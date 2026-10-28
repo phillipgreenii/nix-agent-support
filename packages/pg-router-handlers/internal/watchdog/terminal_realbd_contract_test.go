@@ -242,3 +242,69 @@ func TestTerminal_RealBD_TimeBudgetStopAtThresholdOneEscalates(t *testing.T) {
 		})
 	}
 }
+
+// Bead pg2-bbvs9: three DISTINCT review-role budget-stop sessions on one bead
+// at the default threshold 3, against the REAL bd. Stops 1 and 2 only record
+// the budget-stop labels and release the bead; a repeat stop from an
+// already-counted session does not count twice; only the 3rd distinct session
+// labels the bead escalated (NOT human or attention, which is the triage-role
+// hand-off). After every stop the bead is open and unassigned, and the worker
+// re-claims it as a re-dispatch would. This is the deterministic stand-in for
+// the event-gated live "3 distinct review budget-stop sessions" check.
+func TestTerminal_RealBD_ThreeDistinctReviewStopsEscalate(t *testing.T) {
+	ctx, r := newRealBD(t)
+	id := claimedBead(ctx, t, r)
+
+	stop := func(session string) beads.Issue {
+		t.Helper()
+		wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, &fakeCC{list: []ccpool.Session{{ExternalID: session, CWD: "/repo"}}}, &recBD{}, tokBudget(1000))
+		wd.BD = r
+		wd.Role = "review"
+		wd.BudgetStopEscalateAfter = 3
+		wd.terminal(ctx, session, id, &BudgetError{Role: "review", Pool: "p", Limit: "time", Used: 7201, Cap: 7200})
+		iss, err := beads.ShowObj(ctx, r, id)
+		if err != nil {
+			t.Fatalf("ShowObj after stop %s: %v", session, err)
+		}
+		if iss.Status != "open" || iss.Assignee != "" {
+			t.Errorf("after stop %s the bead must be released: status=%q assignee=%q", session, iss.Status, iss.Assignee)
+		}
+		if iss.HasLabel(labelHuman) || iss.HasLabel("attention") || iss.HasLabel(LabelNeedsSplitReview) {
+			t.Errorf("after stop %s a review bead must never carry human/attention/needs-split-review; labels=%v", session, iss.Labels)
+		}
+		// A re-dispatch claims the released bead again.
+		if out, err := r.Run(ctx, "update", id, "--claim"); err != nil {
+			t.Fatalf("re-claim %s: %v\n%s", id, err, out)
+		}
+		return iss
+	}
+
+	for _, tc := range []struct {
+		session       string
+		wantStops     int
+		wantEscalated bool
+	}{
+		{"rv-1", 1, false},
+		{"rv-2", 2, false},
+		{"rv-2", 2, false}, // a repeated stop from a counted session is not a 3rd stop
+		{"rv-3", 3, true},
+	} {
+		iss := stop(tc.session)
+		if got := beads.BudgetStopCount(iss); got != tc.wantStops {
+			t.Errorf("after stop %s: want %d distinct budget-stop labels, got %d; labels=%v", tc.session, tc.wantStops, got, iss.Labels)
+		}
+		if got := iss.HasLabel(LabelEscalated); got != tc.wantEscalated {
+			t.Errorf("after stop %s: %s present=%v, want %v; labels=%v", tc.session, LabelEscalated, got, tc.wantEscalated, iss.Labels)
+		}
+	}
+
+	iss, err := beads.ShowObj(ctx, r, id)
+	if err != nil {
+		t.Fatalf("ShowObj: %v", err)
+	}
+	for _, s := range []string{"rv-1", "rv-2", "rv-3"} {
+		if !iss.HasLabel(beads.BudgetStopLabelPrefix + s) {
+			t.Errorf("want budget-stop:%s on the bead; labels=%v", s, iss.Labels)
+		}
+	}
+}

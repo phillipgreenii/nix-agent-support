@@ -285,3 +285,109 @@ func precheckSkipRecords(t *testing.T, path string) []map[string]any {
 	}
 	return out
 }
+
+// Bead pg2-bbvs9: a review.ready dispatch for a bead the REAL bd reports as
+// closed is completed as skipped-bead-closed (the review precheck's first check,
+// INV-CCH-22) and launches nothing, and a same-event, same-head redelivery is
+// absorbed the same way: no ccpool call (so no session), no pg-connector call,
+// nothing written to the bead. This is the deterministic stand-in for the
+// event-gated live "closed review bead redelivery" check. The test lives in
+// this file because it shares the real-bd dispatch harness; its name carries
+// the Triage_RealBD_ prefix so the bd-contract-test hook runs it.
+//
+// "No session launched" is proven by recording stubs: the dispatch PATH holds
+// bd, bash, and `ccpool` / `pg-connector` stubs that log every call. The only
+// ccpool calls a skipped dispatch may make are the read-only `list`s of the
+// handler's startup reconcile; any other verb (a launch is `ccpool new`) fails
+// the test. A positive control (the same dispatch for an OPEN bead) must get
+// past the precheck, reaching the connector stub and declining pool-unreadable
+// at the prior-session read, so the zero-call assertions cannot pass by the
+// stubs being unreachable.
+func TestTriage_RealBD_ReviewClosedBeadRedeliverySkipped(t *testing.T) {
+	ctx, r := dtest.NewRealBD(t, "review-actor")
+	f := triageBeadFixture{ctx: ctx, r: r}
+	closed := f.bead(t, "closed review bead")
+	f.bd(t, "close", closed)
+	open := f.bead(t, "open review bead")
+
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"bd", "bash"} {
+		p, err := exec.LookPath(tool)
+		if err != nil {
+			t.Skip(tool + " not on PATH")
+		}
+		if err := os.Symlink(p, filepath.Join(binDir, tool)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logDir := t.TempDir()
+	callLog := func(tool string) string { return filepath.Join(logDir, tool+".log") }
+	for _, tool := range []string{"ccpool", "pg-connector"} {
+		stub := "#!/bin/sh\necho \"$*\" >> '" + callLog(tool) + "'\nexit 2\n"
+		if err := os.WriteFile(filepath.Join(binDir, tool), []byte(stub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// calls returns the logged invocations of tool, one argv string per call.
+	calls := func(tool string) []string {
+		b, err := os.ReadFile(callLog(tool))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Split(strings.TrimSpace(string(b)), "\n")
+	}
+	allowlistProcessEnv(t, binDir, t.TempDir())
+
+	roleJSON := `{"ccpool":{"actor":"review-actor","completion":"close-or-handback","precheck":"review","beadsDir":` +
+		mustJSON(t, r.Dir) + `,"onFailure":"add-human","onDispatchFail":"unclaim","promptBody":"hello"}}`
+	review := roleUnderTest{"review", configFrom(t, roleJSON)}
+	event := func(id string) string {
+		return `{"id":"review.ready:` + id + `","type":"dispatch","payload":{"id":"` + id + `","type":"review-pr","metadata":{"repo":"o/r","pr_number":120058,"head_sha":"abc"}}}`
+	}
+
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	before := f.show(t, closed)
+	for _, delivery := range []string{"first delivery", "same-event same-head redelivery"} {
+		code, got := dispatchWith(t, review.name, review.cfg, "", event(closed))
+		assertSkippedCompletion(t, code, decodeReply(t, got), "skipped-bead-closed")
+		for _, c := range calls("ccpool") {
+			if !strings.HasPrefix(c, "list ") {
+				t.Fatalf("%s: a closed review bead made a non-list ccpool call (a launch): %q", delivery, c)
+			}
+		}
+		if c := calls("pg-connector"); len(c) != 0 {
+			t.Fatalf("%s: a closed review bead reached the connector: %v", delivery, c)
+		}
+		if after := f.show(t, closed); after != before {
+			t.Fatalf("%s: the skip wrote to the closed bead:\nbefore: %s\nafter:  %s", delivery, before, after)
+		}
+	}
+	recs := precheckSkipRecords(t, filepath.Join(stateHome, "pg-router-ccpool-handler", "events.jsonl"))
+	if len(recs) != 2 {
+		t.Fatalf("want one precheck_skip record per delivery (2), got %v", recs)
+	}
+	for _, rec := range recs {
+		if rec["reason"] != "skipped-bead-closed" || rec["bead"] != closed {
+			t.Fatalf("precheck_skip record = %v, want reason skipped-bead-closed for %s", rec, closed)
+		}
+	}
+
+	// Positive control: the same dispatch for an open bead is NOT skipped and
+	// gets past the precheck: it reads the PR through the connector stub and
+	// reaches the launch path, which declines pool-unreadable because the ccpool
+	// stub cannot list.
+	code, got := dispatchWith(t, review.name, review.cfg, "", event(open))
+	if reply := decodeReply(t, got); code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+		t.Fatalf("positive control: an open review bead must reach the launch path: exit %d reply %v", code, reply)
+	}
+	if len(calls("pg-connector")) == 0 {
+		t.Fatal("positive control: an open review bead must reach the connector stub")
+	}
+}
