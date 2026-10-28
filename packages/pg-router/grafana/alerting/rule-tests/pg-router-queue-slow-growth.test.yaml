@@ -290,7 +290,9 @@ tests:
     input_series:
       # A backlog of 400 hides this growth from the ratio term of pg-router-queue-depth-growing
       # (see rule-tests/pg-router-queue-depth-growing.test.yaml); this rule has no ratio
-      # against the backlog, only a floor of 5, so it fires.
+      # against the backlog, only a floor of 5, so it fires. The two rules are complementary by
+      # ruling (bead pg2-24s66z, DEC-OBS-10): the depth-growing case with this same backlog of 400
+      # pins that it does NOT fire there, this case pins that the sibling DOES.
       - series: pg_router_enqueued_total{type="issue.changed",job="pg-router"}
         values: "0+0.941667x1440"
       - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}

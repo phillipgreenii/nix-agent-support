@@ -667,6 +667,25 @@ or when consumption stays far below generation.
   observer hook, a router deploy, and a different meaning of `enqueued` for its other readers). **Not
   covered:** a lane that only loses events (every enqueue retired unconsumed) reads no growth here; its
   `unconsumed_expired` counter and its depth are the alarm for that.
+- **Boundary between `pg-router-queue-depth-growing` and `pg-router-queue-slow-growth` (decided 2026-10-28,
+  bead `pg2-24s66z`, option A: the overlap is accepted and the two rules are complementary).** The depth
+  rule requires `delta(30m) > 0.25 * avg_over_time(30m)`, a ratio against the backlog, so a steady 113
+  events an hour (56.5 over 30m) fires it only while the 30m average depth is under about 226 (56.5 / 0.25);
+  a lane that already holds about 200 or more events does not fire it at that rate. The depth rule is the
+  rule for a rise that is large against the backlog (growth from a small or empty queue, the `pg2-5sirm`
+  shape; slowest growth caught is about 25 an hour). The slow-growth rule has no ratio against the backlog
+  (arrivals against completions over 6h, with a floor of 5 on the depth) and is the rule that catches growth
+  on a large standing backlog. Both may fire for one lane, and that is intended: they read different
+  quantities (the depth gauge over 30 minutes to an hour, the counters over 6 hours). **Chosen over**
+  changing the depth expression so the ratio cannot mask absolute growth, which would loosen a rule whose
+  ratio term is the `pg2-7xvn8` guard against plateau noise (`pr.changed` and `pr.reconcile` hold about 52
+  to 58 events with a delta near +3) and needs operator approval; no existing ruling says the depth rule is
+  meant to catch a large standing backlog on its own, and `alerts.yaml` already records the gap as one to
+  be addressed by a separate rule rather than by loosening this one (`pg2-nw41e`). **Pinned** by the
+  promtool cases `pg-router-queue-depth-growing.test.yaml` (a standing backlog of 400 growing 113 an hour
+  does not fire) and `pg-router-queue-slow-growth.test.yaml` (the same shape fires), and by
+  `TestQueueRulesNameTheirBoundary` in `internal/alertrules/queue_boundary_test.go`, which requires each
+  rule's description to name the other.
 
 **Evidence.** The recorded `drain.pg2` lane of 2026-10-12, reconstructed from the queue log
 (`internal/alertrules/testdata/drain_pg2_2026-10-12.txt`), replays through both rules in

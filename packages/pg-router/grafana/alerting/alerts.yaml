@@ -192,6 +192,20 @@ groups:
       # a backlog that grows slowly under a working consumer is
       # pg-router-queue-slow-growth (below, a rate over 6h). This rule's
       # expression is UNCHANGED by both.
+      #
+      # pg2-24s66z (boundary with pg-router-queue-slow-growth, NO expression change):
+      # the `delta(30m) > 0.25 * avg_over_time(30m)` term is a ratio, so a large
+      # standing backlog hides a steady 113 events an hour (56.5 over 30m exceeds a
+      # quarter of the 30m average only while that average is under about 226). The
+      # two rules are COMPLEMENTARY, by design: this rule reads a rise that is large
+      # against the backlog (growth from a small or empty queue, the pg2-5sirm shape),
+      # pg-router-queue-slow-growth reads arrivals against completions with no ratio
+      # against the backlog and is the rule that catches growth on a large standing
+      # backlog; both may fire for one lane. Pinned by the promtool cases (the 400
+      # backlog does not fire here, fires there) and recorded in DEC-OBS-10
+      # (packages/pg-router/docs/decisions/observability.md). Not tightened here: the
+      # ratio term is the pg2-7xvn8 plateau-noise guard, and loosening it needs
+      # operator approval.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -202,7 +216,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue depth for type {{ $labels.type }} has been growing"
-          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} while the type stayed non-empty on every scrape of the window (it never drained to zero) -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm."
+          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} while the type stayed non-empty on every scrape of the window (it never drained to zero) -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm. Boundary with pg-router-queue-slow-growth (the two are complementary, by ruling pg2-24s66z): this rule compares the rise with the backlog (a rise of more than a quarter of the 30 minute average depth), so it catches growth from a small or empty queue and does not fire on a large standing backlog (about 200 or more events at 113 events an hour); pg-router-queue-slow-growth has no ratio against the backlog and is the rule that catches growth on a large standing backlog."
         data:
           - refId: A
             relativeTimeRange:
@@ -541,7 +555,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router type {{ $labels.type }} receives events faster than it completes them"
-          description: "Over the last 6 hours more than 1.5 times as many events of type {{ $labels.type }} arrived (increase of pg_router_enqueued_total, less the events the queue retired unconsumed, increase of pg_router_unconsumed_expired_total, so an event the queue retired and its source re-emitted counts once) as were completed (increase of pg_router_throughput_total), at least 6 arrived, and a backlog of 5 or more has not drained once in the last hour -- the consumer is working but is not keeping up, so the queue keeps lengthening. This is the rate-based signal for a queue that is processing correctly yet falling behind (the lane's single consumer or its pool is too slow for the arrival rate); it is not an idle-consumer alert (that is pg-router-queue-stalled) and not a fast buildup (that is pg-router-queue-depth-growing). Check `pg-router status` for the role that binds this type, compare the arrival and completion rates on the pg-router dashboard, and decide whether the lane needs more capacity, fewer arrivals or a smaller backlog. A laptop sleep needs an hour of fresh scrapes before this can fire again."
+          description: "Over the last 6 hours more than 1.5 times as many events of type {{ $labels.type }} arrived (increase of pg_router_enqueued_total, less the events the queue retired unconsumed, increase of pg_router_unconsumed_expired_total, so an event the queue retired and its source re-emitted counts once) as were completed (increase of pg_router_throughput_total), at least 6 arrived, and a backlog of 5 or more has not drained once in the last hour -- the consumer is working but is not keeping up, so the queue keeps lengthening. This is the rate-based signal for a queue that is processing correctly yet falling behind (the lane's single consumer or its pool is too slow for the arrival rate); it is not an idle-consumer alert (that is pg-router-queue-stalled) and not a rise that is large against a small backlog (that is pg-router-queue-depth-growing). The two are complementary, by ruling pg2-24s66z: pg-router-queue-depth-growing compares the rise with the backlog and so does not fire on a large standing backlog (about 200 or more events at 113 events an hour), while this rule has no ratio against the backlog and does fire there, so both can fire for the same lane. Check `pg-router status` for the role that binds this type, compare the arrival and completion rates on the pg-router dashboard, and decide whether the lane needs more capacity, fewer arrivals or a smaller backlog. A laptop sleep needs an hour of fresh scrapes before this can fire again."
         data:
           - refId: A
             relativeTimeRange:

@@ -20,9 +20,13 @@
 # a ratio, so a large standing backlog hides a steady 113 an hour. The growth is 56 over 30m,
 # which exceeds a quarter of the 30m average only while that average stays under 226, so a
 # lane that already holds about 200 or more events does not fire at this rate. The rule is NOT
-# changed for that: the positive cases start near empty, a named case below documents the
-# large-backlog shape as not firing, and pg-router-queue-slow-growth (a rate over 6h, with no
-# ratio against the backlog) is the rule that catches it.
+# changed for that (bead pg2-24s66z, option A: accept the overlap). The two rules are COMPLEMENTARY:
+# this rule fires on a rise that is large against the backlog (growth from a small or empty
+# queue; the positive cases start near empty), and pg-router-queue-slow-growth (a rate over 6h,
+# with no ratio against the backlog) is the rule that catches growth on a large standing backlog.
+# The named case below pins the split: a standing backlog of 400 does NOT fire here, and the same
+# shape DOES fire pg-router-queue-slow-growth (pinned in its own test file). If either rule is
+# loosened or tightened, that pair of cases is the alarm.
 rule_files:
   - rules.yml
 
