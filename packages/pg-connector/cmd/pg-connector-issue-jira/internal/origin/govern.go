@@ -12,13 +12,18 @@ import (
 // Bucket is the one declared bucket: Jira requests, metered per second.
 const Bucket governor.Bucket = "requests"
 
+// BurstWindow is the window of the one bucket: Atlassian meters the API-token
+// traffic of a tenant per second (X-RateLimit-Limit is requests per second).
+const BurstWindow = time.Second
+
 // BackgroundShare is the fraction of the request rate the background classes
 // may spend; the rest stays for interactive calls.
 const BackgroundShare = 0.9
 
 // GovernorConfig is the governor configuration of the daemon: ONE declared
 // bucket (unit requests, a one-second window, Cap = request_rate_per_second,
-// no reserve) and a background share of 0.9.
+// Reserve = rate_reserve_requests, the floor on the origin's own reading of its
+// remaining burst allowance) and a background share of 0.9.
 func GovernorConfig(cfg *config.Config) governor.Config {
 	return governor.Config{
 		Declared: []governor.BucketSpec{{
@@ -26,8 +31,8 @@ func GovernorConfig(cfg *config.Config) governor.Config {
 			Unit:   "requests",
 			Limits: governor.Limits{
 				Cap:     int64(cfg.RequestRatePerSecond),
-				Reserve: 0,
-				Window:  time.Second,
+				Reserve: int64(cfg.RateReserveRequests),
+				Window:  BurstWindow,
 			},
 		}},
 		BackgroundShare: BackgroundShare,

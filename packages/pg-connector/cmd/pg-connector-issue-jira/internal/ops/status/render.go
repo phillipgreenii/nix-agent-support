@@ -69,6 +69,27 @@ func Render(w io.Writer, r Report) error {
 		line("pause: %s", r.Pause.Reason)
 		line("  until: %s", ts(&r.Pause.Until))
 	}
+	if rl := r.RateLimit; rl != nil {
+		line("rate_limit: floor=%d", rl.Floor)
+		if rl.ReadingAgeSeconds != nil {
+			line("  last_status=%d reading_age_seconds=%d below_floor=%t", rl.LastStatus, *rl.ReadingAgeSeconds, rl.BelowFloor)
+		}
+		if rl.Remaining != nil {
+			line("  remaining=%d headroom=%d", *rl.Remaining, *rl.Headroom)
+		}
+		if rl.Limit != nil {
+			line("  limit=%d", *rl.Limit)
+		}
+		if rl.NearLimit != nil {
+			line("  near_limit=%t", *rl.NearLimit)
+		}
+		if rl.ResetAt != nil {
+			line("  reset_at=%s", ts(rl.ResetAt))
+		}
+		if rl.Reason != "" {
+			line("  reason=%s", rl.Reason)
+		}
+	}
 	if r.Queue != nil {
 		line("queue: running=%d", r.Queue.Running)
 		for _, c := range r.Queue.Classes {

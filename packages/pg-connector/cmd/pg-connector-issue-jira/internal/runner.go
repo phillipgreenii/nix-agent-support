@@ -189,11 +189,18 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	// The rate-limit reading (ratelimit.go) is handed over whatever the
+	// outcome, a 429 included, then kept out of the failure text.
+	if rl, ok := ParseRateLimit(stderr.Bytes()); ok {
+		ReportRateLimit(ctx, rl)
+	}
+	if err != nil {
+		tail := scriptout.TruncateForFold(StripRateLimitLines(stderr.Bytes()))
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return stdout.String(), fmt.Errorf("%s %s: %w: %s",
-				bin, strings.Join(args, " "), err, scriptout.TruncateForFold(stderr.Bytes()))
+				bin, strings.Join(args, " "), err, tail)
 		}
 		return stdout.String(), fmt.Errorf("%s %s: %w (is %s on PATH?)",
 			bin, strings.Join(args, " "), err, bin)

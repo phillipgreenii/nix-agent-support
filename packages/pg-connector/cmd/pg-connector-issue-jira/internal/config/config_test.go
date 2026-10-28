@@ -45,16 +45,16 @@ func TestDefaultsTable(t *testing.T) {
 		{"default_pause", cfg.DefaultPause, sec(60)},
 		{"write_notice_timeout", cfg.WriteNoticeTimeout, 500 * time.Millisecond},
 		{"write_lease", cfg.WriteLease, sec(30)},
-		{"summary_ttl", cfg.SummaryTTL, sec(60)},
-		{"detail_ttl", cfg.DetailTTL, min(10)},
-		{"detail_max_age", cfg.DetailMaxAge, min(30)},
-		{"query_ttl_default", cfg.QueryTTLDefault, sec(120)},
+		{"summary_ttl", cfg.SummaryTTL, min(5)},
+		{"detail_ttl", cfg.DetailTTL, min(30)},
+		{"detail_max_age", cfg.DetailMaxAge, min(90)},
+		{"query_ttl_default", cfg.QueryTTLDefault, min(5)},
 		{"terminal_ttl", cfg.TerminalTTL, hr(24)},
 		{"expiry", cfg.Expiry, day(7)},
 		{"settle_timeout", cfg.SettleTimeout, sec(30)},
 		{"change_log_retention", cfg.ChangeLogRetention, day(14)},
 		{"consumer_stale_after", cfg.ConsumerStaleAfter, day(7)},
-		{"fill_horizon (one summary_ttl)", cfg.FillHorizon, sec(60)},
+		{"fill_horizon (one summary_ttl)", cfg.FillHorizon, min(5)},
 	} {
 		if c.got.Std() != c.want {
 			t.Errorf("%s = %v, want %v", c.name, c.got.Std(), c.want)
@@ -65,6 +65,7 @@ func TestDefaultsTable(t *testing.T) {
 		got, want int
 	}{
 		{"request_rate_per_second", cfg.RequestRatePerSecond, 2},
+		{"rate_reserve_requests", cfg.RateReserveRequests, 20},
 		{"concurrency", cfg.Concurrency, 2},
 		{"workers (= concurrency)", cfg.Workers, 2},
 		{"batch_size", cfg.BatchSize, 74},
@@ -370,5 +371,25 @@ func TestSharedFileNames(t *testing.T) {
 func TestMissingFile(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "nope.json"), nil); err == nil {
 		t.Fatal("expected a read error")
+	}
+}
+
+// rate_reserve_requests is the floor: 0 switches it off, a negative value is a
+// mistake, and an explicit value is read as written.
+func TestRateReserveRequests(t *testing.T) {
+	load := func(kv string) (*Config, error) {
+		return Load(write(t, `{"state_dir": "/tmp/s", "pjira_path": "/p"`+kv+`}`), nil)
+	}
+	for kv, want := range map[string]int{``: 20, `, "rate_reserve_requests": 0`: 0, `, "rate_reserve_requests": 35`: 35} {
+		cfg, err := load(kv)
+		if err != nil {
+			t.Fatalf("%q: %v", kv, err)
+		}
+		if cfg.RateReserveRequests != want {
+			t.Errorf("%q: rate_reserve_requests = %d, want %d", kv, cfg.RateReserveRequests, want)
+		}
+	}
+	if _, err := load(`, "rate_reserve_requests": -1`); err == nil || !strings.Contains(err.Error(), "rate_reserve_requests") {
+		t.Errorf("a negative rate_reserve_requests must be rejected by name: %v", err)
 	}
 }

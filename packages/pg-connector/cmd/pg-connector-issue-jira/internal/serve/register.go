@@ -87,6 +87,7 @@ func (d *daemon) registerOps(w opsWiring) error {
 		RouterInstance: Instance, Identity: w.auth.Identity,
 		Daemon: w.cfg, Version: d.o.Version, BuildID: d.o.Version, Started: d.started,
 		Store: w.st, Governor: w.gov, Scheduler: w.sched, Settle: w.settle, Feed: w.feed, Auth: w.auth,
+		Readings: w.runner.Readings(),
 	})
 }
 

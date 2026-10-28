@@ -32,6 +32,18 @@
 //	                 bucket (daemon only)
 //	pause            {reason, until}: the origin pause in force, read from the
 //	                 governor's state (absent when none)
+//	rate_limit       {floor, limit, remaining, near_limit, headroom,
+//	                 below_floor, reset_at, reason, last_status,
+//	                 reading_age_seconds}: the origin's own rate-limit reading
+//	                 (the last pjira-ratelimit stderr line) and the floor
+//	                 rate_reserve_requests (daemon only). floor is always
+//	                 stated; the rest only while the reading is no older than
+//	                 origin.ReadingMaxAge (5 minutes), and each of limit,
+//	                 remaining, near_limit and reset_at is absent when the
+//	                 response did not carry it (absent is never 0). headroom is
+//	                 remaining less floor and below_floor is true when it is
+//	                 negative. A pjira that writes no such line, or a tenant
+//	                 that sends no header, leaves only floor.
 //	queue            {running, classes: [{class, name, depth,
 //	                 oldest_overdue_seconds}]} (daemon only)
 //	queries          [{name, last_success_at, last_success_age_seconds,
@@ -58,6 +70,8 @@
 // does:
 //
 //   - an origin pause is in force (a 429 holds the background classes);
+//   - the origin's last rate-limit reading, while current, leaves fewer
+//     requests of the burst window than the floor (rate_limit.below_floor);
 //   - authentication is failing (the authentication marker is set);
 //   - a configured query has a last_error;
 //   - a configured query has had no whole-query success within

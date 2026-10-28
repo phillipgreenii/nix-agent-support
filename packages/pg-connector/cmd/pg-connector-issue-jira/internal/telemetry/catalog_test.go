@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -110,7 +112,12 @@ func TestEveryMetricConstantIsInTheCatalogAndTheCatalogHasNothingElse(t *testing
 
 func TestCatalogTypeAndLabelsMatchWhatTheInstrumentsEmit(t *testing.T) {
 	cat := readCatalog(t)
-	f := newFixture(t, nil)
+	// A reading that carries every key, so every origin.* series is emitted.
+	f, rs := originFixture(t, 20)
+	rs.Record(internal.RateLimit{
+		Status: 429, Limit: i64(100), Remaining: i64(12), NearLimit: bl(true),
+		RetryAfterSeconds: 11, Reset: "2026-10-12T12:00:11Z", Reason: "jira-burst-based",
+	}, t0)
 	f.exerciseEverything()
 	got := f.collect()
 	if len(got) != len(cat) {

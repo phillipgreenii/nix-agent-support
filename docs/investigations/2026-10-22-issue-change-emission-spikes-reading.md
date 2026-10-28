@@ -360,6 +360,12 @@ endpoints the daemon's reads use.
 **Default.** A cap of 2 requests per second and a concurrency cap of 2, counted by the daemon,
 raised only when the live headers or a measured demand justify it.
 
+**Update 2026-10-28 (bead `pg2-doihln`).** `pjira` now conveys the headers (bead `pg2-2ig8ts`), so the
+live headroom is no longer unreachable: the daemon keeps the last reading, enforces a floor of 20 requests
+of the burst window (20% x 100, Atlassian's own near-limit point) and slows its refresh cadence. The
+arithmetic is in the package README ("The Jira daemon", "Budget"). The cap itself was raised to 5 by the
+operator on 2026-10-27 and is not re-derived here.
+
 ## search --expand
 
 **Finding.** Yes for comments and changelog; no for the description. `pjira search --expand

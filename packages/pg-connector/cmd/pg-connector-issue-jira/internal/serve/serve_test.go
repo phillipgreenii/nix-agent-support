@@ -3,6 +3,7 @@ package serve_test
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,4 +188,87 @@ func TestRunAnUnreachableOriginStillStartsAndServesTheStoredContent(t *testing.T
 	if code := d.stop(); code != serve.ExitOK {
 		t.Errorf("exit = %d; stderr: %s", code, d.stderr.String())
 	}
+}
+
+// fakePjiraRateLimited is fakePjiraOK that also writes the rate-limit line a
+// current pjira writes to stderr for each response: 7 of the 100 requests of the
+// burst window left, below the default floor of 20.
+const fakePjiraRateLimited = `#!/bin/sh
+case "$1" in
+search)
+  echo 'pjira-ratelimit: {"status":200,"limit":100,"remaining":7,"near_limit":true}' >&2
+  printf '%s' '{"items":[{"key":"ALPHA-1","summary":"title of ALPHA-1","status":"Some Status","status_category":"indeterminate","issuetype":"Task","project":"ALPHA","updated":"2026-10-05T10:11:12.000+0000","comments":[]}],"truncated":false}'
+  ;;
+*)
+  echo "fake pjira: unexpected args $*" >&2
+  exit 1
+  ;;
+esac
+`
+
+// The reading pjira conveys on stderr reaches the status op through the whole
+// daemon assembly (CLI runner, origin runner, governor, status), and a daemon
+// whose pjira writes no such line reports only the floor.
+func TestRunTheOriginsRateLimitReadingReachesTheStatusOp(t *testing.T) {
+	type rateLimit struct {
+		Floor      int64  `json:"floor"`
+		Limit      *int64 `json:"limit"`
+		Remaining  *int64 `json:"remaining"`
+		NearLimit  *bool  `json:"near_limit"`
+		Headroom   *int64 `json:"headroom"`
+		BelowFloor bool   `json:"below_floor"`
+	}
+	statusOf := func(r *rig) (rateLimit, string) {
+		resp := r.mustCall(serve.Instance, "status", map[string]any{})
+		if resp.Error != nil {
+			t.Fatalf("status: %+v", resp.Error)
+		}
+		var rep struct {
+			Health    string    `json:"health"`
+			RateLimit rateLimit `json:"rate_limit"`
+		}
+		if err := json.Unmarshal(resp.Result, &rep); err != nil {
+			t.Fatal(err)
+		}
+		return rep.RateLimit, rep.Health
+	}
+
+	t.Run("a pjira that writes the line", func(t *testing.T) {
+		r := newRig(t, fakePjiraRateLimited, "", nil)
+		d := r.start(serve.Hooks{})
+		d.waitReady()
+		// The first search answers 7 left; the call that follows it (the detail
+		// fetch behind the same show) is refused below the floor of 20 and the
+		// answer names the reserve, so the floor is enforced end to end.
+		if resp := r.mustCall(serve.Instance, "show", map[string]any{"id": "ALPHA-1"}); resp.Error != nil && !strings.Contains(resp.Error.Message, "below reserve") {
+			t.Fatalf("show: %+v", resp.Error)
+		}
+		rl, health := statusOf(r)
+		if rl.Floor != 20 || rl.Remaining == nil || *rl.Remaining != 7 || rl.Limit == nil || *rl.Limit != 100 ||
+			rl.NearLimit == nil || !*rl.NearLimit || rl.Headroom == nil || *rl.Headroom != -13 || !rl.BelowFloor {
+			t.Fatalf("rate_limit = %+v", rl)
+		}
+		if health != "degraded" {
+			t.Errorf("health = %s, want degraded while the last reading is below the floor", health)
+		}
+		if code := d.stop(); code != serve.ExitOK {
+			t.Errorf("exit = %d; stderr: %s", code, d.stderr.String())
+		}
+	})
+
+	t.Run("a pjira that writes no line", func(t *testing.T) {
+		r := newRig(t, fakePjiraOK, "", nil)
+		d := r.start(serve.Hooks{})
+		d.waitReady()
+		if resp := r.mustCall(serve.Instance, "show", map[string]any{"id": "ALPHA-1"}); resp.Error != nil {
+			t.Fatalf("show: %+v", resp.Error)
+		}
+		rl, health := statusOf(r)
+		if rl.Floor != 20 || rl.Remaining != nil || rl.Limit != nil || rl.Headroom != nil || rl.BelowFloor || health != "healthy" {
+			t.Fatalf("no line is no reading: rate_limit = %+v health %s", rl, health)
+		}
+		if code := d.stop(); code != serve.ExitOK {
+			t.Errorf("exit = %d; stderr: %s", code, d.stderr.String())
+		}
+	})
 }

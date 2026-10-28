@@ -1,0 +1,96 @@
+# promtool unit tests for the pg-conn-jira-below-floor alert (bead pg2-doihln). Run by the flake
+# check test-pg-connector-issue-jira-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with
+# `expr: (min(avg_over_time(pg_connector_issue_jira_origin_headroom[10m]))) < 0`, the rule's
+# `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# The gauge is origin.headroom: Jira's X-RateLimit-Remaining minus the floor (20 by default), so
+# the realistic range is -20 (none left) to 80 (100 left). One gauge sample per 1m scrape. The
+# mean over a trailing 10m covers 10 samples, so a mean below 0 at time t needs the window
+# (t-9m .. t) to be mostly breached. A firing alert carries severity only (the expression has
+# no `by` label).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a headroom of -10 held for 20m fires with severity warning after the 5m for, then clears once the budget recovers
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_origin_headroom{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "-10x20 60x30"
+    alert_rule_test:
+      # Pending since 0, not yet through `for`.
+      - eval_time: 4m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      # Still breached at 12m. `-10x20` is 21 samples (0m..20m), then 60s from 21m. The 10m
+      # window at 21m holds nine -10s and one 60: mean (9 x -10 + 60) / 10 = -3, still below 0;
+      # at 22m it holds eight -10s and two 60s: (8 x -10 + 2 x 60) / 10 = 4, above 0.
+      - eval_time: 12m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      - eval_time: 30m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []
+
+  - name: a healthy headroom of 60 never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_origin_headroom{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "60x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_below_floor)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []
+
+  - name: a brief dip to 0 remaining (headroom -20) is the floor working and does not fire
+    interval: 1m
+    input_series:
+      # `-20x2` is three samples of -20 among 60s: the 10m mean never goes below 0
+      # (the lowest is (3 x -20 + 7 x 60) / 10 = 36).
+      - series: pg_connector_issue_jira_origin_headroom{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "60x5 -20x2 60x40"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_below_floor)
+        eval_time: 12m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []
+
+  - name: a headroom of exactly 0 (remaining equals the floor) never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_origin_headroom{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_daemon_up{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-below-floor
+        exp_alerts: []

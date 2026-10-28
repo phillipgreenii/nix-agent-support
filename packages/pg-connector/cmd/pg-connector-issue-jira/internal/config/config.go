@@ -39,6 +39,10 @@ type Config struct {
 	RequestRatePerSecond int      `json:"request_rate_per_second"`
 	Concurrency          int      `json:"concurrency"`
 	DefaultPause         Duration `json:"default_pause"`
+	// RateReserveRequests is the floor on the origin's own count of requests
+	// left in its burst window (X-RateLimit-Remaining). 0 holds nothing back: a
+	// request is refused only when none is left.
+	RateReserveRequests int `json:"rate_reserve_requests"`
 
 	// Write notice.
 	WriteNoticeTimeout Duration `json:"write_notice_timeout"`
@@ -99,6 +103,7 @@ func Defaults() *Config {
 		RequestRatePerSecond: DefaultRequestRatePerSecond,
 		Concurrency:          DefaultConcurrency,
 		DefaultPause:         Duration(DefaultDefaultPause),
+		RateReserveRequests:  DefaultRateReserveRequests,
 		WriteNoticeTimeout:   Duration(DefaultWriteNoticeTimeout),
 		WriteLease:           Duration(DefaultWriteLease),
 		SummaryTTL:           Duration(DefaultSummaryTTL),
@@ -250,6 +255,9 @@ func (c *Config) validate() error {
 		if time.Duration(d) <= 0 {
 			return fmt.Errorf("%s must be positive", name)
 		}
+	}
+	if c.RateReserveRequests < 0 {
+		return fmt.Errorf("rate_reserve_requests must not be negative, got %d", c.RateReserveRequests)
 	}
 	for name, d := range c.QueryTTL {
 		if d <= 0 {

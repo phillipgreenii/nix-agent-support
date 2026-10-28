@@ -133,6 +133,14 @@ type Options struct {
 	// Auth is marked on an authentication failure and cleared on a success;
 	// nil means none.
 	Auth Auth
+	// Floor is rate_reserve_requests, the requests of the origin burst window
+	// below which nothing spends. The governor enforces it (GovernorConfig puts
+	// it in the bucket); the runner uses it only to leave a reading unenforced
+	// when the origin's own limit is at or below it. Zero disables the floor.
+	Floor int64
+	// Readings keeps the latest rate-limit reading for the status op and the
+	// gauges; nil means the runner makes its own (Readings returns it).
+	Readings *Readings
 }
 
 // Runner is the governed internal.Runner.
@@ -147,6 +155,8 @@ type Runner struct {
 	retryAfter func(string) (time.Duration, bool)
 	obs        Observer
 	auth       Auth
+	floor      int64
+	readings   *Readings
 
 	mu    sync.Mutex
 	pause pauseTracker
@@ -170,7 +180,10 @@ func New(opts Options) (*Runner, error) {
 		inner: opts.Inner, gov: opts.Governor, bucket: opts.Bucket,
 		sem: make(chan struct{}, opts.Concurrency), def: opts.DefaultPause,
 		clock: opts.Clock, jitter: opts.Jitter, retryAfter: opts.RetryAfter,
-		obs: opts.Observer, auth: opts.Auth,
+		obs: opts.Observer, auth: opts.Auth, floor: opts.Floor, readings: opts.Readings,
+	}
+	if r.readings == nil {
+		r.readings = NewReadings()
 	}
 	if r.bucket == "" {
 		r.bucket = Bucket
@@ -183,6 +196,9 @@ func New(opts Options) (*Runner, error) {
 	}
 	return r, nil
 }
+
+// Readings is the holder of the latest rate-limit reading the runner took.
+func (r *Runner) Readings() *Readings { return r.readings }
 
 // Binary returns the configured pjira path (the inner runner's binary).
 func (r *Runner) Binary() string { return r.inner.Binary() }
@@ -221,10 +237,19 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 		ticket.Release()
 		return "", ctx.Err()
 	}
-	out, runErr := r.inner.Run(ctx, args...)
+	var reading *internal.RateLimit
+	runCtx := internal.WithRateLimitSink(ctx, func(rl internal.RateLimit) { reading = &rl })
+	out, runErr := r.inner.Run(runCtx, args...)
 	<-r.sem
 
 	spend := governor.Spend{Purpose: call.Purpose, Group: call.Group, BatchSize: call.BatchSize, Cost: 1}
+	// The reading the response carried (a 429 included) goes to the status
+	// holder and, through the spend, to the governor, which enforces the floor.
+	if reading != nil {
+		latest := Latest{RateLimit: *reading, At: r.clock.Now()}
+		r.readings.Record(latest.RateLimit, latest.At)
+		spend.Reading = governorReading(latest, r.floor, BurstWindow)
+	}
 	if runErr == nil {
 		r.endRateLimitRun()
 		if r.auth != nil {
@@ -246,7 +271,7 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 	}
 	spend.Outcome = kind
 	if kind == KindRateLimited {
-		r.startPause(text)
+		r.startPause(text, reading)
 	} else {
 		r.endRateLimitRun()
 	}
@@ -265,10 +290,14 @@ func (r *Runner) endRateLimitRun() {
 }
 
 // startPause pauses the background classes for the pause this 429 earns.
-func (r *Runner) startPause(text string) {
+func (r *Runner) startPause(text string, rl *internal.RateLimit) {
 	var stated time.Duration
 	var has bool
-	if r.retryAfter != nil {
+	switch {
+	case rl != nil && rl.RetryAfterSeconds > 0:
+		// Retry-After is a minimum delay: the pause never goes below it.
+		stated, has = time.Duration(rl.RetryAfterSeconds)*time.Second, true
+	case r.retryAfter != nil:
 		stated, has = r.retryAfter(text)
 		has = has && stated > 0
 	}

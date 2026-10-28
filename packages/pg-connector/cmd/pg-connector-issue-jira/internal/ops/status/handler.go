@@ -82,6 +82,9 @@ type Config struct {
 	Feed      Feed
 	Auth      AuthMarker
 
+	// Readings is the holder of the origin's last rate-limit reading; nil
+	// reports the floor alone.
+	Readings *origin.Readings
 	// Bucket is the governor bucket the origin spends from; empty means
 	// origin.Bucket.
 	Bucket governor.Bucket
@@ -121,6 +124,31 @@ func Register(rt *router.Router, cfg Config) error {
 		},
 	})
 	return nil
+}
+
+// rateLimit builds the report's rate_limit block: the floor always and, while a
+// reading is current, the reading and what it says about the floor.
+func rateLimit(cfg Config, now time.Time) *RateLimit {
+	rl := &RateLimit{Floor: int64(cfg.Daemon.RateReserveRequests)}
+	if cfg.Readings == nil {
+		return rl
+	}
+	l, ok := cfg.Readings.Current(now)
+	if !ok {
+		return rl
+	}
+	age := int64(l.Age(now).Seconds())
+	rl.LastStatus, rl.ReadingAgeSeconds = l.Status, &age
+	rl.Limit, rl.Remaining, rl.NearLimit, rl.Reason = l.Limit, l.Remaining, l.NearLimit, l.Reason
+	if l.Remaining != nil {
+		h := *l.Remaining - rl.Floor
+		rl.Headroom, rl.BelowFloor = &h, h < 0
+	}
+	if at, ok := l.ResetAt(); ok {
+		u := utc(at)
+		rl.ResetAt = &u
+	}
+	return rl
 }
 
 // Collect fills the daemon's report from the live state. It reads the store
@@ -181,6 +209,9 @@ func Collect(ctx context.Context, cfg Config) (Report, error) {
 	if cfg.Requests != nil {
 		r.Requests.Total = cfg.Requests()
 	}
+
+	// The origin's rate-limit reading and the floor.
+	r.RateLimit = rateLimit(cfg, now)
 
 	// The scheduler.
 	st := cfg.Scheduler.State()

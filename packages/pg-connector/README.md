@@ -365,8 +365,9 @@ and `failure_class` (`auth` for a 401/403 or an `auth_status` of `MISSING`/`UNAU
 `FORBIDDEN`; `rate_limited` when pjira's error text carries an HTTP 429; the wire `error_code` stays
 `unavailable` for a 429). `packages/pg-connector/grafana/alerting/issue-jira-alerts.yaml` alerts on
 auth failure, sustained `unavailable` (excluding throttling) and repeated 429s. There is deliberately
-NO remaining-budget alert: the backend reads no Jira quota figure, header or `Retry-After`, so the 429
-itself is the only quota signal it can see.
+NO remaining-budget alert on THIS (stateless) backend: it reads no Jira quota figure, header or `Retry-After`, so the 429
+itself is the only quota signal it can see. The daemon below does read them (`pjira` conveys them on stderr) and has the
+remaining-budget alert `pg-conn-jira-below-floor`; see "The Jira daemon", "Budget".
 
 The daemon behind `pg-connector-issue-jira --config <file>` (serve, client and status modes) is described in
 "The Jira daemon (pg-connector-issue-jira)" below. With no `--config` the binary stays the old stateless backend that
@@ -531,35 +532,36 @@ The file is rendered by the home-manager module (`jira.settings` merges extra ke
 names it). The daemon reads NO environment variable except the opt-in profiler address. `state_dir` and `pjira_path`
 have no default and MUST be absolute.
 
-| Key                       | Default                                       | Meaning                                                                       |
-| ------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------- |
-| `state_dir`               | none (required)                               | The state directory.                                                          |
-| `socket_path`             | `<state_dir>/sock`                            | The unix socket.                                                              |
-| `pjira_path`              | none (required)                               | Absolute path of `pjira`.                                                     |
-| `pjira_env`               | `{}`                                          | The ONLY environment every `pjira` process gets.                              |
-| `instance`                | `pg-connector-issue-jira`                     | The registry name of the backend.                                             |
-| `supervisor_label`        | `com.phillipg.pg-connector-issue-jira-daemon` | The launchd label shown in a down report.                                     |
-| `otel_endpoint`           | unset (no export)                             | OpenTelemetry endpoint.                                                       |
-| `queries`                 | `{}`                                          | Name to a JQL string, a list of them, or `{expr, watched}`; none is built in. |
-| `request_rate_per_second` | 2                                             | Cap of the one `requests` bucket (one-second window, 0.9 background share).   |
-| `concurrency`             | 2                                             | Concurrent `pjira` processes.                                                 |
-| `default_pause`           | 60s                                           | Pause after a 429 that states no `Retry-After` (doubles with jitter).         |
-| `write_notice_timeout`    | 500ms                                         | Bound of each write notice.                                                   |
-| `write_lease`             | 30s                                           | Longest hold a `write_begin` takes.                                           |
-| `summary_ttl`             | 60s                                           | Freshness of the summary group.                                               |
-| `detail_ttl`              | 10m                                           | Freshness of the detail group.                                                |
-| `detail_max_age`          | 30m                                           | Longest the detail group is served stale.                                     |
-| `query_ttl_default`       | 120s                                          | Query freshness; `query_ttl.<name>` overrides it per query.                   |
-| `terminal_ttl`            | 24h                                           | An issue is refreshed until this long after it closes.                        |
-| `expiry`                  | 168h (7 days)                                 | An issue is evicted this long after it closes.                                |
-| `tracked_set_alert_size`  | 55                                            | The tracked-set size the alert fires over (the rule renders from it).         |
-| `settle_timeout`          | 30s                                           | How long a change waits for its groups before it is recorded anyway.          |
-| `change_log_retention`    | 336h (14 days)                                | How long change rows are kept.                                                |
-| `consumer_stale_after`    | 168h (7 days)                                 | A cursor not seen for this long is dropped.                                   |
-| `change_body_cap`         | 4 KiB                                         | Cap of a recorded change body.                                                |
-| `fill_horizon`            | `summary_ttl`                                 | A short batch is topped up with entries due within this horizon.              |
-| `batch_size`              | 74                                            | Issues per background `pjira` search.                                         |
-| `workers`                 | `concurrency`                                 | Scheduler workers.                                                            |
+| Key                       | Default                                       | Meaning                                                                                                                       |
+| ------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `state_dir`               | none (required)                               | The state directory.                                                                                                          |
+| `socket_path`             | `<state_dir>/sock`                            | The unix socket.                                                                                                              |
+| `pjira_path`              | none (required)                               | Absolute path of `pjira`.                                                                                                     |
+| `pjira_env`               | `{}`                                          | The ONLY environment every `pjira` process gets.                                                                              |
+| `instance`                | `pg-connector-issue-jira`                     | The registry name of the backend.                                                                                             |
+| `supervisor_label`        | `com.phillipg.pg-connector-issue-jira-daemon` | The launchd label shown in a down report.                                                                                     |
+| `otel_endpoint`           | unset (no export)                             | OpenTelemetry endpoint.                                                                                                       |
+| `queries`                 | `{}`                                          | Name to a JQL string, a list of them, or `{expr, watched}`; none is built in.                                                 |
+| `request_rate_per_second` | 2                                             | Cap of the one `requests` bucket (one-second window, 0.9 background share).                                                   |
+| `rate_reserve_requests`   | 20                                            | The floor: nothing spends while fewer requests than this are left in the origin's burst window (0 refuses only at none left). |
+| `concurrency`             | 2                                             | Concurrent `pjira` processes.                                                                                                 |
+| `default_pause`           | 60s                                           | Pause after a 429 that states no `Retry-After` (doubles with jitter); a stated `Retry-After` is the first pause's floor.      |
+| `write_notice_timeout`    | 500ms                                         | Bound of each write notice.                                                                                                   |
+| `write_lease`             | 30s                                           | Longest hold a `write_begin` takes.                                                                                           |
+| `summary_ttl`             | 5m                                            | Freshness of the summary group.                                                                                               |
+| `detail_ttl`              | 30m                                           | Freshness of the detail group.                                                                                                |
+| `detail_max_age`          | 90m                                           | Longest the detail group is served stale.                                                                                     |
+| `query_ttl_default`       | 5m                                            | Query freshness; `query_ttl.<name>` overrides it per query.                                                                   |
+| `terminal_ttl`            | 24h                                           | An issue is refreshed until this long after it closes.                                                                        |
+| `expiry`                  | 168h (7 days)                                 | An issue is evicted this long after it closes.                                                                                |
+| `tracked_set_alert_size`  | 55                                            | The tracked-set size the alert fires over (the rule renders from it).                                                         |
+| `settle_timeout`          | 30s                                           | How long a change waits for its groups before it is recorded anyway.                                                          |
+| `change_log_retention`    | 336h (14 days)                                | How long change rows are kept.                                                                                                |
+| `consumer_stale_after`    | 168h (7 days)                                 | A cursor not seen for this long is dropped.                                                                                   |
+| `change_body_cap`         | 4 KiB                                         | Cap of a recorded change body.                                                                                                |
+| `fill_horizon`            | `summary_ttl`                                 | A short batch is topped up with entries due within this horizon.                                                              |
+| `batch_size`              | 74                                            | Issues per background `pjira` search.                                                                                         |
+| `workers`                 | `concurrency`                                 | Scheduler workers.                                                                                                            |
 
 Durations are Go duration strings. The state directory holds `store.sqlite`, `sock`, `daemon.lock`, `events.jsonl`,
 `daemon.log.jsonl` and `client.log.jsonl`. The profiler is off unless `PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR` is set (the
@@ -580,15 +582,81 @@ launchd entry sets it to `<state_dir>/pprof.sock` unless `jira.pprof.enable` is 
   and gives it ONLY `pjira_env`: launchd supplies no `PATH`, and the daemon never inherits the process environment, so
   anything `pjira` needs (a credential or config location) MUST be in `pjira_env`. The client's writes are the
   opposite: they run under the CALLER's environment.
-- **Budget.** The request rate and concurrency are internal and conservative; `pjira` surfaces no rate-limit header, so
-  the only quota signal is a 429, which pauses background work (interactive calls made during the pause are refused,
-  and stored content is served stale where there is some). Background work spends at most
-  `floor(request_rate_per_second x 0.9)` requests per second (1 with the default rate of 2), however many
-  `workers` there are: a worker whose request the budget refuses only because another worker's request is
-  in flight retries when that request finishes, so the background throughput is that cap (about one request
-  a second with the defaults), not one request per 30 s. A `workers` value above the cap (the defaults are
-  over it) logs one `workers_over_background_cap` warning at start-up, in `daemon.log.jsonl`, naming
-  `workers`, `background_cap` and `request_rate_per_second`; raise the rate or lower `workers` to silence it.
+- **Budget.** The request rate and concurrency are internal and conservative, and the origin's own rate-limit reading
+  is an input (bead `pg2-doihln`). `pjira` conveys it on stderr, one `pjira-ratelimit: ` line of compact JSON per
+  response that carried a header (`status`, and when present `limit`, `remaining`, `near_limit`, `retry_after_seconds`,
+  `reset`, `reason`; the last line of a run is the freshest; the owner's format is `pjira`'s README, "Rate-limit
+  headers"). The daemon takes each reading from every run, a 429 included, and keeps it out of the failure text. A
+  `pjira` that predates the lines, or a tenant that sends no header, gives no reading: nothing changes, nothing fails.
+  Four things follow from a reading:
+  - **The floor.** `rate_reserve_requests` (default 20) is the Jira analogue of the GitHub daemon's
+    `rate_reserve_points`. Its unit is requests remaining of the burst window (Atlassian meters API-token traffic per
+    second, not by the hourly points quota), and the governor refuses a request of EVERY class (background and
+    interactive, as the GitHub reserve does) when the estimated remaining, less the requests already in flight, less
+    this one, would fall below it. The estimate is the last reading less what the daemon has spent since; a reading is
+    in force for one burst window (1 second) after it was taken, or until the reset a 429 stated when that is later,
+    and then the bucket counts as full again, so a refusal lasts at most that long and its `RetryAt` is the end of it.
+    A background refusal holds that class group until then; an interactive one is answered stale where the store holds
+    content, and otherwise `unavailable` naming `below reserve`. A reading with no `remaining`, and one whose `limit` is
+    at or below the floor (enforcing it would refuse everything), is shown but never enforced. The reading is the last
+    response's, whichever endpoint it came from (the two endpoints the daemon uses have separate counters in
+    Atlassian's text), so the floor is one bucket's approximation, not a per-endpoint one.
+  - **The pause.** A 429 that states `Retry-After` pauses background work for at least that long (it is a minimum
+    delay); the first pause is the stated delay, doubled with jitter on each consecutive 429. Without it,
+    `default_pause` applies as before. Interactive calls made during the pause are refused and stored content is
+    served stale where there is some.
+  - **The metrics and the status op.** `origin.remaining`, `origin.limit`, `origin.near_limit` (1 or 0),
+    `origin.reset` (Unix time of a stated reset), `origin.floor`, `origin.headroom` (remaining less the floor; negative
+    means the floor is breached) and `origin.reading_age_seconds`, in the `pg_connector_issue_jira_*` catalog. They
+    report the last reading only while it is no older than 5 minutes (a quiet daemon drops out instead of latching an
+    old breach), and a key the reading did not carry is unreported, not 0; `origin.floor` always reports. The `status`
+    op carries the same in its `rate_limit` block (`floor`, `limit`, `remaining`, `near_limit`, `headroom`,
+    `below_floor`, `reset_at`, `reason`, `last_status`, `reading_age_seconds`), and a reading below the floor makes
+    the report degraded. Each origin row of `events.jsonl` carries the origin's `remaining` after the call.
+  - **The alert.** `pg-conn-jira-below-floor` (warning) fires when the 10-minute mean of `origin.headroom` is below 0
+    for 5 minutes: the shared tenant, not this daemon, is using the burst allowance. One dip is the floor working and
+    does not fire. A deployment that passes its own `--rule-uid` list to the router probe MUST add the uid.
+
+  Background work spends at most `floor(request_rate_per_second x 0.9)` requests per second (1 with the default rate of 2,
+  4 at the rate of 5 the operator set), however many `workers` there are: a worker whose request the budget refuses only
+  because another worker's request is in flight retries when that request finishes, so the background throughput is that
+  cap, not one request per 30 s. A `workers` value above the cap logs one `workers_over_background_cap` warning at
+  start-up, in `daemon.log.jsonl`, naming `workers`, `background_cap` and `request_rate_per_second`; raise the rate or
+  lower `workers` to silence it.
+
+- **Why the floor is 20, and what the daemon's share is.** Atlassian's documented burst limit for GET and POST is 100
+  requests per second per tenant per endpoint, and `X-RateLimit-NearLimit` turns true below 20% of capacity, that is
+  below 20% x 100 = 20 requests. The floor is that same point: the daemon stops spending when Atlassian itself starts
+  to say the tenant is near its limit, so the two signals agree. The daemon's own cap is 5 requests per second (5 / 100
+  = 5% of the limit), so even if the reading it holds is a full second old, the daemon alone cannot take the remainder
+  below 20 - 5 = 15 requests, 15% of the limit, which stays with the tenant's other users. A lower floor (10) would
+  leave the daemon spending until the tenant is within 10% of a 429; a higher one (50) would stop it at ordinary
+  tenant load, 100 - 50 = 50 requests used by others.
+- **Refresh cadence and the request budget.** The defaults were slowed (bead `pg2-doihln`) because Jira consumers do
+  not need the GitHub daemon's one-minute freshness; a change to a watched issue now reaches the feed within one
+  `summary_ttl` (5 minutes) instead of one minute, and `show` with `fresh` is unaffected. Both kinds of knob
+  changed: the per-group windows (`summary_ttl` 60s to 5m, `detail_ttl` 10m to 30m, `detail_max_age` 30m to 90m, each
+  kept at its old ratio to its neighbour) and the default of the per-query window (`query_ttl_default` 120s to 5m).
+  `query_ttl.<name>` is unchanged: it still overrides the default for one query, and none is added. The steady demand
+  with the 196 tracked members and `batch_size` 74, in requests per second:
+
+  | Source                | Before                                 | After                                  |
+  | --------------------- | -------------------------------------- | -------------------------------------- |
+  | summary (batched)     | ceil(196 / 74) / 60 = 3 / 60 = 0.0500  | 3 / 300 = 0.0100                       |
+  | detail, floor         | 196 / 1800 = 0.1089                    | 196 / 5400 = 0.0363                    |
+  | detail, ceiling       | 196 / 600 = 0.3267                     | 196 / 1800 = 0.1089                    |
+  | **total, floor**      | 0.0500 + 0.1089 = 0.1589               | 0.0100 + 0.0363 = 0.0463               |
+  | **total, ceiling**    | 0.0500 + 0.3267 = 0.3767               | 0.0100 + 0.1089 = 0.1189               |
+  | share of the cap of 5 | 0.1589 / 5 = 3.2% to 0.3767 / 5 = 7.5% | 0.0463 / 5 = 0.9% to 0.1189 / 5 = 2.4% |
+  | per configured query  | P / 120                                | P / 300                                |
+
+  The detail floor is one re-pull per issue per `detail_max_age` (an unchanged `updated` token extends the stored
+  detail up to the maximum age), the ceiling one per `detail_ttl` (every issue changing each time). P is the pages one
+  query run takes (`ceil(members / page size)`), so each query adds P / 300 requests per second, which is 2.5 times
+  fewer than P / 120. Summing the floor of the table, the total fell by a factor of 0.1589 / 0.0463 = 3.4, and the
+  ceiling by 0.3767 / 0.1189 = 3.2. Both ceilings are far inside the background cap of floor(5 x 0.9) = 4 requests per
+  second (0.1189 / 4 = 3.0%) and the documented limit of 100 (0.1189 / 100 = 0.12%).
+
 - **Closed issues.** An issue is stamped closed when it reaches the done status category, is refreshed until
   `terminal_ttl` after that and evicted `expiry` after it (the flag goes with it); a reopen clears the stamp.
 

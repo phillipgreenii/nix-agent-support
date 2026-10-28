@@ -28,10 +28,22 @@ import (
 // packages/pg-connector/grafana/pg-connector-issue-jira-metrics.txt lists the
 // same set; keep them in step (the catalog test fails otherwise).
 const (
-	MetricDaemonUp           = "pg_connector_issue_jira.daemon.up"
-	MetricGovernorPaused     = "pg_connector_issue_jira.governor.paused"
-	MetricJiraRequests       = "pg_connector_issue_jira.jira.requests"
-	MetricBudgetRemaining    = "pg_connector_issue_jira.budget.remaining"
+	MetricDaemonUp        = "pg_connector_issue_jira.daemon.up"
+	MetricGovernorPaused  = "pg_connector_issue_jira.governor.paused"
+	MetricJiraRequests    = "pg_connector_issue_jira.jira.requests"
+	MetricBudgetRemaining = "pg_connector_issue_jira.budget.remaining"
+
+	// The origin's own rate-limit reading (the last pjira-ratelimit line) and the
+	// configured floor. They report only while the reading is no older than
+	// origin.ReadingMaxAge; origin.floor always reports.
+	MetricOriginRemaining      = "pg_connector_issue_jira.origin.remaining"
+	MetricOriginLimit          = "pg_connector_issue_jira.origin.limit"
+	MetricOriginNearLimit      = "pg_connector_issue_jira.origin.near_limit"
+	MetricOriginReset          = "pg_connector_issue_jira.origin.reset"
+	MetricOriginFloor          = "pg_connector_issue_jira.origin.floor"
+	MetricOriginHeadroom       = "pg_connector_issue_jira.origin.headroom"
+	MetricOriginReadingAgeSecs = "pg_connector_issue_jira.origin.reading_age_seconds"
+
 	MetricQueueDepth         = "pg_connector_issue_jira.queue.depth"
 	MetricQueueOldestOverdue = "pg_connector_issue_jira.queue.oldest_overdue_seconds"
 	MetricGroupStaleness     = "pg_connector_issue_jira.group.staleness_seconds"
@@ -95,6 +107,12 @@ type Options struct {
 	Governor func() governor.State
 	// Bucket is the governor bucket those two read; empty means origin.Bucket.
 	Bucket governor.Bucket
+	// Readings is the holder of the origin's latest rate-limit reading, polled
+	// for the origin.* gauges; nil leaves them unreported (origin.floor too).
+	Readings *origin.Readings
+	// Floor is rate_reserve_requests, reported as origin.floor and subtracted
+	// from the reading's remaining count for origin.headroom.
+	Floor int
 	// Scheduler returns the scheduler's state, polled for queue.depth and
 	// queue.oldest_overdue_seconds (scheduler.Scheduler.State); nil leaves
 	// them unreported.
@@ -158,15 +176,22 @@ type Telemetry struct {
 	now    func() time.Time
 	bucket governor.Bucket
 
-	up        metric.Int64ObservableGauge
-	remaining metric.Int64ObservableGauge
-	paused    metric.Int64ObservableGauge
-	depth     metric.Int64ObservableGauge
-	overdue   metric.Float64ObservableGauge
-	tracked   metric.Int64ObservableGauge
-	noKind    metric.Int64ObservableGauge
-	requests  metric.Int64Counter
-	duration  metric.Float64Histogram
+	up               metric.Int64ObservableGauge
+	remaining        metric.Int64ObservableGauge
+	paused           metric.Int64ObservableGauge
+	originRemaining  metric.Int64ObservableGauge
+	originLimit      metric.Int64ObservableGauge
+	originNearLimit  metric.Int64ObservableGauge
+	originReset      metric.Int64ObservableGauge
+	originFloor      metric.Int64ObservableGauge
+	originHeadroom   metric.Int64ObservableGauge
+	originReadingAge metric.Float64ObservableGauge
+	depth            metric.Int64ObservableGauge
+	overdue          metric.Float64ObservableGauge
+	tracked          metric.Int64ObservableGauge
+	noKind           metric.Int64ObservableGauge
+	requests         metric.Int64Counter
+	duration         metric.Float64Histogram
 
 	staleness  metric.Float64Histogram
 	storeBytes metric.Int64ObservableGauge
@@ -216,6 +241,35 @@ func New(opts Options) (*Telemetry, error) {
 	if t.remaining, err = m.Int64ObservableGauge(MetricBudgetRemaining,
 		metric.WithDescription("Headroom under the configured request rate: the cap minus the spend in the current window"),
 		metric.WithUnit("{request}")); err != nil {
+		return nil, err
+	}
+	if t.originRemaining, err = m.Int64ObservableGauge(MetricOriginRemaining,
+		metric.WithDescription("Requests left in the origin burst window, as the last response reported it (X-RateLimit-Remaining); absent when no reading is current"), metric.WithUnit("{request}")); err != nil {
+		return nil, err
+	}
+	if t.originLimit, err = m.Int64ObservableGauge(MetricOriginLimit,
+		metric.WithDescription("Requests per burst window the origin allows (X-RateLimit-Limit); absent when no reading is current"), metric.WithUnit("{request}")); err != nil {
+		return nil, err
+	}
+	if t.originNearLimit, err = m.Int64ObservableGauge(MetricOriginNearLimit,
+		metric.WithDescription("1 when the origin says the tenant is below 20% of its burst capacity (X-RateLimit-NearLimit), else 0"), metric.WithUnit("1")); err != nil {
+		return nil, err
+	}
+	if t.originReset, err = m.Int64ObservableGauge(MetricOriginReset,
+		metric.WithDescription("Unix time the origin said the burst window resets (X-RateLimit-Reset, sent with a 429); absent when none was stated"), metric.WithUnit("s")); err != nil {
+		return nil, err
+	}
+	if t.originFloor, err = m.Int64ObservableGauge(MetricOriginFloor,
+		metric.WithDescription("The configured floor, rate_reserve_requests: nothing spends below it"), metric.WithUnit("{request}")); err != nil {
+		return nil, err
+	}
+	if t.originHeadroom, err = m.Int64ObservableGauge(MetricOriginHeadroom,
+		metric.WithDescription("origin.remaining minus origin.floor; negative means the floor is breached"), metric.WithUnit("{request}")); err != nil {
+		return nil, err
+	}
+	if t.originReadingAge, err = m.Float64ObservableGauge(MetricOriginReadingAgeSecs,
+		metric.WithDescription("Age of the origin's last rate-limit reading; absent before the first"),
+		metric.WithUnit("s")); err != nil {
 		return nil, err
 	}
 	if t.depth, err = m.Int64ObservableGauge(MetricQueueDepth,
@@ -277,7 +331,8 @@ func New(opts Options) (*Telemetry, error) {
 	}
 
 	t.registration, err = m.RegisterCallback(t.observe,
-		t.up, t.remaining, t.paused, t.depth, t.overdue, t.tracked, t.storeBytes, t.noKind)
+		t.up, t.remaining, t.paused, t.depth, t.overdue, t.tracked, t.storeBytes, t.noKind,
+		t.originRemaining, t.originLimit, t.originNearLimit, t.originReset, t.originFloor, t.originHeadroom, t.originReadingAge)
 	if err != nil {
 		_ = t.changes.Close()
 		return nil, err
@@ -311,6 +366,7 @@ func (t *Telemetry) observe(ctx context.Context, o metric.Observer) error {
 			}
 		}
 	}
+	t.observeOrigin(o)
 	if t.opts.Scheduler != nil {
 		for _, c := range t.opts.Scheduler().Classes {
 			class := metric.WithAttributes(attribute.String(keyClass, classLabel(c.Class)))
@@ -333,6 +389,39 @@ func (t *Telemetry) observe(ctx context.Context, o metric.Observer) error {
 		}
 	}
 	return nil
+}
+
+// observeOrigin reports the origin.* series: the floor always, the rest from
+// the latest rate-limit reading while it is current. A key the reading did not
+// carry leaves its series unreported rather than zero.
+func (t *Telemetry) observeOrigin(o metric.Observer) {
+	if t.opts.Readings == nil {
+		return
+	}
+	o.ObserveInt64(t.originFloor, int64(t.opts.Floor))
+	now := t.now()
+	l, ok := t.opts.Readings.Current(now)
+	if !ok {
+		return
+	}
+	o.ObserveFloat64(t.originReadingAge, l.Age(now).Seconds())
+	if l.Remaining != nil {
+		o.ObserveInt64(t.originRemaining, *l.Remaining)
+		o.ObserveInt64(t.originHeadroom, *l.Remaining-int64(t.opts.Floor))
+	}
+	if l.Limit != nil {
+		o.ObserveInt64(t.originLimit, *l.Limit)
+	}
+	if l.NearLimit != nil {
+		v := int64(0)
+		if *l.NearLimit {
+			v = 1
+		}
+		o.ObserveInt64(t.originNearLimit, v)
+	}
+	if at, ok := l.ResetAt(); ok {
+		o.ObserveInt64(t.originReset, at.Unix())
+	}
 }
 
 // Request is the origin.Observer: it counts one Jira request under its result

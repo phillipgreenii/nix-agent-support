@@ -75,13 +75,14 @@ type Report struct {
 	Logs       Logs       `json:"logs"`
 	Supervisor Supervisor `json:"supervisor"`
 
-	Requests *Requests `json:"requests,omitempty"`
-	Pause    *Pause    `json:"pause,omitempty"`
-	Queue    *Queue    `json:"queue,omitempty"`
-	Queries  []Query   `json:"queries,omitempty"`
-	Auth     *Auth     `json:"auth,omitempty"`
-	Changes  *Changes  `json:"changes,omitempty"`
-	Tracked  *Tracked  `json:"tracked,omitempty"`
+	Requests  *Requests  `json:"requests,omitempty"`
+	Pause     *Pause     `json:"pause,omitempty"`
+	RateLimit *RateLimit `json:"rate_limit,omitempty"`
+	Queue     *Queue     `json:"queue,omitempty"`
+	Queries   []Query    `json:"queries,omitempty"`
+	Auth      *Auth      `json:"auth,omitempty"`
+	Changes   *Changes   `json:"changes,omitempty"`
+	Tracked   *Tracked   `json:"tracked,omitempty"`
 }
 
 // Exit is the process exit code of the verdict: 0 healthy, 2 degraded, 3 down.
@@ -139,6 +140,28 @@ type Requests struct {
 type Pause struct {
 	Reason string `json:"reason"`
 	Until  Time   `json:"until"`
+}
+
+// RateLimit is the origin's own rate-limit reading and the floor the daemon
+// holds below it. Floor is rate_reserve_requests and is always stated. The other
+// fields come from the last reading while it is no older than
+// origin.ReadingMaxAge, and each is absent when that response did not carry it
+// (absent is never 0): Limit and Remaining are requests per burst window,
+// NearLimit is the origin's below-20% flag, Headroom is Remaining less Floor,
+// ResetAt is the reset the origin stated (a 429 carries it). BelowFloor is true
+// when Headroom is negative. ReadingAgeSeconds and LastStatus (the HTTP status
+// of that response) are stated with any reading.
+type RateLimit struct {
+	Floor             int64  `json:"floor"`
+	Limit             *int64 `json:"limit,omitempty"`
+	Remaining         *int64 `json:"remaining,omitempty"`
+	NearLimit         *bool  `json:"near_limit,omitempty"`
+	Headroom          *int64 `json:"headroom,omitempty"`
+	BelowFloor        bool   `json:"below_floor,omitempty"`
+	ResetAt           *Time  `json:"reset_at,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	LastStatus        int    `json:"last_status,omitempty"`
+	ReadingAgeSeconds *int64 `json:"reading_age_seconds,omitempty"`
 }
 
 // Queue is the scheduler's depth.
@@ -218,6 +241,14 @@ func assess(r *Report, stale []string) {
 		if q.LastError != "" {
 			reasons = append(reasons, "query "+q.Name+" last_error: "+q.LastError)
 		}
+	}
+	if rl := r.RateLimit; rl != nil && rl.BelowFloor {
+		age := int64(0)
+		if rl.ReadingAgeSeconds != nil {
+			age = *rl.ReadingAgeSeconds
+		}
+		reasons = append(reasons, fmt.Sprintf("origin budget below the floor: %d requests remaining of the burst window, floor %d (reading %ds old)",
+			*rl.Remaining, rl.Floor, age))
 	}
 	reasons = append(reasons, stale...)
 	if r.Changes != nil {

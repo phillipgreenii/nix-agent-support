@@ -14,16 +14,26 @@ const (
 	DefaultConcurrency          = 2
 	// DefaultDefaultPause is the pause after a 429 that states no Retry-After.
 	DefaultDefaultPause = 60 * time.Second
+	// DefaultRateReserveRequests is the floor: nothing spends while the origin
+	// reports (or the daemon estimates) fewer than this many requests left in
+	// its one-second burst window. 20 is 20% of the documented limit of 100 per
+	// second, the point at which Atlassian itself sets X-RateLimit-NearLimit
+	// (and 4 times the daemon's own 5 requests per second cap). 0 holds nothing back.
+	DefaultRateReserveRequests = 20
 
 	// Write-notice keys.
 	DefaultWriteNoticeTimeout = 500 * time.Millisecond
 	DefaultWriteLease         = 30 * time.Second
 
-	// Group and retention keys.
-	DefaultSummaryTTL      = 60 * time.Second
-	DefaultDetailTTL       = 10 * time.Minute
-	DefaultDetailMaxAge    = 30 * time.Minute
-	DefaultQueryTTLDefault = 120 * time.Second
+	// Group and retention keys. The four freshness windows are 5 times, 3
+	// times, 3 times and 2.5 times their first values (60 s, 10 min, 30 min and
+	// 120 s): Jira consumers do not need the GitHub daemon's one-minute
+	// freshness, so the steady demand is a small share of the budget (the
+	// arithmetic is in the README, "Refresh cadence and the request budget").
+	DefaultSummaryTTL      = 5 * time.Minute
+	DefaultDetailTTL       = 30 * time.Minute
+	DefaultDetailMaxAge    = 90 * time.Minute
+	DefaultQueryTTLDefault = 5 * time.Minute
 	// DefaultTerminalTTL: an issue is refreshed until 24 hours after it closes.
 	DefaultTerminalTTL = 24 * time.Hour
 	// DefaultExpiry: an issue is evicted 7 days after it closes.

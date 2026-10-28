@@ -179,6 +179,7 @@ func (r *rig) succeed() {
 func TestGovernorConfig_OneRequestsBucketWithOneSecondWindow(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.RequestRatePerSecond = 7
+	cfg.RateReserveRequests = 13
 	gc := GovernorConfig(cfg)
 	if len(gc.Declared) != 1 {
 		t.Fatalf("declared = %d buckets, want 1", len(gc.Declared))
@@ -187,8 +188,8 @@ func TestGovernorConfig_OneRequestsBucketWithOneSecondWindow(t *testing.T) {
 	if s.Bucket != "requests" || s.Unit != "requests" {
 		t.Errorf("bucket = %q unit %q, want requests/requests", s.Bucket, s.Unit)
 	}
-	if s.Limits.Cap != 7 || s.Limits.Reserve != 0 || s.Limits.Window != time.Second {
-		t.Errorf("limits = %+v, want cap 7, reserve 0, window 1s", s.Limits)
+	if s.Limits.Cap != 7 || s.Limits.Reserve != 13 || s.Limits.Window != time.Second {
+		t.Errorf("limits = %+v, want cap 7, reserve 13 (rate_reserve_requests), window 1s", s.Limits)
 	}
 	if gc.BackgroundShare != 0.9 {
 		t.Errorf("background share = %v, want 0.9", gc.BackgroundShare)

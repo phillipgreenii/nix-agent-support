@@ -208,8 +208,13 @@ func (d *daemon) start(ctx context.Context) error {
 	d.mu.Lock()
 	d.telShutdown = shutdown
 	d.mu.Unlock()
+	// ONE holder keeps the origin's latest rate-limit reading for the gauges, the
+	// status op and the runner that takes it.
+	readings := origin.NewReadings()
 	tel, err := telemetry.New(telemetry.Options{
 		MeterProvider: d.o.MeterProvider,
+		Readings:      readings,
+		Floor:         cfg.RateReserveRequests,
 		StorePath:     filepath.Join(cfg.StateDir, config.StoreFileName),
 		Governor: func() governor.State {
 			if g := d.gov.Load(); g != nil {
@@ -330,6 +335,8 @@ func (d *daemon) start(ctx context.Context) error {
 		Concurrency:  cfg.Concurrency,
 		DefaultPause: cfg.DefaultPause.Std(),
 		Auth:         auth,
+		Floor:        int64(cfg.RateReserveRequests),
+		Readings:     readings,
 	}
 	if tel != nil {
 		runOpts.Observer = tel

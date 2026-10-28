@@ -382,19 +382,51 @@ packet is cut) and the code:
   `jira-quota-global-based`, `jira-per-issue-on-write`). The beta points headers (`Beta-RateLimit`) report
   remaining points only near the limit and only for quota-governed apps. Atlassian says `Retry-After` is a hint,
   because limits are per tenant.
-- **What the code gives today.** `pjira` reads no rate-limit header, and the backend's own comment says it
-  surfaces "no figure, header or Retry-After" (`eventlog.go:33-37`): the only signal is the 429 status text,
-  classified `failure_class=rate_limited`. There is no hourly figure to read at all.
+- **What the code gave when this was written (2026-10-20).** `pjira` read no rate-limit header, and the
+  backend's own comment says it surfaces "no figure, header or Retry-After" (`eventlog.go:33-37`): the only
+  signal was the 429 status text, classified `failure_class=rate_limited`. There is no hourly figure to read at
+  all. **Superseded by the update below.**
 
 Therefore **INV-ICD-4.** The Jira daemon's budget MUST be internal and conservative, because the external
 signal is a rate, not a quota: it MUST enforce a configured request-rate cap (requests per second) and a
 concurrency cap, MUST count requests, and MUST handle a 429 by pausing background work for `Retry-After`
 (default 60 seconds when absent) and doubling the pause on consecutive 429s with jitter, as Atlassian advises.
-Interactive reads MUST be served stale during a pause. A change in the repository that owns `pjira` (an out-of-tree dependency, its own bead)
-surfaces `X-RateLimit-Remaining`, `X-RateLimit-NearLimit`, `Retry-After` and `RateLimit-Reason`; **how
-`pjira` conveys them across its CLI boundary is unspecified** (stderr line, a field in its JSON, or a flag) and
-is that bead's decision. Until it lands the daemon runs on the 429 signal and its own counter. If the token
-moves to OAuth the points quota applies and the beta headers become the signal.
+Interactive reads MUST be served stale during a pause. If the token moves to OAuth the points quota applies and
+the beta headers become the signal.
+
+**Update 2026-10-28 (bead `pg2-doihln`; the `pjira` change is bead `pg2-2ig8ts`, landed in the repository that
+owns `pjira`).** `pjira` conveys the headers on stderr, one `pjira-ratelimit: ` line of compact JSON per
+response that carried a header (`status`, and when present `limit`, `remaining`, `near_limit`,
+`retry_after_seconds`, `reset`, `reason`; the last line of a run is the freshest; stdout is unchanged). The
+daemon now uses them, and the decisions are:
+
+- **The floor and its unit.** A new key `rate_reserve_requests`, the Jira analogue of the GitHub daemon's
+  `rate_reserve_points`, in **requests remaining of the burst window** (not points: API-token traffic is under
+  burst limits). The governor refuses a request of every class when `remaining - in_flight - 1 < floor`. The
+  reading is in force for one burst window (1 second, the bucket's window) after it is taken, or until a
+  stated reset when that is later, so a refusal never holds work for more than that, and the `RetryAt` of the
+  refusal is the end of it. A reading with no `remaining`, and one whose `limit` is at or below the floor, is
+  recorded and shown but not enforced.
+- **The default and its arithmetic.** 20. The documented burst limit is 100 requests per second for GET and
+  POST, and `X-RateLimit-NearLimit` turns true below 20% of capacity, 20% x 100 = 20 requests: the floor is
+  the point where Atlassian itself says the tenant is near its limit. The daemon's own cap is 5 requests per
+  second (operator ruling 2026-10-27), 5 / 100 = 5% of the limit, so even a second-old reading cannot let the
+  daemon alone take the remainder below 20 - 5 = 15 requests (15% of the limit). A floor of 10 would send until
+  the tenant is within 10% of a 429; a floor of 50 would stop at ordinary tenant load.
+- **A stated `Retry-After` is a minimum.** The first pause after a 429 is the stated delay (the default pause
+  when none is stated), doubled with jitter on each consecutive 429.
+- **Telemetry.** `origin.remaining`, `origin.limit`, `origin.near_limit`, `origin.reset`, `origin.floor`,
+  `origin.headroom` (remaining less the floor) and `origin.reading_age_seconds`, plus a `rate_limit` block in the
+  `status` op; the reading is reported while it is no older than 5 minutes and an absent figure is never 0. The
+  alert `pg-conn-jira-below-floor` fires when the 10-minute mean of `origin.headroom` is below 0 for 5 minutes.
+- **Cadence.** Jira consumers do not need GitHub's one-minute freshness, so `summary_ttl` went from 60 s to 5
+  minutes, `detail_ttl` from 10 to 30 minutes, `detail_max_age` from 30 to 90 minutes and `query_ttl_default`
+  from 120 s to 5 minutes (per-query `query_ttl.<name>` overrides stay). For the 196 tracked members and a
+  `batch_size` of 74 the steady demand is, before, 3 / 60 = 0.05 summary requests per second plus 196 / 1800 =
+  0.1089 to 196 / 600 = 0.3267 detail requests per second, 0.1589 to 0.3767 in all (3.2% to 7.5% of the cap of
+  5), and after, 3 / 300 = 0.01 plus 196 / 5400 = 0.0363 to 196 / 1800 = 0.1089, 0.0463 to 0.1189 in all (0.9%
+  to 2.4% of the cap), each query adding P / 300 instead of P / 120 for P pages. The full table is in the
+  package README ("The Jira daemon", "Budget").
 
 ### 3.5 Change detection and the feed
 

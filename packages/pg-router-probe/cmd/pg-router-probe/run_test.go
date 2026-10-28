@@ -363,6 +363,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-conn-jira-auth-failing",
 		"pg-conn-jira-unavailable",
 		"pg-conn-jira-rate-limited",
+		"pg-conn-jira-below-floor",
 		"pg-desk-ingest-failed-old",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {

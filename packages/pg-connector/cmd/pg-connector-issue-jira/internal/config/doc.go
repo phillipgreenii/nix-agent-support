@@ -38,13 +38,14 @@
 //	request_rate_per_second 2
 //	concurrency             2
 //	default_pause           60s (pause after a 429 that states no Retry-After)
+//	rate_reserve_requests   20 (the floor: nothing spends below this many requests left in the origin's burst window; 0 refuses only at none left)
 //	write_notice_timeout    500ms
 //	write_lease             30s
-//	summary_ttl             60s
-//	detail_ttl              10m
-//	detail_max_age          30m
+//	summary_ttl             5m
+//	detail_ttl              30m
+//	detail_max_age          90m
 //	query_ttl               {} (object from query name to duration)
-//	query_ttl_default       120s (for a query not named in query_ttl)
+//	query_ttl_default       5m  (for a query not named in query_ttl)
 //	terminal_ttl            24h (refreshed until 24 hours after the issue closes)
 //	expiry                  7d (evicted 7 days after closing)
 //	tracked_set_alert_size  55
@@ -62,7 +63,8 @@
 // start from the sibling GitHub daemon's constants of the same meaning; the
 // design fixes no number for them. Zero or negative values are rejected for
 // the rates, concurrency, workers, batch_size, write_lease and every TTL (and
-// for the other durations and sizes).
+// for the other durations and sizes). rate_reserve_requests is the one key
+// where zero is valid (the floor holds nothing back); a negative value is rejected.
 //
 // # pjira_env
 //

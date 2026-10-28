@@ -427,10 +427,14 @@ only up to the request-rate cap and the concurrency cap, counts every request, a
 tasks so no class starves. A caller's read that needs a stale group (`USECASE-JIRA-READ-ISSUE`) goes
 out at the interactive class inside the share kept for it. Jira refuses a request for rate: the
 daemon pauses background work for the stated retry delay, or the configured default when none is
-stated, and doubles the pause with jitter on each consecutive refusal, while interactive reads are
-served stale. The pause ends and work resumes. Until the origin tool surfaces Jira's own report the
-daemon runs on the refusal and its own counter. The operator watches the request counter and any
-pause in `status` (`USECASE-JIRA-DIAGNOSE`).
+stated (never shorter than it), and doubles the pause with jitter on each consecutive refusal, while
+interactive reads are served stale. The pause ends and work resumes. Before any refusal, every
+response carries Jira's own report of what is left of its burst window: the daemon keeps it, and when
+the other users of the tenant have left fewer requests than the configured floor it refuses its own
+requests until that window passes, so it backs off before Jira has to refuse it. Where the origin
+tool surfaces no report, the daemon runs on the refusal and its own counter. The operator watches the
+request counter, the origin's remaining allowance against the floor, and any pause in `status`
+(`USECASE-JIRA-DIAGNOSE`).
 
 ### `JOURNEY-JIRA-RESTART-OR-MOVE-ASIDE` — restart, upgrade, or lose the store <!-- uuid: 4b343384-2745-4af4-a060-b964d2fd7a78 -->
 

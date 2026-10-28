@@ -2,6 +2,13 @@ pg_connector_issue_jira_daemon_up gauge -
 pg_connector_issue_jira_governor_paused gauge reason
 pg_connector_issue_jira_jira_requests counter result
 pg_connector_issue_jira_budget_remaining gauge -
+pg_connector_issue_jira_origin_remaining gauge -
+pg_connector_issue_jira_origin_limit gauge -
+pg_connector_issue_jira_origin_near_limit gauge -
+pg_connector_issue_jira_origin_reset gauge -
+pg_connector_issue_jira_origin_floor gauge -
+pg_connector_issue_jira_origin_headroom gauge -
+pg_connector_issue_jira_origin_reading_age_seconds gauge -
 pg_connector_issue_jira_queue_depth gauge class
 pg_connector_issue_jira_queue_oldest_overdue_seconds gauge class
 pg_connector_issue_jira_group_staleness_seconds histogram group

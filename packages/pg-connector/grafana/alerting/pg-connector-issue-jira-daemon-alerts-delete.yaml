@@ -23,6 +23,8 @@ deleteRules:
   - orgId: 1
     uid: pg-conn-jira-auth-failing
   - orgId: 1
+    uid: pg-conn-jira-below-floor
+  - orgId: 1
     uid: pg-conn-jira-consumer-stuck
   - orgId: 1
     uid: pg-conn-jira-daemon-down

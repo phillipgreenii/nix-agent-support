@@ -1,12 +1,12 @@
 # pg-connector-issue-jira daemon unified-alerting rules (docket pg2-2qyyh.2): the
-# alerts of the Jira daemon's design ("7. Observability"), as six Prometheus
+# alerts of the Jira daemon's design ("7. Observability"), as seven Prometheus
 # rules over the daemon's own metrics and four Loki rules over its two logs
 # (events.jsonl and daemon.log.jsonl, one Loki service_name).
 #
 # This file sits BESIDE issue-jira-alerts.yaml (the old one-shot backend's three
 # rules, service_name pg-connector-issue-jira), which stays installed until a
 # later cleanup. Its sibling pg-connector-issue-jira-daemon-alerts-delete.yaml
-# lists the same ten uids under `deleteRules:` and is what a machine without the
+# lists the same eleven uids under `deleteRules:` and is what a machine without the
 # daemon registers INSTEAD of this file (Grafana keeps a file-provisioned rule
 # live after its file is dropped, pg2-bry0w and pg2-susum). Which of the two a
 # machine registers is the darwin module's business, not this file's.
@@ -88,12 +88,12 @@ groups:
                     params: [1]
 
       # Configured queries fresh. The design leaves the threshold open. The
-      # literal 600 seconds STANDS FOR 5 x 120 s, five times the default
-      # query_ttl_default: a Jira throttle (HTTP 429) pauses background
+      # literal 1500 seconds STANDS FOR 5 x 300 s, five times the default
+      # query_ttl_default (5 minutes since pg2-doihln; it was 120 s and this literal 600): a Jira throttle (HTTP 429) pauses background
       # refreshes for minutes and is the rate-limited rule's business, so this
       # rule must not fire on a single missed refresh or a short pause, only on
-      # a query that has gone without a whole-query success for 10 minutes. A
-      # deployment that raises query_ttl_default or a query's query_ttl above 120
+      # a query that has gone without a whole-query success for 25 minutes. A
+      # deployment that raises query_ttl_default or a query's query_ttl above 300
       # s needs a larger literal here, or this rule fires for a healthy query.
       - uid: pg-conn-jira-query-stale
         title: pg-connector-issue-jira configured query is stale
@@ -104,8 +104,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-connector-issue-jira: a configured query has had no whole-query success for over 10 minutes"
-          description: "query_last_success_age_seconds for at least one configured query has been above 600 seconds (5 x the default query_ttl_default of 120 s, so a short throttle pause does not page) for over 5 minutes: its refreshes keep failing or are starved, so callers read stale rows. The query label names it. Check budget pauses (pg_connector_issue_jira_governor_paused), auth, and daemon.log.jsonl and events.jsonl."
+          summary: "pg-connector-issue-jira: a configured query has had no whole-query success for over 25 minutes"
+          description: "query_last_success_age_seconds for at least one configured query has been above 1500 seconds (5 x the default query_ttl_default of 300 s, so a short throttle pause does not page) for over 5 minutes: its refreshes keep failing or are starved, so callers read stale rows. The query label names it. Check budget pauses (pg_connector_issue_jira_governor_paused), auth, and daemon.log.jsonl and events.jsonl."
         data:
           - refId: A
             relativeTimeRange:
@@ -133,7 +133,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [600]
+                    params: [1500]
 
       # Consumer stuck: a consumer's oldest unacknowledged change row is older
       # than 15 minutes (900 seconds).
@@ -509,3 +509,56 @@ groups:
                 - evaluator:
                     type: gt
                     params: [2]
+
+      # Origin budget below the floor (bead pg2-doihln). origin.headroom is the
+      # origin's own count of requests left in its one-second burst window (the
+      # last pjira-ratelimit reading, X-RateLimit-Remaining) minus the daemon's
+      # floor rate_reserve_requests, so a negative value means the shared tenant
+      # has left the daemon fewer requests than the floor and the governor is
+      # refusing work. A single reading is a one-second fact, and one dip is the
+      # floor doing its job, so the rule averages the gauge over 10 minutes and
+      # fires when the mean is negative for 5 minutes: the tenant is saturated
+      # by others, not blipping. The gauge reports only while the reading is no
+      # older than 5 minutes (a quiet daemon drops out, so the alert clears) and
+      # is absent for a pjira that writes no reading, so noDataState is OK.
+      # Warning, not error: the floor is the protection; the alert says someone
+      # else is using the tenant's burst allowance.
+      - uid: pg-conn-jira-below-floor
+        title: pg-connector-issue-jira origin budget is below its floor
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira: Jira's remaining burst allowance has averaged below the floor for 15 minutes"
+          description: "pg_connector_issue_jira_origin_headroom (Jira's X-RateLimit-Remaining minus the daemon's rate_reserve_requests floor, 20 by default) averaged below 0 over 10 minutes and stayed there for 5 minutes: other traffic on the shared tenant is using most of its burst allowance, so the governor refuses requests below the floor and callers read stale rows. Read origin_remaining, origin_limit and origin_near_limit, the status op's rate_limit block, and events.jsonl (remaining on each origin row); reduce other Jira polling or lower rate_reserve_requests only with that evidence."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: min(avg_over_time(pg_connector_issue_jira_origin_headroom[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0]

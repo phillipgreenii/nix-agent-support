@@ -10,7 +10,7 @@
 #
 # Every failure line starts with RULE-Sn so a mutant can assert the exact rule that fired.
 #
-#   S1  exactly the ten uids, each once, each at most 40 characters
+#   S1  exactly the eleven uids, each once, each at most 40 characters
 #   S2  one group pg-connector-issue-jira-daemon in folder pg-connector, no folderUid key anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description, labels
 #       with exactly the one key severity whose value is critical, error, warning or info; each
@@ -26,7 +26,7 @@
 #       and parses as LogQL offline; the same tokens `pg-connector-issue-jira"` (the old
 #       backend's service name) are absent
 #   S8  the deleteRules file (pg2-susum) is apiVersion 1, has no groups, and its deleteRules
-#       entries are exactly the ten uids of S1 (so, with S1, exactly the rule file's uids),
+#       entries are exactly the eleven uids of S1 (so, with S1, exactly the rule file's uids),
 #       each once, each with orgId 1
 #
 # Exit codes: 0 consistent (self-test: real inputs pass and every mutant fails with exactly
@@ -67,6 +67,7 @@ pg-conn-jira-rate-limited
 pg-conn-jira-store-aside
 pg-conn-jira-unavailable"
 want_uids="pg-conn-jira-auth-failing
+pg-conn-jira-below-floor
 pg-conn-jira-consumer-stuck
 pg-conn-jira-daemon-down
 pg-conn-jira-query-stale
@@ -88,7 +89,7 @@ lint() {
   # S1
   got="$(jq -r '[.groups[]?.rules[]?.uid] | sort | .[]' <<<"$json")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S1: the rule uids are not exactly the ten expected ones, each once:" \
+    echo "RULE-S1: the rule uids are not exactly the eleven expected ones, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -221,7 +222,7 @@ lint() {
   fi
   got="$(jq -r '[.deleteRules[]?.uid] | sort | .[]' <<<"$deljson")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S8: the deleteRules uids are not exactly the ten rule uids, each once:" \
+    echo "RULE-S8: the deleteRules uids are not exactly the eleven rule uids, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi

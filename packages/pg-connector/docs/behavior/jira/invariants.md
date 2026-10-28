@@ -249,8 +249,9 @@ different meaning for a shared term it takes a different name (`INV-20`).
   **internal and conservative**: the daemon MUST enforce a configured **request-rate cap**
   (requests per second) and a configured **concurrency cap**, and MUST **count** its requests. The
   origin's tenant is shared with every other user's traffic, so the budget is a small share of it.
-  The set assumes no quota figure for the origin: the external signal the daemon can rely on is a
-  rate, not a quota. When the configured number of workers exceeds the requests per second that
+  The origin meters this credential kind by a burst rate (requests per second), not by a quota, and
+  the configured freshness windows MUST leave the steady refresh demand of the tracked set a small
+  share of the request-rate cap. When the configured number of workers exceeds the requests per second that
   background work may spend (the request-rate cap times the background share, rounded down), the
   daemon MUST log one warning at start-up naming both numbers: the extra workers can never all
   run at once, and background throughput is that cap.
@@ -261,13 +262,24 @@ different meaning for a shared term it takes a different name (`INV-20`).
   interactive read with nothing stored is answered `unavailable` naming the pause. The priority
   classes, the background share and the rule that interactive work keeps room (`INV-GH-BUDGET-2`,
   `INV-GH-BUDGET-3`) apply to this one request-rate budget.
-- **`INV-JIRA-BUDGET-3`** <!-- uuid: 56c02035-49a3-42dc-a9c0-2f3cdc4430fb --> — Until the origin tool surfaces the origin's own
-  rate-limit report (the remaining allowance, a near-limit warning, a retry delay and a reason), the
-  daemon MUST run on the refusal signal and its own counter. When the tool does surface it, the
-  daemon SHOULD use it to slow down before a refusal; how the tool conveys it across its own
-  boundary is that tool's decision and is not part of this set. If the origin's credential kind
-  changes to one that is quota-governed, the quota's signals become the budget's input and this set
-  is revisited.
+- **`INV-JIRA-BUDGET-3`** <!-- uuid: 56c02035-49a3-42dc-a9c0-2f3cdc4430fb --> — The origin's own rate-limit report (the
+  remaining allowance of its burst window, its limit, a near-limit warning, a retry delay, a reset
+  time and a reason) is an input of the budget whenever the origin tool surfaces it; how the tool
+  conveys it across its own boundary is that tool's decision and is not part of this set. The daemon
+  MUST keep the latest report of every origin response, a refusal included, and MUST export it and
+  show it in `status` (`INV-JIRA-OBS-1`, `INV-JIRA-DIAG-1`); a report that lacks a figure MUST NOT be
+  shown as zero for it. The daemon MUST enforce a configured **floor**, in requests remaining of the
+  origin's burst window: while the origin's remaining allowance, less the requests already in
+  flight and the one being admitted, would fall below the floor, the daemon MUST refuse the request,
+  of every class, and the refusal MUST name the floor (the same rule as the GitHub daemon's
+  reserve, `INV-GH-BUDGET-3`; interactive reads are then served stale, or answered `unavailable`
+  naming the floor when nothing is stored). A report holds only for the burst window it was taken
+  in, so a refusal ends with that window and never holds work longer. A report that gives no
+  remaining figure, and one whose limit is no larger than the floor, MUST NOT be enforced. A retry
+  delay the origin states is a minimum: a pause MUST NOT be shorter than it (`INV-JIRA-BUDGET-2`).
+  When the tool surfaces no report, or the tenant sends none, the daemon MUST run on the refusal
+  signal and its own counter. If the origin's credential kind changes to one that is quota-governed,
+  the quota's signals become the budget's input and this set is revisited.
 
 ## Diagnostics
 
@@ -287,6 +299,9 @@ different meaning for a shared term it takes a different name (`INV-20`).
 - **`INV-JIRA-OBS-1`** <!-- uuid: b3638e53-5ce3-42c2-a5c3-0f2c5cc84d20 --> — The daemon MUST export the following metrics, under
   the prefix `pg_connector_issue_jira.`: `daemon.up`; `governor.paused{reason}`;
   `jira.requests{result}`; `budget.remaining`, the headroom under the configured request rate;
+  `origin.remaining`, `origin.limit`, `origin.near_limit`, `origin.reset`, `origin.headroom` and
+  `origin.reading_age_seconds`, the origin's last report while it is current, and `origin.floor`,
+  the configured floor (`INV-JIRA-BUDGET-3`);
   `queue.depth`; `queue.oldest_overdue_seconds`; `group.staleness_seconds`; `request.duration`;
   `change.detection_delay_seconds{kind,origin}`; `change.settle{result}`;
   `query.last_success_age_seconds`; `consumer.lag_rows`; `consumer.oldest_unacked_age_seconds`;
@@ -296,7 +311,8 @@ different meaning for a shared term it takes a different name (`INV-20`).
 - **`INV-JIRA-OBS-2`** <!-- uuid: 6f53d2c7-0eae-4504-92e7-7d7921c5a607 --> — These alerts MUST exist: the daemon down; queries
   stale; a consumer stuck (its oldest unacknowledged row older than a bound, 15 minutes at first);
   the settle rule holding; the store moved aside; the tracked set above its configured size
-  (`INV-JIRA-TRACK-2`); any non-zero `change.rows_without_kind`; and Jira authentication failing,
+  (`INV-JIRA-TRACK-2`); any non-zero `change.rows_without_kind`; the origin's remaining allowance
+  averaging below the floor for a sustained time (`INV-JIRA-BUDGET-3`); and Jira authentication failing,
   Jira unavailable and Jira rate limited, the three alerts of the stateless backend carried onto
   the daemon's own log with the same failure classes. Each alert MUST have an automated rule test
   with a positive and a negative case, MUST be registered with the probe that checks that the alert

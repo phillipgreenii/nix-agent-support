@@ -121,19 +121,20 @@ already means a state moving to open, so a first observation is `added`, and `en
 
 Every failure is answered from the parent's seven-value taxonomy (`INV-JIRA-ERR-1`):
 
-| Failure                                  | Answer                                                                                                                                                      |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| origin error or timeout                  | the group stays stale and records its last error; an interactive read gets stale content inside expiry, otherwise `unavailable`                             |
-| origin refuses a request for rate        | background work pauses for the stated or configured time; interactive reads are served stale (`INV-JIRA-BUDGET-2`)                                          |
-| authentication failure                   | fetches answer `unauthenticated`; cached reads are still served with their age; `auth_status` reports the failure                                           |
-| daemon unreachable                       | `unavailable` naming the socket path and the supervisor's restart hint; a write is not affected (`INV-JIRA-PROC-2`)                                         |
-| daemon migrating its store               | `unavailable` whose message starts with `migrating:`                                                                                                        |
-| store corrupt, or its migration fails    | the store is moved aside with a timestamp, the daemon starts empty, flags and baselines are lost and an alert fires (`INV-JIRA-PROC-3`, `INV-JIRA-WATCH-7`) |
-| store newer than the binary              | the daemon refuses to start and alerts; it never moves the store aside                                                                                      |
-| protocol version outside supported range | `version_mismatch`                                                                                                                                          |
-| query name the config does not define    | `query_not_recognized` (`INV-ERR-3`)                                                                                                                        |
-| consumer position outside retention      | `invalid_argument` whose message starts with `cursor_expired:` (`INV-JIRA-CHG-8`)                                                                           |
-| issue deleted or inaccessible            | a `removed` row when the issue is watched (`INV-JIRA-CHG-4`)                                                                                                |
+| Failure                                  | Answer                                                                                                                                                                            |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| origin error or timeout                  | the group stays stale and records its last error; an interactive read gets stale content inside expiry, otherwise `unavailable`                                                   |
+| origin refuses a request for rate        | background work pauses for the stated or configured time; interactive reads are served stale (`INV-JIRA-BUDGET-2`)                                                                |
+| origin allowance is below the floor      | the request is refused, of any class, until the report's burst window passes; interactive reads are served stale or answered `unavailable` naming the floor (`INV-JIRA-BUDGET-3`) |
+| authentication failure                   | fetches answer `unauthenticated`; cached reads are still served with their age; `auth_status` reports the failure                                                                 |
+| daemon unreachable                       | `unavailable` naming the socket path and the supervisor's restart hint; a write is not affected (`INV-JIRA-PROC-2`)                                                               |
+| daemon migrating its store               | `unavailable` whose message starts with `migrating:`                                                                                                                              |
+| store corrupt, or its migration fails    | the store is moved aside with a timestamp, the daemon starts empty, flags and baselines are lost and an alert fires (`INV-JIRA-PROC-3`, `INV-JIRA-WATCH-7`)                       |
+| store newer than the binary              | the daemon refuses to start and alerts; it never moves the store aside                                                                                                            |
+| protocol version outside supported range | `version_mismatch`                                                                                                                                                                |
+| query name the config does not define    | `query_not_recognized` (`INV-ERR-3`)                                                                                                                                              |
+| consumer position outside retention      | `invalid_argument` whose message starts with `cursor_expired:` (`INV-JIRA-CHG-8`)                                                                                                 |
+| issue deleted or inaccessible            | a `removed` row when the issue is watched (`INV-JIRA-CHG-4`)                                                                                                                      |
 
 - **What must hold.** Each op and answer above, under the invariants named against it. The backend
   MUST NOT answer an op from the umbrella's own state, and MUST NOT depend on the umbrella's cache or
@@ -154,8 +155,9 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-JIRA-ERR-
   the governor, through the origin tool. A write is made by the calling process, through the same
   tool, under that caller's identity.
 - **What crosses (in).** Content, a refusal for rate with its stated retry delay when it states one,
-  and authentication failures. The origin's own rate-limit report is an input only when the origin
-  tool surfaces it (`INV-JIRA-BUDGET-3`).
+  and authentication failures. The origin's own rate-limit report (its remaining allowance, limit,
+  near-limit warning, reset and reason) is an input whenever the origin tool surfaces it
+  (`INV-JIRA-BUDGET-3`).
 - **What must hold.** No daemon call is made outside the governor (`INV-JIRA-BUDGET-1`); the
   credential stays with the origin tool and never enters the store or the daemon; the daemon's
   budget is internal (`INV-JIRA-BUDGET-1`); a failed call leaves the previous content in place

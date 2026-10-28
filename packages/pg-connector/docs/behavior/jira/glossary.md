@@ -100,5 +100,7 @@ GitHub set's **instance**.
 - **Request-rate cap** — the most requests per second the daemon sends to the origin
   (`INV-JIRA-BUDGET-1`).
 - **Concurrency cap** — the most requests the daemon has in flight at once (`INV-JIRA-BUDGET-1`).
+- **Floor** — the fewest requests of the origin's burst window that must remain: the daemon sends
+  nothing while the origin's own report leaves fewer (`INV-JIRA-BUDGET-3`).
 - **Pause** — the interval during which the daemon sends no background request after the origin
   refused one for rate; it doubles, with jitter, on each consecutive refusal (`INV-JIRA-BUDGET-2`).
