@@ -685,7 +685,7 @@ further callers listed below. So:
   (`candidates.go`, `rank.go`, `slot.go`, `live.go`, `health.go`), `internal/interpret`
   (`issue_attention_facts.go`), `internal/pipeline` (`entity_change.go`, `feed_row.go`), and
   `cmd/pg-desk` (`link.go`, `doctor_changeflow.go`, the last of which goes with the PR change flow). Only
-  `internal/changes` and `doctor_changeflow.go` leave with the PR change flow deletion, so retiring
+  `internal/changes` (`poll.go`, `orphans.go`) and `doctor_changeflow.go` leave with the PR change flow deletion, so retiring
   `classify` would mean rewriting focus, interpret, pipeline and link. The importer set is pinned by
   `TestClassifyImporterSetIsPinned` (`packages/pg-desk/internal/classify/importers_test.go`), so a later
   deletion is a conscious change to that list.

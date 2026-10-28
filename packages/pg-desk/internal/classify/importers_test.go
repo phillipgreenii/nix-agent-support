@@ -85,11 +85,12 @@ func TestClassifyImporterSetIsPinned(t *testing.T) {
 	importPath := classifyImportPath(t, moduleRoot)
 
 	// Sorted, as productionImporters returns them. doctor_changeflow.go and
-	// internal/changes/poll.go leave with the PR change flow deletion; the rest
+	// the internal/changes files leave with the PR change flow deletion; the rest
 	// keep the classifier alive.
 	want := []string{
 		"cmd/pg-desk/doctor_changeflow.go",
 		"cmd/pg-desk/link.go",
+		"internal/changes/orphans.go",
 		"internal/changes/poll.go",
 		"internal/focus/candidates.go",
 		"internal/focus/health.go",
@@ -109,11 +110,11 @@ func TestClassifyImporterSetIsPinned(t *testing.T) {
 	// change flow; losing them all makes the package a retirement candidate.
 	var live int
 	for _, f := range got {
-		if f != "internal/changes/poll.go" && f != "cmd/pg-desk/doctor_changeflow.go" {
+		if !strings.HasPrefix(f, "internal/changes/") && f != "cmd/pg-desk/doctor_changeflow.go" {
 			live++
 		}
 	}
 	if live == 0 {
-		t.Error("internal/classify has no importer outside the PR change flow; revisit the keep decision in the daemon design")
+		t.Error("internal/classify has no importer outside the PR change flow (internal/changes and doctor_changeflow.go); revisit the keep decision in the daemon design")
 	}
 }
