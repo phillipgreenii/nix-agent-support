@@ -15317,7 +15317,7 @@
                     grep -q "not in the allow-list" out.txt
                     # the load threshold the module rendered (8) is honored
                     rc=0
-                    PG_REPO_RUNNER_LOADAVG=8.00 PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner verify >out.txt 2>&1 || rc=$?
+                    PG_REPO_RUNNER_LOADAVG=8.00 PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner sync >out.txt 2>&1 || rc=$?
                     [ "$rc" = 9 ]
 
                     touch "$out"
