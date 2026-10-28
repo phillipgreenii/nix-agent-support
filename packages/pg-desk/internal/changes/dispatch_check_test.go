@@ -47,15 +47,73 @@ func dispatchCfg() *config.Config {
 	return cfg
 }
 
-func TestCheckDispatchAgreeingConfigurationHasNoMismatchAndSkipsBeads(t *testing.T) {
+// beadsCapsOK is the answer of the non-owning "beads" instance of dispatchCfg
+// when it agrees with the configuration.
+func beadsCapsOK() gather.CapabilitiesAnswer {
+	return capsFor("beads", false, map[string]bool{"beads-q": true})
+}
+
+func TestCheckDispatchAgreeingConfigurationHasNoMismatchAndAsksEveryInstance(t *testing.T) {
 	g := &fakeCaps{answers: map[string]gather.CapabilitiesAnswer{
 		feedInst: capsFor(feedInst, true, map[string]bool{"mine": true, "team": true}),
+		"beads":  beadsCapsOK(),
 	}}
 	if got := CheckDispatch(context.Background(), dispatchCfg(), g); len(got) != 0 {
 		t.Fatalf("mismatches = %+v, want none", got)
 	}
-	if !reflect.DeepEqual(g.calls, []string{"issue " + feedInst}) {
-		t.Errorf("calls = %v, want only the owning instance asked (a non-owning entry is not read)", g.calls)
+	if !reflect.DeepEqual(g.calls, []string{"issue " + feedInst, "issue beads"}) {
+		t.Errorf("calls = %v, want the owning instance then the non-owning one asked", g.calls)
+	}
+}
+
+func TestCheckDispatchNonOwningInstanceMismatches(t *testing.T) {
+	owningOK := capsFor(feedInst, true, map[string]bool{"mine": true, "team": true})
+	cases := []struct {
+		name  string
+		beads *fakeCaps
+		kind  string
+		qry   string
+	}{
+		{
+			"watched differs", &fakeCaps{answers: map[string]gather.CapabilitiesAnswer{
+				feedInst: owningOK, "beads": capsFor("beads", false, map[string]bool{"beads-q": false}),
+			}},
+			MismatchWatchedDiffers, "beads-q",
+		},
+		{
+			"query not listed", &fakeCaps{answers: map[string]gather.CapabilitiesAnswer{
+				feedInst: owningOK, "beads": capsFor("beads", false, map[string]bool{}),
+			}},
+			MismatchQueryMissing, "beads-q",
+		},
+		{
+			"call fails", &fakeCaps{
+				answers: map[string]gather.CapabilitiesAnswer{feedInst: owningOK},
+				errs:    map[string]error{"beads": errors.New("daemon is down")},
+			},
+			MismatchInstanceUnanswered, "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CheckDispatch(context.Background(), dispatchCfg(), tc.beads)
+			if len(got) != 1 || got[0].Kind != tc.kind || got[0].Instance != "beads" || got[0].Query != tc.qry {
+				t.Fatalf("mismatches = %+v, want one %s naming beads and %q", got, tc.kind, tc.qry)
+			}
+		})
+	}
+}
+
+// A non-owning backend reports owns_changes false and that is not a mismatch.
+func TestCheckDispatchNonOwningInstanceNeverChecksOwnsChanges(t *testing.T) {
+	g := &fakeCaps{answers: map[string]gather.CapabilitiesAnswer{
+		feedInst: capsFor(feedInst, true, map[string]bool{"mine": true, "team": true}),
+		"beads":  capsFor("beads", false, map[string]bool{"beads-q": true}),
+	}}
+	for _, m := range CheckDispatch(context.Background(), dispatchCfg(), g) {
+		if m.Kind == MismatchOwnsChangesDiffers {
+			t.Fatalf("owns_changes mismatch for %+v", m)
+		}
 	}
 }
 
@@ -98,6 +156,10 @@ func TestCheckDispatchReportsEachKindOfMismatch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.g.answers == nil {
+				tc.g.answers = map[string]gather.CapabilitiesAnswer{}
+			}
+			tc.g.answers["beads"] = beadsCapsOK()
 			got := CheckDispatch(context.Background(), dispatchCfg(), tc.g)
 			if len(got) != 1 {
 				t.Fatalf("mismatches = %+v, want exactly one", got)
@@ -120,6 +182,7 @@ func TestCheckDispatchTwoOwningInstancesAreEachChecked(t *testing.T) {
 	g := &fakeCaps{answers: map[string]gather.CapabilitiesAnswer{
 		feedInst:     capsFor(feedInst, true, map[string]bool{"mine": true, "team": true}),
 		"other-demo": capsFor("other-demo", true, map[string]bool{"other-q": false}),
+		"beads":      beadsCapsOK(),
 	}}
 	got := CheckDispatch(context.Background(), cfg, g)
 	if len(got) != 1 || got[0].Instance != "other-demo" || got[0].Kind != MismatchWatchedDiffers {
@@ -189,7 +252,7 @@ func TestStartupDispatchCheckAgreementRecordsAnEmptyList(t *testing.T) {
 	}
 }
 
-func TestStartupDispatchCheckSkipsWithoutOwningInstancesOrReader(t *testing.T) {
+func TestStartupDispatchCheckSkipsWithoutInstancesOrReader(t *testing.T) {
 	ResetStartupDispatchCheck()
 	t.Cleanup(ResetStartupDispatchCheck)
 	// No Capabilities reader: no call, no record, the poll still works.
@@ -200,14 +263,43 @@ func TestStartupDispatchCheckSkipsWithoutOwningInstancesOrReader(t *testing.T) {
 	if _, found, _ := f.st.GetMeta(MetaDispatchCheckPrefix + feedInst); found {
 		t.Error("a record was written without a Capabilities reader")
 	}
-	// Only beads configured: the reader is never asked (and the once is not spent).
+	// A watched query with no backends entry names no instance: the reader is
+	// never asked.
 	f = newFeedFixture(t, nil, []string{"beads-q"})
+	f.eng.Cfg.Watch.Issue.Backends = map[string]config.WatchBackend{}
 	g := &fakeCaps{}
 	f.eng.Capabilities = g
 	if _, _, err := f.run("router"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if len(g.calls) != 0 {
-		t.Errorf("calls = %v, want none for a beads-only configuration", g.calls)
+		t.Errorf("calls = %v, want none without a configured backend", g.calls)
+	}
+}
+
+// A beads-only configuration is checked at start-up like an owning one: the
+// mismatch is a warning and the outcome lands under the instance's meta key.
+func TestStartupDispatchCheckCoversNonOwningInstances(t *testing.T) {
+	ResetStartupDispatchCheck()
+	t.Cleanup(ResetStartupDispatchCheck)
+	f := newFeedFixture(t, nil, []string{"beads-q"})
+	g := &fakeCaps{answers: map[string]gather.CapabilitiesAnswer{
+		"beads": capsFor("beads", false, map[string]bool{"beads-q": false}),
+	}}
+	var warn bytes.Buffer
+	f.eng.Capabilities = g
+	f.eng.Warn = &warn
+	if _, _, err := f.run("router"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !reflect.DeepEqual(g.calls, []string{"issue beads"}) {
+		t.Errorf("calls = %v, want the beads instance asked", g.calls)
+	}
+	if !strings.Contains(warn.String(), "dispatch check: watched_differs: backend beads query beads-q") {
+		t.Errorf("warning output lacks the mismatch line:\n%s", warn.String())
+	}
+	v, found, err := f.st.GetMeta(MetaDispatchCheckPrefix + "beads")
+	if err != nil || !found || !strings.Contains(v, "watched_differs") {
+		t.Errorf("meta = %q %v %v, want the recorded mismatch", v, found, err)
 	}
 }

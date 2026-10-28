@@ -62,6 +62,27 @@ func stubDoctorSeams(t *testing.T, lookPathErr, configValidateErr, serveErr erro
 	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
 		return []byte(emptyWorkBeadsFanOut), nil
 	}
+	// A non-owning backend, asked for its capabilities, declares one watched
+	// query, so a seeded issue entity attributed to doctorSeedBackend does not
+	// trip the gate "backend without watched query".
+	origCaps := doctorIssueCapabilityer
+	t.Cleanup(func() { doctorIssueCapabilityer = origCaps })
+	doctorIssueCapabilityer = func(*config.Config) changes.Capabilityer { return declaringCapabilityer{} }
+}
+
+// doctorSeedBackend is the non-owning backend instance the doctor tests that
+// seed issue entities attribute them to.
+const doctorSeedBackend = "beads-seed"
+
+// declaringCapabilityer answers every capabilities call with a non-owning
+// backend row that declares one watched query.
+type declaringCapabilityer struct{}
+
+func (declaringCapabilityer) Capabilities(_ context.Context, _, backend string) (gather.CapabilitiesAnswer, error) {
+	return gather.CapabilitiesAnswer{Backends: []gather.CapBackend{{
+		Backend: backend, Vocabulary: map[string]any{"owns_changes": false},
+		Queries: map[string]gather.CapQuery{"q": {Watched: true}},
+	}}}, nil
 }
 
 // withDoctorStore opens a real (empty) test store and wires it through
@@ -751,6 +772,10 @@ func seedIssueEntity(t *testing.T, st *store.Store, id, facts string, active boo
 	if _, err := st.WriteEntityStateWithLog(e, 0, doctorNow.Format(time.RFC3339), active, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
 		t.Fatalf("seed issue %s: %v", id, err)
 	}
+	inst := doctorSeedBackend
+	if err := st.SetEntityColumns("o/r", "issue", id, &inst, nil); err != nil {
+		t.Fatalf("attribute issue %s: %v", id, err)
+	}
 }
 
 // TestDoctorCountsActiveJiraIssuesWithoutStatusCategory: the report counts
@@ -826,7 +851,9 @@ const (
 	gateInst = "owning-demo"
 
 	gateCapsOK = `{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo",` +
-		`"vocabulary":{"owns_changes":true},"queries":{"q-mine":{"watched":true},"q-team":{"watched":true}}}]}`
+		`"vocabulary":{"owns_changes":true},"queries":{"q-mine":{"watched":true},"q-team":{"watched":true}}},` +
+		`{"backend":"beads-a","vocabulary":{"owns_changes":false},"queries":{"bd-a":{"watched":true}}},` +
+		`{"backend":"beads-b","vocabulary":{"owns_changes":false},"queries":{"bd-b":{"watched":true}}}]}`
 	gateHealthOK = `{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo","status":{"queries":[` +
 		`{"name":"q-mine","baseline_at":"2026-10-01T00:00:00Z"},{"name":"q-team","baseline_open_age_seconds":3600}]}}]}`
 	gateUnavailable = `{"error":{"code":"unavailable","message":"daemon is down"}}`
@@ -858,6 +885,9 @@ func newGateFixture(t *testing.T) *gateFixture {
 	orig := doctorProbeQuery
 	t.Cleanup(func() { doctorProbeQuery = orig })
 	doctorProbeQuery = func(context.Context, *config.Config, string, string) error { return nil }
+	// The gates read the scripted pg-connector below, not the stub of
+	// stubDoctorSeams.
+	doctorIssueCapabilityer = func(cfg *config.Config) changes.Capabilityer { return gather.NewGatherer(cfg, nil) }
 	f.caps(gateCapsOK, 0)
 	f.health(gateHealthOK, 0)
 	installFakePGConnector(t, fmt.Sprintf(`D=%q
@@ -1113,7 +1143,7 @@ func TestDoctorIssueGatesUnavailableDaemonIsUnreachableNotAPass(t *testing.T) {
 	}
 }
 
-func TestDoctorIssueGatesWithoutOwningBackendRunsNoDaemonCall(t *testing.T) {
+func TestDoctorIssueGatesWithoutOwningBackendReadsOnlyCapabilitiesOfTheBeadsBackend(t *testing.T) {
 	f := newGateFixture(t)
 	f.cfg.Watch.Issue.Queries = []string{"bd-a"}
 	f.cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"bd-a": {Instance: "beads-a"}}
@@ -1121,7 +1151,11 @@ func TestDoctorIssueGatesWithoutOwningBackendRunsNoDaemonCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, stdout)
 	}
-	if calls, _ := os.ReadFile(filepath.Join(f.dir, "calls.log")); strings.Contains(string(calls), "capabilities") || strings.Contains(string(calls), "health") {
+	calls, _ := os.ReadFile(filepath.Join(f.dir, "calls.log"))
+	if !strings.Contains(string(calls), "capabilities --backend beads-a") {
+		t.Errorf("the beads backend's capabilities were not read:\n%s", calls)
+	}
+	if strings.Contains(string(calls), "health") || strings.Contains(string(calls), "owning-demo") {
 		t.Errorf("a beads-only configuration asked an owning backend:\n%s", calls)
 	}
 }

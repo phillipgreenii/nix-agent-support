@@ -25,6 +25,22 @@ type doctorFocusWorld struct {
 	watched []string
 }
 
+// write seeds an entity like the embedded fixture and attributes an issue to
+// the non-owning doctorSeedBackend, which the stubbed capabilities declare
+// watched (an issue attributable to no backend trips the gate "backend without
+// watched query").
+func (w *doctorFocusWorld) write(t *testing.T, typ, id string, facts any, at string) focus.Key {
+	t.Helper()
+	k := w.showFixture.write(t, typ, id, facts, at)
+	if typ == "issue" {
+		inst := doctorSeedBackend
+		if err := w.st.SetEntityColumns(showRepo, typ, id, &inst, nil); err != nil {
+			t.Fatalf("attribute %s: %v", id, err)
+		}
+	}
+	return k
+}
+
 func newDoctorFocusWorld(t *testing.T) *doctorFocusWorld {
 	t.Helper()
 	f := newShowFixture(t)

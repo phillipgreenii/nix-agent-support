@@ -61,19 +61,24 @@ func (m DispatchMismatch) String() string {
 }
 
 // CheckDispatch compares the configured per-query backend dispatch of every
-// OWNING issue instance (cfg.OwningInstances("issue") and its
-// OwningWatchQueries) with the capabilities answer of that backend: the
-// answer is the check at start-up of the configuration. It checks ONLY owning
-// instances; a non-owning (beads) entry is not read, since its values arrive
-// with a later phase. A configured query is a watched query, so a backend that
-// reports it unwatched is a mismatch. Mismatches come back sorted by instance
+// issue instance named by watch.issue.backends with the capabilities answer of
+// that backend: the answer is the check at start-up of the configuration. An
+// OWNING instance (cfg.OwningInstances("issue") and its OwningWatchQueries) is
+// also checked for its owns_changes declaration; a non-owning (beads) instance
+// (cfg.NonOwningInstances("issue") and its NonOwningWatchQueries) is checked
+// for its queries only, since it declares no owns_changes. A configured query
+// is a watched query, so a backend that reports it unwatched, or does not list
+// it, is a mismatch. Mismatches come back sorted by instance
 // then query. An error from Capabilities is an instance_unanswered mismatch
 // (its text in Detail); a caller that must tell an unavailable daemon apart
 // wraps the Capabilityer.
 func CheckDispatch(ctx context.Context, cfg *config.Config, g Capabilityer) []DispatchMismatch {
 	var out []DispatchMismatch
 	for _, inst := range cfg.OwningInstances(issueEntityType) {
-		out = append(out, checkInstanceDispatch(ctx, cfg, g, inst)...)
+		out = append(out, checkInstanceDispatch(ctx, cfg, g, inst, true)...)
+	}
+	for _, inst := range cfg.NonOwningInstances(issueEntityType) {
+		out = append(out, checkInstanceDispatch(ctx, cfg, g, inst, false)...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Instance != out[j].Instance {
@@ -84,7 +89,7 @@ func CheckDispatch(ctx context.Context, cfg *config.Config, g Capabilityer) []Di
 	return out
 }
 
-func checkInstanceDispatch(ctx context.Context, cfg *config.Config, g Capabilityer, inst string) []DispatchMismatch {
+func checkInstanceDispatch(ctx context.Context, cfg *config.Config, g Capabilityer, inst string, owning bool) []DispatchMismatch {
 	ans, err := g.Capabilities(ctx, issueEntityType, inst)
 	if err != nil {
 		return []DispatchMismatch{{Kind: MismatchInstanceUnanswered, Instance: inst, Detail: err.Error()}}
@@ -98,13 +103,17 @@ func checkInstanceDispatch(ctx context.Context, cfg *config.Config, g Capability
 		return []DispatchMismatch{{Kind: MismatchInstanceUnanswered, Instance: inst, Detail: detail}}
 	}
 	var out []DispatchMismatch
-	if !b.OwnsChanges() {
+	if owning && !b.OwnsChanges() {
 		out = append(out, DispatchMismatch{
 			Kind: MismatchOwnsChangesDiffers, Instance: inst,
 			Detail: "configured owns_changes=true, the backend reports owns_changes=false",
 		})
 	}
-	for _, q := range cfg.OwningWatchQueries(issueEntityType) {
+	queries := cfg.OwningWatchQueries(issueEntityType)
+	if !owning {
+		queries = cfg.NonOwningWatchQueries(issueEntityType)
+	}
+	for _, q := range queries {
 		if wb, _ := cfg.WatchQueryBackend(issueEntityType, q); wb.Instance != inst {
 			continue
 		}
@@ -154,15 +163,16 @@ func takeStartupDispatchCheck() bool {
 }
 
 // startupDispatchCheck is the first-poll-of-a-process dispatch check: for an
-// issue poll with owning instances and a Capabilities reader, it runs
-// CheckDispatch, writes each mismatch as a warning line and stores the
-// outcome of every owning instance under MetaDispatchCheckPrefix + instance.
+// issue poll with configured backend instances (owning or not) and a
+// Capabilities reader, it runs CheckDispatch, writes each mismatch as a warning
+// line and stores the outcome of every checked instance under
+// MetaDispatchCheckPrefix + instance.
 // It never fails the poll; a write failure is a warning too.
 func (e *Engine) startupDispatchCheck(ctx context.Context, entityType string) {
 	if entityType != issueEntityType || e.Capabilities == nil {
 		return
 	}
-	insts := e.Cfg.OwningInstances(issueEntityType)
+	insts := append(e.Cfg.OwningInstances(issueEntityType), e.Cfg.NonOwningInstances(issueEntityType)...)
 	if len(insts) == 0 || !takeStartupDispatchCheck() {
 		return
 	}

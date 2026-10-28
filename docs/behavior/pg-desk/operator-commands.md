@@ -366,23 +366,38 @@ has been cut over to the change-flow schema:
   - a failed-ingest entity older than the configured bound (the bound is a configured value; no default
     is fixed here);
   - a watched query whose baseline has been open for more than one day, naming the query and the members
-    that fail to hydrate (a baseline that cannot finish);
+    that fail to hydrate (a baseline that cannot finish). For an owning backend the age is the backend's
+    own; for a beads query it is pg-desk's: the query has no `change_flow.baseline.<query>` marker and its
+    `change_flow.baseline_open.<query>` time is more than a day old, and the members named are those of the
+    query's persisted watch set that are absent from the entity table, inactive or not watched;
   - a feed key the backend reported as expired (`cursor_expired:`), whose recovery is the dropped-key
     runbook above;
   - a mismatch between pg-desk's dispatch configuration (which backend instance serves each watched
     query, whether it owns changes, and whether the query is `watched`) and what the backend reports
-    about itself, and an issue id served by watched queries of two different backends;
+    about itself, and an issue id served by watched queries of two different backends. A beads backend
+    (a non-owning entry of `watch.issue.backends`) is compared too: a configured watched query that its
+    capabilities answer reports unwatched, or does not list, is a mismatch (a beads backend reports no
+    `owns_changes` and none is compared);
   - active `issue` entities of a backend for which no watched query is declared, so that a missing
-    declaration is loud.
+    declaration is loud. The gate covers a beads backend as well as an owning one: an entity is attributed
+    to the backend in its `backend` column, else to the backend whose persisted watch set holds its id; and
+    an active entity attributable to no backend, while no non-owning backend declares a watched query,
+    also fails it (the state of a deployment that declared nothing).
 
   Each gate prints one line, `<gate>: ok`, `<gate>: FAIL (<what tripped it>)` naming the backend instance,
   query or entity, or `<gate>: UNREACHABLE (<error>)` when the backend's daemon answered `unavailable` (a
   degraded run, never a pass); a FAIL and an UNREACHABLE both fail `doctor`. The dispatch comparison is
   also run once, at the start of the first `issue changes` poll of a process: each mismatch is logged as a
-  warning line and the outcome is stored under `change_flow.dispatch_check.<instance>`.
+  warning line and the outcome is stored under `change_flow.dispatch_check.<instance>`; it covers the
+  owning and the beads instances named by `watch.issue.backends`.
 
-- **Issue change-flow reports** (never gates): the watched count per backend, the member count of each
-  watched query, and an entity pg-desk holds that nothing watches.
+- **Issue change-flow reports** (never gates), printed under the line `issue change-flow reports:`: the
+  number of active `issue` entities whose `watched` mark is true per backend (an entity is attributed as in
+  the gate above; one with no backend is printed under `none`), the member count of each watched query (the
+  size of its persisted watch set; an owning backend keeps no per-query set, so its line is the count of
+  watched active entities of the instance), and the count of active `issue` entities that no watched
+  query's persisted set holds and whose `watched` mark is not true, labelled `an entity nothing watches`.
+  A report line is never added to the failure list.
 - **Repeated degraded hydrations.** The entities whose hydration degraded or failed on at least two
   consecutive attempts, per type, with their count and the time the run began. A report, not a gate.
 - **Jira issues lacking a status category.** One line, `jira status category: N active Jira issues

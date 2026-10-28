@@ -398,6 +398,25 @@ func (c *Config) OwningInstances(entityType string) []string {
 	return out
 }
 
+// NonOwningInstances returns the distinct, sorted backend instances named by
+// the backends entries of the non-owning watched queries of an entity type
+// (a non-owning query with no entry, or an entry without an instance, names
+// none); nil when there are none.
+func (c *Config) NonOwningInstances(entityType string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, q := range c.NonOwningWatchQueries(entityType) {
+		b, ok := c.WatchQueryBackend(entityType, q)
+		if !ok || b.Instance == "" || seen[b.Instance] {
+			continue
+		}
+		seen[b.Instance] = true
+		out = append(out, b.Instance)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // OwningInstanceForID returns the single owning backend instance of an
 // entity type when id matches one of ticket_patterns and exactly one owning
 // instance is configured. It does no I/O.

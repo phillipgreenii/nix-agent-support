@@ -36,6 +36,18 @@ func loadWatchSet(st *store.Store, entityType, query string) map[string]bool {
 	return out
 }
 
+// WatchSetIDs returns the sorted ids query listed at its last complete
+// listing (the persisted watch set); empty for a query never listed.
+func WatchSetIDs(st *store.Store, entityType, query string) []string {
+	set := loadWatchSet(st, entityType, query)
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func saveWatchSet(st *store.Store, entityType, query string, set map[string]bool) error {
 	ids := make([]string, 0, len(set))
 	for id := range set {

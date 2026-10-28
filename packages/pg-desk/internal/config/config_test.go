@@ -1367,3 +1367,21 @@ watch:
 		t.Error("two owning instances must give ok=false")
 	}
 }
+
+func TestNonOwningInstancesAreDistinctSortedAndSkipUnpinnedQueries(t *testing.T) {
+	cfg := &Config{}
+	cfg.Watch.Issue.Queries = []string{"q-b", "q-a", "q-a2", "q-unpinned", "q-own", "q-empty"}
+	cfg.Watch.Issue.Backends = map[string]WatchBackend{
+		"q-b":     {Instance: "beads-b"},
+		"q-a":     {Instance: "beads-a"},
+		"q-a2":    {Instance: "beads-a"},
+		"q-own":   {Instance: "owning", OwnsChanges: true},
+		"q-empty": {},
+	}
+	if got := cfg.NonOwningInstances("issue"); !reflect.DeepEqual(got, []string{"beads-a", "beads-b"}) {
+		t.Errorf("NonOwningInstances = %v, want [beads-a beads-b]", got)
+	}
+	if got := cfg.NonOwningInstances("pr"); got != nil {
+		t.Errorf("NonOwningInstances(pr) = %v, want nil", got)
+	}
+}

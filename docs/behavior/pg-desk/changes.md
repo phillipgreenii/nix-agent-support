@@ -743,7 +743,8 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
 - **INV-CHANGES-18.** <!-- uuid: 391c1ff5-ad6d-411e-a616-f75aa60dfacb --> pg-desk MUST NOT choose how to detect an issue change by type alone. Its
   configuration MUST name, per watched query, the backend instance that serves it and whether it
   owns changes, rendered from the same source as the connector's registry; the connector's
-  capabilities answer MUST be checked at start-up and a mismatch MUST be a doctor gate; every
+  capabilities answer MUST be checked at start-up, for an owning and for a beads instance alike
+  (including the `watched` value of each configured beads query), and a mismatch MUST be a doctor gate; every
   pg-desk call that reads changes MUST pin the backend; the entity row MUST record its backend; and
   no Jira entity MAY keep an absent backend.
 - **INV-CHANGES-19.** <!-- uuid: d1b6fbb4-ebc7-4438-b0ba-e2e96c1dd034 --> pg-desk MUST NOT acknowledge a feed row before it has been committed. An empty
