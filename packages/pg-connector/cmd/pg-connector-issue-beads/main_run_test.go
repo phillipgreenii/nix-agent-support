@@ -19,6 +19,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
+// wantUsage is the one line -h prints.
+const wantUsage = "usage: pg-connector-issue-beads [--beads-dir DIR] [--bd-max-concurrent N] [--bd-max-per-minute N] [--bd-wait-bound DURATION] [--bd-write-reserve N] [--budget-group NAME]\n"
+
 // TestParseArgs_ExactStderr pins what a parse failure and -h print: a parse
 // error is returned to the caller (printed once there), the flag package
 // prints nothing of its own, and -h prints the usage line exactly once.
@@ -31,8 +34,8 @@ func TestParseArgs_ExactStderr(t *testing.T) {
 		{"unknown flag", []string{"--nope"}, ""},
 		{"missing value", []string{"--beads-dir"}, ""},
 		{"positional", []string{"extra"}, ""},
-		{"help", []string{"-h"}, "usage: pg-connector-issue-beads [--beads-dir DIR]\n"},
-		{"long help", []string{"--help"}, "usage: pg-connector-issue-beads [--beads-dir DIR]\n"},
+		{"help", []string{"-h"}, wantUsage},
+		{"long help", []string{"--help"}, wantUsage},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stderr bytes.Buffer
@@ -128,6 +131,7 @@ func TestConformance_GenericSuitePassesThroughRunWithBeadsDirArgs(t *testing.T) 
 	t.Setenv("FAKE_BD_LOG", logPath)
 	t.Setenv(helperProcessEnv, "1")
 	t.Setenv(eventlog.EnvPath, "off")
+	t.Setenv(EnvBudgetDir, t.TempDir())
 	// Env vars naming a different tracker must lose to the flag.
 	t.Setenv("PG_CONNECTOR_ISSUE_BEADS_DIR", "/env/other")
 	t.Setenv("BEADS_DIR", "/env/other")

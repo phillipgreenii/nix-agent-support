@@ -5,6 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -219,5 +222,130 @@ func TestDefaultStateDirIgnoresHomeAndXDG(t *testing.T) {
 	b, _ = New(Config{MaxConcurrent: 1, StateDir: "/explicit"})
 	if b.Dir() != "/explicit" {
 		t.Errorf("explicit StateDir not used verbatim: %q", b.Dir())
+	}
+}
+
+// windowCfg is a budget whose slots never limit (so only the window does).
+func windowCfg(t *testing.T, perMinute int, window, wait time.Duration) *Budget {
+	t.Helper()
+	return newBudget(t, Config{MaxConcurrent: 20, MaxPerMinute: perMinute, Window: window, WaitBound: wait})
+}
+
+func TestNewRejectsBadWindowConfig(t *testing.T) {
+	if _, err := New(Config{MaxConcurrent: 2, MaxPerMinute: -1}); err == nil {
+		t.Error("negative MaxPerMinute accepted")
+	}
+	if _, err := New(Config{MaxConcurrent: 2, MaxPerMinute: 1, Window: -time.Second}); err == nil {
+		t.Error("negative Window accepted")
+	}
+}
+
+func TestWindowDeniesAfterWaitBoundOverCap(t *testing.T) {
+	b := windowCfg(t, 2, time.Minute, 150*time.Millisecond)
+	mustAcquire(t, b, false)
+	mustAcquire(t, b, false)
+	start := time.Now()
+	if _, err := b.Acquire(context.Background(), false); !errors.Is(err, ErrDenied) {
+		t.Fatalf("third call: err = %v, want ErrDenied", err)
+	}
+	if got := time.Since(start); got < 140*time.Millisecond {
+		t.Errorf("denied after %v, want a wait of about the 150ms bound", got)
+	}
+}
+
+func TestWindowSlides(t *testing.T) {
+	b := windowCfg(t, 1, time.Second, 20*time.Millisecond)
+	mustAcquire(t, b, false)
+	if _, err := b.Acquire(context.Background(), false); !errors.Is(err, ErrDenied) {
+		t.Fatalf("inside the window: err = %v, want ErrDenied", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	mustAcquire(t, b, false)
+}
+
+func TestWindowWaitsForSlideWithinBound(t *testing.T) {
+	b := windowCfg(t, 1, 200*time.Millisecond, 5*time.Second)
+	mustAcquire(t, b, false)
+	s, err := b.Acquire(context.Background(), false)
+	if err != nil {
+		t.Fatalf("second call should wait for the slide: %v", err)
+	}
+	defer s.Release()
+	if s.Waited() < 150*time.Millisecond {
+		t.Errorf("waited %v, want about the 200ms window", s.Waited())
+	}
+}
+
+// A window denial releases the slot it had taken and records no entry.
+func TestWindowDenialReleasesSlotAndTakesNoEntry(t *testing.T) {
+	dir := t.TempDir()
+	b := newBudget(t, Config{MaxConcurrent: 1, MaxPerMinute: 1, StateDir: dir, Window: time.Second})
+	first := mustAcquire(t, b, false)
+	first.Release()
+	// Slot is free again but the window is full: denied, slot not held.
+	if _, err := b.Acquire(context.Background(), false); !errors.Is(err, ErrDenied) {
+		t.Fatalf("err = %v, want ErrDenied", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, windowFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(strings.Fields(string(raw))); n != 1 {
+		t.Errorf("window holds %d entries after a denial, want 1", n)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	// Had the denial kept the slot this would be denied by the semaphore.
+	mustAcquire(t, b, false)
+}
+
+// Two budgets over one state directory (one Group) share the window.
+func TestWindowIsSharedPerStateDir(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{MaxConcurrent: 5, MaxPerMinute: 1, StateDir: dir, WaitBound: 20 * time.Millisecond}
+	mustAcquire(t, newBudget(t, cfg), false)
+	if _, err := newBudget(t, cfg).Acquire(context.Background(), false); !errors.Is(err, ErrDenied) {
+		t.Fatalf("second instance: err = %v, want ErrDenied", err)
+	}
+}
+
+func TestWindowDisabledWhenZero(t *testing.T) {
+	dir := t.TempDir()
+	b := newBudget(t, Config{MaxConcurrent: 20, StateDir: dir})
+	for i := 0; i < 10; i++ {
+		mustAcquire(t, b, false)
+	}
+	if _, err := os.Stat(filepath.Join(dir, windowFileName)); !os.IsNotExist(err) {
+		t.Errorf("window file exists with MaxPerMinute 0: %v", err)
+	}
+}
+
+func TestWindowConcurrentCallersNeverExceedCap(t *testing.T) {
+	b := windowCfg(t, 5, time.Minute, 0)
+	var admitted atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s, err := b.Acquire(context.Background(), false)
+			if err == nil {
+				admitted.Add(1)
+				s.Release()
+			}
+		}()
+	}
+	wg.Wait()
+	if got := admitted.Load(); got != 5 {
+		t.Errorf("admitted %d, want exactly 5", got)
+	}
+}
+
+func TestWindowContextCancelled(t *testing.T) {
+	b := windowCfg(t, 1, time.Minute, 5*time.Second)
+	mustAcquire(t, b, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := b.Acquire(ctx, false); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
 	}
 }

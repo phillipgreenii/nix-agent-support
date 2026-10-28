@@ -19,6 +19,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"time"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/budget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
@@ -61,15 +64,21 @@ func run(args []string, stderr io.Writer) int {
 	return scriptout.ServeLoop(instrument(newDispatchTable(backend), os.Getenv))
 }
 
+// EnvBudgetDir overrides the bd budget's state directory (slot files and the
+// per-minute window). It is test-oriented: unset, the budget uses its default
+// directory under the account's home, in a group directory (see budgetGroup).
+const EnvBudgetDir = "PG_CONNECTOR_ISSUE_BEADS_BUDGET_DIR"
+
 // newRunner builds the bd runner for args: --beads-dir DIR pins the tracker
 // outright (internal.CLIRunner.Dir beats both env vars, so the precedence is
 // flag > $PG_CONNECTOR_ISSUE_BEADS_DIR > $BEADS_DIR with no change to
 // ResolveWorkspaceDir); without the flag the runner resolves from env exactly
 // as before, and with no tracker at all it keeps refusing with
-// internal.ErrWorkspaceNotConfigured. A nil runner means run should exit with
+// internal.ErrWorkspaceNotConfigured. The runner carries the bd budget built
+// from the budget flags (design 4.4). A nil runner means run should exit with
 // the returned code (0 for -h, 2 for a bad argument).
 func newRunner(args []string, stderr io.Writer) (*internal.CLIRunner, int) {
-	dir, err := parseArgs(args, stderr)
+	opts, err := parseArgs(args, stderr)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
 		return nil, 0
@@ -77,10 +86,45 @@ func newRunner(args []string, stderr io.Writer) (*internal.CLIRunner, int) {
 		_, _ = fmt.Fprintln(stderr, strings.TrimPrefix(err.Error(), errUsage.Error()+": "))
 		return nil, 2
 	}
-	if dir != "" {
-		return &internal.CLIRunner{Dir: dir}, 0
+	runner := internal.NewCLIRunner()
+	if opts.beadsDir != "" {
+		runner = &internal.CLIRunner{Dir: opts.beadsDir}
 	}
-	return internal.NewCLIRunner(), 0
+	// The group key hashes the same directory string the runner resolves, so
+	// two instances serving one tracker share a budget by default.
+	workspace, _ := runner.Workspace()
+	bud, err := budget.New(budget.Config{
+		MaxConcurrent: opts.maxConcurrent,
+		MaxPerMinute:  opts.maxPerMinute,
+		WaitBound:     opts.waitBound,
+		WriteReserve:  opts.writeReserve,
+		StateDir:      os.Getenv(EnvBudgetDir),
+		Group:         budgetGroup(opts.budgetGroup, workspace),
+	})
+	if err != nil {
+		// parseArgs already enforces what New checks; this is unreachable
+		// unless the two drift apart.
+		_, _ = fmt.Fprintf(stderr, "%s: %v\n", progName, err)
+		return nil, 2
+	}
+	runner.Budget = bud
+	return runner, 0
+}
+
+// budgetGroup is the directory name of the budget's group: a non-empty
+// --budget-group is used verbatim, and an empty one is the first 12 hex
+// characters of the SHA-256 of the resolved workspace directory string, so
+// each tracker directory gets its own group. With no tracker resolved the
+// group stays empty and the budget uses its default group.
+func budgetGroup(flagValue, workspace string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if workspace == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(workspace))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // instrument wraps table so every call writes a start row, heartbeats while

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/budget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -1523,5 +1524,24 @@ func TestBackend_Show_CreatedAt(t *testing.T) {
 				t.Fatalf("CreatedAt = %q, want %q", got.CreatedAt, tc.want)
 			}
 		})
+	}
+}
+
+// A budget denial from the runner is the retryable wire error unavailable,
+// whatever wraps it, with the pinned message.
+func TestBackend_BudgetDeniedIsRetryableUnavailable(t *testing.T) {
+	fr := &fakeRunner{handle: func([]string) (string, error) {
+		return "", fmt.Errorf("runner: %w", budget.ErrDenied)
+	}}
+	err := New(fr).Comment(context.Background(), "x-1", "hello")
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if code := scriptout.CodeForError(err); code != "unavailable" {
+		t.Errorf("wire code = %q, want unavailable", code)
+	}
+	msg := strings.TrimPrefix(err.Error(), scriptout.ErrUnavailable.Error()+": ")
+	if !strings.HasPrefix(msg, "bd budget denied (retryable): ") {
+		t.Errorf("message = %q, want it to start with %q", msg, "bd budget denied (retryable): ")
 	}
 }

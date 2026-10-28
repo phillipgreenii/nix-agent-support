@@ -21,10 +21,12 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/budget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -92,6 +94,11 @@ var Vocabulary = []string{
 // cmd/pg-connector-issue-beads/main.go's capabilitiesBase.
 var PriorityVocabulary = []string{"P0", "P1", "P2", "P3", "P4"}
 
+// BudgetDeniedMessage is the wire error message when the bd budget denied a
+// call after its bounded wait; the call took no slot and started no bd, so
+// the caller may retry it.
+const BudgetDeniedMessage = "bd budget denied (retryable): no bd slot or per-minute window entry was free within the wait bound; retry the call"
+
 // run execs `bd args... --json` and returns the decoded payload, or a
 // scriptout-taxonomy error. It handles bd's three observed shapes uniformly
 // (see bd.go's doc comment): a well-formed {"data":{"error":...}} envelope
@@ -117,6 +124,9 @@ var PriorityVocabulary = []string{"P0", "P1", "P2", "P3", "P4"}
 // silently succeeding with a zero-value issue.
 func (b *Backend) run(ctx context.Context, args ...string) (jsonData []byte, err error) {
 	out, runErr := b.runner.Run(ctx, args...)
+	if errors.Is(runErr, budget.ErrDenied) {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, BudgetDeniedMessage)
+	}
 	if strings.TrimSpace(out) == "" {
 		if runErr != nil {
 			return nil, classifyBDErrorMessage(runErr.Error())

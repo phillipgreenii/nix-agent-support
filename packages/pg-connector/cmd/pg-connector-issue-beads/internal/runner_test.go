@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/budget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	evlog "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -459,5 +460,261 @@ func TestErrWorkspaceNotConfigured_MentionsFlagKeepsOldText(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q missing %q", msg, want)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------
+// bd budget wiring (design 4.4): a slot and a window entry before every bd
+// ----------------------------------------------------------------------
+
+// fakeBDScript records one marker file per start (so a test can wait until a
+// call is in flight), records whether the slot's descriptor reached it as fd 3,
+// sleeps FAKE_BD_SLEEP seconds and prints an empty JSON object.
+const fakeBDScript = `#!/bin/sh
+: > "$FAKE_BD_STARTED/start-$$"
+if ( : >&3 ) 2>/dev/null; then : > "$FAKE_BD_STARTED/fd3-$$"; fi
+sleep "${FAKE_BD_SLEEP:-0}"
+echo '{}'
+`
+
+// fakeBD puts the fake bd first on PATH and returns the directory it records
+// its starts in.
+func fakeBD(t *testing.T) (startedDir string) {
+	t.Helper()
+	binDir := t.TempDir()
+	startedDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(fakeBDScript), 0o700); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_BD_STARTED", startedDir)
+	t.Setenv("FAKE_BD_SLEEP", "0")
+	return startedDir
+}
+
+// countStarted counts the fake bd's marker files with the given prefix.
+func countStarted(t *testing.T, dir, prefix string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// waitStarted waits (test code, bounded) until n fake bd processes started.
+func waitStarted(t *testing.T, dir string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for countStarted(t, dir, "start-") < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of %d fake bd processes started", countStarted(t, dir, "start-"), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func budgetRunner(t *testing.T, cfg budget.Config) *CLIRunner {
+	t.Helper()
+	if cfg.StateDir == "" {
+		cfg.StateDir = t.TempDir()
+	}
+	b, err := budget.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &CLIRunner{Dir: t.TempDir(), Budget: b}
+}
+
+func TestIsWriteVerb(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"create", "--json"}, true},
+		{[]string{"update", "--status", "closed"}, true},
+		{[]string{"close", "x"}, true},
+		{[]string{"comment", "--json", "--", "id", "body"}, true},
+		{[]string{"show", "--readonly"}, false},
+		{[]string{"list", "--json"}, false},
+		{[]string{"search", "--query=update"}, false},
+		{[]string{"dep", "list", "update"}, false},
+		{[]string{"--json", "create"}, true},
+		{[]string{"--json"}, false},
+		{nil, false},
+	} {
+		if got := isWriteVerb(tc.args); got != tc.want {
+			t.Errorf("isWriteVerb(%v) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+// Case 1: over bd_max_per_minute a call waits the bound and the backend then
+// answers unavailable. The window is a full minute so the cap cannot slide
+// open under host load.
+func TestCLIRunner_Budget_PerMinuteCapDenies(t *testing.T) {
+	started := fakeBD(t)
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 5, MaxPerMinute: 2, WaitBound: 100 * time.Millisecond})
+	for i := 0; i < 2; i++ {
+		if _, err := r.Run(context.Background(), "show", "--json"); err != nil {
+			t.Fatalf("call %d within the cap: %v", i, err)
+		}
+	}
+	begin := time.Now()
+	err := New(r).Comment(context.Background(), "x-1", "hello")
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("over the cap: err = %v, want ErrUnavailable", err)
+	}
+	if want := "bd budget denied (retryable): "; !strings.HasPrefix(strings.TrimPrefix(err.Error(), scriptout.ErrUnavailable.Error()+": "), want) {
+		t.Errorf("message = %q, want it to start with %q", err.Error(), want)
+	}
+	if time.Since(begin) < 90*time.Millisecond {
+		t.Errorf("denied after %v, want a wait of about the 100ms bound", time.Since(begin))
+	}
+	if got := countStarted(t, started, "start-"); got != 2 {
+		t.Fatalf("%d bd processes started, want 2: a denied call must not start bd", got)
+	}
+	if got := countStarted(t, started, "fd3-"); got != 2 {
+		t.Errorf("slot descriptor reached %d of 2 bd children, want all", got)
+	}
+}
+
+// Case 1, second half: once the window slides a call is admitted. The call
+// waits for the slide inside the wait bound, so no host load can race it.
+func TestCLIRunner_Budget_PerMinuteWindowSlides(t *testing.T) {
+	started := fakeBD(t)
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 5, MaxPerMinute: 1, Window: 300 * time.Millisecond, WaitBound: 30 * time.Second})
+	for i := 0; i < 2; i++ {
+		if _, err := r.Run(context.Background(), "show", "--json"); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	if got := countStarted(t, started, "start-"); got != 2 {
+		t.Errorf("%d bd processes started, want 2", got)
+	}
+}
+
+// Case 2: over bd_max_concurrent the same.
+func TestCLIRunner_Budget_ConcurrencyCap(t *testing.T) {
+	started := fakeBD(t)
+	t.Setenv("FAKE_BD_SLEEP", "0.6")
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 2, WaitBound: 100 * time.Millisecond})
+	done := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := r.Run(context.Background(), "show", "--json")
+			done <- err
+		}()
+	}
+	waitStarted(t, started, 2)
+	t.Setenv("FAKE_BD_SLEEP", "0")
+	err := New(r).Comment(context.Background(), "x-1", "hello")
+	if !errors.Is(err, scriptout.ErrUnavailable) || !strings.Contains(err.Error(), "bd budget denied (retryable): ") {
+		t.Fatalf("over the cap: err = %v, want the retryable budget answer", err)
+	}
+	if got := countStarted(t, started, "start-"); got != 2 {
+		t.Fatalf("%d bd processes started, want 2", got)
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("admitted call: %v", err)
+		}
+	}
+	// Both children exited, so the slots are free again.
+	if _, err := r.Run(context.Background(), "show", "--json"); err != nil {
+		t.Fatalf("after the slots freed: %v", err)
+	}
+}
+
+// Case 4: a write is admitted while reads have used every non-reserved slot.
+func TestCLIRunner_Budget_WriteReserve(t *testing.T) {
+	started := fakeBD(t)
+	t.Setenv("FAKE_BD_SLEEP", "0.6")
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 3, WriteReserve: 1, WaitBound: 100 * time.Millisecond})
+	r.Actor = "budget-test" // withActor prefixes --actor; the verb is still found
+	done := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := r.Run(context.Background(), "list", "--json")
+			done <- err
+		}()
+	}
+	waitStarted(t, started, 2)
+	t.Setenv("FAKE_BD_SLEEP", "0")
+	if _, err := r.Run(context.Background(), "list", "--json"); !errors.Is(err, budget.ErrDenied) {
+		t.Fatalf("third read: err = %v, want ErrDenied (the last slot is reserved)", err)
+	}
+	if _, err := r.Run(context.Background(), "update", "--status", "closed", "--json"); err != nil {
+		t.Fatalf("a write must use the reserved slot: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("read: %v", err)
+		}
+	}
+}
+
+// Case 6: an unwritable state directory makes bd run unthrottled.
+func TestCLIRunner_Budget_UnwritableStateDirFailsOpen(t *testing.T) {
+	started := fakeBD(t)
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := budgetRunner(t, budget.Config{
+		MaxConcurrent: 1, MaxPerMinute: 1, WaitBound: 0,
+		StateDir: filepath.Join(blocker, "state"), // a path below a regular file
+	})
+	for i := 0; i < 3; i++ {
+		if _, err := r.Run(context.Background(), "show", "--json"); err != nil {
+			t.Fatalf("call %d: %v (an unusable state directory must fail open)", i, err)
+		}
+	}
+	if got := countStarted(t, started, "start-"); got != 3 {
+		t.Errorf("%d bd processes started, want 3", got)
+	}
+	if got := countStarted(t, started, "fd3-"); got != 0 {
+		t.Errorf("a fail-open call passed a slot descriptor to %d children", got)
+	}
+}
+
+// With no Budget (every existing test) bd gets no extra file and nothing is
+// throttled.
+func TestCLIRunner_NilBudget_PassesNoExtraFile(t *testing.T) {
+	started := fakeBD(t)
+	r := &CLIRunner{Dir: t.TempDir()}
+	for i := 0; i < 5; i++ {
+		if _, err := r.Run(context.Background(), "show", "--json"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := countStarted(t, started, "start-"); got != 5 {
+		t.Errorf("%d started, want 5", got)
+	}
+	if got := countStarted(t, started, "fd3-"); got != 0 {
+		t.Errorf("%d children saw an extra descriptor, want 0", got)
+	}
+}
+
+// A refused workspace or actor never takes a slot: the budget is consulted only
+// when bd is about to run.
+func TestCLIRunner_Budget_NotConsultedWhenBDWouldNotRun(t *testing.T) {
+	dir := t.TempDir()
+	b, err := budget.New(budget.Config{MaxConcurrent: 1, MaxPerMinute: 1, StateDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &CLIRunner{Getenv: fakeEnv(nil), Budget: b}
+	if _, err := r.Run(context.Background(), "show"); !errors.Is(err, ErrWorkspaceNotConfigured) {
+		t.Fatalf("err = %v, want ErrWorkspaceNotConfigured", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("state dir has %d entries after a refused call, want 0", len(entries))
 	}
 }

@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/budget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -242,6 +243,29 @@ type CLIRunner struct {
 	// Actor pins this runner's bd actor identity, overriding EnvActor /
 	// $BEADS_ACTOR. Optional; tests and embedders set it directly.
 	Actor string
+	// Budget, when non-nil, caps this backend's own bd load (design 4.4): Run
+	// takes a slot and a per-minute window entry before every bd execution,
+	// hands the slot's file to the bd child, and reports budget.ErrDenied
+	// (wrapped) when the budget denies the call after its bounded wait. Nil
+	// means no budget, the behavior of every existing test.
+	Budget *budget.Budget
+}
+
+// bdWriteVerbs are the bd verbs this backend runs that change a tracker; they
+// may use the slots reserved for writes.
+var bdWriteVerbs = map[string]bool{"create": true, "update": true, "close": true, "comment": true}
+
+// isWriteVerb reports whether args (as Run received them, before withActor
+// adds its --actor prefix) start a write: its first non-flag word is a write
+// verb.
+func isWriteVerb(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		return bdWriteVerbs[a]
+	}
+	return false
 }
 
 // NewCLIRunner returns a CLIRunner using the process env. Dir is left
@@ -336,12 +360,26 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	write := isWriteVerb(args)
 	args, err = r.withActor(args)
 	if err != nil {
 		return "", err
 	}
+	var slot *budget.Slot
+	if r.Budget != nil {
+		slot, err = r.Budget.Acquire(ctx, write)
+		if err != nil {
+			return "", err
+		}
+		defer slot.Release()
+	}
 	fullArgs := append([]string{"-C", dir}, args...)
 	cmd := r.command(ctx, dir, args)
+	if slot != nil && slot.File() != nil {
+		// The child inherits the slot's descriptor, so the slot stays held
+		// until bd exits even if this process is killed first.
+		cmd.ExtraFiles = []*os.File{slot.File()}
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
