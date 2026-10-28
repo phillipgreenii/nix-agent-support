@@ -485,7 +485,7 @@ var pluginForms = []pluginForm{
 	{"pb", `bd update pg2-abc12 --add-label escalated --status open --assignee "" --actor sess-1`, evalcontract.Approve, ""},
 	{"pb", `bd update pg2-abc12 --add-label escalated,stale-precondition --status open --assignee "" --actor sess-1`, evalcontract.Approve, ""},
 	{"pb", "bd show pg2-abc12 --json | jq -r '(if type==\"object\" and has(\"data\") then .data else . end)[0] | \"\\(.status) assignee=\\(.assignee // \"\") labels=\\((.labels // []) | join(\",\"))\"'", evalcontract.Approve, ""},
-	{"pb", `bd create "worktree-review: reconcile leftover isolation for pg2-abc12" --labels human,worktree-review --defer +7d --deps "discovered-from:pg2-abc12" --notes "[worktree-review $(date +%F)] Leftover isolation. No promotion (priority left at P2)." --actor sess-1`, evalcontract.Approve, ""},
+	{"pb", `bd create "worktree-review: reconcile leftover isolation for pg2-abc12" --labels human,worktree-review --deps "discovered-from:pg2-abc12" --notes "[worktree-review $(date +%F)] Leftover isolation. No promotion (priority left at P2)." --actor sess-1`, evalcontract.Approve, ""},
 	{"pb", `bd update pg2-abc12 --append-notes "$(date +%F) [worktree-review] note" --actor sess-1`, evalcontract.Abstain, "the note value opens with a runtime expansion, which could expand to an option"},
 	{"pb", `bd update pg2-abc12 [worktree-review$X] --actor sess-1`, evalcontract.Abstain, "an unquoted [ can open a glob bracket expression that a runtime value completes"},
 

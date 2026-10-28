@@ -325,10 +325,15 @@ throws that away (F-7). EXTRACT first, close second.
 
    ```bash
    bd create "worktree-review: reconcile leftover isolation for <id> (closed as moot)" \
-     --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
+     --labels human,worktree-review --deps "discovered-from:<id>" \
      --notes "[worktree-review $(date +%F)] Leftover isolation from <id>: branch <work-branch> in <repo>. Unlanded: <git cherry output>. Dirty: <git status --porcelain output>. A person must rule on keep vs discard. No promotion (priority left at P2)." \
      --actor "ID"
    ```
+
+   The follow-up is NOT deferred (no `--defer`): it is planned operator work, and a defer would
+   hide it from `bd ready --label human` (operator ruling, Phillip, 2026-10-27: "DEFER is for the
+   situation that nothing can be done right now, regardless of my availability"; this matches
+   `/unblock-human-beads`' own follow-up, which "is not deferred").
 
    Whoever later adjudicates that isolation MUST remove the label and restore the recorded
    priority in the same update that releases or closes the bead — the
@@ -466,10 +471,13 @@ required".
    bead already carries it from an earlier, mis-applied park:
 
    ```bash
-   bd update <id> --defer +7d --remove-label human --status open --assignee "" --actor "ID"
+   bd update <id> --defer +1d --remove-label human --status open --assignee "" --actor "ID"
    ```
 
-   `+7d` is the default window; shorten it if the event is expected sooner. `--defer`
+   The window is exactly `+1d`, also on a re-defer (beads-lifecycle D-10; operator rulings,
+   Phillip, 2026-10-27: "automated deferral should be only one day"; "it is acceptable for
+   agents to suggest a longer deferral"). You MAY name a longer window you suggest in the
+   step-3 comment, but MUST NOT apply it: a longer defer is the operator's to set. `--defer`
    is what keeps this out of `bd ready`, not a label — it clears itself on the date with no one
    having to remember to remove anything, and it never reaches `/unblock-human-beads`'
    `--label human` queue at all.

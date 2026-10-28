@@ -53,7 +53,7 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    second-guess the stamp from the docket's reconcile reports or its design: a mismatch means a
    reconcile is unfinished or owed, never that the packet was merely untouched by an amendment.
    Nor is it a STUCK trigger: each `pb:drain-stuck` exit either closes the bead or releases it
-   with `--status open` (DEFER-ON-EVENT's `--defer +7d` is only a timer), which UNDOES the defer
+   with `--status open` (DEFER-ON-EVENT's `--defer +1d` is only a timer), which UNDOES the defer
    and returns the packet to the open pool, where every queue consumer claims, checks, and
    releases it in an endless cross-session spin (the `plan-decompose` skill's
    `references/reconcile.md`, "Stamp-mismatch releases"). Instead:

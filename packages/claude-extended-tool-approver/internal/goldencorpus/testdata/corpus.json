@@ -8488,7 +8488,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12 (closed as moot)\" --labels human,worktree-review --defer +7d --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review 2026-10-05] leftover isolation\" --actor \"sess-1-drain\""
+        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12 (closed as moot)\" --labels human,worktree-review --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review 2026-10-05] leftover isolation\" --actor \"sess-1-drain\""
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8582,7 +8582,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd update pg2-abc12 --defer +7d --remove-label human --status open --assignee \"\" --actor \"sess-1-drain\""
+        "command": "bd update pg2-abc12 --defer +1d --remove-label human --status open --assignee \"\" --actor \"sess-1-drain\""
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -10367,7 +10367,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12 (closed as moot)\" --labels human,worktree-review --defer +7d --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review $(date +%F)] Leftover isolation from pg2-abc12: worktree /repo/.worktrees/x, branch drain/pg2-abc12 in /repo. Unlanded: + abc123 subject. Dirty: M a.go. A person must rule on keep vs discard. No promotion (priority left at P2).\" --actor \"sess-1-drain\""
+        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12 (closed as moot)\" --labels human,worktree-review --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review $(date +%F)] Leftover isolation from pg2-abc12: worktree /repo/.worktrees/x, branch drain/pg2-abc12 in /repo. Unlanded: + abc123 subject. Dirty: M a.go. A person must rule on keep vs discard. No promotion (priority left at P2).\" --actor \"sess-1-drain\""
       }
     },
     "cwd_path_state": {
