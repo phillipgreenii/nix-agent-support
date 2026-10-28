@@ -128,6 +128,20 @@ type ChangeFlowOption func(*changeFlowOptions)
 type changeFlowOptions struct {
 	sweepBound   SweepBoundFunc
 	ingestFailed IngestFailedFunc
+	observedAge  OutcomeFunc
+	unflagged    OutcomeFunc
+}
+
+// WithWatchedSourceObserved supplies the observation behind
+// MetricWatchedSourceObservedAge. Without it the metric emits no series.
+func WithWatchedSourceObserved(fn OutcomeFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.observedAge = fn }
+}
+
+// WithUnflaggedMembers supplies the observation behind
+// MetricIssueUnflaggedMembers. Without it the metric emits no series.
+func WithUnflaggedMembers(fn OutcomeFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.unflagged = fn }
 }
 
 // WithIngestFailed supplies the failed-ingest observation behind
@@ -214,6 +228,17 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		return err
 	}
 
+	observedAge, err := m.Int64ObservableGauge(MetricWatchedSourceObservedAge,
+		metric.WithDescription("age in seconds of the oldest successful observation of a watched query of an owning backend instance, read from the feed_observed meta keys at scrape time; 0 while none is recorded"))
+	if err != nil {
+		return err
+	}
+	unflagged, err := m.Int64ObservableGauge(MetricIssueUnflaggedMembers,
+		metric.WithDescription("members of an owning backend instance's watched queries whose pg-desk entity is not flagged watched, the count the last poll stored"))
+	if err != nil {
+		return err
+	}
+
 	_, err = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		flow, err := fn()
 		if err != nil {
@@ -258,13 +283,28 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 				o.ObserveInt64(ingestOldest, r.OldestAgeSeconds, metric.WithAttributes(be))
 			}
 		}
+		for _, s := range []struct {
+			fn OutcomeFunc
+			g  metric.Int64Observable
+		}{{o0.observedAge, observedAge}, {o0.unflagged, unflagged}} {
+			if s.fn == nil {
+				continue
+			}
+			rows, err := s.fn()
+			if err != nil {
+				return err
+			}
+			for _, r := range rows {
+				o.ObserveInt64(s.g, r.Value, metric.WithAttributes(attribute.String("backend", r.Backend)))
+			}
+		}
 		for _, c := range flow.Consumers {
 			o.ObserveInt64(lag, c.Lag, metric.WithAttributes(
 				attribute.String("type", c.Type), attribute.String("consumer", c.Name),
 			))
 		}
 		return nil
-	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestOldest)
+	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestOldest, observedAge, unflagged)
 	return err
 }
 

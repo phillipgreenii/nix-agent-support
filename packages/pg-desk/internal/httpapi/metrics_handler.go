@@ -116,7 +116,10 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	}
 	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound),
 		metrics.WithIngestFailed(metrics.IngestFailedFromStore(st, cfg.OwningInstances(changes.EntityTypeIssue),
-			func() time.Time { return nowUTC() }))); err != nil {
+			func() time.Time { return nowUTC() })),
+		metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedFromStore(st, metrics.OwningQueriesByInstance(cfg),
+			func() time.Time { return nowUTC() })),
+		metrics.WithUnflaggedMembers(metrics.UnflaggedMembersFromStore(st, metrics.OwningQueriesByInstance(cfg)))); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 

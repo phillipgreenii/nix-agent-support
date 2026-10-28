@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -394,5 +395,108 @@ func TestIngestFailedSeriesAbsentWhenTheStoreCannotAnswer(t *testing.T) {
 	}
 	if _, err := collectIngest(t, IngestFailedFromStore(st, []string{"jira-a"}, time.Now), true); err == nil {
 		t.Error("an unparseable first_failed_at must fail the scrape")
+	}
+}
+
+// outcomePoints collects one outcome family into per-backend values.
+func outcomePoints(t *testing.T, name string, opt ChangeFlowOption, migrated bool) (map[string]int64, error) {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	flow := func() (changes.Flow, error) { return changes.Flow{Migrated: migrated}, nil }
+	if err := RegisterChangeFlow(mp, flow, opt); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		return nil, err
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			for _, p := range m.Data.(metricdata.Gauge[int64]).DataPoints {
+				be, _ := p.Attributes.Value("backend")
+				out[be.AsString()] = p.Value
+			}
+		}
+	}
+	return out, nil
+}
+
+// The watched-source age is the OLDEST feed_observed value across an instance's
+// own queries: a key of another instance or of a query that is not configured
+// for the instance does not count, and an instance with no key reads 0.
+func TestWatchedSourceObservedAgeIsTheOldestOfTheInstancesQueries(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	for k, at := range map[string]time.Duration{
+		changes.MetaFeedObservedPrefix + "jira-a.mine":  10 * time.Minute,
+		changes.MetaFeedObservedPrefix + "jira-a.team":  26 * time.Hour,
+		changes.MetaFeedObservedPrefix + "jira-a.stray": 90 * time.Hour, // not a configured query of the instance
+		changes.MetaFeedObservedPrefix + "jira-b.mine":  time.Hour,
+	} {
+		if err := st.SetMeta(k, now.Add(-at).Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queries := map[string][]string{"jira-a": {"mine", "team"}, "jira-b": {"mine"}, "jira-c": {"mine"}}
+	got, err := outcomePoints(t, MetricWatchedSourceObservedAge,
+		WithWatchedSourceObserved(WatchedSourceObservedFromStore(st, queries, func() time.Time { return now })), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int64{"jira-a": 26 * 3600, "jira-b": 3600, "jira-c": 0}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ages = %v, want %v", got, want)
+	}
+}
+
+func TestOutcomeSeriesExistWithNoOwningInstanceAndFailLoudlyOnBadData(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	for name, opt := range map[string]ChangeFlowOption{
+		MetricWatchedSourceObservedAge: WithWatchedSourceObserved(WatchedSourceObservedFromStore(st, nil, time.Now)),
+		MetricIssueUnflaggedMembers:    WithUnflaggedMembers(UnflaggedMembersFromStore(st, nil)),
+	} {
+		got, err := outcomePoints(t, name, opt, true)
+		if err != nil || !reflect.DeepEqual(got, map[string]int64{"": 0}) {
+			t.Errorf("%s with no instance = %v, %v, want one backendless 0", name, got, err)
+		}
+		// An unmigrated store emits nothing and never calls the reader.
+		if got, err := outcomePoints(t, name, opt, false); err != nil || len(got) != 0 {
+			t.Errorf("%s on an unmigrated store = %v, %v", name, got, err)
+		}
+	}
+	queries := map[string][]string{"jira-a": {"mine"}}
+	if err := st.SetMeta(changes.MetaFeedObservedPrefix+"jira-a.mine", "yesterday"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outcomePoints(t, MetricWatchedSourceObservedAge,
+		WithWatchedSourceObserved(WatchedSourceObservedFromStore(st, queries, time.Now)), true); err == nil {
+		t.Error("an unparseable observation must fail the scrape")
+	}
+	if err := st.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", "{not json"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outcomePoints(t, MetricIssueUnflaggedMembers,
+		WithUnflaggedMembers(UnflaggedMembersFromStore(st, queries)), true); err == nil {
+		t.Error("an undecodable unflagged record must fail the scrape")
+	}
+}
+
+func TestUnflaggedMembersSeriesIsTheStoredCountPerInstance(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	if err := st.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", `{"count":4,"at":"2026-10-10T11:55:00Z"}`); err != nil {
+		t.Fatal(err)
+	}
+	queries := map[string][]string{"jira-a": {"mine"}, "jira-b": {"mine"}}
+	got, err := outcomePoints(t, MetricIssueUnflaggedMembers, WithUnflaggedMembers(UnflaggedMembersFromStore(st, queries)), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]int64{"jira-a": 4, "jira-b": 0}; !reflect.DeepEqual(got, want) {
+		t.Errorf("counts = %v, want %v", got, want)
 	}
 }

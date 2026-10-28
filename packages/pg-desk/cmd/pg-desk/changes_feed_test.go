@@ -31,6 +31,14 @@ if [ "$v" = changes-ack ]; then
   echo "{\"consumer\":\"pg-desk\",\"acked_seq\":$n,\"store_identity\":\"s1\"}"
   exit 0
 fi
+if [ "$v" = health ]; then
+  echo '{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}'
+  exit 0
+fi
+if [ "$v" = list ]; then
+  echo '{"entities":[],"present_ids":[],"truncated":false}'
+  exit 0
+fi
 if [ "$v" = show ]; then
   if [ -f "$D/show-$3.json" ]; then cat "$D/show-$3.json"; exit 0; fi
   echo '{"error":{"code":"boom","message":"no fixture"}}'
@@ -108,9 +116,18 @@ func TestChangesFeedEndToEndOneRow(t *testing.T) {
 	if c := calls[show]; !strings.Contains(c, "--backend "+feedTestInstance) {
 		t.Errorf("hydration call = %q, want it pinned to the backend", c)
 	}
-	// No listing was made for the owning query, and no membership was kept.
-	if callIndex(calls, "list") >= 0 {
-		t.Errorf("a listing was made: %v", calls)
+	// The owning query is never list-and-diffed: the only listing is the
+	// unflagged-member read, pinned to the backend, and no membership is kept.
+	for _, c := range calls {
+		if strings.Contains(c, "issue list") && !strings.Contains(c, "--backend "+feedTestInstance) {
+			t.Errorf("a listing was made: %q", c)
+		}
+	}
+	if callIndex(calls, "issue list --query jira-q --backend "+feedTestInstance) < 0 || callIndex(calls, "issue health --backend "+feedTestInstance) < 0 {
+		t.Errorf("calls = %v; want the unflagged-member read (health, then list of jira-q)", calls)
+	}
+	if v, found, _ := f.seed.GetMeta("change_flow.unflagged." + feedTestInstance); !found || !strings.Contains(v, `"count":0`) {
+		t.Errorf("unflagged record = %q %v, want a stored count of 0", v, found)
 	}
 	if v, found, _ := f.seed.GetMeta("change_flow.feed_observed." + feedTestInstance + ".jira-q"); !found || v != "2026-10-01T11:59:00Z" {
 		t.Errorf("feed_observed = %q %v", v, found)
@@ -152,7 +169,14 @@ func TestChangesFeedMixedWatchListDoesBothInOnePoll(t *testing.T) {
 	installFakePGConnector(t, fmt.Sprintf(`D=%q
 echo "$*" >> "$D/calls.log"
 t="$1"; v="$2"
-if [ "$v" = list ]; then cat "$D/issue-list-beads-q.json"; exit 0; fi
+if [ "$v" = list ]; then
+  case "$*" in
+  *"--backend owning-demo"*) echo '{"entities":[],"present_ids":[],"truncated":false}' ;;
+  *) cat "$D/issue-list-beads-q.json" ;;
+  esac
+  exit 0
+fi
+if [ "$v" = health ]; then echo '{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}'; exit 0; fi
 if [ "$v" = changes ]; then cat "$D/feed.json"; exit 0; fi
 if [ "$v" = changes-ack ]; then echo '{"consumer":"pg-desk","acked_seq":6}'; exit 0; fi
 if [ "$v" = show ]; then id=$(echo "$3" | tr '/#' '__'); cat "$D/show-$id.json"; exit 0; fi
@@ -177,7 +201,9 @@ exit 99`, f.dir))
 		if strings.Contains(c, " changes ") && !strings.Contains(c, "--backend") {
 			t.Errorf("feed call without --backend: %q", c)
 		}
-		if strings.Contains(c, "list") && strings.Contains(c, "jira-q") {
+		// The owning query is never list-and-diffed; only the backend-pinned
+		// unflagged-member read lists it.
+		if strings.Contains(c, "list") && strings.Contains(c, "jira-q") && !strings.Contains(c, "--backend "+feedTestInstance) {
 			t.Errorf("owning query was listed: %q", c)
 		}
 	}

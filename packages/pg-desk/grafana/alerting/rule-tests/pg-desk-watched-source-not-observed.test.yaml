@@ -1,0 +1,122 @@
+# promtool unit tests for the pg-desk-watched-source-not-observed alert. Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 86400` (the
+# refId C evaluator), the rule's `for: 10m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The rule reads the age in seconds of the oldest successful observation of
+# an owning backend instance's watched queries, over ONE DAY (86400, strictly: 86400 itself is
+# quiet), held for 10m. promtool cannot run Grafana's noDataState, so the absence semantics of the
+# expression are pinned with promql_expr_test: with pg-desk up and the series absent the expression
+# is EMPTY (NoData, which noDataState: Alerting turns into an alert), and with pg-desk down it
+# answers 0 so pg-desk-liveness-down speaks alone.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an observation older than a day fires per backend after the hold, a younger one does not
+    interval: 1m
+    input_series:
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "100000x60"
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-b",job="pg-desk"}
+        values: "43200x60"
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts:
+          - exp_labels:
+              backend: jira-a
+              severity: warning
+
+  - name: the duplicate job series of one backend is one alert instance
+    interval: 1m
+    input_series:
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "100000x60"
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-a",job="pg-desk-legacy"}
+        values: "100000x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts:
+          - exp_labels:
+              backend: jira-a
+              severity: warning
+
+  - name: exactly one day is quiet, one second over fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "0x10 86401x50"
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-b",job="pg-desk"}
+        values: "86400x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts:
+          - exp_labels:
+              backend: jira-a
+              severity: warning
+
+  - name: the alert clears when the source is observed again
+    interval: 1m
+    input_series:
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "100000x20 30x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts:
+          - exp_labels:
+              backend: jira-a
+              severity: warning
+      - eval_time: 40m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts: []
+
+  - name: a fresh deployment (age 0) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_watched_source_observed_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "0x60"
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts: []
+
+  - name: pg-desk down (no series at all) is quiet, the liveness rule speaks
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-watched-source-not-observed
+        exp_alerts: []
+
+  - name: the expression is empty (NoData) with pg-desk up and the series absent, and 0 with pg-desk down
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x30 _x30"
+    promql_expr_test:
+      - expr: max by (backend) (pg_desk_watched_source_observed_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+        eval_time: 10m
+        exp_samples: []
+      - expr: max by (backend) (pg_desk_watched_source_observed_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+        eval_time: 50m
+        exp_samples:
+          - labels: "{}"
+            value: 0

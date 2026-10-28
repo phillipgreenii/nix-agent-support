@@ -122,6 +122,7 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 		// and commits (a listed entity, or a feed row of an owning backend).
 		Lister:   gatherer,
 		Feeder:   gatherer,
+		Members:  gatherer,
 		Hydrator: pl,
 		Ingester: pl,
 		Now:      changesNow,

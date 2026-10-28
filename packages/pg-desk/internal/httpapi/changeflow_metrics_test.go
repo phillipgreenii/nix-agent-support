@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	pgsync "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
@@ -267,5 +268,59 @@ func TestMetricsExposeTheFailedIngestSeriesFromTheTable(t *testing.T) {
 	})
 	if body := scrape(t, old); strings.Contains(body, "pg_desk_ingest_failed") {
 		t.Errorf("an old-schema store has failed-ingest series:\n%s", body)
+	}
+}
+
+// TestMetricsExposeTheJiraOutcomeSeriesFromTheStore pins the real scrape: the
+// watched-source age and the stored unflagged count of an owning instance are
+// derived from the meta keys at scrape time, and a deployment with no owning
+// instance still emits one backendless 0 of each.
+func TestMetricsExposeTheJiraOutcomeSeriesFromTheStore(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	s := store.OpenNewSchemaForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	body := scrape(t, s)
+	for _, want := range []string{
+		`pg_desk_watched_source_observed_age_seconds{backend=""} 0`,
+		`pg_desk_issue_unflagged_members{backend=""} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no owning instance: body missing %q; full body:\n%s", want, body)
+		}
+	}
+
+	cfg := testConfig()
+	cfg.Watch.Issue.Queries = []string{"mine"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"mine": {Instance: "jira-a", OwnsChanges: true}}
+	if err := s.SetMeta(changes.MetaFeedObservedPrefix+"jira-a.mine", "2026-10-01T10:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", `{"count":2,"at":"2026-10-01T11:55:00Z"}`); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{
+		`pg_desk_watched_source_observed_age_seconds{backend="jira-a"} 7200`,
+		`pg_desk_issue_unflagged_members{backend="jira-a"} 2`,
+	} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Errorf("body missing %q; full body:\n%s", want, rr.Body.String())
+		}
+	}
+
+	old := store.OpenForTest(t)
+	mustUpsertInterpretation(t, old, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	if body := scrape(t, old); strings.Contains(body, "pg_desk_issue_unflagged_members") || strings.Contains(body, "pg_desk_watched_source_observed_age_seconds") {
+		t.Errorf("an old-schema store has outcome series:\n%s", body)
 	}
 }

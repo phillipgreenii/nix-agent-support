@@ -24,7 +24,7 @@
 #   T7  (the sweep-bound and watch-listing rules) the scope: both read issue and thread only
 #   T8  (the lookup-ceiling rule) the ratio is guarded by `ceiling > 0`, so a ceiling gauge of 0
 #       (zero-filled until the decider reports) leaves the rule quiet instead of dividing by zero
-#   T9  (the ingest-failed rule) the uid exists once, at most 40 characters, with noDataState:
+#   T9  (the ingest-failed, watched-source-not-observed and unflagged-members rules) each uid exists once, at most 40 characters, with noDataState:
 #       Alerting guarded by pg-desk liveness: the expression carries the branch that answers 0
 #       while pg-desk is down (so liveness-down speaks alone and NoData alerts only with pg-desk
 #       up), and the rule has the T5 shape. It is NOT an outcome rule: noDataState is Alerting and
@@ -33,7 +33,7 @@
 # The negative cases of --self-test: for EVERY outcome rule a rule file whose guard has been
 # removed MUST fail T3 and one whose noDataState differs MUST fail T2; the never-hydrated rule
 # with its absence branch removed MUST fail T4; each apply-gated rule with its gate removed MUST
-# fail T6; the ingest-failed rule with another noDataState or without its liveness guard MUST fail
+# fail T6; each T9 rule with another noDataState or without its liveness guard MUST fail
 # T9; and each scoped rule with its scope removed MUST fail T7, and the lookup-ceiling rule with its ceiling
 # guard removed MUST fail T8 (each firing only its own rule).
 #
@@ -93,6 +93,9 @@ ceiling_guard='/ (max(pg_desk_pr_lane_lookup_ceiling) > 0)'
 
 # The failed-ingest rule (T9): noDataState Alerting, guarded by pg-desk liveness.
 ingest_uid="pg-desk-ingest-failed-old"
+# The two Jira-half outcome rules (watched source not observed, unflagged members) carry the same
+# noDataState Alerting liveness-guarded shape and are checked by T9 as well.
+liveness_guarded_uids=("pg-desk-ingest-failed-old" "pg-desk-watched-source-not-observed" "pg-desk-issue-unflagged-members")
 ingest_guard=' or (vector(0) and on() absent(pg_desk_liveness == 1))'
 
 guard_uid="pg-desk-sync-stale"
@@ -211,28 +214,29 @@ lint() {
   esac
 
   # T9
-  count="$(jq --arg uid "$ingest_uid" '[.groups[]?.rules[]? | select(.uid == $uid)] | length' <<<"$json")"
-  if [ "$count" != "1" ]; then
-    echo "RULE-T9: want the uid $ingest_uid exactly once, found it $count times" >&2
-    status=1
-  else
-    if [ "${#ingest_uid}" -gt 40 ]; then
-      echo "RULE-T9: uid $ingest_uid is longer than Grafana's 40-character cap" >&2
+  for ingest_uid in "${liveness_guarded_uids[@]}"; do
+    count="$(jq --arg uid "$ingest_uid" '[.groups[]?.rules[]? | select(.uid == $uid)] | length' <<<"$json")"
+    if [ "$count" != "1" ]; then
+      echo "RULE-T9: want the uid $ingest_uid exactly once, found it $count times" >&2
       status=1
-    fi
-    if ! jq -e --arg uid "$ingest_uid" '.groups[].rules[] | select(.uid == $uid) | .noDataState == "Alerting"' <<<"$json" >/dev/null; then
-      echo "RULE-T9: $ingest_uid: noDataState is not Alerting (a missing series with pg-desk up is a failure)" >&2
-      status=1
-    fi
-    expr="$(expr_of "$json" "$ingest_uid")"
-    case "$expr" in
-    *"$ingest_guard") ;;
-    *)
-      echo "RULE-T9: $ingest_uid: the expression does not end with the pg-desk liveness guard: $ingest_guard" >&2
-      status=1
-      ;;
-    esac
-    if ! jq -e --arg uid "$ingest_uid" '
+    else
+      if [ "${#ingest_uid}" -gt 40 ]; then
+        echo "RULE-T9: uid $ingest_uid is longer than Grafana's 40-character cap" >&2
+        status=1
+      fi
+      if ! jq -e --arg uid "$ingest_uid" '.groups[].rules[] | select(.uid == $uid) | .noDataState == "Alerting"' <<<"$json" >/dev/null; then
+        echo "RULE-T9: $ingest_uid: noDataState is not Alerting (a missing series with pg-desk up is a failure)" >&2
+        status=1
+      fi
+      expr="$(expr_of "$json" "$ingest_uid")"
+      case "$expr" in
+      *"$ingest_guard") ;;
+      *)
+        echo "RULE-T9: $ingest_uid: the expression does not end with the pg-desk liveness guard: $ingest_guard" >&2
+        status=1
+        ;;
+      esac
+      if ! jq -e --arg uid "$ingest_uid" '
         .groups[].rules[] | select(.uid == $uid) |
         (.condition == "C")
         and (([.data[]?.refId] | sort) == ["A", "B", "C"])
@@ -242,10 +246,11 @@ lint() {
         and ((.labels // {} | keys) == ["severity"])
         and (.data[0].datasourceUid == "prometheus")
         and (.data[0].model.instant == true)' <<<"$json" >/dev/null; then
-      echo "RULE-T9: $ingest_uid: rule shape wrong (condition C, refIds A B C, for, summary, description, labels {severity}, Prometheus instant query)" >&2
-      status=1
+        echo "RULE-T9: $ingest_uid: rule shape wrong (condition C, refIds A B C, for, summary, description, labels {severity}, Prometheus instant query)" >&2
+        status=1
+      fi
     fi
-  fi
+  done
   return "$status"
 }
 
@@ -311,9 +316,11 @@ for uid in "${scoped_uids[@]}"; do
 done
 negative T8 "$ceiling_uid: the ceiling greater than 0 guard removed" \
   "$(expr_path "$ceiling_uid") |= sub(\" / [(]max[(]pg_desk_pr_lane_lookup_ceiling[)] > 0[)]\"; \" / max(pg_desk_pr_lane_lookup_ceiling)\")"
-negative T9 "$ingest_uid: noDataState differs (OK)" \
-  "($(rule_of "$ingest_uid") | .noDataState) = \"OK\""
-negative T9 "$ingest_uid: the pg-desk liveness guard removed from the expression" \
-  "$(expr_path "$ingest_uid") |= sub(\" or [(]vector[(]0[)] and on[(][)] absent.*\$\"; \"\")"
+for ingest_uid in "${liveness_guarded_uids[@]}"; do
+  negative T9 "$ingest_uid: noDataState differs (OK)" \
+    "($(rule_of "$ingest_uid") | .noDataState) = \"OK\""
+  negative T9 "$ingest_uid: the pg-desk liveness guard removed from the expression" \
+    "$(expr_path "$ingest_uid") |= sub(\" or [(]vector[(]0[)] and on[(][)] absent.*\$\"; \"\")"
+done
 
 [ "$fail" -eq 0 ]

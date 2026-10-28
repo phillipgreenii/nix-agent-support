@@ -82,8 +82,11 @@ type Engine struct {
 	// required when a watched query's backend owns its changes.
 	Feeder   Feeder
 	Ingester Ingester
-	Now      func() time.Time
-	Warn     io.Writer
+	// Members reads an owning backend's query members and baseline state for
+	// the unflagged-member count; nil skips that read.
+	Members MemberReader
+	Now     func() time.Time
+	Warn    io.Writer
 
 	// setMeta replaces Store.SetMeta for the best-effort listing-status
 	// write; tests use it to inject a write failure.
@@ -247,6 +250,9 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 			if o.failed {
 				feedFailed++
 			}
+		}
+		if err := e.recordUnflagged(ctx, opts.EntityType, feedOutcomes, st); err != nil {
+			return Outcome{}, err
 		}
 	}
 	feedSources := e.feedSources(opts.EntityType, owningQueries, feedOutcomes)

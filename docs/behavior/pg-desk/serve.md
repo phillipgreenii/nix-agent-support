@@ -180,6 +180,34 @@ This is INGEST recovery (a row that could not be hydrated), not decider recovery
   `grafana/check-alert-rules.sh`, and has its `noDataState` and liveness guard pinned by
   `grafana/check-alert-structure.sh`.
 
+- `pg_desk_watched_source_observed_age_seconds{backend}` — for an owning backend instance (Jira), the age
+  in seconds of the OLDEST `change_flow.feed_observed.<instance>.<query>` value across the instance's
+  watched queries (the `last_success_at` the feed read took from `sources_freshness`). An instance with
+  no value recorded yet reads `0`, so a fresh deployment never pages; the daemon-side alerts cover a
+  daemon that never succeeds.
+- `pg_desk_issue_unflagged_members{backend}` — the count the last poll stored under
+  `change_flow.unflagged.<instance>` (JSON `{"count":n,"at":"<RFC3339>"}`, the count and the read time
+  only, never a member set): the distinct members of the instance's watched queries (read with
+  `issue list --query Q --backend B`) for which pg-desk holds an entity whose watched flag is not true.
+  A member pg-desk does not hold is never counted, and a query whose baseline has been open under one
+  day (`baseline_open_age_seconds` of `issue health --backend B`) is skipped. A failed list or baseline
+  read, or a truncated list, keeps the previous count; a failed read also makes the poll partial and
+  logs `unflagged read degraded: <query>`. No stored count reads `0`.
+
+  A deployment with no owning instance emits one series of each with an empty `backend`, valued `0`
+  (no label in Prometheus), so their absence always means the store read failed.
+
+The Grafana rules `pg-desk-watched-source-not-observed` (age over `86400` seconds) and
+`pg-desk-issue-unflagged-members` (any non-zero count) fire per `backend`, held for `for: 10m` (two
+consecutive 5-minute polls for the second), severity `warning`. Both carry `noDataState: Alerting`
+guarded by pg-desk liveness with the same expression tail as `pg-desk-ingest-failed-old`
+(`... or (vector(0) and on() absent(pg_desk_liveness == 1))`), so they are quiet while pg-desk is down and
+alert while pg-desk is up and the series is missing; neither has a `SYSTEM_PAUSE` guard. Each uid is
+registered with the router probe, is modelled in `internal/alertrules`, has a promtool case file under
+`grafana/alerting/rule-tests/`, and has its `noDataState` and liveness guard pinned by
+`grafana/check-alert-structure.sh`. The `doctor` report "an entity nothing watches" stays a report, not
+an alert.
+
 On a store that has not been cut over to the new schema these families MUST be absent from the
 scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.
 
@@ -450,6 +478,8 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
 - **INV-SERVE-7.** <!-- uuid: 66d3ee48-e0c9-4da4-a2dc-f515dc67258a --> `pg-desk-sweep-bound-violated` and `pg-desk-watch-listing-degraded` MUST read the issue and thread series only; a `pr` series MUST NOT make either fire.
 
 - **INV-SERVE-8.** <!-- uuid: e631222d-73f7-46fb-a5ca-c4e9283812ee --> `pg_desk_ingest_failed` and `pg_desk_ingest_failed_oldest_age_seconds` MUST be derived from the failed-ingest table at every scrape, MUST be emitted with a value (`0` for an empty table) for every configured owning backend instance and every instance holding entries, and MUST have no series, never `0`, when the read fails or the store is not at schema 2. `pg-desk-ingest-failed-old` MUST fire while the oldest entry of a backend is older than `1800` seconds, MUST clear when the table empties, MUST NOT fire on an empty table, MUST have `noDataState: Alerting` guarded by `pg_desk_liveness` so that it is quiet while pg-desk is down, and its uid MUST be registered with the router probe.
+
+- **INV-SERVE-9.** <!-- uuid: dbe9eda8-edc6-479a-8c83-1e327fe54450 --> `pg_desk_watched_source_observed_age_seconds` and `pg_desk_issue_unflagged_members` MUST be derived from the store at every scrape, MUST be emitted with a value for every configured owning backend instance (`0` when nothing is recorded), and MUST have no series when the read fails or the store is not at schema 2. `pg-desk-watched-source-not-observed` MUST fire while the oldest observation of a backend is older than one day and `pg-desk-issue-unflagged-members` while its count is non-zero across two consecutive polls; each MUST clear afterwards, MUST have `noDataState: Alerting` guarded by `pg_desk_liveness`, and its uid MUST be registered with the router probe. A member pg-desk does not hold MUST NOT be counted, and a query whose baseline has been open under one day MUST be excluded from the count.
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 

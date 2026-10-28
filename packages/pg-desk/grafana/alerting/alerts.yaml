@@ -508,6 +508,117 @@ groups:
                     type: gt
                     params: [1800]
 
+      # Watched source not observed (INV-ICD-21 item 2, the Jira half). The age of
+      # the OLDEST change_flow.feed_observed.<instance>.<query> value across an
+      # owning instance's watched queries (the last_success_at the feed read took
+      # from sources_freshness), over ONE DAY: it bounds how long a watched open
+      # issue's tracker state can differ from pg-desk's. An instance with no
+      # observation recorded yet reads 0 (a fresh deployment never pages; the
+      # daemon-side alerts cover a daemon that never succeeds).
+      #
+      # noDataState: Alerting, guarded by pg-desk liveness, exactly as
+      # pg-desk-ingest-failed-old: the series is derived from the store at scrape
+      # time, so while pg-desk is up its ABSENCE means the store read failed,
+      # which is never "healthy". While pg-desk itself is down the second branch
+      # of the expression answers 0 and pg-desk-liveness-down speaks alone. A
+      # deployment with no owning backend emits one backendless series valued 0.
+      # No SYSTEM_PAUSE guard: an empty result would alert under NoData.
+      #
+      - uid: pg-desk-watched-source-not-observed
+        title: pg-desk has not observed a watched source for over a day
+        condition: C
+        for: 10m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk backend {{ $labels.backend }} has not observed a watched query for over a day, or cannot read its observations"
+          description: "pg_desk_watched_source_observed_age_seconds has read over 86400 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest watched query of that backend has no successful feed observation for a day), or the series is missing while pg-desk is up (the store cannot answer). A watched open issue of that backend may differ from the tracker."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (backend) (pg_desk_watched_source_observed_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [86400]
+
+      # Unflagged watched members (INV-ICD-21 item 3, the Jira half). The count the
+      # last poll stored under change_flow.unflagged.<instance>: distinct members of
+      # the instance's watched queries for which pg-desk holds an entity whose
+      # watched flag is not true. A member pg-desk does not hold is never counted,
+      # and a query whose baseline has been open under one day is excluded.
+      # Non-zero across two consecutive 5-minute polls (for: 10m) fires.
+      #
+      # noDataState: Alerting, guarded by pg-desk liveness, exactly as
+      # pg-desk-ingest-failed-old: the series is derived from the store at scrape
+      # time, so while pg-desk is up its ABSENCE means the store read failed,
+      # which is never "healthy". While pg-desk itself is down the second branch
+      # of the expression answers 0 and pg-desk-liveness-down speaks alone. A
+      # deployment with no owning backend emits one backendless series valued 0.
+      # No SYSTEM_PAUSE guard: an empty result would alert under NoData.
+      #
+      - uid: pg-desk-issue-unflagged-members
+        title: pg-desk holds watched-query members that are not flagged watched
+        condition: C
+        for: 10m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk backend {{ $labels.backend }} holds members of its watched queries that are not flagged watched, or cannot read the count"
+          description: "pg_desk_issue_unflagged_members has been non-zero for backend {{ $labels.backend }} for over 10 minutes (two consecutive polls), or the series is missing while pg-desk is up. Members whose baseline has been open under one day are excluded; a member pg-desk does not hold is not counted."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (backend) (pg_desk_issue_unflagged_members) or (vector(0) and on() absent(pg_desk_liveness == 1))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # ---- Daily-focus alert rules (Phase 15, pg2-2j5ac.44.25) ----
       # Each rule reads a family of internal/metrics/focus.go (or the
       # change-flow families) that is computed at scrape time from the

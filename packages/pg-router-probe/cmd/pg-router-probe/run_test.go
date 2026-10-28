@@ -365,6 +365,8 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-conn-jira-rate-limited",
 		"pg-conn-jira-below-floor",
 		"pg-desk-ingest-failed-old",
+		"pg-desk-watched-source-not-observed",
+		"pg-desk-issue-unflagged-members",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)

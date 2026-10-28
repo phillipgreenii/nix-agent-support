@@ -20,7 +20,7 @@
 # rule without its SYSTEM_PAUSE guard, without its absence branch, the stale-anchor rule without its
 # apply gate, the residual rule reading every mode, the hard-failure rule without its first-event
 # branch, the sweep-bound rule without its scope, the lookup-ceiling rule without its ceiling guard and the
-# hidden-PR rule without its SYSTEM_PAUSE guard, and the ingest-failed rule with its threshold lowered to 0. A case set that passed over any of them
+# hidden-PR rule without its SYSTEM_PAUSE guard, the ingest-failed rule with its threshold lowered to 0, the watched-source rule with its threshold lowered to 0 and the unflagged-members rule with its threshold raised. A case set that passed over any of them
 # would be vacuous.
 #
 # Exit codes: 0 every case passed (self-test: and every broken rule file was rejected), 1 a check
@@ -42,7 +42,7 @@ alerts="$1"
 tests_dir="$2"
 
 # Every rule uid this check wraps and tests. A rule added here extends the cases under rule-tests/.
-rule_uids='["pg-desk-pr-never-hydrated", "pg-desk-pr-residual-after-apply", "pg-desk-pr-stale-anchor", "pg-desk-pr-anchor-hydration-old", "pg-desk-pr-lane-hard-failure", "pg-desk-pr-lane-failure-rate", "pg-desk-pr-hydration-failing", "pg-desk-pr-hydrate-dead-man", "pg-desk-pr-hidden-open-anchor", "pg-desk-pr-lookup-ceiling", "pg-desk-sweep-bound-violated", "pg-desk-watch-listing-degraded", "pg-desk-ingest-failed-old"]'
+rule_uids='["pg-desk-pr-never-hydrated", "pg-desk-pr-residual-after-apply", "pg-desk-pr-stale-anchor", "pg-desk-pr-anchor-hydration-old", "pg-desk-pr-lane-hard-failure", "pg-desk-pr-lane-failure-rate", "pg-desk-pr-hydration-failing", "pg-desk-pr-hydrate-dead-man", "pg-desk-pr-hidden-open-anchor", "pg-desk-pr-lookup-ceiling", "pg-desk-sweep-bound-violated", "pg-desk-watch-listing-degraded", "pg-desk-ingest-failed-old", "pg-desk-watched-source-not-observed", "pg-desk-issue-unflagged-members"]'
 
 fail() {
   echo "FAIL: $*" >&2
@@ -162,6 +162,10 @@ broken "the sweep-bound scope removed" \
   "$(expr_path pg-desk-sweep-bound-violated) |= sub(\"[{]type=.*[}]\"; \"\")"
 broken "the ingest-failed threshold lowered from 1800 to 0" \
   '(.groups[0].rules[] | select(.uid == "pg-desk-ingest-failed-old") | .data[] | select(.refId == "C") | .model.conditions[0].evaluator.params[0]) = 0'
+broken "the watched-source threshold lowered from 86400 to 0" \
+  '(.groups[0].rules[] | select(.uid == "pg-desk-watched-source-not-observed") | .data[] | select(.refId == "C") | .model.conditions[0].evaluator.params[0]) = 0'
+broken "the unflagged-members threshold raised from 0 to 100" \
+  '(.groups[0].rules[] | select(.uid == "pg-desk-issue-unflagged-members") | .data[] | select(.refId == "C") | .model.conditions[0].evaluator.params[0]) = 100'
 broken "the dead-man's role selector widened to every role" \
   "$(expr_path pg-desk-pr-hydrate-dead-man) |= sub(\"[{]role=.pr-change.[}]\"; \"\")"
 broken "the lookup-ceiling rule without its ceiling greater than 0 guard" \

@@ -140,6 +140,12 @@ import (
 // escalation label, so its bead goes to the triager. A machine where pg-desk
 // serve is not deployed never holds the rule.
 //
+// pg-desk-watched-source-not-observed and pg-desk-issue-unflagged-members are the
+// two outcome rules of the same file for an owning backend (the oldest successful
+// observation of a watched query over a day old, and watched-query members that
+// are not flagged watched across two polls). Registered the same way, with no
+// escalation label.
+//
 // pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
 // probe files escalated beads/dispatches triagers, so probing triager failures
 // could feed a loop (operator decision pending).
@@ -169,6 +175,8 @@ var registeredRuleUIDs = []string{
 	"pg-conn-jira-rate-limited",
 	"pg-conn-jira-below-floor",
 	"pg-desk-ingest-failed-old",
+	"pg-desk-watched-source-not-observed",
+	"pg-desk-issue-unflagged-members",
 }
 
 func defaultSnapshotPath() string {
