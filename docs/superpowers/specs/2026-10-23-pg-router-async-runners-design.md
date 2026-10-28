@@ -398,10 +398,20 @@ U="git+file:///Volumes/gitrepos/phillipg/nix-ziprecruiter?rev=$SHA"
    -> builds pg-connector-src, vendor-env, pg-pr-zr-go-tests (the full module test run printed
       "ok  .../modules/pg-pr-zr/cmd/pg-pr-cicd-captains-log") and pg-pr-zr itself, exit 0
       (the two checks that consume the symlink's path pass from the snapshot)
+4. nix flake check --offline --no-write-lock-file "$U"   (the full check, builds every check)
+   -> exit 1, one failure: checks.aarch64-darwin.pg-router-focus-wiring,
+      "FAIL: pg-desk watch.issue.queries is [...7 queries...], want [...4 queries...]".
+      That is a CONTENT failure of one check at that commit, not a snapshot effect: the same
+      check built from the canonical working tree (nix build
+      /Volumes/gitrepos/phillipg/nix-ziprecruiter#checks.aarch64-darwin.pg-router-focus-wiring)
+      fails with the identical output path and message
+      (/nix/store/hazb4rj7zsmjqmkx2prhkq653ywh8vag-check-pg-router-focus-wiring). nix stopped at
+      that first failed build (no --keep-going), so the checks after it were not built by item 4;
+      items 2 and 3 are the evidence that the symlink is not an input to any nix path.
 ```
 
-The result for the full `nix flake check` (builds every check) is recorded below by the bead that
-runs it; items 2 and 3 are the evidence that the symlink is not an input to any nix path.
+A red verdict from this repo is therefore expected to be a real red, which is the verifier working
+as designed (a red is data, exit 0), not a runner defect. This is the data F3 and F4 will see first.
 
 ## Runner C: cross-repo workspace builder
 
