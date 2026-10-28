@@ -1,7 +1,6 @@
 package changes
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -364,22 +363,6 @@ func TestActiveCountAndDueBacklogExcludeOwningBackendIssues(t *testing.T) {
 	}
 }
 
-func TestWithoutOwnedKeepsOtherTypesAndNullBackends(t *testing.T) {
-	es := owningTierEntities()
-	got := withoutOwned(es, "issue", owningJira)
-	var ids []string
-	for _, e := range got {
-		ids = append(ids, e.EntityID)
-	}
-	sort.Strings(ids)
-	if want := []string{"bd-fresh", "bd-null", "bd-stale", "pr-1"}; !reflect.DeepEqual(ids, want) {
-		t.Errorf("withoutOwned = %v, want %v", ids, want)
-	}
-	if got := withoutOwned(es, "issue", nil); len(got) != len(es) {
-		t.Errorf("an empty owning set dropped rows: %d of %d", len(got), len(es))
-	}
-}
-
 func TestOwningSetReadsTheConfiguredOwningInstances(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Watch.Issue.Queries = []string{"mine", "tracked"}
@@ -420,50 +403,6 @@ func owningEngine(t *testing.T) (*Engine, *store.Store, *storeHydrator) {
 		t.Fatal(err)
 	}
 	return e, st, h
-}
-
-func TestOldTiersTouchOnlyTheNonOwningEntity(t *testing.T) {
-	t.Run("remote tier", func(t *testing.T) {
-		e, st, h := owningEngine(t)
-		owningBefore, _, _ := st.GetEntity("o/r", "issue", "PROJ-1")
-		if err := e.sweep(context.Background(), "issue", &pollState{hydrated: map[string]error{}}, &budget{left: 10}, nil); err != nil {
-			t.Fatal(err)
-		}
-		if want := []string{"bd-1"}; !reflect.DeepEqual(h.calls, want) {
-			t.Errorf("remote tier hydrated %v, want %v", h.calls, want)
-		}
-		assertOwningUntouched(t, st, owningBefore)
-	})
-	t.Run("local tier", func(t *testing.T) {
-		e, st, h := owningEngine(t)
-		owningBefore, _, _ := st.GetEntity("o/r", "issue", "PROJ-1")
-		beadsBefore, _, _ := st.GetEntity("o/r", "issue", "bd-1")
-		if err := e.reconcileLocal(context.Background(), "issue", &pollState{hydrated: map[string]error{}}); err != nil {
-			t.Fatal(err)
-		}
-		if len(h.calls) != 0 {
-			t.Errorf("local tier hydrated %v, want none", h.calls)
-		}
-		beadsAfter, _, _ := st.GetEntity("o/r", "issue", "bd-1")
-		if beadsAfter.Version != beadsBefore.Version+1 {
-			t.Errorf("beads entity version = %d, want %d (one local reconcile)", beadsAfter.Version, beadsBefore.Version+1)
-		}
-		assertOwningUntouched(t, st, owningBefore)
-	})
-}
-
-func assertOwningUntouched(t *testing.T, st *store.Store, before store.Entity) {
-	t.Helper()
-	after, found, err := st.GetEntity("o/r", "issue", "PROJ-1")
-	if err != nil || !found {
-		t.Fatalf("GetEntity PROJ-1 = %v, %v", found, err)
-	}
-	if after.Version != before.Version || after.HydratedAt != before.HydratedAt {
-		t.Errorf("owning entity changed: before %+v after %+v", before, after)
-	}
-	if got := len(historyOf(t, st, "PROJ-1")); got != 1 {
-		t.Errorf("owning entity has %d change_log rows, want only its seed row", got)
-	}
 }
 
 func TestObserveExcludesOwningBackendEntitiesFromActiveAndDue(t *testing.T) {

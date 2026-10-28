@@ -190,8 +190,8 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 			}
 		}
 
-		// Phase C: hydrate what the list diff found added or changed, then the
-		// rolling remote sweep, all within hydration.max_per_poll with changed/added
+		// Phase C: hydrate what the list diff found added or changed, then (pr and
+		// thread only) the rolling remote sweep, all within hydration.max_per_poll with changed/added
 		// served first [design 8.4, 8.5]. Nothing is queued: what the cap or a
 		// failure leaves is found again by the next tick's diff.
 		bud := &budget{left: e.Cfg.HydrationMaxPerPoll()}
@@ -210,15 +210,21 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		if err != nil {
 			return Outcome{}, err
 		}
-		if err := e.sweep(ctx, opts.EntityType, st, bud, queued); err != nil {
-			return Outcome{}, err
-		}
+		// The age sweep's two tiers run for pr and thread only. An issue is
+		// never re-emitted by age: it is emitted when it changes, so there is
+		// no reconcile kind, sweep origin or local-reconcile origin for it
+		// (INV-ICD-15, INV-CHANGES-12).
+		if opts.EntityType != EntityTypeIssue {
+			if err := e.sweep(ctx, opts.EntityType, st, bud, queued); err != nil {
+				return Outcome{}, err
+			}
 
-		// Phase C2: the age sweep's LOCAL tier. It runs after the remote tier
-		// so an entity just re-hydrated (whose fresh record restarted its age)
-		// is not reconciled twice; it needs no hydration budget.
-		if err := e.reconcileLocal(ctx, opts.EntityType, st); err != nil {
-			return Outcome{}, err
+			// Phase C2: the age sweep's LOCAL tier. It runs after the remote
+			// tier so an entity just re-hydrated (whose fresh record restarted
+			// its age) is not reconciled twice; it needs no hydration budget.
+			if err := e.reconcileLocal(ctx, opts.EntityType, st); err != nil {
+				return Outcome{}, err
+			}
 		}
 	}
 

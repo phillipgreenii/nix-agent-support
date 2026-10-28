@@ -85,8 +85,9 @@ These keys and rules are what the deployment configures for that.
   the same source as the backend registry, so the two cannot disagree. At start-up pg-desk compares this
   with what each backend reports about itself, including each query's `watched` value; a mismatch is a
   `doctor` gate (see [`operator-commands.md`](operator-commands.md), "doctor").
-- **No `sweep.*` for `issue`.** The `issue` flow no longer reads the `sweep.*` keys. They remain, with
-  their meaning in [`changes.md`](changes.md), for `pr` and `thread`.
+- **No `sweep.*` for `issue`.** The `issue` flow no longer reads the `sweep.*` keys, because it runs
+  neither sweep tier. They apply to `pr` and `thread` only, with their meaning in
+  [`changes.md`](changes.md).
 - **`hydration.orphan_max_per_poll`** (home-module option `hydration.orphanMaxPerPoll`, positive
   integer) bounds how many orphans are read by id in one poll. An orphan is a watched, still-open issue
   of a backend with no change feed that no watched query lists any longer (a one-off watch, or an issue

@@ -366,9 +366,9 @@ func TestStaleListedEntityIsNotHydrated(t *testing.T) {
 	}
 }
 
-func TestResetAndSweepHydrateWithNilListFP(t *testing.T) {
+func TestResetHydratesWithNilListFPAndNoSweepRunsForIssue(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
-	seedRow(t, st, "bd-1", "F1", "2026-09-01T00:00:00Z", true) // due for the sweep
+	seedRow(t, st, "bd-1", "F1", "2026-09-01T00:00:00Z", true) // old enough for a pr sweep, never swept for an issue
 	watched := true                                            // --reset replays only watched issues
 	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &watched); err != nil {
 		t.Fatal(err)
@@ -377,8 +377,8 @@ func TestResetAndSweepHydrateWithNilListFP(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	if h.origins["bd-1"] != OriginSweep || h.listFPs["bd-1"] != nil {
-		t.Errorf("sweep hydration origin=%q listFP=%v, want sweep/nil", h.origins["bd-1"], h.listFPs["bd-1"])
+	if len(h.calls) != 0 {
+		t.Errorf("an unchanged issue was hydrated: %v", h.calls)
 	}
 	if got := listFPOf(t, st, "bd-1"); got != "F1" {
 		t.Errorf("a nil listFP must leave list_fp untouched, got %q", got)

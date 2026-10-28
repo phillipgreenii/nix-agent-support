@@ -960,7 +960,9 @@ func TestChangesSourceTerminalEntityBecomesInactive(t *testing.T) {
 	}
 }
 
-func TestSweepUnchangedEntityGetsExactlyOneAdded(t *testing.T) {
+// An issue is never re-emitted by age (INV-ICD-15): a hydrated row far past
+// sweep.max_age, unchanged and still listed, gets no hydration and no row.
+func TestAgedUnchangedIssueIsNeverSwept(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a")
 	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
@@ -972,23 +974,21 @@ func TestSweepUnchangedEntityGetsExactlyOneAdded(t *testing.T) {
 	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, "2026-09-01T00:00:00Z", true, nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
+	before := len(f.shows())
 
-	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
 	env, err := f.envOf("--consumer", "router")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(env.Records) != 1 || env.Records[0].ID != "bd-1" || len(env.Records[0].Kinds) != 1 ||
-		env.Records[0].Kinds[0] != "added" || env.Records[0].Origin != "sweep" {
-		t.Errorf("records = %+v, want one added with origin sweep", env.Records)
-	}
-	// Now freshly hydrated, so an immediate repeat sweeps nothing.
-	if env, err = f.envOf("--consumer", "router"); err != nil || len(env.Records) != 0 {
-		t.Errorf("repeat = %+v, %v", env, err)
+	if len(env.Records) != 0 || len(f.shows()) != before {
+		t.Errorf("an aged unchanged issue was swept: records = %+v, shows = %v", env.Records, f.shows())
 	}
 }
 
-func TestSweepSelectsOldestFirstCapN(t *testing.T) {
+// Sweep-due issue rows (old, active and inactive alike) are hydrated by no
+// tier: with nothing listed nothing is read and no row of origin sweep or
+// local-reconcile is appended.
+func TestSweepDueIssuesAreNotHydrated(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a")
 	two := 2
 	f.cfg.Sweep.MaxPerPoll = &two
@@ -996,42 +996,30 @@ func TestSweepSelectsOldestFirstCapN(t *testing.T) {
 	f.seedHydrated("bd-1", "2026-09-30T00:00:00Z")
 	f.seedHydrated("bd-4", "2026-09-05T00:00:00Z")
 	f.seedHydrated("bd-2", "2026-09-20T00:00:00Z")
-	f.seedHydrated("bd-fresh", "2026-10-01T11:00:00Z") // inside sweep.max_age: not due
+	e := f.entity("bd-2")
+	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, e.HydratedAt, false, []string{"removed"}, "pg-connector", "2026-09-29T11:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
 	f.listing("a", 0, okSource)
 
 	env, err := f.envOf("--consumer", "router")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.shows(); len(got) != 2 || got[0] != "bd-4" || got[1] != "bd-3" {
-		t.Errorf("swept %v, want the two oldest first: bd-4, bd-3", got)
+	if got := f.shows(); len(got) != 0 {
+		t.Errorf("hydrated %v, want nothing: no tier sweeps an issue", got)
 	}
 	for _, r := range env.Records {
-		// Version 1 rows are the seeds (reconcile); a swept row is version 2.
-		if r.Origin == "sweep" && r.Version > 1 && (len(r.Kinds) != 1 || r.Kinds[0] != "added") {
-			t.Errorf("a sweep must log added only, got %+v", r)
+		// Version 1 rows are the seeds; any later row would be a tier's.
+		if r.Version > 1 && (r.Origin == "sweep" || r.Origin == "local-reconcile") {
+			t.Errorf("a tier row exists for an issue: %+v", r)
 		}
 	}
 }
 
-func TestSweepExcludesInactive(t *testing.T) {
-	f := newChangesFixture(t, "issue", "a")
-	f.seedHydrated("bd-1", "2026-09-01T00:00:00Z")
-	f.seedHydrated("bd-2", "2026-09-01T00:00:00Z")
-	e := f.entity("bd-1")
-	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, e.HydratedAt, false, []string{"removed"}, "pg-connector", "2026-09-29T11:00:00Z"); err != nil {
-		t.Fatal(err)
-	}
-	f.listing("a", 0, okSource)
-	if _, err := f.envOf("--consumer", "router"); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.shows(); len(got) != 1 || got[0] != "bd-2" {
-		t.Errorf("swept %v, want only the active bd-2", got)
-	}
-}
-
-func TestHydrationBudgetHydratesChangedBeforeSweepDue(t *testing.T) {
+// The hydration budget serves the changed and added members and nothing else:
+// old rows are not sweep work, so the budget has nothing deferred to report.
+func TestHydrationBudgetHasNoSweepWorkForIssue(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a")
 	three := 3
 	f.cfg.Hydration.MaxPerPoll = &three
@@ -1042,15 +1030,15 @@ func TestHydrationBudgetHydratesChangedBeforeSweepDue(t *testing.T) {
 	f.showIssue("bd-2", "2026-09-30T00:00:00Z")
 
 	env, err := f.envOf("--consumer", "router")
-	if exitCodeFor(err) != exitPartial {
-		t.Fatalf("err = %v, want exit %d (sweep deferred by the budget)", err, exitPartial)
+	if err != nil {
+		t.Fatalf("err = %v, want success: no sweep work was deferred by the budget", err)
 	}
 	got := f.shows()
-	if len(got) != 3 || got[0] != "bd-1" || got[1] != "bd-2" || got[2] != "bd-old1" {
-		t.Errorf("hydrated %v, want changed/added first then the oldest sweep-due one", got)
+	if len(got) != 2 || got[0] != "bd-1" || got[1] != "bd-2" {
+		t.Errorf("hydrated %v, want only the changed and added members", got)
 	}
-	if len(env.Sources) != 1 || env.Sources[0].Status != changes.StatusDegraded || !strings.Contains(env.Sources[0].Reason, changes.ReasonHydrationBudget) {
-		t.Errorf("sources = %+v, want degraded with %s (sweep work was deferred)", env.Sources, changes.ReasonHydrationBudget)
+	if len(env.Sources) != 1 || env.Sources[0].Status == changes.StatusDegraded {
+		t.Errorf("sources = %+v, want a source that is not degraded", env.Sources)
 	}
 }
 

@@ -39,26 +39,10 @@ func OwningSet(cfg *config.Config, entityType string) map[string]bool {
 }
 
 // OwnedByBackend reports whether e is an issue entity whose backend column is
-// one of the owning instances: an entity the old age-sweep tiers MUST skip and
-// no age-driven count includes. A NULL backend ("") is never owned here.
+// one of the owning instances: an entity no age-driven count includes. A NULL
+// backend ("") is never owned here.
 func OwnedByBackend(e store.Entity, entityType string, owning map[string]bool) bool {
 	return entityType == EntityTypeIssue && e.Backend != "" && owning[e.Backend]
-}
-
-// withoutOwned returns entities with every OwnedByBackend entity of entityType
-// dropped (entities itself when owning is empty).
-func withoutOwned(entities []store.Entity, entityType string, owning map[string]bool) []store.Entity {
-	if len(owning) == 0 {
-		return entities
-	}
-	out := make([]store.Entity, 0, len(entities))
-	for _, e := range entities {
-		if e.EntityType == entityType && OwnedByBackend(e, entityType, owning) {
-			continue
-		}
-		out = append(out, e)
-	}
-	return out
 }
 
 // ActiveCount is the number of entities of entityType that are active

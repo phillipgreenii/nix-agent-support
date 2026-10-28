@@ -206,35 +206,74 @@ func TestReconcileLocalRecordsWithoutRemoteCallOrHydration(t *testing.T) {
 	}
 }
 
-// A real call delivers the local-tier record to the consumer and hydrates
-// nothing for it.
-func TestRunDeliversLocalReconcileWithoutHydration(t *testing.T) {
+// A real call for an issue runs neither tier: an old, quiet issue that the
+// listing still holds unchanged gets no reconcile record, no sweep hydration
+// and no local-reconcile record, however old it is (INV-ICD-15).
+func TestRunIssueRunsNeitherAgeTier(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
-	e.Lister = fakeLister{res: okListing()}
-	seedTierRow(t, st, "bd-1", "2026-10-01T11:58:00Z", "F1", "2026-10-01T09:00:00Z")
+	e.Lister = fakeLister{res: listing("bd-1=F1")}
+	// Hydrated 12h ago (past sweep.max_age) with a 3h-old log row (past
+	// reconcile_age): both tiers would select it for a pr.
+	seedTierRow(t, st, "bd-1", "2026-10-01T00:00:00Z", "F1", "2026-10-01T09:00:00Z")
+	watched := true
+	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &watched); err != nil {
+		t.Fatal(err)
+	}
 
 	env, out, err := runTick(t, e)
 	if err != nil || out.Partial {
 		t.Fatalf("run = %+v, %v", out, err)
 	}
 	if len(h.calls) != 0 {
-		t.Errorf("hydrated %v", h.calls)
+		t.Errorf("hydrated %v, want none", h.calls)
 	}
-	var origins []string
-	for _, r := range env.Records {
-		origins = append(origins, r.Origin)
+	if len(env.Records) != 1 || env.Records[0].Origin != "sweep" || env.Records[0].At != "2026-10-01T09:00:00Z" {
+		t.Errorf("records = %+v, want only the seed record", env.Records)
 	}
-	if !reflect.DeepEqual(origins, []string{"sweep", OriginLocalReconcile}) {
-		t.Errorf("record origins = %v, want the seed then one local-reconcile", origins)
+	if got := len(historyOf(t, st, "bd-1")); got != 1 {
+		t.Errorf("change_log has %d rows, want only the seed row", got)
+	}
+}
+
+// For a pr both tiers still run inside Engine.Run: a pr hydrated long ago is
+// re-hydrated at origin sweep, and a pr whose newest log row is old but whose
+// hydration is recent gets one local-reconcile record without a hydration.
+func TestRunPRStillRunsBothAgeTiers(t *testing.T) {
+	e, st, h := newListEngine(t, "open")
+	e.Cfg.Watch.PR.Queries = []string{"mine"}
+	e.Lister = fakeLister{res: okListing()}
+	seedPR := func(id, hydratedAt, logAt string) {
+		fp := "F"
+		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"},
+			0, hydratedAt, true, &fp, []string{"reconcile"}, "sweep", logAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedPR("remote-due", "2026-10-01T00:00:00Z", "2026-10-01T11:59:00Z") // hydrated 12h ago, log fresh
+	seedPR("local-due", "2026-10-01T11:59:00Z", "2026-10-01T09:00:00Z")  // hydrated fresh, log 3h old
+
+	o := Options{EntityType: "pr", Consumer: "router"}
+	if _, _, err := runTick(t, e, o); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h.calls, []string{"remote-due"}) || h.origins["remote-due"] != OriginSweep {
+		t.Errorf("remote tier hydrated %v (origin %q), want [remote-due] at sweep", h.calls, h.origins["remote-due"])
+	}
+	hist, err := st.ListEntityHistory("o/r", "pr", "local-due", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist) != 2 || hist[0].Origin != OriginLocalReconcile {
+		t.Errorf("local-due history = %+v, want the seed then one local-reconcile", hist)
 	}
 }
 
 // Both tiers are capped per poll and the cap carries work forward: 88
 // entities reset together fall due over several polls, never all at once and
-// never twice.
+// never twice. The tier functions are driven directly (Engine.Run calls them
+// for pr and thread only).
 func TestLocalTierCapCarriesWorkForward(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
-	e.Lister = fakeLister{res: okListing()}
 	cap := 20
 	e.Cfg.Sweep.MaxPerPoll = &cap
 	var ids []string
@@ -250,7 +289,7 @@ func TestLocalTierCapCarriesWorkForward(t *testing.T) {
 		for _, id := range ids {
 			before[id] = len(historyOf(t, st, id))
 		}
-		if _, _, err := runTick(t, e); err != nil {
+		if err := e.reconcileLocal(context.Background(), "issue", &pollState{hydrated: map[string]error{}}); err != nil {
 			t.Fatal(err)
 		}
 		n := 0
@@ -279,7 +318,6 @@ func TestLocalTierCapCarriesWorkForward(t *testing.T) {
 // capped per poll and oldest first; what the cap leaves is selected next poll.
 func TestRemoteTierCapCarriesWorkForward(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
-	e.Lister = fakeLister{res: okListing()}
 	cap := 10
 	e.Cfg.Sweep.MaxPerPoll = &cap
 	hydrated := "2026-10-01T00:00:00Z" // 12h before the engine clock: due at any jitter
@@ -292,7 +330,7 @@ func TestRemoteTierCapCarriesWorkForward(t *testing.T) {
 	var batches [][]string
 	for range 4 {
 		h.calls = nil
-		if _, _, err := runTick(t, e); err != nil {
+		if err := e.sweep(context.Background(), "issue", &pollState{hydrated: map[string]error{}}, &budget{left: 1000}, nil); err != nil {
 			t.Fatal(err)
 		}
 		batches = append(batches, append([]string(nil), h.calls...))

@@ -152,3 +152,69 @@ func TestSweepCmdEmptyStore_CompletesAndStampsLastSweep(t *testing.T) {
 		t.Fatalf("GetMeta(last_sweep): found=%v err=%v, want it stamped after sweep completes", found, err)
 	}
 }
+
+// TestSweepCmdAppendsNoReconcileOrSweepRowForAnIssue pins INV-ICD-15 for the
+// operator's bulk recompute: `pg-desk sweep` runs the gather/interpret/store
+// pipeline per entity and never appends a change_log row, so it cannot give an
+// issue a reconcile kind or a sweep origin. The issue's own read fails here (no
+// pg-connector on PATH), which is tolerated per entity; the change_log MUST be
+// exactly what it was.
+func TestSweepCmdAppendsNoReconcileOrSweepRowForAnIssue(t *testing.T) {
+	origConfigLoad := runConfigLoad
+	origStoreOpen := runStoreOpen
+	t.Cleanup(func() {
+		runConfigLoad = origConfigLoad
+		runStoreOpen = origStoreOpen
+	})
+	t.Setenv("PATH", t.TempDir())
+	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return sweepTestCfg(), nil }
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store.SetSynchronousForTests("OFF")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	if err := st.Cutover(); err != nil {
+		t.Fatalf("cutover test store: %v", err)
+	}
+	runStoreOpen = func() (*store.Store, error) { return st, nil }
+
+	seed := store.Entity{Repo: "acme/widgets", EntityType: "issue", EntityID: "bd-1", Facts: `{}`, AsOf: "x"}
+	if _, err := st.WriteEntityStateWithLog(seed, 0, "2026-09-01T00:00:00Z", true, []string{"added"}, "pg-connector", "2026-09-01T00:00:00Z"); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	before, err := st.ListChangesAfter("issue", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, _, err := rootCmd.Find([]string{"sweep"})
+	if err != nil {
+		t.Fatalf("rootCmd has no sweep subcommand: %v", err)
+	}
+	_ = cmd.RunE(cmd, nil) // the issue's read fails without a connector; tolerated per entity
+
+	verify, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store for verification: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+	after, err := verify.ListChangesAfter("issue", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("change_log has %d issue rows after sweep, want %d: %+v", len(after), len(before), after)
+	}
+	for _, r := range after {
+		if r.Origin == "sweep" || r.Origin == "local-reconcile" {
+			t.Errorf("issue row %+v has a tier origin", r)
+		}
+		for _, k := range r.Kinds {
+			if k == "reconcile" {
+				t.Errorf("issue row %+v has the reconcile kind", r)
+			}
+		}
+	}
+}

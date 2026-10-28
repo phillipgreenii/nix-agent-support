@@ -522,6 +522,11 @@ re-emitted by anything; the issue is decided again at its next change. The `swee
 keys remain for the other types (`pr`, `thread`); the issue flow does not read them. The old
 top-level `pg-desk sweep` bulk backfill is unrelated and unchanged.
 
+The retirement ships with the release that carries it. Rolling it back means reverting that release,
+which brings the old tiers and the flood of re-emitted issues back; the additive `watched`, `backend`
+and read-time columns, the meta keys and the side table stay in the store and the old binary ignores
+them.
+
 ## Hydration budget (design 8.5)
 
 `hydration.max_per_poll` (default 50) caps the DETAIL reads per call, across both sources: the
@@ -677,7 +682,7 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   member.
 - **INV-CHANGES-12.** <!-- uuid: 55ac4d95-84e0-438f-878a-d6d8e36e80b9 --> For `issue`, pg-desk MUST NOT re-emit an issue that has not changed: it MUST run no
   age sweep, no local reconcile tier and no timer, and no `reconcile` kind, `sweep` origin or
-  `local-reconcile` origin MUST exist for issue. A row MUST be appended only for the permitted
+  `local-reconcile` origin MUST exist for issue; the two sweep tiers apply to `pr` and `thread` only. A row MUST be appended only for the permitted
   causes of "Tracked and watched": a real difference in the normalised content, the first
   observation after a baseline, the late watch, propagation to a watched linked issue, an annotation
   write on a watched issue, and `--reset`. A failed decider run MUST NOT be re-emitted: no timer,
