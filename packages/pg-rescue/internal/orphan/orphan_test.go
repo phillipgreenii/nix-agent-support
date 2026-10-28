@@ -170,47 +170,15 @@ func TestDefaults(t *testing.T) {
 
 // ---- a real orphan ------------------------------------------------------
 //
-// The test binary re-executes itself in two roles. "parent" starts a "child"
-// that runs the real Watch, waits until the child is watching, then exits,
-// orphaning it. The child must run its cleanup and go away.
-
-func TestOrphanHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	dir := os.Getenv("ORPHAN_TEST_DIR")
-	switch os.Getenv("GO_ORPHAN_ROLE") {
-	case "parent":
-		child := exec.Command(os.Args[0], "-test.run=^TestOrphanHelperProcess$")
-		child.Env = append(os.Environ(), "GO_ORPHAN_ROLE=child")
-		if err := child.Start(); err != nil {
-			os.Exit(2)
-		}
-		for i := 0; i < 500; i++ {
-			if _, err := os.Stat(filepath.Join(dir, "watching")); err == nil {
-				os.Exit(0) // orphan the child
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		os.Exit(3)
-	case "child":
-		time.AfterFunc(30*time.Second, func() { os.Exit(4) }) // never leak a stray process
-		WatchWith(Options{
-			Interval: 20 * time.Millisecond,
-			Cleanup: func() {
-				_ = os.WriteFile(filepath.Join(dir, "cleanup"), []byte("ran"), 0o600)
-			},
-		})
-		_ = os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(os.Getpid())), 0o600)
-		_ = os.WriteFile(filepath.Join(dir, "watching"), nil, 0o600)
-		select {}
-	}
-}
+// internal/fakes/orphanwatch, built once without the race detector (see
+// testmain_test.go), runs in two roles. "parent" starts a "child" that runs the
+// real Watch, waits until the child is watching, then exits, orphaning it. The
+// child must run its cleanup and go away.
 
 func TestRealOrphanRunsCleanupAndExits(t *testing.T) {
 	dir := t.TempDir()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestOrphanHelperProcess$")
-	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_ORPHAN_ROLE=parent", "ORPHAN_TEST_DIR="+dir)
+	cmd := exec.Command(helperBin)
+	cmd.Env = append(os.Environ(), "GO_ORPHAN_ROLE=parent", "ORPHAN_TEST_DIR="+dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("parent role failed: %v\n%s", err, out)
 	}

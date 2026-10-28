@@ -8,6 +8,8 @@ package testenv
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,4 +44,26 @@ func Run(m *testing.M) int {
 		_ = os.Setenv(k, dir)
 	}
 	return m.Run()
+}
+
+// BuildHelper builds the main package at importPath into a temp dir WITHOUT
+// the race detector and returns the binary's path and a cleanup func. A test
+// that supervises a child process uses it instead of re-executing its own
+// test binary: the race runtime sleeps 1.0 s in every process that exits
+// (atexit_sleep_ms), which a race-built re-executed child would pay each time.
+// Call it from TestMain BEFORE Run, while HOME and the Go build cache are still
+// the real ones. The cwd must be inside the module (a test's is).
+func BuildHelper(importPath string) (bin string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "pg-rescue-helper-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { _ = os.RemoveAll(dir) }
+	bin = filepath.Join(dir, filepath.Base(importPath))
+	cmd := exec.Command("go", "build", "-race=false", "-o", bin, importPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("go build %s: %v\n%s", importPath, err, out)
+	}
+	return bin, cleanup, nil
 }

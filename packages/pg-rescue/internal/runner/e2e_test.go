@@ -86,7 +86,7 @@ func newE2E(t *testing.T, top string, hs []hd, chains map[string][]string) *e2e 
 	h.rt.Executor = e.exec
 	h.rt.LookPath = exec.LookPath
 	h.rt.Environ = func() []string {
-		env := append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "HELPER_BIN="+os.Args[0])
+		env := append(os.Environ(), "HELPER_BIN="+helperBin)
 		for k, v := range h.env {
 			env = append(env, k+"="+v)
 		}

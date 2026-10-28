@@ -1,19 +1,27 @@
 package orphan
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
+// helperBin is internal/fakes/orphanwatch, built once without the race
+// detector (a race-built child sleeps 1.0 s at exit).
+var helperBin string
+
 func TestMain(m *testing.M) {
-	// The re-executed helper roles of TestOrphanHelperProcess end in os.Exit
-	// (or are killed), which skips testenv.Run's deferred RemoveAll and would
-	// leave an empty pg-rescue-test-* dir in $TMPDIR per role. They touch no
-	// HOME/XDG state, so they run un-isolated; the parent test still isolates.
-	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		os.Exit(m.Run())
+	// Build the helper BEFORE testenv.Run, which replaces HOME (and with it the
+	// Go build cache) with an empty temp dir.
+	bin, cleanup, err := testenv.BuildHelper("github.com/phillipgreenii/pg-rescue/internal/fakes/orphanwatch")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orphan tests:", err)
+		os.Exit(1)
 	}
-	os.Exit(testenv.Run(m))
+	helperBin = bin
+	code := testenv.Run(m)
+	cleanup()
+	os.Exit(code)
 }

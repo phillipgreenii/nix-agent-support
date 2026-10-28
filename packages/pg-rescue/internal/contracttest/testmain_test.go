@@ -1,19 +1,28 @@
 package contracttest
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
+// helperBin is the fake handler, internal/fakes/contractfake, built once
+// without the race detector (a race-built child sleeps 1.0 s at exit).
+var helperBin string
+
 // TestMain isolates the test process like every other package. The fake
-// handler is this same binary re-executed (GO_WANT_HELPER_PROCESS=1); it must
-// see the PG_RESCUE_* variables Run gives it, which testenv.Run would clear, so
-// it skips the isolation.
+// handler is built BEFORE testenv.Run, which replaces HOME (and with it the Go
+// build cache) with an empty temp dir.
 func TestMain(m *testing.M) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		os.Exit(m.Run())
+	bin, cleanup, err := testenv.BuildHelper("github.com/phillipgreenii/pg-rescue/internal/fakes/contractfake")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "contracttest tests:", err)
+		os.Exit(1)
 	}
-	os.Exit(testenv.Run(m))
+	helperBin = bin
+	code := testenv.Run(m)
+	cleanup()
+	os.Exit(code)
 }

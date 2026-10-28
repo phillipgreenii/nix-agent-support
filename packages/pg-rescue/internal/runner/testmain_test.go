@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -8,11 +9,16 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// The fake command, handler and verify are this very binary, re-executed
-	// with GO_WANT_HELPER_PROCESS=1 (see helper_test.go). It must run BEFORE
-	// testenv.Run, which unsets the PG_RESCUE_* variables a fake has to see.
-	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		runHelper()
+	// The fake command, handler and verify are internal/fakes/runnercmd, built
+	// once without the race detector. Build it BEFORE testenv.Run, which
+	// replaces HOME (and with it the Go build cache) with an empty temp dir.
+	bin, cleanup, err := testenv.BuildHelper("github.com/phillipgreenii/pg-rescue/internal/fakes/runnercmd")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "runner tests:", err)
+		os.Exit(1)
 	}
-	os.Exit(testenv.Run(m))
+	helperBin = bin
+	code := testenv.Run(m)
+	cleanup()
+	os.Exit(code)
 }
