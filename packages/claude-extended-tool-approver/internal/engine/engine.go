@@ -1525,8 +1525,9 @@ func commandSubstitutionFloor(body string) hookio.RuleResult {
 	}
 }
 
-// evaluatingExpansionFloor is the verdict for parameter expansions that EVALUATE their
-// operand (`${x@P}`, `${!x}`, a non-literal subscript or slice; bead pg2-ftneaj,
+// evaluatingExpansionFloor is the verdict for expansions that EVALUATE their operand
+// (`${x@P}`, `${!x}`, a non-literal subscript or slice; bead pg2-ftneaj; and arithmetic
+// over a variable, `$((x))`, `$[x]`, `(( x ))`, `let`, `[[ $x -eq 1 ]]`; bead pg2-giluda,
 // cmdparse.ParsedCommand.EvaluatingExpansions). Evaluating a variable's value runs any
 // command substitution that value holds, yet the source carries no `$(...)` node for
 // foldSubstitutionScan to recurse, so a safe-commands leaf such as `echo` approved
@@ -1538,7 +1539,7 @@ func commandSubstitutionFloor(body string) hookio.RuleResult {
 func evaluatingExpansionFloor(exprs []string) hookio.RuleResult {
 	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no evaluating expansions", Module: "engine"}
 	for _, ex := range exprs {
-		result = hookio.MostRestrictive(result, commandSubstitutionFloor("parameter expansion "+ex+" evaluates its value, which can run a command substitution"))
+		result = hookio.MostRestrictive(result, commandSubstitutionFloor("expansion "+ex+" evaluates its value, which can run a command substitution"))
 	}
 	return result
 }

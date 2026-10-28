@@ -22,6 +22,22 @@ func TestEvaluatingExpansions(t *testing.T) {
 		{"in a redirection target", `echo hi > "${x@P}"`, []string{"${x@P}"}},
 		{"nested in a default word", `echo "${x:-${y@P}}"`, []string{"${y@P}"}},
 
+		// arithmetic evaluation of a variable (bead pg2-giluda)
+		{"arith variable", `echo "$((x))"`, []string{"$((x))"}},
+		{"arith expanded variable", `echo "$(($x + 1))"`, []string{"$(($x + 1))"}},
+		{"arith mixed", `echo $((1 + y))`, []string{"$((1 + y))"}},
+		{"arith assignment", `echo $((x=1))`, []string{"$((x=1))"}},
+		{"arith legacy bracket form", `echo "$[x]"`, []string{"$[x]"}},
+		{"arith subscript operand", `echo "$((a[i]))"`, []string{"$((a[i]))", "a[i]"}},
+		{"arith in a redirection target", `echo hi > "f$((x))"`, []string{"$((x))"}},
+		{"arith nested in a default word", `echo "${x:-$((y))}"`, []string{"$((y))"}},
+
+		{"arith literal", `echo "$((1+2))" $((3 * (4 - 1))) $((0x10)) $((1 ? 2 : 3))`, nil},
+		{"arith legacy literal", `echo "$[1+2]"`, nil},
+		{"arith with command substitution operands", `echo "$(( $(date +%s) - $(cat f) ))" "$(( 1 + $(( $(cat g) )) ))"`, nil},
+		{"arith command substitution plus variable", `echo "$(( $(date +%s) - n ))"`, []string{"$(( $(date +%s) - n ))"}},
+		{"arith single quoted is literal", `echo '$((x))'`, nil},
+
 		{"plain", `echo "$x" "${x}"`, nil},
 		{"default", `echo "${x:-d}" "${x:=d}" "${x:+d}"`, nil},
 		{"strip replace length case", `echo "${x#p}" "${x%s}" "${x/a/b}" "${#x}" "${x^^}"`, nil},
@@ -38,6 +54,56 @@ func TestEvaluatingExpansions(t *testing.T) {
 				t.Fatalf("ParseShell(%q): unparseable=%v leaves=%d", tt.cmd, sp.Unparseable, len(sp.Leaves))
 			}
 			if got := sp.Leaves[0].EvaluatingExpansions; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("EvaluatingExpansions(%q) = %q, want %q", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEvaluatingExpansions_ArithmeticStatements pins the arithmetic forms that are
+// statements or `[[ ]]` clauses rather than expansions in an argument: they reach a data
+// leaf, which records the same EvaluatingExpansions (bead pg2-giluda).
+func TestEvaluatingExpansions_ArithmeticStatements(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want []string
+	}{
+		{"arithmetic command variable", `(( x ))`, []string{"(( x ))"}},
+		{"arithmetic command increment", `(( i++ ))`, []string{"(( i++ ))"}},
+		{"let variable", `let x`, []string{"let x"}},
+		{"test -eq variable", `[[ $x -eq 1 ]]`, []string{"$x -eq 1"}},
+		{"test -lt bare name", `[[ n -lt 3 ]]`, []string{"n -lt 3"}},
+		{"test -v subscript", `[[ -v a[i] ]]`, []string{"-v a[i]"}},
+		{"test -v indirect", `[[ -v $x ]]`, []string{"-v $x"}},
+
+		{"assignment-only arithmetic", `y=$((x))`, []string{"$((x))"}},
+		{"assignment-only prompt transform", `y="${x@P}"`, []string{"${x@P}"}},
+		{"leading assignment arithmetic", `FOO=$((x)) echo hi`, []string{"$((x))"}},
+		{"leading assignment prompt transform", `FOO="${x@P}" echo hi`, []string{"${x@P}"}},
+		{"subscript assignment", `a[i]=1`, []string{"a[i]=1", "a[i]=1"}},
+
+		{"assignment literal arithmetic", `y=$((1+2))`, nil},
+		{"assignment plain value", `y=$x z=${w:-d} echo hi`, nil},
+		{"literal subscript assignment", `a[1]=2`, nil},
+		{"arithmetic command literal", `(( 1 + 2 ))`, nil},
+		{"let literal", `let 1+2`, nil},
+		{"test -eq literal", `[[ 1 -eq 1 ]]`, nil},
+		{"test -v plain name", `[[ -v x ]]`, nil},
+		{"test string compare", `[[ $x == y ]]`, nil},
+		{"test file check", `[[ -f $x ]]`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sp := ParseShell(tt.cmd)
+			if sp.Unparseable {
+				t.Fatalf("ParseShell(%q) unparseable", tt.cmd)
+			}
+			var got []string
+			for _, l := range sp.Leaves {
+				got = append(got, l.EvaluatingExpansions...)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("EvaluatingExpansions(%q) = %q, want %q", tt.cmd, got, tt.want)
 			}
 		})

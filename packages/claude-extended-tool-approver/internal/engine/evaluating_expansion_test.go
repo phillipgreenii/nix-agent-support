@@ -53,6 +53,45 @@ func TestEvaluatingParameterExpansions(t *testing.T) {
 		{"variable slice offset", `echo "${x:n}"`, hookio.Reject, denied},
 		{"variable slice length", `echo "${x:0:n}"`, hookio.Reject, denied},
 
+		// --- arithmetic expansion of a variable (bead pg2-giluda) ---
+		// x='a[$(touch /nonexistent-dir/x)]' makes `$((x))` run the substitution held in
+		// x's value; the harmless payload is only ever PARSED here, never run.
+		{"arith the bead's case", `x='a[$(touch /nonexistent-dir/x)]'; echo "$((x))"`, hookio.Reject, denied},
+		{"arith variable alone", `echo "$((x))"`, hookio.Reject, denied},
+		{"arith expanded variable", `echo "$(($x + 1))"`, hookio.Reject, denied},
+		{"arith unquoted", `echo $((x))`, hookio.Reject, denied},
+		{"arith legacy bracket form", `echo "$[x]"`, hookio.Reject, denied},
+		{"arith on another safe-commands leaf", `ls "$((x))"`, hookio.Reject, denied},
+		{"arith nested in a safe substitution", `echo "$(echo "$((x))")"`, hookio.Reject, denied},
+		{"arith in a redirection-only leaf", `> "f$((x))"`, hookio.Reject, denied},
+		{"arith in a for word list", `for f in "$((x))"; do echo hi; done`, hookio.Reject, denied},
+		{"arith substitution plus a variable", `echo "$(( $(date +%s) - n ))"`, hookio.Reject, denied},
+		{"arith in an unquoted heredoc body", "cat <<EOF\n$((x))\nEOF", hookio.Reject, denied},
+		{"arith in an unquoted heredoc file write", "cat > /tmp/zr-x/plan.md <<EOF\n$((x))\nEOF", hookio.Reject, denied},
+		{"arithmetic command on a variable", `(( x ))`, hookio.Reject, denied},
+		{"let on a variable", `let x`, hookio.Reject, denied},
+		{"test -eq on a variable", `[[ $x -eq 1 ]]`, hookio.Reject, denied},
+		{"test -v with a subscript", `[[ -v a[i] ]]`, hookio.Reject, denied},
+
+		// --- assignments evaluate their value too (bead pg2-giluda) ---
+		{"assignment-only arith", `y=$((x))`, hookio.Reject, denied},
+		{"assignment then echo", `x='a[$(touch /nonexistent-dir/x)]'; y=$((x)); echo "$y"`, hookio.Reject, denied},
+		{"leading assignment arith", `FOO=$((x)) echo hi`, hookio.Reject, denied},
+		{"assignment-only @P", `y="${x@P}"`, hookio.Reject, denied},
+		{"leading assignment @P", `FOO="${x@P}" echo hi`, hookio.Reject, denied},
+		{"subscript assignment", `a[$i]=1`, hookio.Reject, denied},
+		{"literal assignment then echo", `y=$((1+2)); echo "$y"`, hookio.Approve, ""},
+		{"plain leading assignment", `FOO=bar echo hi`, hookio.Approve, ""},
+
+		// --- plain literal arithmetic keeps approving ---
+		{"arith literal sum", `echo "$((1+2))"`, hookio.Approve, ""},
+		{"arith literal nested parens", `echo $((3 * (4 - 1)))`, hookio.Approve, ""},
+		{"arith literal hex", `echo $((0x10))`, hookio.Approve, ""},
+		{"arith literal legacy form", `echo "$[1+2]"`, hookio.Approve, ""},
+		{"arith of safe command substitutions only", `echo "$(( $(date +%s) - $(date +%s) ))"`, hookio.Approve, ""},
+		{"arith inside single quotes is literal", `echo '$((x))'`, hookio.Approve, ""},
+		{"arith inside a quoted heredoc is literal", "cat > /tmp/zr-x/plan.md <<'EOF'\n$((x))\nEOF", hookio.Approve, ""},
+
 		// --- plain expansions keep approving ---
 		{"plain braces", `echo "${x}"`, hookio.Approve, ""},
 		{"plain bare", `echo "$x"`, hookio.Approve, ""},

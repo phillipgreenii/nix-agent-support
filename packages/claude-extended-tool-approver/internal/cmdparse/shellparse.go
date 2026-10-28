@@ -3751,7 +3751,13 @@ func unmodeledParamExp(v *syntax.ParamExp) string {
 //     form `a[$(cmd)]` evaluates its subscript;
 //   - `${a[i]}`, `${#a[i]}` and `${x:off:len}` evaluate their index / offset / length as
 //     an ARITHMETIC expression, and arithmetic evaluation of a variable name evaluates
-//     that variable's value in turn.
+//     that variable's value in turn;
+//   - arithmetic expansion `$((x))`, the legacy `$[x]`, `(( x ))`, `let x`, the
+//     `-eq`/`-lt`/... operators of `[[ ]]` and `[[ -v a[i] ]]` do the same to a bare
+//     variable name or an expanded variable (bead pg2-giluda): x='a[$(cmd)]'; echo
+//     "$((x))" runs cmd, because the value is evaluated and its array subscript is
+//     command-substituted. Only an arithmetic expression made of integer literals and
+//     operators (`$((1+2))`, `$((0x10))`) is inert.
 //
 // None of these hold a `$(`...`)` node the substitution finder could see, so
 // substitutionsOf never recursed them and a safe-commands leaf such as `echo` approved
@@ -3759,8 +3765,9 @@ func unmodeledParamExp(v *syntax.ParamExp) string {
 // EvaluatingExpansions (and Heredoc.EvaluatingExpansions for an unquoted body) so the
 // engine can fail closed exactly as it does for a command substitution it cannot clear.
 //
-// Plain `${x}`, `$x`, `${x:-default}`, `${x#pat}`, `${x/a/b}`, `${#x}`, a slice or index
-// made only of numeric literals, and the inert `@` transforms are NOT recorded.
+// Plain `${x}`, `$x`, `${x:-default}`, `${x#pat}`, `${x/a/b}`, `${#x}`, a slice, index or
+// arithmetic expansion made only of numeric literals, and the inert `@` transforms are
+// NOT recorded.
 
 // inertTransformOps are the `${x@OP}` operators that only reformat the value (quote,
 // escape-expand, case-convert, describe attributes or the declare form). Any other
@@ -3771,7 +3778,12 @@ var inertTransformOps = map[string]bool{
 	"L": true, "U": true, "u": true,
 }
 
-var digitsOnly = regexp.MustCompile(`^[0-9]+$`)
+// numericLiteral matches a decimal or hexadecimal integer literal: evaluating one never
+// reaches a variable's value.
+var numericLiteral = regexp.MustCompile(`^([0-9]+|0[xX][0-9a-fA-F]+)$`)
+
+// identifierLiteral matches a plain variable name, the one inert operand of `[[ -v x ]]`.
+var identifierLiteral = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // paramExpEvaluates reports whether v evaluates its operand rather than substituting it.
 func paramExpEvaluates(v *syntax.ParamExp) bool {
@@ -3804,8 +3816,19 @@ func isAllElementsIndex(idx syntax.ArithmExpr) bool {
 }
 
 // isLiteralArith reports whether e is absent or an arithmetic expression built only
-// from decimal literals and operators, so evaluating it cannot reach a variable's value.
-func isLiteralArith(e syntax.ArithmExpr) bool {
+// from integer literals and operators, so evaluating it cannot reach a variable's value.
+func isLiteralArith(e syntax.ArithmExpr) bool { return arithHasOnly(e, false) }
+
+// isInertArithExpansion is isLiteralArith for the body of an arithmetic EXPANSION or
+// command (`$(( ))`, `(( ))`, `let`): it additionally accepts a command substitution and
+// a nested arithmetic expansion as operands. A command substitution is judged by the
+// engine's own recursion over its body (it is a Substitution of the leaf), so it does not
+// make the expression a variable lookup; this keeps `$(( $(date +%s) - $(cat f) ))`
+// approvable, as the tc-ltr4 report requires. What such a substitution OUTPUTS being
+// re-evaluated as an expression is NOT modeled (see the pg2-giluda notes in the tests).
+func isInertArithExpansion(e syntax.ArithmExpr) bool { return arithHasOnly(e, true) }
+
+func arithHasOnly(e syntax.ArithmExpr, allowSubst bool) bool {
 	if e == nil {
 		return true
 	}
@@ -3816,8 +3839,20 @@ func isLiteralArith(e syntax.ArithmExpr) bool {
 			return false
 		case *syntax.Word:
 			for _, p := range v.Parts {
-				lit, ok := p.(*syntax.Lit)
-				if !ok || !digitsOnly.MatchString(lit.Value) {
+				switch part := p.(type) {
+				case *syntax.Lit:
+					if !numericLiteral.MatchString(part.Value) {
+						literal = false
+					}
+				case *syntax.CmdSubst:
+					if !allowSubst {
+						literal = false
+					}
+				case *syntax.ArithmExp:
+					if !allowSubst || !arithHasOnly(part.X, true) {
+						literal = false
+					}
+				default:
 					literal = false
 				}
 			}
@@ -3851,12 +3886,34 @@ func (f *evaluatingExpansionVisitor) visit(n syntax.Node) bool {
 		return false
 	case *syntax.ParamExp:
 		if paramExpEvaluates(v) {
-			lo, hi := int(v.Pos().Offset()), int(v.End().Offset())
-			if lo >= 0 && hi > lo && hi <= len(f.src) {
-				f.found = append(f.found, f.src[lo:hi])
-			} else {
-				f.found = append(f.found, "${...}") // extent unknown: still record it
+			f.record(v)
+		}
+	case *syntax.ArithmExp: // `$((x))` and the legacy `$[x]`
+		if !isInertArithExpansion(v.X) {
+			f.record(v)
+		}
+	case *syntax.ArithmCmd: // `(( x ))`
+		if !isInertArithExpansion(v.X) {
+			f.record(v)
+		}
+	case *syntax.LetClause: // `let x`
+		for _, e := range v.Exprs {
+			if !isInertArithExpansion(e) {
+				f.record(v)
+				break
 			}
+		}
+	case *syntax.Assign: // `a[i]=1` evaluates the subscript as arithmetic
+		if v.Index != nil && !isLiteralArith(v.Index) {
+			f.record(v)
+		}
+	case *syntax.BinaryTest: // `[[ $x -eq 1 ]]` evaluates both operands arithmetically
+		if arithmeticTestOps[v.Op] && (!isLiteralTestOperand(v.X) || !isLiteralTestOperand(v.Y)) {
+			f.record(v)
+		}
+	case *syntax.UnaryTest: // `[[ -v a[$i] ]]` evaluates the subscript
+		if (v.Op == syntax.TsVarSet || v.Op == syntax.TsRefVar) && !isPlainNameOperand(v.X) {
+			f.record(v)
 		}
 	case *syntax.Redirect:
 		if f.skipHeredocBodies {
@@ -3872,6 +3929,36 @@ func (f *evaluatingExpansionVisitor) visit(n syntax.Node) bool {
 	return true
 }
 
+// record appends n's source text (or a placeholder when its extent is unknown).
+func (f *evaluatingExpansionVisitor) record(n syntax.Node) {
+	lo, hi := int(n.Pos().Offset()), int(n.End().Offset())
+	if lo >= 0 && hi > lo && hi <= len(f.src) {
+		f.found = append(f.found, f.src[lo:hi])
+	} else {
+		f.found = append(f.found, "${...}") // extent unknown: still record it
+	}
+}
+
+// arithmeticTestOps are the `[[ ]]` binary operators that evaluate both operands as
+// arithmetic expressions.
+var arithmeticTestOps = map[syntax.BinTestOperator]bool{
+	syntax.TsEql: true, syntax.TsNeq: true, syntax.TsLeq: true,
+	syntax.TsGeq: true, syntax.TsLss: true, syntax.TsGtr: true,
+}
+
+// isLiteralTestOperand reports whether a `[[ ]]` operand is a bare integer literal.
+func isLiteralTestOperand(e syntax.TestExpr) bool {
+	w, ok := e.(*syntax.Word)
+	return ok && w != nil && isLiteralArith(w)
+}
+
+// isPlainNameOperand reports whether a `[[ -v ]]` operand is a plain variable name
+// (no subscript, no expansion).
+func isPlainNameOperand(e syntax.TestExpr) bool {
+	w, ok := e.(*syntax.Word)
+	return ok && w != nil && identifierLiteral.MatchString(w.Lit())
+}
+
 // evaluatingExpansionsOf returns the source text of each evaluating parameter
 // expansion reachable from nodes, in source order.
 func (lw *lowering) evaluatingExpansionsOf(nodes []syntax.Node, skipHeredocBodies bool) []string {
@@ -3884,13 +3971,16 @@ func (lw *lowering) evaluatingExpansionsOf(nodes []syntax.Node, skipHeredocBodie
 	return f.found
 }
 
-// callEvaluatingExpansions is callSubstitutions' counterpart: a CallExpr's args and
-// redirections, excluding leading assignments (judged by the env-var rule).
+// callEvaluatingExpansions is callSubstitutions' counterpart: a CallExpr's args,
+// redirections AND leading assignments. Unlike substitutions (judged for assignments by
+// the env-var rule), an assignment's value is expanded and evaluated by bash itself, so
+// `y=$((x))` or `FOO=$((x)) echo` runs a command substitution held in x's value even
+// when the command word is safe or absent (bead pg2-giluda).
 func (lw *lowering) callEvaluatingExpansions(cmd *syntax.CallExpr, redirs []*syntax.Redirect) []string {
-	if len(cmd.Assigns) > 0 && len(cmd.Args) == 0 {
-		return nil
+	nodes := make([]syntax.Node, 0, len(cmd.Assigns)+len(cmd.Args)+len(redirs))
+	for _, a := range cmd.Assigns {
+		nodes = append(nodes, a)
 	}
-	nodes := make([]syntax.Node, 0, len(cmd.Args)+len(redirs))
 	for _, w := range cmd.Args {
 		nodes = append(nodes, w)
 	}
