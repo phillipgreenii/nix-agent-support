@@ -273,7 +273,7 @@ const (
 	// router's own cadence runs on (discover.cadenceDue), and it does not advance
 	// while the host sleeps, so the persistent-failure alert reads "N periods of
 	// awake time without a success", never wall-clock time a sleeping laptop
-	// spent not running anything. A restart resets it to 0 (bead pg2-ez292,
+	// spent not running anything. A restart continues it from the persisted success time (pg2-yagdb2) rather than resetting to 0 (bead pg2-ez292,
 	// DEC-OBS-4's host-sleep amendment).
 	MetricSourceLastSuccessAge = "pg_router_source_last_success_age"
 	// MetricSourceExpectedInterval is the source's configured period in
@@ -528,6 +528,11 @@ type Emitter struct {
 	// age back into wall-clock time, which a host sleep inflates.
 	srcMu          sync.Mutex
 	srcLastSuccess map[string]time.Time
+	// srcStatePath, when set, is where srcLastSuccess is persisted (WithSourceStateFile).
+	srcStatePath string
+	// srcPersisted holds only REAL success or pause times (restored or recorded), never a
+	// process-start seed, so a source that never succeeded is not given a fake success on restart.
+	srcPersisted map[string]time.Time
 	// progMu guards progress, the per-role progress state behind the three
 	// role-progress gauges (nil unless WithRoleProgress was given). Keys are role
 	// names, bounded by the config.
@@ -607,22 +612,23 @@ var (
 type Option func(*options)
 
 type options struct {
-	queueLogBytes func() int64
-	logLimits     func() eventqueue.LimitStatus
-	activeGates   func() []eventqueue.Gate
-	isLive        func() bool
-	now           func() time.Time
-	poolDir       string
-	poolTTL       time.Duration
-	pullSources   map[string]time.Duration
-	awakeSince    func(time.Time) time.Duration
-	queueAges     func() map[string]time.Duration
-	listenerBusy  func() map[string]int
-	roleAvail     func() map[string]bool
-	queueReady    func() bool
-	progressRoles []string
-	progressOn    bool
-	busySources   func() []string
+	queueLogBytes   func() int64
+	logLimits       func() eventqueue.LimitStatus
+	activeGates     func() []eventqueue.Gate
+	isLive          func() bool
+	now             func() time.Time
+	poolDir         string
+	poolTTL         time.Duration
+	pullSources     map[string]time.Duration
+	sourceStatePath string
+	awakeSince      func(time.Time) time.Duration
+	queueAges       func() map[string]time.Duration
+	listenerBusy    func() map[string]int
+	roleAvail       func() map[string]bool
+	queueReady      func() bool
+	progressRoles   []string
+	progressOn      bool
+	busySources     func() []string
 }
 
 // WithQueueReady registers ready, the answer to "does the queue the gauges below read
@@ -690,8 +696,8 @@ func WithRoleProgress(roles ...string) Option {
 // its expected interval. The caller passes only enabled, non-excluded PULL
 // sources that have a period (bead pg2-tv11a); an entry with a non-positive
 // interval is skipped. Every registered source's last-success time starts at
-// the Emitter's clock at construction (process start), NOT zero, so a restart
-// resets the clock (and the age gauge starts at 0). Without this option the
+// the Emitter's clock at construction (process start), NOT zero, unless WithSourceStateFile restores
+// a persisted time (pg2-yagdb2). Without this option the
 // gauges are not registered.
 func WithPullSources(sources map[string]time.Duration) Option {
 	return func(o *options) { o.pullSources = sources }
@@ -994,7 +1000,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		return nil, err
 	}
 	if len(cfg.pullSources) > 0 {
-		if err := e.registerSourceGauges(m, cfg.pullSources, cfg.now()); err != nil {
+		if err := e.registerSourceGauges(m, cfg.pullSources, cfg.now(), cfg.sourceStatePath); err != nil {
 			return nil, err
 		}
 	}
@@ -1791,7 +1797,7 @@ func isNetworkFailure(msg string) bool {
 // registerSourceGauges seeds srcLastSuccess with start for every source whose
 // interval is positive and registers the three observable gauges reading it
 // (last-success timestamp, last-success age, expected interval).
-func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.Duration, start time.Time) error {
+func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.Duration, start time.Time, statePath string) error {
 	intervals := make(map[string]time.Duration, len(sources))
 	e.srcLastSuccess = make(map[string]time.Time, len(sources))
 	for name, iv := range sources {
@@ -1800,6 +1806,16 @@ func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.D
 		}
 		intervals[name] = iv
 		e.srcLastSuccess[name] = start
+	}
+	if statePath != "" {
+		e.srcStatePath = statePath
+		e.srcPersisted = map[string]time.Time{}
+		for name, at := range loadSourceState(statePath) {
+			if _, ok := e.srcLastSuccess[name]; ok && !at.IsZero() && !at.After(start) {
+				e.srcLastSuccess[name] = at
+				e.srcPersisted[name] = at
+			}
+		}
 	}
 	if _, err := m.Float64ObservableGauge(
 		MetricSourceLastSuccess,
@@ -1869,7 +1885,12 @@ func (e *Emitter) advanceSource(source string) {
 	}
 	// e.now() keeps the monotonic reading the age gauge subtracts (see
 	// srcLastSuccess): do not strip it here.
-	e.srcLastSuccess[source] = e.now()
+	now := e.now()
+	e.srcLastSuccess[source] = now
+	if e.srcPersisted != nil {
+		e.srcPersisted[source] = now
+	}
+	e.saveSourceStateLocked()
 }
 
 // sourceDurationBuckets are the pg_router_source_duration_seconds boundaries:

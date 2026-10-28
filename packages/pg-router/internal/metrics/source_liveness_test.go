@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -319,5 +320,71 @@ func TestSourceLiveness_AgeUsesTheMonotonicReadingByDefault(t *testing.T) {
 	h := &sourceLivenessHarness{emitter: e, reader: reader}
 	if age := h.floatGauge(t, MetricSourceLastSuccessAge)["a"]; age < 0.03 || age > 60 {
 		t.Errorf("age = %v s after a 30ms real sleep, want a small positive reading of the elapsed time", age)
+	}
+}
+
+// A restart must continue the age from the persisted last success, not re-seed
+// it at process start (bead pg2-yagdb2).
+func TestSourceLiveness_RestartContinuesAgeFromPersistedSuccess(t *testing.T) {
+	path := t.TempDir() + "/state/" + SourceStateFileName
+	sources := map[string]time.Duration{"thread-me": 30 * time.Minute, "pr-team": time.Minute}
+	build := func(clk *mockClock) *sourceLivenessHarness {
+		reader := sdkmetric.NewManualReader()
+		mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+		e, err := New(mp, func() map[string]int { return nil }, WithClock(clk.now), WithPullSources(sources), WithSourceStateFile(path))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return &sourceLivenessHarness{emitter: e, reader: reader, clk: clk}
+	}
+	start := time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+	h1 := build(&mockClock{t: start})
+	h1.clk.t = start.Add(17 * time.Minute)
+	h1.emitter.OnSourceSucceeded("thread-me") // last real success at 10:17
+	h1.clk.t = start.Add(30 * time.Minute)    // later passes fail: no further call
+
+	// Restart at 11:32: the age must continue from 10:17, not restart at 0.
+	restart := start.Add(92 * time.Minute)
+	h2 := build(&mockClock{t: restart})
+	age := h2.floatGauge(t, MetricSourceLastSuccessAge)
+	if want := (75 * time.Minute).Seconds(); age["thread-me"] != want {
+		t.Errorf("age{thread-me} after restart = %v, want %v (continued from 10:17)", age["thread-me"], want)
+	}
+	if got := h2.floatGauge(t, MetricSourceLastSuccess)["thread-me"]; got != unix(start.Add(17*time.Minute)) {
+		t.Errorf("last-success{thread-me} = %v, want the persisted 10:17", got)
+	}
+	// A source with no persisted success starts at process start, as before.
+	if age["pr-team"] != 0 {
+		t.Errorf("age{pr-team} = %v, want 0 (never succeeded, seeded at start)", age["pr-team"])
+	}
+	// A success after the restart advances and persists again.
+	h2.emitter.OnSourceSucceeded("thread-me")
+	h3 := build(&mockClock{t: restart.Add(time.Minute)})
+	if a := h3.floatGauge(t, MetricSourceLastSuccessAge)["thread-me"]; a != 60 {
+		t.Errorf("age after second restart = %v, want 60", a)
+	}
+}
+
+func TestSourceLiveness_CorruptOrFutureStateFallsBackToStart(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/" + SourceStateFileName
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	for name, content := range map[string]string{
+		"corrupt": "{not json",
+		"future":  `{"s":"2026-10-28T13:00:00Z"}`,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
+		clk := &mockClock{t: now}
+		e, err := New(mp, func() map[string]int { return nil }, WithClock(clk.now),
+			WithPullSources(map[string]time.Duration{"s": time.Minute}), WithSourceStateFile(path))
+		if err != nil {
+			t.Fatalf("%s: New: %v", name, err)
+		}
+		if !e.srcLastSuccess["s"].Equal(now) {
+			t.Errorf("%s: last success = %v, want process start %v", name, e.srcLastSuccess["s"], now)
+		}
 	}
 }

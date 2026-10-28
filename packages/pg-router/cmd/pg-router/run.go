@@ -331,6 +331,11 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
 	// period, last-success initialised to now (process start).
 	metricsOpts = append(metricsOpts, metrics.WithPullSources(pullSourceIntervals(cfg)))
+	if runMode == core.RunModeLongRunning {
+		// Persist each source's last success under the state dir so a restart
+		// continues the age instead of re-seeding it (bead pg2-yagdb2).
+		metricsOpts = append(metricsOpts, metrics.WithSourceStateFile(filepath.Join(cfg.LogDir, metrics.SourceStateFileName)))
+	}
 	// pg_router_busy{kind,name} (bead pg2-8ij5o): a source is busy while a fetch of
 	// it is in flight, read from the same activityObs the status reply's sources[]
 	// read, so the metric and status agree. activityObs is constructed here, ahead

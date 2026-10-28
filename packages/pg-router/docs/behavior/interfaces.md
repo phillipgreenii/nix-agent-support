@@ -609,8 +609,8 @@ sequenceDiagram
     not excluded from this run, and has a period; a push source, a disabled source and an excluded
     source have no series. A **failed** pass never advances it, but a pass the core **deliberately
     skipped** — an active gate blocking the source, or the log-size limit halting the polled emitters
-    (`INV-EVT-1`) — advances it exactly like a success, because a pause is not a failure. It starts at
-    **process start**, never at zero, so a restart resets it (`DEC-OBS-4`). It is a **wall-clock**
+    (`INV-EVT-1`) — advances it exactly like a success, because a pause is not a failure. It is restored on start from a file in the state dir, written on every success or pause, so a restart
+    continues it (`pg2-yagdb2`); a source with no persisted success starts at **process start**, never at zero (`DEC-OBS-4`). It is a **wall-clock**
     reading, so it is the member for "when did this last succeed", never for "for how long has it
     not": a host that sleeps leaves the wall clock far ahead of the core's own clock;
   - **source_last_success_age** — gauge, per source (same set as above), in seconds: how long ago that
@@ -621,7 +621,7 @@ sequenceDiagram
     that slept through several periods does not make every source look silent when it wakes (the
     watcher would otherwise compute the age from the timestamp above and its own wall clock,
     `DEC-OBS-4`'s host-sleep amendment). It resets to **0** on a success or a deliberate pause, keeps
-    growing on a failure, and starts at **0** at process start, so a restart resets it;
+    growing on a failure, and continues across a restart from the persisted success time (a source with none starts at **0** at process start);
   - **source_expected_interval** — gauge, per source (same set as above): the source's configured
     period, in seconds — the base a watcher scales its "this source has gone quiet" threshold by.
     The age and this interval together let an observer tell a source that is **persistently**

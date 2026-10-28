@@ -282,10 +282,10 @@ emitters, the pass is skipped and **advances** the last-success time like a succ
 sources that have a period (a threshold or manual source with no explicit `expected_interval` has no
 cadence to alert against); none for disabled, excluded or push sources.
 
-**Restart semantics.** The timestamp starts at **process start**, not zero, so a restart resets the
-clock: a source that keeps failing across a restart re-alerts only after the threshold plus `for`
-following that restart. This is accepted because the failure counter also resets on restart and a
-restart is itself a strong recovery attempt.
+**Restart semantics (amended, bead `pg2-yagdb2`).** The last-success time is persisted in the state dir
+(`source-last-success.json`) and restored on start, so a restart continues the age instead of re-seeding
+it: it neither hides a source that was already failing nor delays its alert by a further threshold. A
+source with no persisted success starts at **process start**, not zero. The alert rule is unchanged.
 
 **No-data.** The series exist from daemon start, so the rule keeps `noDataState: OK`: absence means
 the daemon (or its metrics endpoint) is down, which `pg-router-liveness-down` covers.
@@ -317,8 +317,8 @@ when a success happened and for dashboards; the alert no longer reads it. Pollin
   the length of the sleep (`TestHostSleepDelaysButDoesNotHideARealOutage`).
 - A dark wake (a few seconds of CPU about every 15 minutes with the lid closed) counts as awake time, as
   it does for the router's own cadence.
-- A pause still resets the age and a failure still does not. A restart resets it to 0, so the restart
-  semantics above are unchanged except that threshold plus `for` is measured in awake time.
+- A pause still resets the age and a failure still does not. A restart continues it from the persisted success
+  (see Restart semantics above); a restored time is measured on the wall clock until the next success.
 - No-data is unchanged, with one transition effect: a router build that predates the gauge exports no age
   series, so the rule reads as no data (OK) until the new build runs. It is not firing then, and it is
   not protecting either.
