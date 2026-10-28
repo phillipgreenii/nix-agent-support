@@ -142,6 +142,11 @@ func (c *CmuxSignaler) Detect(pid int) bool {
 	return ok
 }
 
+// DetectIsHostClassification marks Detect as the very ancestry predicate that
+// classifies a session's terminal host as "cmux" (see hostClassifier), so a
+// cached "cmux" host already proves Detect and the walk can be skipped.
+func (c *CmuxSignaler) DetectIsHostClassification() bool { return true }
+
 // FindCmuxServerAncestor walks the process tree from targetPID upward,
 // returning the PID of the first ancestor whose process name (comm) is
 // "cmux". Returns (0, false) if no such ancestor exists. Used by the

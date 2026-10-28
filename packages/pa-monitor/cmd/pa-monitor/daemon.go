@@ -199,6 +199,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	providerCache.FetchTerminalHost = func(pid int) string {
 		return signallayer.DetectHost(signallayer.DefaultSignalers(), pid)
 	}
+	providerCache.FetchParentPID = signallayer.ParentPID
 	providerCache.FetchRepoLabel = detectors.RepoLabelFor
 
 	opts := daemon.RunOptions{

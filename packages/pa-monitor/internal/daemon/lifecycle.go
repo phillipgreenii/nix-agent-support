@@ -678,8 +678,8 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		anyUnattemptedNudgeableDisrupt := false
 		if wmCaffeinate != nil && wmCaffeinate.AutoResumeEnabled() {
 			// Uses the FULL opts.NudgerSignalers (NOT the cmux-stripped
-			// delivery slice): D5 only calls ResolveSignaler→Detect, never
-			// Send, so keeping CmuxSignaler here lets a cmux-hosted disrupt
+			// delivery slice): D5 only resolves a signaler (host-aware, via the
+			// session's cached terminal host), never Send, so keeping CmuxSignaler here lets a cmux-hosted disrupt
 			// hold the Mac awake without the daemon ever exec'ing cmux
 			// (ADR 0022). Do not swap this for the delivery slice.
 			anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate, opts.NudgerSignalers)
@@ -832,6 +832,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if directiveTemplate == "" {
 				directiveTemplate = nudger.DefaultDirectiveTemplate
 			}
+			// Per-tick surface resolver: resolves each pid through the
+			// terminal host the poller already cached on the tree, so a
+			// cmux-only session never pays the tmux ancestry walk.
+			surf := newSurfaceResolver(opts.NudgerSignalers, tree)
 			tctx := nudger.TickContext{
 				Now:               time.Now(),
 				Tree:              tree,
@@ -853,14 +857,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				// so a cmux-hosted target resolves without the daemon exec'ing
 				// cmux (ADR 0022). Deeper fix complementing pg2-2o0p7's
 				// dispatcher-side suppress-and-drop backstop.
-				HasSurface: func(pid int) bool {
-					return signal.ResolveSignaler(opts.NudgerSignalers, pid) != nil
-				},
+				HasSurface: surf.HasSurface,
 				// Unsubmitted-input guard (bead tc-m08w3, safety-critical): see
 				// signal.HasUnsubmittedInput's doc for the fail-closed rationale.
-				HasUnsubmittedInput: func(pid int) bool {
-					return signal.HasUnsubmittedInput(opts.NudgerSignalers, pid)
-				},
+				HasUnsubmittedInput: surf.HasUnsubmittedInput,
 			}
 			n.Reconcile(tctx)
 			// Annotate sessions BEFORE dispatch so clients see what's queued.
@@ -977,7 +977,7 @@ func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, si
 			if le.FromSubagent {
 				continue
 			}
-			if signal.ResolveSignaler(signalers, sv.PID) == nil {
+			if signal.ResolveSignalerForHost(signalers, sv.TerminalHost, sv.PID) == nil {
 				continue
 			}
 			attempt := wm.SessionWatermark(sv.SessionID).LastDisruptAttemptAt

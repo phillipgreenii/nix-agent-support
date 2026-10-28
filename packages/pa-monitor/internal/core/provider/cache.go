@@ -37,21 +37,39 @@ type Cache struct {
 	FetchGitBranch    func(cwd string) (branch, headPath string, ok bool)
 	FetchSubshell     func(pid int) (int, error)
 	FetchTerminalHost func(pid int) string
-	FetchRepoLabel    func(cwd string) (string, bool)
-	PRBackend         func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
-	PRPrune           func(live map[string]bool)
+	// FetchParentPID reports pid's parent for the unknown-host backoff reset
+	// (nil = no parent check; the backoff then resets only on a new session or
+	// a changed pid).
+	FetchParentPID func(pid int) (ppid int, ok bool)
+	FetchRepoLabel func(cwd string) (string, bool)
+	PRBackend      func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
+	PRPrune        func(live map[string]bool)
 }
+
+// UnknownProbeMin and UnknownProbeMax bound the exponential backoff between
+// re-probes of a session whose terminal host classified as "unknown".
+const (
+	UnknownProbeMin = 5 * time.Second
+	UnknownProbeMax = 60 * time.Second
+)
 
 // sessionNode holds the PID/session-lifecycle lookups for one session-id.
 type sessionNode struct {
 	pid          int
 	env          map[string]string // cached-while-alive (nil until first alive fetch)
 	envFetched   bool
-	terminalHost string // "" = not yet detected
-	subPath      string
-	subMtime     time.Time
-	subCount     int
-	subValid     bool
+	terminalHost string // "" = not yet detected; "unknown" = last probe failed
+	// Unknown-host backoff (see TerminalHost). unknownWindow is the wait that
+	// follows the last failed probe (0 = never probed); unknownNext is when the
+	// next probe is due; unknownPPID is the parent seen at that probe.
+	unknownWindow time.Duration
+	unknownNext   time.Time
+	unknownPPID   int
+	unknownPPIDOK bool
+	subPath       string
+	subMtime      time.Time
+	subCount      int
+	subValid      bool
 }
 
 // cwdNode holds the workspace-lifecycle lookups for one cwd.
