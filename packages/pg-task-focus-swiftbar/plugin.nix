@@ -21,7 +21,7 @@ let
     "xbar.version" = "v1.0";
     "xbar.author" = "phillipgreenii";
     "xbar.desc" =
-      "pg-task-focus in the menu bar: the active task with a coarse clock (wide) or one colour-coded glyph (narrow, a Title row in the dropdown switches), overtime, paused cycles with a resume or switch action, the next due task and a READ-ONLY marker when the daemon cannot write. Streams from `pg-task-focus status --watch`";
+      "pg-task-focus in the menu bar: the active task with a coarse clock (wide) or one colour-coded glyph (narrow), or auto, which follows the primary display (a Title row in the dropdown cycles wide, narrow, auto), overtime, paused cycles with a resume or switch action, the next due task and a READ-ONLY marker when the daemon cannot write. Streams from `pg-task-focus status --watch`";
     "xbar.dependencies" = "pg-task-focus";
     "swiftbar.type" = "streamable";
     "swiftbar.hideRunInTerminal" = "true";

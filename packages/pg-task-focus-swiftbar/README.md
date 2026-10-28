@@ -48,14 +48,20 @@ Overtime uses the same buckets with a plus sign (`+5m`, `+<40s`). The dropdown r
 value the title already shows, so the time left appears once: in the title (wide) or in the first
 dropdown row (narrow).
 
-## Wide and narrow
+## Wide, narrow and auto
 
-The title has two widths, switched from the dropdown. The default is wide.
+The title has two widths, and a setting with a third value, `auto`, all switched from the dropdown.
+The default is wide.
 
 | Width    | Title                                                | First dropdown row                  |
 | -------- | ---------------------------------------------------- | ----------------------------------- |
 | `wide`   | The active task and its coarse clock, in its colour. | Not a repeat of the title.          |
 | `narrow` | One colour-coded glyph, for the laptop-only notch.   | The text the wide title would show. |
+
+`auto` is a setting value, not a third title. It renders as wide or narrow, whichever the display
+class file names: the primary display has room for the wide title (wide) or has not (narrow, which is
+also what a notched primary display gets). The dropdown follows that resolved width exactly as it
+follows a setting of that width.
 
 The narrow glyph is a focus ring, and the colour is the state. The colour of a state is the same in
 both widths:
@@ -69,31 +75,58 @@ both widths:
 | unreachable (no daemon)   | `⚠`          | orange `#e07000` |
 | read-only                 | `⊘`          | red `#cc3333`    |
 
-The last block of every dropdown, in every state and both widths, is the Title row
-(`Title: wide (click for narrow)`) followed by Refresh. Clicking the Title row runs the renderer
-itself with `--set-title-width` and the other width.
+The last block of every dropdown, in every state and every mode, is the Title row followed by
+Refresh. The Title row shows the current mode and the action, and cycles wide, narrow, auto, wide:
+
+| Setting  | Title row text                                                       |
+| -------- | -------------------------------------------------------------------- |
+| `wide`   | `Title: wide (click for narrow)`                                     |
+| `narrow` | `Title: narrow (click for auto)`                                     |
+| `auto`   | `Title: auto, <width> now (click for wide)`, e.g. `auto, narrow now` |
+
+Clicking the Title row runs the renderer itself with `--set-title-width` and the next value.
 
 ```mermaid
 flowchart LR
   F["title-width state file"] --> R{"Renderer reads width on every frame"}
   R -->|"wide, or missing, empty, unrecognised"| W["Wide title, then dropdown"]
   R -->|"narrow"| N["One-glyph title, then dropdown with the detail first"]
+  R -->|"auto"| C{"Renderer reads the class file"}
+  C -->|"wide, or missing, empty, unrecognised"| W
+  C -->|"narrow"| N
   W --> T["Title row: click for narrow"]
-  N --> T2["Title row: click for wide"]
+  N --> T2["Title row: click for auto"]
   T -->|"writes narrow atomically"| F
-  T2 -->|"writes wide atomically"| F
+  T2 -->|"writes auto atomically"| F
+  A["Title row in auto: click for wide"] -->|"writes wide atomically"| F
 ```
 
 ### The state file
 
 The setting is the file `$XDG_STATE_HOME/pg-task-focus-swiftbar/title-width` (`XDG_STATE_HOME`
-defaults to `~/.local/state`). It holds the word `wide` or `narrow` and a newline. A missing, empty,
-unreadable or unrecognised value reads as wide, and a read problem is never an error in the menu
-bar. The renderer is a long-lived process, so unlike a plugin SwiftBar re-runs on every refresh, it
-re-reads the file on every frame and once a second while idle: a click shows within about a second
-and needs no restart.
+defaults to `~/.local/state`). It holds the word `wide`, `narrow` or `auto` and a newline. A
+missing, empty, unreadable or unrecognised value reads as wide, and a read problem is never an error
+in the menu bar. The renderer is a long-lived process, so unlike a plugin SwiftBar re-runs on every
+refresh, it re-reads the file on every frame and once a second while idle: a click shows within
+about a second and needs no restart.
 
-`pg-task-focus-swiftbar --set-title-width wide|narrow` writes the file (a temporary file in the same
+### The class file (auto)
+
+In `auto` the renderer never classifies the display. A machine-wide display-class helper writes
+`<state base>/display-class/class`, one word (`wide` or `narrow`) and a newline, and this renderer only
+reads it, on every frame and tick, with shell builtins. The state base is `$XDG_STATE_HOME` when it is
+non-empty and absolute, else `$HOME/.local/state` (the setting file above keeps its older
+`${XDG_STATE_HOME:-...}` resolution, so for a relative `XDG_STATE_HOME` the two resolve differently;
+that is accepted). A missing, empty or unrecognised class file reads as wide, even on a notched
+display, so an unreadable file never hides information; the consequence is that with no helper
+running, `auto` shows the wide title until narrow is picked.
+
+The renderer redraws when the RESOLVED width changes, not when the setting word changes: in `auto`
+the setting stays `auto` while the display class flips, so comparing the word would never redraw.
+The stored setting is compared as well, only because the Title row's text names it (wide to auto with
+the class on wide leaves the width alone and still changes the row).
+
+`pg-task-focus-swiftbar --set-title-width wide|narrow|auto` writes the file (a temporary file in the same
 directory, then a rename, so a render never reads half a value), prints nothing and exits without
 rendering. It exits 2 on a missing or bad value (the existing setting stays) and 1 when the file
 cannot be written. The Nix wrapper exports `PG_TASK_FOCUS_SWIFTBAR_SELF`, the renderer's store path,
@@ -102,13 +135,13 @@ space in its name); a bare run falls back to its own path, quoted when it has wh
 
 ## Refresh rate
 
-| Moment                       | Frame                                               |
-| ---------------------------- | --------------------------------------------------- |
-| A daemon state line arrives  | Emitted at once.                                    |
-| A cycle runs                 | A tick re-renders the last state every 5 s.         |
-| No cycle runs                | A tick every 15 s, to move the "due in" countdowns. |
-| The title-width file changes | Emitted within about a second.                      |
-| The stream ends              | The unreachable frame, then a reconnect after 5 s.  |
+| Moment                                                            | Frame                                               |
+| ----------------------------------------------------------------- | --------------------------------------------------- |
+| A daemon state line arrives                                       | Emitted at once.                                    |
+| A cycle runs                                                      | A tick re-renders the last state every 5 s.         |
+| No cycle runs                                                     | A tick every 15 s, to move the "due in" countdowns. |
+| The title-width file or the class file changes the resolved width | Emitted within about a second.                      |
+| The stream ends                                                   | The unreachable frame, then a reconnect after 5 s.  |
 
 Each frame replaces the previous one in a single write behind the `~~~` separator. The separator
 syntax is the renderer's one seam (`STREAM_SEPARATOR`); it is verified against the SwiftBar 2.0.1

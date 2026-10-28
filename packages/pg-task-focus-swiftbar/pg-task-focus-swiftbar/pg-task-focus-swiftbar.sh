@@ -8,8 +8,8 @@
 # without a process per second (and without a request to the daemon). Click
 # actions in the dropdown are direct `pg-task-focus` invocations. Always exits
 # 0: a menu bar plugin must never surface a raw error (except --set-title-width,
-# which exits 2 on a bad value). The title has a wide and a narrow form, a
-# setting re-read for every frame; see --help.
+# which exits 2 on a bad value). The title has a wide and a narrow form, and a
+# setting (wide, narrow or auto) re-read for every frame; see --help.
 #
 # Design: docs/superpowers/specs/2026-10-07-pg-task-focus-design.md ("SwiftBar plugin")
 
@@ -74,18 +74,27 @@ least 5 min left shows whole minutes (`12m`, `5m`); under 5 min shows the next
 20 s step above the time left behind a `<` (`<5m` at 299 s, `<40s` at 20 s,
 `<20s` under 20 s). Overtime uses the same buckets with a `+` (`+<20s`, `+7m`).
 
-The title has two widths, a setting the Title row of the dropdown switches:
+The title has two widths and a setting with three values, which the Title row of
+the dropdown cycles (wide, narrow, auto, wide):
   wide    (the default) the title described above.
   narrow  a ONE-glyph title coloured by state (green filled ring running, red
           filled ring overtime, amber ring paused, grey empty ring idle or a
           next task, orange warning unreachable, red slashed circle read-only);
           the detail the wide title would show is the first row of the dropdown.
+  auto    follows the PRIMARY display: it renders wide or narrow, whichever the
+          machine-wide class file names (written by the display-class helper,
+          never by this plugin). A missing, empty or unrecognised class file
+          reads as wide.
 Either way the colour of a state is the same, the Title row and Refresh end the
-dropdown, and the Title row shows the current width and the one to switch to.
+dropdown, and the Title row shows the current mode and the action: `Title: wide
+(click for narrow)`, `Title: narrow (click for auto)` and `Title: auto, <width>
+now (click for wide)` (<width> is wide or narrow, what auto resolves to now).
 The setting is the file $XDG_STATE_HOME/pg-task-focus-swiftbar/title-width
-(default ~/.local/state), holding `wide` or `narrow`; a missing, empty or
-unrecognised value reads as wide. It is re-read for every frame, so a change shows
-within a second, without a restart.
+(default ~/.local/state), holding `wide`, `narrow` or `auto`; a missing, empty or
+unrecognised value reads as wide. The class file is <state base>/display-class/class,
+holding `wide` or `narrow`, where the state base is $XDG_STATE_HOME when it is
+non-empty and absolute, else $HOME/.local/state. Both are re-read for every frame,
+so a change of either shows within a second, without a restart.
 
 Options:
   -h, --help     Show this help message
@@ -93,9 +102,9 @@ Options:
   --render       Read ONE state object from stdin (empty or invalid input renders
                  the unreachable frame), print its frame and exit. No separator.
   --set-title-width MODE
-                 Write the title-width setting (wide or narrow) and exit; nothing
-                 is rendered. Exits 2 on a bad value. The dropdown's "Title:" row
-                 runs this.
+                 Write the title-width setting (wide, narrow or auto) and exit;
+                 nothing is rendered. Exits 2 on a bad value. The dropdown's
+                 "Title:" row runs this.
 
 Environment:
   PG_TASK_FOCUS_BIN                     pg-task-focus executable (default: on PATH)
@@ -195,15 +204,19 @@ def narrow_glyph($state):
   { running: "◉", overtime: "◉", paused: "◎", idle: "○", read_only: "⊘", unreachable: "⚠" }[$state]
   | row(.; "color=\(state_color($state))");
 
-# The Title row: shows the current width and, on click, runs THIS script with
-# --set-title-width to write the other one. No path to run (an empty $self)
-# leaves the row as plain text. A path with whitespace is quoted, since
+# The Title row: shows the current mode and, on click, runs THIS script with
+# --set-title-width to write the next one in the cycle wide, narrow, auto, wide.
+# $setting is the STORED setting (what the cycle and the text name); $width is
+# the RESOLVED width (all that auto adds to the text). No path to run (an empty
+# $self) leaves the row as plain text. A path with whitespace is quoted, since
 # SwiftBar splits the bash= value on it.
 def title_row:
-  (if $width == "narrow" then "wide" else "narrow" end) as $other
-  | "Title: \($width) (click for \($other))" as $text
+  (if $setting == "narrow" then "auto" elif $setting == "auto" then "wide" else "narrow" end) as $next
+  | (if $setting == "auto" then "Title: auto, \($width) now (click for \($next))"
+     elif $setting == "narrow" then "Title: narrow (click for \($next))"
+     else "Title: wide (click for \($next))" end) as $text
   | if $self == "" then row($text; "")
-    else row($text; "bash=\(if ($self | test("\\s")) then "\"\($self)\"" else $self end) param1=--set-title-width param2=\($other) terminal=false refresh=true")
+    else row($text; "bash=\(if ($self | test("\\s")) then "\"\($self)\"" else $self end) param1=--set-title-width param2=\($next) terminal=false refresh=true")
     end;
 
 # The last block of every dropdown: the Title row, then Refresh.
@@ -356,8 +369,12 @@ BOOSTS="5 10 25"
 SELF=""
 # The title width is NOT read once: this process is long-lived, so it is re-read
 # for every frame (load_title_width) and a toggle shows without a restart.
+# TITLE_SETTING is the stored setting (wide, narrow or auto); TITLE_WIDTH is the
+# RESOLVED width (wide or narrow), the only thing that draws the title.
+TITLE_SETTING=wide
 TITLE_WIDTH=wide
 TITLE_WIDTH_FILE=""
+CLASS_FILE=""
 
 load_settings() {
   BIN=$(resolve_bin)
@@ -370,24 +387,65 @@ load_settings() {
   BOOSTS=${PG_TASK_FOCUS_SWIFTBAR_BOOST_MINUTES:-5 10 25}
 }
 
-# Title-width setting: `wide` (the default) or `narrow`, one file holding the
-# word plus a newline. A missing, empty or unrecognised value reads as wide.
+# Title-width setting: `wide` (the default), `narrow` or `auto`, one file holding
+# the word plus a newline. A missing, empty or unrecognised value reads as wide.
 title_width_file() {
   TITLE_WIDTH_FILE="${XDG_STATE_HOME:-${HOME:-}/.local/state}/pg-task-focus-swiftbar/title-width"
 }
 
-# load_title_width: set TITLE_WIDTH from the file. Builtins only (no process), and
-# no output, so it can run at every poll and its result survives (a command
-# substitution would lose the assignment).
-load_title_width() {
-  local file value=""
-  title_width_file
-  file=$TITLE_WIDTH_FILE
-  if [[ -r $file ]]; then
-    read -r value <"$file" || true
-    value=${value//[[:space:]]/}
+# class_file: the machine-wide display-class file `auto` reads, <state base>/
+# display-class/class. The state base is the contract's one rule: $XDG_STATE_HOME
+# when it is non-empty AND absolute, else $HOME/.local/state (unlike the setting
+# file above, which keeps its older ${XDG_STATE_HOME:-...} resolution). Only the
+# display-class helper writes it; this plugin only reads it.
+class_file() {
+  local base=${XDG_STATE_HOME:-}
+  [[ $base == /* ]] || base=${HOME:-}/.local/state
+  CLASS_FILE="$base/display-class/class"
+}
+
+# read_word FILE: set REPLY to the first line of FILE with all whitespace
+# removed, or to "" when it is missing, not a regular file or unreadable (silently:
+# a read problem is never output). Builtins only (no process).
+read_word() {
+  REPLY=""
+  if [[ -f $1 && -r $1 ]]; then
+    read -r REPLY <"$1" 2>/dev/null || true
+    REPLY=${REPLY//[[:space:]]/}
   fi
-  if [[ $value == narrow ]]; then TITLE_WIDTH=narrow; else TITLE_WIDTH=wide; fi
+}
+
+# resolve_title_width SETTING CLASS: set TITLE_SETTING and TITLE_WIDTH. A pure
+# function of its two arguments (no file, no process, no output): SETTING narrow
+# or auto is honoured, anything else is wide; auto then takes CLASS, and only the
+# exact word narrow narrows it (a missing, empty or unrecognised class reads wide,
+# so an unreadable class file never hides information).
+resolve_title_width() {
+  case $1 in
+  narrow) TITLE_SETTING=narrow TITLE_WIDTH=narrow ;;
+  auto)
+    TITLE_SETTING=auto
+    if [[ ${2:-} == narrow ]]; then TITLE_WIDTH=narrow; else TITLE_WIDTH=wide; fi
+    ;;
+  *) TITLE_SETTING=wide TITLE_WIDTH=wide ;;
+  esac
+}
+
+# load_title_width: set TITLE_SETTING and TITLE_WIDTH from the setting file and,
+# in auto, the class file. Builtins only (no process), and no output, so it can
+# run at every poll and its result survives (a command substitution would lose the
+# assignment).
+load_title_width() {
+  local setting class=""
+  title_width_file
+  read_word "$TITLE_WIDTH_FILE"
+  setting=$REPLY
+  if [[ $setting == auto ]]; then
+    class_file
+    read_word "$CLASS_FILE"
+    class=$REPLY
+  fi
+  resolve_title_width "$setting" "$class"
 }
 
 # --set-title-width MODE: write the setting atomically (temp file in the same
@@ -395,8 +453,8 @@ load_title_width() {
 # when the file cannot be written. Run by the dropdown's Title row.
 set_title_width() {
   local mode=${1:-} file dir tmp
-  if [[ $mode != wide && $mode != narrow ]]; then
-    printf 'pg-task-focus-swiftbar: --set-title-width must be wide or narrow, not: %s\n' "$mode" >&2
+  if [[ $mode != wide && $mode != narrow && $mode != auto ]]; then
+    printf 'pg-task-focus-swiftbar: --set-title-width must be wide, narrow or auto, not: %s\n' "$mode" >&2
     return 2
   fi
   title_width_file
@@ -437,14 +495,14 @@ render_frame() {
     rendered=$(printf '%s' "$state" | timeout 5 jq -r \
       --argjson now "$now" --arg bin "$BIN" --arg addr "$ADDR" --arg web "$WEB_URL" \
       --argjson dueSoon "$DUE_SOON" --arg boosts "$BOOSTS" --arg mode state \
-      --arg width "$TITLE_WIDTH" --arg self "$SELF" \
+      --arg width "$TITLE_WIDTH" --arg setting "$TITLE_SETTING" --arg self "$SELF" \
       "$PG_TASK_FOCUS_JQ_PROGRAM" 2>/dev/null) || rendered=""
   fi
   if [[ -z $rendered ]]; then
     rendered=$(timeout 5 jq -nr \
       --argjson now "$now" --arg bin "$BIN" --arg addr "$ADDR" --arg web "$WEB_URL" \
       --argjson dueSoon "$DUE_SOON" --arg boosts "$BOOSTS" --arg mode unreachable \
-      --arg width "$TITLE_WIDTH" --arg self "$SELF" \
+      --arg width "$TITLE_WIDTH" --arg setting "$TITLE_SETTING" --arg self "$SELF" \
       "$PG_TASK_FOCUS_JQ_PROGRAM" 2>/dev/null) || rendered=""
   fi
   # jq itself failed (not on PATH, killed): the minimal frame, never an error.
@@ -462,7 +520,7 @@ render_frame() {
 # and per tick, then returns when the stream ends.
 stream_once() {
   local tick=${PG_TASK_FOCUS_SWIFTBAR_TICK_S:-5} idle_tick=${PG_TASK_FOCUS_SWIFTBAR_IDLE_TICK_S:-15}
-  local rfd watch_pid chunk rc buf="" last="" wait_s now deadline fresh emitted_width
+  local rfd watch_pid chunk rc buf="" last="" wait_s now deadline fresh emitted_width emitted_setting
   [[ $tick =~ ^[0-9]+$ ]] && ((10#$tick > 0)) || tick=5
   [[ $idle_tick =~ ^[0-9]+$ ]] && ((10#$idle_tick > 0)) || idle_tick=15
 
@@ -475,11 +533,20 @@ stream_once() {
 
   # The menu bar needs a new frame only for a state line (at once), for a clock
   # that moved (a tick) and for a changed title width. The read therefore wakes
-  # once a second, a cheap builtin poll, so a width toggle shows within a second
-  # even while the timer ticks only every few seconds; a frame is emitted only
-  # when one of those three happened. The tick is measured on the wall clock.
+  # once a second, a cheap builtin poll, so a width toggle (or a display-class
+  # flip, in auto) shows within a second even while the timer ticks only every few
+  # seconds; a frame is emitted only when one of those three happened. The tick is
+  # measured on the wall clock.
+  #
+  # "A changed title width" is the RESOLVED width (wide or narrow), NOT the setting
+  # word: in auto the setting never changes when the display class flips, so
+  # comparing the word would never redraw. The stored setting is compared too, but
+  # only because the Title row's TEXT names it (wide to auto with the class on wide
+  # leaves the width alone and still changes the row); a stable setting word never
+  # causes a redraw by itself, so no flip means no redraw.
   load_title_width
   emitted_width=$TITLE_WIDTH
+  emitted_setting=$TITLE_SETTING
   printf -v now '%(%s)T' -1
   deadline=$((now + idle_tick))
 
@@ -500,10 +567,11 @@ stream_once() {
     fi
     load_title_width
     printf -v now '%(%s)T' -1
-    if ((fresh == 0)) && [[ $TITLE_WIDTH == "$emitted_width" ]] && ((now < deadline)); then
+    if ((fresh == 0)) && [[ $TITLE_WIDTH == "$emitted_width" && $TITLE_SETTING == "$emitted_setting" ]] && ((now < deadline)); then
       continue
     fi
     emitted_width=$TITLE_WIDTH
+    emitted_setting=$TITLE_SETTING
     # A cycle that runs ticks every few seconds; anything else only to move the
     # "in 22m" countdowns.
     if [[ $last == *'"focus":{'* ]]; then wait_s=$tick; else wait_s=$idle_tick; fi

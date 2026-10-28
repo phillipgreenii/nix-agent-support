@@ -49,6 +49,8 @@ setup() {
   # The title-width setting lives under XDG_STATE_HOME; the Title row re-invokes SELF.
   export XDG_STATE_HOME="$TEST_DIR/xdg-state"
   WIDTH_FILE="$XDG_STATE_HOME/pg-task-focus-swiftbar/title-width"
+  # The display-class file `auto` reads (the contract path <state base>/display-class/class).
+  CLASS_FILE="$XDG_STATE_HOME/display-class/class"
   export PG_TASK_FOCUS_SWIFTBAR_SELF="$TEST_DIR/bin/pg-task-focus-swiftbar"
 }
 
@@ -56,6 +58,22 @@ setup() {
 set_width() {
   mkdir -p "$(dirname "$WIDTH_FILE")"
   printf '%s\n' "$1" >"$WIDTH_FILE"
+}
+
+# set_class WORD -> store WORD (verbatim) as the display-class file.
+set_class() {
+  mkdir -p "$(dirname "$CLASS_FILE")"
+  printf '%s\n' "$1" >"$CLASS_FILE"
+}
+
+# title_row_text MODE CLASS -> the exact Title row text of the contract for a
+# stored setting MODE (CLASS is the resolved width, used by auto only).
+title_row_text() {
+  case $1 in
+  wide) printf 'Title: wide (click for narrow)' ;;
+  narrow) printf 'Title: narrow (click for auto)' ;;
+  auto) printf 'Title: auto, %s now (click for wide)' "$2" ;;
+  esac
 }
 
 # no_actions -> succeeds when no row but the Title row carries a bash= action.
@@ -821,7 +839,7 @@ check_widths() {
   set_width "  narrow  "
   render
   [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
-  [[ $output == *"Title: narrow (click for wide)"* ]]
+  [[ $output == *"Title: narrow (click for auto)"* ]]
 }
 
 @test "title width: the wide dropdown does not repeat the title's values in a row" {
@@ -853,20 +871,25 @@ check_widths() {
   [ "$narrow_rows" = "$wide_rows" ]
 }
 
-@test "Title row: present in every state and width, shows the mode and the action, and ends the dropdown above Refresh" {
-  local fn width
-  for width in wide narrow; do
-    set_width "$width"
+@test "Title row: present in every state and mode, shows the mode and the action, and ends the dropdown above Refresh" {
+  local fn mode resolved
+  # auto is run with the class file on narrow, so its text names a resolved width
+  # that differs from the default wide
+  set_class narrow
+  for mode in wide narrow auto; do
+    set_width "$mode"
+    resolved=wide
+    [[ $mode == wide ]] || resolved=narrow
     for fn in state_running state_overtime state_paused state_offer state_idle state_next state_readonly; do
       "$fn"
       render
       [ "${lines[-1]}" = "Refresh | refresh=true" ]
-      [[ ${lines[-2]} == "Title: $width (click for "* ]]
+      [[ ${lines[-2]} == "$(title_row_text "$mode" "$resolved") | bash="* ]]
       [ "${lines[-3]}" = "---" ]
     done
     run bash -c "printf '' | $(printf '%q ' "${PLUGIN[@]}") --render"
     [ "${lines[-1]}" = "Refresh | refresh=true" ]
-    [[ ${lines[-2]} == "Title: $width (click for "* ]]
+    [[ ${lines[-2]} == "$(title_row_text "$mode" "$resolved") | bash="* ]]
   done
 }
 
@@ -876,7 +899,44 @@ check_widths() {
   [[ $output == *$'\nTitle: wide (click for narrow) | bash='"$PG_TASK_FOCUS_SWIFTBAR_SELF"$' param1=--set-title-width param2=narrow terminal=false refresh=true\n'* ]]
   set_width narrow
   render
-  [[ $output == *$'\nTitle: narrow (click for wide) | bash='"$PG_TASK_FOCUS_SWIFTBAR_SELF"$' param1=--set-title-width param2=wide terminal=false refresh=true\n'* ]]
+  [[ $output == *$'\nTitle: narrow (click for auto) | bash='"$PG_TASK_FOCUS_SWIFTBAR_SELF"$' param1=--set-title-width param2=auto terminal=false refresh=true\n'* ]]
+  set_width auto
+  set_class narrow
+  render
+  [[ $output == *$'\nTitle: auto, narrow now (click for wide) | bash='"$PG_TASK_FOCUS_SWIFTBAR_SELF"$' param1=--set-title-width param2=wide terminal=false refresh=true\n'* ]]
+}
+
+@test "Title row: the action cycles wide, narrow, auto, wide, each written by the row's own command" {
+  state_idle
+  local expect next
+  for expect in narrow auto wide; do
+    render
+    next=$(sed -n 's/^Title: .* | bash=[^ ]* param1=--set-title-width param2=\([a-z]*\) terminal=false refresh=true$/\1/p' <<<"$output")
+    [ "$next" = "$expect" ]
+    run "${PLUGIN[@]}" --set-title-width "$next"
+    [ "$status" -eq 0 ]
+  done
+  [ "$(cat "$WIDTH_FILE")" = "wide" ]
+}
+
+@test "Title row: in auto the text names the resolved width, whatever the class file holds" {
+  state_idle
+  set_width auto
+  local class
+  for class in wide narrow; do
+    set_class "$class"
+    render
+    [[ $output == *$'\n'"Title: auto, $class now (click for wide) | bash="* ]]
+  done
+  # a missing, empty or garbage class file reads wide
+  for class in "" "bogus" "NARROW"; do
+    set_class "$class"
+    render
+    [[ $output == *$'\nTitle: auto, wide now (click for wide) | bash='* ]]
+  done
+  rm -f "$CLASS_FILE"
+  render
+  [[ $output == *$'\nTitle: auto, wide now (click for wide) | bash='* ]]
 }
 
 @test "Title row: a path with whitespace is quoted" {
@@ -921,6 +981,10 @@ check_widths() {
   [ -z "$output" ]
   [ "$(cat "$WIDTH_FILE")" = "narrow" ]
   [ ! -e "$TEST_DIR/args" ]
+  run "${PLUGIN[@]}" --set-title-width auto
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$WIDTH_FILE")" = "auto" ]
   run "${PLUGIN[@]}" --set-title-width wide
   [ "$status" -eq 0 ]
   [ "$(cat "$WIDTH_FILE")" = "wide" ]
@@ -928,6 +992,8 @@ check_widths() {
 
 @test "--set-title-width: leaves no temporary file beside the setting (atomic rename)" {
   run "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -eq 0 ]
+  run "${PLUGIN[@]}" --set-title-width auto
   [ "$status" -eq 0 ]
   run "${PLUGIN[@]}" --set-title-width wide
   [ "$status" -eq 0 ]
@@ -938,11 +1004,16 @@ check_widths() {
   set_width narrow
   run "${PLUGIN[@]}" --set-title-width bogus
   [ "$status" -eq 2 ]
-  [[ $output == *"must be wide or narrow"* ]]
+  [[ $output == *"must be wide, narrow or auto"* ]]
   [ "$(cat "$WIDTH_FILE")" = "narrow" ]
   run "${PLUGIN[@]}" --set-title-width
   [ "$status" -eq 2 ]
   run "${PLUGIN[@]}" --set-title-width ""
+  [ "$status" -eq 2 ]
+  # the words are exact: no case folding, no neighbours
+  run "${PLUGIN[@]}" --set-title-width AUTO
+  [ "$status" -eq 2 ]
+  run "${PLUGIN[@]}" --set-title-width automatic
   [ "$status" -eq 2 ]
   [ "$(cat "$WIDTH_FILE")" = "narrow" ]
   [ "$(ls -A "$(dirname "$WIDTH_FILE")")" = "title-width" ]
@@ -974,6 +1045,14 @@ check_widths() {
   [ "$status" -eq 0 ]
   render
   [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
+  run "${PLUGIN[@]}" --set-title-width auto
+  [ "$status" -eq 0 ]
+  set_class narrow
+  render
+  [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
+  set_class wide
+  render
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
   run "${PLUGIN[@]}" --set-title-width wide
   [ "$status" -eq 0 ]
   render
@@ -986,9 +1065,223 @@ check_widths() {
   [[ $output == *"--set-title-width"* ]]
   [[ $output == *"title-width"* ]]
   [[ $output == *"wide"* && $output == *"narrow"* ]]
+  # auto, the class file it reads and the three-way Title row texts
+  [[ $output == *"auto"* ]]
+  [[ $output == *"display-class/class"* ]]
+  [[ $output == *"Title: narrow (click for auto)"* ]]
+  [[ $output == *"Title: auto, <width>"* ]]
+  [[ $output == *"--set-title-width MODE"* && $output == *"wide, narrow or auto"* ]]
   [[ $output == *"coarse"* ]]
   [[ $output == *"every 5 s while a cycle runs"* ]]
   [[ $output == *"seconds between ticks while a cycle runs (default 5)"* ]]
   # the ended-period prompt is a dropdown row, so it is no longer a title state
   [[ $output != *"New day: roll over"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Title width: auto (follows the display-class file)
+
+@test "auto: a class file holding wide renders wide, and one holding narrow renders narrow" {
+  state_running
+  set_width auto
+  set_class wide
+  render
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+  set_class narrow
+  render
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
+  # surrounding whitespace is honoured, like the setting's
+  set_class "  narrow  "
+  render
+  [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
+}
+
+@test "auto: a missing, empty or garbage class file reads wide, and none is an error" {
+  state_running
+  set_width auto
+  # missing: neither the file nor its directory exists
+  render
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+  local value
+  for value in "" "bogus" "NARROW" "narrow2" "wide narrow"; do
+    set_class "$value"
+    render
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+  done
+  # unreadable
+  if [ "$(id -u)" -ne 0 ]; then
+    set_class narrow
+    chmod 000 "$CLASS_FILE"
+    render
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+    chmod 600 "$CLASS_FILE"
+  fi
+  # a directory where the file should be
+  rm -f "$CLASS_FILE"
+  mkdir -p "$CLASS_FILE"
+  render
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+}
+
+@test "auto: the class file is read only in auto, and never changes a wide or narrow setting" {
+  state_running
+  set_class narrow
+  set_width wide
+  render
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+  set_class wide
+  set_width narrow
+  render
+  [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
+}
+
+@test "auto: the dropdown follows the resolved width exactly as it follows a setting of that width" {
+  local fn
+  for fn in state_running state_paused state_offer state_idle state_next state_readonly; do
+    "$fn"
+    set_width narrow
+    render
+    local narrow_frame
+    narrow_frame=$(grep -v '^Title: ' <<<"$output")
+    set_width auto
+    set_class narrow
+    render
+    [ "$(grep -v '^Title: ' <<<"$output")" = "$narrow_frame" ]
+    set_width wide
+    render
+    local wide_frame
+    wide_frame=$(grep -v '^Title: ' <<<"$output")
+    set_width auto
+    set_class wide
+    render
+    [ "$(grep -v '^Title: ' <<<"$output")" = "$wide_frame" ]
+  done
+}
+
+@test "auto: the unreachable frame follows the resolved width too" {
+  set_width auto
+  set_class narrow
+  run bash -c "printf '' | $(printf '%q ' "${PLUGIN[@]}") --render"
+  [ "${lines[0]}" = "⚠ | color=#e07000" ]
+  set_class wide
+  run bash -c "printf '' | $(printf '%q ' "${PLUGIN[@]}") --render"
+  [ "${lines[0]}" = "focus ⚠ | color=#e07000" ]
+}
+
+# The class file path is the contract path <state base>/display-class/class, where
+# the state base is XDG_STATE_HOME when non-empty AND absolute, else HOME/.local/state.
+# Each case plants the class file under the EXPECTED base (narrow) and a decoy (wide)
+# under every other candidate base, so only the right path renders narrow.
+class_path_case() {
+  # $1 = expected state base, $2... = decoy state bases
+  state_running
+  mkdir -p "$1/display-class"
+  printf 'narrow\n' >"$1/display-class/class"
+  local decoy
+  for decoy in "${@:2}"; do
+    mkdir -p "$decoy/display-class"
+    printf 'wide\n' >"$decoy/display-class/class"
+  done
+  render
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "◉ | color=#3a9a4a" ]
+}
+
+@test "auto class path: an absolute XDG_STATE_HOME is the state base" {
+  set_width auto
+  class_path_case "$XDG_STATE_HOME" "$HOME/.local/state"
+}
+
+@test "auto class path: an unset XDG_STATE_HOME falls back to HOME/.local/state" {
+  unset XDG_STATE_HOME
+  mkdir -p "$HOME/.local/state/pg-task-focus-swiftbar"
+  printf 'auto\n' >"$HOME/.local/state/pg-task-focus-swiftbar/title-width"
+  class_path_case "$HOME/.local/state" "$TEST_DIR/xdg-state"
+}
+
+@test "auto class path: an empty XDG_STATE_HOME falls back to HOME/.local/state" {
+  export XDG_STATE_HOME=""
+  mkdir -p "$HOME/.local/state/pg-task-focus-swiftbar"
+  printf 'auto\n' >"$HOME/.local/state/pg-task-focus-swiftbar/title-width"
+  class_path_case "$HOME/.local/state" "$TEST_DIR/xdg-state"
+}
+
+@test "auto class path: a relative XDG_STATE_HOME is NOT the state base (HOME/.local/state is), while the setting file keeps its own resolution" {
+  cd "$TEST_DIR"
+  export XDG_STATE_HOME="rel-state"
+  # the setting file resolves against the working directory (accepted divergence)
+  mkdir -p "$TEST_DIR/rel-state/pg-task-focus-swiftbar"
+  printf 'auto\n' >"$TEST_DIR/rel-state/pg-task-focus-swiftbar/title-width"
+  class_path_case "$HOME/.local/state" "$TEST_DIR/rel-state"
+}
+
+# ---------------------------------------------------------------------------
+# Streaming in auto: redraw on the RESOLVED width, not the setting word.
+#
+# COST: the stream read wakes once a second and the tick cannot go below 1 s, so
+# a test that waits for a flip costs about 4 s and the "no flip, no redraw" test
+# needs a held stream (the precedent is the title-width change test above). The
+# resolved-width logic itself (resolve_title_width) is covered case by case by the
+# fast --render tests above; these three prove only that the LOOP compares it.
+
+# held_stub AFTER_1S: a client stub that prints the state, runs AFTER_1S (a shell
+# snippet that changes the setting or the class file) one second in, and holds the
+# stream open for 3 more seconds. Both ticks are far away, so a frame inside the
+# held 4 s can only come from a changed title width.
+held_stub() {
+  STUB="$TEST_DIR/pg-task-focus"
+  cat >"$STUB" <<STUBEOF
+#!$(command -v bash)
+printf '%s\n' "\$\$" >>"$TEST_DIR/pids"
+jq -c . "$TEST_DIR/state.json"
+sleep 1
+$1
+sleep 3
+STUBEOF
+  chmod +x "$STUB"
+  export PG_TASK_FOCUS_BIN="$STUB" PG_TASK_FOCUS_SWIFTBAR_ONCE=1 PG_TASK_FOCUS_SWIFTBAR_TICK_S=60 PG_TASK_FOCUS_SWIFTBAR_IDLE_TICK_S=60
+  state_running
+}
+
+@test "stream auto: a display-class flip redraws although the setting word stays auto" {
+  set_width auto
+  set_class wide
+  held_stub "printf 'narrow\\n' >\"$CLASS_FILE\""
+  run "${PLUGIN[@]}"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+  # wide frame, the narrow frame the flip caused, the unreachable frame (narrow now)
+  [[ $output == *$'\n~~~\n◉ | color=#3a9a4a\n---\ndeep 12m | color=#3a9a4a\n'* ]]
+  [[ $output == *$'\nTitle: auto, narrow now (click for wide) | bash='* ]]
+  [ "$(wc -l <"$TEST_DIR/pids")" -eq 1 ]
+  [ "$(grep -c '^~~~$' <<<"$output")" -eq 2 ]
+}
+
+@test "stream auto: no flip, no redraw, even when the class file is rewritten to another word that still reads wide" {
+  set_width auto
+  # missing -> garbage -> empty: the word changes, the resolved width does not
+  held_stub "mkdir -p \"$(dirname "$CLASS_FILE")\"; printf 'bogus\\n' >\"$CLASS_FILE\"; sleep 1; : >\"$CLASS_FILE\""
+  run "${PLUGIN[@]}"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "deep 12m | color=#3a9a4a" ]
+  # the state frame, then only the unreachable frame at the end: one separator
+  [ "$(grep -c '^~~~$' <<<"$output")" -eq 1 ]
+  [ "$(grep -c '^deep 12m | color=#3a9a4a$' <<<"$output")" -eq 1 ]
+}
+
+@test "stream auto: a setting change that leaves the width alone still refreshes the Title row" {
+  set_class wide
+  set_width wide
+  held_stub "printf 'auto\\n' >\"$WIDTH_FILE\""
+  run "${PLUGIN[@]}"
+  [ "$status" -eq 0 ]
+  [[ $output == *$'\nTitle: wide (click for narrow) | bash='* ]]
+  [[ $output == *$'\n~~~\ndeep 12m | color=#3a9a4a\n'* ]]
+  [[ $output == *$'\nTitle: auto, wide now (click for wide) | bash='* ]]
 }
