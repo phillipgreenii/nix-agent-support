@@ -519,6 +519,45 @@ tests:
         eval_time: 20m
         exp_samples: []
 
+  - name: the runner roles are exempt (queue-stalled-exempt-roles.json), a declined backlog behind them is not a stall, and a mapped role beside them still is
+    interval: 30s
+    input_series:
+      # repo-verify and repo-sync answer exit 9 "not now" and are re-offered, so their
+      # queues stay non-empty with nothing completing and the role not held in flight
+      # (a declined offer is in flight for a second or two). No clause maps their types,
+      # so nothing pages; pg-router-role-busy-long owns the sustained-decline case.
+      - series: pg_router_queue_depth{type="repo.tip",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="repo-verify",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="repo.sync",job="pg-router"}
+        values: "1x240"
+      - series: pg_router_listener_in_flight{role="repo-sync",job="pg-router"}
+        values: "0x240"
+      # Control: the same shape on a mapped, non-runner role does page, so the silence
+      # above is the exemption and not a vacuous setup.
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pr-change",job="pg-router"}
+        values: "0x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled{type=~"repo[.](tip|sync)"})
+        eval_time: 20m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: pr.changed
+              job: pg-router
+              severity: warning
+
   - name: any gate in force suppresses every type, and the rule fires normally once the gate is gone
     interval: 30s
     input_series:

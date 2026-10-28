@@ -346,18 +346,33 @@ groups:
       # explicit label_replace table below, one clause per role of the daemon config
       # (the same shape as the pool mapping of pg-router-pool-full-idle, and without
       # capture-group references so nothing in the provisioning layer can expand them).
-      # A type missing from the table is NOT covered, and this table is the only
-      # idle-consumer detection for the types it lists (pr.changed included: a role
+      # A type missing from the table and from the exemption list below is NOT
+      # covered, and this table is the only idle-consumer detection for the types it lists (pr.changed included: a role
       # removed from the config leaves its clause dead, a role renamed or added
       # leaves its type silent until the clause follows). A new role MUST be added to
       # the table, to the type-to-role cases in rule-tests/pg-router-queue-stalled.test.yaml
       # and to stalledRoles in internal/alertrules/queue_stalled_test.go. The
       # deployment derives the expected (role, type) pairs from the roles it renders
       # and checks every one against this rendered rule, so a role bound without a
-      # clause fails its build instead of going silent. `max without
+      # clause or an exemption fails its build instead of going silent. `max without
       # (role)` drops the helper label again, so the alert keeps the labels of the rule
       # it replaced (rule uid, alertname, severity, type, instance, job,
       # otel_scope_name) and an open bead for that fingerprint keeps matching.
+      #
+      # Exempt runner roles (pg2-e0myo4). The pg-repo-runner roles repo-verify (type
+      # repo.tip) and repo-sync (type repo.sync) are NOT in the table, by an explicit and
+      # named exemption: queue-stalled-exempt-roles.json beside this file. A runner
+      # answers exit 9 "not now" (load, the lease shared by the runner roles, the kill
+      # switch, canonical busy) and pg-router re-offers the event until it expires, so its
+      # queue is non-empty with nothing completing BY DESIGN, and a clause would page that
+      # routine shed after about 15 minutes (a declined offer is in flight for a second
+      # or two, never for 6 scrapes). The sustained decline is paged by
+      # pg-router-role-busy-long (4h, lower severity), a runner that fails by
+      # pg-router-role-stalled and pg-router-failure-rate. The deployment's check MUST
+      # treat a bound (role, type) pair as satisfied when it has a clause here OR is
+      # listed in that file, and MUST NOT accept any other pair. The list and its tests:
+      # internal/alertrules/queue_stalled_exempt_test.go. A role in that list MUST NOT
+      # also have a clause here.
       #
       # The escalation-watchdog clause (type escalation-watchdog.tick, role
       # escalation-watchdog) covers the timer role that hands stale escalations to the

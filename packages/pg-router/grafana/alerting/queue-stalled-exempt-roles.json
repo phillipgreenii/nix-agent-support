@@ -1,0 +1,26 @@
+{
+  "rule": "pg-router-queue-stalled",
+  "doc": "Named exemption list for the pg-router-queue-stalled role map (pg2-e0myo4). A (role, type) pair bound by a pg-router role MUST be either a clause of that rule's label_replace chain in alerts.yaml (covered) or listed here (exempt); anything else is an uncovered binding and a failed check. A role listed here MUST NOT have a clause in the chain: the rule would page the exit-9 backlog the role is built to keep. Adding an entry needs a reason, the rules that still watch the role (coveredBy, each a uid in alerts.yaml) and a test; internal/alertrules/queue_stalled_exempt_test.go pins all of it.",
+  "exemptRoles": [
+    {
+      "role": "repo-verify",
+      "types": ["repo.tip"],
+      "reason": "A pg-repo-runner role answers exit 9 (not now: load, the runner-private single-flight lease held by another runner role, the kill switch, canonical busy) and pg-router re-offers the event until it expires, so its queue is non-empty and nothing completes BY DESIGN while the lease is held by repo-sync or the host is loaded. A declined offer is not in flight for 6 scrapes, so pg-router-queue-stalled (about 15 minutes) would page that routine shed. The sustained-decline case is paged by pg-router-role-busy-long.",
+      "coveredBy": [
+        "pg-router-role-busy-long",
+        "pg-router-role-stalled",
+        "pg-router-failure-rate"
+      ]
+    },
+    {
+      "role": "repo-sync",
+      "types": ["repo.sync"],
+      "reason": "Same shape as repo-verify: exit 9 is its shed signal (the lease is shared with repo-verify, whose nix flake check can run for an hour), so a repo.sync backlog with nothing completing is routine, and pg-router-queue-stalled would page it after about 15 minutes. The sustained-decline case is paged by pg-router-role-busy-long.",
+      "coveredBy": [
+        "pg-router-role-busy-long",
+        "pg-router-role-stalled",
+        "pg-router-failure-rate"
+      ]
+    }
+  ]
+}
