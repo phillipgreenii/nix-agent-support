@@ -33,9 +33,15 @@ import (
 //   - needs a real external tool (bd, dolt, tmux, ccpool).
 //
 // Everything else stays unit: pure logic, in-process tests against a fake backend
-// script, a git fixture repo (git is allowlisted: fast, single process), the
-// re-exec-the-test-binary helper-process pattern (os.Args[0]) and `go list`/`go env`
-// metadata queries.
+// script, a git fixture repo (git is allowlisted: fast, single process) and
+// `go list`/`go env` metadata queries.
+//
+// Re-executing the test binary (exec.Command(os.Args[0], ...)) is NOT unit tier any
+// more (shared command runner ADR in repo x, decision 5; bead pg2-ty6mjm): a test
+// that stands in for an external tool MUST use the x runner fake, and a test whose
+// subject is a real process MUST live in an integration-tagged file. The existing
+// uses are listed by path, each with its reason, in unitReexecAllowed until it is
+// migrated or tagged; a new one is a violation.
 //
 // Integration tests run on demand: `nix build .#checks.<system>.pg-connector-integration-tests`
 // or `go test -tags integration ./...` (see README.md, "Integration tier"). Files tagged
@@ -44,6 +50,21 @@ import (
 
 // unitExecAllowed lists the programs a unit-tier test may exec by literal name.
 var unitExecAllowed = map[string]bool{"git": true, "diff": true, "sh": true, "bash": true}
+
+// reexecReason is the reason integrationMarkers reports for an exec of the test binary.
+const reexecReason = "re-executes the test binary (os.Args[0]) as a helper process"
+
+// unitReexecAllowed lists, by path relative to the module root, the unit-tier test
+// files that still re-execute the test binary, each with the reason it is allowed.
+// An entry that no longer matches a re-exec call fails the guard, so the list can
+// only shrink.
+var unitReexecAllowed = map[string]string{
+	"pkg/connectord/store/store_test.go":                            "crash-recovery test kills a re-executed writer mid-transaction; the dead process is the subject, the file also holds unit migration tests",
+	"cmd/pg-connector-github/internal/logs/rotation_test.go":        "cross-process rotation test: concurrent client processes are the subject, the file also holds unit rotation tests",
+	"cmd/pg-connector-issue-jira/internal/logs/rotation_test.go":    "cross-process rotation test: concurrent client processes are the subject, the file also holds unit rotation tests",
+	"cmd/pg-connector-github/internal/sidecar/lock_process_test.go": "cross-process sidecar lock tests: a second process holding the lock is the subject",
+	"cmd/pg-connector-github/internal/ops/review/daemon_test.go":    "cross-process sidecar lock test: a second process holding the lock is the subject, the file also holds unit tests",
+}
 
 // goMetaSubcommands are `go` invocations that only query metadata, never build.
 var goMetaSubcommands = map[string]bool{"list": true, "env": true, "version": true}
@@ -109,7 +130,7 @@ func execReason(call *ast.CallExpr, withCtx bool) string {
 		return fmt.Sprintf("runs the external program %q", name)
 	}
 	if idx, ok := prog.(*ast.IndexExpr); ok && isOsArgsZero(idx) {
-		return "" // the helper-process pattern: re-exec the test binary itself
+		return reexecReason
 	}
 	if goMetadataOnly(call.Args, i+1) {
 		return "" // a variable holding the go tool, asked only for metadata
@@ -186,8 +207,11 @@ func requiresIntegrationTag(src []byte) bool {
 // evaluateUnitTierPurity walks root and returns one violation per integration-tier
 // construct found in a test file that a plain `go test ./...` compiles, plus the
 // number of `integration`-tagged test files it saw (so a caller can prove the guard
-// is not vacuous).
-func evaluateUnitTierPurity(root string) (violations []string, integrationFiles int, err error) {
+// is not vacuous). A re-exec of the test binary is excused only in a file listed in
+// reexecAllowed (path relative to root, slash-separated); a listed file that no longer
+// re-executes is itself a violation, so the list cannot go stale.
+func evaluateUnitTierPurity(root string, reexecAllowed map[string]string) (violations []string, integrationFiles int, err error) {
+	used := map[string]bool{}
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -221,6 +245,10 @@ func evaluateUnitTierPurity(root string) (violations []string, integrationFiles 
 			rel = path
 		}
 		for _, r := range reasons {
+			if _, ok := reexecAllowed[filepath.ToSlash(rel)]; ok && r == reexecReason {
+				used[filepath.ToSlash(rel)] = true
+				continue
+			}
 			violations = append(violations, fmt.Sprintf(
 				"%s: %s; a test like this MUST live in a file tagged //go:build integration (it runs through checks.<system>.pg-connector-integration-tests, not the unit tier)",
 				filepath.ToSlash(rel), r,
@@ -228,6 +256,11 @@ func evaluateUnitTierPurity(root string) (violations []string, integrationFiles 
 		}
 		return nil
 	})
+	for p := range reexecAllowed {
+		if !used[p] {
+			violations = append(violations, fmt.Sprintf("%s: listed in unitReexecAllowed but no longer re-executes the test binary in a unit-tier file; remove the entry", p))
+		}
+	}
 	sort.Strings(violations)
 	return violations, integrationFiles, err
 }
@@ -240,7 +273,7 @@ func TestUnitTierHasNoIntegrationTests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve module root: %v", err)
 	}
-	violations, integrationFiles, err := evaluateUnitTierPurity(root)
+	violations, integrationFiles, err := evaluateUnitTierPurity(root, unitReexecAllowed)
 	if err != nil {
 		t.Fatalf("walk module: %v", err)
 	}
@@ -276,7 +309,7 @@ func TestUnitTierGuardRecognizesEachIntegrationShape(t *testing.T) {
 		{"git fixture is unit", `exec.Command("git", "init")`, ""},
 		{"diff is unit", `exec.Command("diff", "-u", "a", "b")`, ""},
 		{"sh fake backend is unit", `exec.Command("sh", "-c", "true")`, ""},
-		{"helper process re-exec is unit", `exec.Command(os.Args[0], "-test.run=^TestHelper$")`, ""},
+		{"helper process re-exec is not unit", `exec.Command(os.Args[0], "-test.run=^TestHelper$")`, "re-executes the test binary"},
 		{"go list is metadata", `exec.Command(goBin, "list", "-deps", ".")`, ""},
 		{"go env literal is metadata", `exec.Command("go", "env", "GOMOD")`, ""},
 		{"a string mentioning the shapes is not a call", `_ = "exec.Command(\"go\", \"build\")"`, ""},
@@ -321,7 +354,7 @@ func TestUnitTierGuardHonoursBuildTags(t *testing.T) {
 	write(root, "a/negated_test.go", "//go:build !integration\n\n"+marker)
 	write(root, "a/testdata/fixture_test.go", marker)
 
-	violations, integrationFiles, err := evaluateUnitTierPurity(root)
+	violations, integrationFiles, err := evaluateUnitTierPurity(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,5 +368,53 @@ func TestUnitTierGuardHonoursBuildTags(t *testing.T) {
 	}
 	if integrationFiles != 2 {
 		t.Errorf("integration-tagged files = %d, want 2 (integration_test.go, either_test.go)", integrationFiles)
+	}
+}
+
+// TestUnitTierGuardReexecAllowlist proves a re-exec of the test binary is a violation
+// unless its file is listed by path, that the list excuses nothing else, and that a
+// listed file which no longer re-executes is reported (so the list cannot go stale).
+func TestUnitTierGuardReexecAllowlist(t *testing.T) {
+	const reexec = "package x\n\nfunc TestX(t *testing.T) { exec.Command(os.Args[0], \"-test.run=^TestHelper$\") }\n"
+	const reexecAndGo = "package x\n\nfunc TestX(t *testing.T) { exec.Command(os.Args[0]); exec.Command(\"go\", \"build\") }\n"
+	const clean = "package x\n\nfunc TestX(t *testing.T) {}\n"
+	root := t.TempDir()
+	for rel, content := range map[string]string{
+		"a/reexec_test.go":      reexec,
+		"a/listed_test.go":      reexec,
+		"a/mixed_test.go":       reexecAndGo,
+		"a/tagged_test.go":      "//go:build integration\n\n" + reexec,
+		"a/cleaned_test.go":     clean,
+		"a/other_clean_test.go": clean,
+	} {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allowed := map[string]string{
+		"a/listed_test.go":  "reason",
+		"a/mixed_test.go":   "reason",
+		"a/cleaned_test.go": "reason",
+	}
+	violations, _, err := evaluateUnitTierPurity(root, allowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(violations, "\n")
+	for _, want := range []string{
+		"a/reexec_test.go: " + reexecReason,
+		"a/mixed_test.go: builds or runs a Go program",
+		"a/cleaned_test.go: listed in unitReexecAllowed",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("violations do not contain %q:\n%s", want, got)
+		}
+	}
+	if len(violations) != 3 {
+		t.Errorf("got %d violations, want exactly 3 (unlisted re-exec, listed file's other violation, stale entry):\n%s", len(violations), got)
 	}
 }

@@ -1,0 +1,11 @@
+# Untagged Go test files that still name GO_WANT_*HELPER_PROCESS, excused by path
+# for scripts/check-no-reexec-test-doubles.sh. One `path | reason` per line. An entry
+# is removed when its file is migrated to the x command runner fake or tagged
+# `//go:build integration`; the whole-tree check fails on an entry that no longer
+# matches. Do NOT add a new entry to make a new re-exec test pass: fix the test.
+packages/pg-rescue/cmd/pg-rescue/main_test.go | TestMain re-executes the binary as the real pg-rescue main for the umask test and the flake-lock handler script; the rest of the file runs in process (ADR 0111 follow-up)
+packages/pg-rescue/cmd/pg-rescue/flakelock_handler_test.go | the flake-lock handler script calls this test binary as pg-rescue; the real script run is the subject (ADR 0111 follow-up)
+packages/pg-rescue/cmd/pg-rescue-bead/main_test.go | the one orphan test needs a genuine process; every other test runs in process (ADR 0111 follow-up)
+packages/pg-rescue/cmd/pg-rescue-claude/main_test.go | the one orphan test needs a genuine process; every other test runs in process (ADR 0111 follow-up)
+packages/pg-rescue/cmd/pg-rescue-notify/main_test.go | the one orphan test needs a genuine process; every other test runs in process (ADR 0111 follow-up)
+packages/pg-connector/pkg/scriptout/conformance/conformance_test.go | GO_WANT_CONFORMANCE_HELPER_PROCESS: two tests drive ExecBackend against a real child process; ADR 0111 decision 3 replaces them with an sh-based backend

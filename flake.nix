@@ -1209,6 +1209,39 @@
           require_serial = true;
         };
 
+        # pg2-ty6mjm: guard against new re-exec test doubles (shared command
+        # runner ADR in repo x, decision 5; ADR 0111 here). A Go test file the
+        # default build compiles MUST NOT name GO_WANT_*HELPER_PROCESS: a stand-in
+        # tool uses the x runner fake, and a real-process test sits behind
+        # `//go:build integration` (V-4). Pre-existing uses are excused BY PATH,
+        # each with a reason, in scripts/reexec-test-double-allowlist.txt. The logic
+        # lives in scripts/check-no-reexec-test-doubles.sh (a whole-tree run, with no
+        # file arguments, also fails on a stale allowlist entry); its regression
+        # guard is tests/check-no-reexec-test-doubles.bats. Pure text scan: no tool
+        # beyond bash, grep, awk and find, so it also runs inside the nix sandbox.
+        no-reexec-test-doubles = {
+          enable = true;
+          name = "no-reexec-test-doubles";
+          description = "flag GO_WANT_*HELPER_PROCESS (a re-exec test double) in an untagged Go test file (pg2-ty6mjm)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "no-reexec-test-doubles-hook";
+              runtimeInputs = [
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gawk
+                pkgs.gnugrep
+              ];
+              text = ''
+                exec bash ${./scripts/check-no-reexec-test-doubles.sh} --allowlist ${./scripts/reexec-test-double-allowlist.txt} "$@"
+              '';
+            }
+          }/bin/no-reexec-test-doubles-hook";
+          language = "system";
+          files = "_test\\.go$";
+          pass_filenames = true;
+        };
+
         # pg2-sx246: the pg-router-ccpool-handler budget hard stop MUST NOT
         # reopen a bead that is already closed. Whether the release
         # (`bd update --status=open --assignee=`) reopens a closed bead is a
