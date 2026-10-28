@@ -41,6 +41,13 @@ ADR 0110): the roots in `CETA_UNATTENDED_EXTRA_READONLY_ROOTS` (read-only; home-
 `/private/var/folders`, `/private/tmp` or `/tmp`). An attended session never gets either. See
 "Unattended sessions get a few more read roots" in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+Named-prefix read roots (bead `pg2-d00wo0`, ADR 0112): `CETA_EXTRA_READONLY_PREFIX_ROOTS` (home-manager
+option `extraReadOnlyPrefixRoots`) holds `<parent>/<prefix>*` entries, where `<parent>` is an absolute
+directory or the literal `$TMPDIR` (resolved when the hook runs). Each grants read-only access to the
+direct children of the parent named `<prefix>` plus a safe suffix (`pd-*` matches `pd-1` but not `pd`,
+`pdx-foo`, the parent, a `..` or symlink escape), so a generated-suffix scratch directory can be read
+without granting the whole parent.
+
 ## Decision Database
 
 Stored at `~/.local/share/claude-extended-tool-approver/asks.db` (or `$XDG_DATA_HOME/claude-extended-tool-approver/asks.db`).

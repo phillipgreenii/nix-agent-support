@@ -13525,6 +13525,158 @@
                     touch $out
                   '';
 
+              # Durable check (pg2-d00wo0, ADR 0112) for ceta's extraReadOnlyPrefixRoots
+              # option: the list reaches the hook wrapper as
+              # `--set CETA_EXTRA_READONLY_PREFIX_ROOTS` with the `*` and the literal
+              # `$TMPDIR` token intact (shell-escaped, never expanded at build time), the
+              # default adds no flag, contributions list-merge, and the module's assertion
+              # rejects every entry that is not `<parent>/<prefix>*` with a dash-terminated
+              # alphanumeric-led prefix, a wildcard or variable in the parent, a relative,
+              # `:`-bearing, `.`/`..`, too-broad or ~/.claude parent. Like
+              # test-ceta-unattended-roots it forces cfg.package to a stub that prints the
+              # variable, so the wrapper is observed, not assumed.
+              test-ceta-prefix-roots =
+                let
+                  stubPkg = pkgs.runCommand "ceta-stub-0" { } ''
+                    mkdir -p $out/bin
+                    printf '#!${pkgs.runtimeShell}\necho "CETA_EXTRA_READONLY_PREFIX_ROOTS=$CETA_EXTRA_READONLY_PREFIX_ROOTS"\n' \
+                      > $out/bin/claude-extended-tool-approver
+                    chmod +x $out/bin/claude-extended-tool-approver
+                  '';
+
+                  evalCfg =
+                    extra:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/claude-extended-tool-approver/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.knownAbsentRoots = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs.claude-code.enable = true;
+                          phillipgreenii.programs.claude-extended-tool-approver = {
+                            enable = true;
+                            package = stubPkg;
+                          };
+                        }
+                        extra
+                      ];
+                    }).config;
+
+                  withEntries = entries: {
+                    phillipgreenii.programs.claude-extended-tool-approver.extraReadOnlyPrefixRoots = entries;
+                  };
+                  hookOf = cfg: lib.head cfg.home.packages;
+                  failedAssertions = cfg: lib.filter (a: !a.assertion) cfg.assertions;
+
+                  defaultCfg = evalCfg { };
+                  ruled = [
+                    "/home/test/.cache/p2-decomp-*"
+                    "/home/test/.cache/pdec-*"
+                    "/home/test/.cache/pd-*"
+                    "$TMPDIR/pd-*"
+                  ];
+                  ruledCfg = evalCfg (withEntries ruled);
+                  mergedCfg = evalCfg {
+                    imports = [
+                      (withEntries [ "/a/x-*" ])
+                      (withEntries [ "/b/y-*" ])
+                    ];
+                  };
+                  mergedEntries =
+                    mergedCfg.phillipgreenii.programs.claude-extended-tool-approver.extraReadOnlyPrefixRoots;
+                  bad = entries: failedAssertions (evalCfg (withEntries entries));
+                  rejected = [
+                    ""
+                    "pd-*"
+                    "/pd-*"
+                    "/home/test/.cache/pd-"
+                    "/home/test/.cache/pd*"
+                    "/home/test/.cache/*"
+                    "/home/test/.cache/-*"
+                    "/home/test/.cache/.pd-*"
+                    "/home/test/.cache/pd-*x"
+                    "/home/test/.cache/p*d-*"
+                    "/home/test/*/pd-*"
+                    "/home/test/.cache/../pd-*"
+                    "/home/test/./.cache/pd-*"
+                    "relative/.cache/pd-*"
+                    "/a:/b/pd-*"
+                    "~/.cache/pd-*"
+                    "$HOME/.cache/pd-*"
+                    "$TMPDIR/sub/pd-*"
+                    "/Volumes/pd-*"
+                    "/Volumes/gitrepos/pd-*"
+                    "/Users/pd-*"
+                    "/home/test/pd-*"
+                    "/home/pd-*"
+                    "/home/test/.claude/pd-*"
+                    "/home/test/.claude/projects/pd-*"
+                  ];
+                in
+                assert
+                  lib.sort (x: y: x < y) mergedEntries == [
+                    "/a/x-*"
+                    "/b/y-*"
+                  ];
+                assert failedAssertions ruledCfg == [ ];
+                assert failedAssertions defaultCfg == [ ];
+                assert lib.all (r: lib.length (bad [ r ]) == 1) rejected;
+                pkgs.runCommand "ceta-prefix-roots-ok"
+                  {
+                    defaultHook = hookOf defaultCfg;
+                    ruledHook = hookOf ruledCfg;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    bin=bin/claude-extended-tool-approver
+
+                    # Default: no flag, so the variable is not exported at all.
+                    ! grep -q CETA_EXTRA_READONLY_PREFIX_ROOTS "$defaultHook/$bin" \
+                      || fail "default wrapper mentions CETA_EXTRA_READONLY_PREFIX_ROOTS"
+                    [ "$("$defaultHook/$bin")" = "CETA_EXTRA_READONLY_PREFIX_ROOTS=" ] \
+                      || fail "default run exported CETA_EXTRA_READONLY_PREFIX_ROOTS"
+
+                    # The ruled list is baked in as one --set, in order, with the literal
+                    # $TMPDIR token and every `*` intact (no build-time expansion).
+                    want='CETA_EXTRA_READONLY_PREFIX_ROOTS=/home/test/.cache/p2-decomp-*:/home/test/.cache/pdec-*:/home/test/.cache/pd-*:$TMPDIR/pd-*'
+                    [ "$("$ruledHook/$bin")" = "$want" ] \
+                      || fail "ruled wrapper exported '$("$ruledHook/$bin")', want '$want'"
+                    grep -F -- 'CETA_EXTRA_READONLY_PREFIX_ROOTS' "$ruledHook/$bin" | grep -F '$TMPDIR/pd-*' >/dev/null \
+                      || fail "the wrapper script lost the literal \$TMPDIR token"
+                    # --set, not --suffix: nothing else defines this variable, and a value from
+                    # the calling environment must not widen the read roots.
+                    [ "$(CETA_EXTRA_READONLY_PREFIX_ROOTS=/etc/x-* "$ruledHook/$bin")" = "$want" ] \
+                      || fail "an inherited CETA_EXTRA_READONLY_PREFIX_ROOTS must be replaced, not merged"
+                    touch $out
+                  '';
+
               # Durable eval test (tc-o14i5.8.3, Track X.3): confirms ceta's OWN
               # contribution to programs.claude-hook-router.delegates carries a SIXTH
               # entry for PostToolUseFailure, observe-contract, alongside the original

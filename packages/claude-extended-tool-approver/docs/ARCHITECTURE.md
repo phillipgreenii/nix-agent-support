@@ -185,6 +185,21 @@ worker may read, and only that worker (bead `pg2-b1lir` W3, operator ruling `pg2
   guards, so a root can only make an otherwise-unknown path known; it can never unblock a credential
   path.
 
+## Named-prefix read roots
+
+`CETA_EXTRA_READONLY_PREFIX_ROOTS` (home-manager option `extraReadOnlyPrefixRoots`; decision record
+`docs/adr/0112-ceta-named-prefix-read-roots.md`) is the narrow way to read a directory whose name has a
+generated suffix. Each ":"-separated entry is `<parent>/<prefix>*`, with `<parent>` an absolute directory
+or the literal token `$TMPDIR` and `<prefix>` a dash-terminated, alphanumeric-led name.
+`patheval.PrefixRoot.ChildOf` matches only a DIRECT child of the symlink-resolved parent whose name is
+the prefix plus a non-empty `A-Za-z0-9._-` suffix, on the already cleaned and symlink-resolved path, so
+the bare parent, a lookalike, `..` and a symlink that leaves the child all fail to match.
+`classify` checks these after the exact extra roots, so they are read-only and last in the ladder.
+`pathspec.SessionKind` mirrors them through `RootDecl.Under`. `$TMPDIR` is read from the process at
+evaluator construction (never baked into the nix store) and honoured only strictly inside
+`/private/var/folders`, `/private/tmp` or `/tmp`; a parent at or above `$HOME`, or one touching
+`~/.claude`, is refused.
+
 ## Extension point 1: adding a rule module (code-level)
 
 A **rule module** governs a _class of tool calls by policy logic_ — reachable only by changing Go

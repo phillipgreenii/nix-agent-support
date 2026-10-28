@@ -178,3 +178,25 @@ func TestSessionKind_NilEvaluator(t *testing.T) {
 		t.Errorf("PathAccess = %+v, want no Permitted facet for a nil evaluator", pa)
 	}
 }
+
+// TestSessionKind_ExtraReadOnlyPrefixRoots: a named-prefix read root declares Read:
+// Permitted over each matching direct child only, never the parent or a lookalike,
+// mirroring patheval's classify (pg2-d00wo0).
+func TestSessionKind_ExtraReadOnlyPrefixRoots(t *testing.T) {
+	home := patheval.ResolveRealPath(t.TempDir())
+	parent := filepath.Join(home, ".cache")
+	t.Setenv("HOME", home)
+	t.Setenv("CETA_EXTRA_READONLY_ROOTS", "")
+	t.Setenv("CETA_EXTRA_READONLY_PREFIX_ROOTS", parent+"/pd-*")
+	pe := patheval.New("/ceta-session-project")
+
+	granted := filepath.Join(parent, "pd-1", "sub", "f.txt")
+	if pa := ResolveAccess(sessionKinds(pe), granted); pa.Read.Result != Permitted || pa.Write.Result == Permitted {
+		t.Errorf("%s: Read=%s Write=%s, want Read Permitted and Write not Permitted", granted, pa.Read.Result, pa.Write.Result)
+	}
+	for _, p := range []string{parent, filepath.Join(parent, "pd"), filepath.Join(parent, "pdx-1", "f"), filepath.Join(parent, "other", "f")} {
+		if pa := ResolveAccess(sessionKinds(pe), p); pa.Read.Result == Permitted {
+			t.Errorf("%s: Read = Permitted, want not granted", p)
+		}
+	}
+}

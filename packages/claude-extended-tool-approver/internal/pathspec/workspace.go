@@ -177,6 +177,11 @@ type Rule struct {
 type RootDecl struct {
 	Root                string
 	Read, Write, Delete AccessResult
+	// Under, when set, replaces the fixed Root test: it returns the declared
+	// root abs lies at or under (a directory that is not known until abs is
+	// seen, such as a named-prefix child), or "" when abs is under none. Root
+	// is ignored when Under is set.
+	Under func(abs string) string
 }
 
 // Kind is one workspace declaration. Exactly one of Markers / Home / Temp
@@ -710,6 +715,12 @@ func candidates(kinds []Kind, abs string) []candidate {
 		}
 		if k.Roots != nil {
 			for _, d := range k.Roots() {
+				if d.Under != nil {
+					if r := d.Under(abs); r != "" {
+						out = append(out, candidate{r, rootKind(k, d.Read, d.Write, d.Delete), i})
+					}
+					continue
+				}
 				if d.Root != "" && patheval.PathContains(d.Root, abs) {
 					out = append(out, candidate{d.Root, rootKind(k, d.Read, d.Write, d.Delete), i})
 				}

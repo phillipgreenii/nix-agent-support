@@ -83,6 +83,9 @@ func SessionKind(pe *patheval.PathEvaluator) Kind {
 //     precedence (irrelevant here since each entry only ever declares one
 //     of the two shapes, but named for parity with classify()'s check
 //     order).
+//   - every CETA_EXTRA_READONLY_PREFIX_ROOTS entry: Read: Permitted only, over
+//     each matching direct child of its parent (RootDecl.Under), never the
+//     parent itself.
 //   - the project root, Read: Permitted + Write: Permitted, GATED by
 //     ProjectRootGrantsZone().
 //   - WORKSPACE_ROOT, Read: Permitted + Write: Permitted, UNGATED.
@@ -102,6 +105,9 @@ func sessionRootDecls(pe *patheval.PathEvaluator) []RootDecl {
 	}
 	for _, root := range pe.ExtraReadOnlyRoots() {
 		decls = append(decls, RootDecl{Root: root, Read: Permitted})
+	}
+	for _, pr := range pe.ExtraReadOnlyPrefixRoots() {
+		decls = append(decls, RootDecl{Read: Permitted, Under: pr.ChildOf})
 	}
 	if pe.ProjectRootGrantsZone() {
 		if root := pe.ProjectRoot(); root != "" {

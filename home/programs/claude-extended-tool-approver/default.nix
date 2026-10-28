@@ -118,6 +118,31 @@ let
     else
       null;
 
+  # extraReadOnlyPrefixRoots validation (pg2-d00wo0, ADR 0112): each entry is
+  # `<parent>/<prefix>*` where <parent> is an absolute directory or the literal
+  # token `$TMPDIR`, and <prefix> is an alphanumeric-led name ending in `-`. The
+  # parent must pass the unattendedExtraReadOnlyRoots shape rules (absolute, no
+  # `:`, no `.`/`..` segment, not `/`, `/Volumes`, `/Users`, the home directory or
+  # a parent of one, not under ~/.claude). The Go side re-checks the same rules at
+  # run time (patheval.parsePrefixRoot) and drops a bad entry; this fails the BUILD.
+  prefixRootMatch = builtins.match "(.*)/([A-Za-z0-9][A-Za-z0-9._-]*-)\\*";
+  prefixRootProblem =
+    entry:
+    let
+      m = prefixRootMatch entry;
+      parent = if m == null then null else builtins.elemAt m 0;
+    in
+    if m == null then
+      "is not of the form <parent>/<prefix>* (prefix: alphanumeric first character, then letters, digits, '.', '_' or '-', ending in '-')"
+    else if lib.hasInfix "*" parent then
+      "has a wildcard in its parent (the only wildcard is the one trailing '*')"
+    else if parent == "$TMPDIR" then
+      null
+    else if lib.hasInfix "$" parent then
+      "has a variable in its parent (only the whole parent `$TMPDIR` is allowed)"
+    else
+      unattendedRootProblem parent;
+
   # wrapProgram flags, contributed only by the settings that are active. The
   # binary is wrapped iff at least one flag is present; otherwise the unwrapped
   # package is used directly.
@@ -138,6 +163,12 @@ let
     ++ lib.optional (
       cfg.extraReadOnlyRoots != [ ]
     ) ''--set CETA_EXTRA_READONLY_ROOTS "${lib.concatStringsSep ":" cfg.extraReadOnlyRoots}"''
+    # Named-prefix read roots (pg2-d00wo0): shell-escaped, NOT double-quoted, so the
+    # literal `$TMPDIR` token and the `*` reach the wrapper verbatim and the binary
+    # resolves $TMPDIR itself at run time (per-user, per-boot; not known at build time).
+    ++
+      lib.optional (cfg.extraReadOnlyPrefixRoots != [ ])
+        "--set CETA_EXTRA_READONLY_PREFIX_ROOTS ${lib.escapeShellArg (lib.concatStringsSep ":" cfg.extraReadOnlyPrefixRoots)}"
     # --suffix, NOT --set (pg2-t0hi5): --set would silently discard a developer's
     # own CETA_EXTRA_TEMP_ROOTS from their shell; --suffix merges (existing value
     # first, ours appended, ":"-separated).
@@ -264,6 +295,40 @@ in
         additions here are additive on top of that base set.
       '';
     };
+    extraReadOnlyPrefixRoots = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [
+        "/Users/someone/.cache/pd-*"
+        "$TMPDIR/pd-*"
+      ];
+      description = ''
+        Named-prefix read-only roots (exported as CETA_EXTRA_READONLY_PREFIX_ROOTS, a
+        ":"-separated list). Each entry is `<parent>/<prefix>*`: the path-safety
+        evaluator classifies read-only every DIRECT child of `<parent>` whose name is
+        `<prefix>` followed by one or more of `A-Za-z0-9._-`, and everything beneath
+        that child. It never grants `<parent>` itself, a child whose name merely
+        resembles the prefix (`pd` or `pdx-foo` for `pd-*`), a nested directory, or
+        anything reached through a symlink or `..` that leaves a matching child. Use it
+        where `extraReadOnlyRoots` cannot name a directory exactly (agent scratch
+        directories with a generated suffix) without granting the whole parent.
+
+        `<parent>` is an absolute directory, or the literal token `$TMPDIR`: the
+        process's own temp directory, resolved when the hook runs (a per-user,
+        per-boot `/var/folders/.../T/` is not known at build time). `$TMPDIR` is
+        honoured only when it is a directory strictly inside `/private/var/folders`,
+        `/private/tmp` or `/tmp`. `<prefix>` MUST start with a letter or digit and end
+        with `-`; the only wildcard is that one trailing `*`.
+
+        The parent must pass the `unattendedExtraReadOnlyRoots` shape rules (absolute,
+        no `:`, no `.` or `..` segment, not `/`, `/Volumes`, `/Volumes/gitrepos`,
+        `/Users`, the home directory or a parent of one, and not, containing or under
+        `~/.claude`); the module asserts this. Checked after every built-in zone and
+        after the secrets and denyRead guards. Empty by default so this repo stays
+        generic; set machine paths in the consuming flake. Definitions list-merge. See
+        ADR 0112.
+      '';
+    };
     extraTempRoots = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -320,6 +385,10 @@ in
         assertion = tempRootProblem root == null;
         message = "phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots: \"${root}\" ${tempRootProblem root}";
       }) cfg.extraTempRoots
+      ++ map (entry: {
+        assertion = prefixRootProblem entry == null;
+        message = "phillipgreenii.programs.claude-extended-tool-approver.extraReadOnlyPrefixRoots: \"${entry}\" ${prefixRootProblem entry}";
+      }) cfg.extraReadOnlyPrefixRoots
       ++ map (root: {
         assertion = unattendedRootProblem root == null;
         message = "phillipgreenii.programs.claude-extended-tool-approver.unattendedExtraReadOnlyRoots: \"${root}\" ${unattendedRootProblem root}";

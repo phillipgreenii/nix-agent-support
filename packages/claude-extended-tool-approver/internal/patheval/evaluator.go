@@ -66,6 +66,11 @@ type PathEvaluator struct {
 	// built-in zone (see Evaluate).
 	extraReadWrite []string
 	extraReadOnly  []string
+	// extraReadOnlyPrefix are named-prefix read-only roots from
+	// CETA_EXTRA_READONLY_PREFIX_ROOTS (see prefixroots.go): direct children of a
+	// parent whose name starts with a dash-terminated prefix. Checked after the
+	// exact extra roots; never grant the parent itself.
+	extraReadOnlyPrefix []PrefixRoot
 	// deniedRoots are absolute roots configured via the CETA_DENIED_ROOTS env
 	// var (":"-separated), machine-specific and KNOWN NOT TO EXIST on the
 	// machine that configured them (pg2-fxu7k). They exist to catch a
@@ -218,6 +223,7 @@ func New(projectRoot string) *PathEvaluator {
 		tmpRoot:               tmpRoot,
 		extraReadWrite:        resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
 		extraReadOnly:         resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
+		extraReadOnlyPrefix:   resolveExtraPrefixRoots(home),
 		deniedRoots:           resolveDeniedRoots(),
 	}
 }
@@ -260,6 +266,7 @@ func NewWithCWD(projectRoot, cwd string) *PathEvaluator {
 		tmpRoot:               tmpRoot,
 		extraReadWrite:        resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
 		extraReadOnly:         resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
+		extraReadOnlyPrefix:   resolveExtraPrefixRoots(home),
 		deniedRoots:           resolveDeniedRoots(),
 	}
 }
@@ -366,6 +373,7 @@ func (pe *PathEvaluator) WithCWD(cwd string) *PathEvaluator {
 		inContainer:           pe.inContainer,
 		extraReadWrite:        pe.extraReadWrite,
 		extraReadOnly:         pe.extraReadOnly,
+		extraReadOnlyPrefix:   pe.extraReadOnlyPrefix,
 		deniedRoots:           pe.deniedRoots,
 	}
 }
@@ -517,6 +525,11 @@ func (pe *PathEvaluator) extraRootAccess(path string) PathAccess {
 	}
 	for _, root := range pe.extraReadOnly {
 		if pathContains(root, path) {
+			return PathReadOnly
+		}
+	}
+	for _, pr := range pe.extraReadOnlyPrefix {
+		if pr.ChildOf(path) != "" {
 			return PathReadOnly
 		}
 	}
