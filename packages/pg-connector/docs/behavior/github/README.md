@@ -72,14 +72,19 @@ the data that explains it is already stored.
 ## Realization gaps
 
 This set's **realization-gap register** (method `INV-23`): intended behavior this set's
-implementation has not built, one row per gap. The set states intended behavior only. **No gap is
-open.** The daemon-backed GitHub backend is built (`packages/pg-connector/cmd/pg-connector-github`,
-on the shared daemon library `packages/pg-connector/pkg/connectord`), and every row this register
-once carried (process and placement, freshness, change delivery, budget, `status`, the error
-taxonomy, and the config, supervision and status interfaces) was re-verified against that code and
-its tests and removed, because the build now realizes it. The umbrella's half of the seam is the
+implementation has not built, one row per gap. The set states intended behavior only. **One gap is
+open**, a fairness limit under an undersized budget, in the row below. The daemon-backed GitHub
+backend is built (`packages/pg-connector/cmd/pg-connector-github`, on the shared daemon library
+`packages/pg-connector/pkg/connectord`), and every row this register once carried (process and
+placement, freshness, change delivery, budget, `status`, the error taxonomy, and the config,
+supervision and status interfaces) was re-verified against that code and its tests and removed,
+because the build now realizes it. The umbrella's half of the seam is the
 parent set's register. A later divergence between this set and the build is recorded here as a new
 row.
+
+| Element           | Intended                                                                                                                                                                                                                                                               | Where the implementation stands                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Tracked by  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `INV-GH-BUDGET-5` | under any cap, a PR with an open work item keeps being refreshed: a **watched** PR (`INV-GH-CHG-5`) stays inside the refresh the keep-alive set promises (`INV-GH-FRESH-3`), and a burst that exhausts the background share slows every refresh evenly until it drains | with a cap too small for the keep-alive set (a request-bucket cap of 340 per hour, against the 4000 per hour cap at which the load test runs), watched and unwatched PRs **stall alike** and the burst does not drain: the aging of `INV-GH-BUDGET-2` lifts an overdue class 4 task into class 3, and class 3 to 5 share the one background share of `INV-GH-BUDGET-3` with no reserve for any class. A PR watched directly (a read with the watch option) is class 4 unless a configured query also lists it, so nothing protects it. The only protection is the tracked-set alert and the governor's backlog (`INV-GH-DIAG-5`), which warn and protect nothing. Accepted, not fixed: an agent decision of 2026-10-27, reversible (the operator may overturn it); a watched-aware class can follow if the backlog and the alert show real overload | `pg2-ckr7y` |
 
 ## External references
 
