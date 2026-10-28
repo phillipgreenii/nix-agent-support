@@ -2,17 +2,17 @@
 // pg-connector — this packet's own "tests MAY fake the pg-connector
 // subprocess" allowance [Binding decisions: "'Nothing new' rule" closing
 // paragraph], extended to ccpool's own list subprocess too.
-// Mirrors packages/pg-router-probe/cmd/pg-router-probe/testmain_test.go's
-// pattern exactly (itself mirroring packages/pg-connector's own
-// pkg/scriptout/exec_test.go).
 //
-// The double answers a Call through the package's Runner seam (runner.go)
-// in process. It used to re-execute the race-built test binary once per
-// call (GO_WANT_HELPER_PROCESS), and a race-built child sleeps 1 s at exit
-// (atexit_sleep_ms), so every fake call cost about 1 s under -race. The
-// behavior names (GO_HELPER_BEHAVIOR values) are kept so call sites in the
-// tests did not change. The real exec path (ExecRunner) is covered by
-// runner_test.go with sh -c.
+// The double is a cmdruntest.Fake (github.com/phillipgreenii/x) installed on
+// the package's Runner seams (runner.go): it answers a Call in process and
+// keeps the ordered call log, so a test can assert on the EXACT argv this
+// probe passed ccpool/pg-connector. It used to re-execute the race-built test
+// binary once per call, and a race-built child sleeps 1 s at exit
+// (atexit_sleep_ms); nothing here starts a process. The behavior
+// names (GO_HELPER_BEHAVIOR values) are kept so call sites in the tests did
+// not change. The real exec path is cmdrun.Exec, covered by the shared
+// cmdruntest.RunContract suite in x and, through this adapter, by
+// runner_test.go.
 //
 // One shared helperRun switch covers both subprocesses' fake behaviors
 // (ccpoolRunner in ccpoolexec.go and connectorRunner in connector.go are
@@ -25,31 +25,18 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-)
 
-var (
-	recordedMu    sync.Mutex
-	recordedCalls []Call
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
-
-// recordCall remembers the Call a double answered, so a test can assert on
-// the EXACT argv this probe passed ccpool/pg-connector (e.g. that
-// --backend pg-connector-issue-beads is really present) rather than
-// trusting a code read of the hardcoded constant that builds it.
-func recordCall(c Call) {
-	recordedMu.Lock()
-	defer recordedMu.Unlock()
-	recordedCalls = append(recordedCalls, c)
-}
 
 // helperRun answers one Call with the canned wire response/exit code for
-// behavior. ctx is honored by the "slow" behavior only.
-func helperRun(ctx context.Context, behavior string, c Call) Result {
-	ok := func(stdout string) Result { return Result{Stdout: stdout} }
-	fail := func(code int, stderr string) Result { return Result{Code: code, Stderr: stderr} }
+// behavior. The "slow" behavior is not answered here: see helperRunner.
+func helperRun(behavior string, c cmdrun.Call) cmdrun.Result {
+	ok := cmdruntest.Out
+	fail := cmdruntest.Fail
 
 	switch behavior {
 	// pg-connector behaviors.
@@ -71,7 +58,7 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 			`{"id":"zr-2","labels":["escalated"],"metadata":{"pg_router_escalation_fingerprint":"fp2"}}` +
 			`],"present_ids":["zr-1","zr-2"],"sources":[{"source":"pg-connector-issue-beads","status":"succeeded","count":2}]}`)
 	case "list_degraded_empty":
-		return Result{Code: 2, Stdout: `{"entities":[],"present_ids":[],"sources":[{"source":"pg-connector-issue-beads","status":"degraded","reason":"timeout"}]}`}
+		return cmdrun.Result{Code: 2, Stdout: []byte(`{"entities":[],"present_ids":[],"sources":[{"source":"pg-connector-issue-beads","status":"degraded","reason":"timeout"}]}`)}
 	case "list_total_failure":
 		return fail(3, "pg-connector: total failure: no backend succeeded\n")
 
@@ -105,28 +92,40 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 	case "ccpool_list_fail":
 		return fail(1, "ccpool: list: store open failed\n")
 
-	case "slow":
-		// Outlives any short test timeout -- exercises "every external call
-		// in run MUST carry an explicit timeout" for both subprocess sides.
-		// A child killed by its context deadline reports Code -1 and
-		// Signaled, exactly as ExecRunner does.
-		select {
-		case <-ctx.Done():
-			return Result{Code: -1, Signaled: true}
-		case <-time.After(10 * time.Second):
-			return Result{}
-		}
 	default:
 		return fail(99, "unknown GO_HELPER_BEHAVIOR: "+behavior+" (childArgs="+fmt.Sprint(c.Args)+")\n")
 	}
 }
 
-// helperRunner returns a Runner that answers every Call with behavior and
-// records it (recordCall).
-func helperRunner(behavior string) Runner {
-	return func(ctx context.Context, c Call) Result {
-		recordCall(c)
-		return helperRun(ctx, behavior, c)
+// lastFake is the cmdruntest.Fake the most recent withFactory or
+// withCcpoolFactory installed; recordedArgs reads its call log.
+var lastFake *cmdruntest.Fake
+
+// helperRunner returns a Runner answering every Call with behavior; the call
+// is recorded in lastFake's ordered log.
+func helperRunner(t *testing.T, behavior string) cmdrun.Runner {
+	t.Helper()
+	f := cmdruntest.New(t)
+	lastFake = f
+	rule := f.On(cmdruntest.Any)
+	if behavior != "slow" {
+		rule.Respond(func(c cmdrun.Call) cmdrun.Result { return helperRun(behavior, c) })
+		return f.Runner()
+	}
+	// "slow" outlives any short test timeout -- exercises "every external
+	// call in run MUST carry an explicit timeout" for both subprocess sides.
+	// The Fake does not see the context, so this wrapper does: a child
+	// killed by its context deadline reports Code -1, a signal and the
+	// context error, exactly as cmdrun.Exec does.
+	inner := f.Runner()
+	return func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		inner(ctx, c)
+		select {
+		case <-ctx.Done():
+			return cmdrun.Result{Code: -1, Signal: "killed", CtxErr: ctx.Err()}
+		case <-time.After(10 * time.Second):
+			return cmdrun.Result{}
+		}
 	}
 }
 
@@ -134,7 +133,7 @@ func helperRunner(behavior string) Runner {
 func withFactory(t *testing.T, behavior string) {
 	t.Helper()
 	orig := connectorRunner
-	connectorRunner = helperRunner(behavior)
+	connectorRunner = helperRunner(t, behavior)
 	t.Cleanup(func() { connectorRunner = orig })
 }
 
@@ -144,6 +143,6 @@ func withFactory(t *testing.T, behavior string) {
 func withCcpoolFactory(t *testing.T, behavior string) {
 	t.Helper()
 	orig := ccpoolRunner
-	ccpoolRunner = helperRunner(behavior)
+	ccpoolRunner = helperRunner(t, behavior)
 	t.Cleanup(func() { ccpoolRunner = orig })
 }

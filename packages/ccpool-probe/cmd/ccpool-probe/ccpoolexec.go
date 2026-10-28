@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // ccpoolBinary is the ambient $PATH name this probe execs.
@@ -32,12 +34,12 @@ const ccpoolBinary = "ccpool"
 // item 1, its parenthetical: "no new tagging scheme is needed"].
 const pgRouterPoolFilter = "pgrouter.pool=pg-router"
 
-// ccpoolRunner runs the ccpool subprocess. nil means ExecRunner; tests
+// ccpoolRunner runs the ccpool subprocess. nil means cmdrun.Exec; tests
 // swap it for an in-process double (testmain_test.go) instead of
 // re-executing the test binary. Kept as a SEPARATE variable from
 // connector.go's connectorRunner so a test can independently fake ccpool's
 // and pg-connector's own behavior in the same run.
-var ccpoolRunner Runner
+var ccpoolRunner cmdrun.Runner
 
 type ccpoolResult struct {
 	stdout   []byte
@@ -53,15 +55,15 @@ type ccpoolResult struct {
 // mutated). The returned error is non-nil only when the child could never
 // even be started.
 func runCcpool(ctx context.Context, poolDir string, args []string) (ccpoolResult, error) {
-	call := Call{Name: ccpoolBinary, Args: args}
+	call := cmdrun.Call{Name: ccpoolBinary, Args: args}
 	if poolDir != "" {
 		call.Env = []string{"CCPOOL_POOL=" + poolDir}
 	}
-	r := ccpoolRunner.do(ctx, call)
+	r := runnerOrExec(ccpoolRunner)(ctx, call)
 	if r.StartErr != nil {
 		return ccpoolResult{}, fmt.Errorf("ccpool: exec %v: %w", args, r.StartErr)
 	}
-	return ccpoolResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
+	return ccpoolResult{stdout: r.Stdout, stderr: r.Stderr, exitCode: r.Code}, nil
 }
 
 var errCcpoolFailed = errors.New("ccpool-probe: ccpool call failed")

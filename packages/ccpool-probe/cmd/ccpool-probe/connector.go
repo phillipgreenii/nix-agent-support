@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // pgConnectorBinary is the ambient $PATH name this probe execs. Never a
@@ -40,11 +42,11 @@ const defaultPgConnectorBackend = "pg-connector-issue-beads"
 // --connector-backend through runOptions (run.go defaultRunDeps), so there
 // is no package-level mutable state.
 
-// connectorRunner runs the pg-connector subprocess. nil means ExecRunner;
+// connectorRunner runs the pg-connector subprocess. nil means cmdrun.Exec;
 // tests swap it for an in-process double (testmain_test.go) instead of
 // re-executing the test binary. Kept separate from ccpoolexec.go's own
 // ccpoolRunner so a test can independently fake each subprocess's behavior.
-var connectorRunner Runner
+var connectorRunner cmdrun.Runner
 
 type pgConnectorResult struct {
 	stdout   []byte
@@ -57,11 +59,11 @@ type pgConnectorResult struct {
 // tracker is selected). The returned error is non-nil only when
 // the child could never even be started.
 func runPgConnector(ctx context.Context, args []string) (pgConnectorResult, error) {
-	r := connectorRunner.do(ctx, Call{Name: pgConnectorBinary, Args: args})
+	r := runnerOrExec(connectorRunner)(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args})
 	if r.StartErr != nil {
 		return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, r.StartErr)
 	}
-	return pgConnectorResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
+	return pgConnectorResult{stdout: r.Stdout, stderr: r.Stderr, exitCode: r.Code}, nil
 }
 
 // invokeOrFail runs pg-connector with args and treats any exit code in
