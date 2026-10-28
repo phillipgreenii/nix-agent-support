@@ -59,6 +59,10 @@ type pollState struct {
 	// baselineIDs holds the ids of the members of the queries in a baseline run
 	// this call: no other path hydrates them with a row in this call.
 	baselineIDs map[string]bool
+	// closed holds the ids of the issues whose hydration in this call appended
+	// a closed row (listed hydrations and orphan reads); rehydrateDependants
+	// reads their dependants.
+	closed map[string]bool
 }
 
 func (s *pollState) noteQueries(queries []string, reason string) {
@@ -95,6 +99,45 @@ func (b *budget) note(herr error) {
 	} else {
 		b.streak = 0
 	}
+}
+
+// noteClosed records, in st.closed, that a hydration of an issue appended a
+// closed row. Only a hydration that returned no error and no degraded note
+// counts: a failed read appended nothing. Every issue the poll hydrates is
+// watched (a listed one is marked watched by its own hydration write, an
+// orphan is watched by definition), so the record needs no flag check, and
+// none could be made afterwards: the closing write clears the flag.
+func (s *pollState) noteClosed(id string, kinds []string, herr error) {
+	if herr != nil {
+		return
+	}
+	for _, k := range kinds {
+		if k == string(classify.KindClosed) {
+			if s.closed == nil {
+				s.closed = map[string]bool{}
+			}
+			s.closed[id] = true
+			return
+		}
+	}
+}
+
+// closedIDs returns the ids noteClosed recorded, sorted.
+func (s *pollState) closedIDs() []string {
+	ids := make([]string, 0, len(s.closed))
+	for id := range s.closed {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// sourceTerminalRow reports whether a stored issue row is terminal in its
+// source system, the predicate the reverse-edge index takes. It lives here,
+// beside the other classify uses of the poll, so the pinned importer set of
+// internal/classify does not grow for the dependants detector.
+func sourceTerminalRow(row store.Entity, now time.Time, window time.Duration) bool {
+	return classify.SourceTerminal(issueEntityType, json.RawMessage(row.Facts), now, window)
 }
 
 func appendUnique(dst []string, vals ...string) []string {
@@ -565,8 +608,9 @@ func (e *Engine) hydrateListed(ctx context.Context, opts Options, runs []queryRu
 			// statement, so the first row passes the delivery gate.
 			apply = append(apply, watchLocal)
 		}
-		herr := e.hydrate(ctx, opts.EntityType, p.id, p.change, OriginPGConnector, false, listFP, apply...)
+		res, herr := e.hydrateResult(ctx, opts.EntityType, p.id, p.change, OriginPGConnector, false, listFP, apply...)
 		st.hydrated[p.id] = herr
+		st.noteClosed(p.id, res.Kinds, herr)
 		bud.note(herr)
 		if herr != nil {
 			st.noteQueries(p.queries, fmt.Sprintf("hydrate %s: %s", p.id, firstErrLine(herr.Error())))

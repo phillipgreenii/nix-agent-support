@@ -527,11 +527,45 @@ which brings the old tiers and the flood of re-emitted issues back; the additive
 and read-time columns, the meta keys and the side table stay in the store and the old binary ignores
 them.
 
+## A dependant left stale by a blocker's closure
+
+With no age sweep and no timer, nothing re-reads a watched issue on its own, so one loss path
+remains: a change that reaches a watched bead only through ANOTHER bead. When a blocker closes, the
+stored recursive `issue_deps` of its dependant changes without the dependant's own list fingerprint
+moving, so the dependant would be seen only at its next change. The detector for it is built on the
+reverse-edge index (`dependency.IssueDependents`, INV-CHANGES-17):
+
+- **Trigger.** A hydration in this poll appended a `closed` row for an issue: a listed hydration or,
+  more usually, an orphan read, because a closed bead leaves the open-status queries and is read by
+  id. A hydration that failed, degraded or appended no `closed` row triggers nothing.
+- **Action.** After the orphan reads and the listed hydrations, each of the closed issue's DIRECT,
+  `blocks`-typed dependants that is still active, not terminal and watched is re-hydrated in the same
+  poll as an ordinary change read (no forced reconcile, no list fingerprint, origin `pg-connector`).
+  The classifier decides what that read appends: a row only when the dependant's normalised
+  snapshot differs, normally `deps_changed`, and nothing when it is unchanged. Inactive, terminal and
+  unwatched dependants are not read, a dependant is read once however many of its blockers closed, and
+  one already read without error in this poll is not read again. The edges are those the dependants
+  store in their own `issue_show.deps`, so the detector does not depend on how a list decodes edges.
+- **Budget.** Each re-hydration draws one unit of the poll's `hydration.max_per_poll`, after the
+  poll's own hydrations (the closed issue's read, every orphan read and every listed hydration), and
+  stops when the budget is spent or the backend is degraded. The cut is reported like any budget
+  cut: the watched queries are marked `degraded` with reason `hydration_budget` and the call exits
+  `2`.
+- **Accepted loss path.** pg-desk keeps no retry counter, deferral queue or timer, so a dependant
+  the budget cuts is NOT retried: it is seen at its next change. A failed re-hydration of a dependant
+  is likewise not retried.
+- **Unavailable index.** A closed issue whose stored facts carry no `issue_deps` is unavailable, not
+  proof of no dependants: when no dependant stores an edge to it either, it is skipped and a
+  diagnostic names it; the edges that dependants do store are still used.
+- **Not cascading.** A dependant that this detector re-hydrates and finds closed does not itself
+  trigger a further pass in the same poll.
+
 ## Hydration budget (design 8.5)
 
 `hydration.max_per_poll` (default 50) caps the DETAIL reads per call, across both sources: the
-orphan reads first, then the changed entities, then the added entities and late watches. A `--reset`
-replay is exempt (see `--reset`).
+orphan reads first, then the changed entities, then the added entities and late watches, then the
+re-hydration of the dependants of an issue closed in this poll (see "A dependant left stale by a
+blocker's closure"). A `--reset` replay is exempt (see `--reset`).
 
 - When the budget runs out, or the backend answers degraded three hydrations in a row, the
   remaining hydrations are left for the next call, never retried inline. Every watched query that
@@ -702,7 +736,10 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   hydration; the direct `issue_show.deps` edges MUST be stored either way.
 - **INV-CHANGES-17.** <!-- uuid: 6962bf00-e1eb-475f-b5f6-ea3ce09423e8 --> The issue reverse-edge index MUST count DIRECT, `blocks`-typed edges only,
   MUST exclude inactive and (by the caller's predicate) terminal dependents, and MUST report an
-  issue without stored `issue_deps` as unavailable rather than as having no dependents.
+  issue without stored `issue_deps` as unavailable rather than as having no dependents. When a poll's
+  hydration of an issue appends `closed`, pg-desk MUST re-hydrate that issue's watched, active,
+  non-terminal direct dependants in the same poll within `hydration.max_per_poll`, and MUST NOT retry
+  one the budget cut.
 - **INV-CHANGES-18.** <!-- uuid: 391c1ff5-ad6d-411e-a616-f75aa60dfacb --> pg-desk MUST NOT choose how to detect an issue change by type alone. Its
   configuration MUST name, per watched query, the backend instance that serves it and whether it
   owns changes, rendered from the same source as the connector's registry; the connector's

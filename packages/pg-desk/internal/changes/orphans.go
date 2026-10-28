@@ -137,6 +137,7 @@ func (e *Engine) readOrphans(ctx context.Context, opts Options, st *pollState, b
 		read++
 		res, herr := e.hydrateResult(ctx, issueEntityType, id, gather.ChangeRemoved, OriginPGConnector, false, nil, skipUnchangedWrite)
 		st.hydrated[id] = herr
+		st.noteClosed(id, res.Kinds, herr)
 		bud.note(herr)
 		if herr != nil {
 			st.side = append(st.side, fmt.Sprintf("orphan read %s: %s", id, firstErrLine(herr.Error())))

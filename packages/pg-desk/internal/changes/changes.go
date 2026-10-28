@@ -210,6 +210,12 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		if err != nil {
 			return Outcome{}, err
 		}
+		// A blocker closed by this poll's reads leaves its dependants stale: they
+		// are re-hydrated from what is left of the budget, after the orphan reads
+		// and the listed hydrations.
+		if err := e.rehydrateDependants(ctx, opts, st, bud, st.closedIDs()); err != nil {
+			return Outcome{}, err
+		}
 		// The age sweep's two tiers run for pr and thread only. An issue is
 		// never re-emitted by age: it is emitted when it changes, so there is
 		// no reconcile kind, sweep origin or local-reconcile origin for it
