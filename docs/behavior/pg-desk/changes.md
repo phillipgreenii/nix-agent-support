@@ -316,13 +316,17 @@ row.
   would collapse `title_changed`, `description_changed`, `labels_changed` and the rest into
   `fields_changed`. Link propagation for a feed row is derived from the row's kinds or from the
   stored snapshot, not from the classifier's kinds.
-- **Membership.** The feed's `entered_query`, `left_query` and `removed` rows keep maintaining the
-  per-query listing status and the persisted per-query sets (see "Active entities, membership and
-  orphan reads"), which the focus coverage reads and which are maintained only by list runs
-  otherwise. They MUST NOT end watching (see "Stickiness") and, except for the first observation of
-  an unseen issue, MUST NOT be stored as change rows: otherwise each would become a row and an
-  event for a flip that changed nothing about the issue. An `entered_query` row for an issue never
-  seen before is delivered as its first-observation `added` row.
+- **No per-query membership.** For a backend that owns its changes pg-desk keeps NO per-query
+  membership: it writes no `change_flow.watchset.<type>.<query>` set for it and does not consume the
+  feed's `entered_query` or `left_query` kinds (the daemon never emits them; one that arrived anyway
+  would be dropped from the stored kinds, and a row left with no kind only advances the feed
+  position, so a flip that changed nothing about the issue becomes neither a change row nor an
+  event). Whether an issue is watched arrives as entity metadata (`entity_meta.watched` of the
+  hydrating `issue show`), which pg-desk reads at hydration into the entity's watched column; the
+  focus coverage, the focus unwatched count and the watched-id reads take an owning backend's
+  watched ids from that column, and the per-backend beads sets stay as "Active entities, membership
+  and orphan reads" describes. The per-query listing status (`ok`, `degraded`, `failed`) is not
+  membership: it only reports how the last read of a query went.
 - **A dropped key is a gap.** A feed key unseen for the connector's consumer-stale period is
   dropped, and its next poll starts at the tail: a silent gap for the sole detector. The runbook for
   a dropped key (a refresh of every watched entity of that backend), and the doctor gate on a
@@ -418,10 +422,10 @@ terminal, see "What counts as a terminal issue" below; thread with a reply insid
   A **complete** listing is one where at least one pg-connector backend succeeded, none is degraded
   (`disabled` counts as healthy) and nothing was truncated; it rewrites the query's set to exactly
   the listed ids. A degraded or truncated listing only ever ADDS its listed ids and never removes
-  any, and a failed query contributes nothing at all. For an owning backend the feed's membership
-  rows maintain the same sets (see "Feed consumption for a backend that owns its changes"). The
-  sets and the per-query listing status serve the focus coverage; they are not a source of
-  `removed` rows.
+  any, and a failed query contributes nothing at all. These sets belong to the beads (non-owning)
+  queries only: for an owning backend pg-desk keeps no per-query set and reads the entity's watched
+  column instead (see "Feed consumption for a backend that owns its changes"). The sets and the
+  per-query listing status serve the focus coverage; they are not a source of `removed` rows.
 - **Leaving a query is not removal.** For `issue`, an entity's absence from every watched query MUST
   NOT produce a `removed` row and MUST NOT end watching. A watched, still-open entity that no watched
   query lists any longer (a one-off watch, or an entity that left its query for an ordinary reason,
@@ -743,9 +747,11 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   `stale` or served from the cache MUST be treated as degraded: pg-desk MUST write nothing and leave
   the entity due.
 - **INV-CHANGES-28.** <!-- uuid: 11e0db31-83bb-4c1b-bd13-a191359ead2b --> The kinds of a feed-driven row MUST be the feed row's own kinds, stored as given;
-  pg-desk's classifier MUST NOT be run on it. A feed's `entered_query`, `left_query` and `removed`
-  rows MUST maintain the per-query listing status and persisted sets, MUST NOT end watching and,
-  except for the first observation of an unseen issue, MUST NOT be stored as change rows.
+  pg-desk's classifier MUST NOT be run on it. For an owning backend pg-desk MUST keep NO per-query
+  membership (no `change_flow.watchset.*` set) and MUST NOT consume a feed's `entered_query` or
+  `left_query` kinds, which MUST NOT be stored as change rows; whether the issue is watched MUST be
+  read from entity metadata (`entity_meta.watched`) into the entity's watched column at hydration.
+  Per-query listing status is not membership, and the beads backend keeps its list-and-diff sets.
 - **INV-CHANGES-29.** <!-- uuid: 5286b9ce-b03d-4343-91a3-5cc1efb9cc54 --> For `issue`, the due backlog (the series and the coverage header) MUST count only
   pending hydrations (a changed or watched entity not yet hydrated, and the failed-ingest table), not
   entities past an age.

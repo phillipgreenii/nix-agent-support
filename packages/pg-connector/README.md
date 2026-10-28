@@ -688,40 +688,32 @@ on a fan-out verb, so a caller MUST read the body, not the exit code, to tell it
 not retry, but only a beads tracker is its target), and the escalation prompts, which pass `--backend` on every call.
 They MUST keep passing `--backend`: an unpinned id-keyed read is the case below.
 
-**Callers that treat `unavailable` as terminal.** Each is a follow-up, not fixed here, because each needs a decision
-that changes documented behavior.
+**Callers that treat `unavailable` as terminal.** One caller still does; the other two named by the first audit were
+re-checked against the current code (bead `pg2-2qyyh.3.22`) and retry. Callers MUST retry `unavailable` (a degraded
+run, retried), and there is NO local `not_found` shortcut for a non-Jira id (operator ruling, Phillip, 2026-10-25, bead
+`pg2-962xg`: the Jira client answers `unavailable` for every read while its daemon is down, and options (a), (b) and
+(c) of the first audit were declined).
 
 1. **Unpinned id-keyed reads of an id the Jira backend does not own.** The umbrella's try-each resolution
    (`dispatchTargetedFor`, `dispatchShowWithCacheOpts`) stops at the first answer that is not `not_found`
-   (`INV-REG-2`). The daemon answers `not_found` for an id that is not a Jira key without an origin call
-   (`internal/ops/read/show.go`), but the client forwards every read without looking at the id, so with the daemon down
-   or migrating the same id answers `unavailable`. With the Jira backend registered ahead of a beads backend, an
-   unpinned `issue show|children|deps <bead-id>` then fails for the whole outage instead of reaching the beads
-   backend. `pg-desk` gather (`gatherDeps`, `issue deps <bead-id> --full`, no `--backend`) degrades every PR run that
-   has a matched work item for the same reason. The old stateless backend did not have this property, so it appears at
-   the registry flip. Options: (a) the client answers `not_found` locally for an id that is not a Jira key
-   (`internal.IsJiraKey`), which needs `INV-JIRA-PROC-2` narrowed (it says a read MUST answer `unavailable`); (b) every
-   unpinned caller pins `--backend`; (c) the umbrella skips an `unavailable` backend in try-each, which hides outages
-   and is not recommended. Recommended: (a), with a client test against the real binary and a closed socket.
-2. **`pg-decider` work-item lookup** (`internal/apply/lookup.go`, `ReadLookup`). A failed or degraded lookup is
-   `lookup-unavailable`, exit `4`, which `pr-change` maps to `decide_failed` (`internal/prchange/run.go`, `mapDecide`),
-   a class that is not retryable and whose failure line is scrubbed of the word `unavailable`. The router therefore
-   never re-runs the delivery for a lookup that only needs the backend back. It reaches the Jira backend only when
-   `agent_tracker_backend` is unset (the listing is then a fan-out); with it set the lookup is pinned and the case is
-   a beads outage. Fix: map a `lookup-unavailable` exit to a retryable class and update
-   `docs/behavior/pg-decider/pr-change.md` and its exit-code table.
-3. **`work-report pull`** (`internal/pull/pull.go`). The `activity list` fan-out includes the Jira backend, whose
-   `list_activity` is forwarded. A source answering `unavailable` becomes a `degraded` row and is retried in the run
-   only when its reason is a deadline (`deadlineReason`); a daemon outage is reported with a re-pull command and
-   waits for the operator. Fix: also retry once for a reason that carries `unavailable` (the umbrella writes
-   `scriptout: unavailable: ...`), with a test against the real fan-out document shape.
+   (`INV-REG-2`), so with the Jira daemon down or migrating an unpinned `issue show|children|deps <bead-id>` answers
+   `unavailable` for the whole outage instead of reaching a beads backend registered after it. The umbrella is NOT to
+   change; the callers that can meet a non-Jira id either pin `--backend` or retry. `pg-desk` gather (`gatherDeps`,
+   `issue deps <bead-id> --full`, no `--backend`) already degrades the run and retries it. Still terminal, tracked by
+   bead `pg2-kwjze2` (`umbrella try-each treats unavailable as terminal (retry required)`; code and prompt changes
+   belong to it).
+2. **`pg-decider` work-item lookup** (`internal/apply/lookup.go`, `ReadLookup`). Already retries: a `lookup-unavailable`
+   exit `4` maps to the retryable class `transient` (exit `32`, `internal/prchange/class.go`, `internal/prchange/run.go`),
+   whose failure line carries the router's `unavailable` word, and `docs/behavior/pg-decider/pr-change.md` states it.
+3. **`work-report pull`** (`internal/pull/pull.go`). Already retries: a `degraded` row whose reason is a deadline or
+   the umbrella's `scriptout: unavailable: ...` is retried once in the run (`isDeadlineReason`, `isUnavailableReason`).
 
 The manual acknowledgement a feed consumer uses is built: `<type> changes --no-ack` forwards and writes the answer
 but sends no `changes_ack` (a source whose position lives in the umbrella's own ledger is reported `disabled`, and the call
 fails `invalid_argument` when every queried backend is such a source), and `<type> changes-ack --consumer C [--query Q]
 --next-seq N [--backend B]` sends the acknowledgement and prints the backend's own answer unchanged (`pr`, `ci`, `issue` and
 `calendar`; behavior: `INTF-WIRE-ACK-1`, `INTF-WIRE-ACK-2`). The `pg-desk` feed consumer that uses them
-is not built yet; it MUST retry on `unavailable` and MUST NOT acknowledge a poll that failed (the design's "Daemon down" paragraph).
+is built (`pg-desk issue changes`); it retries on `unavailable` and does not acknowledge a poll that failed.
 
 ## Profiling (pg-connector-github)
 
