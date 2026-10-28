@@ -51,6 +51,13 @@ func newChangesFixture(t *testing.T, typ string, queries ...string) *changesFixt
 		cfg.Watch.PR.Queries = queries
 	case "issue":
 		cfg.Watch.Issue.Queries = queries
+		// These fixtures exercise the rules AFTER a query's baseline, so each
+		// marker is preset; the baseline run itself is tested in internal/changes.
+		for _, q := range queries {
+			if err := seed.SetMeta(changes.MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
+				t.Fatal(err)
+			}
+		}
 	case "thread":
 		cfg.Watch.Thread.Queries = queries
 	}

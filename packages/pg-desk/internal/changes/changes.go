@@ -195,7 +195,13 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		// served first [design 8.4, 8.5]. Nothing is queued: what the cap or a
 		// failure leaves is found again by the next tick's diff.
 		bud := &budget{left: e.Cfg.HydrationMaxPerPoll()}
-		queued, err := e.hydrateListed(ctx, opts, runs, st, bud)
+		// The baseline step comes first: a watched query with no marker is in a
+		// silent baseline run, and only the other queries reach hydrateListed.
+		listedRuns, err := e.baselineStep(ctx, opts, runs, st, bud)
+		if err != nil {
+			return Outcome{}, err
+		}
+		queued, err := e.hydrateListed(ctx, opts, listedRuns, st, bud)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -400,21 +406,26 @@ func (e *Engine) envelope(opts Options, from int64, sources []Source, rows []sto
 // returns the failure (error or degraded note) or nil. listFP is the list
 // fingerprint observed this tick for a hydration driven by a listed entity,
 // nil for every read that did not come from a list (reset replay, sweep, the
-// removal confirmation read).
-func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string) error {
-	_, err := e.hydrateResult(ctx, entityType, id, change, origin, forceReconcile, listFP)
+// removal confirmation read). opts adjust the pipeline options after the defaults
+// (the snapshot-only hydration of a baseline run passes SnapshotOnly).
+func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string, opts ...func(*pipeline.EntityChangeOptions)) error {
+	_, err := e.hydrateResult(ctx, entityType, id, change, origin, forceReconcile, listFP, opts...)
 	return err
 }
 
 // hydrateResult is hydrate that also returns the pipeline's result, for the
 // caller that must tell a not_found read from one that wrote a snapshot.
-func (e *Engine) hydrateResult(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string) (pipeline.EntityChangeResult, error) {
-	res, err := e.Hydrator.RunEntityChange(ctx, entityType, id, change, pipeline.EntityChangeOptions{
+func (e *Engine) hydrateResult(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string, opts ...func(*pipeline.EntityChangeOptions)) (pipeline.EntityChangeResult, error) {
+	ecOpts := pipeline.EntityChangeOptions{
 		Origin:             origin,
 		ThreadActiveWindow: e.Cfg.ThreadActiveWindow(),
 		ForceReconcile:     forceReconcile,
 		ListFP:             listFP,
-	})
+	}
+	for _, apply := range opts {
+		apply(&ecOpts)
+	}
+	res, err := e.Hydrator.RunEntityChange(ctx, entityType, id, change, ecOpts)
 	RecordHydration(e.Store, entityType, id, res, err)
 	if err != nil {
 		return res, err

@@ -343,7 +343,8 @@ Both backends follow one rule.
 
 - **A marker per query.** Each watched query has its own baseline marker, kept where its backend
   keeps state: for Jira the daemon's per-query baseline time, set at a configured query's first
-  complete run; for beads a pg-desk store key `change_flow.baseline.<query>` (a time).
+  complete run; for beads a pg-desk store key `change_flow.baseline.<query>` (a time). pg-desk also writes `change_flow.baseline_open.<query>` (a time) once, at the first poll that
+  finds no marker, so a baseline that cannot finish can be told by how long it has been open.
 - **The baseline run.** A run of a query that has no marker is a baseline run: every member is
   marked watched and NO row is appended. For beads, a member pg-desk does not yet hold is hydrated
   silently with the no-row write (a state write with empty kinds updates the snapshot and bumps the

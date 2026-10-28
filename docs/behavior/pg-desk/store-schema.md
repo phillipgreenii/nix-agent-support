@@ -372,7 +372,7 @@ failing issue never blocks every other issue's feed.
 
 ### Feed and baseline markers in `meta`
 
-`meta` keeps three more families of keys for the issue flow, none written by the cutover:
+`meta` keeps four more families of keys for the issue flow, none written by the cutover:
 
 - **`change_flow.feed_seq.<instance>`** holds, for one backend instance's change feed, the identity of
   that backend's own store and the highest feed `seq` pg-desk has committed from it. It is written in
@@ -391,6 +391,10 @@ failing issue never blocks every other issue's feed.
   written only in the poll in which the last unhydrated member was hydrated, so a baseline that takes
   several polls stays silent throughout. A store move-aside loses every marker, and each watched query
   then baselines again, silently.
+- **`change_flow.baseline_open.<query>`** holds the time of the first poll that began a watched query's
+  baseline, written once and left alone after that, so the doctor and the outcome rules can tell a
+  baseline open for more than one day (see [`changes.md`](changes.md)). The marker's presence ends the
+  baseline; the open key stays.
 - **`change_flow.listing_ok.<query>`** holds the time of the last successful listing of a watched
   query. `change_flow.listing.<type>.<query>` above is overwritten by every call, failures included, so
   it cannot say when a query was last observed; this key can.

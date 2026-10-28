@@ -82,12 +82,29 @@ func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string
 			kinds = append(kinds, string(r.Kind))
 		}
 	}
+	if opts.SnapshotOnly {
+		kinds = nil
+	}
 	v, err := h.st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: `{}`, AsOf: "x"},
 		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z")
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v}, err
 }
 
+// newListEngine builds an engine over BASELINED queries (each marker is preset),
+// so the post-baseline rules are what its tests exercise; newUnbaselinedEngine
+// leaves the markers absent.
 func newListEngine(t *testing.T, queries ...string) (*Engine, *store.Store, *storeHydrator) {
+	t.Helper()
+	e, st, h := newUnbaselinedEngine(t, queries...)
+	for _, q := range queries {
+		if err := st.SetMeta(MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return e, st, h
+}
+
+func newUnbaselinedEngine(t *testing.T, queries ...string) (*Engine, *store.Store, *storeHydrator) {
 	t.Helper()
 	st := store.OpenNewSchemaForTest(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())

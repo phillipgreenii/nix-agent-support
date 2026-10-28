@@ -55,6 +55,9 @@ type pollState struct {
 	notes    map[string][]string // watched query -> extra degraded reasons
 	all      []string            // reasons that apply to every watched-query row
 	side     []string            // failures with no watched query to carry them
+	// baselineIDs holds the ids of the members of the queries in a baseline run
+	// this call: no other path hydrates them with a row in this call.
+	baselineIDs map[string]bool
 }
 
 func (s *pollState) noteQueries(queries []string, reason string) {
@@ -467,6 +470,9 @@ func (e *Engine) hydrateListed(ctx context.Context, opts Options, runs []queryRu
 	considered := make(map[string]bool, len(pending))
 	for _, p := range pending {
 		considered[p.id] = true
+		if st.baselineIDs[p.id] { // a baseline run owns it this call
+			continue
+		}
 		if herr, done := st.hydrated[p.id]; done { // a --reset replay already hydrated it
 			if herr != nil {
 				st.noteQueries(p.queries, fmt.Sprintf("hydrate %s: %s", p.id, firstErrLine(herr.Error())))
