@@ -21,6 +21,10 @@ let
     u: u.phillipgreenii.programs.pg-router-ccpool-handler.daemon.enable or false
   ) (lib.attrValues hmUsers);
   daemonEnabledByAnyUser = daemonUsers != [ ];
+  handlerEnabledByAnyUser =
+    lib.filter (u: u.phillipgreenii.programs.pg-router-ccpool-handler.enable or false) (
+      lib.attrValues hmUsers
+    ) != [ ];
   daemonCfg =
     if daemonEnabledByAnyUser then
       (lib.head daemonUsers).phillipgreenii.programs.pg-router-ccpool-handler.daemon
@@ -146,6 +150,18 @@ in
       phillipgreenii.observability.logSources.pg-router-ccpool-handler-daemon = {
         path = "${stateHome}/pg-router-ccpool-handler/launchd-*.log";
         format = "raw";
+      };
+    })
+    # The handler's own event log (bead pg2-vsepbz): dispatch_start records the
+    # launched model and effort (INV-CCH-40). Guarded on the handler's HM
+    # `enable` (the deployment never sets the handler's own daemon.enable) and
+    # obs.enable. errorAlert is off: dispatch_result lines are level "error" by
+    # design, so the generic error alert would fire on every failed dispatch.
+    (lib.mkIf (handlerEnabledByAnyUser && (obs.enable or false)) {
+      phillipgreenii.observability.logSources.pg-router-ccpool-handler-events = {
+        path = "${stateHome}/pg-router-ccpool-handler/events.jsonl";
+        format = "jsonl";
+        errorAlert.enable = false;
       };
     })
     (lib.mkIf poolMetricsEnabledByAnyUser {

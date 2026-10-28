@@ -8809,6 +8809,38 @@
                       };
                     }).phillipgreenii.programs.pg-router.rolesFile;
 
+                  # model validation (bead pg2-vsepbz, INV-CCH-40): a role whose
+                  # ccpool.model is `m` (forced to its rolesFile outPath), and a
+                  # launchConfig whose model is `m` (forced to its file outPath).
+                  # `-p` (a leading dash) must fail at eval; a real ID must not.
+                  modelRoleFile =
+                    m:
+                    (evalHM {
+                      enable = true;
+                      roles.m = {
+                        handler = ccpoolHandler;
+                        ccpool = {
+                          actor = "m-actor";
+                          completion = "close-only";
+                          onFailure = "unclaim";
+                          onDispatchFail = "leave";
+                          promptBody = "m prompt";
+                          model = m;
+                        };
+                      };
+                    }).phillipgreenii.programs.pg-router.rolesFile;
+                  modelLaunchConfigFile =
+                    m:
+                    (evalHM {
+                      enable = true;
+                      roles = { };
+                      launchConfig = {
+                        repoRoot = "/tmp/pg2-vsepbz-repo";
+                        worktreeDir = "/tmp/pg2-vsepbz-repo/.worktrees";
+                        model = m;
+                      };
+                    }).phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
+
                   # roleWithOwnPool (bead pg2-mr0sl): a ccpool role opting
                   # into its OWN dedicated pool, plus poolMetrics enabled --
                   # proves (a) roleBodyFor renders `poolDir` into that
@@ -8861,6 +8893,9 @@
                           # effort (bead pg2-svkob): a per-role claude --effort
                           # override renders into this role's own JSON only.
                           effort = "high";
+                          # model (bead pg2-vsepbz, INV-CCH-40): a per-role claude
+                          # --model override renders into this role's own JSON only.
+                          model = "claude-sonnet-5-5";
                           # toolSets (bead pg2-cwn44, pg2-bg9qq): declares the built-in
                           # "go" and "hooks" sets and a consumer-defined "linter" set;
                           # the role's own extraAllowedTools repeats one go grant to
@@ -9509,6 +9544,7 @@
                     beadsDir = "/tmp/pg2-12gr4-10-beads";
                     worktreeQuietWindow = "90s";
                     effort = "high";
+                    model = "claude-sonnet-5-5";
                     toolSets = [ "go" ];
                     extraAllowedTools = [ "Skill" ];
                     isolation.prefetch = {
@@ -9833,7 +9869,8 @@
                         [ "$(jq -r 'has("prTool")' "$launchConfigFile")" = false ]
                         [ "$(jq -r .beadsPrefix "$launchConfigFile")" = zr ]
                         [ "$(jq -r .autonomous "$launchConfigFile")" = true ]
-                        [ "$(jq -r .effort "$launchConfigFile")" = max ]
+                        [ "$(jq -r .effort "$launchConfigFile")" = medium ]
+                        [ "$(jq -r .model "$launchConfigFile")" = claude-sonnet-5-5 ]
                         [ "$(jq -r .sessionPrefix "$launchConfigFile")" = pg-router- ]
                         # confirmIngest/budgetTime render as NANOSECOND
                         # integers, not "25m"-style duration strings --
@@ -9865,7 +9902,7 @@
                         # values exactly.
                         [ "$(jq -r .permissionMode "$defaultLaunchConfigFile")" = dontAsk ]
                         [ "$(jq -r 'has("prTool")' "$defaultLaunchConfigFile")" = false ]
-                        [ "$(jq -r .model "$defaultLaunchConfigFile")" = "" ]
+                        [ "$(jq -r .model "$defaultLaunchConfigFile")" = claude-sonnet-5-5 ]
                         [ "$(jq -r .selfLogin "$defaultLaunchConfigFile")" = "" ]
                         [ "$(jq -r .budgetTokens "$defaultLaunchConfigFile")" -eq 0 ]
                         [ "$(jq -r .budgetCost "$defaultLaunchConfigFile")" -eq 0 ]
@@ -9929,7 +9966,15 @@
                         [ "$(jq -r .ccpool.effort "$ownPoolRolesJson/drain.json")" = high ]
                         jq -e '.ccpool | has("effort") | not' "$ownPoolRolesJson/review.json" >/dev/null
                         jq -e '.ccpool | has("effort") | not' "$twoRolesJson/feedback.json" >/dev/null
-                        [ "$(jq -r .effort "$defaultLaunchConfigFile")" = max ]
+                        [ "$(jq -r .effort "$defaultLaunchConfigFile")" = medium ]
+
+                        # model (bead pg2-vsepbz, INV-CCH-40): the same shape as
+                        # effort; the launch config's default is the new
+                        # claude-sonnet-5-5.
+                        [ "$(jq -r .ccpool.model "$ownPoolRolesJson/drain.json")" = claude-sonnet-5-5 ]
+                        jq -e '.ccpool | has("model") | not' "$ownPoolRolesJson/review.json" >/dev/null
+                        jq -e '.ccpool | has("model") | not' "$twoRolesJson/feedback.json" >/dev/null
+                        [ "$(jq -r .model "$defaultLaunchConfigFile")" = claude-sonnet-5-5 ]
 
                         # close-or-release + precheck (bead pg2-nk6th.3): the role file
                         # is rendered from an explicit field list, so an option not
@@ -10022,6 +10067,7 @@
                         # The ccpool role's config carries the fields the renderer lists.
                         jq -e '.role[] | select(.name=="np-ccpool") | .config
                           | .ccpool.precheck == "ready" and .ccpool.effort == "high"
+                            and .ccpool.model == "claude-sonnet-5-5"
                             and .ccpool.beadsDir == "/tmp/pg2-12gr4-10-beads"
                             and .ccpool.poolDir == "/tmp/pg2-12gr4-10-pool"
                             and .ccpool.isolation.Prefetch.DiffBase == "origin/main"
@@ -10127,6 +10173,17 @@
                 # toolSets (bead pg2-cwn44): a role declaring a set the module does
                 # not define fails at eval time (never a silent empty grant).
                 assert !(builtins.tryEval unknownToolSetRolesFile.outPath).success;
+                # model (bead pg2-vsepbz, INV-CCH-40): a leading dash (or whitespace)
+                # fails at eval, for the per-role option and the launch config; a
+                # real ID evaluates. Forced with deepSeq on the file's outPath.
+                assert !(builtins.tryEval (builtins.deepSeq (modelRoleFile "-p").outPath true)).success;
+                assert
+                  (builtins.tryEval (builtins.deepSeq (modelRoleFile "claude-sonnet-5-5").outPath true)).success;
+                assert !(builtins.tryEval (builtins.deepSeq (modelLaunchConfigFile "-p").outPath true)).success;
+                assert (builtins.tryEval (builtins.deepSeq (modelLaunchConfigFile "").outPath true)).success;
+                assert
+                  (builtins.tryEval (builtins.deepSeq (modelLaunchConfigFile "claude-sonnet-5-5").outPath true))
+                  .success;
                 # roleWithOwnPool (bead pg2-mr0sl): the per-role bootstrap
                 # activation entry exists, keyed by role name, and mirrors
                 # the whole-process pool.enable activation's own ordering
@@ -10254,6 +10311,20 @@
                   == "raw";
                 assert
                   !(darwinWithPoolMetrics.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-daemon);
+                # logSources.pg-router-ccpool-handler-events (bead pg2-vsepbz): the
+                # handler's events.jsonl, JSONL, with the generic error alert off
+                # (dispatch_result lines are level "error"); present for an enabled
+                # handler, absent for a disabled one.
+                assert
+                  darwinWithoutPoolMetrics.phillipgreenii.observability.logSources.pg-router-ccpool-handler-events.format
+                  == "jsonl";
+                assert lib.hasSuffix "/pg-router-ccpool-handler/events.jsonl"
+                  darwinWithoutPoolMetrics.phillipgreenii.observability.logSources.pg-router-ccpool-handler-events.path;
+                assert
+                  darwinWithoutPoolMetrics.phillipgreenii.observability.logSources.pg-router-ccpool-handler-events.errorAlert.enable
+                  == false;
+                assert
+                  !(darwinWithoutRoles.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-events);
                 assert
                   !(darwinWithoutRoles.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-daemon);
                 assert

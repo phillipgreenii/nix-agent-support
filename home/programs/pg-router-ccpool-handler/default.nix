@@ -899,6 +899,12 @@ let
         # applies, unchanged behavior).
         inherit (roleCfg.ccpool) effort;
       }
+      // lib.optionalAttrs (roleCfg.ccpool.model != null) {
+        # model (bead pg2-vsepbz, INV-CCH-40): omitted when null, so a role that
+        # never sets it decodes to "no override" (the launch-config model
+        # applies).
+        inherit (roleCfg.ccpool) model;
+      }
       // lib.optionalAttrs (roleCfg.ccpool.precheck != null) {
         # precheck (bead pg2-nk6th.3): omitted when null, so a role that never
         # opts in decodes to "" (the historical behavior). The role file is
@@ -1445,10 +1451,25 @@ let
                   Per-role override of the claude `--effort` level
                   (`roles.CCPoolConfig.Effort`, bead pg2-svkob, INV-CCH-31) for this
                   role's launched sessions only. `null` (the default) keeps the
-                  launch-config `effort` (`"max"` by default), unchanged. The handler
-                  reads role files at start, so a change needs an apply AND a handler
-                  restart, and a session already running keeps the effort it started
+                  launch-config `effort` (`"medium"` by default). A change reaches
+                  sessions after an apply AND a pg-router daemon restart on the new
+                  config, and a session already running keeps the effort it started
                   with. Does not touch `model`.
+                '';
+              };
+              model = lib.mkOption {
+                type = lib.types.nullOr (lib.types.strMatching "[^-[:space:]][^[:space:]]*");
+                default = null;
+                example = "claude-opus-5-5";
+                description = ''
+                  Per-role override of the claude `--model`
+                  (`roles.CCPoolConfig.Model`, bead pg2-vsepbz, INV-CCH-40) for this
+                  role's launched sessions only. `null` (the default) keeps the
+                  launch-config `model` (`"claude-sonnet-5-5"` by default). A model
+                  name or alias with no whitespace and no leading `-`. A change
+                  reaches sessions after an apply AND a pg-router daemon restart on
+                  the new config, and a session already running keeps the model it
+                  started with. Does not touch `effort`.
                 '';
               };
               isolation = lib.mkOption {
@@ -2104,19 +2125,21 @@ in
       };
       effort = lib.mkOption {
         type = lib.types.str;
-        default = "max";
+        default = "medium";
         description = ''
           Effort in the launch config -- forwarded verbatim to `ccpool new`.
-          Matches `internal/config.Default()`'s own value.
+          Matches `internal/config.Default()`'s own value (`"medium"`, bead
+          pg2-vsepbz).
         '';
       };
       model = lib.mkOption {
-        type = lib.types.str;
-        default = "";
+        type = lib.types.strMatching "([^-[:space:]][^[:space:]]*)?";
+        default = "claude-sonnet-5-5";
         description = ''
-          Model in the launch config -- forwarded verbatim to `ccpool new`.
-          `""` (the default, matching `internal/config.Default()`) omits the
-          flag.
+          Model in the launch config -- forwarded verbatim to `ccpool new`
+          (bead pg2-vsepbz, INV-CCH-40). Matches `internal/config.Default()`'s
+          own value. `""` omits the flag; otherwise a model name or alias with
+          no whitespace and no leading `-`.
         '';
       };
       sessionPrefix = lib.mkOption {
