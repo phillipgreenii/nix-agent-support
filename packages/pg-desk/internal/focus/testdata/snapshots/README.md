@@ -31,7 +31,7 @@ A recorded snapshot MUST carry no real names, logins, tracker keys, repository n
 them with neutral placeholders that keep the field's shape: `PRJ-<n>` keys, `bd-<id>` ids,
 `example-org/example-repo`, `https://tracker.example.test` and `https://github.example.test` URLs,
 `Pat Example` and `pat@example.test` for the operator, `teammate` for another author (the identifier
-guard, `TestIdentifierAllowlistGuard`, scans these directories and fails on any other login-shaped
+guard, the `identifier-allowlist` hook (`scripts/check-identifier-allowlist.sh`), scans these directories and fails on any other login-shaped
 token in a structured identity field).
 
 ## The Jira creation-time layout

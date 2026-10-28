@@ -171,5 +171,6 @@ nice -n 10 go test -p 4 ./...
 ```
 
 Docs and fixtures MUST NOT name organization-specific identifiers: the package's identifier guard
-test (`identifier_guard_test.go`) walks every `.go` file and every file under `docs/` and
+(the `identifier-allowlist` hook, `scripts/check-identifier-allowlist.sh`, allowlist
+`scripts/identifier-allowlists/work-report.txt`) scans every `.go` file and every file under `docs/` and
 `testdata/`. Use `example-*` names.

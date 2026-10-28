@@ -80,7 +80,7 @@ type ruleModel struct {
 
 func loadThreadSlackRule(t *testing.T) (alertRule, ruleModel) {
 	t.Helper()
-	path := filepath.Join(pgConnectorModuleRoot(t), "grafana", "alerting", "thread-slack-alerts.yaml")
+	path := filepath.Join(moduleRoot(t), "grafana", "alerting", "thread-slack-alerts.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

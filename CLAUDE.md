@@ -29,19 +29,27 @@ user identifier of any kind — real name, login, or handle — other than the o
 hashed) may be committed to this or any repo to enforce it; a short-lived denylist MAY live only
 in this workspace's local, uncommitted `CLAUDE.md` (see its "Workspace Policies").
 
-**Mechanical guard**: each Go module that carries fixtures owns a copy of
-`cmd/<name>/identifier_allowlist_test.go` (`TestIdentifierAllowlistGuard`; the reference copy is
-`packages/pg-connector/cmd/pg-connector/identifier_allowlist_test.go`). It inverts the check into a small, committable ALLOWLIST of
-known-safe identifiers (the operator's own identity plus named public bot/product accounts —
-`coderabbitai`, `policy-bot`, `dependabot` — and this module's existing generic test placeholders)
-and flags any other username/login/handle-shaped token found in a structured identity field
-(a JSON `login`/`author`/`reviewer`/`user` key, a `name.name.TICKET-NNN`-shaped branch-name
-component, or a git `Author:`/`Committer:` trailer). Each copy runs automatically as part of its module's
-`checks.<system>.<name>-go-tests` in `flake.nix` — no separate check attribute. Guarded scope is a
-RATCHET per module: today it covers each module's own `testdata/` fixtures, widening as other
-directories are scrubbed (`pg2-dssp6`, `pg2-n3gez`, `pg2-k23s6`). It does NOT catch a real name
-embedded in free-text prose with no structural marker — that stays a manual-review
-responsibility. See the test file's doc comments for the full scope rationale.
+**Mechanical guard**: ONE pre-commit hook, `identifier-allowlist` (`scripts/check-identifier-allowlist.sh`,
+regression guard `tests/identifier-allowlist.bats`), runs at commit and under `pg-hooks run pre-land`; it replaced
+six per-module Go copies of the guard. It inverts the check into a small, committable ALLOWLIST of known-safe
+identifiers (the operator's own identity, named public bot/product accounts such as `policy-bot` and
+`dependabot`, and each module's generic test placeholders) and flags any other username/login/handle-shaped
+token found in a structured identity field (a JSON `login`/`author`/`reviewer`/`user` key, a
+`name.name.TICKET-NNN`-shaped branch-name component, or a git `Author:`/`Committer:` trailer). Matching is
+case-insensitive and ignores surrounding whitespace.
+
+Per-module config lives in two places. The `MODULES` table in the script holds each module's root, scope
+(`testdata`: every tracked file under a `testdata/` directory; `wide`: every `.go` file plus `testdata/` and
+`docs/` files, which only `work-report` uses) and its liveness canaries (required files, a minimum file count,
+per-subtree minimums such as `pg-desk`'s `internal/focus/testdata/`), so an empty or mis-scoped scan fails
+loudly. Each module's allowlist is `scripts/identifier-allowlists/<module>.txt`, one identifier per line with a
+`#` comment saying why it is safe. **To allow a new known-safe identifier, add one line to that module's file
+only** (never a forbidden name, never a real third-party name); to guard a new Go module, add a `MODULES`
+row and an allowlist file. The hook is handed the changed paths and scans only the modules they touch (all of
+them when the script or an allowlist changes). Guarded scope is a RATCHET per module, widening as other
+directories are scrubbed (`pg2-dssp6`, `pg2-n3gez`, `pg2-k23s6`). It does NOT catch a real name embedded in
+free-text prose with no structural marker; that stays a manual-review responsibility. The hook only runs once
+the hook bundle has been rebuilt (`nix run .#install-pre-commit-hooks`) after the hook was added or changed.
 
 ## Configuration Structure
 
@@ -280,7 +288,7 @@ presets, not in the common executable (docket `pg2-6oop0`). Before changing `pac
 or `home/programs/work-report`, read `packages/work-report/README.md` (the generator and preset
 model, the breaking changes, and the one-way schema version 2 store migration), the behavior docs
 under `packages/work-report/docs/behavior/`, and ADR 0102 in `docs/adr/` (the process contract).
-The package's identifier guard test covers its `docs/` and `testdata/`: use `example-*` names there.
+The `identifier-allowlist` hook covers its `.go` files, `docs/` and `testdata/`: use `example-*` names there.
 
 ## Status Line (`home/programs/claude-status-line`)
 

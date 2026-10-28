@@ -3,9 +3,9 @@
 # lines 997-1011). Values are fictional/generic per this repo's public-repo
 # identifier rule (pg2-tphcc) — only the operator's own identity and this
 # module's generic placeholders appear (see
-# cmd/pg-desk/identifier_allowlist_test.go's allowlistedIdentifiers).
+# scripts/identifier-allowlists/pg-desk.txt).
 # Loaded by TestLoadFile_FullExample and scanned by
-# cmd/pg-desk/identifier_allowlist_test.go's TestIdentifierAllowlistGuard.
+# the identifier-allowlist hook (scripts/check-identifier-allowlist.sh).
 
 self_login: phillipgreenii
 team_members: [phillipgreenii, teammate]

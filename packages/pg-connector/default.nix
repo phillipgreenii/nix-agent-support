@@ -10,7 +10,7 @@ mkGoApp {
 
   # Filtered src (pg2-p5at3): this Tier-1 umbrella's OWN test suite is a
   # deliberate whole-module architecture-conformance check — layout_convention_test.go,
-  # backend_internal_sync_test.go, chokepoint_test.go, dependency_direction_test.go, identifier_allowlist_test.go and
+  # backend_internal_sync_test.go, chokepoint_test.go, dependency_direction_test.go and
   # stack_readonly_test.go all `filepath.Abs("../..")`/walk the MODULE ROOT to verify
   # cross-backend layout/naming/isolation invariants over every cmd/pg-connector-*
   # tree and pkg/*, so (unlike the four Tier-2 backends below) this derivation's `src`

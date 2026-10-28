@@ -136,7 +136,7 @@ func testdataFixture(name string) string {
 // fixture — which declares every one of the 21 section-7.8 keys — and
 // asserts each one parses into the expected field. This both proves Load
 // actually works end-to-end against a real file and gives
-// cmd/pg-desk/identifier_allowlist_test.go's guard a real fixture under
+// the identifier-allowlist hook (scripts/check-identifier-allowlist.sh) a real fixture under
 // testdata/ to cover (acceptance criterion: "identifier-allowlist guard
 // extended to packages/pg-desk fixtures").
 func TestLoadFile_FullExample(t *testing.T) {

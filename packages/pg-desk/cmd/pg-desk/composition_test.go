@@ -96,8 +96,8 @@ func scanForCompositionViolations(root string) (violations []string, scannedFile
 // moduleRoot walks up from the test's own working directory to the nearest
 // go.mod. Mirrors packages/pg-connector/cmd/pg-connector/chokepoint_test.go's
 // moduleRoot — same shape, independent copy per this module's own go.mod
-// (see identifier_allowlist_test.go's package doc comment for why each Go
-// module in this repo carries its own copy of this kind of guard).
+// (each Go module in this repo has its own go.mod, so a module-root walk like
+// this one cannot be shared across modules).
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
