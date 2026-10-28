@@ -241,9 +241,6 @@ run_role() {
     [[ -n $item ]] || die "PG_ROUTER_ITEM_ID is not set" 2
     rr_parse_item_id "$item" || die "malformed PG_ROUTER_ITEM_ID: $item" 2
     key="$RR_ITEM_REPO"
-    if [[ $role == verify && -z $RR_ITEM_SHA ]]; then
-      die "verify needs an item id <repo>@<sha>, got: $item" 2
-    fi
     rr_repo_listed "$key" || die "repo '$key' is not in the allow-list" 2
     rc=0
     rr_workspace_has_key "$root" "$key" || rc=$?
@@ -258,6 +255,9 @@ run_role() {
     if ! rr_repo_flag "$key" "$role"; then
       rr_log "exit=0 skipped: $role is not enabled for '$key'"
       exit 0
+    fi
+    if [[ $role == verify && -z $RR_ITEM_SHA ]]; then
+      die "verify needs an item id <repo>@<sha>, got: $item" 2
     fi
     # 3b. idempotent receiver: a role may end the run when its work is stored
     if declare -F "early_$role" >/dev/null && "early_$role"; then
