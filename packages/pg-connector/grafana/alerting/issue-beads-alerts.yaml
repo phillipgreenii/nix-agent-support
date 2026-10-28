@@ -1,0 +1,126 @@
+# pg-connector-issue-beads unified-alerting rules (docket pg2-2qyyh.5, design
+# 4.4): LogQL rules over the backend's OWN event log (packages/pg-connector/cmd/
+# pg-connector-issue-beads/internal/eventlog), shipped to Loki by the logSources
+# entry in darwin/modules/pg-connector-issue-beads/default.nix. Sibling of
+# issue-jira-alerts.yaml.
+#
+# Why these two, and why log-derived: the backend is a one-shot process, so
+# Prometheus cannot scrape it and the bd budget (internal/budget) has no daemon
+# to export its pressure. The event log is the only place the budget shows, in
+# the fields budget_denied (1 when the budget denied the call after its bounded
+# wait) and bd_timeouts (bd executions the call's deadline killed). Both are
+# absent on a healthy call, so a quiet log is the healthy case.
+#
+# What a firing rule means: a SUSTAINED budget_denied rate, or bd timeouts the
+# semaphore cannot remove (the dolt server itself saturated), are the signals
+# that would justify a separate beads daemon that is the only bd reader. They
+# are new rules, not the generic error-rate alert, which stays off for this
+# source in the nix module.
+#
+# Threshold: both rules fire at 5 or more matching events in the 15 minute
+# window (`gt 4`), and must hold for 5 minutes. A single denial or kill is
+# routine burst behaviour.
+#
+# Tested the way the Jira rules are (promtool cannot evaluate LogQL): logcli
+# over a positive and a negative fixture of real event lines, run by
+# packages/pg-connector/grafana/check-loki-rules.sh from the flake check
+# test-pg-connector-issue-beads-alert-rules. The fixtures live under
+# rule-tests/loki/ named <uid>.positive.jsonl (6 events) and
+# <uid>.negative.jsonl (4 events).
+#
+# Shape notes (see issue-jira-alerts.yaml): datasourceUid is `loki`, the query
+# model uses the string `queryType: instant`, every rule's noDataState is OK,
+# the outer sum() collapses the per-field series `| json` produces, the folder
+# "pg-connector" converges by title and rule uids stay under Grafana's 40-char
+# cap. The rule's severity label MUST be one of critical, error, warning, info.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-connector-issue-beads
+    folder: pg-connector
+    interval: 1m
+    rules:
+      # (a) Sustained budget denials: calls the bd budget refused after their
+      # wait bound, answered to the caller as unavailable (retryable).
+      - uid: pg-conn-beads-budget-denied
+        title: pg-connector-issue-beads bd budget denying calls
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-beads: the bd budget denied at least 5 calls in 15 minutes"
+          description: 'The beads backend answered unavailable (retryable) to at least 5 calls in the last 15 minutes, sustained for 5 minutes, because no bd slot or per-minute window entry was free within the wait bound. Callers poll beads faster than the bd budget admits. Inspect the events with {service_name="pg-connector-issue-beads"} | json | budget_denied > 0 and read op and budget_wait_ms. A sustained rate is the signal that would justify a beads daemon.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-beads"} | json | budget_denied > 0 [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [4]
+
+      # (b) Sustained bd timeouts: bd executions the call's deadline killed.
+      # The budget caps how many bd run at once, so a bd that still times out
+      # means the dolt server itself is saturated.
+      - uid: pg-conn-beads-bd-timeouts
+        title: pg-connector-issue-beads bd calls timing out
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-beads: at least 5 calls had a bd killed at the call deadline in 15 minutes"
+          description: 'At least 5 calls of the beads backend in the last 15 minutes, sustained for 5 minutes, had a bd execution killed by the call deadline. The bd budget limits concurrency, so the dolt server itself is probably saturated or wedged. Inspect the events with {service_name="pg-connector-issue-beads"} | json | bd_timeouts > 0 and read op, bd_slowest_argv and bd_slowest_ms.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-beads"} | json | bd_timeouts > 0 [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [4]

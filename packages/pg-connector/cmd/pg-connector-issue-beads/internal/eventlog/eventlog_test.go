@@ -203,3 +203,92 @@ func TestSinkFromEnv(t *testing.T) {
 		t.Errorf("sink = %+v", s)
 	}
 }
+
+// budgetLine runs one call through Instrument and returns the event and its
+// JSON line.
+func budgetLine(t *testing.T, h func(ctx context.Context)) (Event, string) {
+	t.Helper()
+	sink := &memSink{}
+	tb := Instrument(table(func(ctx context.Context, _ json.RawMessage) (any, error) {
+		h(ctx)
+		return "res", nil
+	}), sink, "", time.Now)
+	_, _ = tb["list"].Handle(context.Background(), nil)
+	line, err := Line(sink.events[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sink.events[0], string(line)
+}
+
+func TestInstrument_BudgetAndTimeoutFieldsAppearWhenSet(t *testing.T) {
+	_, line := budgetLine(t, func(ctx context.Context) {
+		RecordBudget(ctx, 1200*time.Millisecond, false, false)
+		RecordBudget(ctx, 300*time.Millisecond, false, false)
+		RecordBDTimeout(ctx)
+		RecordBDTimeout(ctx)
+	})
+	var got map[string]any
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["budget_wait_ms"] != float64(1500) || got["bd_timeouts"] != float64(2) {
+		t.Errorf("line = %s, want budget_wait_ms 1500 and bd_timeouts 2", line)
+	}
+	for _, k := range []string{"budget_denied", "budget_failed_open"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("line carries %s without it being set: %s", k, line)
+		}
+	}
+}
+
+func TestInstrument_DeniedCallCarriesBudgetDeniedAndNoBDCalls(t *testing.T) {
+	ev, line := budgetLine(t, func(ctx context.Context) {
+		RecordBudget(ctx, 5*time.Second, true, false)
+	})
+	var got map[string]any
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["budget_denied"] != float64(1) || got["budget_wait_ms"] != float64(5000) || ev.BDCalls != 0 {
+		t.Errorf("line = %s", line)
+	}
+	if _, ok := got["bd_calls"]; ok {
+		t.Errorf("a denied call must not carry bd_calls: %s", line)
+	}
+}
+
+func TestInstrument_FailOpenIsRecordedAsTrue(t *testing.T) {
+	_, line := budgetLine(t, func(ctx context.Context) {
+		RecordBudget(ctx, 0, false, true)
+	})
+	var got map[string]any
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["budget_failed_open"] != true {
+		t.Errorf("line = %s, want budget_failed_open true", line)
+	}
+	for _, k := range []string{"budget_wait_ms", "budget_denied", "bd_timeouts"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("line carries %s for a fail-open call that waited 0: %s", k, line)
+		}
+	}
+}
+
+func TestInstrument_NoBudgetActivityOmitsAllBudgetFields(t *testing.T) {
+	_, line := budgetLine(t, func(ctx context.Context) {
+		RecordBudget(ctx, 0, false, false)
+		RecordBDCall(ctx, []string{"bd", "list"}, time.Millisecond)
+	})
+	for _, k := range []string{"bd_timeouts", "budget_wait_ms", "budget_denied", "budget_failed_open"} {
+		if strings.Contains(line, k) {
+			t.Errorf("line carries %s though the call did none of it: %s", k, line)
+		}
+	}
+}
+
+func TestRecordBudgetAndTimeout_NoRecorderIsNoOp(t *testing.T) {
+	RecordBudget(context.Background(), time.Second, true, true)
+	RecordBDTimeout(context.Background())
+}

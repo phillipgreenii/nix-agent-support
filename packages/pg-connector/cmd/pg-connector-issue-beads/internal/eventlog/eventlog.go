@@ -24,10 +24,12 @@
 // keeps what is specific to the bd CLI: the Event shape and the per-call
 // recorder of bd executions.
 //
-// No alert rules ship with this log. The diagnostic need is attribution
-// (which bd command, how long), which the rows answer when queried; the
-// generic error-rate alert is switched off in the nix module so the first
-// registration does not introduce paging.
+// The generic error-rate alert is switched off in the nix module so the first
+// registration does not introduce paging. The only alert rules shipped on this
+// log are the two budget rules (sustained budget_denied and sustained
+// bd_timeouts, grafana/alerting/issue-beads-alerts.yaml), because the bd
+// budget (design 4.4) has no daemon to scrape: its pressure is observable only
+// through the budget_* and bd_timeouts fields of this log.
 //
 // Failure policy: writing the event log is strictly best effort and never
 // changes an op's result or exit code.
@@ -84,6 +86,19 @@ type Event struct {
 	// command that was slow. Both are absent when the call ran no bd.
 	BDSlowestMS   *int64 `json:"bd_slowest_ms,omitempty"`
 	BDSlowestArgv string `json:"bd_slowest_argv,omitempty"`
+	// BDTimeouts counts the bd executions of the call that the call's
+	// deadline killed (the context ended with context.DeadlineExceeded). A bd
+	// that merely exits non-zero does not count. Absent when 0.
+	BDTimeouts int `json:"bd_timeouts,omitempty"`
+	// BudgetWaitMS is the total time, in milliseconds, the call waited for the
+	// bd budget (the sum of the slots' wait; a fail-open slot waited 0). Absent
+	// when 0.
+	BudgetWaitMS *int64 `json:"budget_wait_ms,omitempty"`
+	// BudgetDenied is 1 when the budget denied the call, absent otherwise.
+	BudgetDenied int `json:"budget_denied,omitempty"`
+	// BudgetFailedOpen is true when the budget's state directory was unusable
+	// so the call ran unthrottled. Absent otherwise.
+	BudgetFailedOpen bool `json:"budget_failed_open,omitempty"`
 }
 
 // Sink receives finished events and in-flight rows.
@@ -103,6 +118,10 @@ type recorder struct {
 	calls       int
 	slowest     time.Duration
 	slowestArgv string
+	timeouts    int
+	waited      time.Duration
+	denied      bool
+	failedOpen  bool
 }
 
 type recorderKey struct{}
@@ -123,6 +142,34 @@ func RecordBDCall(ctx context.Context, argv []string, elapsed time.Duration) {
 		r.slowest = elapsed
 		r.slowestArgv = evlog.Truncate(strings.Join(argv, " "), maxArgvBytes)
 	}
+}
+
+// RecordBudget notes the outcome of one bd budget acquisition on the in-flight
+// call's event: how long the call waited for it, whether the budget denied it,
+// and whether the budget failed open (unusable state directory). It is a no-op
+// when ctx carries no recorder.
+func RecordBudget(ctx context.Context, waited time.Duration, denied, failedOpen bool) {
+	r, ok := ctx.Value(recorderKey{}).(*recorder)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waited += waited
+	r.denied = r.denied || denied
+	r.failedOpen = r.failedOpen || failedOpen
+}
+
+// RecordBDTimeout notes one bd execution that the call's deadline killed on
+// the in-flight call's event. It is a no-op when ctx carries no recorder.
+func RecordBDTimeout(ctx context.Context) {
+	r, ok := ctx.Value(recorderKey{}).(*recorder)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.timeouts++
 }
 
 // ---------------------------------------------------------------------
@@ -164,6 +211,14 @@ func buildEvent(op, version string, start, end time.Time, err error, rec *record
 		ev.BDSlowestMS = &ms
 		ev.BDSlowestArgv = rec.slowestArgv
 	}
+	ev.BDTimeouts = rec.timeouts
+	if ms := rec.waited.Milliseconds(); ms > 0 {
+		ev.BudgetWaitMS = &ms
+	}
+	if rec.denied {
+		ev.BudgetDenied = 1
+	}
+	ev.BudgetFailedOpen = rec.failedOpen
 	return ev
 }
 

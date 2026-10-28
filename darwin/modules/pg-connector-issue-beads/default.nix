@@ -4,11 +4,11 @@
   ...
 }:
 let
-  # phillipgreenii.observability.logSources is declared at darwin/system scope
-  # in phillipgreenii-nix-support-apps
-  # (darwin/modules/observability/registration.nix), so this lives in darwin,
-  # not in the home-manager module -- setting it from HM targets an undeclared
-  # option and fails eval (same reasoning as pg-connector-pr-github's,
+  # phillipgreenii.observability.{logSources,alertRuleFiles} are declared at
+  # darwin/system scope in phillipgreenii-nix-support-apps
+  # (darwin/modules/observability/{registration,alerting}.nix), so this lives
+  # in darwin, not in the home-manager module -- setting them from HM targets
+  # undeclared options and fails eval (same reasoning as pg-connector-pr-github's,
   # -thread-slack's and -issue-jira's registrations).
   obs = config.phillipgreenii.observability;
 in
@@ -46,10 +46,21 @@ in
     # errorAlert is switched off: this registration exists to make killed and
     # slow calls ATTRIBUTABLE (query the log), not to add paging. The generic
     # "log error rate high" rule would fire on the first host-wide stall, the
-    # exact event the log is meant to explain; a bespoke rule MAY be added
-    # later once the log has shown which signal is worth alerting on.
+    # exact event the log is meant to explain. The two budget rules registered
+    # below are NEW rules over specific event fields, not that generic alert.
     phillipgreenii.observability.logSources.pg-connector-issue-beads = {
       errorAlert.enable = false;
     };
+
+    # LogQL rules over the bd budget's footprint in the event log (design 4.4):
+    # sustained budget_denied events, and sustained bd_timeouts events. The
+    # backend is one-shot with no daemon to scrape, so the log is the only place
+    # the budget shows. The rules fire at 5 or more events in 15 minutes; they
+    # are tested with logcli over fixtures by the flake check
+    # test-pg-connector-issue-beads-alert-rules. Gated, like the log source, on
+    # observability being enabled.
+    phillipgreenii.observability.alertRuleFiles = [
+      ../../../packages/pg-connector/grafana/alerting/issue-beads-alerts.yaml
+    ];
   };
 }

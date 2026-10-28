@@ -4205,12 +4205,16 @@
               # REAL logSources submodule's defaults), so the assertions prove the
               # module leaves `path`/`serviceName` at their defaults -- which the
               # Go side (eventlog.Path) depends on -- switches the generic
-              # error-rate alert off, and registers NO alert rule file. The
+              # error-rate alert off, and registers only the alert file of the two
+              # budget rules (issue-beads-alerts.yaml, design 4.4). The
               # runCommand then checks that the default glob selects events.jsonl
               # and not the rotated copy or the rotation lock, and that the event
               # fields the log exists for (bd_calls, bd_slowest_ms,
-              # bd_slowest_argv, and the shared in-flight phase/elapsed_ms) are
-              # still json tags on the writer.
+              # bd_slowest_argv, the budget outcomes bd_timeouts,
+              # budget_wait_ms, budget_denied and budget_failed_open, and the
+              # shared in-flight phase/elapsed_ms) are still json tags on the
+              # writer, and that the alert file's two rules query fields the
+              # writer emits.
               test-pg-connector-issue-beads-darwin-module =
                 let
                   logSourceSubmodule =
@@ -4264,17 +4268,23 @@
                   enabled = evalDarwin true;
                   disabled = evalDarwin false;
                   src = enabled.logSources.pg-connector-issue-beads;
+                  alertsFile = ./packages/pg-connector/grafana/alerting/issue-beads-alerts.yaml;
                 in
                 assert disabled.logSources == { };
-                assert enabled.alertRuleFiles == [ ];
+                assert disabled.alertRuleFiles == [ ];
+                assert enabled.alertRuleFiles == [ alertsFile ];
                 assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-issue-beads/*.jsonl";
                 assert src.serviceName == "pg-connector-issue-beads";
                 assert src.format == "jsonl";
                 assert src.errorAlert.enable == false;
                 pkgs.runCommand "test-pg-connector-issue-beads-darwin-module-ok"
                   {
-                    nativeBuildInputs = [ pkgs.gnugrep ];
+                    nativeBuildInputs = [
+                      pkgs.gnugrep
+                      pkgs.yq-go
+                    ];
                     glob = src.path;
+                    alerts = alertsFile;
                     eventlogSrc = ./packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog/eventlog.go;
                     sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
                   }
@@ -4292,8 +4302,19 @@
                     matched="$(ls -d $pattern 2>/dev/null || true)"
                     [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
 
-                    for field in bd_calls bd_slowest_ms bd_slowest_argv; do
+                    for field in bd_calls bd_slowest_ms bd_slowest_argv bd_timeouts budget_wait_ms budget_denied budget_failed_open; do
                       grep -q "json:\"$field[,\"]" "$eventlogSrc" || fail "eventlog.Event has no json tag $field"
+                    done
+                    # The alert rules query the budget fields of the event, and the
+                    # file is the one the module registers.
+                    for pair in pg-conn-beads-budget-denied:budget_denied pg-conn-beads-bd-timeouts:bd_timeouts; do
+                      uid="''${pair%%:*}"
+                      field="''${pair##*:}"
+                      expr="$(yq ".groups[].rules[] | select(.uid == \"$uid\") | .data[0].model.expr" "$alerts")"
+                      case "$expr" in
+                        *'{service_name="pg-connector-issue-beads"}'*"| json | $field > 0"*) ;;
+                        *) fail "rule $uid does not query $field of the beads log: $expr" ;;
+                      esac
                     done
                     for field in phase elapsed_ms args; do
                       grep -q "json:\"$field[,\"]" "$sharedEventlogSrc" || fail "evlog.ProgressEvent has no json tag $field"
@@ -6558,6 +6579,33 @@
                     loki=${./packages/pg-connector/grafana/alerting/rule-tests/loki}
                     bash ${./packages/pg-connector/grafana/check-loki-rules.sh} "$alerts" "$loki"
                     bash ${./packages/pg-connector/grafana/check-loki-rules.sh} --self-test "$alerts" "$loki"
+                    touch "$out"
+                  '';
+
+              # pg-connector-issue-beads budget alert rules (docket pg2-2qyyh.5, design 4.4): the two
+              # LogQL rules of grafana/alerting/issue-beads-alerts.yaml run their pipeline with
+              # `logcli --stdin` over the positive and negative fixture logs under
+              # grafana/alerting/rule-tests/loki/ (promtool cannot evaluate LogQL), as the Jira
+              # rules do. check-loki-rules.sh's mutant self-test is bound to the Jira file's uids,
+              # so only the lint runs here.
+              test-pg-connector-issue-beads-alert-rules =
+                pkgs.runCommand "test-pg-connector-issue-beads-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.gnused
+                      pkgs.gnugrep
+                      pkgs.grafana-loki
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    alerts=${./packages/pg-connector/grafana/alerting/issue-beads-alerts.yaml}
+                    loki=${./packages/pg-connector/grafana/alerting/rule-tests/loki}
+                    bash ${./packages/pg-connector/grafana/check-loki-rules.sh} "$alerts" "$loki"
                     touch "$out"
                   '';
 

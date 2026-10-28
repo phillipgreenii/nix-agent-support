@@ -718,3 +718,179 @@ func TestCLIRunner_Budget_NotConsultedWhenBDWouldNotRun(t *testing.T) {
 		t.Errorf("state dir has %d entries after a refused call, want 0", len(entries))
 	}
 }
+
+// ----------------------------------------------------------------------
+// Event-log fields of the budget outcomes (design 4.4)
+// ----------------------------------------------------------------------
+
+// runInstrumented runs fn as the handler of one instrumented call and returns
+// the event line the call wrote, decoded.
+func runInstrumented(t *testing.T, fn func(ctx context.Context) error) (map[string]any, error) {
+	t.Helper()
+	sink := &lineSink{}
+	tb := eventlog.Instrument(scriptout.DispatchTable{"list": {SchemaVersion: 1, Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+		return nil, fn(ctx)
+	}}}, sink, "", time.Now)
+	_, err := tb["list"].Handle(context.Background(), nil)
+	if len(sink.lines) != 1 {
+		t.Fatalf("%d event lines, want 1", len(sink.lines))
+	}
+	var got map[string]any
+	if jerr := json.Unmarshal(sink.lines[0], &got); jerr != nil {
+		t.Fatal(jerr)
+	}
+	return got, err
+}
+
+type lineSink struct{ lines [][]byte }
+
+func (s *lineSink) Write(ev eventlog.Event) {
+	line, _ := eventlog.Line(ev)
+	s.lines = append(s.lines, line)
+}
+func (s *lineSink) WriteProgress(evlog.ProgressEvent) {}
+
+func TestCLIRunner_Event_NoBudgetNoWaitNoKillLeavesFieldsAbsent(t *testing.T) {
+	fakeBD(t)
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 2, WaitBound: time.Second})
+	got, err := runInstrumented(t, func(ctx context.Context) error {
+		_, err := r.Run(ctx, "show", "--json")
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["bd_calls"] != float64(1) {
+		t.Errorf("event = %v, want bd_calls 1", got)
+	}
+	for _, k := range []string{"bd_timeouts", "budget_wait_ms", "budget_denied", "budget_failed_open"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("event carries %s on an unthrottled, unkilled call: %v", k, got)
+		}
+	}
+}
+
+// A call that waited for a slot carries budget_wait_ms.
+func TestCLIRunner_Event_WaitedCallCarriesBudgetWaitMS(t *testing.T) {
+	started := fakeBD(t)
+	t.Setenv("FAKE_BD_SLEEP", "0.5")
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 1, WaitBound: 30 * time.Second})
+	first := make(chan error, 1)
+	go func() {
+		_, err := r.Run(context.Background(), "show", "--json")
+		first <- err
+	}()
+	waitStarted(t, started, 1)
+	got, err := runInstrumented(t, func(ctx context.Context) error {
+		_, err := r.Run(ctx, "show", "--json")
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if ms, _ := got["budget_wait_ms"].(float64); ms <= 0 {
+		t.Errorf("event = %v, want a positive budget_wait_ms", got)
+	}
+	if _, ok := got["budget_denied"]; ok {
+		t.Errorf("an admitted call carries budget_denied: %v", got)
+	}
+}
+
+// A denied call carries budget_denied and its wait, and no bd_calls.
+func TestCLIRunner_Event_DeniedCallCarriesBudgetDeniedAndNoBDCalls(t *testing.T) {
+	started := fakeBD(t)
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 5, MaxPerMinute: 1, WaitBound: 150 * time.Millisecond})
+	if _, err := r.Run(context.Background(), "show", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runInstrumented(t, func(ctx context.Context) error {
+		_, err := r.Run(ctx, "show", "--json")
+		return err
+	})
+	if !errors.Is(err, budget.ErrDenied) {
+		t.Fatalf("err = %v, want ErrDenied", err)
+	}
+	if got["budget_denied"] != float64(1) {
+		t.Errorf("event = %v, want budget_denied 1", got)
+	}
+	if ms, _ := got["budget_wait_ms"].(float64); ms < 100 {
+		t.Errorf("event = %v, want budget_wait_ms of about the 150ms bound", got)
+	}
+	if _, ok := got["bd_calls"]; ok {
+		t.Errorf("a denied call carries bd_calls: %v", got)
+	}
+	if n := countStarted(t, started, "start-"); n != 1 {
+		t.Errorf("%d bd started, want 1 (the denied call must not start bd)", n)
+	}
+}
+
+// A bd killed at the call's deadline counts in bd_timeouts; a bd that merely
+// exits non-zero does not.
+func TestCLIRunner_Event_KilledAtDeadlineCountsBDTimeout(t *testing.T) {
+	fakeBD(t)
+	t.Setenv("FAKE_BD_SLEEP", "30")
+	r := &CLIRunner{Dir: t.TempDir()}
+	got, err := runInstrumented(t, func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+		defer cancel()
+		_, err := r.Run(ctx, "show", "--json")
+		return err
+	})
+	if err == nil {
+		t.Fatal("a bd killed at the deadline must fail the call")
+	}
+	if got["bd_timeouts"] != float64(1) || got["bd_calls"] != float64(1) {
+		t.Errorf("event = %v, want bd_timeouts 1 and bd_calls 1", got)
+	}
+}
+
+func TestCLIRunner_Event_NonZeroExitIsNotATimeout(t *testing.T) {
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte("#!/bin/sh\nexit 3\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	r := &CLIRunner{Dir: t.TempDir()}
+	got, err := runInstrumented(t, func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		_, err := r.Run(ctx, "show", "--json")
+		return err
+	})
+	if err == nil {
+		t.Fatal("exit 3 must fail the call")
+	}
+	if _, ok := got["bd_timeouts"]; ok {
+		t.Errorf("a bd that exited non-zero within the deadline counts as a timeout: %v", got)
+	}
+}
+
+// An unusable state directory is recorded as budget_failed_open and does not
+// change the call's result.
+func TestCLIRunner_Event_FailOpenIsRecordedAndResultUnchanged(t *testing.T) {
+	fakeBD(t)
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := budgetRunner(t, budget.Config{MaxConcurrent: 1, StateDir: filepath.Join(blocker, "state")})
+	got, err := runInstrumented(t, func(ctx context.Context) error {
+		out, err := r.Run(ctx, "show", "--json")
+		if err == nil && strings.TrimSpace(out) != "{}" {
+			t.Errorf("stdout = %q, want the fake bd's {}", out)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatalf("fail-open must not change the result: %v", err)
+	}
+	if got["budget_failed_open"] != true {
+		t.Errorf("event = %v, want budget_failed_open true", got)
+	}
+	if _, ok := got["budget_denied"]; ok {
+		t.Errorf("a fail-open call carries budget_denied: %v", got)
+	}
+}

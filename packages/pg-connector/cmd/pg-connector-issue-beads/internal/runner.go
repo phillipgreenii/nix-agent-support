@@ -367,10 +367,15 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	}
 	var slot *budget.Slot
 	if r.Budget != nil {
+		acquireStart := time.Now()
 		slot, err = r.Budget.Acquire(ctx, write)
 		if err != nil {
+			// A denied call waited the whole bound; its event carries that
+			// wait and budget_denied, and no bd_calls (bd never ran).
+			eventlog.RecordBudget(ctx, time.Since(acquireStart), errors.Is(err, budget.ErrDenied), false)
 			return "", err
 		}
+		eventlog.RecordBudget(ctx, slot.Waited(), false, slot.FailedOpen())
 		defer slot.Release()
 	}
 	fullArgs := append([]string{"-C", dir}, args...)
@@ -391,6 +396,11 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	// what the 2026-10-06 SIGKILL cluster could not be attributed to
 	// [bead pg2-5dyz2].
 	eventlog.RecordBDCall(ctx, append([]string{"bd"}, fullArgs...), elapsed)
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// The call's deadline killed this bd execution (a bd that merely
+		// exited non-zero within the deadline does not count).
+		eventlog.RecordBDTimeout(ctx)
+	}
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

@@ -146,6 +146,13 @@ import (
 // are not flagged watched across two polls). Registered the same way, with no
 // escalation label.
 //
+// pg-conn-beads-budget-denied and pg-conn-beads-bd-timeouts are the two
+// log-derived rules of the beads backend's alert file (packages/pg-connector/
+// grafana/alerting/issue-beads-alerts.yaml, registered by the beads darwin
+// module): sustained bd budget denials, and sustained bd executions killed at
+// the call deadline, the signals that would justify a beads daemon. Registered
+// the same way, with no escalation label.
+//
 // pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
 // probe files escalated beads/dispatches triagers, so probing triager failures
 // could feed a loop (operator decision pending).
@@ -177,6 +184,8 @@ var registeredRuleUIDs = []string{
 	"pg-desk-ingest-failed-old",
 	"pg-desk-watched-source-not-observed",
 	"pg-desk-issue-unflagged-members",
+	"pg-conn-beads-budget-denied",
+	"pg-conn-beads-bd-timeouts",
 }
 
 func defaultSnapshotPath() string {
