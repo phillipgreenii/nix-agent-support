@@ -30,8 +30,10 @@ const (
 	// MetricOCCRetries counts optimistic-concurrency retries, by type
 	// (persisted, like MetricHydrations).
 	MetricOCCRetries = "pg_desk_occ_retries"
-	// MetricDueBacklog is the number of active entities whose hydrated_at is
-	// older than the sweep bound D (or that were never hydrated), by type.
+	// MetricDueBacklog is the number of hydrations owed, by type: for thread,
+	// the active entities whose hydrated_at is older than the sweep bound D (or
+	// that were never hydrated); for issue (no age sweep), the watched active
+	// entities never hydrated plus the failed-ingest entries; 0 for pr.
 	MetricDueBacklog = "pg_desk_due_backlog"
 	// MetricConsumerLag is max(seq) - cursor per consumer and type.
 	MetricConsumerLag = "pg_desk_consumer_lag"
@@ -41,7 +43,8 @@ const (
 	// MetricSweepBoundViolated is 1 for a (type, tier) whose sweep sizing
 	// bound active_count / max_per_poll x poll_interval <= max_age is
 	// violated and 0 when it holds. A tier whose poll interval is unknown has
-	// NO series (never a false violation). Labels: type, tier (local|remote).
+	// NO series (never a false violation), and the issue type, which has no age
+	// sweep, has no series at all. Labels: type, tier (local|remote).
 	MetricSweepBoundViolated = "pg_desk_sweep_bound_violated"
 	// MetricIngestFailed is the number of failed-ingest entries (change-feed
 	// rows that could not be hydrated and were recorded instead of lost), by
@@ -196,7 +199,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		return err
 	}
 	due, err := m.Int64ObservableGauge(MetricDueBacklog,
-		metric.WithDescription("active entities with hydrated_at older than the sweep max age (or never hydrated), by type; an owning-backend issue entity is not counted (no age sweep reaches it)"))
+		metric.WithDescription("hydrations owed, by type: for thread the active entities with hydrated_at older than the sweep max age (or never hydrated); for issue (no age sweep) the watched active entities never hydrated plus the failed-ingest entries; always 0 for pr"))
 	if err != nil {
 		return err
 	}
@@ -212,7 +215,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 	}
 
 	bound, err := m.Int64ObservableGauge(MetricSweepBoundViolated,
-		metric.WithDescription("1 when the sweep sizing bound active_count / max_per_poll x poll_interval <= max_age is violated for a type and tier, 0 when it holds; absent when the poll interval is unknown"))
+		metric.WithDescription("1 when the sweep sizing bound active_count / max_per_poll x poll_interval <= max_age is violated for a type and tier, 0 when it holds; absent when the poll interval is unknown and for the issue type, which has no age sweep"))
 	if err != nil {
 		return err
 	}
@@ -258,7 +261,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 			o.ObserveInt64(retries, t.Stats.OCCRetries, metric.WithAttributes(typ))
 			o.ObserveInt64(due, int64(t.Due), metric.WithAttributes(typ))
 			o.ObserveInt64(repeated, int64(len(t.Repeated)), metric.WithAttributes(typ))
-			if o0.sweepBound == nil || !isFlowType(t.Type) {
+			if o0.sweepBound == nil || !isFlowType(t.Type) || !changes.HasSweepBound(t.Type) {
 				continue
 			}
 			for _, tier := range changes.SweepTiers {

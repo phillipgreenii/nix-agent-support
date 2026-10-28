@@ -1,11 +1,13 @@
 package focus
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // Coverage reads only the persisted listing status, the active count and due
@@ -72,23 +74,66 @@ func TestComputeCoverage(t *testing.T) {
 		f.cfg.Watch.PR.Queries = []string{"mine"}
 	})
 	t.Run("a small backlog is a notice, a large one is incomplete", func(t *testing.T) {
-		// The age rule is shown on the issue type: a PR has no due backlog (next test).
+		// The issue backlog is its pending hydrations: watched entities never
+		// hydrated, plus the failed-ingest entries. A PR has no due backlog (below).
 		g := newFixture(t)
-		g.issue("K-1", issueSpec{state: "open"})
 		g.cfg.Watch.Issue.Queries = []string{"mine"}
 		setListing(t, g, "issue", "mine", "ok", "")
-		late := fixtureNow.Add(30 * 24 * time.Hour) // every entity is past the sweep max age
-		rep, _ := ComputeCoverage(g.st, g.cfg, late, g.inputs().Entities)
-		// 1 due of 1 active: the default bound is ceil(10%) = 1, so within it.
+		g.pending("K-1")
+		rep, _ := ComputeCoverage(g.st, g.cfg, fixtureNow, g.inputs().Entities)
+		// 1 pending of 1 active: the default bound is ceil(10%) = 1, so within it.
 		if rep.State.Incomplete || len(rep.Notices) != 1 {
 			t.Errorf("within the bound: %+v", rep)
 		}
 		n := 1
 		g.cfg.Focus.CoverageBacklogMax = &n
-		g.issue("K-2", issueSpec{state: "open"})
-		rep, _ = ComputeCoverage(g.st, g.cfg, late, g.inputs().Entities)
+		g.pending("K-2")
+		rep, _ = ComputeCoverage(g.st, g.cfg, fixtureNow, g.inputs().Entities)
 		if !rep.State.Incomplete || !strings.Contains(strings.Join(rep.State.Reasons, ";"), "backlog") {
 			t.Errorf("above the bound: %+v", rep)
+		}
+		// Failed-ingest entries count too: one more of them keeps it above the bound.
+		if got := rep.State.PerType["issue"].DueBacklog; got != 2 {
+			t.Errorf("DueBacklog = %d, want 2 pending hydrations", got)
+		}
+	})
+	t.Run("a hydrated issue set is no backlog however old", func(t *testing.T) {
+		g := newFixture(t)
+		g.cfg.Watch.Issue.Queries = []string{"mine"}
+		setListing(t, g, "issue", "mine", "ok", "")
+		for i := 0; i < 50; i++ {
+			k := g.issue(fmt.Sprintf("K-%d", i), issueSpec{state: "open"})
+			watched := true
+			if err := g.st.SetEntityColumns(testRepo, "issue", k.ID, nil, &watched); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n := 1
+		g.cfg.Focus.CoverageBacklogMax = &n
+		late := fixtureNow.Add(365 * 24 * time.Hour) // far past hydrated_at + any sweep age
+		rep, _ := ComputeCoverage(g.st, g.cfg, late, g.inputs().Entities)
+		if rep.State.Incomplete || len(rep.Notices) != 0 {
+			t.Errorf("a fully hydrated set read incomplete or noisy: %+v", rep)
+		}
+		if got := rep.State.PerType["issue"]; got.Active != 50 || got.DueBacklog != 0 {
+			t.Errorf("issue coverage = %+v, want 50 active and no due backlog", got)
+		}
+	})
+	t.Run("failed-ingest entries are counted into the issue backlog", func(t *testing.T) {
+		g := newFixture(t)
+		g.cfg.Watch.Issue.Queries = []string{"mine"}
+		setListing(t, g, "issue", "mine", "ok", "")
+		g.pending("K-1")
+		g.pending("K-2")
+		g.pending("K-3")
+		for i, id := range []string{"PROJ-1", "PROJ-2"} {
+			if err := g.st.RecordIngestFailure(store.IngestFailure{Instance: "jira-a", EntityID: id, Seq: int64(i + 1), StoreIdentity: "s", FirstFailedAt: fixtureAt}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rep, _ := ComputeCoverage(g.st, g.cfg, fixtureNow, g.inputs().Entities)
+		if got := rep.State.PerType["issue"].DueBacklog; got != 5 {
+			t.Errorf("DueBacklog = %d, want 5 (3 pending hydrations and 2 failed ingests)", got)
 		}
 	})
 	t.Run("PRs never count toward the backlog however old they are", func(t *testing.T) {
@@ -262,24 +307,36 @@ func TestLoadWatchedReadsTheWatchedColumnForAnOwningBackend(t *testing.T) {
 	}
 }
 
-// The coverage counts leave an owning-backend issue out of Active and
-// DueBacklog.
-func TestComputeCoverageExcludesOwningBackendEntitiesFromBacklog(t *testing.T) {
+// An owning-backend issue is counted like any other: with the age sweeps gone
+// it is pending until it is hydrated, and Active includes it.
+func TestComputeCoverageCountsOwningBackendEntitiesLikeAnyOther(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.Watch.Issue.Queries = []string{"tracked"}
 	f.cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"tracked": {Instance: "jira-a", OwnsChanges: true}}
-	f.writeEntity(Key{"issue", "PROJ-1"}, `{}`, true)
+	f.pending("PROJ-1")
 	jira := "jira-a"
 	if err := f.st.SetEntityColumns(testRepo, "issue", "PROJ-1", &jira, nil); err != nil {
 		t.Fatal(err)
 	}
-	in := f.inputs()
-	// Far past hydrated_at + sweep.max_age: a beads entity would be due.
-	rep, err := ComputeCoverage(f.st, f.cfg, fixtureNow.Add(1000*time.Hour), in.Entities)
+	// Far past any age: only the missing hydration makes it pending.
+	rep, err := ComputeCoverage(f.st, f.cfg, fixtureNow.Add(1000*time.Hour), f.inputs().Entities)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := rep.State.PerType["issue"]; got.Active != 0 || got.DueBacklog != 0 {
-		t.Errorf("issue coverage = %+v, want Active 0 and DueBacklog 0 for an owning-backend entity", got)
+	if got := rep.State.PerType["issue"]; got.Active != 1 || got.DueBacklog != 1 {
+		t.Errorf("issue coverage = %+v, want Active 1 and DueBacklog 1 for a watched, never-hydrated owning-backend entity", got)
+	}
+}
+
+// pending stores an active issue entity that is watched and never hydrated.
+func (f *fixture) pending(id string) {
+	f.t.Helper()
+	e := store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: fixtureAt, ContentHash: "h" + id}
+	if _, err := f.st.WriteEntityStateWithLog(e, 0, "", true, []string{"created"}, "sync", fixtureAt); err != nil {
+		f.t.Fatalf("write pending issue %s: %v", id, err)
+	}
+	watched := true
+	if err := f.st.SetEntityColumns(testRepo, "issue", id, nil, &watched); err != nil {
+		f.t.Fatal(err)
 	}
 }

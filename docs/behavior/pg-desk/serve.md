@@ -120,18 +120,21 @@ series.
   `serve`, so they are read from the totals those processes persist.
 - `pg_desk_repeated_degraded_entities{type}` — entities with repeated degraded hydrations (the one
   definition `status` and `doctor` share).
-- `pg_desk_due_backlog{type}` — active entities whose `hydrated_at` is older than the sweep max age
-  (or that were never hydrated); always 0 for `pr` (no sweep re-hydrates a PR on a clock, and the
-  never-hydrated PRs are `pg_desk_pr_unhydrated`). An `issue` entity of a backend that owns its changes
-  is never counted: the age sweep skips it, so its `hydrated_at` does not advance and it would otherwise
-  be due for ever.
+- `pg_desk_due_backlog{type}` — the hydrations still owed, by type. For `thread`, the active entities whose
+  `hydrated_at` is older than the sweep max age (or that were never hydrated); always 0 for `pr` (no
+  sweep re-hydrates a PR on a clock, and the never-hydrated PRs are `pg_desk_pr_unhydrated`). For `issue`,
+  which has no age sweep, only PENDING hydrations: the active entities that are watched and have never been
+  hydrated, plus the entries of the failed-ingest table. An issue is never due for its age, so a fully
+  hydrated set reads `0` however old its `hydrated_at` is. An entity whose listed fingerprint changed but
+  that is not yet re-hydrated is NOT counted: the stored fingerprint is compared only against a listing the
+  poll holds, which the scrape does not have. The focus coverage header counts the same way.
 - `pg_desk_consumer_lag{type,consumer}` — the type's highest change sequence minus the consumer's
   cursor.
 - `pg_desk_sweep_bound_violated{type,tier}` — `1` for a (type, tier) whose sweep sizing bound
   `active_count / sweep.max_per_poll x poll_interval <= age` is violated, `0` when it holds. The
   bound is checked per capped age tier: `tier="remote"` (re-hydration, age `sweep.max_age`) and
-  `tier="local"` (reconcile, age `sweep.reconcile_age`). `active_count` leaves out an `issue` entity of
-  a backend that owns its changes, which neither tier touches. It is the same evaluation `doctor` prints
+  `tier="local"` (reconcile, age `sweep.reconcile_age`). It is emitted for `pr` and `thread` only: `issue` has
+  no age sweep, so it has no tier, no bound and NO series, whatever the poll interval. It is the same evaluation `doctor` prints
   (`changes.EvaluateSweepBound`), so the metric and the doctor line always agree. `pg-desk` does not
   own the poll interval: `serve` reads it from the router config named by `serve --router-config
 <path>` (or the `PG_DESK_ROUTER_CONFIG` environment variable), re-reading the file on every scrape
@@ -144,8 +147,9 @@ series.
 
 The Grafana rule `pg-desk-sweep-bound-violated` (`packages/pg-desk/grafana/alerting/alerts.yaml`,
 expression `max by (type, tier) (pg_desk_sweep_bound_violated{type=~"issue|thread"})`, threshold `>= 1`, `for: 15m`,
-warning) fires per (type, tier) while a bound is violated. It is scoped to issue and thread (PR lane
-refactor): the PR inputs of the bound vanish with the PR sweep, so a `pr` series is not read. A cap on the sweep is allowed only while
+warning) fires per (type, tier) while a bound is violated. Its selector still names issue and thread (PR lane
+refactor: the PR inputs of the bound vanish with the PR sweep, so a `pr` series is not read), but the issue
+series no longer exists, so in practice only `thread` can fire it. A cap on the sweep is allowed only while
 its bound is checked and alerting. An absent series (no verdict) is Normal, not an alert.
 
 - `pg_desk_ingest_failed{backend}` and `pg_desk_ingest_failed_oldest_age_seconds{backend}` — the

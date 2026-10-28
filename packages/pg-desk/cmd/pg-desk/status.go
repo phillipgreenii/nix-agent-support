@@ -234,7 +234,7 @@ func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version 
 		cfg = &config.Config{}
 		fmt.Fprintf(w, "  config: unavailable (%v); defaults assumed\n", cfgErr)
 	}
-	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge(), changes.OwningSet(cfg, changes.EntityTypeIssue))
+	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
 	if err != nil {
 		return fmt.Errorf("observe change flow: %w", err)
 	}
@@ -243,8 +243,10 @@ func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version 
 		fmt.Fprintf(w, "  type %s:\n", t.Type)
 		fmt.Fprintf(w, "    active: %d\n", t.Active)
 		fmt.Fprintf(w, "    due_backlog: %d\n", t.Due)
-		fmt.Fprintf(w, "    sweep_bound: active_count=%d max_per_poll=%d max_age=%s poll_interval=unknown\n",
-			in.ActiveCount, in.MaxPerPoll, in.MaxAge.Round(time.Second))
+		if changes.HasSweepBound(t.Type) {
+			fmt.Fprintf(w, "    sweep_bound: active_count=%d max_per_poll=%d max_age=%s poll_interval=unknown\n",
+				in.ActiveCount, in.MaxPerPoll, in.MaxAge.Round(time.Second))
+		}
 		fmt.Fprintf(w, "    hydrations: %d\n", t.Stats.Hydrations)
 		fmt.Fprintf(w, "    hydration_failures: %d\n", t.Stats.Failures)
 		fmt.Fprintf(w, "    occ_retries: %d\n", t.Stats.OCCRetries)

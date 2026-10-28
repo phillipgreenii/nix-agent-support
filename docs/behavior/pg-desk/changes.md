@@ -547,7 +547,9 @@ replay is exempt (see `--reset`).
 
 The count of work that is due (the due-backlog series and the focus coverage header, which marks the
 focus state incomplete past `coverage_backlog_max`) MUST, for `issue`, count only hydrations that are
-PENDING: a changed or watched entity not yet hydrated, and the entries of the failed-ingest table.
+PENDING: a watched entity not yet hydrated, and the entries of the failed-ingest table. A changed
+entity not yet re-hydrated is NOT counted: the stored fingerprint is compared only against a listing the
+poll holds, and the count is taken from the store alone.
 It MUST NOT count entities past an age, because with no sweep `hydrated_at` no longer advances for an
 unchanged entity, and coverage would otherwise read incomplete for ever.
 
@@ -759,7 +761,7 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   read from entity metadata (`entity_meta.watched`) into the entity's watched column at hydration.
   Per-query listing status is not membership, and the beads backend keeps its list-and-diff sets.
 - **INV-CHANGES-29.** <!-- uuid: 5286b9ce-b03d-4343-91a3-5cc1efb9cc54 --> For `issue`, the due backlog (the series and the coverage header) MUST count only
-  pending hydrations (a changed or watched entity not yet hydrated, and the failed-ingest table), not
+  pending hydrations (a watched entity not yet hydrated, and the failed-ingest table), not
   entities past an age.
 - **INV-CHANGES-30.** <!-- uuid: 6ef8f2ab-a5de-4c15-846f-7edcc8edddfd --> `--reset` for issue MUST replay only watched active entities, as kind `added` with
   origin `reset`, never as `reconcile`.

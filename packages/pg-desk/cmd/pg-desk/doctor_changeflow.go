@@ -77,7 +77,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		checkCfg = &config.Config{}
 	}
 	now := changesNow()
-	flow, err := changes.Observe(st, now, checkCfg.SweepMaxAge(), changes.OwningSet(checkCfg, changes.EntityTypeIssue))
+	flow, err := changes.Observe(st, now, checkCfg.SweepMaxAge())
 	if err != nil {
 		fmt.Fprintf(w, "  observe: FAIL (%v)\n", err)
 		*failures = append(*failures, "change_flow observe")
@@ -187,8 +187,10 @@ func doctorStalledConsumers(w io.Writer, cfg *config.Config, rc *routerConfig, f
 }
 
 // doctorSweepBound evaluates active_count / N x poll_interval <= max_age per
-// type AND per capped age tier (remote re-hydration against sweep.max_age,
-// local reconcile against sweep.reconcile_age) when the router config supplies
+// type that has an age sweep (pr and thread; the issue type has none, so it
+// has no line and no verdict) AND per capped age tier (remote
+// re-hydration against sweep.max_age, local reconcile against
+// sweep.reconcile_age) when the router config supplies
 // the poll interval; otherwise it reports the bound's inputs with
 // poll_interval: unknown and NO verdict [design 8.4]. The verdict is
 // changes.EvaluateSweepBound, the same evaluation behind the
@@ -199,6 +201,9 @@ func doctorSweepBound(w io.Writer, cfg *config.Config, rc *routerConfig, flow ch
 	for _, t := range flow.Types {
 		if !isFlowEntityType(t.Type) {
 			continue
+		}
+		if !changes.HasSweepBound(t.Type) {
+			continue // issue: no age sweep, so no line and no verdict
 		}
 		var poll time.Duration
 		known := false

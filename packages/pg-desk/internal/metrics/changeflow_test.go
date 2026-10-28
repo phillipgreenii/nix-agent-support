@@ -3,7 +3,9 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,12 +145,17 @@ func boundPoints(t *testing.T, rm metricdata.ResourceMetrics) map[string]int64 {
 }
 
 func sweepFlow() changes.Flow {
-	return changes.Flow{Migrated: true, Types: []changes.TypeFlow{{Type: "pr", Active: 88}, {Type: "issue", Active: 3}}}
+	return changes.Flow{Migrated: true, Types: []changes.TypeFlow{{Type: "pr", Active: 88}, {Type: "issue", Active: 3}, {Type: "thread", Active: 5}}}
 }
 
 func TestSweepBoundMetricReadsOneWhenViolatedAndZeroWhenHolding(t *testing.T) {
-	// pr: the local tier is violated, the remote tier holds. issue: both hold.
+	// pr: the local tier is violated, the remote tier holds. issue: the
+	// evaluator would call both tiers violated, but the issue type has no age
+	// sweep, so no series is emitted for it at all.
 	eval := func(tf changes.TypeFlow, tier string) changes.BoundVerdict {
+		if tf.Type == "issue" {
+			return changes.BoundViolated
+		}
 		if tf.Type == "pr" && tier == changes.TierLocal {
 			return changes.BoundViolated
 		}
@@ -163,8 +170,13 @@ func TestSweepBoundMetricReadsOneWhenViolatedAndZeroWhenHolding(t *testing.T) {
 	if err := reader.Collect(context.Background(), &rm); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int64{"pr/local": 1, "pr/remote": 0, "issue/local": 0, "issue/remote": 0}
+	want := map[string]int64{"pr/local": 1, "pr/remote": 0, "thread/local": 0, "thread/remote": 0}
 	got := boundPoints(t, rm)
+	for k := range got {
+		if strings.HasPrefix(k, "issue/") {
+			t.Errorf("series %s emitted: the issue type has no sweep-bound series", k)
+		}
+	}
 	if len(got) != len(want) {
 		t.Fatalf("points = %v, want %v", got, want)
 	}
@@ -213,55 +225,64 @@ func TestSweepBoundMetricIgnoresNonFlowTypes(t *testing.T) {
 	}
 }
 
-// The due-backlog gauge counts only entities the age sweep can reach: with an
-// owning backend configured, an age-stale owning-backend issue is not counted
-// and the stale beads issue is.
-func TestDueBacklogGaugeExcludesOwningBackendEntities(t *testing.T) {
+// For issue the due-backlog gauge counts only pending hydrations: the watched
+// never-hydrated entities plus the failed-ingest entries. A hydrated set, however
+// old, reads 0 (nothing re-hydrates an issue on a clock).
+func TestDueBacklogGaugeForIssueCountsOnlyPendingHydrations(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	seed := func(id, backend string) {
+	seed := func(id, hydratedAt string, watched bool) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"}
-		if _, err := st.WriteEntityStateWithLog(e, 0, "2026-09-01T00:00:00Z", true, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(e, 0, hydratedAt, true, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.SetEntityColumns("o/r", "issue", id, &backend, nil); err != nil {
+		backend := "beads-a"
+		if err := st.SetEntityColumns("o/r", "issue", id, &backend, &watched); err != nil {
 			t.Fatal(err)
 		}
 	}
-	seed("bd-1", "beads-a")
-	seed("PROJ-1", "jira-a")
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	issueDue := func(t *testing.T) int64 {
+		t.Helper()
+		rm, err := collectChangeFlow(t, func() (changes.Flow, error) { return changes.Observe(st, now, 6*time.Hour) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := findMetric(t, rm, MetricDueBacklog)
+		d, ok := m.Data.(metricdata.Gauge[int64])
+		if !ok {
+			t.Fatalf("%s is %T, want an int64 gauge", MetricDueBacklog, m.Data)
+		}
+		var got int64 = -1
+		for _, p := range d.DataPoints {
+			if typ, _ := p.Attributes.Value("type"); typ.AsString() == "issue" {
+				got = p.Value
+			}
+		}
+		return got
+	}
 
-	for _, tc := range []struct {
-		name   string
-		owning map[string]bool
-		want   int64
-	}{
-		{"no owning backend", nil, 2},
-		{"jira-a owns changes", map[string]bool{"jira-a": true}, 1},
+	for i := 0; i < 50; i++ {
+		seed(fmt.Sprintf("bd-old-%d", i), "2026-01-01T00:00:00Z", true)
+	}
+	if got := issueDue(t); got != 0 {
+		t.Errorf("%s{type=issue} with 50 hydrated watched issues = %d, want 0", MetricDueBacklog, got)
+	}
+
+	for i := 0; i < 3; i++ {
+		seed(fmt.Sprintf("bd-new-%d", i), "", true)
+	}
+	seed("bd-unwatched", "", false)
+	for _, f := range []store.IngestFailure{
+		{Instance: "jira-a", EntityID: "PROJ-1", Seq: 1, StoreIdentity: "s", FirstFailedAt: "2026-10-01T11:00:00Z"},
+		{Instance: "jira-a", EntityID: "PROJ-2", Seq: 2, StoreIdentity: "s", FirstFailedAt: "2026-10-01T11:00:00Z"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rm, err := collectChangeFlow(t, func() (changes.Flow, error) {
-				return changes.Observe(st, now, 6*time.Hour, tc.owning)
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			m := findMetric(t, rm, MetricDueBacklog)
-			d, ok := m.Data.(metricdata.Gauge[int64])
-			if !ok {
-				t.Fatalf("%s is %T, want an int64 gauge", MetricDueBacklog, m.Data)
-			}
-			var got int64 = -1
-			for _, p := range d.DataPoints {
-				if typ, _ := p.Attributes.Value("type"); typ.AsString() == "issue" {
-					got = p.Value
-				}
-			}
-			if got != tc.want {
-				t.Errorf("%s{type=issue} = %d, want %d", MetricDueBacklog, got, tc.want)
-			}
-		})
+		if err := st.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := issueDue(t); got != 5 {
+		t.Errorf("%s{type=issue} with 3 pending and 2 failed ingests = %d, want 5", MetricDueBacklog, got)
 	}
 }
 

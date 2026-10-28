@@ -94,7 +94,8 @@ let
       "/tmp/pg-desk-serve/pg-desk-serve.log";
 
   # pg2-t92xc: the pg-router config `serve` reads (as a file, on every scrape)
-  # for the poll interval behind pg_desk_sweep_bound_violated{type,tier}.
+  # for the poll interval behind pg_desk_sweep_bound_violated{type,tier} (types
+  # with an age sweep only: pr and thread; issue has none and emits no series).
   # pg-router's daemon config is DECLARATIVE: it exists only as the store path
   # pkgs.writeText renders from the enabled user's
   # phillipgreenii.programs.pg-router.daemon.configText (darwin/modules/
@@ -143,6 +144,8 @@ in
         interval behind the `pg_desk_sweep_bound_violated{type,tier}` metric
         (and so the `pg-desk-sweep-bound-violated` alert). Without it the
         metric emits no series and a violated sweep sizing bound never alerts.
+        Only the types that still have an age sweep (`pr` and `thread`) carry the
+        metric; `issue` has no age sweep, so it has no series and no bound.
 
         When `null` (the default) the path is derived from the pg-router daemon
         of an enabled home-manager user

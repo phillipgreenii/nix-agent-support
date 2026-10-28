@@ -64,9 +64,11 @@ hydration and hydration-failure totals, the optimistic-concurrency retries, and 
 repeated degraded hydrations. For `thread` the due backlog is the active entities whose
 `hydrated_at` is older than the sweep max age, or that were never hydrated. For `pr` it is always 0 (no
 sweep re-hydrates a PR on a clock any more; never-hydrated PRs are counted by `pg_desk_pr_unhydrated`). For `issue`, which has no
-age-driven sweep, the due backlog counts ONLY hydrations that are pending: a changed or watched entity
-not yet hydrated, plus the entries of the failed-ingest table. An unchanged issue is never due for its
-age. Per consumer it reports the cursor, the lag (the type's highest change
+age-driven sweep, the due backlog counts ONLY hydrations that are pending: a watched entity not yet
+hydrated, plus the entries of the failed-ingest table. An unchanged issue is never due for its
+age. An entity whose listed fingerprint changed but that is not yet re-hydrated is NOT counted, because the
+stored fingerprint is compared only against a listing the poll holds; the same counts feed the focus
+coverage header. Per consumer it reports the cursor, the lag (the type's highest change
 sequence minus the cursor) and `seen_at`, which is the consumer's liveness now that the heartbeat is
 retired. For the sweep bound of `pr` and `thread` (`active_count / N x poll_interval <= D`), `status`
 reports only its inputs (`active_count`, `N`, `D`) and `poll_interval: unknown`, with NO verdict:
@@ -543,8 +545,8 @@ can drift.
   `watched` mismatch), and on active `issue` entities of a backend with no watched query declared; the
   reports MUST never fail it.
 - **INV-OPERATOR-6.** <!-- uuid: 7bf954d5-73a6-465b-847a-64cd422dd1bf --> `status` MUST print the issue change-flow figures as counts only, with no verdict.
-- **INV-OPERATOR-7.** <!-- uuid: 83ea533e-e2c1-4e45-ba8a-0a113c0aceea --> For `issue` the due backlog MUST count only pending hydrations (a changed or watched entity not yet
-  hydrated, and the failed-ingest entries), and neither the local nor the remote sweep bound MUST be
+- **INV-OPERATOR-7.** <!-- uuid: 83ea533e-e2c1-4e45-ba8a-0a113c0aceea --> For `issue` the due backlog MUST count only pending hydrations (a watched entity not yet
+  hydrated, and the failed-ingest entries; a changed entity not yet re-hydrated is not counted), and neither the local nor the remote sweep bound MUST be
   evaluated or reported.
 - **INV-OPERATOR-8.** <!-- uuid: de87cc87-33cc-4461-9630-95a83e86430f --> Every leaf verb of the command tree MUST be classified safe or unsafe on a store at schema 2,
   every safe verb MUST run on a store migrated to schema 2 without a schema or ledger error, and the

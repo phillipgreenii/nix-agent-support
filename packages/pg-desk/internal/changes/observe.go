@@ -61,12 +61,10 @@ type Flow struct {
 
 // Observe reads the change-flow observability from the store at now: the
 // single definition /metrics and `status` share. It only reads. maxAge is the
-// sweep bound D used for the due backlog.
-//
-// owning is the set of owning backend instances of the issue type
-// (OwningSet(cfg, "issue")): an owning-backend issue entity is excluded from
-// Active and Due, because the age-sweep tiers skip it.
-func Observe(st *store.Store, now time.Time, maxAge time.Duration, owning map[string]bool) (Flow, error) {
+// sweep bound D used for the due backlog of the types that still have an age
+// sweep. The issue type's Due is its pending hydrations: the watched entities
+// not yet hydrated plus the failed-ingest entries (see DueBacklog).
+func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error) {
 	version, err := st.SchemaVersion()
 	if err != nil {
 		return Flow{}, err
@@ -79,6 +77,10 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration, owning map[st
 		return Flow{}, err
 	}
 	consumers, err := st.ListConsumers()
+	if err != nil {
+		return Flow{}, err
+	}
+	failures, err := st.ListIngestFailures("")
 	if err != nil {
 		return Flow{}, err
 	}
@@ -137,8 +139,8 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration, owning map[st
 		tf := TypeFlow{
 			Type:     t,
 			MaxSeq:   top,
-			Active:   ActiveCount(entities, t, owning),
-			Due:      DueBacklog(entities, t, now, maxAge, owning),
+			Active:   ActiveCount(entities, t),
+			Due:      DueBacklog(entities, t, now, maxAge, len(failures)),
 			Stats:    stats,
 			Repeated: RepeatedDegraded(stats),
 		}

@@ -73,12 +73,21 @@ type CoverageReport struct {
 // are the stored entity rows of the configured repository (Inputs.Entities).
 // Exit 2 (incomplete) is State.Incomplete: any listing degraded, failed or
 // unknown, or a due backlog above focus.coverage_backlog_max of its type. A
-// backlog within the bound is a Notice only.
+// backlog within the bound is a Notice only. For issue the backlog counts only
+// pending hydrations (watched entities never hydrated and the failed-ingest
+// entries), never entities past an age, because no age sweep re-hydrates them.
 func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entities map[Key]store.Entity) (CoverageReport, error) {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	owning := changes.OwningSet(cfg, entityTypeIssue)
+	failedIngest := 0
+	if st != nil {
+		fails, err := st.ListIngestFailures("")
+		if err != nil {
+			return CoverageReport{}, err
+		}
+		failedIngest = len(fails)
+	}
 	rows := make([]store.Entity, 0, len(entities))
 	for _, e := range entities {
 		rows = append(rows, e)
@@ -87,8 +96,8 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 	known, failed := 0, 0
 	for _, t := range CoverageTypes {
 		cov := TypeCoverage{
-			Active:     changes.ActiveCount(rows, t, owning),
-			DueBacklog: changes.DueBacklog(rows, t, now, cfg.SweepMaxAge(), owning),
+			Active:     changes.ActiveCount(rows, t),
+			DueBacklog: changes.DueBacklog(rows, t, now, cfg.SweepMaxAge(), failedIngest),
 		}
 		cov.OldestHydratedAt = oldestHydrated(rows, t)
 
@@ -120,7 +129,7 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 				fmt.Sprintf("%s hydration backlog %d is above focus.coverage_backlog_max %d", t, cov.DueBacklog, max))
 		} else if cov.DueBacklog > 0 {
 			rep.Notices = append(rep.Notices,
-				fmt.Sprintf("hydration backlog: %d of %d active %s entities are due (within focus.coverage_backlog_max %d)", cov.DueBacklog, cov.Active, t, max))
+				fmt.Sprintf("hydration backlog: %d of %d active %s entities are pending hydration (within focus.coverage_backlog_max %d)", cov.DueBacklog, cov.Active, t, max))
 		}
 		rep.State.PerType[t] = cov
 	}

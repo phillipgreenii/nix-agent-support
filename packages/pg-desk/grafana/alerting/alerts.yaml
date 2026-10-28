@@ -406,7 +406,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk sweep bound violated for type {{ $labels.type }}, tier {{ $labels.tier }}"
-          description: "pg_desk_sweep_bound_violated has read 1 for type {{ $labels.type }}, tier {{ $labels.tier }} for over 15 minutes -- active_count / sweep.max_per_poll x poll_interval exceeds the tier's age (tier=remote: sweep.max_age; tier=local: sweep.reconcile_age), so the sweep falls behind and some active entities go longer than that age between refreshes. Run `pg-desk doctor --router-config <path>` for the inputs, then raise sweep.max_per_poll, lengthen the age, or shorten the poll interval."
+          description: "pg_desk_sweep_bound_violated has read 1 for type {{ $labels.type }}, tier {{ $labels.tier }} for over 15 minutes -- active_count / sweep.max_per_poll x poll_interval exceeds the tier's age (tier=remote: sweep.max_age; tier=local: sweep.reconcile_age), so the sweep falls behind and some active entities go longer than that age between refreshes. Only types with an age sweep carry the series (the issue type has none, so it never fires this rule). Run `pg-desk doctor --router-config <path>` for the inputs, then raise sweep.max_per_poll, lengthen the age, or shorten the poll interval."
         data:
           - refId: A
             relativeTimeRange:

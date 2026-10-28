@@ -31,13 +31,13 @@ func sweepEntities() []store.Entity {
 
 func TestActiveCount(t *testing.T) {
 	es := sweepEntities()
-	if got := ActiveCount(es, "pr", nil); got != 7 {
+	if got := ActiveCount(es, "pr"); got != 7 {
 		t.Errorf("pr active = %d, want 7 (inactive and other-type excluded)", got)
 	}
-	if got := ActiveCount(es, "issue", nil); got != 1 {
+	if got := ActiveCount(es, "issue"); got != 1 {
 		t.Errorf("issue active = %d, want 1", got)
 	}
-	if got := ActiveCount(nil, "pr", nil); got != 0 {
+	if got := ActiveCount(nil, "pr"); got != 0 {
 		t.Errorf("empty = %d", got)
 	}
 }
@@ -60,10 +60,10 @@ func TestDueBacklog(t *testing.T) {
 	// not older than 6h), gone (inactive), other-type. The age rule is shown on
 	// the thread type: pr has no due backlog (TestDueBacklogOfPRIsAlwaysZero).
 	es := asType(sweepEntities(), "thread")
-	if got := DueBacklog(es, "thread", sweepTestNow, 6*time.Hour, nil); got != 5 {
+	if got := DueBacklog(es, "thread", sweepTestNow, 6*time.Hour, 0); got != 5 {
 		t.Errorf("DueBacklog = %d, want 5", got)
 	}
-	if got := DueBacklog(es, "thread", sweepTestNow, 100*24*time.Hour, nil); got != 2 {
+	if got := DueBacklog(es, "thread", sweepTestNow, 100*24*time.Hour, 0); got != 2 {
 		t.Errorf("DueBacklog with a huge max age = %d, want 2 (never hydrated and unparseable)", got)
 	}
 }
@@ -75,14 +75,14 @@ func TestDueBacklog(t *testing.T) {
 func TestDueBacklogOfPRIsAlwaysZero(t *testing.T) {
 	es := sweepEntities()
 	for _, maxAge := range []time.Duration{time.Hour, 6 * time.Hour, 100 * 24 * time.Hour} {
-		if got := DueBacklog(es, "pr", sweepTestNow, maxAge, nil); got != 0 {
+		if got := DueBacklog(es, "pr", sweepTestNow, maxAge, 0); got != 0 {
 			t.Errorf("DueBacklog(pr, max age %s) = %d, want 0", maxAge, got)
 		}
 	}
-	if got := DueBacklog(asType(es, "thread"), "thread", sweepTestNow, 6*time.Hour, nil); got != 5 {
+	if got := DueBacklog(asType(es, "thread"), "thread", sweepTestNow, 6*time.Hour, 0); got != 5 {
 		t.Errorf("control: the same rows as thread are %d due, want 5", got)
 	}
-	if got := ActiveCount(es, "pr", nil); got != 7 {
+	if got := ActiveCount(es, "pr"); got != 7 {
 		t.Errorf("pr active = %d, want 7 (the exclusion must not touch the active count)", got)
 	}
 }
@@ -325,41 +325,83 @@ func TestSweepTiersCoverLocalAndRemote(t *testing.T) {
 	}
 }
 
-// --- owning-backend entities are outside the old age-sweep tiers ---
+// --- the issue type has no age sweep: its backlog is pending hydrations ---
 
 var owningJira = map[string]bool{"jira-a": true}
 
-// owningTierEntities is one age-stale beads issue, one age-stale owning-backend
-// issue, an age-stale owning-backend PR-typed id (the exclusion is for the
-// issue type only), and a fresh beads issue.
-func owningTierEntities() []store.Entity {
-	return []store.Entity{
-		{EntityType: "issue", EntityID: "bd-stale", Backend: "beads-a", HydratedAt: "2026-09-01T00:00:00Z"},
-		{EntityType: "issue", EntityID: "PROJ-1", Backend: "jira-a", HydratedAt: "2026-09-01T00:00:00Z"},
-		{EntityType: "issue", EntityID: "bd-null", HydratedAt: "2026-09-01T00:00:00Z"},
-		{EntityType: "issue", EntityID: "bd-fresh", Backend: "beads-a", HydratedAt: "2026-10-01T11:00:00Z"},
-		{EntityType: "pr", EntityID: "pr-1", Backend: "jira-a", HydratedAt: "2026-09-01T00:00:00Z"},
+func boolPtr(b bool) *bool { return &b }
+
+// issueRows builds n issue rows with the given watched mark and hydrated_at.
+func issueRows(prefix string, n int, watched *bool, hydratedAt string) []store.Entity {
+	out := make([]store.Entity, n)
+	for i := range out {
+		out[i] = store.Entity{EntityType: "issue", EntityID: fmt.Sprintf("%s-%d", prefix, i), Watched: watched, HydratedAt: hydratedAt}
+	}
+	return out
+}
+
+// An active issue set that is fully hydrated has nothing pending: however old
+// hydrated_at is, the due backlog is 0 (an age never makes an issue due, since
+// no sweep re-hydrates it).
+func TestDueBacklogOfIssueIsZeroForAFullyHydratedSet(t *testing.T) {
+	es := issueRows("bd-old", 50, boolPtr(true), "2026-01-01T00:00:00Z")
+	for _, maxAge := range []time.Duration{time.Minute, 6 * time.Hour, 100 * 24 * time.Hour} {
+		if got := DueBacklog(es, "issue", sweepTestNow, maxAge, 0); got != 0 {
+			t.Errorf("DueBacklog(50 hydrated watched issues, max age %s) = %d, want 0", maxAge, got)
+		}
+	}
+	if got := ActiveCount(es, "issue"); got != 50 {
+		t.Errorf("ActiveCount = %d, want 50 (the age rule never touches the active count)", got)
 	}
 }
 
-func TestActiveCountAndDueBacklogExcludeOwningBackendIssues(t *testing.T) {
-	es := owningTierEntities()
-	if got := ActiveCount(es, "issue", nil); got != 4 {
-		t.Errorf("ActiveCount(no owning set) = %d, want 4", got)
+// Pending hydrations are the active, watched, never-hydrated issues plus the
+// failed-ingest entries the caller passes; everything else is not counted.
+func TestDueBacklogOfIssueCountsPendingHydrationsAndFailedIngests(t *testing.T) {
+	pending := issueRows("bd-new", 3, boolPtr(true), "")
+	hydrated := issueRows("bd-old", 4, boolPtr(true), "2026-01-01T00:00:00Z")
+	notPending := append(issueRows("bd-unwatched", 2, nil, ""), issueRows("bd-off", 2, boolPtr(false), "")...)
+	gone := issueRows("bd-gone", 2, boolPtr(true), "")
+	for i := range gone {
+		gone[i].Inactive = true
 	}
-	if got := ActiveCount(es, "issue", owningJira); got != 3 {
-		t.Errorf("ActiveCount(owning jira-a) = %d, want 3 (the owning entity left out)", got)
+	garbled := issueRows("bd-garbled", 1, boolPtr(true), "not a time") // hydrated at some point: not pending
+	es := append(append(append(append(pending, hydrated...), notPending...), gone...), garbled...)
+
+	if got := DueBacklog(es, "issue", sweepTestNow, 6*time.Hour, 2); got != 5 {
+		t.Errorf("3 pending + 2 failed ingests: DueBacklog = %d, want 5", got)
 	}
-	if got := DueBacklog(es, "issue", sweepTestNow, 6*time.Hour, nil); got != 3 {
-		t.Errorf("DueBacklog(no owning set) = %d, want 3", got)
+	if got := DueBacklog(es, "issue", sweepTestNow, 6*time.Hour, 0); got != 3 {
+		t.Errorf("3 pending, no failed ingests: DueBacklog = %d, want 3", got)
 	}
-	if got := DueBacklog(es, "issue", sweepTestNow, 6*time.Hour, owningJira); got != 2 {
-		t.Errorf("DueBacklog(owning jira-a) = %d, want 2 (bd-stale and bd-null; the owning entity is never due)", got)
+	if got := DueBacklog(nil, "issue", sweepTestNow, 6*time.Hour, 2); got != 2 {
+		t.Errorf("failed ingests alone: DueBacklog = %d, want 2", got)
 	}
-	// The exclusion is for the issue type: a pr row carrying an owning
-	// backend value is counted as before.
-	if got := ActiveCount(es, "pr", owningJira); got != 1 {
-		t.Errorf("ActiveCount(pr) = %d, want 1", got)
+	// An entity of the owning backend is counted like any other: the old tiers
+	// that skipped it are gone, so it is pending until it is hydrated.
+	owned := store.Entity{EntityType: "issue", EntityID: "PROJ-1", Backend: "jira-a", Watched: boolPtr(true)}
+	if got := DueBacklog([]store.Entity{owned}, "issue", sweepTestNow, 6*time.Hour, 0); got != 1 {
+		t.Errorf("a watched, never-hydrated owning-backend issue: DueBacklog = %d, want 1", got)
+	}
+}
+
+// The failed-ingest term is for issue only; pr stays 0 and thread keeps its age
+// rule, as they were.
+func TestDueBacklogFailedIngestTermIsIssueOnly(t *testing.T) {
+	es := sweepEntities()
+	if got := DueBacklog(es, "pr", sweepTestNow, 6*time.Hour, 9); got != 0 {
+		t.Errorf("pr with failed ingests = %d, want 0", got)
+	}
+	if got := DueBacklog(asType(es, "thread"), "thread", sweepTestNow, 6*time.Hour, 9); got != 5 {
+		t.Errorf("thread with failed ingests = %d, want 5 (the age rule alone)", got)
+	}
+}
+
+func TestHasSweepBoundIsFalseForIssueOnly(t *testing.T) {
+	for typ, want := range map[string]bool{"pr": true, "thread": true, "issue": false} {
+		if got := HasSweepBound(typ); got != want {
+			t.Errorf("HasSweepBound(%q) = %v, want %v", typ, got, want)
+		}
 	}
 }
 
@@ -381,33 +423,34 @@ func TestOwningSetReadsTheConfiguredOwningInstances(t *testing.T) {
 	}
 }
 
-// owningEngine is a list engine whose config has one owning instance next to
-// the beads one, with a stale beads entity and a stale owning-backend entity.
-func owningEngine(t *testing.T) (*Engine, *store.Store, *storeHydrator) {
-	t.Helper()
-	e, st, h := newListEngine(t, "open", "tracked")
-	e.Cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
-		"open":    {Instance: "beads-a"},
-		"tracked": {Instance: "jira-a", OwnsChanges: true},
+// Observe reports the issue type's pending hydrations as its Due: watched
+// never-hydrated entities (owning backend or not) plus the failed-ingest
+// entries of the store, while every issue stays in Active.
+func TestObserveIssueDueIsPendingHydrationsAndFailedIngests(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seed := func(id, backend, hydratedAt string, watched bool) {
+		t.Helper()
+		e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"}
+		if _, err := st.WriteEntityStateWithLog(e, 0, hydratedAt, true, nil, "sync", "2026-10-01T10:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetEntityColumns("o/r", "issue", id, &backend, &watched); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// Both rows: hydrated 12h ago (past sweep.max_age) with a 3h-old log row
-	// (past reconcile_age), so each tier would select either.
-	seedTierRow(t, st, "bd-1", "2026-10-01T00:00:00Z", "F1", "2026-10-01T09:00:00Z")
-	seedTierRow(t, st, "PROJ-1", "2026-10-01T00:00:00Z", "F2", "2026-10-01T09:00:00Z")
-	jira := "jira-a"
-	if err := st.SetEntityColumns("o/r", "issue", "PROJ-1", &jira, nil); err != nil {
-		t.Fatal(err)
+	seed("bd-old", "beads-a", "2026-01-01T00:00:00Z", true) // hydrated long ago: not due
+	seed("bd-new", "beads-a", "", true)                     // pending
+	seed("PROJ-1", "jira-a", "", true)                      // pending (owning backend)
+	seed("bd-unwatched", "beads-a", "", false)              // not watched: not pending
+	for _, f := range []store.IngestFailure{
+		{Instance: "jira-a", EntityID: "PROJ-8", Seq: 1, StoreIdentity: "s", FirstFailedAt: "2026-10-01T10:00:00Z"},
+		{Instance: "jira-a", EntityID: "PROJ-9", Seq: 2, StoreIdentity: "s", FirstFailedAt: "2026-10-01T10:00:00Z"},
+	} {
+		if err := st.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
 	}
-	beads := "beads-a"
-	if err := st.SetEntityColumns("o/r", "issue", "bd-1", &beads, nil); err != nil {
-		t.Fatal(err)
-	}
-	return e, st, h
-}
-
-func TestObserveExcludesOwningBackendEntitiesFromActiveAndDue(t *testing.T) {
-	_, st, _ := owningEngine(t)
-	flow, err := Observe(st, sweepTestNow, 6*time.Hour, owningJira)
+	flow, err := Observe(st, sweepTestNow, 6*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,22 +463,8 @@ func TestObserveExcludesOwningBackendEntitiesFromActiveAndDue(t *testing.T) {
 	if issue == nil {
 		t.Fatal("no issue type in the flow")
 	}
-	if issue.Active != 1 || issue.Due != 1 {
-		t.Errorf("issue Active/Due = %d/%d, want 1/1 (only the beads entity)", issue.Active, issue.Due)
-	}
-	// The local-tier sweep-bound input is built from the same Active.
-	cfg := &config.Config{}
-	if in := SweepInputsForTier(cfg, *issue, TierLocal); in.ActiveCount != 1 {
-		t.Errorf("local-tier ActiveCount = %d, want 1", in.ActiveCount)
-	}
-	flow, err = Observe(st, sweepTestNow, 6*time.Hour, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tf := range flow.Types {
-		if tf.Type == "issue" && (tf.Active != 2 || tf.Due != 2) {
-			t.Errorf("without the owning set Active/Due = %d/%d, want 2/2", tf.Active, tf.Due)
-		}
+	if issue.Active != 4 || issue.Due != 4 {
+		t.Errorf("issue Active/Due = %d/%d, want 4/4 (2 pending + 2 failed ingests; every active issue counted)", issue.Active, issue.Due)
 	}
 }
 

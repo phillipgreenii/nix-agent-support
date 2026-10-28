@@ -395,7 +395,7 @@ func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *con
 		fmt.Fprintln(w, "focus: unmigrated")
 		return
 	}
-	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge(), changes.OwningSet(cfg, changes.EntityTypeIssue))
+	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
 	if err != nil {
 		fmt.Fprintf(w, "focus: FAIL (observe change flow: %v)\n", err)
 		appendFailure(failures, "focus health")

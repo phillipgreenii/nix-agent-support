@@ -24,7 +24,8 @@ type boundSeries struct {
 }
 
 // evalSweepBoundRule models `max by (type, tier) (...{type=~"issue|thread"})`:
-// the selector keeps only the issue and thread series (=~ is fully anchored),
+// the selector keeps only the issue and thread series (=~ is fully anchored; the
+// issue type no longer has any series, since it has no age sweep),
 // then one output element per (type, tier), valued at the max over the series
 // sharing those labels. The PR series is out of scope (P8a): its inputs vanish
 // after the pr-change role replaces the PR sweep.
@@ -91,20 +92,20 @@ func TestSweepBoundRuleExprMatchesModel(t *testing.T) {
 
 func TestSweepBoundViolationFiresPerTypeAndTier(t *testing.T) {
 	// Both the job=pg-desk series and its job=pg-desk-legacy duplicate read 1 for
-	// issue/local: ONE alert instance. issue/remote holds (0), thread is fine,
-	// and a pr series reading 1 is out of scope (it is not selected at all).
+	// thread/local: ONE alert instance. thread/remote holds (0), and a pr series
+	// reading 1 is out of scope (it is not selected at all). The issue type has
+	// no sweep and so no series (TestSweepBoundHasNoIssueSeries).
 	res := evalSweepBoundRule([]boundSeries{
-		{"pg-desk", "issue", "local", 1},
-		{"pg-desk-legacy", "issue", "local", 1},
-		{"pg-desk", "issue", "remote", 0},
-		{"pg-desk-legacy", "issue", "remote", 0},
-		{"pg-desk", "thread", "local", 0},
+		{"pg-desk", "thread", "local", 1},
+		{"pg-desk-legacy", "thread", "local", 1},
+		{"pg-desk", "thread", "remote", 0},
+		{"pg-desk-legacy", "thread", "remote", 0},
 		{"pg-desk", "pr", "local", 1},
 		{"pg-desk", "pr", "remote", 1},
 	})
 	got := firingKeys(res)
-	if len(got) != 1 || got[0] != [2]string{"issue", "local"} {
-		t.Errorf("firing = %v, want exactly [issue local]", got)
+	if len(got) != 1 || got[0] != [2]string{"thread", "local"} {
+		t.Errorf("firing = %v, want exactly [thread local]", got)
 	}
 }
 
@@ -112,13 +113,46 @@ func TestSweepBoundHoldingOrUnknownNeverFires(t *testing.T) {
 	// Holding: every series reads 0. Unknown poll interval: the metric has no
 	// series at all (NoData -> Normal under noDataState: OK).
 	for name, in := range map[string][]boundSeries{
-		"bound holds for every type and tier":    {{"pg-desk", "issue", "local", 0}, {"pg-desk", "thread", "remote", 0}},
+		"bound holds for every type and tier":    {{"pg-desk", "thread", "local", 0}, {"pg-desk", "thread", "remote", 0}},
 		"only a pr series violates (scoped out)": {{"pg-desk", "pr", "local", 1}},
 		"poll interval unknown (no series)":      nil,
 	} {
 		if got := firingKeys(evalSweepBoundRule(in)); len(got) != 0 {
 			t.Errorf("%s: fired %v", name, got)
 		}
+	}
+}
+
+// TestSweepBoundHasNoIssueSeries pins the meaning the alert has now: the issue
+// type has no age sweep, so changes.HasSweepBound is false for it and the metric
+// emits no issue series. Whatever the evaluation would say about an issue's
+// active count, the rule therefore has no issue instance to fire, while pr and
+// thread keep theirs.
+func TestSweepBoundHasNoIssueSeries(t *testing.T) {
+	if changes.HasSweepBound("issue") {
+		t.Fatal("HasSweepBound(issue) = true, want false: issue has no age sweep")
+	}
+	for _, typ := range []string{"pr", "thread"} {
+		if !changes.HasSweepBound(typ) {
+			t.Errorf("HasSweepBound(%s) = false, want true", typ)
+		}
+	}
+	// An overloaded issue active set: were the bound evaluated it would be violated.
+	over := changes.SweepInputs{ActiveCount: 1000, MaxPerPoll: 1, MaxAge: time.Minute}
+	var series []boundSeries
+	for _, typ := range []string{"issue", "thread"} {
+		if !changes.HasSweepBound(typ) {
+			continue // what RegisterChangeFlow does: no series for the type
+		}
+		v := 0.0
+		if changes.EvaluateSweepBound(over, time.Minute, true) == changes.BoundViolated {
+			v = 1
+		}
+		series = append(series, boundSeries{"pg-desk", typ, "local", v})
+	}
+	got := firingKeys(evalSweepBoundRule(series))
+	if len(got) != 1 || got[0] != [2]string{"thread", "local"} {
+		t.Errorf("firing = %v, want exactly [thread local] (no issue instance)", got)
 	}
 }
 
@@ -137,11 +171,11 @@ func TestSweepBoundRuleAgreesWithTheEvaluation(t *testing.T) {
 	remote := changes.SweepInputs{ActiveCount: 88, MaxPerPoll: 20, MaxAge: 6 * time.Hour}
 	local := changes.SweepInputs{ActiveCount: 88, MaxPerPoll: 20, MaxAge: 4 * time.Minute} // 4.4m > 4m
 	res := evalSweepBoundRule([]boundSeries{
-		{"pg-desk", "issue", "remote", value(remote)},
-		{"pg-desk", "issue", "local", value(local)},
+		{"pg-desk", "thread", "remote", value(remote)},
+		{"pg-desk", "thread", "local", value(local)},
 	})
 	got := firingKeys(res)
-	if len(got) != 1 || got[0] != [2]string{"issue", "local"} {
-		t.Errorf("firing = %v, want exactly [issue local]", got)
+	if len(got) != 1 || got[0] != [2]string{"thread", "local"} {
+		t.Errorf("firing = %v, want exactly [thread local]", got)
 	}
 }

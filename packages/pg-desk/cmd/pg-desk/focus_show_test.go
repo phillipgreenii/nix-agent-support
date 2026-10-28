@@ -812,17 +812,38 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			f.cfg.Watch.PR.Queries = []string{"never-ran"}
 		}, 0, ""},
 		{"backlog above the bound", func(t *testing.T, f *showFixture) {
-			// All entities were hydrated long before the sweep max age. The PR is
-			// shown in the table; the backlog is counted on the issues, because a PR
-			// has no due backlog (the next case).
-			f.hydrated = "2026-10-01T00:00:00Z"
+			// The issues are watched and were never hydrated: two pending
+			// hydrations against a bound of 1. The PR is shown in the table; it
+			// has no due backlog (a later case).
+			f.hydrated = ""
 			f.pr(t, 1, "a", showAt)
-			f.jira(t, "K-1", "a", "", showAt)
-			f.jira(t, "K-2", "b", "", showAt)
+			for _, id := range []string{"K-1", "K-2"} {
+				f.jira(t, id, id, "", showAt)
+				watched := true
+				if err := f.st.SetEntityColumns(showRepo, "issue", id, nil, &watched); err != nil {
+					t.Fatal(err)
+				}
+			}
 			setListing(t, f, "mine", "ok")
 			n := 1
 			f.cfg.Focus.CoverageBacklogMax = &n
 		}, 2, "backlog"},
+		{"old hydrated issues are no backlog", func(t *testing.T, f *showFixture) {
+			// With no age sweep for issue, an entity hydrated long ago is not
+			// owed a hydration: coverage reads complete however old it is.
+			f.hydrated = "2026-10-01T00:00:00Z"
+			f.pr(t, 1, "a", showAt)
+			for _, id := range []string{"K-1", "K-2"} {
+				f.jira(t, id, id, "", showAt)
+				watched := true
+				if err := f.st.SetEntityColumns(showRepo, "issue", id, nil, &watched); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setListing(t, f, "mine", "ok")
+			n := 1
+			f.cfg.Focus.CoverageBacklogMax = &n
+		}, 0, ""},
 		{"old PRs are no backlog", func(t *testing.T, f *showFixture) {
 			// PR lane refactor, packet P3b2: with the sweeps gone every quiet PR ages
 			// past the sweep max age; they MUST NOT make coverage incomplete.

@@ -38,23 +38,13 @@ func OwningSet(cfg *config.Config, entityType string) map[string]bool {
 	return out
 }
 
-// OwnedByBackend reports whether e is an issue entity whose backend column is
-// one of the owning instances: an entity no age-driven count includes. A NULL
-// backend ("") is never owned here.
-func OwnedByBackend(e store.Entity, entityType string, owning map[string]bool) bool {
-	return entityType == EntityTypeIssue && e.Backend != "" && owning[e.Backend]
-}
-
 // ActiveCount is the number of entities of entityType that are active
 // (Inactive is false). status, /metrics and doctor all use it so they report
 // the same number.
-//
-// An entity of the issue type whose backend column is an owning instance is
-// not counted (see OwnedByBackend): the age-driven sweep never reaches it.
-func ActiveCount(entities []store.Entity, entityType string, owning map[string]bool) int {
+func ActiveCount(entities []store.Entity, entityType string) int {
 	n := 0
 	for _, e := range entities {
-		if e.EntityType == entityType && !e.Inactive && !OwnedByBackend(e, entityType, owning) {
+		if e.EntityType == entityType && !e.Inactive {
 			n++
 		}
 	}
@@ -65,9 +55,17 @@ func ActiveCount(entities []store.Entity, entityType string, owning map[string]b
 // DueBacklog).
 const EntityTypePR = "pr"
 
-// DueBacklog is the number of ACTIVE entities of entityType the sweep would
-// re-hydrate at now: never hydrated (empty or unparseable HydratedAt) or
-// hydrated longer than maxAge ago.
+// DueBacklog is the number of hydrations of entityType still owed at now.
+//
+// For the issue type there is no age sweep, so a quiet issue is never
+// re-hydrated on a clock and counting it by age would read incomplete for ever.
+// The backlog is the PENDING hydrations only: the ACTIVE entities that are
+// watched and have never been hydrated (HydratedAt is empty), plus failedIngest,
+// the number of failed-ingest entries the caller read from the store
+// (len of Store.ListIngestFailures("")). An entity whose listed fingerprint
+// changed but which is not yet re-hydrated is NOT counted: the stored list_fp is
+// only compared against a listing the poll holds, which this count does not
+// have. maxAge is not used for issue.
 //
 // The pr type is always 0 (PR lane refactor, packet P3b2): the router sweeps
 // that re-listed every open pull request are gone, so a quiet PR is never
@@ -76,19 +74,35 @@ const EntityTypePR = "pr"
 // going to work off. A PR that was never hydrated is reported by its own
 // gauge (the unhydrated count), not by this one.
 //
-// An owning-backend issue entity is never counted: the old tiers skip it, so
-// its hydrated_at never advances and it would otherwise be due for ever.
-func DueBacklog(entities []store.Entity, entityType string, now time.Time, maxAge time.Duration, owning map[string]bool) int {
-	if entityType == EntityTypePR {
+// Every other type (thread) counts the active entities the sweep would
+// re-hydrate at now: never hydrated (empty or unparseable HydratedAt) or
+// hydrated longer than maxAge ago. failedIngest is added for issue only.
+func DueBacklog(entities []store.Entity, entityType string, now time.Time, maxAge time.Duration, failedIngest int) int {
+	switch entityType {
+	case EntityTypePR:
 		return 0
+	case EntityTypeIssue:
+		n := failedIngest
+		for _, e := range entities {
+			if e.EntityType == entityType && pendingHydration(e) {
+				n++
+			}
+		}
+		return n
 	}
 	n := 0
 	for _, e := range entities {
-		if e.EntityType == entityType && !e.Inactive && !OwnedByBackend(e, entityType, owning) && sweepDue(e, now, maxAge) {
+		if e.EntityType == entityType && !e.Inactive && sweepDue(e, now, maxAge) {
 			n++
 		}
 	}
 	return n
+}
+
+// pendingHydration reports whether e is an active, watched entity that has
+// never been hydrated.
+func pendingHydration(e store.Entity) bool {
+	return !e.Inactive && e.Watched != nil && *e.Watched && e.HydratedAt == ""
 }
 
 // SweepBoundHolds evaluates the sweep sizing bound of design 8.4:
@@ -117,8 +131,17 @@ const (
 )
 
 // SweepTiers lists the capped age tiers whose bound is checked: the local
-// reconcile tier and the remote re-hydration tier.
+// reconcile tier and the remote re-hydration tier. They apply to pr and thread
+// only: the issue type has no age sweep, so its bound is never evaluated (see
+// HasSweepBound).
 var SweepTiers = []string{TierLocal, TierRemote}
+
+// HasSweepBound reports whether the sizing bound is defined for entityType.
+// The issue type has no age sweep, so no bound and no sweep-bound series; pr and
+// thread keep theirs. Doctor and the /metrics gauge both ask this one question.
+func HasSweepBound(entityType string) bool {
+	return entityType != EntityTypeIssue
+}
 
 // EvaluateSweepBound is the ONE evaluation of the sizing bound for a tier,
 // shared by `doctor` and the /metrics sweep-bound gauge so the doctor line and
