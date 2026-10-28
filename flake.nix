@@ -3323,6 +3323,93 @@
                     touch $out
                   '';
 
+              # darwin/modules/claude-code and darwin/modules/pg2-agent install their
+              # per-user packages for system.primaryUser, not for a hardcoded login
+              # (deep review 2026-10-24, finding C F-11). The two modules are evaluated
+              # together against a stub of the nix-darwin / home-manager surface
+              # (home-manager.users, home-manager.sharedModules, system.primaryUser,
+              # assertions); the packages are only compared, never built. A consumer
+              # whose primary user is not the author's must get exactly one HM user,
+              # carrying the packages, and no stray `phillipg` user; with no primary
+              # user the modules install nothing and assert instead.
+              test-darwin-primary-user-modules =
+                let
+                  mkBashBuildersFor =
+                    p:
+                    inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                      pkgs = p;
+                      inherit self;
+                      inherit (p) lib;
+                    };
+                  # The check set's pkgs carries no llm-agents overlay, so the claude-code
+                  # package the module reads is a stand-in the assertions can compare.
+                  fakeClaude = pkgs.writeShellScriptBin "claude" "exit 0";
+                  testPkgs = pkgs // {
+                    llm-agentsPkgs.claude-code = fakeClaude;
+                  };
+                  hmUserType = lib.types.submodule {
+                    freeformType = lib.types.attrsOf lib.types.anything;
+                    options.home.packages = lib.mkOption {
+                      type = lib.types.listOf lib.types.package;
+                      default = [ ];
+                    };
+                  };
+                  evalDarwin =
+                    primaryUser:
+                    (lib.evalModules {
+                      specialArgs = {
+                        pkgs = testPkgs;
+                        inherit mkBashBuildersFor;
+                      };
+                      modules = [
+                        ./darwin/modules/claude-code/default.nix
+                        ./darwin/modules/pg2-agent/default.nix
+                        {
+                          options = {
+                            assertions = lib.mkOption {
+                              type = lib.types.listOf lib.types.raw;
+                              default = [ ];
+                            };
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf hmUserType;
+                              default = { };
+                            };
+                            home-manager.sharedModules = lib.mkOption {
+                              type = lib.types.listOf lib.types.raw;
+                              default = [ ];
+                            };
+                            system.primaryUser = lib.mkOption {
+                              type = lib.types.nullOr lib.types.str;
+                              default = null;
+                            };
+                          };
+                          config = {
+                            system.primaryUser = primaryUser;
+                            phillipgreenii.programs.claude-code.enable = true;
+                          };
+                        }
+                      ];
+                    }).config;
+
+                  alice = evalDarwin "alice";
+                  aliceUsers = alice.home-manager.users;
+                  alicePackages = aliceUsers.alice.home.packages;
+                  noUser = evalDarwin null;
+                in
+                assert lib.attrNames aliceUsers == [ "alice" ];
+                assert !(aliceUsers ? phillipg);
+                # claude-code (darwin/modules/claude-code) ...
+                assert lib.elem fakeClaude alicePackages;
+                # ... and the pg2-agent scripts (darwin/modules/pg2-agent) both land on alice
+                assert lib.length alicePackages > 1;
+                assert aliceUsers.alice.programs.tldr.customPages != { };
+                assert lib.all (a: a.assertion) alice.assertions;
+                # no primary user: nothing is installed for a made-up account, and both
+                # modules say why
+                assert noUser.home-manager.users == { };
+                assert lib.length (lib.filter (a: !a.assertion) noUser.assertions) == 2;
+                pkgs.runCommand "test-darwin-primary-user-modules-ok" { } "touch $out";
+
               # darwin/modules/pg-connector-pr-github (bead pg2-ph0o4): registers the
               # backend's own event log as a Loki log source, from its own nix
               # module rather than through pg-connector's config. Its three LogQL
