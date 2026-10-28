@@ -36,8 +36,11 @@ func Lookup(entityType string) (Classifier, bool) {
 // to the per-type classifier. Evaluation order:
 //
 //  1. no previous snapshot, or a previous snapshot of an inactive entity:
-//     exactly [reconcile] (before the identical rule, so --reset, a new
-//     watched query and the cutover wave are never swallowed);
+//     exactly [reconcile], or exactly [added] for an issue (a first
+//     observation, a return after deactivation, a late watch and a forced
+//     hydration are all "added" for an issue, which has no reconcile kind);
+//     evaluated before the identical rule, so --reset, a new watched query
+//     and the cutover wave are never swallowed;
 //  2. identical snapshots (byte-equal Payload and Decorations, and equal
 //     Updated unless new.OwningBackend): nothing;
 //  3. dispatch on new.Type (an unregistered type yields nothing). new.Exists
@@ -48,6 +51,9 @@ func Lookup(entityType string) (Classifier, bool) {
 // sorted by kind and free of duplicates.
 func Classify(old, new Snapshot) []Record {
 	if !old.Exists || !old.Active {
+		if new.Type == localTypeIssue {
+			return []Record{{Kind: KindAdded}}
+		}
 		return []Record{{Kind: KindReconcile}}
 	}
 	if identical(old, new) {

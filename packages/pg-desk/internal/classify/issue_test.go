@@ -85,17 +85,17 @@ func TestIssueClassifyIdenticalSnapshotsIsEmpty(t *testing.T) {
 	}
 }
 
-func TestIssueFirstObservationYieldsOnlyReconcile(t *testing.T) {
+func TestIssueFirstObservationYieldsAdded(t *testing.T) {
 	for _, n := range []string{"open", "closed", "dep_added", "no_show"} {
 		fresh := issueFixture(t, n)
 		none := Snapshot{Type: "issue", ID: "iss-1"} // Exists=false
-		if got := kindsOf(Classify(none, fresh)); !reflect.DeepEqual(got, []Kind{KindReconcile}) {
-			t.Fatalf("first observation of %s = %v, want [reconcile]", n, got)
+		if got := kindsOf(Classify(none, fresh)); !reflect.DeepEqual(got, []Kind{KindAdded}) {
+			t.Fatalf("first observation of %s = %v, want [added]", n, got)
 		}
 		inactive := issueFixture(t, "closed")
 		inactive.Active = false
-		if got := kindsOf(Classify(inactive, fresh)); !reflect.DeepEqual(got, []Kind{KindReconcile}) {
-			t.Fatalf("return after removal (%s) = %v, want [reconcile]", n, got)
+		if got := kindsOf(Classify(inactive, fresh)); !reflect.DeepEqual(got, []Kind{KindAdded}) {
+			t.Fatalf("return after removal (%s) = %v, want [added]", n, got)
 		}
 	}
 }

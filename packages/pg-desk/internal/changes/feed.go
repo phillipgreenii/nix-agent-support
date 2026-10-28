@@ -352,12 +352,13 @@ func feedReadReason(what string, err error) string {
 
 func isUnavailable(err error) bool { return errors.Is(err, gather.ErrUnavailable) }
 
-// resetReplay is phase B (--reset): it replays every active entity of the type
-// to the consumer, kind added or reconcile, origin reset. For issue an
-// OWNING entity is replayed only when it is watched, through IngestFeedRow as a
-// replay row {Seq 0, kinds [added]} (no marker write, origin reset, never
-// reconcile); an unwatched owning entity is skipped. Every other entity
-// replays exactly as before.
+// resetReplay is phase B (--reset): it replays the active entities of the type
+// to the consumer, origin reset. For issue only WATCHED active entities are
+// replayed (an unwatched one is skipped, whoever owns it), always as kind
+// added: an OWNING entity through IngestFeedRow as a replay row {Seq 0, kinds
+// [added]} (no marker write), any other through a hydration whose first
+// observation classifies as added. pr and thread replay every active entity as
+// before, as reconcile.
 func (e *Engine) resetReplay(ctx context.Context, entityType string, st *pollState) error {
 	all, err := e.Store.ListEntities()
 	if err != nil {
@@ -365,9 +366,14 @@ func (e *Engine) resetReplay(ctx context.Context, entityType string, st *pollSta
 	}
 	var targets []store.Entity
 	for _, ent := range all {
-		if ent.EntityType == entityType && !ent.Inactive {
-			targets = append(targets, ent)
+		if ent.EntityType != entityType || ent.Inactive {
+			continue
 		}
+		// An issue is replayed only while watched: nothing else is observed.
+		if entityType == "issue" && (ent.Watched == nil || !*ent.Watched) {
+			continue
+		}
+		targets = append(targets, ent)
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].EntityID < targets[j].EntityID })
 

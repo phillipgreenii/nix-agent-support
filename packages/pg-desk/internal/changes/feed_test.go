@@ -686,10 +686,10 @@ func TestFeedOwningQueryWithoutFeederIsAnError(t *testing.T) {
 	}
 }
 
-// --reset replays only WATCHED owning issues, as kind added with origin reset,
-// through the ingester (a replay row, no marker); an unwatched owning issue
-// appends nothing; a beads issue replays through the hydrator as before.
-func TestFeedResetReplaysOnlyWatchedOwningIssues(t *testing.T) {
+// --reset replays only WATCHED issues, as kind added with origin reset: an
+// owning one through the ingester (a replay row, no marker), a beads one
+// through the hydrator; an unwatched issue of either kind appends nothing.
+func TestFeedResetReplaysOnlyWatchedIssues(t *testing.T) {
 	f := newFeedFixture(t, []string{"jira-q"}, []string{"beads-q"}, feedAnswer(feedIdentity, 1))
 	seed := func(id, backend string, watched bool) {
 		t.Helper()
@@ -703,7 +703,8 @@ func TestFeedResetReplaysOnlyWatchedOwningIssues(t *testing.T) {
 	}
 	seed("J-watched", feedInst, true)
 	seed("J-unwatched", feedInst, false)
-	seed("bd-1", "beads", false)
+	seed("bd-1", "beads", true)
+	seed("bd-2", "beads", false)
 
 	if _, _, err := f.run("router", func(o *Options) { o.Reset = true }); err != nil {
 		t.Fatal(err)
@@ -722,6 +723,9 @@ func TestFeedResetReplaysOnlyWatchedOwningIssues(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.hyd.calls, []string{"bd-1"}) {
 		t.Errorf("hydrated = %v, want only the beads issue", f.hyd.calls)
+	}
+	if h := historyOf(t, f.st, "bd-2"); len(h) != 1 { // the seed row only
+		t.Errorf("unwatched beads issue history = %+v", h)
 	}
 	if h := historyOf(t, f.st, "J-unwatched"); len(h) != 1 { // the seed row only
 		t.Errorf("unwatched owning issue history = %+v", h)

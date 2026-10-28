@@ -220,8 +220,8 @@ func TestChangesListAndDiffHydratesLogsAndAdvances(t *testing.T) {
 	if len(env.Sources) != 1 || env.Sources[0] != (changes.Source{Query: "open", Status: changes.StatusOK}) {
 		t.Errorf("sources = %+v", env.Sources)
 	}
-	if got := envKindsByID(env); len(got) != 2 || got["bd-1"][0] != "reconcile" || got["bd-2"][0] != "reconcile" {
-		t.Errorf("first observation must yield only reconcile for the two reported entities, got %v", got)
+	if got := envKindsByID(env); len(got) != 2 || got["bd-1"][0] != "added" || got["bd-2"][0] != "added" {
+		t.Errorf("first observation must yield only added for the two reported entities, got %v", got)
 	}
 	for _, r := range env.Records {
 		if r.Origin != "pg-connector" || r.Title != "title of "+r.ID {
@@ -386,6 +386,7 @@ func TestChangesResetReplaysActiveEntities(t *testing.T) {
 	if _, err := f.seed.WriteEntityStateWithLog(ent, ent.Version, "2026-09-30T01:00:00Z", false, []string{"removed"}, "sweep", "2026-09-30T01:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
+	f.watch("bd-1", "bd-2", "bd-3") // --reset replays only watched issues
 	f.listing("open", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
 	if _, err := f.envOf("--consumer", "router"); err != nil { // consume the removed record
 		t.Fatal(err)
@@ -396,8 +397,8 @@ func TestChangesResetReplaysActiveEntities(t *testing.T) {
 		t.Fatalf("reset: %v", err)
 	}
 	got := envKindsByID(env)
-	if len(got) != 2 || len(got["bd-1"]) != 1 || got["bd-1"][0] != "reconcile" || len(got["bd-2"]) != 1 || got["bd-2"][0] != "reconcile" {
-		t.Fatalf("reset must replay the two active entities as reconcile only, got %v", got)
+	if len(got) != 2 || len(got["bd-1"]) != 1 || got["bd-1"][0] != "added" || len(got["bd-2"]) != 1 || got["bd-2"][0] != "added" {
+		t.Fatalf("reset must replay the two active entities as added only, got %v", got)
 	}
 	if _, ok := got["bd-3"]; ok {
 		t.Error("an inactive entity was replayed")
@@ -696,7 +697,7 @@ func TestChangesTextRendering(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 4 ||
-		!strings.HasPrefix(lines[0], "issue bd-1  ") || !strings.HasSuffix(lines[0], "  reconcile  origin=pg-connector") ||
+		!strings.HasPrefix(lines[0], "issue bd-1  ") || !strings.HasSuffix(lines[0], "  added  origin=pg-connector") ||
 		lines[1] != "source open: ok" || lines[2] != "source mine: degraded (rate_limited)" ||
 		!strings.HasPrefix(lines[3], "cursor 0 -> ") {
 		t.Errorf("text output:\n%s", out)
@@ -773,6 +774,18 @@ func (f *changesFixture) seedHydrated(id, hydratedAt string) {
 	f.showIssue(id, "2026-09-30T00:00:00Z")
 }
 
+// watch marks the issues watched (the column-only write), as a baseline run or
+// a one-off refresh --watch would.
+func (f *changesFixture) watch(ids ...string) {
+	f.t.Helper()
+	yes := true
+	for _, id := range ids {
+		if err := f.seed.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
 func (f *changesFixture) entity(id string) store.Entity {
 	f.t.Helper()
 	e, found, err := f.seed.GetEntity("o/r", f.typ, id)
@@ -842,7 +855,7 @@ func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
 	}
 }
 
-func TestChangesReturningEntityGetsReconcile(t *testing.T) {
+func TestChangesReturningEntityGetsAdded(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a")
 	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
@@ -862,8 +875,8 @@ func TestChangesReturningEntityGetsReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := envKindsByID(env); len(got["bd-1"]) != 1 || got["bd-1"][0] != "reconcile" || len(env.Records) != 1 {
-		t.Errorf("a returning entity must get exactly one reconcile, got %v", got)
+	if got := envKindsByID(env); len(got["bd-1"]) != 1 || got["bd-1"][0] != "added" || len(env.Records) != 1 {
+		t.Errorf("a returning entity must get exactly one added, got %v", got)
 	}
 	if f.entity("bd-1").Inactive {
 		t.Error("a returning entity must be active again")
@@ -932,7 +945,7 @@ func TestChangesSourceTerminalEntityBecomesInactive(t *testing.T) {
 	}
 }
 
-func TestSweepUnchangedEntityGetsExactlyOneReconcile(t *testing.T) {
+func TestSweepUnchangedEntityGetsExactlyOneAdded(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a")
 	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
@@ -951,8 +964,8 @@ func TestSweepUnchangedEntityGetsExactlyOneReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(env.Records) != 1 || env.Records[0].ID != "bd-1" || len(env.Records[0].Kinds) != 1 ||
-		env.Records[0].Kinds[0] != "reconcile" || env.Records[0].Origin != "sweep" {
-		t.Errorf("records = %+v, want one reconcile with origin sweep", env.Records)
+		env.Records[0].Kinds[0] != "added" || env.Records[0].Origin != "sweep" {
+		t.Errorf("records = %+v, want one added with origin sweep", env.Records)
 	}
 	// Now freshly hydrated, so an immediate repeat sweeps nothing.
 	if env, err = f.envOf("--consumer", "router"); err != nil || len(env.Records) != 0 {
@@ -979,8 +992,9 @@ func TestSweepSelectsOldestFirstCapN(t *testing.T) {
 		t.Errorf("swept %v, want the two oldest first: bd-4, bd-3", got)
 	}
 	for _, r := range env.Records {
-		if r.Origin == "sweep" && (len(r.Kinds) != 1 || r.Kinds[0] != "reconcile") {
-			t.Errorf("a sweep must log reconcile only, got %+v", r)
+		// Version 1 rows are the seeds (reconcile); a swept row is version 2.
+		if r.Origin == "sweep" && r.Version > 1 && (len(r.Kinds) != 1 || r.Kinds[0] != "added") {
+			t.Errorf("a sweep must log added only, got %+v", r)
 		}
 	}
 }
@@ -1080,6 +1094,7 @@ func TestHydrationBudgetDoesNotCapAResetReplay(t *testing.T) {
 	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
 		f.seedHydrated(id, "2026-10-01T11:00:00Z")
 	}
+	f.watch("bd-1", "bd-2", "bd-3")
 	f.listing("a", 0, okSource)
 	env, err := f.envOf("--consumer", "router", "--reset")
 	if err != nil {

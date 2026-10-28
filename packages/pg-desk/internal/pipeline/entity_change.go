@@ -52,7 +52,9 @@ type EntityChangeOptions struct {
 	// MaxRetries bounds the lost-race retries; <= 0 means a small default.
 	MaxRetries int
 	// ForceReconcile makes the old snapshot count as unobserved even when a
-	// row exists (--reset, a new watched query: first observation).
+	// row exists (--reset, a new watched query: first observation). The
+	// classifier then yields reconcile, or added for an issue, and neither
+	// propagates to linked entities.
 	ForceReconcile bool
 	// ListFP, when non-nil, is the list fingerprint observed in THIS tick's
 	// listing of the entity; it is written to list_fp in the same transaction
@@ -300,7 +302,14 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		propagate = false
 		for _, r := range classify.Classify(old, newSnap) {
 			kindSet[string(r.Kind)] = true
-			if r.Kind != classify.KindReconcile {
+			// Rule 1 yields reconcile (pr, thread) or, for an issue, added: a
+			// first observation, a late watch, a return after deactivation or a
+			// forced hydration. None of them propagates, because the targets are
+			// not covered by the issue gate. An issue classifier never returns
+			// added for a real change, so added is only ever rule 1 here.
+			firstObservation := r.Kind == classify.KindReconcile ||
+				(entityType == issueEntityType && r.Kind == classify.KindAdded)
+			if !firstObservation {
 				propagate = true
 			}
 		}
@@ -325,6 +334,11 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		sort.Strings(kinds)
 		if opts.Watch && !alreadyWatched {
 			kinds = []string{string(classify.KindAdded)}
+			// A late watch replaces the entity's own kinds with the one added row
+			// and, like any other first observation of a watched issue, must not
+			// re-emit the linked pr and thread entities (the issue gate does not
+			// cover them).
+			propagate, otherLinks = false, nil
 		}
 		if opts.SnapshotOnly {
 			kinds, propagate, otherLinks = nil, false, nil

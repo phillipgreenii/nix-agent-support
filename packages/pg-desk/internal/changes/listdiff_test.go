@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
@@ -46,6 +47,10 @@ type storeHydrator struct {
 	listFPs map[string]*string
 	changes map[string]gather.ChangeKind
 	origins map[string]string
+	// classified makes the written kinds the classifier's answer for a first
+	// observation (what the pipeline derives when the hydration is forced to
+	// unobserved) instead of the fixed reconcile.
+	classified bool
 }
 
 func newStoreHydrator(st *store.Store) *storeHydrator {
@@ -68,8 +73,17 @@ func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string
 	if found {
 		expected = row.Version
 	}
+	kinds := []string{"reconcile"}
+	if h.classified {
+		old := classify.Snapshot{Type: entityType, ID: id, Exists: found && !opts.ForceReconcile, Active: found && !row.Inactive}
+		newSnap := classify.Snapshot{Type: entityType, ID: id, Exists: true, Active: true, Payload: []byte(`{}`)}
+		kinds = nil
+		for _, r := range classify.Classify(old, newSnap) {
+			kinds = append(kinds, string(r.Kind))
+		}
+	}
 	v, err := h.st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: `{}`, AsOf: "x"},
-		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, []string{"reconcile"}, opts.Origin, "2026-10-01T12:00:00Z")
+		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z")
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v}, err
 }
 
@@ -312,6 +326,10 @@ func TestStaleListedEntityIsNotHydrated(t *testing.T) {
 func TestResetAndSweepHydrateWithNilListFP(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
 	seedRow(t, st, "bd-1", "F1", "2026-09-01T00:00:00Z", true) // due for the sweep
+	watched := true                                            // --reset replays only watched issues
+	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &watched); err != nil {
+		t.Fatal(err)
+	}
 	e.Lister = fakeLister{res: listing("bd-1=F1")}
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
@@ -327,6 +345,48 @@ func TestResetAndSweepHydrateWithNilListFP(t *testing.T) {
 	}
 	if h.origins["bd-1"] != OriginReset || h.listFPs["bd-1"] != nil {
 		t.Errorf("reset hydration origin=%q listFP=%v", h.origins["bd-1"], h.listFPs["bd-1"])
+	}
+}
+
+// --reset of issue hydrates only the WATCHED active issues and logs each as
+// added at origin reset; an unwatched active issue is never touched, and an
+// inactive watched one is skipped.
+func TestResetReplaysOnlyWatchedActiveIssuesAsAdded(t *testing.T) {
+	e, st, h := newListEngine(t, "open")
+	h.classified = true
+	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
+	seedRow(t, st, "bd-2", "F1", "2026-10-01T11:00:00Z", true)
+	seedRow(t, st, "bd-3", "F1", "2026-10-01T11:00:00Z", true)
+	seedRow(t, st, "bd-4", "F1", "2026-10-01T11:00:00Z", false)
+	yes := true
+	for _, id := range []string{"bd-1", "bd-2", "bd-4"} {
+		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F1", "bd-3=F1")}
+
+	if _, _, err := runTick(t, e, Options{EntityType: "issue", Consumer: "router", Reset: true}); err != nil {
+		t.Fatal(err)
+	}
+	calls := append([]string(nil), h.calls...)
+	sort.Strings(calls)
+	if !reflect.DeepEqual(calls, []string{"bd-1", "bd-2"}) {
+		t.Fatalf("hydrated = %v, want exactly the two watched active issues", calls)
+	}
+	for _, id := range []string{"bd-1", "bd-2"} {
+		log := historyOf(t, st, id)
+		if len(log) != 2 || log[0].Origin != OriginReset || !reflect.DeepEqual(log[0].Kinds, []string{"added"}) {
+			t.Errorf("%s history = %+v, want a newest row added at origin reset", id, log)
+		}
+	}
+	for _, id := range []string{"bd-3", "bd-4"} {
+		// The age tiers are retired by a later packet, so only the reset origin is checked.
+		for _, r := range historyOf(t, st, id) {
+			if r.Origin == OriginReset {
+				t.Errorf("%s was replayed by --reset: %+v", id, r)
+			}
+		}
 	}
 }
 

@@ -86,13 +86,13 @@ func mustRun(t *testing.T, p *Pipeline, typ, id string, change gather.ChangeKind
 	return r
 }
 
-func TestRunEntityChange_FirstObservationIsReconcileOnly(t *testing.T) {
+func TestRunEntityChange_FirstObservationIsAddedOnly(t *testing.T) {
 	var gerr error
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
 
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{Origin: "sweep"})
-	if !r.Written || r.Version != 1 || r.Retries != 0 || !reflect.DeepEqual(r.Kinds, []string{"reconcile"}) {
+	if !r.Written || r.Version != 1 || r.Retries != 0 || !reflect.DeepEqual(r.Kinds, []string{"added"}) {
 		t.Fatalf("result = %+v", r)
 	}
 	e, found, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
@@ -100,7 +100,7 @@ func TestRunEntityChange_FirstObservationIsReconcileOnly(t *testing.T) {
 		t.Fatalf("entity = %+v found=%v", e, found)
 	}
 	rows := p.changeRows(t, "issue", "i-1")
-	if len(rows) != 1 || rows[0].Origin != "sweep" || !reflect.DeepEqual(rows[0].Kinds, []string{"reconcile"}) || rows[0].Version != 1 {
+	if len(rows) != 1 || rows[0].Origin != "sweep" || !reflect.DeepEqual(rows[0].Kinds, []string{"added"}) || rows[0].Version != 1 {
 		t.Fatalf("rows = %+v", rows)
 	}
 	// The interpretation and the derived links are written too (links LAST).
@@ -282,11 +282,11 @@ func TestRunEntityChange_ForceReconcileSuppressesLocalSources(t *testing.T) {
 	seedPR(t, p, ecRepo+"#7")
 	seedPR(t, p, ecRepo+"#8")
 
-	// A real status change AND a link change, but forced to reconcile.
+	// A real status change AND a link change, but forced to a first observation (added for an issue).
 	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", workMeta("8"))
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{ForceReconcile: true, Origin: "reset"})
-	if !reflect.DeepEqual(r.Kinds, []string{"reconcile"}) {
-		t.Fatalf("kinds = %v, want exactly [reconcile]", r.Kinds)
+	if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
+		t.Fatalf("kinds = %v, want exactly [added]", r.Kinds)
 	}
 	for _, id := range []string{ecRepo + "#7", ecRepo + "#8"} {
 		if rows := p.changeRows(t, "pr", id); len(rows) != 1 { // the seed row only
@@ -300,7 +300,7 @@ func TestRunEntityChange_ForceReconcileSuppressesLocalSources(t *testing.T) {
 	}
 }
 
-func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreReconcile(t *testing.T) {
+func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreAdded(t *testing.T) {
 	var gerr error
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
@@ -310,7 +310,7 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreReconcile(t *testing.
 		t.Fatal(err)
 	}
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
-	if !reflect.DeepEqual(r.Kinds, []string{"reconcile"}) || r.Version != 1 {
+	if !reflect.DeepEqual(r.Kinds, []string{"added"}) || r.Version != 1 {
 		t.Fatalf("cutover row: %+v", r)
 	}
 
@@ -321,7 +321,7 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreReconcile(t *testing.
 	}
 	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", workMeta("7"))
 	r = mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
-	if !reflect.DeepEqual(r.Kinds, []string{"reconcile"}) {
+	if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
 		t.Fatalf("return from inactive: %+v", r)
 	}
 	e, _, _ = p.store.GetEntity(ecRepo, "issue", "i-1")
@@ -694,5 +694,102 @@ func TestRunEntityChange_SkipUnchangedWrite_AbsentEntityIsWritten(t *testing.T) 
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{SkipUnchangedWrite: true})
 	if r.Unchanged || !r.Written || r.Version != 1 {
 		t.Fatalf("result = %+v, want a first write", r)
+	}
+}
+
+// seedThread seeds a thread entity row, the target of a link from the issue.
+func seedThread(t *testing.T, p *Pipeline, id string) {
+	t.Helper()
+	if _, err := p.store.WriteEntityWithLog(store.Entity{Repo: ecRepo, EntityType: "thread", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}, 0, []string{"reconcile"}, "sync", "t"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// backendFuncGatherer is a funcEntityGatherer that also answers a backend-pinned
+// and a watch read (the late watch of an issue needs both) with the same result.
+type backendFuncGatherer struct{ funcEntityGatherer }
+
+func (g backendFuncGatherer) GatherEntityOn(_ context.Context, _, _ string, change gather.ChangeKind) (gather.GatherResult, error) {
+	return g.funcEntityGatherer(change)
+}
+
+func (g backendFuncGatherer) GatherEntityWatch(_ context.Context, _, _ string) (gather.GatherResult, error) {
+	return g.funcEntityGatherer(gather.ChangeChanged)
+}
+
+// An issue's first observation, late watch and --reset replay yield added and
+// append only the issue's own row: they never propagate link_changed or
+// work_changed to the linked pr or thread, while a real change still does.
+func TestRunEntityChange_AddedForIssueNeverPropagates(t *testing.T) {
+	var gerr error
+	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
+	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
+		"issue": backendFuncGatherer{funcEntityGatherer(func(gather.ChangeKind) (gather.GatherResult, error) { return res, gerr })},
+	})
+	prID, threadID := ecRepo+"#7", "t-1"
+	seedPR(t, p, prID)
+	seedThread(t, p, threadID)
+	if err := p.store.UpsertXref(store.Xref{
+		Repo: ecRepo, FromType: "issue", FromID: "i-1", ToType: "thread", ToID: threadID,
+		FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	linkedRows := func() (int, int) {
+		return len(p.changeRows(t, "pr", prID)), len(p.changeRows(t, "thread", threadID))
+	}
+	if pr, th := linkedRows(); pr != 1 || th != 1 { // the seed rows only
+		t.Fatalf("seed rows: pr=%d thread=%d", pr, th)
+	}
+	assertOwnAdded := func(step string, r EntityChangeResult) {
+		t.Helper()
+		if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
+			t.Fatalf("%s: kinds = %v, want exactly [added]", step, r.Kinds)
+		}
+		if pr, th := linkedRows(); pr != 1 || th != 1 {
+			t.Fatalf("%s propagated: pr rows=%d thread rows=%d, want 1 and 1", step, pr, th)
+		}
+	}
+
+	// First observation.
+	assertOwnAdded("first observation", mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{}))
+	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 1 {
+		t.Fatalf("issue rows after first observation = %+v", rows)
+	}
+
+	// A real change while observed still propagates: the PR gets work_changed
+	// and the thread link_changed.
+	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", workMeta("7"))
+	mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
+	if pr, th := linkedRows(); pr != 2 || th != 2 {
+		t.Fatalf("real change did not propagate: pr rows=%d thread rows=%d, want 2 and 2", pr, th)
+	}
+
+	// Late watch of the known, unwatched issue: exactly one added row.
+	before := len(p.changeRows(t, "issue", "i-1"))
+	res = ecIssue(t, "in_progress", "me", "2026-09-16T02:00:00Z", workMeta("7"))
+	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{Watch: true, Backend: "b1"})
+	if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
+		t.Fatalf("late watch: kinds = %v, want exactly [added]", r.Kinds)
+	}
+	if pr, th := linkedRows(); pr != 2 || th != 2 {
+		t.Fatalf("late watch propagated: pr rows=%d thread rows=%d, want 2 and 2", pr, th)
+	}
+	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != before+1 {
+		t.Fatalf("late watch issue rows = %d, want %d", len(rows), before+1)
+	}
+
+	// The --reset replay (ForceReconcile, origin reset) of a changed issue.
+	res = ecIssue(t, "closed", "me", "2026-09-16T03:00:00Z", workMeta("7"))
+	r = mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{ForceReconcile: true, Origin: "reset"})
+	if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
+		t.Fatalf("reset replay: kinds = %v, want exactly [added]", r.Kinds)
+	}
+	if pr, th := linkedRows(); pr != 2 || th != 2 {
+		t.Fatalf("reset replay propagated: pr rows=%d thread rows=%d, want 2 and 2", pr, th)
+	}
+	rows := p.changeRows(t, "issue", "i-1")
+	if last := rows[len(rows)-1]; last.Origin != "reset" || !reflect.DeepEqual(last.Kinds, []string{"added"}) {
+		t.Fatalf("last issue row = %+v, want added at origin reset", last)
 	}
 }
