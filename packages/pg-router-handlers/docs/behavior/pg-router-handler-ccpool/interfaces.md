@@ -28,7 +28,7 @@ a session-backed role, because a session outlives the daemon that started it (`I
   object, plus a build-time check of it. **Counterparty:** `ACTOR-CCA-OP`, through the deployment's
   build. **Initiator:** the operator. The table carries the fields a role of this adapter needs
   (the actor, the prompt or its file, the completion policy, the
-  failure actions, the budget, the isolation, the tool grants, the effort level, the pre-launch check
+  failure actions, the budget, the isolation, the tool grants, the effort level, the model, the pre-launch check
   and the other per-role settings the shared set's rules name); this set neither lists nor respells
   them. The adapter rejects a field it does not know on every call, and ships a `validate`
   subcommand that applies the same decoding to a rendered table without running anything

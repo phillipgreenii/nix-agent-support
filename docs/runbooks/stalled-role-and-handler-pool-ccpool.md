@@ -86,12 +86,12 @@ echo "$LOG"
 
 Every record has `time`, `level`, `kind` and `msg`. The kinds that matter here:
 
-| `kind`             | Written                                                     | What it tells you                                                                                                                                                    |
-| ------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_start`   | when the payload STARTS, for command and ccpool roles alike | ccpool role: `route` (`launched` or `adopted`), `session` and `session_env`. Command role: the rendered `argv`, `strict_base_env` and `base_env_names` (names only). |
-| `dispatch_decline` | per pre-accept decline                                      | `role`, `item_id`, `reason`, `decline_kind` (`busy`, `fault` or `neutral`), `session_env`, the redacted `evidence` tail and `failure_signature`.                     |
-| `dispatch_result`  | when an accepted dispatch FAILED                            | `failure_signature` and `signature_evidence`; see `docs/runbooks/dispatched-session-failure-signatures.md`.                                                          |
-| `dispatch_end`     | when an accepted dispatch ended without failing             | `outcome`: `completed`, `unclaimed-end`, `peer-held`, `needs-input-stalled` or `interrupted`.                                                                        |
+| `kind`             | Written                                                     | What it tells you                                                                                                                                                                                                                      |
+| ------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_start`   | when the payload STARTS, for command and ccpool roles alike | ccpool role: `route` (`launched` or `adopted`), `session`, `session_env`, and for a `launched` route the `model` and `effort` it started with. Command role: the rendered `argv`, `strict_base_env` and `base_env_names` (names only). |
+| `dispatch_decline` | per pre-accept decline                                      | `role`, `item_id`, `reason`, `decline_kind` (`busy`, `fault` or `neutral`), `session_env`, the redacted `evidence` tail and `failure_signature`.                                                                                       |
+| `dispatch_result`  | when an accepted dispatch FAILED                            | `failure_signature` and `signature_evidence`; see `docs/runbooks/dispatched-session-failure-signatures.md`.                                                                                                                            |
+| `dispatch_end`     | when an accepted dispatch ended without failing             | `outcome`: `completed`, `unclaimed-end`, `peer-held`, `needs-input-stalled` or `interrupted`.                                                                                                                                          |
 
 A command role's `dispatch_start` is written before its payload runs, so a payload that hangs or is
 killed still has one. A command role that exits `9` leaves a `dispatch_start` and then a
@@ -125,6 +125,28 @@ declines (`at-capacity`, `session-in-flight`, `command-busy`) feed the quieter
   session is still working that event: `ccpool capacity` and `ccpool list` against the pool.
 - Failure outcomes (`dispatch_result`) with `usage-limit`, `api-rate-limit` or similar signatures are a
   Claude limit, not a wrap fault.
+
+## Which model and effort does each role run at
+
+A ccpool role launches claude with its own `ccpool.model` and `ccpool.effort` when it sets them, and
+otherwise with the handler-wide launch-config model and effort (`INV-CCH-40`, `INV-CCH-31`). The
+core's own config shows the configured values per role. A bare `pg-router config --show` reads the
+current directory's config and shows zero roles, so point it at the running daemon's config:
+
+```bash
+PG_ROUTER_CONFIG=$(pg-router status --json | jq -r .core.configPath) pg-router config --show --json \
+  | jq -c '.roles[]|select(.role.config.ccpool)|{name,effort:.role.config.ccpool.effort,model:.role.config.ccpool.model}'
+```
+
+A `null` there means the role sets none and takes the handler-wide value. To see what a session
+actually launched with, read its `dispatch_start` record (`route` `launched`): `model` and `effort`
+are the values after the role's overrides, and `model` is `""` when none was set. A change reaches
+sessions only after the pg-router daemon restarts on the new config.
+
+```bash
+jq -c 'select(.kind=="dispatch_start" and .route=="launched" and .role=="<role>")
+       | {time, role, model, effort}' "$LOG" | tail -n 5
+```
 
 ## Step 4 — follow `sessionEnv.PG_WRAP_SPEC` to `pg-wrap show`
 

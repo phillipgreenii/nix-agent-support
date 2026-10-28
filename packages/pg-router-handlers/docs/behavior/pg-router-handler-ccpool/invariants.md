@@ -102,7 +102,8 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   tail and the failure signature (`INV-CCH-35`). The `dispatch_start` fields are `role`, `item_id`,
   `item_type`, `route`, `session` and `session_env`, where `route` is `launched` (this dispatch ran
   `ccpool new` and it returned ready) or `adopted` (it took over a live session of the same event's
-  turn); the `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
+  turn), plus `model` and `effort` (the values the session was launched with, `INV-CCH-40`) when the
+  route is `launched`; the `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
   `session_env`, `evidence` and `failure_signature` (`INV-CCH-35` lists them in full). Every
   accepted dispatch **MUST** then write exactly one outcome record after its `dispatch_start`,
   success included: the `dispatch_result` failure record (`INV-CCH-9`) when the dispatch failed, and

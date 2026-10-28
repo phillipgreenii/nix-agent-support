@@ -63,7 +63,8 @@ and to the deployment. Each is fully defined by the invariant cited; none is dec
 - **The `dispatch_start`, outcome and `dispatch_decline` event-log records** — what an accepted
   dispatch ran, written when its payload starts (`role`, `item_id`, `item_type`, then `argv`,
   `strict_base_env` and `base_env_names` for a command-backed role, or `route` (`launched` or
-  `adopted`), `session` and `session_env` for a ccpool-backed one); how it ended, as exactly one
+  `adopted`), `session` and `session_env` for a ccpool-backed one, plus `model` and `effort` when
+  the route is `launched`); how it ended, as exactly one
   outcome record after it, which is `dispatch_result` for a failure (`role`, `pool`, `bead`,
   `session`, `failure_signature`, `signature_evidence`; `INV-CCH-9`) and `dispatch_end` for every
   other end, success included (`role`, `item_id`, `item_type`, `outcome`, and `session` for a

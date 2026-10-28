@@ -960,14 +960,14 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   behind every false budget stop so far, here on a bead that is already done.
 
 - **`INV-CCH-31`** <!-- uuid: 3b342787-b7d7-48f3-81f6-1a80c3130958 --> — a role MAY override the claude `--effort` level its own
-  launched sessions run at, and a role that does not set the override MUST behave exactly as
-  before: the handler-wide launch-config effort (`max` by default) applies. The override MUST be
+  launched sessions run at, and a role that does not set the override gets the handler-wide
+  launch-config effort (`medium` by default). The override MUST be
   empty (no override) or one of the levels `claude --help` lists for `--effort` (`low`,
   `medium`, `high`, `xhigh`, `max`); a role config that says otherwise MUST be rejected at
   load, before any session is launched. The override replaces only the effort of that role's own
   dispatches; it MUST NOT change the model or any other role's effort, and the handler-wide value
   stays the default for every other role. A change takes effect for sessions launched after the
-  handler has restarted: a running session keeps the effort it started with. **Why.** Effort was a
+  pg-router daemon restarts on the new config: a running session keeps the effort it started with. **Why.** Effort was a
   single handler-wide value, so every role launched at `max`, and a role that needs less (the
   drain roles, measured 2026-10-14 at about 23 percent of drain spend in output tokens) could be
   lowered only by lowering every role. **Not decided here.** Whether a subagent a session starts
@@ -1083,8 +1083,9 @@ changes a core gate or `INV-LIFE-2`.
     event-log record carrying the role, the item's id and type, and, for a command-backed role, the
     argv as rendered, whether `strictBaseEnv` is on, and the **names** of the base-environment
     variables the payload received (never their values, and never the item-context values); for a
-    ccpool-backed role, the route the session was launched by and the `sessionEnv` entries, values
-    included, since they are non-secret by `INV-CCH-33`. The agent's own environment is the prefix tool's: an operator follows the `sessionEnv` entry that names its spec to that tool's
+    ccpool-backed role, the route the session was launched by, the model and effort a launched
+    session started with (`INV-CCH-40`) and the `sessionEnv` entries, values included, since they
+    are non-secret by `INV-CCH-33`. The agent's own environment is the prefix tool's: an operator follows the `sessionEnv` entry that names its spec to that tool's
     own `show` command. For a command-backed role the record MUST be written BEFORE the payload
     starts, so a payload that hangs or is killed still has it; because that role's busy exit `9` is
     only known after the command ran, an exit `9` leaves a `dispatch_start` followed by a
@@ -1119,7 +1120,11 @@ changes a core gate or `INV-LIFE-2`.
     `session_env` (the role's entries, values included). `route` is `launched` when this dispatch
     launched a fresh session through `ccpool new` and it returned ready, and `adopted` when it took
     over a live session of the same event's turn (`INV-CCH-30`): ccpool does not report its own
-    internal route to its caller, so the record names the route the handler took. A command-backed
+    internal route to its caller, so the record names the route the handler took. When the route is
+    `launched`, the record also carries `model` and `effort`, the claude `--model` and `--effort`
+    values the dispatch launched with after the role's overrides (`INV-CCH-31`, `INV-CCH-40`);
+    `model` is `""` when none was set, and an `adopted` record carries neither (the adopted session
+    keeps the values it started with). A command-backed
     `dispatch_start` is written before the payload starts, so one exists for a payload that exits
     `9` (then followed by the cmd layer's `dispatch_decline`), cannot start, hangs or is killed. A
     ccpool-backed one is written once `ccpool new` returned ready or the adoption took over, before
@@ -1238,3 +1243,19 @@ changes a core gate or `INV-LIFE-2`.
     watched repository is no longer declined while that repository's origin is down, and a `path`
     role whose path IS a watched repository root is still declined. The gate is neither dropped nor
     widened for any other role.
+
+- **`INV-CCH-40`** <!-- uuid: d0f95279-8084-4d39-ad72-4802a72e4285 --> — a role MAY override the
+  claude `--model` its own launched sessions run with, and a role that does not set the override
+  uses the handler-wide launch-config model (`claude-sonnet-5-5` by default). Both the override and
+  the handler-wide model MUST be empty or a model name or alias with no whitespace and no leading
+  `-`; a role config or a launch config that says otherwise MUST be rejected at load, before any
+  session is launched. The override replaces only the model of that role's own dispatches: it MUST NOT
+  change the effort or any other role's model, and the effort override of `INV-CCH-31` applies
+  alone, with or without a model override. A change takes effect for sessions launched after the
+  pg-router daemon restarts on the new config: a running session keeps the model it started with. A
+  dispatch that launches a session records the model and the effort it launched with on its
+  `dispatch_start` record (`INV-CCH-35`); a dispatch that adopts a live session carries neither.
+  **Why.** Model was a handler-wide value only, so every role ran on the `~/.claude/settings.json`
+  fallback model, whatever that happened to be, and a role that needs a different model could not say
+  so. **Not decided here.** The model of a subagent a session starts: that is the session's own
+  agent configuration, not this module's.
