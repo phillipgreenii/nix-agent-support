@@ -324,3 +324,59 @@ func TestMetricsExposeTheJiraOutcomeSeriesFromTheStore(t *testing.T) {
 		t.Errorf("an old-schema store has outcome series:\n%s", body)
 	}
 }
+
+// TestMetricsExposeTheWatchedEntityAndOrphanSeriesFromTheStore pins the real
+// scrape: the watched count by type and backend and the oldest-orphan age (from
+// the last successful read, hydrated_at before any) are derived from the entity
+// table at scrape time, and a deployment with no orphan emits one 0 series.
+func TestMetricsExposeTheWatchedEntityAndOrphanSeriesFromTheStore(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	s := store.OpenNewSchemaForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	body := scrape(t, s)
+	for _, want := range []string{
+		`pg_desk_watched_entities{backend="",type="issue"} 0`,
+		`pg_desk_oldest_orphan_read_age_seconds{backend=""} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("nothing watched: body missing %q; full body:\n%s", want, body)
+		}
+	}
+
+	fp := "F1"
+	yes := true
+	for id, hydrated := range map[string]string{"bd-1": "2026-10-01T11:30:00Z", "bd-2": "2026-10-01T11:50:00Z"} {
+		if _, err := s.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+			0, hydrated, true, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// bd-1 was last READ successfully 45 minutes ago, though hydrated 30 minutes ago.
+	ok := "2026-10-01T11:15:00Z"
+	if err := s.SetEntityReadTimes("o/r", "issue", "bd-1", nil, &ok); err != nil {
+		t.Fatal(err)
+	}
+	body = scrape(t, s)
+	for _, want := range []string{
+		`pg_desk_watched_entities{backend="",type="issue"} 2`,
+		`pg_desk_oldest_orphan_read_age_seconds{backend=""} 2700`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("two orphans: body missing %q; full body:\n%s", want, body)
+		}
+	}
+
+	old := store.OpenForTest(t)
+	mustUpsertInterpretation(t, old, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	if body := scrape(t, old); strings.Contains(body, "pg_desk_watched_entities") || strings.Contains(body, "pg_desk_oldest_orphan_read_age_seconds") {
+		t.Errorf("an old-schema store has watched or orphan series:\n%s", body)
+	}
+}

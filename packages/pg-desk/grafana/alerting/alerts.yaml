@@ -619,6 +619,61 @@ groups:
                     type: gt
                     params: [0]
 
+      # Orphan read lag (INV-ICD-21 item 1). The age of the oldest orphan, a
+      # watched issue that no watched query holds any longer and that pg-desk
+      # reads by id at a capped rate, counted from its last SUCCESSFUL read
+      # (read_ok_at, else hydrated_at), so an orphan whose reads keep failing
+      # keeps ageing. The bound is 1800 seconds: 6 polls of 5 minutes, the longest
+      # an orphan waits under the recommended cap of hydration.orphan_max_per_poll.
+      # The 6 x 10 = 60 orphans that cap serves in that time is a sizing
+      # assumption, not a measured orphan count.
+      #
+      # noDataState: Alerting, guarded by pg-desk liveness, exactly as
+      # pg-desk-ingest-failed-old: the series is derived from the store at scrape
+      # time, so while pg-desk is up its ABSENCE means the store read failed. A
+      # deployment with no orphan emits one backendless series valued 0. No
+      # SYSTEM_PAUSE guard: an empty result would alert under NoData.
+      #
+      - uid: pg-desk-issue-orphan-read-lag
+        title: pg-desk has not read an orphaned watched issue for over 30 minutes
+        condition: C
+        for: 10m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk has a watched issue of backend {{ $labels.backend }} that no watched query holds and that has not been read successfully for over 30 minutes, or cannot read the series"
+          description: "pg_desk_oldest_orphan_read_age_seconds has read over 1800 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest orphan has had no successful read for 30 minutes: its reads fail, or hydration.orphan_max_per_poll is too small for the number of orphans), or the series is missing while pg-desk is up (the store cannot answer)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (backend) (pg_desk_oldest_orphan_read_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1800]
+
       # ---- Daily-focus alert rules (Phase 15, pg2-2j5ac.44.25) ----
       # Each rule reads a family of internal/metrics/focus.go (or the
       # change-flow families) that is computed at scrape time from the

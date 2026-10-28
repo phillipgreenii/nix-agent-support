@@ -24,7 +24,7 @@
 #   T7  (the sweep-bound and watch-listing rules) the scope: both read issue and thread only
 #   T8  (the lookup-ceiling rule) the ratio is guarded by `ceiling > 0`, so a ceiling gauge of 0
 #       (zero-filled until the decider reports) leaves the rule quiet instead of dividing by zero
-#   T9  (the ingest-failed, watched-source-not-observed and unflagged-members rules) each uid exists once, at most 40 characters, with noDataState:
+#   T9  (the ingest-failed, watched-source-not-observed, unflagged-members and orphan-read-lag rules) each uid exists once, at most 40 characters, with noDataState:
 #       Alerting guarded by pg-desk liveness: the expression carries the branch that answers 0
 #       while pg-desk is down (so liveness-down speaks alone and NoData alerts only with pg-desk
 #       up), and the rule has the T5 shape. It is NOT an outcome rule: noDataState is Alerting and
@@ -93,9 +93,9 @@ ceiling_guard='/ (max(pg_desk_pr_lane_lookup_ceiling) > 0)'
 
 # The failed-ingest rule (T9): noDataState Alerting, guarded by pg-desk liveness.
 ingest_uid="pg-desk-ingest-failed-old"
-# The two Jira-half outcome rules (watched source not observed, unflagged members) carry the same
+# The two Jira-half outcome rules (watched source not observed, unflagged members) and the orphan-read-lag rule carry the same
 # noDataState Alerting liveness-guarded shape and are checked by T9 as well.
-liveness_guarded_uids=("pg-desk-ingest-failed-old" "pg-desk-watched-source-not-observed" "pg-desk-issue-unflagged-members")
+liveness_guarded_uids=("pg-desk-ingest-failed-old" "pg-desk-watched-source-not-observed" "pg-desk-issue-unflagged-members" "pg-desk-issue-orphan-read-lag")
 ingest_guard=' or (vector(0) and on() absent(pg_desk_liveness == 1))'
 
 guard_uid="pg-desk-sync-stale"

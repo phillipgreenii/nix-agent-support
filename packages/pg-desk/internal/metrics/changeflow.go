@@ -133,6 +133,20 @@ type changeFlowOptions struct {
 	ingestFailed IngestFailedFunc
 	observedAge  OutcomeFunc
 	unflagged    OutcomeFunc
+	watched      WatchedEntitiesFunc
+	oldestOrphan OutcomeFunc
+}
+
+// WithWatchedEntities supplies the count behind MetricWatchedEntities. Without
+// it the metric emits no series.
+func WithWatchedEntities(fn WatchedEntitiesFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.watched = fn }
+}
+
+// WithOldestOrphanReadAge supplies the observation behind
+// MetricOldestOrphanReadAge. Without it the metric emits no series.
+func WithOldestOrphanReadAge(fn OutcomeFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.oldestOrphan = fn }
 }
 
 // WithWatchedSourceObserved supplies the observation behind
@@ -242,6 +256,17 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		return err
 	}
 
+	watchedEntities, err := m.Int64ObservableGauge(MetricWatchedEntities,
+		metric.WithDescription("active entities flagged watched, by type and backend; read from the entity table at scrape time"))
+	if err != nil {
+		return err
+	}
+	oldestOrphan, err := m.Int64ObservableGauge(MetricOldestOrphanReadAge,
+		metric.WithDescription("age in seconds of the oldest orphan (a watched issue no watched query holds) counted from its last successful read, by backend; one series valued 0 when nothing is orphaned"))
+	if err != nil {
+		return err
+	}
+
 	_, err = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		flow, err := fn()
 		if err != nil {
@@ -289,7 +314,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		for _, s := range []struct {
 			fn OutcomeFunc
 			g  metric.Int64Observable
-		}{{o0.observedAge, observedAge}, {o0.unflagged, unflagged}} {
+		}{{o0.observedAge, observedAge}, {o0.unflagged, unflagged}, {o0.oldestOrphan, oldestOrphan}} {
 			if s.fn == nil {
 				continue
 			}
@@ -301,13 +326,24 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 				o.ObserveInt64(s.g, r.Value, metric.WithAttributes(attribute.String("backend", r.Backend)))
 			}
 		}
+		if o0.watched != nil {
+			rows, err := o0.watched()
+			if err != nil {
+				return err
+			}
+			for _, r := range rows {
+				o.ObserveInt64(watchedEntities, r.Count, metric.WithAttributes(
+					attribute.String("type", r.Type), attribute.String("backend", r.Backend),
+				))
+			}
+		}
 		for _, c := range flow.Consumers {
 			o.ObserveInt64(lag, c.Lag, metric.WithAttributes(
 				attribute.String("type", c.Type), attribute.String("consumer", c.Name),
 			))
 		}
 		return nil
-	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestOldest, observedAge, unflagged)
+	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestOldest, observedAge, unflagged, watchedEntities, oldestOrphan)
 	return err
 }
 

@@ -367,6 +367,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-desk-ingest-failed-old",
 		"pg-desk-watched-source-not-observed",
 		"pg-desk-issue-unflagged-members",
+		"pg-desk-issue-orphan-read-lag",
 		"pg-conn-beads-budget-denied",
 		"pg-conn-beads-bd-timeouts",
 	}

@@ -212,6 +212,28 @@ registered with the router probe, is modelled in `internal/alertrules`, has a pr
 `grafana/check-alert-structure.sh`. The `doctor` report "an entity nothing watches" stays a report, not
 an alert.
 
+- `pg_desk_watched_entities{type,backend}` — the count of active entities whose watched flag is true,
+  by entity type and by the entity's backend (the empty `backend` while the entity's backend column is
+  unset, as for a beads entity pg-desk has not attributed to an instance). Read from the entity table at
+  every scrape; with nothing watched it is one `type="issue"` series with an empty `backend`, valued `0`.
+- `pg_desk_oldest_orphan_read_age_seconds{backend}` — the age in seconds of the OLDEST orphan per
+  `backend` (the empty label for an orphan whose backend column is unset). An orphan is a watched, active
+  issue of the listed (non-owning) path that no watched query holds any longer (`changes.md`, "Active
+  entities, membership and orphan reads"). The age counts from the orphan's last SUCCESSFUL read
+  (`read_ok_at`), else its `hydrated_at`, else the time it was first seen, so an orphan whose reads
+  keep failing keeps ageing. With no orphan it is one series with an empty `backend`, valued `0`.
+
+The Grafana rule `pg-desk-issue-orphan-read-lag` fires per `backend` while
+`pg_desk_oldest_orphan_read_age_seconds` is over `1800` seconds (30 minutes: 6 polls of 5 minutes, the
+longest an orphan waits under the recommended `hydration.orphan_max_per_poll` cap), held for
+`for: 10m`, severity `warning`. It carries `noDataState: Alerting` guarded by pg-desk liveness with the
+same expression tail as `pg-desk-ingest-failed-old`
+(`max by (backend) (pg_desk_oldest_orphan_read_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))`),
+so it is quiet while pg-desk is down and alerts while pg-desk is up and the series is missing; it has no
+`SYSTEM_PAUSE` guard. Its uid is registered with the router probe, it is modelled in
+`internal/alertrules`, has a promtool case file under `grafana/alerting/rule-tests/`, and has its
+`noDataState` and liveness guard pinned by `grafana/check-alert-structure.sh`.
+
 On a store that has not been cut over to the new schema these families MUST be absent from the
 scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.
 

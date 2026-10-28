@@ -146,6 +146,10 @@ import (
 // are not flagged watched across two polls). Registered the same way, with no
 // escalation label.
 //
+// pg-desk-issue-orphan-read-lag is the rule of the same file for the oldest
+// orphan (a watched issue no watched query holds) whose last successful read is
+// over 1800 seconds old. Registered the same way, with no escalation label.
+//
 // pg-conn-beads-budget-denied and pg-conn-beads-bd-timeouts are the two
 // log-derived rules of the beads backend's alert file (packages/pg-connector/
 // grafana/alerting/issue-beads-alerts.yaml, registered by the beads darwin
@@ -184,6 +188,7 @@ var registeredRuleUIDs = []string{
 	"pg-desk-ingest-failed-old",
 	"pg-desk-watched-source-not-observed",
 	"pg-desk-issue-unflagged-members",
+	"pg-desk-issue-orphan-read-lag",
 	"pg-conn-beads-budget-denied",
 	"pg-conn-beads-bd-timeouts",
 }

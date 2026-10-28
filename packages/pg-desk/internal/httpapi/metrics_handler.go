@@ -119,7 +119,10 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 			func() time.Time { return nowUTC() })),
 		metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedFromStore(st, metrics.OwningQueriesByInstance(cfg),
 			func() time.Time { return nowUTC() })),
-		metrics.WithUnflaggedMembers(metrics.UnflaggedMembersFromStore(st, metrics.OwningQueriesByInstance(cfg)))); err != nil {
+		metrics.WithUnflaggedMembers(metrics.UnflaggedMembersFromStore(st, metrics.OwningQueriesByInstance(cfg))),
+		metrics.WithWatchedEntities(metrics.WatchedEntitiesFromStore(st)),
+		metrics.WithOldestOrphanReadAge(metrics.OldestOrphanReadAgeFromStore(st, cfg,
+			func() time.Time { return nowUTC() }))); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 
