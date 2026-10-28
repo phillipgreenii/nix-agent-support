@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
@@ -95,11 +96,18 @@ func skipUnchangedWrite(o *pipeline.EntityChangeOptions) { o.SkipUnchangedWrite 
 // untouched through the nil list fingerprint) and writes nothing but the two
 // read times when nothing changed; a changed read appends the classified row.
 // After every attempt read_attempt_at is stamped; read_ok_at too when the read
-// answered (no error, not degraded, not not_found). A failed, degraded or
-// not_found read leaves the entity watched and active (the outcomes of those
-// reads belong to the orphan read outcomes, not to this selection). An
-// id read is recorded in st.hydrated so later phases skip it. When the budget
-// stops an orphan no attempt is made and nothing is written for it.
+// answered (no error, not degraded, not not_found). The outcomes:
+//   - not_found (a deleted bead): one removed row, then in the same
+//     transaction the flag is cleared (written false) and the entity is
+//     deactivated, so it is never read again; no read times are written;
+//   - failed or degraded: nothing is appended, the entity stays watched and
+//     active, only the attempt time moves, and no retry counter is kept (the
+//     age of the last successful read is what exposes it);
+//   - the bead is found closed: the hydration appends closed and then ends the
+//     flag with the deactivation (hydrateResult's deactivateIfTerminal).
+//
+// An id read is recorded in st.hydrated so later phases skip it. When the
+// budget stops an orphan no attempt is made and nothing is written for it.
 func (e *Engine) readOrphans(ctx context.Context, opts Options, st *pollState, bud *budget) error {
 	if opts.EntityType != issueEntityType {
 		return nil
@@ -132,6 +140,17 @@ func (e *Engine) readOrphans(ctx context.Context, opts Options, st *pollState, b
 		bud.note(herr)
 		if herr != nil {
 			st.side = append(st.side, fmt.Sprintf("orphan read %s: %s", id, firstErrLine(herr.Error())))
+		}
+		if herr == nil && res.NotFound {
+			// Gone: the removed row is appended while the flag still stands (so it
+			// is delivered), then the flag is cleared and the entity deactivated
+			// in the same transaction. A failure leaves the entity watched and
+			// active, so the next poll reads it again.
+			if derr := e.deactivate(issueEntityType, id, []string{string(classify.KindRemoved)}); derr != nil {
+				st.side = append(st.side, fmt.Sprintf("orphan read %s: removal: %s", id, firstErrLine(derr.Error())))
+			} else {
+				continue
+			}
 		}
 		now := e.now().UTC().Format(time.RFC3339Nano)
 		var okAt *string

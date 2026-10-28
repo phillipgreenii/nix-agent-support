@@ -2,6 +2,7 @@ package changes
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -66,9 +67,13 @@ func (h *orphanHydrator) RunEntityChange(ctx context.Context, entityType, id str
 	if found {
 		expected = row.Version
 	}
+	kinds := []string{"changed"}
+	if k, ok := h.kindsOf[id]; ok {
+		kinds = k
+	}
 	v, err := h.st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
-		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, []string{"changed"}, opts.Origin, "2026-10-01T12:00:00Z")
-	return pipeline.EntityChangeResult{Written: err == nil, Version: v, Kinds: []string{"changed"}}, err
+		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z")
+	return pipeline.EntityChangeResult{Written: err == nil, Version: v, Kinds: kinds}, err
 }
 
 // newOrphanEngine is a baselined engine over the one query "open" with the
@@ -349,33 +354,155 @@ func TestSortOrphansComparesParsedTimesNotText(t *testing.T) {
 	}
 }
 
-// A failed, degraded or not_found read stamps only the attempt time and leaves
-// the entity watched and active; a later answering read sets the ok time.
-func TestFailedDegradedOrNotFoundOrphanReadStampsOnlyTheAttempt(t *testing.T) {
+// A failed or degraded read leaves the entity watched and active, appends
+// nothing, moves read_attempt_at forward, leaves read_ok_at as it was, keeps no
+// retry counter, and the same entity is read again at the next poll.
+func TestFailedOrDegradedOrphanReadLeavesItWatchedAndDueAgain(t *testing.T) {
 	for name, setup := range map[string]func(h *orphanHydrator){
-		"error":     func(h *orphanHydrator) { h.fail["bd-o1"] = errors.New("connector exploded") },
-		"degraded":  func(h *orphanHydrator) { h.degraded["bd-o1"] = "rate_limited" },
-		"not found": func(h *orphanHydrator) { h.notFound["bd-o1"] = true },
+		"error":    func(h *orphanHydrator) { h.fail["bd-o1"] = errors.New("connector exploded") },
+		"degraded": func(h *orphanHydrator) { h.degraded["bd-o1"] = "rate_limited" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, st, h := newOrphanEngine(t)
+			e.Store.SetGateScope(issueGateScope)
 			seedOrphan(t, st, "bd-o1")
-			setup(h)
-			e.Lister = fakeLister{res: listing()}
-			if _, _, err := runTick(t, e); err != nil {
+			okBefore := "2026-10-01T10:00:00Z"
+			attemptBefore := "2026-10-01T10:00:01Z"
+			if err := st.SetEntityReadTimes("o/r", "issue", "bd-o1", &attemptBefore, &okBefore); err != nil {
 				t.Fatal(err)
 			}
-			row := entityOf(t, st, "bd-o1")
-			if row.ReadAttemptAt == "" || row.ReadOKAt != "" {
-				t.Errorf("read times = %q / %q, want only the attempt", row.ReadAttemptAt, row.ReadOKAt)
-			}
-			if row.Inactive || row.Watched == nil || !*row.Watched {
-				t.Errorf("inactive=%v watched=%v, want active and watched", row.Inactive, row.Watched)
-			}
-			if n := removedRows(t, st, "bd-o1"); n != 0 {
-				t.Errorf("%d removed rows, want none from this selection", n)
+			setup(h)
+			e.Lister = fakeLister{res: listing()}
+			histBefore := len(historyOf(t, st, "bd-o1"))
+			var lastAttempt string
+			for poll := 1; poll <= 2; poll++ {
+				if _, _, err := runTick(t, e); err != nil {
+					t.Fatal(err)
+				}
+				row := entityOf(t, st, "bd-o1")
+				if row.ReadOKAt != okBefore {
+					t.Errorf("poll %d: read_ok_at = %q, want it left at %q", poll, row.ReadOKAt, okBefore)
+				}
+				if row.ReadAttemptAt <= attemptBefore || row.ReadAttemptAt <= lastAttempt {
+					t.Errorf("poll %d: read_attempt_at = %q, want it moved forward past %q / %q", poll, row.ReadAttemptAt, attemptBefore, lastAttempt)
+				}
+				lastAttempt = row.ReadAttemptAt
+				if row.Inactive || row.Watched == nil || !*row.Watched {
+					t.Errorf("poll %d: inactive=%v watched=%v, want active and watched", poll, row.Inactive, row.Watched)
+				}
+				if got := len(historyOf(t, st, "bd-o1")); got != histBefore {
+					t.Errorf("poll %d: change log grew by %d rows, want none", poll, got-histBefore)
+				}
+				if len(h.calls) != poll {
+					t.Errorf("poll %d: reads = %v, want the same entity read at every poll", poll, h.calls)
+				}
 			}
 		})
+	}
+}
+
+// issueGateScope is a test delivery-gate scope that is true for every issue,
+// so the tests do not depend on the owning-backend scope of the gate.
+func issueGateScope(_ *sql.Tx, _, entityType, _, _ string) (bool, error) {
+	return entityType == "issue", nil
+}
+
+func changeRows(t *testing.T, st *store.Store, id string) []store.ChangeRecord {
+	t.Helper()
+	all, err := st.ListChangesAfter("issue", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []store.ChangeRecord
+	for _, r := range all {
+		if r.EntityID == id {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// A read answering not_found appends exactly one removed row, delivered although
+// the flag is then cleared (written false), deactivates the entity, writes no
+// read times, and the entity is not read again at the next poll.
+func TestNotFoundOrphanReadAppendsOneRemovedRowThenEndsTheWatch(t *testing.T) {
+	e, st, h := newOrphanEngine(t)
+	e.Store.SetGateScope(issueGateScope)
+	seedOrphan(t, st, "bd-o1")
+	h.notFound["bd-o1"] = true
+	e.Lister = fakeLister{res: listing()}
+	before := len(changeRows(t, st, "bd-o1"))
+
+	env, out, err := runTick(t, e)
+	if err != nil || out.Partial {
+		t.Fatalf("tick = %+v, %v", out, err)
+	}
+	rows := changeRows(t, st, "bd-o1")
+	if len(rows) != before+1 || !reflect.DeepEqual(rows[len(rows)-1].Kinds, []string{"removed"}) {
+		t.Fatalf("rows = %+v (before %d), want exactly one new removed row", rows, before)
+	}
+	delivered := 0
+	for _, r := range env.Records {
+		if r.ID == "bd-o1" && reflect.DeepEqual(r.Kinds, []string{"removed"}) {
+			delivered++
+		}
+	}
+	if delivered != 1 {
+		t.Errorf("delivered removed rows = %d, want 1 (records %+v)", delivered, env.Records)
+	}
+	row := entityOf(t, st, "bd-o1")
+	if !row.Inactive {
+		t.Error("the gone entity is still active")
+	}
+	if row.Watched == nil || *row.Watched {
+		t.Errorf("watched = %v, want a stated false", row.Watched)
+	}
+	if row.ReadAttemptAt != "" || row.ReadOKAt != "" {
+		t.Errorf("read times = %q / %q, want none written on the removed path", row.ReadAttemptAt, row.ReadOKAt)
+	}
+
+	h.calls = nil
+	if _, _, err := runTick(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.calls) != 0 {
+		t.Errorf("second poll read %v, want the removed entity not read again", h.calls)
+	}
+	if got := len(changeRows(t, st, "bd-o1")); got != before+1 {
+		t.Errorf("rows after the second poll = %d, want %d", got, before+1)
+	}
+}
+
+// A read that finds the bead closed appends closed (the classifier's row) and
+// then the flag is cleared and the entity is inactive; no removed row.
+func TestClosedOrphanReadAppendsClosedThenEndsTheWatch(t *testing.T) {
+	e, st, h := newOrphanEngine(t)
+	e.Store.SetGateScope(issueGateScope)
+	seedOrphan(t, st, "bd-o1")
+	h.facts = map[string]string{"bd-o1": `{"issue_show":{"id":"bd-o1","state":"closed","title":"t"}}`}
+	h.kindsOf = map[string][]string{"bd-o1": {"closed"}}
+	e.Lister = fakeLister{res: listing()}
+
+	env, _, err := runTick(t, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fresh(env.Records); len(got) != 1 || !reflect.DeepEqual(got[0].Kinds, []string{"closed"}) {
+		t.Fatalf("records = %+v, want the closed row delivered", got)
+	}
+	row := entityOf(t, st, "bd-o1")
+	if !row.Inactive || row.Watched == nil || *row.Watched {
+		t.Errorf("inactive=%v watched=%v, want inactive and a stated false", row.Inactive, row.Watched)
+	}
+	if removedRows(t, st, "bd-o1") != 0 {
+		t.Error("a closed bead appended a removed row")
+	}
+	h.calls = nil
+	if _, _, err := runTick(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.calls) != 0 {
+		t.Errorf("second poll read %v, want the closed entity not read again", h.calls)
 	}
 }
 
