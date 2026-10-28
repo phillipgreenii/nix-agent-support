@@ -251,11 +251,14 @@ func helperMain(args []string) {
 	os.Exit(99)
 }
 
-// record writes what the process saw to kv["dest"] (with {pos} expanded).
+// record writes what the process saw to kv["dest"] (with {pos} expanded). Its
+// environment record holds the PG_RESCUE_* and XT_* variables and GORACE (the
+// runner tests assert that the children inherit the race runtime's exit-sleep
+// setting).
 func record(kv map[string]string, rest []string) {
 	env := map[string]string{}
 	for _, e := range os.Environ() {
-		if k, v, _ := strings.Cut(e, "="); strings.HasPrefix(k, "PG_RESCUE_") || strings.HasPrefix(k, "XT_") {
+		if k, v, _ := strings.Cut(e, "="); strings.HasPrefix(k, "PG_RESCUE_") || strings.HasPrefix(k, "XT_") || k == "GORACE" {
 			env[k] = v
 		}
 	}

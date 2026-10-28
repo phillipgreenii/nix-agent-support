@@ -552,3 +552,24 @@ func TestFingerprintIsComputedOnceInBothModes(t *testing.T) {
 }
 
 func jsonUnmarshal(s string, v any) error { return jsonDecode([]byte(s), v) }
+
+// A race-built child sleeps 1.0 s at exit unless GORACE says otherwise (ADR
+// 0111, bead pg2-jrnkva). TestMain sets it for the tests' children; this proves
+// the production ChainExecutor hands it to a handler and to the verify command
+// (a real process each), so the setting reaches every supervised child.
+func TestChildrenInheritTheRaceExitSleepSetting(t *testing.T) {
+	dir := t.TempDir()
+	e := newE2E(t, "", recorders(dir, 1), chainOf("r1"))
+	e.wrap("r1", helperArgv("exit", "code=1"))
+	vdir := t.TempDir()
+	v := newE2E(t, "", []hd{result("fixer", "resolved")}, chainOf("fixer"))
+	verify := helperShell("record", "dest="+vdir+"/verify-rec")
+	if code, _, stderr := v.wrap("fixer", helperArgv("exit", "code=1"), "--verify", verify); code != 0 {
+		t.Fatalf("exit = %d (stderr %s)", code, stderr)
+	}
+	for name, path := range map[string]string{"handler": filepath.Join(dir, "rec-1"), "verify": filepath.Join(vdir, "verify-rec")} {
+		if got := readRecord(t, path).Env["GORACE"]; !strings.Contains(got, raceExitSleepOff) {
+			t.Errorf("%s: GORACE = %q; want it to contain %q", name, got, raceExitSleepOff)
+		}
+	}
+}

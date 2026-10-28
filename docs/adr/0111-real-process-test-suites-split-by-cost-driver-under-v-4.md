@@ -153,9 +153,49 @@ whole-app allowance of "a minute or two"). A package timeout MUST NOT be raised 
   `-race`) and MUST check that the production `ChainExecutor` hands the variable to the command.
   If it scrubs the environment, more of the helper-based tests MUST move behind the tag instead.
   The operator ruled on 2026-10-26 that the `-race` default is not changed; this does not change it.
+- Outcome of that follow-up (bead `pg2-jrnkva`, 2026-10-28):
+  - `ChainExecutor` does NOT scrub the environment. It passes the wrapper's whole environment
+    (`rt.Environ`, minus only `PG_RESCUE_PARENT_RUN_ID`) as the base of every handler's and the
+    verify command's environment (`internal/runner/chain.go` `baseEnv`, `internal/config/env.go`
+    `BuildEnv`), so no test moved behind the tag for this reason. `TestMain` now sets `GORACE`
+    (`atexit_sleep_ms=0`, appended to any value the caller already has) and
+    `TestChildrenInheritTheRaceExitSleepSetting` proves, with a real handler process and a real
+    verify process run through the production `ChainExecutor`, that both see it.
+  - The 95.725 s `-race` figure above was measured on a tree without bead `pg2-cp2dfo` (commit
+    `3a481a012`, which is not an ancestor of the measured `bb275fbbe`): since that commit
+    `TestMain` builds the fake command, handler and verify once WITHOUT the race detector
+    (`testenv.BuildHelper`), so no race-built child is re-executed any more and the `GORACE` setting
+    has no race runtime in a child to act on today. It is kept as a guard for a child that is
+    race-built again. This is also why the `-race` run is now close to the plain run (measurements
+    below).
+  - Measured, untagged `internal/runner` only, `env -C packages/pg-rescue nice -n 10 go test -p 4
+-count=1 [-race] ./internal/runner`, the `ok` line (excludes compilation). The host was far
+    busier than in the Method section: one-minute load average 36 to 67 for the "before" runs and 76
+    to 94 for the "after" runs. Before (tree with `pg2-cp2dfo`, without the `GORACE` change): no
+    `-race` 17.908 s (load 36.9) and 28.158 s (load 67.0), mean (17.908 + 28.158) / 2 = 23.033 s;
+    `-race` 22.491 s (load 36.4) and 20.042 s (load 56.8), mean (22.491 + 20.042) / 2 = 21.267 s.
+    After (with the `GORACE` change and its test), the two scripted runs: no `-race` 21.279 s (one
+    failure, not reproduced and not identified; load 88.3) and 13.961 s (load 85.3), `-race`
+    24.757 s (load 93.6) and 15.149 s (load 81.6). Further passing runs: no `-race` 11.954 s,
+    11.017 s, 9.297 s and 11.840 s (load 76.5 to 87), `-race` 12.414 s (load 84). Passing-run means
+    after: no `-race` (13.961 + 11.954 + 11.017 + 9.297 + 11.840) / 5 = 58.069 / 5 = 11.614 s;
+    `-race` (24.757 + 15.149 + 12.414) / 3 = 52.320 / 3 = 17.440 s. The `GORACE` change cannot
+    explain a difference between before and after (no child is race-built); the host load moved
+    more than the code did, so the two sets are NOT a measure of the change. The `-race` penalty
+    that matters is the gap inside one set: after, 15.149 - 13.961 = 1.188 s in the pair measured
+    back to back, against 66.623 s in the Method section.
+  - The package's top-level test time is 10.39 s (no `-race`, 98 tests, load 80.8) and 10.02 s
+    (`-race`, load 84.0), the sum of the `--- PASS` lines.
 - The follow-up's acceptance MUST report the package time before and after, with and without
-  `-race`. Proposed target: at most 10 s in each of the four cases (a proposal for the operator to
-  confirm; the measured residue of 4.88 s to 8.13 s without `-race` fits it).
+  `-race`. Target (confirmed and adjusted by bead `pg2-jrnkva`): the MEDIAN of three runs of the
+  untagged package is at most 20 s, with and without `-race`, on a host at a one-minute load
+  average of 75 or more. Measured medians (n = 3 each, the passing runs of the set above): no
+  `-race` 11.017 s (runs 9.297, 11.017, 11.954), `-race` 15.149 s (runs 12.414, 15.149, 24.757). The
+  earlier proposal of 10 s is NOT met at that load (one run in nine was below 10 s; the
+  top-level sum alone is 10.0 to 10.4 s there) and was not measured on an idle host, where the
+  residue of 4.88 s to 8.13 s without `-race` in the Method section suggests it would be; a single
+  run MAY exceed 20 s under load (observed 21.3 s and 24.8 s at load 88 and 94). Re-measure on a
+  quiet host before tightening it.
 
 An alternative that keeps `TestDisplayGolden` untagged is to run each of its 5 scenarios once and
 render the four verbosity levels from that one run (4 real runs become 1), if the display can be
@@ -208,8 +248,8 @@ tag stands if it is not possible.
 
 - The remaining `pg-rescue` packages and the whole-module time against the "minute or two" allowance
   for an app; only `internal/runner` was timed.
-- The `GORACE` effect on the production `ChainExecutor` environment, and the `atexit` experiment is
-  one run per package.
+- The `atexit` experiment is one run per package. (The `ChainExecutor` pass-through of `GORACE` is
+  now verified by a test; see the outcome in decision 1.)
 - That the display can be rendered from one run per scenario.
 - Whether `pg-rescue-integration-tests` is excluded from every hook (`run-unit-tests`,
   `pre-land`) by construction; the follow-up MUST confirm it before the move.
