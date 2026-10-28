@@ -2,7 +2,7 @@
 
 Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads step 6; `ID`, `<work-branch>`, the release policy and the tracker section are defined in `SKILL.md`.
 
-6. **LAND via a dedicated LANDER SUBAGENT** — dispatched synchronously, ONE at a
+6. **LAND via a dedicated LANDER SUBAGENT** (the agent named by the rule "Which agent receives a drain dispatch" in `references/rules.md`: `pb:drain-lander`, no `model` or `effort`) — dispatched synchronously, ONE at a
    time, never in parallel with another land and never fanned out. Landing must
    go through the repo-declared strategy, so the lander invokes the dispatcher
    itself in its own context (its own persistent shell keeps the ~37KB of
@@ -120,7 +120,7 @@ Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads
      reproduce command and land NOTHING. Unlike FF-1b, that stop is AGENT-FIXABLE
      (a deterministic failure of the code this bead just changed): the lander does
      not fix it, and the orchestrator treats it as a failed gate to repair (re-delegate
-     the fix to the implementation subagent, then re-land) rather than as an
+     the fix to `pb:drain-implementer`, per the "Which agent receives a drain dispatch" rule, then re-land) rather than as an
      operator decision; only a failure that cannot be repaired goes to STUCK;
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
@@ -187,11 +187,11 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-dispatch the lander at most
-   ONCE more (the handler already made its own 2 attempts internally, per
+   ONCE more (to `pb:drain-lander`, per the "Which agent receives a drain dispatch" rule) (the handler already made its own 2 attempts internally, per
    FF-3); a second failure is a GENUINE
    stop → STUCK. The `pull-request` analogue is a REJECTED NON-FAST-FORWARD PUSH (a
    peer advanced the remote `<work-branch>`): also TRANSIENT — rebase onto the
-   UPDATED REMOTE branch and re-dispatch the lander at most ONCE more (it already
+   UPDATED REMOTE branch and re-dispatch the lander at most ONCE more (same rule "Which agent receives a drain dispatch"; it already
    made its own 2 attempts internally, per PR-1); a second failure is a GENUINE stop → STUCK. Only route
    to STUCK for a GENUINE stop (rebase-conflict, `stopped:ambiguous-remote`,
    `stopped:no-pr-host`, or a canonical off-primary/dirty halt — the latter

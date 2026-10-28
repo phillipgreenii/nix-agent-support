@@ -172,7 +172,7 @@ and the container's own priority, then:
    gates, MUST NOT claim or close the bead, create beads, add dependencies or gates,
    or land anything, and ends with ONE of `done`, `done-pending-apply-verification`,
    `stuck`, `needs-more-repos`. Scan every subagent report for a stall phrase before
-   trusting it.
+   trusting it. The implementer is the agent named by the rule "Which agent receives a drain dispatch" in `references/rules.md` (`pb:drain-implementer`).
 
 5. **VALIDATE** from the report (first applying the stall-phrase check above —
    a stalled report is never validated as-is): the pre-apply gates MUST show a clear PASS for
@@ -186,7 +186,7 @@ and the container's own priority, then:
 6. **LAND via a dedicated LANDER SUBAGENT.** Read `references/land.md` in full now:
    it holds the pinned-session check, the lander brief, the verdict verification and
    the strategy-specific LANDED rules. In short:
-   - Dispatch ONE lander at a time, synchronously. It invokes
+   - Dispatch ONE lander at a time, synchronously, to the agent named by the rule "Which agent receives a drain dispatch" in `references/rules.md` (`pb:drain-lander`). It invokes
      `integrate-branch:integrate-branch` with NO handler named (or
      `pn-workspace-rules:land-workforest` for a set) and reports `landed`,
      `pr-opened`, `pr-updated` or `stopped:<reason>`.

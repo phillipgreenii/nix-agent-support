@@ -150,3 +150,19 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   DERIVED STATE and a bead describes one instant while it regenerates on every land. Full
   contract: the `session-wrapup:wrap-up-session` skill's `references/unpushed-landing-debt.md`
   (U-1..U-4, U-6). U-5 alone remains in the core agent rules, unconditionally.
+
+### Which agent receives a drain dispatch
+
+Every drain dispatch names its agent, so a drain session's own model and effort never decide its
+subagents' (ADR 0113, decision D4 of the pg-router role model change). The agents' frontmatter
+fixes model and effort.
+
+- Every UNCURATED-PATH implementation dispatch and every re-dispatch of it goes to
+  `subagent_type: "pb:drain-implementer"`.
+- Every lander dispatch and every lander re-dispatch goes to `subagent_type: "pb:drain-lander"`.
+- No dispatch passes `model` or `effort`.
+- An unavailable agent type fails the dispatch: route the bead to `pb:drain-stuck`. There is no
+  fallback to `general-purpose` (fix forward, D9).
+- A class of work that needs a stronger model or effort gets its own agent definition plus a rule
+  in this section naming when to use it, never a per-dispatch override.
+- The CURATED PATH (`plan-decompose:packet-implementer`) is unchanged.

@@ -26,6 +26,8 @@ CONSUMERS=(
   pb/commands/unstick-beads.md
   pb/commands/stop-draining-beads.md
   pb/agents/unstick-batch-worker.md
+  pb/agents/drain-implementer.md
+  pb/agents/drain-lander.md
   plan-decompose/agents/phase-plan-verifier.md
   bead-grooming/skills/bead-grooming/SKILL.md
   bead-grooming/skills/bead-grooming/references/criteria-examples.md

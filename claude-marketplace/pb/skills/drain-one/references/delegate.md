@@ -91,7 +91,7 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    `3 ≠ 7` stamp refusal a false positive from the docket's reconcile reports and re-dispatched
    the packet via the UNCURATED PATH.)
 
-   **UNCURATED PATH.** The brief is a POINTER, not a payload. It MUST contain exactly:
+   **UNCURATED PATH.** Dispatch to the agent named by the rule "Which agent receives a drain dispatch" in `references/rules.md` (`pb:drain-implementer`; pass no `model` or `effort`). The brief is a POINTER, not a payload. It MUST contain exactly:
    - the bead id, with the instruction to run `bd show <id>` ITSELF for the full
      description and acceptance criteria;
    - the absolute repo root and the worktree/set path (state the root once —
@@ -234,7 +234,7 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      repos touched. The implementation subagent lands nothing — the LANDER
      subagent (step 6) does.
 
-   Re-dispatch with guidance if the report is incomplete. If it reports
+   Re-dispatch with guidance if the report is incomplete (same agent, per the rule "Which agent receives a drain dispatch" in `references/rules.md`). If it reports
    `needs-more-repos`, re-ISOLATE as a `pn-workspace-rules:fork-workforest` set and
    re-dispatch.
 

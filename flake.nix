@@ -2267,6 +2267,31 @@
                     touch $out
                   '';
 
+              # Named drain subagents (pg2-5ggo5o, ADR 0113): the pb drain agents pin model and
+              # effort in frontmatter and every drain-one dispatch site points at the one rule that
+              # names them, so a drain session's own model never decides its subagents'.
+              test-pb-drain-subagents =
+                let
+                  drainSubagentsSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace;
+                    fileset = ./claude-marketplace/pb;
+                  };
+                in
+                pkgs.runCommand "test-pb-drain-subagents"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export PBD_PB_DIR="${drainSubagentsSrc}/pb"
+                    bats --verbose-run ${./tests/pb-drain-subagents.bats}
+                    touch $out
+                  '';
+
               # Focus-item exclusion conformance (pg2-2j5ac.44.33): the sweep that undefers or
               # closes deferred beads MUST NOT touch a `focus-item` bead (the decider holds one as
               # status=deferred; a close ends the item for good). The rule must live in the
