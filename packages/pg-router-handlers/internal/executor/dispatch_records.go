@@ -159,6 +159,10 @@ func (r *commandRun) emitCommandStart(d DispatchContext, argv, baseNames []strin
 // emitCCPoolStart writes the dispatch_start record of an accepted ccpool-role
 // dispatch: the route the handler took (RouteLaunched or RouteAdopted), the
 // session's external id and the role's sessionEnv entries, values included.
+// For RouteLaunched it also records the model and effort the session was
+// launched with (INV-CCH-40): the effective values on Deps.Cfg after the role's
+// overrides, "model" being "" when none was set. An adopted session keeps what
+// it started with, so its record carries neither key.
 // The claude env itself is the prefix tool's: an operator follows
 // session_env.PG_WRAP_SPEC to pg-wrap show.
 func (r *ccpoolRun) emitCCPoolStart(d DispatchContext, route, session string) {
@@ -168,9 +172,13 @@ func (r *ccpoolRun) emitCCPoolStart(d DispatchContext, route, session string) {
 	if r.deps.Log == nil {
 		return
 	}
-	_ = r.deps.Log.Emit("info", DispatchStartKind, "dispatch accepted: ccpool session ready",
-		map[string]any{
-			"role": d.Role.Name, "item_id": d.Item.ID, "item_type": d.Item.Type,
-			"route": route, "session": session, "session_env": sessionEnvField(d.Role.SessionEnv),
-		})
+	fields := map[string]any{
+		"role": d.Role.Name, "item_id": d.Item.ID, "item_type": d.Item.Type,
+		"route": route, "session": session, "session_env": sessionEnvField(d.Role.SessionEnv),
+	}
+	if route == RouteLaunched {
+		fields["model"] = r.deps.Cfg.Model
+		fields["effort"] = r.deps.Cfg.Effort
+	}
+	_ = r.deps.Log.Emit("info", DispatchStartKind, "dispatch accepted: ccpool session ready", fields)
 }

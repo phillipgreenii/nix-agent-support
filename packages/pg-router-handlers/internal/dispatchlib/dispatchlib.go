@@ -126,6 +126,13 @@ func BuildDeps(cfg config.Config, role roles.Role) executor.Deps {
 		if role.CCPool.Effort != "" {
 			cfg.Effort = role.CCPool.Effort
 		}
+		// Per-role model (bead pg2-vsepbz, INV-CCH-40): the same, for the claude
+		// --model. It MUST be applied here, before NewCLIRunner below copies cfg
+		// into the runner: a later change to cfg would leave the runner's --model
+		// stale while deps.Cfg looked right.
+		if role.CCPool.Model != "" {
+			cfg.Model = role.CCPool.Model
+		}
 	}
 	cc := ccpool.NewCLIRunner(cfg)
 	if role.CCPool != nil && role.CCPool.PoolDir != "" {

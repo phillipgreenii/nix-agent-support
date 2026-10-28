@@ -203,6 +203,55 @@ func TestDispatch_writesDispatchStart_launched(t *testing.T) {
 	}
 }
 
+// launchedStartRecord runs one launching dispatch with the given handler
+// model and effort on its Deps.Cfg and returns its dispatch_start record.
+func launchedStartRecord(t *testing.T, model, effort string) map[string]any {
+	t.Helper()
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	role := workerRole(cfg)
+	log, path := newTestLog(t)
+	deps := newExec(cc, bd, cfg).deps
+	deps.Cfg.Model = model
+	deps.Cfg.Effort = effort
+	deps.Log = log
+	deps.ExternalID = "pg-router-worker-zr-w"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-w", Type: "task"}}
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	recs := readRecords(t, path, DispatchStartKind)
+	if len(recs) != 1 {
+		t.Fatalf("want one dispatch_start, got %d: %v", len(recs), recs)
+	}
+	return recs[0]
+}
+
+// INV-CCH-40: a launched dispatch_start records the model and effort the
+// session was launched with, as the literal Deps.Cfg values.
+func TestDispatch_writesDispatchStart_launchedRecordsModelAndEffort(t *testing.T) {
+	rec := launchedStartRecord(t, "m-x", "low")
+	if rec["model"] != "m-x" || rec["effort"] != "low" {
+		t.Errorf("model/effort = %v/%v, want m-x/low; record = %v", rec["model"], rec["effort"], rec)
+	}
+}
+
+// INV-CCH-40: an empty model is still recorded, as "", so a reader can tell
+// "launched with no --model" from "an adopted session".
+func TestDispatch_writesDispatchStart_launchedEmptyModelIsPresent(t *testing.T) {
+	rec := launchedStartRecord(t, "", "medium")
+	if v, ok := rec["model"]; !ok || v != "" {
+		t.Errorf("model = %v (present %v), want present and empty; record = %v", v, ok, rec)
+	}
+	if rec["effort"] != "medium" {
+		t.Errorf("effort = %v, want medium", rec["effort"])
+	}
+}
+
 // Adopting a live session of the same event's turn records route "adopted".
 func TestDispatch_writesDispatchStart_adopted(t *testing.T) {
 	cfg := leaseCfg()
@@ -232,6 +281,13 @@ func TestDispatch_writesDispatchStart_adopted(t *testing.T) {
 	}
 	if !reflect.DeepEqual(recs[0]["session_env"], map[string]any{"PG_WRAP_SPEC": "/etc/pg-wrap/worker.toml"}) {
 		t.Errorf("session_env = %v", recs[0]["session_env"])
+	}
+	// INV-CCH-40: an adopted session keeps the values it started with, so the
+	// record carries neither.
+	for _, k := range []string{"model", "effort"} {
+		if v, ok := recs[0][k]; ok {
+			t.Errorf("adopted dispatch_start carries %s = %v, want no such key", k, v)
+		}
 	}
 }
 
