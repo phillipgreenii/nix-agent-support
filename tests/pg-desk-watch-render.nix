@@ -126,13 +126,22 @@ in
     connector = mixedBackends;
   });
 
-  # The same, plus manual names: one already derived, one not.
+  # The same, plus manual names: one already derived, one not. The not-derived
+  # name is rejected by an assertion and is not rendered (exact-watched
+  # narrowing, INV-CONFIG-7).
   mixedWithManual = summarize (evaluate {
     connector = mixedBackends;
     desk.watch.issue.queries = [
       "watched-demo-query"
       "manual-demo-query"
     ];
+  });
+
+  # The connector enabled and a manual list naming only a derived name: no
+  # assertion fails and the name renders once.
+  manualDerivedOnly = summarize (evaluate {
+    connector = mixedBackends;
+    desk.watch.issue.queries = [ "watched-demo-query" ];
   });
 
   # The connector module disabled: nothing derived, the manual list alone.

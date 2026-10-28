@@ -92,7 +92,20 @@ let
       };
     }) derivedWatchPairs
   );
-  watchIssueQueries = lib.unique (lib.attrNames derivedWatchBackends ++ cfg.watch.issue.queries);
+  # Exact-watched narrowing (INV-CONFIG-7): with the connector module enabled
+  # the rendered list is EXACTLY the derived watched names, so it cannot drift
+  # from the backend's query block. A manual entry that is not one of them is
+  # rejected by an assertion below (never silently dropped, which would hide
+  # the missing `watched = true`); the manual list is rendered as written only
+  # while the connector module is disabled, where nothing is derived.
+  nonDerivedManualQueries = lib.optionals connectorCfg.enable (
+    lib.filter (q: !(derivedWatchBackends ? ${q})) cfg.watch.issue.queries
+  );
+  watchIssueQueries =
+    if connectorCfg.enable then
+      lib.attrNames derivedWatchBackends
+    else
+      lib.unique cfg.watch.issue.queries;
 
   renderedWatch = lib.filterAttrs (_: v: v != { }) {
     pr = lib.optionalAttrs (cfg.watch.pr.queries != [ ]) { queries = cfg.watch.pr.queries; };
@@ -587,9 +600,14 @@ in
           from every issue backend's queries written as
           `{ expr = ...; watched = true; }` are rendered FIRST (with a
           watch.issue.backends entry each, naming the backend instance and its
-          `ownsChanges`), followed by the names listed here, de-duplicated; a
-          name listed here gets no backends entry. Empty with nothing derived
-          (the default) renders no watch.issue block.
+          `ownsChanges`), and NOTHING else: the rendered list is exactly the
+          queries marked watched, so it cannot drift from the backend's query
+          block. A name listed here that is not one of those derived names is
+          rejected by an assertion (declare it once, as
+          `{ expr = ...; watched = true; }` under the backend's queries). With
+          the pg-connector module disabled nothing is derived and this list
+          renders as written. Empty with nothing derived (the default)
+          renders no watch.issue block.
         '';
       };
       thread = {
@@ -1028,6 +1046,10 @@ in
       {
         assertion = lib.length derivedWatchPairs == lib.length (lib.attrNames derivedWatchBackends);
         message = "phillipgreenii.programs.pg-desk: a watched query name is declared under more than one pg-connector issue backend; watched query names MUST be unique across backends, because watch.issue.backends is keyed by query name.";
+      }
+      {
+        assertion = nonDerivedManualQueries == [ ];
+        message = "phillipgreenii.programs.pg-desk: watch.issue.queries lists ${lib.concatStringsSep ", " nonDerivedManualQueries}, which is not a watched query of any pg-connector issue backend. With phillipgreenii.programs.pg-connector enabled, watch.issue.queries is exactly the queries marked watched; declare each one once, as { expr = ...; watched = true; } under the backend's queries, and remove it from phillipgreenii.programs.pg-desk.watch.issue.queries.";
       }
     ];
 

@@ -250,7 +250,9 @@ func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config,
 // least one query, because that block is how a deployment says it wants issue
 // entities held, and `run issue` also fires for ticket keys that only appear in
 // PR text. The deployment's trigger therefore decides WHICH issues, and this
-// function never invents a query of its own.
+// function never invents a query of its own. watch.issue.queries lists only
+// watched queries, so an issue stored here because PR text named its key is
+// HELD but not watched: it stays silent and a PR change does not re-emit it.
 //
 // A `removed` change re-reads an issue the store already holds (so the row
 // reflects the status or assignee that took it out of the watched set) and is

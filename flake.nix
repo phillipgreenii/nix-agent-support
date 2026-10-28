@@ -16232,14 +16232,24 @@
               # { expr = ...; watched = true; } under an issue backend), with
               # owns_changes from pg-connector's ownsChanges (true for the Jira
               # daemon instance when jira.enable is set), so a deployment
-              # declares a watched query once. Pure module eval plus one tiny
-              # build that parses each rendered config.yaml.
+              # declares a watched query once. Docket pg2-2qyyh.5, packet P5-08:
+              # with the connector module enabled the rendered list is EXACTLY
+              # the derived watched names and a non-derived manual entry is
+              # rejected by an assertion; disabled, the manual list renders
+              # as written. Pure module eval plus one tiny build that parses
+              # each rendered config.yaml.
               test-pg-desk-watch-render =
                 let
                   r = import ./tests/pg-desk-watch-render.nix { inherit lib pkgs; };
                 in
                 assert r.mixed.failedAssertions == [ ];
                 assert r.collision.failedAssertions != [ ];
+                assert lib.length r.mixedWithManual.failedAssertions == 1;
+                assert lib.hasInfix "manual-demo-query" (lib.head r.mixedWithManual.failedAssertions);
+                assert lib.hasInfix "watched = true" (lib.head r.mixedWithManual.failedAssertions);
+                assert !(lib.hasInfix "watched-demo-query," (lib.head r.mixedWithManual.failedAssertions));
+                assert r.manualDerivedOnly.failedAssertions == [ ];
+                assert r.connectorOff.failedAssertions == [ ];
                 pkgs.runCommand "pg-desk-watch-render-ok"
                   {
                     nativeBuildInputs = [
@@ -16263,12 +16273,20 @@
                     ' >/dev/null || { echo "mixed: wrong watch block:" >&2; cat ${r.mixed.yaml} >&2; exit 1; }
                     ! grep -qE 'unwatched-demo|watched-demo-pr-query' ${r.mixed.yaml}
 
-                    # A manual name is kept after the derived ones, de-duplicated, and
-                    # gets no backends entry.
+                    # Exact-watched narrowing: a manual name that is not derived is
+                    # rejected by an assertion (naming it and telling the deployment
+                    # to declare it watched) and is not rendered; the derived names
+                    # are unchanged, with no backends entry for the manual one.
                     j ${r.mixedWithManual.yaml} | jq -e '
-                      .watch.issue.queries == ["watched-demo-other-query", "watched-demo-query", "manual-demo-query"]
+                      .watch.issue.queries == ["watched-demo-other-query", "watched-demo-query"]
                       and (.watch.issue.backends | keys) == ["watched-demo-other-query", "watched-demo-query"]
                     ' >/dev/null || { echo "mixedWithManual: wrong watch block:" >&2; cat ${r.mixedWithManual.yaml} >&2; exit 1; }
+                    ! grep -q 'manual-demo-query' ${r.mixedWithManual.yaml}
+
+                    # A manual name that is also derived is accepted and renders once.
+                    j ${r.manualDerivedOnly.yaml} | jq -e '
+                      .watch.issue.queries == ["watched-demo-other-query", "watched-demo-query"]
+                    ' >/dev/null || { echo "manualDerivedOnly: wrong watch block:" >&2; cat ${r.manualDerivedOnly.yaml} >&2; exit 1; }
 
                     # Connector module disabled: the manual list alone, no backends key.
                     j ${r.connectorOff.yaml} | jq -e '

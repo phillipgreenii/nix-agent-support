@@ -30,6 +30,9 @@ func init() {
 // through the generic entity pipeline, watch.issue.queries). They read the
 // issue's DueDate fact and the injected clock (View.Now), nothing else, so
 // they raise for exactly the issues the deployment's watch queries select.
+// watch.issue.queries lists only the queries declared watched, so an issue
+// that is held but not watched, or selected only by an unwatched query, gets
+// no due-date attention unless the deployment declares that query watched.
 //
 // The two are mutually exclusive: an issue is overdue once its due moment has
 // passed, and due soon only before that. A bare calendar date (Jira's

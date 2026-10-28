@@ -123,7 +123,11 @@ from configuration (`jira.in_progress_statuses`, matched case-insensitively).
 
 - **Due-date rules cover Jira issues and beads alike.** Both reach the desk as `issue` entities
   through the generic entity pipeline, and the rules read only the issue's due date and status, so
-  whose issues are watched is decided by `watch.issue.queries`, not by the rule. Jira supplies a
+  whose issues are watched is decided by `watch.issue.queries`, not by the rule. That list holds
+  exactly the queries declared `watched = true`, so an issue held but not watched (for example one
+  stored only because pull-request text named its ticket key) is silent and gets no due-date
+  attention, and neither does an issue selected only by an unwatched query unless the deployment
+  declares that query watched. Jira supplies a
   bare date and beads an instant. A bare date falls due at the END of that calendar day in the
   evaluating clock's zone, so an issue due today is `issue.due-soon` until the day ends. The
   `issue.due-soon` window is measured to that due moment. At the due moment itself the issue is

@@ -98,6 +98,13 @@ These keys and rules are what the deployment configures for that.
   measurement taken before the flow ships (how many `bd` processes stand behind one hydration), and a
   deployment MAY set another value. A zero or negative value is a load error naming the key.
 
+With the connector module enabled, the home module renders `watch.issue.queries` as exactly the queries
+the connector configuration marks `watched = true`, from the same declaration as the backend's query
+block, so the two cannot drift. A manual `watch.issue.queries` entry that is not one of them is rejected
+at evaluation with a message telling the deployment to declare it `watched = true` under the backend's
+queries (never silently dropped). With the connector module disabled nothing is derived and the manual
+list renders as written.
+
 Two other readers narrow with `watch.issue.queries`. An issue stored only because pull-request text
 named its ticket key is HELD but not watched, so it stays silent and a pull-request change no longer
 re-emits it. The due-date attention rules raise for exactly the issues the deployment's watch queries
