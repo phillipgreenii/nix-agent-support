@@ -41,3 +41,5 @@ deleteRules:
     uid: pg-conn-github-store-aside
   - orgId: 1
     uid: pg-conn-github-tracked-set
+  - orgId: 1
+    uid: pg-conn-github-unavailable-ratio

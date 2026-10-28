@@ -1,15 +1,17 @@
 # pg-connector-github unified-alerting rules (docket pg2-z5fax.6, Phase 4a): the
 # service levels of the daemon's design spec ("Observability > Service levels
-# and alerts"), as six Prometheus rules over the daemon's own metrics and one
+# and alerts"), as Prometheus rules over the daemon's own metrics and Loki rules (the
+# unavailable-ratio rule of pg2-4pfrkm among them) over its structured logs, in the first
+# design as six Prometheus rules over the daemon's own metrics and one
 # Loki rule over its structured log (daemon.log.jsonl), plus two Prometheus rules
 # added by the PR lane refactor (P8b-1): tracked-set size and governor backlog,
 # and no watched PRs while anchors are open (the latter also reads the pg-desk
 # open-anchor gauge, pg_desk_pr_open_anchors, so it is exempt from rule S6's
 # catalogue check, which covers pg_connector_github_* names only).
 #
-# This file sits BESIDE pr-github-alerts.yaml (the old backend's rules, which
-# stay until Phase 6b) and is registered by the darwin module
-# darwin/modules/pg-connector-github, not by this file.
+# This file is registered by the darwin module darwin/modules/pg-connector-github, not by
+# this file. The old backend's rules (pr-github-alerts.yaml) are retired (pg2-4pfrkm); its
+# deleteRules twin pr-github-alerts-delete.yaml remains.
 #
 # Metric names are the Prometheus names the OpenTelemetry collector produces
 # (dots to underscores, no _total, no unit suffix) and every one of them is
@@ -25,7 +27,7 @@
 # this daemon nor Prometheus holds. The histogram is on the dashboard and the
 # shadow report states the criterion.
 #
-# Shape notes (copied from the model files pr-github-alerts.yaml and
+# Shape notes (copied from the model files issue-jira-alerts.yaml and
 # packages/pg-router/grafana/alerting/alerts.yaml): condition C over refIds
 # A (the query), B (reduce, last), C (threshold); a Prometheus rule is
 # `datasourceUid: prometheus` with the boolean `instant: true`; a Loki rule is
@@ -470,3 +472,74 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # Unavailable ratio (pg2-4pfrkm): the share of the daemon's answered requests
+      # that failed as `unavailable` over a rolling hour. A call-budget kill (the
+      # per-op time limit hit while the host is starved), GitHub down, or `gh`
+      # failing all answer `unavailable`, and until this rule the daemon path had no
+      # alert for it: the retired pr-github rule pg-conn-pr-github-unavailable read a
+      # log stream that ended at the daemon cutover. Only the event log carries the
+      # per-op outcome (no metric has an error label), hence a Loki rule.
+      #
+      # Threshold, 5 percent (0.05), and why. Measured on the daemon after the
+      # cutover: 35 unavailable of 10742 ops (0.33 percent) over 6 days, and the
+      # pr-changes source 13.0 of 1865.5 (0.70 percent) over 5 days, the failures
+      # clustering in host-load spikes (load 50 to 387). 5 percent is about 15x the
+      # daemon's own baseline and 7x the worst observed source rate, so a load spike
+      # alone does not reach it, while a real regression (a per-op budget that no
+      # longer fits, GitHub or the network down) takes the ratio to tens of percent.
+      # The bar is a starting point and is revisited with data.
+      #
+      # Quiet-hour guard: the ratio is only reported while the denominator holds at
+      # least 50 requests in the hour (`and on() (... >= 50)`). Without it one failure
+      # among a handful of calls overnight would read as a huge ratio. Below 50 an
+      # hour the daemon is nearly idle, and daemon-down and the staleness rules speak
+      # for a daemon that is broken rather than quiet. `for: 15m` keeps one bad
+      # quarter hour of a spike from paging. Zero unavailable ops give an empty
+      # numerator, so the whole expression is empty: noDataState OK.
+      #
+      # Counted: kind=request rows of service_name pg-connector-github (the event
+      # log), error_code unavailable. Origin rows and the client log (its own
+      # service_name) never match. Behaviour (fires above the bar, quiet below it,
+      # quiet at low volume) is checked by check-loki-ratio-rule.sh over the fixtures
+      # in rule-tests/loki; it is exempt from probe escalation in nix-ziprecruiter
+      # like the other warning-level rules of this file.
+      - uid: pg-conn-github-unavailable-ratio
+        title: pg-connector-github unavailable ratio high
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github: over 5 percent of requests in the last hour failed as unavailable"
+          description: 'More than 5 percent of the requests the pg-connector-github daemon answered in the last hour (with at least 50 answered) failed with error_code unavailable: a per-op call budget is being exceeded (a killed gh or origin call, often under host load), or GitHub or the network is failing. The daemon baseline is about 0.3 percent. Inspect the failures with {service_name="pg-connector-github"} | json | kind="request" | error_code="unavailable" and read the op and error fields; check host load before raising a budget.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: '(sum(count_over_time({service_name="pg-connector-github"} | json | kind="request" | error_code="unavailable" [1h])) / sum(count_over_time({service_name="pg-connector-github"} | json | kind="request" [1h]))) and on() (sum(count_over_time({service_name="pg-connector-github"} | json | kind="request" [1h])) >= 50)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.05]

@@ -316,8 +316,10 @@ issue-comment pages. A `show` refused below the reserve spent nothing and logs 0
 (see the reserve paragraph below). `show`'s own `gh pr
 view` metadata read is built by gh, whose query cannot select `rateLimit`, so a `show` row's cost
 excludes that one read and is a lower bound.
-`packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
-`unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and
+The retired rules file `pr-github-alerts.yaml` (auth failure, sustained `unavailable`, budget under
+`rate_reserve_points`) is gone (bead `pg2-4pfrkm`): the stream ended at the daemon cutover, and
+`pr-github-alerts-delete.yaml` removes the provisioned rules. The daemon path is covered by
+`pg-conn-github-unavailable-ratio` in `pg-connector-github-alerts.yaml`. Writing the log is best effort and
 never changes an op's result.
 
 The `pg-connector-pr-github` PR list is deliberately cheap. Its batched GraphQL search selects the

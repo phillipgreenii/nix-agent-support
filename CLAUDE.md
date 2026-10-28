@@ -177,7 +177,9 @@ without a deployed daemon fires critical forever. While the daemon is not deploy
 file) instead, because Grafana keeps a file-provisioned rule live after its file is dropped
 (bead `pg2-susum`); structure rule S8 of `check-alert-structure.sh` pins its uids to the rule uids. The
 log sources and dashboard follow `observability.enable` alone. Checks:
-`test-pg-connector-github-darwin-module`, `test-pg-connector-github-alert-structure`. A new rule is NOT
+`test-pg-connector-github-darwin-module`, `test-pg-connector-github-alert-structure`. The tenth rule, `pg-conn-github-unavailable-ratio` (bead `pg2-4pfrkm`, a Loki ratio rule over `events.jsonl` with a 5 percent bar and a 50-request floor), is
+tested by `check-loki-ratio-rule.sh` inside `test-pg-connector-github-alert-rules`; the retired legacy
+`pg-conn-pr-github-*` rules are removed through `pr-github-alerts-delete.yaml`. A new rule is NOT
 escalated to a bead unless its uid is also registered with `pg-router-probe`
 (`docs/investigations/2026-10-19-pg-connector-github-daemon-down-alert.md`).
 

@@ -2,7 +2,7 @@
 # rules over the backend's OWN event log (packages/pg-connector/cmd/
 # pg-connector-thread-slack/internal/eventlog), shipped to Loki by the
 # logSources entry in darwin/modules/pg-connector-thread-slack/default.nix.
-# Sibling of pr-github-alerts.yaml (bead pg2-ph0o4).
+# Sibling of the retired pr-github-alerts.yaml (bead pg2-ph0o4).
 #
 # Why these two, and why log-derived: the backend is a one-shot process, so
 # Prometheus cannot scrape it, and before this file nothing alerted when its

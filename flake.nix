@@ -3299,21 +3299,18 @@
                   '';
 
               # darwin/modules/pg-connector-pr-github (bead pg2-ph0o4): registers the
-              # backend's own event log as a Loki log source and its LogQL alert
-              # rules, from its own nix module rather than through pg-connector's
-              # config. Same stub technique as test-pg-rescue-darwin-module above: a
+              # backend's own event log as a Loki log source, from its own nix
+              # module rather than through pg-connector's config. Its three LogQL
+              # alert rules are retired (bead pg2-4pfrkm): the module registers the
+              # deleteRules-only file pr-github-alerts-delete.yaml instead. Same stub technique as test-pg-rescue-darwin-module above: a
               # stub of the observability surface that mirrors the REAL logSources
               # submodule's defaults (path from the attribute name, serviceName =
               # name, format jsonl, errorAlert.enable) so the assertions prove the
               # module leaves `path`/`serviceName` at their defaults -- which the Go
               # side (eventlog.Path) and the alert selectors depend on -- and that it
               # switches the generic error-rate alert off. The runCommand then
-              # checks the alert file itself: three rules with unique <=40-char uids
-              # and Loki datasources, every query selecting the registered
-              # service_name and parsing as LogQL (logcli --stdin parses offline;
-              # "metrics Query: not supported" is the parse-success sentinel, same as
-              # test-pg-rescue-runs-dashboard), and every event field a rule reads
-              # still being a json tag on eventlog.Event.
+              # checks the delete file: apiVersion 1, no groups, exactly the three
+              # retired uids once each with orgId 1.
               test-pg-connector-pr-github-darwin-module =
                 let
                   logSourceSubmodule =
@@ -3367,7 +3364,7 @@
                   enabled = evalDarwin true;
                   disabled = evalDarwin false;
                   src = enabled.logSources.pg-connector-pr-github;
-                  alertsFile = ./packages/pg-connector/grafana/alerting/pr-github-alerts.yaml;
+                  alertsFile = ./packages/pg-connector/grafana/alerting/pr-github-alerts-delete.yaml;
                 in
                 assert disabled.logSources == { };
                 assert disabled.alertRuleFiles == [ ];
@@ -3381,15 +3378,10 @@
                     nativeBuildInputs = [
                       pkgs.yq-go
                       pkgs.gnugrep
-                      pkgs.grafana-loki
+                      pkgs.jq
                     ];
                     glob = src.path;
                     alerts = alertsFile;
-                    eventlogSrc = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog/eventlog.go;
-                    # error_code lives on the shared evlog.Base (bead pg2-kjdfi
-                    # moved the common event fields into pkg/eventlog), the
-                    # graphql_* / below_reserve fields on this backend's Event.
-                    sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
                   }
                   ''
                     export HOME="$TMPDIR"
@@ -3405,38 +3397,13 @@
                     matched="$(ls -d $pattern 2>/dev/null || true)"
                     [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
 
-                    # Alert file structure.
-                    [ "$(yq '.groups[0].rules | length' "$alerts")" = 3 ] || fail "want exactly 3 rules"
-                    [ "$(yq '.groups[0].folder' "$alerts")" = pg-connector ] || fail "folder is not pg-connector"
-                    uids="$(yq '.groups[0].rules[].uid' "$alerts")"
-                    [ "$(printf '%s\n' "$uids" | sort -u | wc -l)" = 3 ] || fail "uids are not unique"
-                    printf '%s\n' "$uids" | while read -r u; do
-                      [ "''${#u}" -le 40 ] || fail "uid $u exceeds Grafana's 40-char cap"
-                    done
-                    for want in pg-conn-pr-github-unauthenticated pg-conn-pr-github-unavailable pg-conn-pr-github-quota-low; do
-                      printf '%s\n' "$uids" | grep -qx "$want" || fail "missing rule $want"
-                    done
-                    [ "$(yq '[.groups[0].rules[] | select(.condition == "C" and .noDataState == "OK" and .data[0].datasourceUid == "loki" and .data[0].model.queryType == "instant")] | length' "$alerts")" = 3 ] \
-                      || fail "a rule is not a loki instant query with condition C and noDataState OK"
-
-                    # Every query selects the registered service_name and parses
-                    # as LogQL; the fields it reads are still json tags on
-                    # eventlog.Event.
-                    for i in 0 1 2; do
-                      e="$(yq ".groups[0].rules[$i].data[0].model.expr" "$alerts")"
-                      case "$e" in
-                        *'{service_name="pg-connector-pr-github"}'*) ;;
-                        *) fail "rule $i does not select the registered service_name: $e" ;;
-                      esac
-                      parsed="$(logcli query --stdin --quiet "$e" </dev/null 2>&1 | tail -n 1 || true)"
-                      case "$parsed" in
-                        *"metrics Query: not supported"*) ;;
-                        *) fail "rule $i does not parse as LogQL: $parsed" ;;
-                      esac
-                    done
-                    for field in error_code below_reserve graphql_headroom; do
-                      grep -q "json:\"$field[,\"]" "$eventlogSrc" "$sharedEventlogSrc" || fail "eventlog.Event has no json tag $field"
-                    done
+                    # Delete file structure: no rules left, only the three retired uids.
+                    [ "$(yq '.apiVersion' "$alerts")" = 1 ] || fail "apiVersion is not 1"
+                    [ "$(yq '.groups // "none"' "$alerts")" = none ] || fail "the delete file must have no groups key"
+                    got="$(yq '.deleteRules[].uid' "$alerts" | sort)"
+                    want="$(printf '%s\n' pg-conn-pr-github-quota-low pg-conn-pr-github-unauthenticated pg-conn-pr-github-unavailable)"
+                    [ "$got" = "$want" ] || fail "deleteRules uids are not exactly the three retired ones: $got"
+                    [ "$(yq '[.deleteRules[] | select(.orgId == 1)] | length' "$alerts")" = 3 ] || fail "a deleteRules entry lacks orgId 1"
                     touch $out
                   '';
 
@@ -6502,7 +6469,7 @@
                     touch "$out"
                   '';
 
-              # pg-connector-github: the PromQL behaviour of its six Prometheus alert rules
+              # pg-connector-github: the PromQL behaviour of its Prometheus alert rules
               # (docket pg2-z5fax.6). refId A of each rule listed in
               # packages/pg-connector/grafana/check-alert-rules.sh is wrapped as a Prometheus
               # alert and the cases under grafana/alerting/rule-tests/ run under
@@ -6517,12 +6484,24 @@
                       pkgs.yq-go
                       pkgs.prometheus.cli
                       pkgs.coreutils
+                      pkgs.gnused
+                      pkgs.gnugrep
+                      pkgs.gawk
+                      pkgs.grafana-loki
                     ];
                   }
                   ''
+                    export HOME="$TMPDIR"
                     bash ${./packages/pg-connector/grafana/check-alert-rules.sh} \
                       ${./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml} \
                       ${./packages/pg-connector/grafana/alerting/rule-tests}
+                    # The Loki unavailable-ratio rule (pg2-4pfrkm): its LogQL pipelines run over the
+                    # fixtures under rule-tests/loki, then the script's own mutant self-tests.
+                    ratio=${./packages/pg-connector/grafana/check-loki-ratio-rule.sh}
+                    alerts=${./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml}
+                    loki=${./packages/pg-connector/grafana/alerting/rule-tests/loki}
+                    bash "$ratio" "$alerts" "$loki" pg-conn-github-unavailable-ratio
+                    bash "$ratio" --self-test "$alerts" "$loki" pg-conn-github-unavailable-ratio
                     touch "$out"
                   '';
 

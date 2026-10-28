@@ -42,20 +42,24 @@ in
     # fields (time as the timestamp, lowercase level as the severity).
     #
     # errorAlert is switched off: the generic "log error rate high" rule would
-    # fire on the same error-level lines the bespoke rules below already
-    # cover (unauthenticated and unavailable are the two error levels), with
-    # a count-only threshold that cannot tell auth from quota apart, so each
-    # incident would page twice.
+    # fire on the same error-level lines (unauthenticated and unavailable are the
+    # two error levels) with a count-only threshold, and it has been the only
+    # alert for this stream since the bespoke rules were retired (below), so it
+    # stays off to keep a stray legacy call from paging on its own.
     phillipgreenii.observability.logSources.pg-connector-pr-github = {
       errorAlert.enable = false;
     };
 
-    # LogQL rules for the three named conditions: unauthenticated within 15m,
-    # sustained unavailable, GraphQL remaining below the rate reserve for
-    # 10m. Surfaces in the SwiftBar menu through pg-connector-alert-grafana
-    # with no menubar change (it lists every firing Grafana alert).
+    # The three bespoke LogQL rules (unauthenticated, unavailable, quota low)
+    # are RETIRED (bead pg2-4pfrkm): the backend's log stream ended at the
+    # pg-connector-github daemon cutover, so they were permanently NoData. The
+    # rules file is gone and this registers its deleteRules-only twin instead,
+    # because Grafana keeps a file-provisioned rule live after its file is
+    # dropped (same reason as darwin/modules/pg-connector-github, pg2-susum).
+    # The daemon's own rules (pg-connector-github-alerts.yaml) cover the live
+    # path, including pg-conn-github-unavailable-ratio.
     phillipgreenii.observability.alertRuleFiles = [
-      ../../../packages/pg-connector/grafana/alerting/pr-github-alerts.yaml
+      ../../../packages/pg-connector/grafana/alerting/pr-github-alerts-delete.yaml
     ];
   };
 }

@@ -9,24 +9,27 @@
 #
 # Every failure line starts with RULE-Sn so a mutant can assert the exact rule that fired.
 #
-#   S1  exactly the nine uids, each once, each at most 40 characters
+#   S1  exactly the ten uids, each once, each at most 40 characters
 #   S2  one group pg-connector-github in folder pg-connector, no folderUid key anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description, labels
 #       with exactly the one key severity; each Prometheus rule has a non-empty for
-#   S4  the Prometheus rules use datasourceUid prometheus (instant: true), the Loki rule uses
-#       loki with queryType: instant
+#   S4  the Prometheus rules use datasourceUid prometheus (instant: true), the two Loki rules
+#       (store-aside and unavailable-ratio) use loki with queryType: instant
 #   S5  daemon-down has noDataState Alerting, every other rule OK
 #   S6  every pg_connector_github_* token of an expression is a catalogued name (a histogram's
 #       _bucket/_sum/_count stripped first)
 #   S7  the Loki expression selects {service_name="pg-connector-github"}, names store_moved_aside
 #       and store_refused, and parses as LogQL offline
 #   S8  the deleteRules file (pg2-susum) is apiVersion 1, has no groups, and its deleteRules
-#       entries are exactly the nine uids of S1 (so, with S1, exactly the rule file's uids),
+#       entries are exactly the ten uids of S1 (so, with S1, exactly the rule file's uids),
 #       each once, each with orgId 1
 #   S9  the two PR lane rules of P8b-1: the tracked-set rule alerts on the ratio to the daemon's own
 #       limit gauge (guarded by `max(limit) > 0`, never a number copied into YAML) and reads the
 #       governor backlog; the no-watched-PRs rule reads the watched gauge and pg-desk's open-anchor
 #       gauge; both end with the SYSTEM_PAUSE guard
+#   S10 the unavailable-ratio rule (pg2-4pfrkm) selects {service_name="pg-connector-github"}, counts
+#       kind="request" rows and error_code="unavailable", guards the ratio with a request floor, and
+#       parses as LogQL offline (its behaviour is check-loki-ratio-rule.sh's)
 #
 # Exit codes: 0 consistent (self-test: real inputs pass and every mutant fails with exactly
 # its own rule), 1 a rule failed, 2 usage error or unreadable input or a missing tool.
@@ -61,6 +64,7 @@ done
 
 loki_uid="pg-conn-github-store-aside"
 tracked_uid="pg-conn-github-tracked-set"
+ratio_uid="pg-conn-github-unavailable-ratio"
 watched_uid="pg-conn-github-no-watched-prs"
 pause_guard=' unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
 down_uid="pg-conn-github-daemon-down"
@@ -72,7 +76,8 @@ pg-conn-github-query-stale
 pg-conn-github-settle-failing
 pg-conn-github-spend-over-cap
 pg-conn-github-store-aside
-pg-conn-github-tracked-set"
+pg-conn-github-tracked-set
+pg-conn-github-unavailable-ratio"
 
 # lint <alerts.yaml> <catalog> <alerts-delete.yaml>: prints RULE-Sn lines to stderr, returns 1
 # when any fired.
@@ -85,7 +90,7 @@ lint() {
   # S1
   got="$(jq -r '[.groups[]?.rules[]?.uid] | sort | .[]' <<<"$json")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S1: the rule uids are not exactly the nine expected ones, each once:" \
+    echo "RULE-S1: the rule uids are not exactly the ten expected ones, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -123,10 +128,10 @@ lint() {
   fi
 
   # S4
-  bad="$(jq -r --arg loki "$loki_uid" '
+  bad="$(jq -r --arg loki "$loki_uid" --arg ratio "$ratio_uid" '
     .groups[]?.rules[]? |
     select(
-      if .uid == $loki
+      if .uid == $loki or .uid == $ratio
       then (.data[0].datasourceUid != "loki" or .data[0].model.queryType != "instant")
       else (.data[0].datasourceUid != "prometheus" or .data[0].model.instant != true)
       end
@@ -192,6 +197,33 @@ lint() {
     ;;
   esac
 
+  # S10
+  expr="$(jq -r --arg uid "$ratio_uid" '.groups[]?.rules[]? | select(.uid == $uid) | .data[0].model.expr // empty' <<<"$json")"
+  for want in '{service_name="pg-connector-github"}' 'kind="request"' 'error_code="unavailable"' ') and on() (sum(count_over_time('; do
+    case "$expr" in
+    *"$want"*) ;;
+    *)
+      echo "RULE-S10: $ratio_uid: the expression lacks: $want" >&2
+      status=1
+      ;;
+    esac
+  done
+  case "$expr" in
+  *' >= '*) ;;
+  *)
+    echo "RULE-S10: $ratio_uid: the expression has no request-floor guard (>= N)" >&2
+    status=1
+    ;;
+  esac
+  parsed="$(HOME="${TMPDIR:-/tmp}" logcli query --stdin --quiet "$expr" </dev/null 2>&1 | tail -n 1 || true)"
+  case "$parsed" in
+  *"metrics Query: not supported"*) ;;
+  *)
+    echo "RULE-S10: $ratio_uid: the expression does not parse as LogQL: $parsed" >&2
+    status=1
+    ;;
+  esac
+
   # S9
   local uid
   for uid in "$tracked_uid" "$watched_uid"; do
@@ -229,7 +261,7 @@ lint() {
   fi
   got="$(jq -r '[.deleteRules[]?.uid] | sort | .[]' <<<"$deljson")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S8: the deleteRules uids are not exactly the nine rule uids, each once:" \
+    echo "RULE-S8: the deleteRules uids are not exactly the ten rule uids, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -319,6 +351,14 @@ mutant S7 "a Loki expression that no longer names store_refused" \
   "($(rule_of "$loki_uid") | .data[0].model.expr) |= sub(\"store_refused\"; \"store_other\")" ""
 mutant S7 "a Loki expression that does not parse" \
   "($(rule_of "$loki_uid") | .data[0].model.expr) |= sub(\"\\[10m\\]\"; \"[10m\")" ""
+mutant S10 "the ratio rule without its request-floor guard" \
+  "($(rule_of "$ratio_uid") | .data[0].model.expr) |= sub(\" and on[(][)] .*\$\"; \"\")" ""
+mutant S10 "the ratio rule that no longer counts only unavailable rows" \
+  "($(rule_of "$ratio_uid") | .data[0].model.expr) |= sub(\"error_code=.unavailable.\"; \"error_code=\\\"other\\\"\")" ""
+mutant S4 "the ratio rule on the Prometheus datasource" \
+  "($(rule_of "$ratio_uid") | .data[0].datasourceUid) = \"prometheus\"" ""
+mutant S5 "the ratio rule at noDataState Alerting" \
+  "($(rule_of "$ratio_uid") | .noDataState) = \"Alerting\"" ""
 mutant S5 "the no-watched-PRs rule at noDataState Alerting" \
   "($(rule_of "$watched_uid") | .noDataState) = \"Alerting\"" ""
 mutant S9 "the tracked-set rule without its limit guard (a ratio over a missing limit)" \

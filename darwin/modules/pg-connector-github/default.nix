@@ -95,10 +95,10 @@ in
         };
       };
 
-      # Group pg-connector-github, folder pg-connector: six Prometheus rules over
-      # the daemon's own metrics and one Loki rule over daemon.log.jsonl.
-      # pr-github-alerts.yaml is deliberately NOT listed (it belongs to the old
-      # module). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
+      # Group pg-connector-github, folder pg-connector: Prometheus rules over the
+      # daemon's own metrics and two Loki rules over its logs (store-aside, and
+      # unavailable-ratio over events.jsonl). pr-github-alerts.yaml is gone (its
+      # rules are retired, pr-github-alerts-delete.yaml belongs to the old module). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
       # which lists every firing Grafana alert. Listed only while the daemon is
       # deployed (see the header comment); otherwise the deleteRules file below.
       alertRuleFiles =

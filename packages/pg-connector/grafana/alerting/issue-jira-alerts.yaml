@@ -2,7 +2,7 @@
 # over the backend's OWN event log (packages/pg-connector/cmd/
 # pg-connector-issue-jira/internal/eventlog), shipped to Loki by the logSources
 # entry in darwin/modules/pg-connector-issue-jira/default.nix. Sibling of
-# pr-github-alerts.yaml (bead pg2-ph0o4) and thread-slack-alerts.yaml (bead
+# the retired pr-github-alerts.yaml (bead pg2-ph0o4) and thread-slack-alerts.yaml (bead
 # pg2-kjdfi).
 #
 # Why these three, and why log-derived: the backend is a one-shot process, so
