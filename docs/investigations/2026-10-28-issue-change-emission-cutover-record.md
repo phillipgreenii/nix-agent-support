@@ -370,4 +370,89 @@ remote service), any `bd` write verb, any configuration edit.
 
 ## Post-cutover
 
-Appended by the verify packet: counts per backend and the real-change rate under the fields_changed rule, by the method above.
+Appended by the verify packet on 2026-10-28, between 17:02Z and 17:37Z (UTC). Counts and results only:
+no identifier of an organisation, tracker instance, bead, issue or person appears here, and the scratch
+beads of the live checks are named by role. Every command was read-only except the state changes of
+checks 4 and 5 (one scratch bead in each tracker, created, edited and closed).
+
+### Release time, and what the pre-cutover record got wrong
+
+- Release time, read from the newest applied-generation record (the `applied_at` field of the newest
+  file under the `pn-workspace/applied/` state directory): **2026-10-28T15:51:47Z**. The two deferred
+  follow-up beads count from it.
+- The beads baseline markers in the pg-desk store are earlier than that record. The baseline of each
+  of the three watched beads queries began at 11:32:54Z and finished at 11:38:07Z (meta keys
+  `change_flow.baseline_open.<query>` and `change_flow.baseline.<query>`). The cutover build was
+  therefore already running at 11:32Z (the old router process also started at 11:32:26Z); the
+  15:51:47Z record is a second apply (router build `562fa16c`, the same installed pg-desk build
+  `a97c6b50`). The measurements of sections 1 to 5 were consequently taken AFTER the pg-desk cutover,
+  not before it, which is why "Read this first" found no flood: the last `reconcile` row in
+  `change_log` is at 11:29:00Z, 3 min 54 s before the first baseline poll began. The 7-day follow-up
+  counts from the later time (the conservative choice).
+
+### Checks, each with its command
+
+| #   | Check                                                  | Command                                                                                                                                                                   | Result                                                                                                                                                                                                                                                      |
+| --- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Issue change-flow gates                                | `pg-desk doctor`                                                                                                                                                          | `dispatch check: ok`, `issue served by two backends: ok`, `backend without watched query: ok`, `feed cursor expired: ok`, `failed ingest age: ok`, `baseline open: ok`; all 7 issue watched queries `ok`. The command exits non-zero for one unrelated gate |
+| 2   | Baseline marker, and the baselines wrote no change row | `sqlite3 -readonly <store> "select key, value from meta where key like 'change_flow.baseline%'"` and `select count(*), max(seq) from change_log where ... and at between` | markers present for all 3 beads queries (11:38:07Z); 0 issue rows with `at` from 11:32:54Z to 11:38:08Z; max issue seq before it 52787 (11:29:00Z); 0 `reconcile` rows after seq 52787                                                                      |
+| 3   | Steady state of the issue source                       | `pg-router run-query --json query:<the issue source query>` with `PG_ROUTER_CONFIG` set to the daemon's config file                                                       | `{"total":0,"matches":[]}` at 17:04:17Z; the consumer of the issue feed shows `lag=0` (cursor equal to the newest issue seq) in `pg-desk status`                                                                                                            |
+| 4   | One edit of a watched bead: one event, one decider run | `bd -C <watched tracker> update <scratch> --priority 3`, then `grep <scratch> queue.jsonl` and the router metrics endpoint                                                | one `change_log` row (`["fields_changed"]`, origin `pg-connector`, 15 s after the edit); one `enqueue` and one `accept` by the issue decider in the queue log; `pg_router_enqueued_total` 20 to 21 and `pg_router_throughput_total` 20 to 21                |
+| 5   | An edit of an unwatched bead: none                     | the same create, `update --priority 3`, `comment` and `close` on a scratch bead of the tracker that has no watched query                                                  | 0 `change_log` rows, 0 `entity` rows and 0 queue-log records for it, read 11 min after the edit and 6 min after the close (the watched tracker's changes surfaced 15 s to 5 min after each edit)                                                            |
+| 6   | A PR linked to an unwatched issue                      | not run                                                                                                                                                                   | No linked-PR change to an unwatched issue occurred in the window: not observed                                                                                                                                                                              |
+
+Notes on the checks:
+
+- Check 1: the one failing gate is the focus gate "unminted selections" (the PR lane is still in plan
+  mode). It is outside the issue cutover and expected until the PR lane is applied. Every issue
+  change-flow gate is green, including the three the packet names.
+- Check 4, the whole life of the watched scratch bead: its creation produced one `added` row and one
+  `issue.changed` event (decider accept 3.2 s after the enqueue), the edit one row and one event, its
+  close one `["closed","status_changed"]` row. **A comment alone yields none.** The first edit tried
+  was `bd comment`, which does not change the bead's `updated_at` and so not its listing fingerprint:
+  no row appeared in 13 minutes, and the check was repeated with a field edit. A later reader SHOULD
+  NOT use a comment as the probe edit.
+
+### Counts per backend (read at 17:30Z)
+
+Command: `sqlite3 -readonly <store> "select backend, active, count(*), sum(watched=1) from entity where entity_type='issue' group by 1,2"`.
+
+| Backend               | Active | Watched flag set on the active | Inactive rows |
+| --------------------- | ------ | ------------------------------ | ------------- |
+| Primary beads backend | 453    | 453                            | 61            |
+| Jira backend          | 191    | 191                            | 13            |
+| Rows with no backend  | 0      | 0                              | 3             |
+| Total                 | 644    | 644                            | 77            |
+
+Against section 1: the beads counts are unchanged; the Jira active count is 191 (192 before) and its
+inactive count 13 (12 before), one Jira issue having left its queries.
+
+### Real-change rate under the `fields_changed` rule: interim figures, not a daily rate
+
+The method of section 5 needs a full day past the first pass of the release, so no per-day rate is
+claimed here; the verify follow-up for the 7 days owns it. The pieces measured now:
+
+- First pass: the burst written from 12:12:59Z to 12:59Z was 362 rows from origin `pg-desk` (196
+  `fields_changed`, 166 `link_changed`) plus 3 from the connector. It is excluded from the rate below.
+- Rows in `change_log` that are not `reconcile`, from 13:00:00Z to 17:30:13Z (4.5036 h, the window after
+  the burst): 39 rows, of which 3 belong to the watched scratch bead (excluded), so 36 rows, which is
+  36 / 4.5036 = **7.99 an hour**. Rows with `kinds = '["reconcile"]'` after seq 52787: **0**.
+- Hydration counters (`change_flow.hydrations.issue`, `change_flow.hydration_failures.issue`): 15,169
+  and 212 at 15:52:40Z, 15,177 and 213 at 17:30Z, a delta of 8 hydrations and 1 failure in 1.6222 h
+  (1 h 37 min 20 s), which is 8 / 1.6222 = 4.9 an hour.
+- Router side: `pg_router_enqueued_total{type="issue.changed"}` was 14 at 17:04:47Z and 22 at 17:36:06Z.
+  The 8 events between them include the 3 of the scratch bead, leaving 5 in 0.5219 h (31 min 19 s),
+  5 / 0.5219 = 9.6 an hour: the same order as the 7.99 an hour above, well inside one order of
+  magnitude, which is the criterion the 7-day follow-up checks over the whole window.
+- `pg_router_throughput_total{role="issue-decider",type="issue.changed"}` equals the enqueued total (22
+  and 22), and `pg-router status --json` shows no `issue.changed` entry in `queues` (depth 0): nothing
+  is queued behind the decider, and the 13(e) wait is still 0.
+
+### Follow-ups and daemon state
+
+Two deferred follow-up beads carry the events that happen on their own schedule: the 7-day success
+criterion (deferred to 2026-11-04T15:51:47Z, seven days after the release record) and the reconcile
+backlog drain (deferred to 2026-10-31T12:51:47Z, the release record plus the roughly 69 hours the
+design measured; this record's own reading on 2026-10-28 was depth 0, so it may close on first look).
+At the end of the checks `com.phillipg.pg-router-daemon` is running (a process id present, last exit
+status 0) and `pg-router gate list --json` is `[]`; nothing was paused or resumed.
