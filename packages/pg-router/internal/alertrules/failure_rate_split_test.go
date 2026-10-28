@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router/internal/metrics"
+	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 )
 
 // The failure-rate alert is split by cause (pg2-irowq): budget stops get their
@@ -15,7 +16,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|dispatch-retry|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -102,8 +103,8 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
 	// the handler's session-in-flight decline (pg2-qaeb8), routine
 	// backpressure like at-capacity. Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, usage-limit, launch-failed, session-in-flight and skipped-*: %q", got)
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|dispatch-retry|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, upstream-unavailable, dispatch-retry, usage-limit, launch-failed, session-in-flight and skipped-*: %q", got)
 	}
 	// docket pg2-12gr4.8: launch-failed (a ccpool session that failed before it was
 	// ready, a fault decline) is excluded in the rule's expr AND its description, and
@@ -233,6 +234,9 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"skipped-pr-merged":          true,
 		"usage-limit":                true, // pg2-e0imq: an external usage/spend limit or API outage
 		"upstream-unavailable":       true, // pg2-8o8x9d: a router-retried class-unavailable handler error
+		"dispatch-retry":             true, // pg2-f1d4mk: the class=declined hand-back of that re-run
+		"dispatch-retry2":            false,
+		"dispatch":                   false,
 		"session-in-flight":          true, // pg2-qaeb8: routine backpressure
 		"launch-failed":              true, // docket pg2-12gr4.8: covered by the role-progress rule
 		"launch-failed2":             false,
@@ -308,5 +312,53 @@ func TestResidualExcludesUpstreamUnavailable(t *testing.T) {
 	r := ruleBlock(t, "pg-router-failure-rate")
 	if !strings.Contains(r, "reason=upstream-unavailable") || !strings.Contains(r, "pg-desk-pr-lane-failure-rate") {
 		t.Error("residual annotation must name the upstream-unavailable exclusion and pg-desk-pr-lane-failure-rate")
+	}
+}
+
+// pg2-f1d4mk (completes pg2-8o8x9d): the router hands a re-run attempt back to the
+// queue as class=declined reason=dispatch-retry (DEC-RETRY-2). The failed attempt is
+// already excluded as upstream-unavailable, so the hand-back is excluded with it, or a
+// retried-and-recovered failure still pages. Only that exact reason is excluded: every
+// other declined reason (command-busy, capacity-unknown) keeps paging. The exclusion
+// matches the orchestrator's constant, not a retyped literal. The promtool fire /
+// no-fire cases live in rule-tests/pg-router-failure-rate.test.yaml.
+func TestResidualExcludesDispatchRetry(t *testing.T) {
+	if orchestrator.DeclineDetailDispatchRetry != "dispatch-retry" {
+		t.Fatalf("DeclineDetailDispatchRetry = %q, the rule pins dispatch-retry", orchestrator.DeclineDetailDispatchRetry)
+	}
+	m := regexp.MustCompile(`reason!~"([^"]+)"`).FindStringSubmatch(ruleExpr(t, ruleBlock(t, "pg-router-failure-rate")))
+	if m == nil {
+		t.Fatal("no reason!~ matcher in the live residual expr")
+	}
+	re := regexp.MustCompile("^(?:" + m[1] + ")$")
+	if !re.MatchString(orchestrator.DeclineDetailDispatchRetry) {
+		t.Errorf("the residual must exclude reason %q", orchestrator.DeclineDetailDispatchRetry)
+	}
+	for reason, wantExcluded := range map[string]bool{
+		"command-busy":       false,
+		"capacity-unknown":   false,
+		"dispatch-retry2":    false,
+		"pre-dispatch-retry": false,
+		"dispatch":           false,
+		"retry":              false,
+		"":                   false,
+	} {
+		if got := re.MatchString(reason); got != wantExcluded {
+			t.Errorf("residual excludes reason %q = %v, want %v", reason, got, wantExcluded)
+		}
+	}
+	// No alert of its own: only the residual's matcher may name the reason.
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range regexp.MustCompile(`(?m)^\s*expr: (.+)$`).FindAllStringSubmatch(string(b), -1) {
+		if strings.Contains(e[1], "dispatch-retry") && e[1] != wantResidualExpr {
+			t.Errorf("only the residual's exclusion may mention dispatch-retry, got expr %q", e[1])
+		}
+	}
+	r := ruleBlock(t, "pg-router-failure-rate")
+	if !strings.Contains(r, "reason=dispatch-retry") || !strings.Contains(r, "pg-desk-pr-lane-failure-rate") {
+		t.Error("residual annotation must name the dispatch-retry exclusion and pg-desk-pr-lane-failure-rate")
 	}
 }

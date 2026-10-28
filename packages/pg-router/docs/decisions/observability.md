@@ -188,6 +188,24 @@ whose retry window has passed) is excluded as well; those lost deliveries are vi
 the lane rule and the outcome alerts. Same bounds as above: the reason is a fixed constant and `role`
 stays config-bounded.
 
+**Amended** (agent decision, reversible, the operator may overturn it; bead `pg2-f1d4mk`, from the
+`pg2-21lxtd` triage; completes the `pg2-8o8x9d` decision, `pg2-hk1sn` option c). The residual rule
+also excludes `reason="dispatch-retry"`. Why: the router counts each retry of a transient failure
+twice. The failed attempt is counted as `class="handler-error"` with `reason="upstream-unavailable"`
+(excluded above), and the re-run hand-back to the queue is counted as `class="declined"` with
+`reason="dispatch-retry"` (`DEC-RETRY-2`), which was NOT excluded, so a retried-and-recovered failure
+still paged (2026-10-28: five `pr-change` failures between 12:16Z and 12:29Z, each recovered on its
+first re-run, five series of each kind, and the second one fired the alert). The reason is attached
+only by that hand-back, so no other declined reason is clipped: a `command-busy` or
+`capacity-unknown` decline keeps paging. **No burst rule of its own**, like `upstream-unavailable`: a
+sustained PR-lane failure still pages through `pg-desk-pr-lane-failure-rate`. The count stays visible
+as `pg_router_failures_total{class="declined",reason="dispatch-retry"}`. **Accepted limitation:** the
+reason is set per hand-back, so a hand-back for a failure that is not class `unavailable` (a `killed`
+or `deadline` failure the router also re-runs) is excluded as well; the failed attempt of such a
+failure keeps its own disposition (`upstream-killed` when it carries the sentinel, otherwise it pages the
+residual rule). Same bounds as
+above: the reason is a fixed constant and `role` stays config-bounded.
+
 **Amended** (operator ruling A, Phillip, 2026-10-05; bead `pg2-vn4jb`). The budget-stop rule
 (`pg-router-budget-stops`) is **repeat-only**: it pages when a role records **2 or more**
 `reason="budget-exceeded"` handler errors in a 1-hour window

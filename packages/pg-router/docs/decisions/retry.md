@@ -76,6 +76,11 @@ narrow, **opt-in** exception, in the same spirit as `DEC-OBS-3`'s:
   queries and alerts spell it `pg_router_dispatch_retries_total`. Every failed attempt is still
   counted as a `handler-error` failure, and the decline is visible as
   `declined` with reason `dispatch-retry`.
+  The residual alert `pg-router-failure-rate` excludes `reason="dispatch-retry"` (bead `pg2-f1d4mk`,
+  the `DEC-OBS-3` amendment in `observability.md`), as it excludes `upstream-unavailable` for the failed
+  attempt itself: a failure that is re-run and recovers is one event, not two pages. The series stays
+  visible as `pg_router_failures_total{class="declined",reason="dispatch-retry"}`, and a sustained
+  failure still pages through the lane rule.
 - **Only effective with a retry window.** An event with no `expiresAt` is born expired
   (`INV-EVT-1`), so its single attempt is also its last and no re-run is possible: a producer whose
   role opts in MUST stamp a future `expiresAt` on its events. For a pull source that is a command
