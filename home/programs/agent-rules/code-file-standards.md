@@ -147,6 +147,25 @@ If a test needs something the library lacks, it MUST extend the library, not byp
 predates this rule MAY keep its hand-rolled setup until the file is next changed; at that point it
 MUST be migrated.
 
+Exemption: scenario `setup.sh` scripts of the `pn` smoke tier (`phillipg-nix-repo-base`,
+`modules/pn/internal/workspace/smoke/scenarios/*/setup.sh`; operator-reversible agent decision b+
+recorded on `pg2-km0jx`, applied by `pg2-wsvch`). They MAY keep their hand-written `git init`,
+`git clone` and `git config`. Reason: a `setup.sh` is not a Go test; it only ever runs inside the
+smoke runner, as `bash setup.sh` with the environment from `buildScrubbedEnv` (throwaway `HOME`,
+`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` at `/dev/null`, fixed identity), and migrating 44 scripts
+would add a second fixture mechanism without closing a leak that environment does not already
+close. The exemption holds only while ALL of these hold:
+
+- `buildScrubbedEnv` MUST strip the whole GIT_DIR family (`GIT_DIR`, `GIT_WORK_TREE`,
+  `GIT_INDEX_FILE`, `GIT_CEILING_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_PREFIX`,
+  `GIT_OBJECT_DIRECTORY`) on every call, so a variable set with `t.Setenv` after `TestMain` cannot
+  reach a script;
+- a test MUST prove that (`TestSmoke_ScrubbedEnvStripsGitDirFamilyAfterTestMain`);
+- the smoke package's own Go code MUST NOT run git outside `x/gitfixture`/`x/gitclient`.
+
+The exemption covers nothing else: any new Go test in that package, and any other `setup.sh`-style
+script outside the smoke runner, follows the rule above.
+
 Why this is a hard rule: hook environments (a `pre-commit` run, a linked worktree) export
 `GIT_DIR`/`GIT_INDEX_FILE` pointing at the OUTER repository. A fixture `git init` that inherits
 them writes its temp path into the canonical clone's `.git/config` as `core.worktree`; the temp
