@@ -87,25 +87,6 @@ func TestDefaultVerifyRerunsTheOriginalCommand(t *testing.T) {
 	}
 }
 
-func TestVerifyTimeoutFailsTheAttempt(t *testing.T) {
-	dir := t.TempDir()
-	pidFile := filepath.Join(dir, "pid")
-	e := newE2E(t, "", []hd{{name: "fixer", argv: helperArgv("result", "outcome=resolved"), timeout: "3s"}}, chainOf("fixer"))
-	start := time.Now()
-	code, _, _ := e.wrap("fixer", helperArgv("exit", "code=4"), "--verify", helperShell("sleep", "started="+pidFile, "secs=60"))
-	if time.Since(start) > 10*time.Second {
-		t.Errorf("verify was not bounded: %v", time.Since(start))
-	}
-	a := e.onDisk().Attempts[0]
-	if code != 4 || a.Outcome != contract.Failed || a.Reason != "resolved → verify timed out after 3s" {
-		t.Errorf("exit=%d attempt=%+v", code, a)
-	}
-	pid, _ := strconv.Atoi(waitForFile(t, pidFile))
-	if !eventuallyDead(pid) {
-		t.Errorf("the timed-out verify %d is still alive", pid)
-	}
-}
-
 func TestVerifyEnvironmentOutputAndStdout(t *testing.T) {
 	dir := t.TempDir()
 	e := newE2E(t, "", []hd{result("fixer", "resolved")}, chainOf("fixer"))

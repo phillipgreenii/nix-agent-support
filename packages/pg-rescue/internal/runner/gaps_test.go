@@ -68,24 +68,6 @@ func TestSignalAfterTheLastHandlerIsStillAnInterrupt(t *testing.T) {
 	}
 }
 
-func TestTheFirstSignalWins(t *testing.T) {
-	dir := t.TempDir()
-	started := filepath.Join(dir, "started")
-	e := newE2E(t, "", []hd{result("h", "declined")}, chainOf("h"))
-	e.exec.Signals = make(chan os.Signal, 8)
-	done := make(chan int, 1)
-	go func() {
-		c, _, _ := e.wrap("h", helperArgv("ignore-term", "secs=2", "started="+started))
-		done <- c
-	}()
-	waitForFile(t, started)
-	e.exec.Signals <- syscall.SIGINT
-	e.exec.Signals <- syscall.SIGTERM
-	if c := <-done; c != 130 || e.result().Interrupted.Signal != syscall.SIGINT {
-		t.Errorf("exit=%d interruption=%+v; the first signal (INT) decides", c, e.result().Interrupted)
-	}
-}
-
 func TestSignalWhileReadingStdin(t *testing.T) {
 	e := newE2E(t, "", []hd{result("h", "declined")}, chainOf("h"))
 	pr, pw, err := os.Pipe()
@@ -115,17 +97,6 @@ func TestCommandAndVerifyStayInTheWrappersProcessGroup(t *testing.T) {
 		if r.Pgid != r.ParentPgid || r.Pgid == r.Pid {
 			t.Errorf("%s: pid=%d pgid=%d parent pgid=%d; it must stay in the wrapper's group", f, r.Pid, r.Pgid, r.ParentPgid)
 		}
-	}
-}
-
-func TestCommandOutputThatArrivesAfterItExitsIsStillCaptured(t *testing.T) {
-	// The command leaves a child holding its stdout; like a shell pipeline the
-	// wrapper keeps reading until the pipe closes.
-	e := newE2E(t, "", []hd{result("d", "declined")}, chainOf("d"))
-	start := time.Now()
-	code, stdout, _ := e.wrap("d", helperArgv("grandchild", "hold=1", "child=late", "ms=900", "text=LATE-TEXT\n", "code=1"))
-	if code != 1 || stdout != "LATE-TEXT\n" || time.Since(start) < 800*time.Millisecond {
-		t.Errorf("exit=%d stdout=%q after %v", code, stdout, time.Since(start))
 	}
 }
 

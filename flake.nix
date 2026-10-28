@@ -6932,22 +6932,82 @@
               # superset of pg-rescue-go-tests (mkGoTest takes no
               # subPackages, so `-tags integration` re-runs the untagged
               # suites); the plain check stays the fast gate.
-              pg-rescue-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-rescue-integration-tests";
-                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
-                gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
-                testDeps = [
-                  pkgs.bash
-                  pkgs.git
-                  pkgs.jq
-                  pkgs.pg-rescue
-                  pkgs.pg-rescue-flake-lock-conflict
-                ];
-                testFlags = [
-                  "-tags"
-                  "integration"
-                ];
-              };
+              #
+              # Gating guard (bead pg2-pxmq64, ADR 0111 and ADR 0024, shaped like
+              # pg-connector-integration-tests-gating): the five wall-clock-bound
+              # end-to-end tests of internal/runner (TestDisplayGolden,
+              # TestVerifyTimeoutFailsTheAttempt, TestTheFirstSignalWins,
+              # TestCommandOutputThatArrivesAfterItExitsIsStillCaptured,
+              # TestHandlerTimeoutIsTermThenKill) live in `integration`-tagged files
+              # and run in no other gate, so they MUST NOT silently stop running.
+              # Before the suite runs, the buildPhase (1) lists each tagged package
+              # with and without the tag and fails when the tag moves nothing, when
+              # one of the five is missing from the tagged listing or present in
+              # the default one; (2) vets the module with and without the tag; then
+              # runs the whole module under `-tags integration -race -v` and fails
+              # when any tagged-only test, the five included, has no `--- PASS`
+              # line (skipped or not run). The guard is part of this check, not a
+              # sibling check, so building this check is the only way to run it.
+              pg-rescue-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-rescue-integration-tests";
+                  src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                  gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
+                  testDeps = [
+                    pkgs.bash
+                    pkgs.git
+                    pkgs.jq
+                    pkgs.pg-rescue
+                    pkgs.pg-rescue-flake-lock-conflict
+                  ];
+                  testFlags = [
+                    "-tags"
+                    "integration"
+                  ];
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      fail() { echo "pg-rescue-integration-tests: $*" >&2; exit 1; }
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | grep -v '^./vendor/' | xargs -n1 dirname | sort -u)
+                      [ -n "$pkgs" ] || fail "no test file carries //go:build integration"
+                      expected="TestDisplayGolden TestVerifyTimeoutFailsTheAttempt TestTheFirstSignalWins TestCommandOutputThatArrivesAfterItExitsIsStillCaptured TestHandlerTimeoutIsTermThenKill"
+                      only=""
+                      for dir in $pkgs; do
+                        # The listings go to variables first: `grep -q` closing the
+                        # pipe early would fail a pipefail pipeline on SIGPIPE.
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                        [ -n "$names" ] || fail "$dir: the tagged build lists no test the default build lacks; the tag moves nothing"
+                        only="$only $names"
+                        if [ "$dir" = "./internal/runner" ]; then
+                          for t in $expected; do
+                            echo "$tagged" | grep -qx "$t" || fail "$dir: the tagged build does not list $t"
+                            echo "$plain" | grep -qx "$t" && fail "$dir: the default build lists $t; it must stay behind the tag"
+                          done
+                        fi
+                      done
+                      case " $pkgs " in *" ./internal/runner "*) ;; *) fail "./internal/runner has no integration-tagged file" ;; esac
+                      go vet ./... || fail "go vet of the default build failed"
+                      go vet -tags integration ./... || fail "go vet of the integration build failed"
+                      log="$TMPDIR/integration.log"
+                      if ! go test -tags integration -race -count=1 -v ./... > "$log" 2>&1; then
+                        cat "$log"
+                        fail "go test -tags integration failed"
+                      fi
+                      grep -E '^(ok|FAIL|---|panic)' "$log" | grep -v '^--- PASS' || true
+                      total=0
+                      for t in $only; do
+                        grep -q -- "^--- PASS: $t " "$log" || { cat "$log"; fail "$t did not report PASS (skipped or not run)"; }
+                        total=$((total + 1))
+                      done
+                      echo "pg-rescue-integration-tests: $total integration-only tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line; both builds vet clean"
+                      runHook postBuild
+                    '';
+                  });
 
               # T-14 enforcement, mechanical rather than aspirational: the
               # pg-ccaudit plugin MUST NOT ship a hooks manifest.

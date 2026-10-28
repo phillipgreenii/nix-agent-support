@@ -266,43 +266,6 @@ func TestHandlerKilledBySignalIsFailed(t *testing.T) {
 	}
 }
 
-func TestHandlerTimeoutIsTermThenKill(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		argv  []string
-		limit time.Duration
-	}{
-		{"term is enough", helperArgv("sleep", "secs=60", "started={pid}"), 5 * time.Second},
-		{"ignores term: killed after the grace", helperArgv("ignore-term", "secs=60", "started={pid}"), 5 * time.Second},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			pidFile := filepath.Join(dir, "pid")
-			argv := make([]string, len(c.argv))
-			for i, a := range c.argv {
-				argv[i] = strings.ReplaceAll(a, "{pid}", pidFile)
-			}
-			e := newE2E(t, "", []hd{{name: "slow", argv: argv, timeout: "300ms"}, result("next", "declined")}, chainOf("slow", "next"))
-			start := time.Now()
-			code, _, _ := e.wrap("slow,next", helperArgv("exit", "code=1"))
-			if time.Since(start) > c.limit {
-				t.Errorf("took %v", time.Since(start))
-			}
-			atts := e.onDisk().Attempts
-			if code != 1 || len(atts) != 2 {
-				t.Fatalf("exit=%d attempts=%+v", code, atts)
-			}
-			if a := atts[0]; a.Outcome != contract.Failed || a.Reason != "timed out after 300ms" || a.Exit != -1 {
-				t.Errorf("attempt = %+v", a)
-			}
-			pid, _ := strconv.Atoi(waitForFile(t, pidFile))
-			if !eventuallyDead(pid) {
-				t.Errorf("the timed-out handler %d is still alive", pid)
-			}
-		})
-	}
-}
-
 func TestGrandchildrenAreKilledWhenTheHandlerExits(t *testing.T) {
 	for _, hold := range []string{"0", "1"} {
 		t.Run("hold="+hold, func(t *testing.T) {

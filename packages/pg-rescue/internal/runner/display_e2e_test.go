@@ -10,6 +10,22 @@ import (
 	"testing"
 )
 
+// script is one fake executable; installScripts puts them first on PATH. The
+// golden test (display_golden_test.go, integration-tagged) uses them too.
+type script struct{ name, body string }
+
+func installScripts(t *testing.T, scripts ...script) {
+	t.Helper()
+	bin := t.TempDir()
+	for _, s := range scripts {
+		path := filepath.Join(bin, s.name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+s.body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 const secret = "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 4 + 36 characters
 
 func TestHeaderNeverSharesALineWithCommandOutput(t *testing.T) {

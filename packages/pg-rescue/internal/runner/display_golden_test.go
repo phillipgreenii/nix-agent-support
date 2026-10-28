@@ -1,3 +1,5 @@
+//go:build integration
+
 // display_golden_test.go: golden files for the display. They are built from
 // the design's worked example (chain sync over `git pull --rebase`: the first
 // handler declines, the second claims a fix that verify rejects, the third
@@ -8,7 +10,14 @@
 // The fake `git` and the five handlers are shell scripts first on PATH, so the
 // header reads `git pull --rebase` exactly as in the design. The goldens are
 // normalized for the run directory, $HOME, durations and run ids. Regenerate
-// them with `go test ./internal/runner -run TestDisplayGolden -update`.
+// them with
+// `go test -tags integration ./internal/runner -run TestDisplayGolden -update`.
+//
+// The file is `integration`-tagged (ADR 0111, ADR 0024): the 20 subtests are
+// real wrapper runs that wait on real timeouts, about half the package's
+// unit-run time. They run under checks.<system>.pg-rescue-integration-tests.
+// installScripts and script, which display_e2e_test.go also uses, stay in the
+// untagged display_e2e_test.go.
 package runner_test
 
 import (
@@ -71,21 +80,6 @@ timeout = "10s"
 [chain.sync]
 handlers = ["flake-lock-conflict", "fix-small", "fix-large", "p1-later", "notify"]
 `, fixLargeTimeout)
-}
-
-// script is one fake executable.
-type script struct{ name, body string }
-
-func installScripts(t *testing.T, scripts ...script) {
-	t.Helper()
-	bin := t.TempDir()
-	for _, s := range scripts {
-		path := filepath.Join(bin, s.name)
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+s.body), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 var gitScript = script{"git", "echo 'Auto-merging README.md'\necho 'CONFLICT (content): Merge conflict in README.md' >&2\nexit 1\n"}
