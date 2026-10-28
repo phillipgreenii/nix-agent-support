@@ -6990,7 +6990,7 @@
                           done
                         fi
                       done
-                      case " $pkgs " in *" ./internal/runner "*) ;; *) fail "./internal/runner has no integration-tagged file" ;; esac
+                      echo "$pkgs" | grep -qx './internal/runner' || fail "./internal/runner has no integration-tagged file"
                       go vet ./... || fail "go vet of the default build failed"
                       go vet -tags integration ./... || fail "go vet of the integration build failed"
                       log="$TMPDIR/integration.log"
