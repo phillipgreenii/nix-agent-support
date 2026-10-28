@@ -357,10 +357,17 @@ An optional macOS menu bar indicator (a [SwiftBar](https://swiftbar.app) plugin)
 the current 5-hour Claude usage window and lets you flip the two pa-monitor toggles without opening
 the TUI:
 
-- **Title** (two widths; a `Title: wide (click for narrow)` row at the end of the dropdown switches
-  between them, and the choice is remembered in `$XDG_STATE_HOME/pa-monitor-swiftbar/title-width`,
-  default `~/.local/state`, holding `wide` or `narrow`; a missing, empty or unrecognised value reads
-  as **wide**). Colors are the same in both widths: green / yellow / red with the same thresholds
+- **Title** (two widths and a third setting, `auto`; a `Title:` row at the end of the dropdown
+  cycles wide, then narrow, then auto, then wide: `Title: wide (click for narrow)`,
+  `Title: narrow (click for auto)`, `Title: auto, narrow now (click for wide)`. The choice is
+  remembered in `$XDG_STATE_HOME/pa-monitor-swiftbar/title-width`, default `~/.local/state`, holding
+  `wide`, `narrow` or `auto`; a missing, empty or unrecognised value reads as **wide**. `auto`
+  renders as wide or narrow, whichever the display-class helper's class file names:
+  `<state base>/display-class/class`, holding `wide` or `narrow`, where the state base is
+  `$XDG_STATE_HOME` if it is non-empty and absolute, else `~/.local/state`. The plugin only reads
+  that file, and a missing, empty or unrecognised one reads as **wide**, even on a notched display.
+  A plugin older than `auto` reads an `auto` setting as wide. `pa-monitor-swiftbar --set-title-width
+wide|narrow|auto` writes the setting and exits 2 on anything else). Colors are the same in both widths: green / yellow / red with the same thresholds
   as the cmux 5h accent (red at 80% and above, yellow when usage runs ahead of the time elapsed in
   the window, green otherwise; dimmed when the reading is stale).
   - **wide** (the default): the text title, `5h 63% · 1h 52m` while capacity remains (the time part

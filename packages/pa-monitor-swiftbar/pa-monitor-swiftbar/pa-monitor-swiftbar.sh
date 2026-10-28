@@ -16,7 +16,8 @@ pa-monitor-swiftbar: Render pa-monitor's 5h usage window as SwiftBar menu bar ou
 Usage: pa-monitor-swiftbar [OPTIONS]
 
 Reads `pa-monitor status --json` and prints SwiftBar plugin output. The title has
-two widths, a setting that the Title row of the dropdown switches:
+two widths, chosen by a setting (wide, narrow or auto) that the Title row of the
+dropdown cycles:
   wide    (the default) `5h 63% · 1h 52m` while capacity remains, `⛔ LIMIT ·
           resets 23:10 (24m)` (`⛔ 7d LIMIT · ...` for the weekly window) when a
           limit is hit, and `5h –`, `5h ?` or `5h ⚠` for an expired reading, no
@@ -29,14 +30,21 @@ Either way the dropdown continues with session counts and caffeinate /
 auto-resume toggle rows, then the Title row and Refresh. Colors are the same in
 both widths. The setting is the file
 $XDG_STATE_HOME/pa-monitor-swiftbar/title-width (default ~/.local/state), holding
-`wide` or `narrow`; a missing, empty or unrecognised value reads as wide.
+`wide`, `narrow` or `auto`; a missing, empty or unrecognised value reads as wide.
+`auto` follows the primary display: it renders as wide or narrow, whichever the
+class file names. The class file is written by the display-class helper (this
+plugin only reads it) at <state base>/display-class/class, holding `wide` or
+`narrow`, where <state base> is $XDG_STATE_HOME if it is non-empty and absolute,
+else $HOME/.local/state; a missing, empty or unrecognised class file reads as
+wide. The Title row cycles wide -> narrow -> auto -> wide and, in auto, shows the
+resolved width ("Title: auto, narrow now (click for wide)").
 Always exits 0, except --set-title-width, which exits 2 on a bad value.
 
 Options:
   -h, --help     Show this help message
   -v, --version  Show version information
   --set-title-width MODE
-                 Write the title-width setting (wide or narrow) and exit;
+                 Write the title-width setting (wide, narrow or auto) and exit;
                  nothing is rendered. The dropdown's "Title:" row runs this.
 
 Environment:
@@ -223,24 +231,66 @@ if type != "object" then error("status is not an object") else . end
 JQ
 )
 
-# Title-width setting (bead pg2-fiw4h): `wide` (the default) or `narrow`, one
-# file per plugin holding the word plus a newline. A missing, empty or
-# unrecognised value reads as wide.
+# Title-width setting (beads pg2-fiw4h, pg2-ogkx1x): `wide` (the default),
+# `narrow` or `auto`, one file per plugin holding the word plus a newline. A
+# missing, empty or unrecognised value reads as wide. `auto` renders as the
+# width the display-class helper's class file names (see read_class_flag).
 title_width_file() {
   printf '%s' "${XDG_STATE_HOME:-${HOME:-}/.local/state}/pa-monitor-swiftbar/title-width"
 }
 
-read_title_width() {
-  local file value=""
-  file=$(title_width_file)
-  if [[ -r $file ]]; then
-    read -r value <"$file" || true
+# The class file: <state base>/display-class/class, where the state base is
+# $XDG_STATE_HOME if it is non-empty AND absolute, else $HOME/.local/state (the
+# convention's one rule for every reader and writer of the class file; the
+# setting file above keeps its own, looser resolution). Only the display-class
+# helper writes it; this plugin never does.
+class_flag_file() {
+  local base=${XDG_STATE_HOME:-}
+  if [[ -z $base || $base != /* ]]; then
+    base="${HOME:-}/.local/state"
+  fi
+  printf '%s' "$base/display-class/class"
+}
+
+# read_word FILE -> the first line with all whitespace removed, or nothing.
+read_word() {
+  local value=""
+  if [[ -r $1 ]]; then
+    read -r value <"$1" 2>/dev/null || true
     value=${value//[[:space:]]/}
   fi
+  printf '%s' "$value"
+}
+
+# read_title_setting -> wide | narrow | auto (anything else reads as wide).
+read_title_setting() {
+  local value
+  value=$(read_word "$(title_width_file)")
+  case $value in
+  narrow | auto) printf '%s' "$value" ;;
+  *) printf 'wide' ;;
+  esac
+}
+
+# read_class_flag -> wide | narrow (a missing, empty or unrecognised class file
+# reads as wide, even on a notched display: an unreadable setting never hides
+# information).
+read_class_flag() {
+  local value
+  value=$(read_word "$(class_flag_file)")
   if [[ $value == narrow ]]; then
     printf 'narrow'
   else
     printf 'wide'
+  fi
+}
+
+# resolve_title_width SETTING -> the RESOLVED width, wide or narrow.
+resolve_title_width() {
+  if [[ $1 == auto ]]; then
+    read_class_flag
+  else
+    printf '%s' "$1"
   fi
 }
 
@@ -249,8 +299,8 @@ read_title_width() {
 # 1 when the file cannot be written. Run by the dropdown's Title row.
 set_title_width() {
   local mode=${1:-} file dir tmp
-  if [[ $mode != wide && $mode != narrow ]]; then
-    printf 'pa-monitor-swiftbar: --set-title-width must be wide or narrow, not: %s\n' "$mode" >&2
+  if [[ $mode != wide && $mode != narrow && $mode != auto ]]; then
+    printf 'pa-monitor-swiftbar: --set-title-width must be wide, narrow or auto, not: %s\n' "$mode" >&2
     return 2
   fi
   file=$(title_width_file)
@@ -272,16 +322,30 @@ set_title_width() {
 }
 
 # The Title row: shows the current mode and the action, and on click re-invokes
-# this script to write the other mode, then refreshes. The nix plugin wrapper
-# exports PA_SWIFTBAR_SELF (a whitespace-free store path: the installed plugin
-# lives under "Application Support", and a space in a SwiftBar `bash=` value
-# needs quoting); a bare run falls back to $0.
+# this script to write the NEXT value of the cycle wide -> narrow -> auto ->
+# wide, then refreshes. In auto it also shows the resolved width. The nix plugin
+# wrapper exports PA_SWIFTBAR_SELF (a whitespace-free store path: the installed
+# plugin lives under "Application Support", and a space in a SwiftBar `bash=`
+# value needs quoting); a bare run falls back to $0.
 title_row() {
-  local width=$1 other self=${PA_SWIFTBAR_SELF:-$0}
-  if [[ $width == narrow ]]; then other=wide; else other=narrow; fi
+  local setting=$1 resolved=$2 next label self=${PA_SWIFTBAR_SELF:-$0}
+  case $setting in
+  narrow)
+    next=auto
+    label="narrow"
+    ;;
+  auto)
+    next=wide
+    label="auto, $resolved now"
+    ;;
+  *)
+    next=narrow
+    label="wide"
+    ;;
+  esac
   [[ $self != *[[:space:]]* ]] || self="\"$self\""
   printf 'Title: %s (click for %s) | bash=%s param1=--set-title-width param2=%s terminal=false refresh=true' \
-    "$width" "$other" "$self" "$other"
+    "$label" "$next" "$self" "$next"
 }
 
 # Message-only output for the states that cannot show data or toggles: the
@@ -309,7 +373,7 @@ resolve_pa_monitor() {
 }
 
 main() {
-  local bin now stale_after call_timeout status_json rc rendered width wide glyph_prefix trow
+  local bin now stale_after call_timeout status_json rc rendered setting width wide glyph_prefix trow
 
   case "${1:-}" in
   -h | --help)
@@ -328,15 +392,18 @@ main() {
   call_timeout=${PA_SWIFTBAR_TIMEOUT_S:-5}
   [[ $call_timeout =~ ^[0-9]+$ ]] && ((10#$call_timeout > 0)) || call_timeout=5
 
-  # Title width: wide prefixes the message-state glyphs with `5h `.
-  width=$(read_title_width)
+  # Title width: wide prefixes the message-state glyphs with `5h `. The setting
+  # (wide, narrow or auto) resolves to wide or narrow once per run; auto reads
+  # the display-class helper's class file.
+  setting=$(read_title_setting)
+  width=$(resolve_title_width "$setting")
   wide=false
   glyph_prefix=""
   if [[ $width == wide ]]; then
     wide=true
     glyph_prefix="5h "
   fi
-  trow=$(title_row "$width")
+  trow=$(title_row "$setting" "$width")
 
   bin=$(resolve_pa_monitor)
   if [[ -z $bin ]]; then

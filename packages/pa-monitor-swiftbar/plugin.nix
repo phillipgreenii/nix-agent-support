@@ -15,7 +15,7 @@ let
     "xbar.version" = "v1.0";
     "xbar.author" = "phillipgreenii";
     "xbar.desc" =
-      "5-hour Claude usage from pa-monitor, colored by pace: by default a wide title (5h 63% · 1h 52m, or ⛔ LIMIT · resets 23:10 (24m) when a limit is hit), or a narrow one-glyph pie with the detail in the first dropdown row; a Title row in the dropdown switches between wide and narrow (stored in $XDG_STATE_HOME/pa-monitor-swiftbar/title-width). The dropdown also has session counts and caffeinate / auto-resume toggles";
+      "5-hour Claude usage from pa-monitor, colored by pace: by default a wide title (5h 63% · 1h 52m, or ⛔ LIMIT · resets 23:10 (24m) when a limit is hit), or a narrow one-glyph pie with the detail in the first dropdown row; a Title row in the dropdown cycles wide, narrow and auto (stored in $XDG_STATE_HOME/pa-monitor-swiftbar/title-width); auto follows the primary display through the display-class helper's class file ($XDG_STATE_HOME/display-class/class, wide when missing). The dropdown also has session counts and caffeinate / auto-resume toggles";
     "xbar.dependencies" = "pa-monitor";
     "swiftbar.hideRunInTerminal" = "true";
     "swiftbar.hideDisablePlugin" = "true";

@@ -71,6 +71,13 @@ set_width() {
   printf '%s\n' "$1" >"$TITLE_WIDTH_FILE"
 }
 
+# set_class WORD -> write the display-class helper's class file (under the same
+# isolated state root), exactly as the helper would: the word plus a newline.
+set_class() {
+  mkdir -p "$XDG_STATE_HOME/display-class"
+  printf '%s\n' "$1" >"$XDG_STATE_HOME/display-class/class"
+}
+
 # at OFFSET -> ISO-8601 UTC instant NOW+OFFSET seconds.
 at() {
   jq -rn --argjson t "$((NOW + $1))" '$t | todate'
@@ -872,24 +879,29 @@ render_state() {
   [ "$(line 5)" = "resets Thu 00:38" ]
   local n
   n=$(printf '%s\n' "$output" | wc -l | tr -d ' ')
-  [[ "$(line $((n - 1)))" == "Title: narrow (click for wide) | bash="* ]]
+  [[ "$(line $((n - 1)))" == "Title: narrow (click for auto) | bash="* ]]
   [ "$(line "$n")" = "Refresh | refresh=true" ]
 }
 
-@test "title width: the toggle row shows the mode and the action, in every state, both widths" {
-  local mode state other
-  for mode in wide narrow; do
-    set_width "$mode"
-    if [ "$mode" = wide ]; then other=narrow; else other=wide; fi
+@test "title width: the toggle row shows the mode and the action, in every state, every mode" {
+  local mode state label next
+  for mode in wide narrow auto-wide auto-narrow; do
+    case "$mode" in
+    wide) set_width wide; label="wide"; next=narrow ;;
+    narrow) set_width narrow; label="narrow"; next=auto ;;
+    auto-wide) set_width auto; set_class wide; label="auto, wide now"; next=wide ;;
+    auto-narrow) set_width auto; set_class narrow; label="auto, narrow now"; next=wide ;;
+    esac
     for state in normal limit expired nodata malformed notfound unreachable; do
       render_state "$state"
       [ "$status" -eq 0 ]
-      [[ $output == *$'\nTitle: '"$mode"' (click for '"$other"') | bash='*" param1=--set-title-width param2=$other terminal=false refresh=true"$'\n'* ]] || {
+      [[ $output == *$'\nTitle: '"$label"' (click for '"$next"') | bash='*" param1=--set-title-width param2=$next terminal=false refresh=true"$'\n'* ]] || {
         echo "no toggle row for $mode/$state" >&2
         return 1
       }
-      # Refresh stays the last line.
+      # Refresh stays the last line, and the Title row is the block right above it.
       [ "$(printf '%s\n' "$output" | tail -n1)" = "Refresh | refresh=true" ]
+      [[ "$(printf '%s\n' "$output" | tail -n2 | head -n1)" == "Title: $label (click for $next) | bash="* ]]
     done
   done
 }
@@ -1005,6 +1017,289 @@ render_state() {
   [ "$(cat "$TITLE_WIDTH_FILE")" = "narrow" ]
 }
 
+# --- title width: auto follows the display-class helper's class file (bead pg2-ogkx1x) ---
+# auto is a third setting value. It renders as wide or narrow, whichever the class
+# file <state base>/display-class/class names; the plugin only reads that file.
+# A missing, empty or unrecognised class file reads as wide.
+
+@test "--set-title-width accepts auto, writes exactly auto plus a newline, prints nothing" {
+  rm -rf "$XDG_STATE_HOME"
+  run env PA_MONITOR_BIN="$TEST_DIR/does-not-exist" "${PLUGIN[@]}" --set-title-width auto
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "auto" ]
+  [ "$(wc -c <"$TITLE_WIDTH_FILE" | tr -d ' ')" -eq 5 ]
+  [ "$(ls -A "$XDG_STATE_HOME/pa-monitor-swiftbar")" = "title-width" ]
+}
+
+@test "--set-title-width still rejects garbage with exit 2 and writes nothing, auto included in the message" {
+  rm -rf "$XDG_STATE_HOME"
+  local v
+  for v in huge Auto AUTO "auto narrow" "" "autox"; do
+    run "${PLUGIN[@]}" --set-title-width "$v"
+    [ "$status" -eq 2 ] || {
+      echo "value '$v' was not rejected with 2" >&2
+      return 1
+    }
+    [[ $output == *"wide, narrow or auto"* ]]
+  done
+  [ ! -e "$XDG_STATE_HOME/pa-monitor-swiftbar" ]
+}
+
+@test "--set-title-width with a bad value keeps an existing auto setting" {
+  set_width auto
+  run "${PLUGIN[@]}" --set-title-width huge
+  [ "$status" -eq 2 ]
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "auto" ]
+}
+
+@test "auto: a class file holding wide renders the wide title" {
+  set_width auto
+  set_class wide
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  # Wide dropdown: no duplicate detail row, window row with the countdown.
+  [ "$(line 3)" = "█████████░░░░░░░░░ 50%" ]
+}
+
+@test "auto: a class file holding narrow renders the narrow title and the detail row first" {
+  set_width auto
+  set_class narrow
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+  [ "$(line 3)" = "5h 50% · 1h 52m left | color=#3a9a4a" ]
+  [ "$(line 5)" = "resets Thu 00:38" ]
+}
+
+@test "auto: surrounding whitespace around auto and the class word is ignored" {
+  printf '  auto  \n' >"$TITLE_WIDTH_FILE"
+  mkdir -p "$XDG_STATE_HOME/display-class"
+  printf '  narrow \n' >"$XDG_STATE_HOME/display-class/class"
+  render_state normal
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "auto: a missing class file reads wide, not an error" {
+  set_width auto
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  [[ $output == *$'\nTitle: auto, wide now (click for wide) | bash='* ]]
+}
+
+@test "auto: an empty class file, garbage, and a missing display-class directory each read wide" {
+  set_width auto
+  mkdir -p "$XDG_STATE_HOME/display-class"
+  local v
+  : >"$XDG_STATE_HOME/display-class/class"
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  for v in huge Narrow "narrow-ish" "auto" "0" "narrow wide" "wide narrow"; do
+    set_class "$v"
+    render_state normal
+    [ "$status" -eq 0 ]
+    [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ] || {
+      echo "class value '$v' did not read as wide" >&2
+      return 1
+    }
+  done
+  rm -rf "$XDG_STATE_HOME/display-class"
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "auto: an unreadable class file (a directory) reads wide, not an error" {
+  set_width auto
+  mkdir -p "$XDG_STATE_HOME/display-class/class"
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "auto: the class file is ignored when the setting is wide or narrow" {
+  set_class narrow
+  set_width wide
+  render_state normal
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  set_class wide
+  set_width narrow
+  render_state normal
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "auto resolving narrow: the title is exactly one glyph in every state, colours match narrow" {
+  local state narrow_title auto_title
+  for state in normal limit expired nodata malformed notfound unreachable; do
+    set_width narrow
+    render_state "$state"
+    narrow_title=$(title)
+    set_width auto
+    set_class narrow
+    render_state "$state"
+    [ "$status" -eq 0 ]
+    assert_one_char
+    auto_title=$(title)
+    [ "$auto_title" = "$narrow_title" ] || {
+      echo "auto/narrow title differs from narrow for $state: '$auto_title' vs '$narrow_title'" >&2
+      return 1
+    }
+  done
+}
+
+@test "auto: colours are identical whether auto resolves wide or narrow" {
+  local pct state wide_color narrow_color
+  for pct in 10 50 85 100; do
+    set_width auto
+    set_class wide
+    used_at "$pct"
+    wide_color=$(title | sed 's/^.* | //')
+    set_class narrow
+    used_at "$pct"
+    narrow_color=$(title | sed 's/^.* | //')
+    [ "$wide_color" = "$narrow_color" ] || {
+      echo "colour differs at $pct%: '$wide_color' vs '$narrow_color'" >&2
+      return 1
+    }
+  done
+}
+
+@test "auto: every degraded state renders in both resolved widths, never a raw error" {
+  local state resolved
+  for resolved in wide narrow; do
+    set_width auto
+    set_class "$resolved"
+    for state in expired nodata malformed notfound unreachable; do
+      render_state "$state"
+      [ "$status" -eq 0 ]
+      [ "$(printf '%s\n' "$output" | sed -n '2p')" = "---" ]
+      if [ "$resolved" = narrow ]; then
+        assert_one_char
+      else
+        [[ "$(title)" == "5h "* ]]
+      fi
+    done
+  done
+}
+
+@test "title row: auto shows the resolved width in both cases, with the exact text" {
+  set_width auto
+  set_class wide
+  render_state normal
+  [[ $output == *$'\nTitle: auto, wide now (click for wide) | bash='*" param1=--set-title-width param2=wide terminal=false refresh=true"$'\n'* ]]
+  set_class narrow
+  render_state normal
+  [[ $output == *$'\nTitle: auto, narrow now (click for wide) | bash='*" param1=--set-title-width param2=wide terminal=false refresh=true"$'\n'* ]]
+}
+
+@test "title row: the click action cycles wide, narrow, auto, wide" {
+  rm -f "$TITLE_WIDTH_FILE"
+  local next expected=(narrow auto wide) i row
+  for i in 0 1 2; do
+    render_state normal
+    row="$(grep '^Title: ' <<<"$output")"
+    [[ $row == *" param2=${expected[$i]} terminal=false refresh=true" ]]
+    next="${row##*param2=}"
+    next="${next%% *}"
+    run "${PLUGIN[@]}" --set-title-width "$next"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TITLE_WIDTH_FILE")" = "${expected[$i]}" ]
+  done
+}
+
+@test "auto: running the setter through all three values flips the next render, and back" {
+  set_class narrow
+  run "${PLUGIN[@]}" --set-title-width wide
+  render_state normal
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  run "${PLUGIN[@]}" --set-title-width narrow
+  render_state normal
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+  run "${PLUGIN[@]}" --set-title-width auto
+  render_state normal
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+  # A class flip is picked up on the next render with no setting change.
+  set_class wide
+  render_state normal
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  run "${PLUGIN[@]}" --set-title-width wide
+  render_state normal
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "auto: rendering never writes or removes the setting or the class file" {
+  set_width auto
+  set_class narrow
+  render_state normal
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "auto" ]
+  [ "$(cat "$XDG_STATE_HOME/display-class/class")" = "narrow" ]
+  [ "$(ls -A "$XDG_STATE_HOME/display-class")" = "class" ]
+  # A recognised-but-old plugin reads any value other than narrow as wide; the
+  # file written for auto therefore shows wide there (documented, not tested
+  # against old code), and the setter never rewrites it on read.
+  rm -rf "$XDG_STATE_HOME/display-class"
+  render_state normal
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "auto" ]
+  [ ! -e "$XDG_STATE_HOME/display-class" ]
+}
+
+# Class file path parity with the display-class helper: this side asserts the
+# literal contract path <state base>/display-class/class, where the state base
+# is $XDG_STATE_HOME if non-empty AND absolute, else $HOME/.local/state. (The
+# helper asserts the same literals in its own repo; neither imports the other.)
+# The setting file keeps its looser resolution ${XDG_STATE_HOME:-$HOME/.local/state}.
+
+# parity_render SETTING_FILE CLASS_FILE_EXPECTED DECOY_CLASS_FILE ENVWORDS... ->
+# sets auto in SETTING_FILE, narrow at the contract path, wide at a decoy path,
+# and renders with the given environment; the title MUST be narrow.
+parity_render() {
+  local setting_file=$1 class_file=$2 decoy=$3
+  shift 3
+  mkdir -p "$(dirname "$setting_file")" "$(dirname "$class_file")" "$(dirname "$decoy")"
+  printf 'auto\n' >"$setting_file"
+  printf 'wide\n' >"$decoy"
+  printf 'narrow\n' >"$class_file"
+  status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}"
+  run env "$@" PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+}
+
+@test "class file path: XDG_STATE_HOME unset resolves to HOME/.local/state/display-class/class" {
+  local base="$HOME/.local/state"
+  mkdir -p "$TEST_DIR/cwd"
+  cd "$TEST_DIR/cwd"
+  parity_render "$base/pa-monitor-swiftbar/title-width" "$base/display-class/class" "$TEST_DIR/cwd/display-class/class" -u XDG_STATE_HOME
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "class file path: XDG_STATE_HOME empty resolves to HOME/.local/state/display-class/class" {
+  local base="$HOME/.local/state"
+  mkdir -p "$TEST_DIR/cwd"
+  cd "$TEST_DIR/cwd"
+  parity_render "$base/pa-monitor-swiftbar/title-width" "$base/display-class/class" "$TEST_DIR/cwd/display-class/class" XDG_STATE_HOME=
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "class file path: a relative XDG_STATE_HOME is ignored for the class file (HOME/.local/state is used)" {
+  local base="$HOME/.local/state"
+  mkdir -p "$TEST_DIR/cwd"
+  cd "$TEST_DIR/cwd"
+  # The setting file keeps its looser resolution (relative to the cwd), the class
+  # file does not: the decoy under the relative base MUST NOT be read.
+  parity_render "$TEST_DIR/cwd/relstate/pa-monitor-swiftbar/title-width" "$base/display-class/class" "$TEST_DIR/cwd/relstate/display-class/class" XDG_STATE_HOME=relstate
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "class file path: an absolute XDG_STATE_HOME resolves to XDG_STATE_HOME/display-class/class" {
+  local base="$TEST_DIR/abs-state"
+  mkdir -p "$TEST_DIR/cwd"
+  cd "$TEST_DIR/cwd"
+  parity_render "$base/pa-monitor-swiftbar/title-width" "$base/display-class/class" "$HOME/.local/state/display-class/class" XDG_STATE_HOME="$base"
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
 @test "--help documents the title width setting and --set-title-width" {
   run "${PLUGIN[@]}" --help
   [ "$status" -eq 0 ]
@@ -1012,6 +1307,12 @@ render_state() {
   [[ $output == *"title-width"* ]]
   [[ $output == *"wide"* && $output == *"narrow"* ]]
   [[ $output == *"PA_SWIFTBAR_SELF"* ]]
+  # auto: the third value, the class file and its fallback.
+  [[ $output == *"auto"* ]]
+  [[ $output == *"display-class/class"* ]]
+  [[ $output == *"class file"* ]]
+  [[ $output == *"wide, narrow or auto"* ]]
+  [[ $output == *"Title: auto, narrow now (click for wide)"* ]]
 }
 
 # --- call timeout (bead pg2-zacis) --------------------------------------------
