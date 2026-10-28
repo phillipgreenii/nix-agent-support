@@ -213,13 +213,13 @@ shared tracker, so the repo label is what tells repos apart, BF-1). `bd` is reso
 PATH of the run (`PG_REPO_RUNNER_BD_BIN` replaces it), like every bd-calling script here, so the
 deployment's pg-router role MUST put the machine's `bd` on that PATH.
 
-**The pg-rescue chain.** The home module of pg-rescue ships the matching `runner-red` chain
-(`notify`, then `runner-red-bead` = `p1-later` plus `runnerRed.repoLabelMap` and
-`runnerRed.backendMap`; no agent handler). `notify` is first because it always declines, while
-`p1-later` ends a chain. The runner itself does NOT invoke that chain in this version: `pg-rescue-bead`
-cannot set the `runner` metadata and cannot close a bead, which the auto-close needs, so the runner
-files, comments and closes through `bd` directly and reads its own label map from `surface.repo_labels`.
-The chain is the pg-rescue-side counterpart for any caller that wants the same filing through pg-rescue.
+**One filing path.** The runner is the only thing that files these beads: it files, comments and closes
+through `bd` directly and reads its labels from `surface.repo_labels`. It does NOT go through pg-rescue
+(ruling `pg2-8x6t6t`): `pg-rescue-bead` cannot set the `runner = pg-repo-runner` metadata and cannot
+close a bead, and the auto-close needs both, so a pg-rescue chain would have been a second,
+undriven implementation of the same transition. The design's failure-surfacing requirements (the bead
+with its repo label, one notification per transition, dedup, auto-close of its own beads) are all met
+here.
 
 ## Sync (runner A, report-only)
 

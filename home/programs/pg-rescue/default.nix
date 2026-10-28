@@ -184,26 +184,6 @@ let
     };
   };
 
-  # The failure-surfacing handler of the runner-red chain (async-runners design,
-  # "Failure surfacing"): `p1-later` plus the repo-label and backend maps, so the
-  # bead lands in the tracker of the repo where the fix lands, with that repo's
-  # label (BF-1). The maps are machine-specific, so they default to empty.
-  mapArgs =
-    flag: m:
-    lib.concatLists (
-      lib.mapAttrsToList (repo: value: [
-        flag
-        "${repo}=${value}"
-      ]) m
-    );
-  runnerRedBead = defaultHandlers.p1-later // {
-    command =
-      defaultHandlers.p1-later.command
-      ++ mapArgs "--repo-label-map" cfg.runnerRed.repoLabelMap
-      ++ mapArgs "--backend-map" cfg.runnerRed.backendMap;
-    description = "file a P1 bead for a runner transition, labelled for its repo";
-  };
-
   defaultChains = {
     sync.handlers = [
       "flake-lock-conflict"
@@ -221,14 +201,6 @@ let
     fix-ci.handlers = [ "give-up" ];
     # For a shim that must hand an item over without running any other handler.
     give-up.handlers = [ "give-up" ];
-    # Surfacing of a pg-repo-runner transition (red tip, diverged, push blocked,
-    # red build). `notify` comes FIRST: it always declines, so the chain goes on,
-    # whereas `p1-later` ends a chain (deferred, exit 3), so a notify placed after
-    # it would never run. No agent handler (no unattended agent spend).
-    runner-red.handlers = [
-      "notify"
-      "runner-red-bead"
-    ];
   };
 in
 {
@@ -280,7 +252,7 @@ in
         Named handler instances, rendered as `[handler.NAME]` tables. The
         defaults (`flake-lock-conflict`, `fix-small`, `fix-large`,
         `conflict-fix-small`, `conflict-fix-large`, `p1-later`, `notify`,
-        `give-up`, `runner-red-bead`) are set per field with `mkDefault`, so any of them can be
+        `give-up`) are set per field with `mkDefault`, so any of them can be
         overridden wholesale or one field at a time, and further instances can
         be added. `conflict-fix-small` and `conflict-fix-large` are `fix-small`
         and `fix-large` plus `--disallowed-tools` denying `git push`, so an
@@ -295,35 +267,6 @@ in
           fix-large.env_file = "/Users/me/.config/pg-rescue/fix-large.env";
         }
       '';
-    };
-
-    runnerRed = {
-      repoLabelMap = lib.mkOption {
-        type = lib.types.attrsOf lib.types.str;
-        default = { };
-        example = {
-          nix-repo-base = "base";
-        };
-        description = ''
-          `REPO=LABEL` entries handed to the `runner-red-bead` handler as
-          `--repo-label-map`: the beads label of each workspace repo (the repo
-          label lookup table). REPO is the basename of the git toplevel the
-          failure ran in. Machine- and workspace-specific, so it has no default.
-        '';
-      };
-      backendMap = lib.mkOption {
-        type = lib.types.attrsOf lib.types.str;
-        default = { };
-        example = {
-          nix-repo-base = "pg-connector-issue-beads-home";
-        };
-        description = ''
-          `REPO=INSTANCE` entries handed to the `runner-red-bead` handler as
-          `--backend-map`: the pg-connector backend instance (so, the tracker)
-          each repo's bead is filed in. A repo with no entry uses the handler's
-          `--backend`. Machine-specific, so it has no default.
-        '';
-      };
     };
 
     chains = lib.mkOption {
@@ -344,11 +287,7 @@ in
         `conflict-fix-small`, `conflict-fix-large`, `give-up`; the default
         `fix-ci` chain and the default `give-up` chain each run `give-up`
         alone (the script-first chains of the work-item roles; `give-up` is
-        for a shim that must hand an item over without any other handler). The
-        default `runner-red` chain (`notify`, then `runner-red-bead`, which is
-        `p1-later` plus `runnerRed.repoLabelMap` and `runnerRed.backendMap`) is the
-        surfacing chain of a pg-repo-runner transition: it has no agent handler,
-        and `notify` comes first because `p1-later` ends a chain.
+        for a shim that must hand an item over without any other handler).
       '';
       example = {
         quick.handlers = [
@@ -361,9 +300,7 @@ in
 
   config = lib.mkIf cfg.enable {
     phillipgreenii.programs.pg-rescue = {
-      handlers = lib.mapAttrs (_: lib.mapAttrs (_: lib.mkDefault)) (
-        defaultHandlers // { runner-red-bead = runnerRedBead; }
-      );
+      handlers = lib.mapAttrs (_: lib.mapAttrs (_: lib.mkDefault)) defaultHandlers;
       chains = lib.mapAttrs (_: lib.mapAttrs (_: lib.mkDefault)) defaultChains;
     };
 
