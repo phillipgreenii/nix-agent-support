@@ -547,8 +547,8 @@ func TestInvoke_NonJSONStdoutFoldIsCapped(t *testing.T) {
 func TestInvoke_ListHasItsOwnExecBudget(t *testing.T) {
 	withFactory(t, "hang")
 	origExec, origList := execTimeout, listExecTimeout
-	execTimeout = 100 * time.Millisecond
-	listExecTimeout = 600 * time.Millisecond
+	execTimeout = 50 * time.Millisecond
+	listExecTimeout = 300 * time.Millisecond
 	t.Cleanup(func() { execTimeout, listExecTimeout = origExec, origList })
 
 	start := time.Now()
@@ -557,24 +557,22 @@ func TestInvoke_ListHasItsOwnExecBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a hung list backend to be killed")
 	}
-	if listElapsed < 500*time.Millisecond {
+	if listElapsed < 250*time.Millisecond {
 		t.Errorf("list was killed after %v, before its %v budget", listElapsed, listExecTimeout)
 	}
-	if !strings.Contains(err.Error(), "umbrella deadline 600ms exceeded") {
-		t.Errorf("list error %q does not name the 600ms list limit", err)
+	if !strings.Contains(err.Error(), "umbrella deadline 300ms exceeded") {
+		t.Errorf("list error %q does not name the 300ms list limit", err)
 	}
 
-	start = time.Now()
+	// No wall-clock UPPER bound here: under host load (and -race) a kill can
+	// land hundreds of ms late, which made an elapsed ceiling flaky. The error
+	// text names the budget that fired, which is the proof of which one applied.
 	_, err = Invoke(context.Background(), "fake-binary", "commit", nil, nil)
-	otherElapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected a hung non-list backend to be killed")
 	}
-	if otherElapsed >= 500*time.Millisecond {
-		t.Errorf("non-list op was killed after %v, it should use the %v budget", otherElapsed, execTimeout)
-	}
-	if !strings.Contains(err.Error(), "umbrella deadline 100ms exceeded") {
-		t.Errorf("non-list error %q does not name the 100ms limit", err)
+	if !strings.Contains(err.Error(), "umbrella deadline 50ms exceeded") {
+		t.Errorf("non-list error %q does not name the 50ms limit", err)
 	}
 }
 
@@ -585,9 +583,9 @@ func TestInvoke_ListHasItsOwnExecBudget(t *testing.T) {
 func TestInvoke_ListActivityHasItsOwnExecBudget(t *testing.T) {
 	withFactory(t, "hang")
 	origExec, origList, origActivity := execTimeout, listExecTimeout, listActivityExecTimeout
-	execTimeout = 100 * time.Millisecond
-	listExecTimeout = 100 * time.Millisecond
-	listActivityExecTimeout = 600 * time.Millisecond
+	execTimeout = 50 * time.Millisecond
+	listExecTimeout = 50 * time.Millisecond
+	listActivityExecTimeout = 300 * time.Millisecond
 	t.Cleanup(func() {
 		execTimeout, listExecTimeout, listActivityExecTimeout = origExec, origList, origActivity
 	})
@@ -598,25 +596,21 @@ func TestInvoke_ListActivityHasItsOwnExecBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a hung list_activity backend to be killed")
 	}
-	if activityElapsed < 500*time.Millisecond {
+	if activityElapsed < 250*time.Millisecond {
 		t.Errorf("list_activity was killed after %v, before its %v budget", activityElapsed, listActivityExecTimeout)
 	}
-	if !strings.Contains(err.Error(), "umbrella deadline 600ms exceeded") {
-		t.Errorf("list_activity error %q does not name the 600ms list_activity limit", err)
+	if !strings.Contains(err.Error(), "umbrella deadline 300ms exceeded") {
+		t.Errorf("list_activity error %q does not name the 300ms list_activity limit", err)
 	}
 
 	for _, op := range []string{"list", "commit"} {
-		start = time.Now()
+		// No wall-clock upper bound (flaky under load); the error names the budget.
 		_, err = Invoke(context.Background(), "fake-binary", op, nil, nil)
-		elapsed := time.Since(start)
 		if err == nil {
 			t.Fatalf("expected a hung %q backend to be killed", op)
 		}
-		if elapsed >= 500*time.Millisecond {
-			t.Errorf("op %q was killed after %v, it should use its 100ms budget", op, elapsed)
-		}
-		if !strings.Contains(err.Error(), "umbrella deadline 100ms exceeded") {
-			t.Errorf("op %q error %q does not name the 100ms limit", op, err)
+		if !strings.Contains(err.Error(), "umbrella deadline 50ms exceeded") {
+			t.Errorf("op %q error %q does not name the 50ms limit", op, err)
 		}
 	}
 }

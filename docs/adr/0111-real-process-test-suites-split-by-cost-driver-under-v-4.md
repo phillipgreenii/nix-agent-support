@@ -233,6 +233,35 @@ tag stands if it is not possible.
   the unit tier, as V-3 allows. The follow-up that adds the guard from Appendix A of the `x` ADR
   MUST cover the `GO_WANT_CONFORMANCE_HELPER_PROCESS` name too, and MUST flip the allowance for
   `os.Args[0]` in `unit_tier_guard_test.go` consistently.
+- Outcome of that follow-up (bead `pg2-ozk7on`, 2026-10-28):
+  - The six deadline-bound tests now use budgets of 20 to 300 ms (the configured-minimum test swaps
+    a new package variable `minConfiguredTimeout`, initialised to `MinConfiguredTimeout`, so the
+    1 s minimum in production is unchanged and still pinned by `TestConfiguredTimeout_Parsing`).
+    Their wall-clock UPPER bounds ("killed after less than X") were removed after one `-race` run at
+    load 50 failed one (a kill landed 350 ms late); each test still asserts the lower bound and that
+    the error names the budget that fired.
+  - The two `conformance` tests no longer re-exec the test binary: `ExecBackend` drives `sh` running
+    a generated replay script whose replies are the real `ServeOne` bytes and exit codes, so the
+    real `os/exec` path is still exercised and no race runtime starts in the child. The
+    `GORACE` alternative was not needed. `scripts/reexec-test-double-allowlist.txt` lost the
+    `conformance_test.go` entry, so the untagged-file guard now covers
+    `GO_WANT_CONFORMANCE_HELPER_PROCESS` (no untagged file in the repo names it any more). The
+    `unit_tier_guard_test.go` here has no `os.Args[0]` allowance to flip; the one in the `x` ADR is
+    follow-up 5.
+  - Measured, `env -C packages/pg-connector nice -n 10 go test -p 4 -count=1 [-race] ./pkg/scriptout/...`,
+    sum of the three `ok` lines (excludes compilation). Before (the Method section above, no clean
+    re-run was possible on the changed tree): no `-race` 6.872 s and 6.867 s, `-race` 13.176 s and
+    12.230 s. After, load average 27 to 52 (the host was busier than in the Method section): no
+    `-race` 3.116 + 0.387 + 0.376 = 3.879 s (load 27), 4.148 + 1.277 + 0.214 = 5.639 s (load 52) and
+    3.033 + 2.037 + 0.475 = 5.545 s (load 45); `-race` 3.851 + 1.709 + 1.667 = 7.227 s (load about 48) and 3.932 + 1.624 + 1.648 = 7.204 s (load about 42). The `-race` penalty is now about 1.7 s
+    against 5.4 s to 6.3 s before; the `conformance` package is 1.6 s to 1.7 s under `-race`, from
+    3.355 s to 3.864 s. Under load the two `sh` tests cost 0.7 s each (process spawn on a busy
+    host), more than the 0.25 s measured on an idle host with `GORACE`. The `ok` times vary with
+    load by more than the code change moved some of them. Against a before mean of 6.870 s
+    (6.872 + 6.867) / 2 the no-`-race` sums are 19 % less at load 45 to 52 (5.545 s and 5.639 s,
+    (6.870 - 5.592) / 6.870) and 44 % less at load 27 (3.879 s); against a `-race` before mean of
+    12.703 s the two `-race` sums (mean 7.216 s) are 43 % less. The direction is the finding, not
+    the percentage.
 
 ## Consequences
 

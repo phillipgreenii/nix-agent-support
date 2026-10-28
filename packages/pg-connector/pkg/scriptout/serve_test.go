@@ -476,13 +476,13 @@ func TestServeLoop_MalformedRequest(t *testing.T) {
 // succeeds as a list and fails as any other op.
 func TestServeLoop_ListHasItsOwnBudget(t *testing.T) {
 	origBackend, origList := backendTimeout, listBackendTimeout
-	backendTimeout = 50 * time.Millisecond
+	backendTimeout = 20 * time.Millisecond
 	listBackendTimeout = 5 * time.Second
 	t.Cleanup(func() { backendTimeout, listBackendTimeout = origBackend, origList })
 
 	slow := func(ctx context.Context, _ json.RawMessage) (any, error) {
 		select {
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(120 * time.Millisecond):
 			return map[string]any{"ok": true}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -501,8 +501,8 @@ func TestServeLoop_ListHasItsOwnBudget(t *testing.T) {
 		t.Fatalf("non-list op ran past backendTimeout %v and still succeeded (resp=%v)", backendTimeout, resp)
 	}
 	errObj, _ := resp["error"].(map[string]any)
-	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 50ms") {
-		t.Errorf("non-list deadline error %q does not name its own limit 50ms", msg)
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 20ms") {
+		t.Errorf("non-list deadline error %q does not name its own limit 20ms", msg)
 	}
 }
 
@@ -514,8 +514,8 @@ func TestServeLoop_ListHasItsOwnBudget(t *testing.T) {
 // any other op.
 func TestServeLoop_ListActivityHasItsOwnBudget(t *testing.T) {
 	origBackend, origList, origActivity := backendTimeout, listBackendTimeout, listActivityBackendTimeout
-	backendTimeout = 50 * time.Millisecond
-	listBackendTimeout = 50 * time.Millisecond
+	backendTimeout = 20 * time.Millisecond
+	listBackendTimeout = 20 * time.Millisecond
 	listActivityBackendTimeout = 5 * time.Second
 	t.Cleanup(func() {
 		backendTimeout, listBackendTimeout, listActivityBackendTimeout = origBackend, origList, origActivity
@@ -523,7 +523,7 @@ func TestServeLoop_ListActivityHasItsOwnBudget(t *testing.T) {
 
 	slow := func(ctx context.Context, _ json.RawMessage) (any, error) {
 		select {
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(120 * time.Millisecond):
 			return map[string]any{"ok": true}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -541,11 +541,11 @@ func TestServeLoop_ListActivityHasItsOwnBudget(t *testing.T) {
 	for _, op := range []string{"list", "commit"} {
 		code, resp := runServeLoop(t, table, `{"op":"`+op+`","args":{}}`)
 		if code == 0 {
-			t.Fatalf("op %q ran past its 50ms budget and still succeeded (resp=%v)", op, resp)
+			t.Fatalf("op %q ran past its 20ms budget and still succeeded (resp=%v)", op, resp)
 		}
 		errObj, _ := resp["error"].(map[string]any)
-		if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 50ms") {
-			t.Errorf("op %q deadline error %q does not name its own limit 50ms", op, msg)
+		if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 20ms") {
+			t.Errorf("op %q deadline error %q does not name its own limit 20ms", op, msg)
 		}
 	}
 }

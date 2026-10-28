@@ -417,16 +417,19 @@ func TestServeLoop_InvalidTimeoutConfig_IsInvalidArgument(t *testing.T) {
 // TestServeLoop_ConfiguredListDeadlineIsEnforced proves the configured value is
 // the deadline the handler really runs under, not just one that is armed: the
 // same slow handler fails under a configured 1s and succeeds without it under
-// a swapped, longer list default. (The 1s minimum makes this the one real
-// wait here.)
+// a swapped, longer list default. The real 1s minimum would make this the one
+// long wait of the package, so the test lowers minConfiguredTimeout and
+// configures 100ms instead; the enforcement path is the same for any valid
+// value (the minimum itself is pinned by TestConfiguredTimeout_Parsing).
 func TestServeLoop_ConfiguredListDeadlineIsEnforced(t *testing.T) {
-	origList := listBackendTimeout
+	origList, origMin := listBackendTimeout, minConfiguredTimeout
 	listBackendTimeout = 10 * time.Second
-	t.Cleanup(func() { listBackendTimeout = origList })
+	minConfiguredTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { listBackendTimeout, minConfiguredTimeout = origList, origMin })
 
 	slow := func(ctx context.Context, _ json.RawMessage) (any, error) {
 		select {
-		case <-time.After(1500 * time.Millisecond):
+		case <-time.After(250 * time.Millisecond):
 			return map[string]any{"ok": true}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -437,12 +440,12 @@ func TestServeLoop_ConfiguredListDeadlineIsEnforced(t *testing.T) {
 	if code, resp := runServeLoop(t, table, `{"op":"list","args":{}}`); code != 0 {
 		t.Fatalf("list without config under the %v default: exit %d resp=%v, want success", listBackendTimeout, code, resp)
 	}
-	code, resp := runServeLoop(t, table, `{"op":"list","args":{},"config":{"timeouts":{"list":"1s"}}}`)
+	code, resp := runServeLoop(t, table, `{"op":"list","args":{},"config":{"timeouts":{"list":"100ms"}}}`)
 	if code == 0 {
-		t.Fatalf("list ran past its configured 1s and still succeeded (resp=%v)", resp)
+		t.Fatalf("list ran past its configured 100ms and still succeeded (resp=%v)", resp)
 	}
 	errObj, _ := resp["error"].(map[string]any)
-	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 1s") {
-		t.Errorf("deadline error %q does not name the configured limit 1s", msg)
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 100ms") {
+		t.Errorf("deadline error %q does not name the configured limit 100ms", msg)
 	}
 }

@@ -200,6 +200,12 @@ const (
 	MaxConfiguredTimeout = 300 * time.Second
 )
 
+// minConfiguredTimeout is the lower bound configuredTimeout enforces. It starts
+// at MinConfiguredTimeout; a test swaps it to a few milliseconds so a
+// configured deadline that is really enforced can be proven without waiting
+// out the real 1s minimum (the same swappable-var pattern as execTimeout).
+var minConfiguredTimeout = MinConfiguredTimeout
+
 // configurableTimeoutOp reports whether op's budget may be overridden by the
 // backend's config. Only list and show are: every other op (list_activity, the
 // writes, capabilities, ...) keeps the budget its handlers are sized against,
@@ -257,10 +263,10 @@ func configuredTimeout(op string, cfg json.RawMessage) (time.Duration, bool, err
 			"config %s %q is not a Go duration such as \"60s\": %v", key, text, err,
 		))
 	}
-	if d < MinConfiguredTimeout || d > MaxConfiguredTimeout {
+	if d < minConfiguredTimeout || d > MaxConfiguredTimeout {
 		return 0, false, WrapError(ErrInvalidArgument, fmt.Sprintf(
 			"config %s %q is outside the allowed range %s to %s",
-			key, text, MinConfiguredTimeout, MaxConfiguredTimeout,
+			key, text, minConfiguredTimeout, MaxConfiguredTimeout,
 		))
 	}
 	return d, true, nil

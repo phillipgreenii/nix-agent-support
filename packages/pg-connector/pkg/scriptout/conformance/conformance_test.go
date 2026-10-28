@@ -3,8 +3,11 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -267,45 +270,63 @@ func TestRun_TableBackend_CatchesAFakeShapeNoRealBackendImplements(t *testing.T)
 
 // --- Run: ExecBackend (a real OS subprocess) ----------------------------
 //
-// Mirrors pkg/scriptout/exec_test.go's own test-helper-process idiom: the
-// test binary re-execs itself with a special env var so ExecBackend drives
-// a genuine child process without needing a separately compiled backend
-// binary.
+// ExecBackend is driven against a genuine child process: `sh` running a tiny
+// generated script. The script is a replay backend: for each request line it
+// knows, it prints the reply (and exits with the code) that the real
+// scriptout.ServeOne produced for that request in this test process, so the
+// bytes on the wire and the exit codes are the real ones while ExecBackend's
+// real os/exec path (spawn, stdin, stdout, exit code) is what is exercised.
+// This replaces the earlier re-exec of the race-built test binary, whose
+// race-runtime exit sleep cost about 1s per spawn under -race (ADR 0111,
+// decision 3); an `sh` child pays no such cost.
 
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_CONFORMANCE_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	os.Exit(scriptout.ServeOne(fakeTableWithCapabilities(), os.Stdin, os.Stdout))
+// shReplayRequests are the requests Run and the success test send, exactly as
+// driver.go and the tests spell them. A request outside this set makes the
+// script exit 99, which fails the calling test loudly.
+var shReplayRequests = []string{
+	`{"op":"show","args":{}}`,
+	`{"op":"__scriptout_conformance_unknown_op_probe__"}`,
+	"this is not json",
+	`{"op":"capabilities"}`,
 }
 
-func helperExecBackend(t *testing.T) ExecBackend {
+// shReplayBackend writes the replay script into a temp dir and returns an
+// ExecBackend that runs it with sh.
+func shReplayBackend(t *testing.T) ExecBackend {
 	t.Helper()
-	// -test.run pins the re-exec'd test binary to ONLY TestHelperProcess —
-	// without it, running os.Args[0] with no arguments would re-run this
-	// whole test package's suite (including this very test) as a fresh
-	// process, recursing indefinitely.
-	return ExecBackend{Binary: os.Args[0], Args: []string{"-test.run=^TestHelperProcess$"}}
+	dir := t.TempDir()
+	table := TableBackend{Table: fakeTableWithCapabilities()}
+
+	var script strings.Builder
+	script.WriteString("req=$(cat)\n")
+	for i, req := range shReplayRequests {
+		if strings.Contains(req, "'") {
+			t.Fatalf("replay request %q contains a single quote", req)
+		}
+		out, code, err := table.Invoke(context.Background(), []byte(req))
+		if err != nil {
+			t.Fatalf("replay %q: %v", req, err)
+		}
+		outPath := filepath.Join(dir, fmt.Sprintf("reply-%d.json", i))
+		if err := os.WriteFile(outPath, out, 0o600); err != nil {
+			t.Fatalf("write replay reply: %v", err)
+		}
+		fmt.Fprintf(&script, "if [ \"$req\" = '%s' ]; then cat '%s'; exit %d; fi\n", req, outPath, code)
+	}
+	script.WriteString("echo \"replay backend: unexpected request: $req\" >&2\nexit 99\n")
+
+	scriptPath := filepath.Join(dir, "backend.sh")
+	if err := os.WriteFile(scriptPath, []byte(script.String()), 0o600); err != nil {
+		t.Fatalf("write replay script: %v", err)
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Fatalf("sh not found on PATH: %v", err)
+	}
+	return ExecBackend{Binary: "sh", Args: []string{scriptPath}}
 }
 
-// helperExecCommand is the exec.CommandContext replacement conformance's
-// own tests use to turn ExecBackend.Binary (os.Args[0], the test binary
-// itself) into a call to TestHelperProcess. ExecBackend does not expose a
-// swappable command factory the way pkg/scriptout/exec.go's
-// execCmdFactory does — deliberately: ExecBackend's whole point is
-// exercising the REAL os/exec path, so the fake plumbing lives here in the
-// test's own Binary value instead (a subtly different binary path that
-// re-dispatches into TestHelperProcess), not in a mocked factory.
 func TestExecBackend_RealSubprocess_Success(t *testing.T) {
-	if _, err := exec.LookPath(os.Args[0]); err != nil {
-		// Re-exec needs the test binary to be independently executable;
-		// skip rather than fail if the environment doesn't allow that.
-		t.Skipf("test binary not independently executable: %v", err)
-	}
-	t.Setenv("GO_WANT_CONFORMANCE_HELPER_PROCESS", "1")
-
-	backend := helperExecBackend(t)
+	backend := shReplayBackend(t)
 	req := []byte(`{"op":"show","args":{}}`)
 	out, code, err := backend.Invoke(context.Background(), req)
 	if err != nil {
@@ -324,19 +345,24 @@ func TestExecBackend_RealSubprocess_Success(t *testing.T) {
 // TableBackend double) — the strongest form of "a new backend
 // implementation (real or fake) can be run against it."
 func TestRun_ExecBackend_RealSubprocess(t *testing.T) {
-	if _, err := exec.LookPath(os.Args[0]); err != nil {
-		t.Skipf("test binary not independently executable: %v", err)
-	}
-	t.Setenv("GO_WANT_CONFORMANCE_HELPER_PROCESS", "1")
-
-	results := Run(context.Background(), helperExecBackend(t))
+	results := Run(context.Background(), shReplayBackend(t))
+	sawCapabilities := false
 	for _, r := range results {
+		if r.Name == "invoking/capabilities" {
+			sawCapabilities = true
+			if r.Skipped {
+				t.Errorf("invoking/capabilities was skipped, want a live pass: %s", r.SkipReason)
+			}
+		}
 		if r.Skipped {
 			continue
 		}
 		if r.Err != nil {
 			t.Errorf("%s: %v", r.Name, r.Err)
 		}
+	}
+	if !sawCapabilities {
+		t.Error("Run produced no invoking/capabilities result")
 	}
 }
 
