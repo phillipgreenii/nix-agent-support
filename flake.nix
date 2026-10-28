@@ -16129,6 +16129,14 @@
                     # unset one renders no key
                     same ${fixtures + "/beads-attention.yaml"} ${rendered.beadsAttention}
                     same ${fixtures + "/beads-attention-unset.yaml"} ${rendered.beadsAttentionUnset}
+                    # bd budget (docket pg2-2qyyh.5): each set bdBudget value renders
+                    # as its flag on every beads registration (two instances sharing
+                    # a group render the same --budget-group, a bare-string beads
+                    # registration becomes an instance), other backends are left
+                    # alone, and with no value set the pre-change golden is unchanged
+                    same ${fixtures + "/bd-budget.yaml"} ${rendered.bdBudget}
+                    same ${fixtures + "/bd-budget-partial.yaml"} ${rendered.bdBudgetPartial}
+                    same ${fixtures + "/instances.yaml"} ${rendered.bdBudgetUnset}
                     # the SAME golden is the Go registry's parse fixture, so the
                     # Nix-rendered output, the golden and the Go parser are tied
                     # together (compared semantically, like every other golden

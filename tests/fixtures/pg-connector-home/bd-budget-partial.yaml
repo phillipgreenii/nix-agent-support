@@ -1,0 +1,10 @@
+connector:
+  issue:
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+        - --bd-wait-bound
+        - 4s
+      name: pg-connector-issue-beads-pg2
+    - pg-connector-issue-jira

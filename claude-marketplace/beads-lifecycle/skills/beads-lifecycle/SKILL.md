@@ -400,6 +400,9 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 
   The command adds `human` and `attention`, removes `escalated`, does all of it in ONE update
   call and reads the bead back (exit 4 names a disagreement).
+  With `--backend` the write goes through `pg-connector issue update`; when that answers
+  `unavailable` (for example the beads backend's `bd` budget had no free slot), the answer is
+  retryable, so repeat the same command after a pause.
 
 - **LV-4** ORDER IS LOAD-BEARING (the same reasoning as D-5): a bead carrying neither the
   escalated nor the human labels is visible to the normal work queues, so the human labels MUST be

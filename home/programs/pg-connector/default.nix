@@ -251,6 +251,59 @@ let
     }
   );
 
+  # ---- the beads backend's bd budget (docket pg2-2qyyh.5) ----------------------
+  # Each set `bdBudget` value is appended as its flag to the argv of EVERY
+  # registration whose binary is the beads backend; a bare-string registration
+  # of that binary becomes `{ name = <same name>; command = [ binary flags... ]; }`.
+  # Nothing is appended while no value is set, so an unconfigured deployment
+  # renders exactly what it did before and the backend's own defaults apply.
+  # Two instances given the same `group` render the same `--budget-group` and so
+  # share one budget (the instances behind one dolt server).
+  beadsBinary = "pg-connector-issue-beads";
+  bb = cfg.bdBudget;
+  durationArg = v: if builtins.isInt v then "${toString v}s" else v;
+  budgetFlags = lib.concatLists [
+    (lib.optionals (bb.maxConcurrent != null) [
+      "--bd-max-concurrent"
+      (toString bb.maxConcurrent)
+    ])
+    (lib.optionals (bb.maxPerMinute != null) [
+      "--bd-max-per-minute"
+      (toString bb.maxPerMinute)
+    ])
+    (lib.optionals (bb.waitBound != null) [
+      "--bd-wait-bound"
+      (durationArg bb.waitBound)
+    ])
+    (lib.optionals (bb.writeReserve != null) [
+      "--bd-write-reserve"
+      (toString bb.writeReserve)
+    ])
+    (lib.optionals (bb.group != null) [
+      "--budget-group"
+      bb.group
+    ])
+  ];
+  rewriteBudgetEntry =
+    entry:
+    let
+      isBeads =
+        if builtins.isString entry then
+          entry == beadsBinary
+        else
+          builtins.head entry.command == beadsBinary;
+    in
+    if budgetFlags == [ ] || !isBeads then
+      entry
+    else if builtins.isString entry then
+      {
+        name = entry;
+        previousNames = [ ];
+        command = [ beadsBinary ] ++ budgetFlags;
+      }
+    else
+      entry // { command = entry.command ++ budgetFlags; };
+
   # An instance renders as { name, command } plus previous_names only when it
   # declares some (an empty list renders no key, so a rename-free config is
   # byte-for-byte what it was before); a plain string renders untouched.
@@ -266,11 +319,11 @@ let
   renderEntries =
     v:
     if builtins.isList v then
-      map (e: renderEntry (rewriteJiraEntry (rewriteGithubEntry e))) v
+      map (e: renderEntry (rewriteBudgetEntry (rewriteJiraEntry (rewriteGithubEntry e)))) v
     else if v == null then
       null
     else
-      renderEntry (rewriteJiraEntry (rewriteGithubEntry v));
+      renderEntry (rewriteBudgetEntry (rewriteJiraEntry (rewriteGithubEntry v)));
 
   # connector.<type> as pg-connector's own registry.go actually requires it:
   # pr/issue/ci MUST be either a non-empty list or ABSENT entirely
@@ -745,6 +798,51 @@ in
         daemon's own config, so a query is declared once. Nothing is watched
         by default.
       '';
+    };
+
+    # bdBudget (docket pg2-2qyyh.5): the beads backend's own flags. Every option
+    # is null by default and a null renders nothing, so the backend's compiled-in
+    # defaults apply (9 in flight, 92 starts per minute, a 5s wait bound, 2 write
+    # slots, one budget per tracker directory).
+    bdBudget = {
+      maxConcurrent = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        example = 9;
+        description = "Rendered as `--bd-max-concurrent`: the number of `bd` processes in flight at once across every instance of one budget group. `null` renders no flag (the backend's default, 9, applies).";
+      };
+      maxPerMinute = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        example = 92;
+        description = "Rendered as `--bd-max-per-minute`: the cap on `bd` process starts per minute. `null` renders no flag (the backend's default, 92, applies).";
+      };
+      waitBound = lib.mkOption {
+        type = lib.types.nullOr (lib.types.either lib.types.ints.unsigned lib.types.str);
+        default = null;
+        example = "5s";
+        description = ''
+          Rendered as `--bd-wait-bound`: how long a call waits for the budget
+          before it is denied with the retryable wire error `unavailable`. A
+          number is seconds; a string is a Go duration (`"5s"`, `"1500ms"`).
+          It MUST stay shorter than the shortest poll interval of a caller that
+          pins a beads instance (the documented shortest is 10 seconds), or a
+          denied poll overlaps the next one. `null` renders no flag (the
+          backend's default, 5s, applies).
+        '';
+      };
+      writeReserve = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.unsigned;
+        default = null;
+        example = 2;
+        description = "Rendered as `--bd-write-reserve`: the slots only writes may take, so a burst of reads cannot starve a write. `null` renders no flag (the backend's default, 2, applies).";
+      };
+      group = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "shared-dolt";
+        description = "Rendered as `--budget-group`: instances naming the same group share one budget (use it for two trackers served by one dolt server). `null` renders no flag, so each tracker directory has its own budget.";
+      };
     };
 
     ownsChanges = lib.mkOption {

@@ -203,6 +203,41 @@ let
     ];
   };
 
+  # The bd budget (docket pg2-2qyyh.5): two beads instances and a bare-string
+  # beads registration given ONE group, next to a Jira string and an scm string
+  # that must stay untouched. EXAMPLE values only.
+  bdBudgetAll = {
+    maxConcurrent = 6;
+    maxPerMinute = 60;
+    waitBound = 3;
+    writeReserve = 1;
+    group = "example-shared";
+  };
+  bdBudgetExample = {
+    connector = {
+      issue = [
+        "pg-connector-issue-jira"
+        "pg-connector-issue-beads"
+        (instanceBeads "pg2")
+        (instanceBeads "zr")
+      ];
+      scm = "pg-connector-scm-git";
+    };
+    attention.sources = [
+      (instanceBeads "pg2")
+      (instanceBeads "zr")
+    ];
+    bdBudget = bdBudgetAll;
+  };
+  # Only waitBound set, as a duration string: one flag, nothing else.
+  bdBudgetPartialExample = {
+    connector.issue = [
+      (instanceBeads "pg2")
+      "pg-connector-issue-jira"
+    ];
+    bdBudget.waitBound = "4s";
+  };
+
   # scm as a single {name, command} instance (connector.scm is single-valued).
   scmInstanceExample = {
     connector.scm = {
@@ -946,6 +981,24 @@ in
       perBackend."pg-connector-issue-beads-pg2" = { };
     };
   };
+  # bdBudget values render as flags on every beads registration; two instances
+  # with one group render the same --budget-group.
+  bdBudget = render bdBudgetExample;
+  bdBudgetPartial = render bdBudgetPartialExample;
+  # Every bdBudget value explicitly null renders the pre-change `instances`
+  # golden byte for byte (an unconfigured deployment does not move).
+  bdBudgetUnset = render (
+    instancesExample
+    // {
+      bdBudget = {
+        maxConcurrent = null;
+        maxPerMinute = null;
+        waitBound = null;
+        writeReserve = null;
+        group = null;
+      };
+    }
+  );
   # A single-valued scm accepts one {name, command} too.
   scmInstance = render scmInstanceExample;
   # Entries missing command or with an empty command are rejected at eval.

@@ -113,6 +113,26 @@ naming `attention_labels`.
 `pg-connector-issue-beads` takes its tracker from `--beads-dir DIR`, then
 `$PG_CONNECTOR_ISSUE_BEADS_DIR`, then `$BEADS_DIR`; with none of the three it refuses to run.
 
+The beads backend also keeps a **bd budget** that caps its own load on the tracker's dolt server.
+It counts the `bd` processes in flight and the ones started in the last minute, shared by every
+instance that names the same group. A call that cannot get a slot within the wait bound is not run:
+the backend answers the wire error `unavailable`, which is **retryable**, so a caller repeats the
+call after a pause. Five optional flags on the backend's argv set the budget:
+`--bd-max-concurrent N` (processes in flight; default 9), `--bd-max-per-minute N` (starts per
+minute; default 92), `--bd-wait-bound DURATION` (how long a call waits before it is denied;
+default 5s), `--bd-write-reserve N` (slots only writes may take; default 2) and `--budget-group NAME`
+(the budget's name; two trackers served by one dolt server share one budget by naming the same
+group, and the default is a group derived from the tracker directory). The slot files live in the
+state directory `~/.local/state/pg-connector-issue-beads/budget/<group>` (taken from the account's
+home, not from `$XDG_STATE_HOME`), which `PG_CONNECTOR_ISSUE_BEADS_BUDGET_DIR` overrides. The wait
+bound MUST stay shorter than the shortest poll interval of a caller that pins a beads instance: the
+probes and routers that pass `--backend` poll every 10 to 60 seconds, so 10 seconds is the one to
+stay under, and a denied poll then ends before the next one starts. The budget caps only the
+connector's own load; a direct `bd` call by an agent or a person bypasses it. In the home-manager
+module the flags are `phillipgreenii.programs.pg-connector.bdBudget.{maxConcurrent, maxPerMinute,
+waitBound, writeReserve, group}`, appended to every registration of `pg-connector-issue-beads`;
+with none set nothing is rendered and the defaults above apply.
+
 `pg-connector-thread-slack` execs `claude -p` against a Slack MCP server that its own config
 block declares (the umbrella copies `backends.<name>` into every `show` and `list` request; the
 home-manager `backends` option passes it through untouched). Every `claude` key is optional:

@@ -1109,6 +1109,10 @@ detect`; against a daemon-backed backend also `pr explain`, `ci explain`,
   forwarded `changes` source delivers nothing and moves no position (`INV-CACHE-9`, `INV-EXIT-1`).
   A caller MUST treat that `unavailable` as retryable. `auth status` and `config validate` carry the
   backend's own health as rows from its `status` op, and that op reports even when the daemon is down.
+- **A beads backend's budget denial.** The beads backend caps the `bd` processes it runs (the package README's paragraph on the bd budget). A call that cannot get a budget slot within the backend's
+  wait bound is not run and ends as the ordinary `unavailable` failure, with the same exit codes as any
+  other `unavailable`. A caller MUST treat it as retryable and repeat the call after a pause; the wait
+  bound is shorter than the shortest pinned poll interval, so the next poll finds the budget again.
 - **Outcome reporting.** A targeted call's outcome is the umbrella's own **targeted** exit-code
   scheme (`0`/`4`/`1`); a fan-out call's outcome is the **fan-out** scheme (`0`/`2`/`3`) plus a
   `sources[]` row per backend queried — `INV-EXIT-1` and `INV-OUT-1` state both in full. A

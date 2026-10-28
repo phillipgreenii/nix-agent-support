@@ -158,6 +158,12 @@ This binary's own exit-code scheme is deliberately just two values, never pg-con
 | 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                                                                   |
 | 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries (a `cursor_expired:` reason included) is appended too (bead `pg2-wa5uk`) |
 
+A pinned poll (`--backend <binary>`) against a beads backend can also exit 1 because the backend's own
+`bd` budget had no free slot within its wait bound: pg-connector then reports `unavailable`, which
+is **retryable**, so the poll is simply repeated at the next tick. The budget's wait bound is shorter
+than the shortest pinned poll interval (10 seconds), so a denied poll has ended before the next one
+starts. This adapter does not retry it and holds no state about it.
+
 `sweep`'s own "zero query names given" case never reaches a pg-connector subprocess at all — it
 is classified directly as the same non-zero exit, with this adapter's own usage message on
 stderr.
