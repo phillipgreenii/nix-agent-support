@@ -272,3 +272,44 @@ func TestRunTheOriginsRateLimitReadingReachesTheStatusOp(t *testing.T) {
 		}
 	})
 }
+
+// A watched query's baseline marker lives in the store, so a store moved aside
+// loses it: the fresh store's first complete run of the query is a baseline run
+// again, silent for its members (the log stays empty, the flags are set).
+func TestRunAMovedAsideStoreRebaselinesAWatchedQuerySilently(t *testing.T) {
+	r := newRig(t, fakePjiraOK, `{"mine":{"expr":"assignee = me","watched":true}}`, nil)
+	first := r.start(serve.Hooks{})
+	first.waitReady()
+	until(t, 30*time.Second, "the first baseline of the watched query", func() bool {
+		return r.count(`SELECT COUNT(*) FROM query WHERE baseline_at IS NOT NULL`) == 1
+	})
+	if n := r.count(`SELECT COUNT(*) FROM entity WHERE watched_at IS NOT NULL`); n != 1 {
+		t.Fatalf("watched entities after the first baseline = %d, want the one member", n)
+	}
+	if code := first.stop(); code != serve.ExitOK {
+		t.Fatalf("exit = %d; stderr: %s", code, first.stderr.String())
+	}
+
+	if err := os.WriteFile(r.storePath(), []byte(strings.Repeat("this is not a sqlite database; ", 200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, sfx := range []string{"-wal", "-shm"} {
+		_ = os.Remove(r.storePath() + sfx)
+	}
+	second := r.start(serve.Hooks{})
+	second.waitReady()
+	if !hasChange(r.daemonLog(), "store_moved_aside") {
+		t.Fatal("the move-aside must be logged as store_moved_aside")
+	}
+	// The marker and the flag can only come from a run of the new store.
+	until(t, 30*time.Second, "the baseline of the watched query in the new store", func() bool {
+		return r.count(`SELECT COUNT(*) FROM query WHERE baseline_at IS NOT NULL`) == 1 &&
+			r.count(`SELECT COUNT(*) FROM entity WHERE watched_at IS NOT NULL`) == 1
+	})
+	if n := r.count(`SELECT COUNT(*) FROM change_log`); n != 0 {
+		t.Errorf("the re-baseline appended %d rows, want none", n)
+	}
+	if code := second.stop(); code != serve.ExitOK {
+		t.Errorf("exit = %d; stderr: %s", code, second.stderr.String())
+	}
+}

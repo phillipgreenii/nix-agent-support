@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	lq "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -317,5 +318,104 @@ func TestUnauthenticatedRunAnswersUnauthenticated(t *testing.T) {
 	_, err = r.Fetch(context.Background(), lq.Key{Name: "team"})
 	if !errors.Is(err, scriptout.ErrUnauthenticated) {
 		t.Errorf("Fetch while unauthenticated = %v, want unauthenticated", err)
+	}
+}
+
+// A closed issue that left every query keeps its watched flag until eviction,
+// so a reopen inside the seven-day window is a change of a watched entity and
+// is delivered, after the closed row and with no second added row.
+func TestReopenInsideTheWindowIsDeliveredAfterTheClosedRow(t *testing.T) {
+	h := newHarness(t, 100)
+	h.fake.setIssue("A-1", "indeterminate")
+	h.fake.setIssue("A-2", "indeterminate")
+	h.fake.list(jqlMine, "A-1", "A-2")
+	h.fetch("mine")
+
+	h.fake.setIssue("A-1", "done")
+	h.fake.list(jqlMine, "A-2")
+	h.fetch("mine")
+	h.settle()
+	if rows := h.changeRows(); !eq(rows, []string{"A-1:closed"}) {
+		t.Fatalf("rows = %v, want the closed row", rows)
+	}
+
+	h.clk.Advance(24 * time.Hour) // well inside the seven-day window
+	h.fake.setIssue("A-1", "indeterminate")
+	h.fake.list(jqlMine, "A-1", "A-2")
+	h.fetch("mine")
+	h.settle()
+	rows := h.changeRows()
+	if len(rows) != 2 || rows[0] != "A-1:closed" || !strings.HasPrefix(rows[1], "A-1:reopened") {
+		t.Errorf("rows = %v, want the closed row then one reopened row of A-1 and no added row", rows)
+	}
+	if got := h.watched(); !eq(got, []string{"A-1", "A-2"}) {
+		t.Errorf("watched = %v", got)
+	}
+}
+
+// After the eviction age the closed issue and its flag are gone, so a query
+// that lists the issue again meets a first observation: exactly one added row.
+func TestEvictedIssueListedAgainIsAFirstObservationWithOneAddedRow(t *testing.T) {
+	h := newHarness(t, 100)
+	h.fake.setIssue("A-1", "indeterminate")
+	h.fake.setIssue("A-2", "indeterminate")
+	h.fake.list(jqlMine, "A-1", "A-2")
+	h.fetch("mine")
+
+	h.fake.setIssue("A-1", "done")
+	h.fake.list(jqlMine, "A-2")
+	h.fetch("mine")
+	h.settle()
+	if rows := h.changeRows(); !eq(rows, []string{"A-1:closed"}) {
+		t.Fatalf("rows = %v, want the closed row", rows)
+	}
+
+	h.clk.Advance(7 * 24 * time.Hour)
+	if n, err := summary.Sweep(context.Background(), h.st, 7*24*time.Hour, h.clk.Now()); err != nil || n != 1 {
+		t.Fatalf("Sweep = %d, %v, want the closed issue evicted", n, err)
+	}
+	if got := h.watched(); !eq(got, []string{"A-2"}) {
+		t.Fatalf("watched after the eviction = %v, want the flag gone with the row", got)
+	}
+
+	h.fake.setIssue("A-1", "indeterminate")
+	h.fake.list(jqlMine, "A-1", "A-2")
+	h.fetch("mine")
+	h.settle()
+	if rows := h.changeRows(); !eq(rows, []string{"A-1:added", "A-1:closed"}) {
+		t.Errorf("rows = %v, want the earlier closed row and exactly one added row", rows)
+	}
+	if got := h.watched(); !eq(got, []string{"A-1", "A-2"}) {
+		t.Errorf("watched = %v", got)
+	}
+}
+
+// A watched query added to the configuration after the others has no marker:
+// its first complete run is a baseline, silent for every member, the ones the
+// store already tracks included.
+func TestWatchedQueryAddedLaterRunsABaselineWithZeroRowsForItsMembers(t *testing.T) {
+	h := newHarness(t, 100)
+	h.fake.setIssue("A-1", "indeterminate")
+	h.fake.list(jqlMine, "A-1")
+	h.fetch("mine")
+	h.fake.setIssue("T-1", "indeterminate")
+	h.fake.list(jqlTeam, "T-1")
+	h.fetch("team") // T-1 is tracked, unwatched
+
+	const jqlLate = "project = LATE"
+	h.cfg.Queries["late"] = schema.QueryDef{Expr: schema.QueryExpr{jqlLate}, Watched: true}
+	h.fake.setIssue("L-1", "new")
+	h.fake.setIssue("L-2", "indeterminate")
+	h.fake.list(jqlLate, "A-1", "T-1", "L-1", "L-2")
+
+	row := h.fetch("late")
+	if !row.Complete || row.BaselineAt.IsZero() || len(row.IDs) != 4 {
+		t.Fatalf("row = %+v, want a complete baseline run of four members", row)
+	}
+	if rows := h.changeRows(); len(rows) != 0 {
+		t.Errorf("the baseline of the later query appended rows: %v", rows)
+	}
+	if got := h.watched(); !eq(got, []string{"A-1", "L-1", "L-2", "T-1"}) {
+		t.Errorf("watched = %v, want every member of the later query marked", got)
 	}
 }

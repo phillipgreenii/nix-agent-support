@@ -735,3 +735,50 @@ func TestFeedResetReplaysOnlyWatchedIssues(t *testing.T) {
 		t.Errorf("watched owning history = %+v", h)
 	}
 }
+
+// A watched flip of a Jira query makes the daemon answer one added row per
+// known member at once. pg-desk hydrates at most hydration.max_per_poll of them
+// per poll, acknowledges only what it processed, and the next poll takes the
+// rest: every member ends with exactly one row and none is lost.
+func TestFeedAFlipBurstIsHydratedAtMostMaxPerPollAndLosesNoRow(t *testing.T) {
+	burst := []gather.FeedRow{frow(3, "J-1", "added"), frow(5, "J-2", "added"), frow(7, "J-3", "added"), frow(9, "J-4", "added")}
+	f := newFeedFixture(t, []string{"jira-q"}, nil,
+		feedAnswer(feedIdentity, 10, burst...),
+		feedAnswer(feedIdentity, 10, burst[2:]...))
+	max := 2
+	f.eng.Cfg.Hydration.MaxPerPoll = &max
+
+	env, out, err := f.run("router")
+	if err != nil || !out.Partial {
+		t.Fatalf("first poll = %+v, %v; want a partial run cut by the budget", out, err)
+	}
+	if len(env.Records) != 2 || env.Records[0].ID != "J-1" || env.Records[1].ID != "J-2" {
+		t.Fatalf("first poll records = %+v, want the first two members", env.Records)
+	}
+
+	env, out, err = f.run("router")
+	if err != nil || out.Partial {
+		t.Fatalf("second poll = %+v, %v; want the rest in budget", out, err)
+	}
+	if len(env.Records) != 2 || env.Records[0].ID != "J-3" || env.Records[1].ID != "J-4" {
+		t.Fatalf("second poll records = %+v, want the remaining members", env.Records)
+	}
+	if !reflect.DeepEqual(f.feeder.acks, []int64{5, 10}) {
+		t.Errorf("acks = %v, want the last processed seq then the scanned next position", f.feeder.acks)
+	}
+	for _, id := range []string{"J-1", "J-2", "J-3", "J-4"} {
+		rows, err := f.st.ReadChanges("other", "issue", 100, f.eng.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, r := range rows {
+			if r.EntityID == id {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s has %d rows, want exactly one added row", id, n)
+		}
+	}
+}
