@@ -664,6 +664,50 @@ func TestDecodeRole_effort(t *testing.T) {
 	}
 }
 
+// TestDecodeRole_model (bead pg2-vsepbz, INV-CCH-40): absent/empty => no
+// override; a model name or alias loads; whitespace or a leading dash is
+// rejected at load, naming the key and the role file, so a bad value cannot
+// survive until claude itself fails to start. A row sets both effort and model
+// to show each override loads alongside the other.
+func TestDecodeRole_model(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"name":"zr-drain","ccpool":{"actor":"a","completion":"close-or-release","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, extra, wantModel, wantEffort string
+		wantErr                            bool
+	}{
+		{"absent", "", "", "", false},
+		{"empty string", `,"model":""`, "", "", false},
+		{"alias", `,"model":"sonnet"`, "sonnet", "", false},
+		{"full id", `,"model":"claude-opus-5-5"`, "claude-opus-5-5", "", false},
+		{"effort and model", `,"effort":"xhigh","model":"claude-opus-5-5"`, "claude-opus-5-5", "xhigh", false},
+		{"leading space rejected", `,"model":" sonnet"`, "", "", true},
+		{"leading dash rejected", `,"model":"-p"`, "", "", true},
+		{"inner whitespace rejected", `,"model":"a b"`, "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := mustWriteRoleFile(t, mk(tc.extra))
+			role, err := loadRoleFile(path)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "model") || !strings.Contains(err.Error(), path) {
+					t.Fatalf("err = %v, want a model error naming the role file %s", err, path)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := role.CCPool.Model; got != tc.wantModel {
+				t.Errorf("Model = %q, want %q", got, tc.wantModel)
+			}
+			if got := role.CCPool.Effort; got != tc.wantEffort {
+				t.Errorf("Effort = %q, want %q", got, tc.wantEffort)
+			}
+		})
+	}
+}
+
 const sessionEnvCCPoolBlock = `"ccpool":{"actor":"a","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"}`
 
 // INV-CCH-33: the role decodes sessionEnv (string map, default empty) onto

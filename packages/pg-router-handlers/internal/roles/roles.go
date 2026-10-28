@@ -114,6 +114,13 @@ type CCPoolConfig struct {
 	// receive (applied in buildDeps). "" (an absent key) keeps the handler-wide
 	// value. Validated at load: empty or one of config.ValidEfforts.
 	Effort string
+	// Model (bead pg2-vsepbz, INV-CCH-40) overrides, for THIS role's dispatches
+	// only, the handler-wide launch-config model (config.Config.Model,
+	// "claude-sonnet-5-5" by default), which is what `ccpool new --model` and so
+	// `claude --model` receive (applied in dispatchlib.BuildDeps before the
+	// runner is built). "" (an absent key) keeps the handler-wide value.
+	// Validated at load: empty or a name config.ValidateModelOverride accepts.
+	Model string
 	// Precheck (bead pg2-nk6th.3, INV-CCH-22) opts this role in to a dispatch
 	// precheck; the zero value leaves the historical behavior (the role named
 	// "review" runs the review precheck, every other role none).

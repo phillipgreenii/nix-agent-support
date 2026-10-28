@@ -113,6 +113,11 @@ type RoleFile struct {
 		// claude --effort; see roles.CCPoolConfig.Effort. Absent/"" => no override;
 		// anything else must be one of config.ValidEfforts (rejected at load).
 		Effort string `json:"effort"`
+		// Model (bead pg2-vsepbz, INV-CCH-40): per-role override of the
+		// handler-wide claude --model; see roles.CCPoolConfig.Model. Absent/"" =>
+		// no override; anything else must pass config.ValidateModelOverride
+		// (rejected at load).
+		Model string `json:"model"`
 		// Precheck (bead pg2-nk6th.3, INV-CCH-22): opts the role in to a dispatch
 		// precheck, "review", "ready" or "triage"; see roles.CCPoolConfig.Precheck. Absent
 		// or "" => the historical behavior.
@@ -200,6 +205,9 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 	if err := config.ValidateEffortOverride(rf.CCPool.Effort); err != nil {
 		return roles.Role{}, fmt.Errorf("role config %s: %w", path, err)
 	}
+	if err := config.ValidateModelOverride(rf.CCPool.Model); err != nil {
+		return roles.Role{}, fmt.Errorf("role config %s: %w", path, err)
+	}
 	// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
 	// worktree this handler created, so it is valid ONLY with the
 	// worktree strategy, and its templates must parse.
@@ -246,6 +254,7 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 		NeedsInputStall:         needsInputStall,
 		ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
 		Effort:                  rf.CCPool.Effort,
+		Model:                   rf.CCPool.Model,
 		Precheck:                rf.CCPool.Precheck,
 	}
 	return r, nil

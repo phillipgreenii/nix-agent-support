@@ -178,6 +178,7 @@ func TestValidate_loadRulesAreProblems(t *testing.T) {
 		{"bad enum", withCompletion("nope"), "invalid completion"},
 		{"bad budget time", ccpoolConfig(t, pool, "", `,"budget":{"time":"soon"}`), "budget.time"},
 		{"bad effort", ccpoolConfig(t, pool, "", `,"effort":"ludicrous"`), "ludicrous"},
+		{"bad model", ccpoolConfig(t, pool, "", `,"model":"-p"`), `model "-p"`},
 		{"ccpool table missing", map[string]any{}, "role.config.ccpool: required"},
 		{"unparseable template", ccpoolConfig(t, pool, "", `,"promptBody":"{{"`), "promptBody"},
 	}
