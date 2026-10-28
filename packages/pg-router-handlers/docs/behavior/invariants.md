@@ -971,7 +971,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   single handler-wide value, so every role launched at `max`, and a role that needs less (the
   drain roles, measured 2026-10-14 at about 23 percent of drain spend in output tokens) could be
   lowered only by lowering every role. **Not decided here.** Whether a subagent a session starts
-  follows the session's effort: nothing in this module or the roles' configuration sets a subagent
+  follows the session's effort (for the drain, ADR 0113 "Drain subagents are named agents with their own model" settles it): nothing in this module or the roles' configuration sets a subagent
   effort, so a subagent most likely follows the session flag, but that is a property of claude and
   is confirmed from a subagent transcript after a change, not assumed.
 
@@ -1258,4 +1258,5 @@ changes a core gate or `INV-LIFE-2`.
   **Why.** Model was a handler-wide value only, so every role ran on the `~/.claude/settings.json`
   fallback model, whatever that happened to be, and a role that needs a different model could not say
   so. **Not decided here.** The model of a subagent a session starts: that is the session's own
-  agent configuration, not this module's.
+  agent configuration, not this module's (for the drain, ADR 0113 "Drain subagents are named agents
+  with their own model" settles it).

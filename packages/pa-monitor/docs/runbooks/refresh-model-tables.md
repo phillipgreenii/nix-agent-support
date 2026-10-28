@@ -96,13 +96,18 @@ pricing docs, and say so if you had to fall back to the cache.
    (`windows_test.go` for table 1; the pricing / caps tests for 2 and 3), watch
    it fail, then edit the table so it passes. Never edit a table without its test
    moving in lockstep.
-6. **Validate** (all MUST pass):
+6. **Pinned role models:** bump the pinned model IDs together when a role model is replaced.
+   Find them with
+   `git grep -nE 'claude-(sonnet|opus|haiku|fable)-[0-9]' -- claude-marketplace/pb/agents packages/pg-router-handlers/internal/config home/programs/pg-router-ccpool-handler`
+   and, in nix-ziprecruiter, the `models` binding. The two `pb` drain agents MUST keep identical
+   `model:` lines.
+7. **Validate** (all MUST pass):
    ```bash
    cd packages/pa-monitor && gofmt -l internal/ | grep -v pb.go   # empty = clean
    go vet ./... && go test ./...
    cd ../.. && nix build .#pa-monitor --no-link
    ```
-7. **Report**: the drift found, the edits made (or "no drift"), and the source
+8. **Report**: the drift found, the edits made (or "no drift"), and the source
    each value came from (live API vs cached catalog). Then commit.
 
 ## Committing (this repo's convention)
