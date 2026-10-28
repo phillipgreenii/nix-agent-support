@@ -190,7 +190,7 @@ func WriteFlipMarker(ctx context.Context, o FlipMarkerOptions) (Marker, error) {
 	}
 	res := run(ctx, Call{Name: conn, Args: args, Env: env})
 	if res.StartErr != nil || res.Code != 0 {
-		return m, fmt.Errorf("%w: %s", ErrEpicComment, firstLine(res.Stderr+res.Stdout+errText(res.StartErr)))
+		return m, fmt.Errorf("%w: %s", ErrEpicComment, firstLine(string(res.Stderr)+string(res.Stdout)+errText(res.StartErr)))
 	}
 	return m, nil
 }

@@ -32,12 +32,12 @@ func withHelper(t *testing.T, env ...string) {
 		if f := set["GO_HELPER_STDOUT_FILE"]; f != "" {
 			b, err := os.ReadFile(f)
 			if err != nil {
-				return CallResult{Stderr: "helper: " + err.Error(), Code: 99}
+				return CallResult{Stderr: []byte("helper: " + err.Error()), Code: 99}
 			}
-			res.Stdout = string(b)
+			res.Stdout = b
 		}
-		res.Stdout += set["GO_HELPER_STDOUT"]
-		res.Stderr = set["GO_HELPER_STDERR"]
+		res.Stdout = append(res.Stdout, set["GO_HELPER_STDOUT"]...)
+		res.Stderr = []byte(set["GO_HELPER_STDERR"])
 		res.Code, _ = strconv.Atoi(set["GO_HELPER_EXIT"])
 		return res
 	}

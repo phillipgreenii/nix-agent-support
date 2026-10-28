@@ -33,7 +33,7 @@ func (f *fake) runner() apply.Runner {
 		if f.respond != nil {
 			out, code = f.respond(line)
 		}
-		return apply.CallResult{Stdout: out, Code: code}
+		return apply.CallResult{Stdout: []byte(out), Code: code}
 	}
 }
 

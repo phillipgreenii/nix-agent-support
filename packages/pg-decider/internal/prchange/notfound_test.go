@@ -171,7 +171,7 @@ func TestSearchJudgment(t *testing.T) {
 		{"no rows at all is transient", searchAnswer("", ""), ExitHydrateTransient, false, true},
 		{"unparseable is transient", ok("boom"), ExitHydrateTransient, false, true},
 		{"a failed search with no output is transient", exit(1, "", "no registry"), ExitHydrateTransient, false, true},
-		{"killed is transient", Result{Code: -1, Signaled: true}, ExitHydrateTransient, false, true},
+		{"killed is transient", Result{Code: -1, Signal: "killed"}, ExitHydrateTransient, false, true},
 		{"exit 3 with a degraded beads row is transient", func() Result {
 			r := searchAnswer(beadsRow("degraded", 0), "")
 			r.Code = 3

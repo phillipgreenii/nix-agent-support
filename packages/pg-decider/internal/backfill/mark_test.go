@@ -37,18 +37,18 @@ func (d *fakeDaemon) run(_ context.Context, c Call) Result {
 	switch {
 	case c.Name == "pg-desk" && len(a) == 3 && a[0] == "pr" && a[1] == "refresh":
 		if d.refreshFail[a[2]] {
-			return Result{Code: 3, Stderr: "refresh refused\n"}
+			return Result{Code: 3, Stderr: []byte("refresh refused\n")}
 		}
 		return Result{}
 	case c.Name == "pg-connector" && len(a) >= 3 && a[0] == "pr" && a[1] == "show":
 		pr := a[2]
 		if code, bad := d.showFail[pr]; bad {
-			return Result{Code: 1, Stdout: fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":"forced"}}`+"\n", code)}
+			return Result{Code: 1, Stdout: []byte(fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":"forced"}}`+"\n", code))}
 		}
 		if hasArg(a, "--watch") && !d.ignoreWatch[pr] {
 			d.watched[pr] = true
 		}
-		return Result{Stdout: `{"protocolVersion":1,"result":{"id":"` + pr + `"}}` + "\n"}
+		return Result{Stdout: []byte(`{"protocolVersion":1,"result":{"id":"` + pr + `"}}` + "\n")}
 	case c.Name == "pg-connector" && len(a) >= 3 && a[0] == "pr" && a[1] == "inspect":
 		d.inspects++
 		var ids []string
@@ -65,7 +65,7 @@ func (d *fakeDaemon) run(_ context.Context, c Call) Result {
 			}
 		}
 		out := fmt.Sprintf(`{"protocolVersion":1,"result":{"instance":"pr","results":[],"counts":{"requested":%d,"watched":%d}}}`, len(ids), n)
-		return Result{Stdout: out + "\n"}
+		return Result{Stdout: []byte(out + "\n")}
 	}
 	d.t.Fatalf("unexpected call %s %v", c.Name, a)
 	return Result{}
@@ -295,9 +295,9 @@ func TestMarkWatchedAnInspectionThatFailsOrIsUnreadableFailsTheCheck(t *testing.
 	set := markSet(0, map[string]string{"o/r#1": StateOpen})
 	for name, wrap := range map[string]func(Result) Result{
 		"an error answer": func(Result) Result {
-			return Result{Code: 1, Stdout: `{"protocolVersion":1,"error":{"code":"unavailable","message":"down"}}` + "\n"}
+			return Result{Code: 1, Stdout: []byte(`{"protocolVersion":1,"error":{"code":"unavailable","message":"down"}}` + "\n")}
 		},
-		"garbage": func(Result) Result { return Result{Stdout: "not json"} },
+		"garbage": func(Result) Result { return Result{Stdout: []byte("not json")} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := newFakeDaemon(t)

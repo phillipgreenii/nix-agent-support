@@ -182,27 +182,27 @@ func (r *run) planCmd() string    { return "pg-decider plan pr " + r.id }
 func (r *run) hydrate() (int, bool) {
 	res := r.call(Call{Name: "pg-desk", Args: []string{"pr", "refresh", r.id}})
 	r.rec.Hydrate.Result = hydrateFailed
-	if res.StartErr == nil && !res.Signaled {
+	if res.StartErr == nil && !signaled(res) {
 		code := res.Code
 		r.rec.Hydrate.ExitCode = &code
-		r.rec.Hydrate.Line = oneLine(res.Stdout, 200)
+		r.rec.Hydrate.Line = oneLine(string(res.Stdout), 200)
 	}
 	switch {
 	case res.StartErr != nil:
 		return r.fail(StageHydrate, ClassHydrateError, "refresh could not start", res.StartErr.Error(), r.refreshCmd()), true
-	case res.Signaled:
+	case signaled(res):
 		return r.fail(StageHydrate, ClassTransient, "refresh was stopped", "pg-desk was ended by a signal (signal: killed)", r.refreshCmd()), true
 	case res.Code == 0:
-		if s := strings.TrimSpace(res.Stdout); s != "" {
+		if s := strings.TrimSpace(string(res.Stdout)); s != "" {
 			fmt.Fprintln(r.o.Stdout, s)
 		}
 	case res.Code == 1:
-		return r.fail(StageHydrate, ClassHydrateError, "refresh failed", firstLine(res.Stderr+"\n"+res.Stdout), r.refreshCmd()), true
+		return r.fail(StageHydrate, ClassHydrateError, "refresh failed", firstLine(string(res.Stderr)+"\n"+string(res.Stdout)), r.refreshCmd()), true
 	case res.Code == 2 || res.Code == 3:
 		return r.refreshFailed(res), true
 	default:
 		return r.fail(StageHydrate, ClassHydrateError, "refresh failed",
-			fmt.Sprintf("pg-desk pr refresh exited %d: %s", res.Code, firstLine(res.Stderr)), r.refreshCmd()), true
+			fmt.Sprintf("pg-desk pr refresh exited %d: %s", res.Code, firstLine(string(res.Stderr))), r.refreshCmd()), true
 	}
 
 	code, stop := r.checkView()
@@ -231,11 +231,11 @@ func refreshClass(stdout string) string {
 // refreshFailed maps a refresh exit of 2 or 3 to its failure. The decider
 // never runs after one.
 func (r *run) refreshFailed(res Result) int {
-	detail := firstLine(res.Stderr)
+	detail := firstLine(string(res.Stderr))
 	if detail == "" {
 		detail = fmt.Sprintf("pg-desk pr refresh exited %d", res.Code)
 	}
-	class := refreshClass(res.Stdout)
+	class := refreshClass(string(res.Stdout))
 	if class == "" {
 		// An older pg-desk prints no class. Exit 2 is always a degraded read; an
 		// exit 3 whose cause is unknown is never read as not found.
@@ -270,12 +270,12 @@ func viewFromResult(res Result) (v *view.View, class, detail string) {
 	switch {
 	case res.StartErr != nil:
 		return nil, ClassHydrateError, res.StartErr.Error()
-	case res.Signaled:
+	case signaled(res):
 		return nil, ClassTransient, "pg-desk pr show was ended by a signal (signal: killed)"
 	case res.Code != 0:
-		return nil, ClassTransient, fmt.Sprintf("pg-desk pr show exited %d: %s", res.Code, firstLine(res.Stderr))
+		return nil, ClassTransient, fmt.Sprintf("pg-desk pr show exited %d: %s", res.Code, firstLine(string(res.Stderr)))
 	}
-	v, err := view.Parse([]byte(res.Stdout))
+	v, err := view.Parse(res.Stdout)
 	if err != nil {
 		return nil, ClassHydrateError, err.Error()
 	}
@@ -309,7 +309,7 @@ func (r *run) deciderCall() Call {
 	c := Call{Name: "pg-decider", Args: []string{r.o.Mode, "pr", r.id}}
 	if r.o.Mode == ModeApply && r.key.Has() {
 		c.Args = append(c.Args, "--from-item", "-")
-		c.Stdin = RoutedItemJSON(r.o.RawID, r.id, r.key)
+		c.Stdin = []byte(RoutedItemJSON(r.o.RawID, r.id, r.key))
 	}
 	return c
 }
@@ -322,16 +322,16 @@ func (r *run) readPlan() (*action.PlanResult, string) {
 	switch {
 	case res.StartErr != nil:
 		return nil, res.StartErr.Error()
-	case res.Signaled:
+	case signaled(res):
 		return nil, "pg-decider plan --json was ended by a signal"
 	case res.Code != 0:
-		return nil, fmt.Sprintf("pg-decider plan --json exited %d: %s", res.Code, firstLine(res.Stderr))
+		return nil, fmt.Sprintf("pg-decider plan --json exited %d: %s", res.Code, firstLine(string(res.Stderr)))
 	}
-	p, err := parsePlanJSON(res.Stdout)
+	p, err := parsePlanJSON(string(res.Stdout))
 	if err != nil {
 		return nil, "the plan is not readable JSON: " + err.Error()
 	}
-	if items, ceiling := lookupFromPlanJSON(res.Stdout); items != nil || ceiling != nil {
+	if items, ceiling := lookupFromPlanJSON(string(res.Stdout)); items != nil || ceiling != nil {
 		r.planItems, r.planCeiling = items, ceiling
 	}
 	return p, ""
@@ -353,7 +353,7 @@ func (r *run) decide() int {
 	res := r.call(r.deciderCall())
 	code := r.mapDecide(res)
 	rec.ExitCode = res.Code
-	if res.StartErr != nil || res.Signaled {
+	if res.StartErr != nil || signaled(res) {
 		return code
 	}
 
@@ -375,7 +375,7 @@ func (r *run) decide() int {
 		}
 	}
 
-	counters := parseCounters(res.Stderr)
+	counters := parseCounters(string(res.Stderr))
 	rec.Actions, rec.ByKind = plannedActions(pre)
 	rec.Rules = ruleOutcomes(r.o.Mode, pre, counters)
 	r.decisions = decisionsFor(r.o.Mode, pre, counters)
@@ -397,10 +397,10 @@ func (r *run) decide() int {
 // write path call forwards the two values; a test replaces this function to
 // show that with a stub.
 var lookupFromDecider = func(res Result) (items, ceiling *int64) {
-	if c := parseCounters(res.Stderr); c != nil && (c.LookupItems != nil || c.LookupCeiling != nil) {
+	if c := parseCounters(string(res.Stderr)); c != nil && (c.LookupItems != nil || c.LookupCeiling != nil) {
 		return intp64(c.LookupItems), intp64(c.LookupCeiling)
 	}
-	return lookupFromPlanJSON(res.Stdout)
+	return lookupFromPlanJSON(string(res.Stdout))
 }
 
 func intp64(p *int) *int64 {
@@ -429,17 +429,17 @@ func lookupFromPlanJSON(stdout string) (items, ceiling *int64) {
 // line passes through unchanged, and every other line becomes part of this
 // command's own failure line (or, on success, a prefixed diagnostic).
 func (r *run) mapDecide(res Result) int {
-	counters, others := splitDeciderStderr(res.Stderr)
+	counters, others := splitDeciderStderr(string(res.Stderr))
 	for _, l := range counters {
 		fmt.Fprintln(r.o.Stderr, l)
 	}
-	if res.Stdout != "" {
-		fmt.Fprint(r.o.Stdout, res.Stdout)
+	if len(res.Stdout) > 0 {
+		r.o.Stdout.Write(res.Stdout)
 	}
 	switch {
 	case res.StartErr != nil:
 		return r.fail(StageDecide, ClassDecideFailed, "the decider could not start", res.StartErr.Error(), r.planCmd())
-	case res.Signaled:
+	case signaled(res):
 		return r.fail(StageDecide, ClassDecidePartial, "the decider was stopped", "pg-decider was ended by a signal (signal: killed)", r.planCmd())
 	case res.Code == 0:
 		for _, l := range others {
@@ -451,7 +451,7 @@ func (r *run) mapDecide(res Result) int {
 	if detail == "" {
 		detail = fmt.Sprintf("pg-decider exited %d with no diagnostic", res.Code)
 	}
-	if res.Code == exitcode.LookupUntrusted && lookupUnavailable(res.Stderr) {
+	if res.Code == exitcode.LookupUntrusted && lookupUnavailable(string(res.Stderr)) {
 		// The decider failed closed because the tracker could not be read, and
 		// wrote nothing: retryable, unlike a listing above the ceiling or a
 		// truncated one, which a retry cannot clear.

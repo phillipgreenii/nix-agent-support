@@ -62,7 +62,7 @@ func trackerDouble(t *testing.T, listJSON string, listExit int) *connectorDouble
 			n++
 			out = `{"result":{"id":"wb-new-` + strconv.Itoa(n) + `"}}`
 		}
-		return apply.CallResult{Stdout: out + "\n", Code: code}
+		return apply.CallResult{Stdout: []byte(out + "\n"), Code: code}
 	}
 	return d
 }

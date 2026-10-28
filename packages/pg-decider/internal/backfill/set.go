@@ -389,7 +389,7 @@ type sourceRow struct {
 // connector's own words.
 func decodeListing(res Result, what string, into any) error {
 	if err := json.Unmarshal([]byte(res.Stdout), into); err != nil {
-		return fmt.Errorf("pg-connector %s: exit %d and no readable answer: %s", what, res.Code, firstLine(res.Stderr+res.Stdout))
+		return fmt.Errorf("pg-connector %s: exit %d and no readable answer: %s", what, res.Code, firstLine(string(res.Stderr)+string(res.Stdout)))
 	}
 	return nil
 }

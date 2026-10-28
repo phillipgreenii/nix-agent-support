@@ -22,17 +22,17 @@ func (d *connectorDouble) run(_ context.Context, c Call) Result {
 	d.env = append(d.env, c.Env)
 	switch {
 	case len(c.Args) >= 2 && c.Args[0] == "issue" && c.Args[1] == "list":
-		return Result{Stdout: d.issues}
+		return Result{Stdout: []byte(d.issues)}
 	case len(c.Args) >= 2 && c.Args[0] == "pr" && c.Args[1] == "list":
 		for i, a := range c.Args {
 			if a == "--query" {
 				if ans, ok := d.prs[c.Args[i+1]]; ok {
-					return Result{Stdout: ans}
+					return Result{Stdout: []byte(ans)}
 				}
 			}
 		}
 	}
-	return Result{Code: 2, Stderr: "no answer for " + strings.Join(c.Args, " ")}
+	return Result{Code: 2, Stderr: []byte("no answer for " + strings.Join(c.Args, " "))}
 }
 
 const okSources = `"sources":[{"source":"s","status":"succeeded","count":1}],"truncated":false`

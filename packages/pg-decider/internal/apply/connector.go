@@ -96,12 +96,12 @@ func call(ctx context.Context, env Env, args []string) ([]byte, error) {
 		return nil, fmt.Errorf("exec pg-connector %s: %w", strings.Join(args, " "), res.StartErr)
 	}
 	if res.Code != 0 {
-		detail := strings.TrimSpace(res.Stdout)
+		detail := strings.TrimSpace(string(res.Stdout))
 		var w wireEnvelope
 		if json.Unmarshal([]byte(res.Stdout), &w) == nil && w.Error != nil {
 			detail = w.Error.Code + ": " + w.Error.Message
 		}
-		if s := strings.TrimSpace(res.Stderr); s != "" && detail == "" {
+		if s := strings.TrimSpace(string(res.Stderr)); s != "" && detail == "" {
 			detail = s
 		}
 		return nil, &connectorError{args: args, exitCode: res.Code, detail: detail}

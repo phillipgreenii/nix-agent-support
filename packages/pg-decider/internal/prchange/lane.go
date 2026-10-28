@@ -91,14 +91,14 @@ func (r *run) callLane(in laneInput) (ok bool, detail string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	res := r.call(Call{Name: "pg-desk", Args: []string{"pr", "lane-record"}, Stdin: string(b) + "\n"})
+	res := r.call(Call{Name: "pg-desk", Args: []string{"pr", "lane-record"}, Stdin: append(b, '\n')})
 	switch {
 	case res.StartErr != nil:
 		return false, res.StartErr.Error()
-	case res.Signaled:
+	case signaled(res):
 		return false, "pg-desk pr lane-record was ended by a signal"
 	case res.Code != 0:
-		return false, fmt.Sprintf("exit %d: %s", res.Code, firstLine(res.Stderr+"\n"+res.Stdout))
+		return false, fmt.Sprintf("exit %d: %s", res.Code, firstLine(string(res.Stderr)+"\n"+string(res.Stdout)))
 	}
 	return true, ""
 }

@@ -14,7 +14,7 @@ import (
 
 func TestExecRunnerCapturesStdoutStderrAndExitCode(t *testing.T) {
 	res := ExecRunner(context.Background(), Call{Name: "sh", Args: []string{"-c", `printf out; printf err >&2; exit 7`}})
-	if res.Stdout != "out" || res.Stderr != "err" || res.Code != 7 || res.Signaled || res.StartErr != nil {
+	if string(res.Stdout) != "out" || string(res.Stderr) != "err" || res.Code != 7 || res.Signal != "" || res.StartErr != nil {
 		t.Fatalf("got %+v", res)
 	}
 	if ok := ExecRunner(context.Background(), Call{Name: "sh", Args: []string{"-c", "exit 0"}}); ok.Code != 0 || ok.StartErr != nil {
@@ -27,17 +27,17 @@ func TestExecRunnerAppendsEnvToTheAmbientEnvironmentAndFeedsStdin(t *testing.T) 
 	res := ExecRunner(context.Background(), Call{
 		Name:  "sh",
 		Args:  []string{"-c", `printf '%s|%s|' "$PGD_RUNEXEC_AMBIENT" "$PGD_RUNEXEC_ADDED"; cat`},
-		Stdin: "in",
+		Stdin: []byte("in"),
 		Env:   []string{"PGD_RUNEXEC_ADDED=added"},
 	})
-	if res.Stdout != "ambient|added|in" || res.Code != 0 {
+	if string(res.Stdout) != "ambient|added|in" || res.Code != 0 {
 		t.Fatalf("got %+v", res)
 	}
 }
 
 func TestExecRunnerReportsASignalAsCodeMinusOne(t *testing.T) {
 	res := ExecRunner(context.Background(), Call{Name: "sh", Args: []string{"-c", `kill -9 $$`}})
-	if res.Code != -1 || !res.Signaled || res.StartErr != nil {
+	if res.Code != -1 || res.Signal == "" || res.StartErr != nil {
 		t.Fatalf("got %+v", res)
 	}
 }

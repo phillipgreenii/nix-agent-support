@@ -55,7 +55,7 @@ func (f *fakeBd) run(_ context.Context, c Call) Result {
 	f.calls = append(f.calls, args)
 	out := func(v any) Result {
 		b, _ := json.Marshal(map[string]any{"data": v})
-		return Result{Stdout: string(b)}
+		return Result{Stdout: []byte(string(b))}
 	}
 	switch args[0] {
 	case "list":
@@ -115,11 +115,11 @@ func (f *fakeBd) run(_ context.Context, c Call) Result {
 			case "--unset-metadata":
 				delete(it.Metadata, v)
 			default:
-				return Result{Code: 2, Stderr: "fake bd: unknown flag " + args[i]}
+				return Result{Code: 2, Stderr: []byte("fake bd: unknown flag " + args[i])}
 			}
 		}
 	default:
-		return Result{Code: 2, Stderr: "fake bd: unknown verb " + args[0]}
+		return Result{Code: 2, Stderr: []byte("fake bd: unknown verb " + args[0])}
 	}
 	return Result{}
 }
@@ -411,7 +411,7 @@ func TestAnItemWhoseStepFailedGetsNoRollbackNoteAndIsListedAgain(t *testing.T) {
 	inner := tr.Runner
 	tr.Runner = func(ctx context.Context, c Call) Result {
 		if len(c.Args) > 3 && c.Args[2] == "close" && c.Args[3] == "r-2" {
-			return Result{Code: 1, Stderr: "boom"}
+			return Result{Code: 1, Stderr: []byte("boom")}
 		}
 		return inner(ctx, c)
 	}

@@ -34,7 +34,7 @@ func recordWrites(t *testing.T, actions []action.Action, stdout string, exit str
 	code, _ := strconv.Atoi(exit)
 	applyRunner = func(_ context.Context, c apply.Call) apply.CallResult {
 		recs = append(recs, execRec{c.Name, strings.Join(c.Args, " ")})
-		return apply.CallResult{Stdout: stdout, Code: code}
+		return apply.CallResult{Stdout: []byte(stdout), Code: code}
 	}
 	return &recs
 }

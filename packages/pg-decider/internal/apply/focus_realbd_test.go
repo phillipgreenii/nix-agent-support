@@ -31,6 +31,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/view"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // The environment variables of the opt-in test. Each of the three binary
@@ -239,10 +240,10 @@ func (w *focusRealWorld) runner() Runner {
 			w.t.Fatalf("the apply layer exec'd %q, which this test does not provide", c.Name)
 		}
 		w.calls = append(w.calls, c.Name+" "+strings.Join(c.Args, " "))
-		cmd := exec.CommandContext(ctx, bin, c.Args...)
-		cmd.Dir = w.dir
-		cmd.Env = append(append([]string{}, w.env...), c.Env...)
-		return runCmd(ctx, cmd)
+		return cmdrun.Exec(ctx, cmdrun.Call{
+			Name: bin, Args: c.Args, Dir: w.dir, Stdin: c.Stdin,
+			Env: append(append([]string{}, w.env...), c.Env...), EnvMode: cmdrun.EnvExact,
+		})
 	}
 }
 

@@ -124,7 +124,7 @@ func TestTheFlipMarkerCommentsOnTheEpicBeadAndTheRunRecordIsAuthoritative(t *tes
 	}
 	// A comment that fails does not undo the marker.
 	p2 := tmpRecord(t)
-	bad := func(context.Context, Call) Result { return Result{Code: 3, Stderr: "tracker down"} }
+	bad := func(context.Context, Call) Result { return Result{Code: 3, Stderr: []byte("tracker down")} }
 	_, err = WriteFlipMarker(context.Background(), FlipMarkerOptions{RunRecord: p2, EpicBead: "pg2-6mo45", Runner: bad})
 	if err == nil || !strings.Contains(err.Error(), ErrEpicComment.Error()) {
 		t.Fatalf("err %v", err)

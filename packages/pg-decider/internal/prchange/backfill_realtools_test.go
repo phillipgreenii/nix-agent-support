@@ -131,7 +131,7 @@ func (r *rig) hermetic(ctx context.Context, c backfill.Call) backfill.Result {
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
-	res := backfill.Result{Stdout: out.String(), Stderr: errb.String()}
+	res := backfill.Result{Stdout: []byte(out.String()), Stderr: []byte(errb.String())}
 	var ee *exec.ExitError
 	switch {
 	case err == nil:

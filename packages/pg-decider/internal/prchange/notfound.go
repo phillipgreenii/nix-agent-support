@@ -51,16 +51,16 @@ func callFailure(name string, args []string, res Result) string {
 	switch {
 	case res.StartErr != nil:
 		return what + ": " + res.StartErr.Error()
-	case res.Signaled:
+	case signaled(res):
 		return what + " was ended by a signal (signal: killed)"
 	}
 	var w struct {
 		Error *struct{ Code, Message string } `json:"error"`
 	}
-	if json.Unmarshal([]byte(res.Stdout), &w) == nil && w.Error != nil {
+	if json.Unmarshal(res.Stdout, &w) == nil && w.Error != nil {
 		return fmt.Sprintf("%s: exit %d: %s: %s", what, res.Code, w.Error.Code, w.Error.Message)
 	}
-	return fmt.Sprintf("%s: exit %d: %s", what, res.Code, firstLine(res.Stderr+"\n"+res.Stdout))
+	return fmt.Sprintf("%s: exit %d: %s", what, res.Code, firstLine(string(res.Stderr)+"\n"+string(res.Stdout)))
 }
 
 // notFound handles a PR the source says is gone (refresh exit 3, class
@@ -83,7 +83,7 @@ func (r *run) notFound(refreshDetail string) int {
 	if !open {
 		args := []string{"pr", "mark-inactive", r.id}
 		res := r.call(Call{Name: "pg-desk", Args: args})
-		if res.StartErr != nil || res.Signaled || res.Code != 0 {
+		if res.StartErr != nil || signaled(res) || res.Code != 0 {
 			return r.fail(StageHydrate, ClassTransient, "marking the PR inactive failed",
 				callFailure("pg-desk", args, res), "pg-desk pr mark-inactive "+r.id)
 		}
@@ -120,7 +120,7 @@ func (r *run) notFound(refreshDetail string) int {
 // hold has none. A probe that fails is reported as a transient class.
 func (r *run) openAnchor() (anchorID string, open bool, class, detail string) {
 	res := r.call(Call{Name: "pg-desk", Args: []string{"pr", "show", r.id, "--json"}})
-	if res.Code != 0 && !res.Signaled && res.StartErr == nil && strings.Contains(res.Stderr, "does not resolve") {
+	if res.Code != 0 && !signaled(res) && res.StartErr == nil && strings.Contains(string(res.Stderr), "does not resolve") {
 		return "", false, "", ""
 	}
 	v, _, detail := viewFromResult(res)
@@ -135,7 +135,7 @@ func (r *run) openAnchor() (anchorID string, open bool, class, detail string) {
 	}
 	args := append([]string{"issue", "show", a.ID, "--fresh"}, r.backendFlag()...)
 	live := r.connectorCall(args...)
-	if live.StartErr != nil || live.Signaled || live.Code != 0 {
+	if live.StartErr != nil || signaled(live) || live.Code != 0 {
 		return "", false, ClassTransient, callFailure("pg-connector", args, live)
 	}
 	var w struct {
@@ -143,7 +143,7 @@ func (r *run) openAnchor() (anchorID string, open bool, class, detail string) {
 			State string `json:"state"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(live.Stdout), &w); err != nil || w.Result.State == "" {
+	if err := json.Unmarshal(live.Stdout, &w); err != nil || w.Result.State == "" {
 		return "", false, ClassTransient, fmt.Sprintf("pg-connector %s answered no state for the anchor", strings.Join(args, " "))
 	}
 	return a.ID, !strings.EqualFold(w.Result.State, "closed"), "", ""
@@ -180,13 +180,13 @@ type searchOutcome struct {
 func (r *run) findEscalation(title string) (id string, found bool, class, detail string) {
 	args := []string{"search", title}
 	res := r.connectorCall(args...)
-	if res.StartErr != nil || res.Signaled {
+	if res.StartErr != nil || signaled(res) {
 		return "", false, ClassTransient, callFailure("pg-connector", args, res)
 	}
 	// search prints its outcome on exit 0 (all healthy), 2 (some degraded) and 3
 	// (none healthy); the rows say which, so the exit code is not read.
 	var out searchOutcome
-	if err := json.Unmarshal([]byte(res.Stdout), &out); err != nil {
+	if err := json.Unmarshal(res.Stdout, &out); err != nil {
 		return "", false, ClassTransient, callFailure("pg-connector", args, res)
 	}
 	beads := 0
@@ -230,7 +230,7 @@ func (r *run) createEscalation(title, anchorID, refreshDetail string) (id, class
 	}
 	args = append(args, r.backendFlag()...)
 	res := r.connectorCall(args...)
-	if res.StartErr != nil || res.Signaled || res.Code != 0 {
+	if res.StartErr != nil || signaled(res) || res.Code != 0 {
 		return "", ClassTransient, callFailure("pg-connector", args[:2], res)
 	}
 	var w struct {
@@ -238,7 +238,7 @@ func (r *run) createEscalation(title, anchorID, refreshDetail string) (id, class
 			ID string `json:"id"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(res.Stdout), &w); err != nil || w.Result.ID == "" {
+	if err := json.Unmarshal(res.Stdout, &w); err != nil || w.Result.ID == "" {
 		return "", ClassTransient, "pg-connector issue create returned no id"
 	}
 	return w.Result.ID, "", ""

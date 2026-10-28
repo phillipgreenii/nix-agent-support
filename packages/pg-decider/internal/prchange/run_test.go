@@ -47,7 +47,7 @@ func (s *script) run(_ context.Context, c Call) Result {
 	line := strings.TrimSpace(c.Name + " " + strings.Join(c.Args, " "))
 	s.mu.Lock()
 	s.calls = append(s.calls, line)
-	s.inputs = append(s.inputs, c.Stdin)
+	s.inputs = append(s.inputs, string(c.Stdin))
 	s.mu.Unlock()
 	for i := range s.rules {
 		r := &s.rules[i]
@@ -62,7 +62,7 @@ func (s *script) run(_ context.Context, c Call) Result {
 			return r.res
 		}
 	}
-	return Result{Code: 1, Stderr: "script: no rule for " + line}
+	return Result{Code: 1, Stderr: []byte("script: no rule for " + line)}
 }
 
 func (s *script) called(prefix string) bool {
@@ -84,10 +84,10 @@ func hydratedView(version int, stale bool, anchorState string) string {
 	return fmt.Sprintf(`{"contract":"pg-desk.view/v1","type":"pr","id":"acme/api#7","version":%d,"stale":%t,"snapshot":null,"links":[%s]}`, version, stale, links)
 }
 
-func ok(stdout string) Result { return Result{Stdout: stdout} }
+func ok(stdout string) Result { return Result{Stdout: []byte(stdout)} }
 
 func exit(code int, stdout, stderr string) Result {
-	return Result{Code: code, Stdout: stdout, Stderr: stderr}
+	return Result{Code: code, Stdout: []byte(stdout), Stderr: []byte(stderr)}
 }
 
 func opts(t *testing.T, mode string, s *script) (Options, *bytes.Buffer, *bytes.Buffer) {
@@ -121,7 +121,7 @@ func TestRefreshExitsNeverRunTheDecider(t *testing.T) {
 		{"exit 3 no class is never not found", exit(3, "", "something"), ExitHydrateError, ClassHydrateError, false, "something"},
 		{"exit 3 unknown class", exit(3, "class=bogus\n", "x"), ExitHydrateError, ClassHydrateError, false, "x"},
 		{"exit 4", exit(4, "", ""), ExitHydrateError, ClassHydrateError, false, "exited 4"},
-		{"killed", Result{Code: -1, Signaled: true}, ExitHydrateTransient, ClassTransient, true, "signal: killed"},
+		{"killed", Result{Code: -1, Signal: "killed"}, ExitHydrateTransient, ClassTransient, true, "signal: killed"},
 		{"cannot start", Result{Code: -1, StartErr: fmt.Errorf("executable file not found")}, ExitHydrateError, ClassHydrateError, false, "not found"},
 	}
 	for _, c := range cases {
@@ -259,7 +259,7 @@ func TestViewReadFailures(t *testing.T) {
 		retry bool
 	}{
 		{"show fails", exit(1, "", "store busy"), ExitHydrateTransient, true},
-		{"show killed", Result{Code: -1, Signaled: true}, ExitHydrateTransient, true},
+		{"show killed", Result{Code: -1, Signal: "killed"}, ExitHydrateTransient, true},
 		{"show unparseable", ok("not json"), ExitHydrateError, false},
 		{"show wrong contract", ok(`{"contract":"other/v9"}`), ExitHydrateError, false},
 	}
@@ -298,7 +298,7 @@ func TestDeciderExitMapping(t *testing.T) {
 		{"exit 3 is failed", exit(3, "", "cannot read the view: signal: killed\n"), ExitDecideFailed, false},
 		{"exit 1 is failed", exit(1, "", "bad config: deadline exceeded"), ExitDecideFailed, false},
 		{"exit 1 no text", exit(1, "", ""), ExitDecideFailed, false},
-		{"killed is partial", Result{Code: -1, Signaled: true}, ExitDecidePartial, true},
+		{"killed is partial", Result{Code: -1, Signal: "killed"}, ExitDecidePartial, true},
 		{"exit 4 with an unavailable lookup is transient and retryable", exit(4, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup is unavailable: down\n"+lookupCounters("lookup-unavailable")+"\n"), ExitDecideUnavailable, true},
 		{"exit 4 above the ceiling is failed", exit(4, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup: the listing holds 9 work items, above the ceiling\n"+lookupCounters("lookup-above-ceiling")+"\n"), ExitDecideFailed, false},
 		{"exit 4 truncated is failed", exit(4, "", "pg-decider: work-item lookup: truncated\n"+lookupCounters("lookup-truncated")+"\n"), ExitDecideFailed, false},
@@ -335,7 +335,7 @@ func TestDeciderExitMapping(t *testing.T) {
 					}
 				}
 			}
-			if strings.Contains(c.res.Stderr, countersContract) && !strings.Contains(errb.String(), countersContract) {
+			if strings.Contains(string(c.res.Stderr), countersContract) && !strings.Contains(errb.String(), countersContract) {
 				t.Fatal("the run counters line was not passed through")
 			}
 		})

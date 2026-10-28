@@ -57,7 +57,7 @@ func TestTheBackfillProgressLineOfAPartialDecideNamesTheFailingAction(t *testing
 		o.RunRecordPath = rec
 		o.LockWait = time.Second
 		code := Run(ctx, o)
-		return backfill.Result{Code: code, Stdout: out.String(), Stderr: errb.String()}
+		return backfill.Result{Code: code, Stdout: []byte(out.String()), Stderr: []byte(errb.String())}
 	}
 	set := &backfill.Set{Contract: backfill.SetContract, Entries: []backfill.Entry{{PR: testID, State: backfill.StateOpen, From: []string{backfill.FromQuery}}}}
 	res, err := backfill.Run(context.Background(), backfill.RunOptions{

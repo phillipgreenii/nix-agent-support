@@ -281,7 +281,7 @@ func MarkWatched(ctx context.Context, o MarkOptions) (*MarkResult, error) {
 			case cr.StartErr != nil:
 				stop("cannot start " + o.Desk + ": " + firstLine(cr.StartErr.Error()))
 			case cr.Code != 0:
-				fail(pr, "refresh", fmt.Sprintf("%s pr refresh exited %d: %s", o.Desk, cr.Code, firstLine(cr.Stderr+"\n"+cr.Stdout)))
+				fail(pr, "refresh", fmt.Sprintf("%s pr refresh exited %d: %s", o.Desk, cr.Code, firstLine(string(cr.Stderr)+"\n"+string(cr.Stdout))))
 			default:
 				res.Refreshed++
 				fmt.Fprintf(o.Progress, "ok %s (refreshed)\n", pr)
@@ -332,7 +332,7 @@ func (o *MarkOptions) countCheck(ctx context.Context, res *MarkResult, stop func
 		var env markEnvelope
 		var ans inspectAnswer
 		if err := json.Unmarshal([]byte(cr.Stdout), &env); err != nil || json.Unmarshal(env.Result, &ans) != nil {
-			res.CheckError = "the inspection answer is not readable: " + firstLine(cr.Stdout)
+			res.CheckError = "the inspection answer is not readable: " + firstLine(string(cr.Stdout))
 			return
 		}
 		res.Watched += ans.Counts.Watched
@@ -359,7 +359,7 @@ func connectorOutcome(cr Result) (code, detail string) {
 		return env.Error.Code, env.Error.Code + ": " + env.Error.Message
 	}
 	if cr.Code != 0 {
-		return "", fmt.Sprintf("exit %d: %s", cr.Code, firstLine(cr.Stderr+"\n"+cr.Stdout))
+		return "", fmt.Sprintf("exit %d: %s", cr.Code, firstLine(string(cr.Stderr)+"\n"+string(cr.Stdout)))
 	}
 	return "", ""
 }

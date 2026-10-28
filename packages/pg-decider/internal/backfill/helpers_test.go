@@ -152,7 +152,7 @@ func (f *fakeChange) run(_ context.Context, c Call) Result {
 	_ = fh.Close()
 	res := Result{Code: code}
 	if code != 0 {
-		res.Stderr = "pg-pr-change: failed (class=" + rl.class + ")\n"
+		res.Stderr = []byte("pg-pr-change: failed (class=" + rl.class + ")\n")
 	}
 	return res
 }

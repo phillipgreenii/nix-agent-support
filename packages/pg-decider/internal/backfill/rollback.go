@@ -95,9 +95,9 @@ func (tr Tracker) run(ctx context.Context, args ...string) (string, error) {
 		return "", fmt.Errorf("bd %s: %w", strings.Join(args, " "), res.StartErr)
 	}
 	if res.Code != 0 {
-		return "", fmt.Errorf("bd %s: exit %d: %s", strings.Join(args, " "), res.Code, firstLine(res.Stderr+res.Stdout))
+		return "", fmt.Errorf("bd %s: exit %d: %s", strings.Join(args, " "), res.Code, firstLine(string(res.Stderr)+string(res.Stdout)))
 	}
-	return res.Stdout, nil
+	return string(res.Stdout), nil
 }
 
 // jsonData decodes the {"data": ...} envelope of a bd --json answer, tolerating

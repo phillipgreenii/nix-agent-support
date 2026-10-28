@@ -49,7 +49,7 @@ func (f *fake) runner() apply.Runner {
 		}
 		f.seen = append(f.seen, seen)
 		stdout, exit := f.respond(line)
-		return apply.CallResult{Stdout: stdout, Code: exit}
+		return apply.CallResult{Stdout: []byte(stdout), Code: exit}
 	}
 }
 

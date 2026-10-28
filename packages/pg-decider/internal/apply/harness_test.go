@@ -85,18 +85,18 @@ func (d *double) runner() Runner {
 				continue
 			}
 			return CallResult{
-				Stdout: strings.ReplaceAll(r.Stdout, "{seq}", strconv.Itoa(seq)),
-				Stderr: r.Stderr,
+				Stdout: []byte(strings.ReplaceAll(r.Stdout, "{seq}", strconv.Itoa(seq))),
+				Stderr: []byte(r.Stderr),
 				Code:   r.Exit,
 			}
 		}
 		switch {
 		case strings.HasPrefix(line, "pg-connector issue create"):
-			return CallResult{Stdout: `{"result":{"id":"wb-` + strconv.Itoa(seq) + `"}}`}
+			return CallResult{Stdout: []byte(`{"result":{"id":"wb-` + strconv.Itoa(seq) + `"}}`)}
 		case strings.HasPrefix(line, "pg-connector issue list"):
-			return CallResult{Stdout: `{"entities":[],"present_ids":[],"sources":[]}`}
+			return CallResult{Stdout: []byte(`{"entities":[],"present_ids":[],"sources":[]}`)}
 		}
-		return CallResult{Stdout: `{"result":{}}`}
+		return CallResult{Stdout: []byte(`{"result":{}}`)}
 	}
 }
 

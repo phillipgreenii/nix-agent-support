@@ -33,7 +33,7 @@ func scriptedWrites(t *testing.T, decide func(v *view.View) []action.Action, res
 		recs = append(recs, execRec{c.Name, a})
 		out, code := respond(c.Name, a)
 		n, _ := strconv.Atoi(code)
-		return apply.CallResult{Stdout: out, Code: n}
+		return apply.CallResult{Stdout: []byte(out), Code: n}
 	}
 	return &recs
 }

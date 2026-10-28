@@ -25,7 +25,7 @@ func desk(ctx context.Context, env Env, args ...string) error {
 		return fmt.Errorf("exec pg-desk %s: %w", strings.Join(args, " "), res.StartErr)
 	}
 	if res.Code != 0 {
-		detail := strings.TrimSpace(res.Stderr)
+		detail := strings.TrimSpace(string(res.Stderr))
 		if detail == "" {
 			detail = "no diagnostic on stderr"
 		}

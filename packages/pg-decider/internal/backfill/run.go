@@ -326,7 +326,7 @@ func Run(ctx context.Context, o RunOptions) (*RunResult, error) {
 			if !known {
 				cls = ExitClass{Class: "unknown"}
 			}
-			fmt.Fprintf(o.Progress, "fail %s: exit %d (%s): %s\n", e.PR, cr.Code, cls.Class, FailureReason(cr.Stderr))
+			fmt.Fprintf(o.Progress, "fail %s: exit %d (%s): %s\n", e.PR, cr.Code, cls.Class, FailureReason(string(cr.Stderr)))
 			if cls.Final {
 				res.Counts.NotFound++
 			} else if !failedAt[e.PR] {

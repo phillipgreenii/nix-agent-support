@@ -21,7 +21,7 @@ func Read(ctx context.Context, typ, id string) (*View, error) {
 		return nil, fmt.Errorf("%s: cannot run: %w", pgDeskBinary, res.StartErr)
 	}
 	if res.Code != 0 {
-		detail := strings.TrimSpace(res.Stderr)
+		detail := strings.TrimSpace(string(res.Stderr))
 		if detail == "" {
 			detail = "no diagnostic on stderr"
 		}

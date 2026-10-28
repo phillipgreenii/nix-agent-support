@@ -514,7 +514,7 @@ func TestApplyModeForwardsTheFiguresOfTheCountersLine(t *testing.T) {
 	line := strings.TrimSuffix(applyCounters, "}") + `,"lookup_items":3443,"lookup_ceiling":7000}`
 	s := hydrated().
 		on("pg-decider plan pr", ok(planWithWork)).
-		on("pg-decider apply", Result{Stderr: line + "\n"})
+		on("pg-decider apply", Result{Stderr: []byte(line + "\n")})
 	o, _, errb := opts(t, ModeApply, s)
 	Run(context.Background(), o)
 	if len(laneCalls(t, s)) != 1 {
@@ -532,8 +532,8 @@ func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.
 	for _, mode := range []string{ModePlan, ModeApply} {
 		t.Run(mode, func(t *testing.T) {
 			s := hydrated().
-				on("pg-decider plan pr", Result{Code: 4, Stderr: "pg-decider: cannot plan pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n"}).
-				on("pg-decider apply", Result{Code: 4, Stderr: "pg-decider: cannot apply pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n"})
+				on("pg-decider plan pr", Result{Code: 4, Stderr: []byte("pg-decider: cannot plan pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n")}).
+				on("pg-decider apply", Result{Code: 4, Stderr: []byte("pg-decider: cannot apply pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n")})
 			o, _, errb := opts(t, mode, s)
 			got := Run(context.Background(), o)
 			if got != ExitDecideFailed {
