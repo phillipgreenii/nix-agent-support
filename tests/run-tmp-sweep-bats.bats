@@ -105,3 +105,12 @@ EOS
   [ -f "$BATS_TEST_DIRNAME/../packages/pg-disk-reclaimer/pg-disk-reclaimer/tests/test-pg-disk-reclaimer-tmp-sweep.bats" ]
   grep -q 'packages/pg-disk-reclaimer/pg-disk-reclaimer/tests/test-pg-disk-reclaimer-tmp-sweep.bats' "$SCRIPT"
 }
+
+@test "the gate sets PGDR_REQUIRE_PTY=1 for the suite it runs, so a missing pty fails instead of skipping (bead pg2-kb5dby)" {
+  suite <<'EOS'
+@test "sees the switch" { [ "${PGDR_REQUIRE_PTY:-}" = 1 ]; }
+EOS
+  gate
+  [ "$status" -eq 0 ]
+  [[ $output == *"1 cases ran and passed"* ]]
+}

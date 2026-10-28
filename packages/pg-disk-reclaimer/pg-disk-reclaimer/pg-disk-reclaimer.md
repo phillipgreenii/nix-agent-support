@@ -31,7 +31,7 @@
 
 `pg-disk-reclaimer --help`
 
-- Aggressiveness is a ceiling on a 0-5 scale (0 tidy cruft, 1 tidy, 2 caches, 3 deep, 4 costly or irreversible, 5 hardest to recover); under `--apply`, a selection that includes level 4 or above asks for one interactive confirmation before anything runs (declining runs nothing). Full definitions: `packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md` in the phillipgreenii-nix-agent-support repo:
+- Aggressiveness is a ceiling on a 0-5 scale (0 tidy cruft, 1 tidy, 2 caches, 3 deep, 4 costly or irreversible, 5 hardest to recover); under `--apply`, a selection that includes level 4 or above asks for ONE interactive confirmation, at most once per run and before anything runs, and that one answer gates the whole run (the prompt names each such item and its size; declining exits 2 and no terminal to ask on exits 3, both with nothing run; no command prompts mid-run). Full definitions: `packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md` in the phillipgreenii-nix-agent-support repo:
 
 `pg-disk-reclaimer reclaim --aggressiveness {{3}}`
 

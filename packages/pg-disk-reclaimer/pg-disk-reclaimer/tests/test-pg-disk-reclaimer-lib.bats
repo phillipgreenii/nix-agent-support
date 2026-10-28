@@ -829,7 +829,7 @@ JSON
   run cmd_reclaim --aggressiveness 5 --apply
   [ "$status" -eq 0 ]
   [ "$(grep -c 'CONFIRM-CALLED' <<<"$output")" -eq 1 ]
-  [[ "$output" == *"hi4,hi5"* ]]
+  [[ "$output" == *"(hi4: 1.0M, hi5: 1.0M)"* ]]
   # The prompt precedes every removeCommand, and the plan (sizes) precedes the prompt.
   [[ "$output" == *"hi5: size: 1.0M"*"CONFIRM-CALLED"*"remove-lo"*"remove-hi4"*"remove-hi5"* ]]
 }

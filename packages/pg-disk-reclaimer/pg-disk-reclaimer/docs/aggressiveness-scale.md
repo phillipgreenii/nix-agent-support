@@ -26,11 +26,21 @@ document are to be interpreted as described in RFC 2119.
     it MUST NOT prompt at any other point of the run.
   - Before the prompt, `reclaim` MUST print the plan: each selected item with
     its size. The prompt MUST be visible on the controlling terminal, and the
-    answer MUST be read from that terminal, never from stdin.
+    answer MUST be read from that terminal, never from stdin. Because the plan
+    goes to standard output, which MAY be redirected to a file or a pager while
+    the prompt goes to the terminal, the prompt text itself MUST name the item
+    count and each level `>= 4` item with its size.
+  - Only `y`, `yes` and their upper-case forms (`Y`, `YES`, `Yes`) confirm.
+    Anything else is a decline: an empty answer, `n`, `no`, `yep`, a leading or
+    trailing space, trailing words. End of input (Ctrl-D) is a decline too, and
+    the "not confirmed" line then starts on its own line.
   - A declined confirmation MUST run nothing and exit with status 2. When a
     confirmation is needed but there is no controlling terminal, `reclaim` MUST
     say so, run nothing and exit with status 3; it MUST NOT report that as a
-    decline.
+    decline. A bad explicit item id does not change either status: a decline or
+    no terminal still exits 2 or 3, never 1.
+  - A selected item whose `path` does not exist is skipped before the plan, so
+    it neither triggers the prompt nor counts toward it.
   - A dry run MUST NOT prompt at any level, and neither MUST an `--apply` run
     whose selection has no variant at level `>= 4`.
   - There MUST NOT be any flag, environment variable, or non-interactive path
@@ -38,13 +48,22 @@ document are to be interpreted as described in RFC 2119.
 - Commands never prompt. A registry `displayCommand`, `sizeCommand`,
   `heldSizeCommand`, `dryRunCommand` and `removeCommand` MUST NOT ask for
   input. `reclaim` and `list` run each with standard input from `/dev/null`, so
-  a command that tries to read fails instead of hanging.
+  a command that tries to read standard input fails instead of hanging. That
+  guarantee covers standard input ONLY: a command that opens `/dev/tty` itself
+  (`sudo`, `ssh`, an `osascript` call that raises a dialog) can still reach the
+  terminal, and a registry author MUST NOT write one.
+- Sizing: a dry run sizes each item just before printing it, so its first line
+  appears at once. `--apply` sizes every item first, because the plan and the
+  one prompt need them all. Each `removeCommand` and `dryRunCommand` runs in its
+  own subshell, so a `cd` or a variable it sets never reaches a later item.
 - The gate level is the code constant `PGDR_CONFIRM_GATE_LEVEL` in
   `pg-disk-reclaimer.bash`. The marker line below MUST equal that constant; the
   bats suite `tests/test-pg-disk-reclaimer-scale-docs.bats` fails when they
   differ.
 
 <!-- pgdr-confirm-gate-level: 4 -->
+<!-- pgdr-confirm-exit-declined: 2 -->
+<!-- pgdr-confirm-exit-no-terminal: 3 -->
 
 ```mermaid
 flowchart LR

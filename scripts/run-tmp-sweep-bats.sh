@@ -12,6 +12,12 @@
 # skip. A skip is allowed only for the two environmental reasons that cannot apply
 # everywhere: no BSD userland (Linux) and root ignoring file modes.
 #
+# The same script is the body of the `pg-disk-reclaimer-pty-test` hook (bead
+# pg2-kb5dby), run with --suite on the confirmation-prompt suite. It sets
+# PGDR_REQUIRE_PTY=1 (tests/test-pg-disk-reclaimer-confirm-pty.bats), so a
+# missing pty or /dev/tty FAILS the case instead of skipping it: the hook runs
+# outside any sandbox, where a pty is guaranteed.
+#
 # Usage: run-tmp-sweep-bats.sh [--root <repo-root>] [--suite <bats-file>]
 #   --suite defaults to the package's tmp-sweep suite under <repo-root>.
 #
@@ -63,7 +69,7 @@ tap="$(mktemp "${TMPDIR:-/tmp}/tmp-sweep-bats.XXXXXX")"
 trap 'rm -f "${tap}"' EXIT
 
 rc=0
-PGDR_REQUIRE_SWEEP_TOOLS=1 bats --tap "${suite}" >"${tap}" 2>&1 || rc=$?
+PGDR_REQUIRE_SWEEP_TOOLS=1 PGDR_REQUIRE_PTY=1 bats --tap "${suite}" >"${tap}" 2>&1 || rc=$?
 cat "${tap}"
 if [ "${rc}" -ne 0 ]; then
   echo "run-tmp-sweep-bats: the tmp-sweep suite failed (bats exit ${rc})" >&2

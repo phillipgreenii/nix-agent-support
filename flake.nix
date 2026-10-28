@@ -1506,6 +1506,51 @@
           require_serial = true;
         };
 
+        # pg2-kb5dby: the confirmation prompt of pg-disk-reclaimer needs a real pty
+        # (tests/test-pg-disk-reclaimer-confirm-pty.bats). A nix sandbox may not have
+        # one, in which case those cases skip and the check stays green, so nothing
+        # enforced that the prompt ever ran. This hook runs the suite OUTSIDE any
+        # sandbox, with PGDR_REQUIRE_PTY=1 so a missing pty or /dev/tty FAILS instead
+        # of skipping; it reuses the tmp-sweep gate script (scripts/run-tmp-sweep-bats.sh,
+        # which also refuses a green run holding an unexpected skip). Path-scoped to
+        # the CLI, its prompt driver and the suite; about 25 s.
+        pg-disk-reclaimer-pty-test = {
+          enable = true;
+          name = "pg-disk-reclaimer-pty-test";
+          description = "pg-disk-reclaimer prompt: run the pty confirmation suite outside the nix sandbox, failing (not skipping) when no pty is available (pg2-kb5dby)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-disk-reclaimer-pty-test-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.bats
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnugrep
+                pkgs.gnused
+                pkgs.jq
+                pkgs.lsof
+                pkgs.python3
+              ]
+              ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-disk-reclaimer-pty-test: inside the nix build sandbox; skipping (no pty guarantee there)" >&2
+                  exit 0
+                fi
+
+                root="$(git rev-parse --show-toplevel)"
+                exec bash ${./scripts/run-tmp-sweep-bats.sh} --root "$root" \
+                  --suite "$root/packages/pg-disk-reclaimer/pg-disk-reclaimer/tests/test-pg-disk-reclaimer-confirm-pty.bats"
+              '';
+            }
+          }/bin/pg-disk-reclaimer-pty-test-hook";
+          language = "system";
+          files = "^packages/pg-disk-reclaimer/pg-disk-reclaimer/(pg-disk-reclaimer\\.(bash|sh)|tests/(test-pg-disk-reclaimer-confirm-pty\\.bats|pty_drive\\.py|hermetic\\.bash))$";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed

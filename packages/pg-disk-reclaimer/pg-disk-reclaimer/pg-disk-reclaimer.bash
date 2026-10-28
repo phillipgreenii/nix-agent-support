@@ -793,9 +793,20 @@ pgdr_confirm() {
   fi
 
   printf '%s' "$prompt" >/dev/tty
-  IFS= read -r reply </dev/tty || true
+  # End of input (Ctrl-D) is a decline. The terminal echoes it as ^D without a
+  # newline, so one is printed here to keep the caller's "not confirmed" line
+  # off the prompt line. An `if` condition, so a failed read is errexit-safe.
+  if ! IFS= read -r reply </dev/tty; then
+    printf '\n' >/dev/tty
+  fi
 
-  case "$reply" in
+  pgdr_reply_is_yes "$reply"
+}
+
+# pgdr_reply_is_yes: returns 0 for exactly y, Y, yes, YES or Yes-in-any-case
+# (a whole-word match: no surrounding space, no trailing text), else 1.
+pgdr_reply_is_yes() {
+  case "$1" in
   [yY] | [yY][eE][sS])
     return 0
     ;;
@@ -1047,6 +1058,50 @@ pgdr_print_dry_run_output() {
   return 0
 }
 
+# pgdr_reclaim_size_item: sizes selected item I of a cmd_reclaim run and records
+# the result in the caller's per-item arrays (bash dynamic scope: it reads
+# r_item[I] and r_path[I], and sets r_size_kb[I], r_size_label[I], r_held_kb[I]
+# and r_held_label[I], all declared by cmd_reclaim). Never fails: a failing size
+# is an explicit "unknown (<reason>)" label, errexit-safe under the nix
+# wrapper's `set -euo pipefail`.
+pgdr_reclaim_size_item() {
+  local idx="$1"
+  local item="${r_item[idx]}" path="${r_path[idx]}"
+  local size_command size_kind size_method held_command size_timeout
+  local size_result held_result
+  size_command=$(jq -r '.sizeCommand // ""' <<<"$item")
+  size_kind=$(jq -r '.sizeKind // "exact"' <<<"$item")
+  size_method=$(jq -r '.sizeMethod // "du"' <<<"$item")
+  held_command=$(jq -r '.heldSizeCommand // ""' <<<"$item")
+  size_timeout=$(pgdr_item_size_timeout "$item")
+
+  r_size_kb[idx]=""
+  r_held_kb[idx]=""
+  r_held_label[idx]=""
+  # NOT a bare $(...) assignment: a failing size computation must be an explicit
+  # "unknown" marker, never fatal under `set -euo pipefail`.
+  if size_result=$(pgdr_size_kb "$path" "$size_command" "$size_timeout"); then
+    r_size_kb[idx]="$size_result"
+    r_size_label[idx]=$(pgdr_size_label "$size_kind" "$size_method" "$size_result")
+    # Held size (removable but for a safety guard, e.g. a dirty worktree):
+    # sized only after the main size succeeded, under its OWN timeout, so a
+    # held failure/timeout is an explicit marker here and can never void the
+    # main size. Same `if x=$(...)` capture as the main size (errexit-safe).
+    if [[ -n $held_command ]]; then
+      if held_result=$(pgdr_size_kb "$path" "$held_command" "$size_timeout"); then
+        if ((held_result > 0)); then
+          r_held_kb[idx]="$held_result"
+          r_held_label[idx]=$(pgdr_format_kb "$held_result")
+        fi
+      else
+        r_held_label[idx]="unknown ($held_result)"
+      fi
+    fi
+  else
+    r_size_label[idx]="unknown ($size_result)"
+  fi
+}
+
 # cmd_reclaim: implements the `reclaim` subcommand.
 #
 # Reclaimable-size reporting (bead pg2-es6fn): every item cmd_reclaim runs
@@ -1141,8 +1196,17 @@ pgdr_print_dry_run_output() {
 # fast instead of hanging behind a prompt nobody can see. There is NO bypass of
 # any kind (no flag, no env var, no non-interactive path) -- do not add one.
 #
-# The run is two passes: pass 1 resolves and sizes every selected item, the
-# --apply plan and the single confirmation follow, and pass 2 runs the items.
+# The run is two passes: pass 1 resolves every selected item (and, under
+# --apply only, sizes it), the --apply plan and the single confirmation follow,
+# and pass 2 runs the items. A dry run sizes each item lazily in pass 2, just
+# before printing it, so its first line appears at once. The prompt text names
+# each gated item and its size, because the plan above it goes to stdout (which
+# may be a file or a pager) while the prompt goes to the terminal. A gated item
+# whose path does not exist is skipped before the plan, so it neither prompts
+# nor counts. A bad explicit id never turns a decline or no terminal into
+# status 1: those still exit 2 or 3. The stdin guarantee is stdin only: a
+# command that opens /dev/tty itself (sudo, ssh) can still reach the terminal
+# (docs/aggressiveness-scale.md, "Commands never prompt").
 #
 # dryRunCommand/removeCommand are trusted operator-authored strings from
 # the registry JSON (not user input), so running them via `eval` is safe
@@ -1228,71 +1292,45 @@ cmd_reclaim() {
   local held_total_kb=0 unknown_count=0 failed_count=0
   local item
 
-  # Pass 1: resolve and size every selected item into parallel arrays, so the
-  # whole plan is known before anything runs (the single confirmation below
-  # needs it, and so does the operator reading the prompt).
-  local -a r_id=() r_level=() r_dry=() r_remove=() r_path=() r_size_kb=() \
-  r_size_label=() r_held_kb=() r_held_label=() r_kind_idx=()
+  # Pass 1: resolve every selected item into parallel arrays, so the whole
+  # plan is known before anything runs. Sizing is eager only under --apply (the
+  # single confirmation below needs every size, and so does the operator reading
+  # the prompt); a dry run sizes each item lazily in pass 2, right before it
+  # prints that item, so output starts at once instead of after the slowest
+  # sizing of the run.
+  local -a r_id=() r_level=() r_dry=() r_remove=() r_path=() r_item=() r_skip=() \
+  r_size_kb=() r_size_label=() r_held_kb=() r_held_label=() r_kind_idx=()
   while IFS= read -r item; do
-    local id aggressiveness dry_run_command remove_command path size_command
-    local size_kb size_result size_label
-    local size_kind size_method held_command held_kb held_result held_label kind_idx
+    local id aggressiveness path skip
     id=$(jq -r '.id' <<<"$item")
-    aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
-    dry_run_command=$(jq -r '.dryRunCommand' <<<"$item")
-    remove_command=$(jq -r '.removeCommand' <<<"$item")
     path=$(jq -r '.path' <<<"$item")
-    size_command=$(jq -r '.sizeCommand // ""' <<<"$item")
-    size_kind=$(jq -r '.sizeKind // "exact"' <<<"$item")
-    size_method=$(jq -r '.sizeMethod // "du"' <<<"$item")
-    held_command=$(jq -r '.heldSizeCommand // ""' <<<"$item")
-    kind_idx=$(pgdr_kind_index "$size_kind")
 
+    # A missing path means nothing to reclaim. Under --apply the note (stderr)
+    # is printed here, before the plan; on a dry run it is deferred to pass 2 so
+    # it stays in registry order among that run's stdout.
+    skip=0
     if ! pgdr_path_exists "$path"; then
-      if [[ $verbose -eq 1 ]]; then
+      [[ $verbose -eq 1 ]] || continue
+      if [[ $apply -eq 1 ]]; then
         echo "pg-disk-reclaimer: '$id' path '$path' does not exist -- nothing to do, skipping" >&2
+        continue
       fi
-      continue
+      skip=1
     fi
 
-    # Size the item before anything runs, so the operator sees it ahead of
-    # the --apply confirm prompt. NOT a bare $(...) assignment: a failing
-    # size computation must be an explicit "unknown" marker, never fatal
-    # under the nix wrapper's `set -euo pipefail`.
-    size_kb=""
-    held_kb=""
-    held_label=""
-    if size_result=$(pgdr_size_kb "$path" "$size_command" "$(pgdr_item_size_timeout "$item")"); then
-      size_kb="$size_result"
-      size_label=$(pgdr_size_label "$size_kind" "$size_method" "$size_kb")
-      # Held size (removable but for a safety guard, e.g. a dirty worktree):
-      # sized only after the main size succeeded, under its OWN timeout, so a
-      # held failure/timeout is an explicit marker here and can never void the
-      # main size. Same `if x=$(...)` capture as the main size (errexit-safe).
-      if [[ -n $held_command ]]; then
-        if held_result=$(pgdr_size_kb "$path" "$held_command" "$(pgdr_item_size_timeout "$item")"); then
-          if ((held_result > 0)); then
-            held_kb="$held_result"
-            held_label=$(pgdr_format_kb "$held_kb")
-          fi
-        else
-          held_label="unknown ($held_result)"
-        fi
-      fi
-    else
-      size_label="unknown ($size_result)"
-    fi
-
+    aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
     r_id+=("$id")
     r_level+=("$aggressiveness")
-    r_dry+=("$dry_run_command")
-    r_remove+=("$remove_command")
+    r_dry+=("$(jq -r '.dryRunCommand' <<<"$item")")
+    r_remove+=("$(jq -r '.removeCommand' <<<"$item")")
     r_path+=("$path")
-    r_size_kb+=("$size_kb")
-    r_size_label+=("$size_label")
-    r_held_kb+=("$held_kb")
-    r_held_label+=("$held_label")
-    r_kind_idx+=("$kind_idx")
+    r_item+=("$item")
+    r_skip+=("$skip")
+    r_size_kb+=("")
+    r_size_label+=("")
+    r_held_kb+=("")
+    r_held_label+=("")
+    r_kind_idx+=("$(pgdr_kind_index "$(jq -r '.sizeKind // "exact"' <<<"$item")")")
   done < <(jq -c '.[]' <<<"$selected")
 
   local n_items=${#r_id[@]} i
@@ -1301,22 +1339,31 @@ cmd_reclaim() {
   # confirmation covers the whole run. Dry-run output stays interleaved with
   # each item's own dry-run command in pass 2.
   if [[ $apply -eq 1 ]]; then
-    local -a gated_ids=()
+    local -a gated_ids=() gated_sized=()
     for ((i = 0; i < n_items; i++)); do
+      pgdr_reclaim_size_item "$i"
       printf '%s: size: %s\n' "${r_id[i]}" "${r_size_label[i]}"
       [[ -n ${r_held_label[i]} ]] && printf '%s: held, not removable: %s\n' "${r_id[i]}" "${r_held_label[i]}"
       if [[ ${r_level[i]} -ge $PGDR_CONFIRM_GATE_LEVEL ]]; then
         gated_ids+=("${r_id[i]}")
+        gated_sized+=("${r_id[i]}: ${r_size_label[i]}")
       fi
     done
 
     if ((${#gated_ids[@]} > 0)); then
-      local confirm_status=0 gated_list
+      local confirm_status=0 gated_list gated_plan
       gated_list=$(
         IFS=,
         printf '%s' "${gated_ids[*]}"
       )
-      pgdr_confirm "pg-disk-reclaimer: run --apply for the $n_items item(s) above, including level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_list)? This is the only confirmation. [y/N] " || confirm_status=$?
+      gated_plan="${gated_sized[0]}"
+      for ((i = 1; i < ${#gated_sized[@]}; i++)); do
+        gated_plan+=", ${gated_sized[i]}"
+      done
+      # The prompt names each gated item and its size itself: it goes to the
+      # terminal while the plan above goes to stdout, which may be redirected
+      # to a file or a pager, and the operator must see what they confirm.
+      pgdr_confirm "pg-disk-reclaimer: run --apply for $n_items item(s), including level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_plan)? This is the only confirmation. [y/N] " || confirm_status=$?
       if [[ $confirm_status -eq 2 ]]; then
         echo "pg-disk-reclaimer: no terminal to confirm level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_list); nothing was run" >&2
         return 3
@@ -1330,20 +1377,28 @@ cmd_reclaim() {
   # Pass 2: run every item. No prompt happens here, and every command gets
   # stdin from /dev/null, so a command that tries to read input fails fast
   # instead of hanging behind a prompt the operator cannot see.
+  local kind_idx size_kb held_kb dry_out
   for ((i = 0; i < n_items; i++)); do
     id="${r_id[i]}"
     kind_idx="${r_kind_idx[i]}"
-    size_kb="${r_size_kb[i]}"
-    held_kb="${r_held_kb[i]}"
 
     if [[ $apply -eq 0 ]]; then
+      if [[ ${r_skip[i]} -eq 1 ]]; then
+        echo "pg-disk-reclaimer: '$id' path '${r_path[i]}' does not exist -- nothing to do, skipping" >&2
+        continue
+      fi
+
+      # Lazy sizing: this item is sized now, after the previous item's output
+      # was printed, not up front (see pass 1).
+      pgdr_reclaim_size_item "$i"
+      size_kb="${r_size_kb[i]}"
+      held_kb="${r_held_kb[i]}"
       printf '%s: size: %s\n' "$id" "${r_size_label[i]}"
       [[ -n ${r_held_label[i]} ]] && printf '%s: held, not removable: %s\n' "$id" "${r_held_label[i]}"
 
       # stdout+stderr captured together so a long single-line dry run (go
       # clean -n prints its `rm -rf` line on a stream we should not guess)
       # can be collapsed; see pgdr_print_dry_run_output.
-      local dry_out
       if dry_out=$(eval "${r_dry[i]}" 2>&1 </dev/null); then
         pgdr_print_dry_run_output "${r_path[i]}" "$verbose" "$dry_out"
         if [[ -n $size_kb ]]; then
@@ -1370,7 +1425,11 @@ cmd_reclaim() {
       continue
     fi
 
-    if eval "${r_remove[i]}" </dev/null; then
+    size_kb="${r_size_kb[i]}"
+    held_kb="${r_held_kb[i]}"
+    # Run in a subshell so a registry command's own variables (a `for i in ...`
+    # loop, a `cd`) cannot leak into this loop's state or into later items.
+    if (eval "${r_remove[i]}") </dev/null; then
       if [[ -n $size_kb ]]; then
         bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
         bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))

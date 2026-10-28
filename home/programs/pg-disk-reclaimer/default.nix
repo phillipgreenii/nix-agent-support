@@ -150,7 +150,10 @@ in
                         Aggressiveness level (0 to 5); unique within this item's variants.
                         `reclaim --aggressiveness N` selects variants at level N or below,
                         and a level of 4 or above asks for interactive confirmation under
-                        `--apply`. The authoritative definition of each level, and the rule
+                        `--apply`: ONE prompt per run, at most once, before anything runs,
+                        and that one answer gates the whole run (declining exits 2, no
+                        terminal to ask on exits 3, both with nothing run; no command
+                        prompts mid-run). The authoritative definition of each level, and the rule
                         that a non-obvious level needs a justifying comment, is
                         packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md
                         in the phillipgreenii-nix-agent-support repository.

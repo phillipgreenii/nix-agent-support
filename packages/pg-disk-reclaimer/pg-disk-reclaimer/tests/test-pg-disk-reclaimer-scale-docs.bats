@@ -152,3 +152,94 @@ install_gate_registry() {
   [[ -f $module ]] || skip "home module not reachable from the sandboxed package source"
   grep -q "$DOC_PATH_FRAGMENT" "$module"
 }
+
+# --- the documented exit statuses and the one-prompt contract (bead pg2-kb5dby) ---
+
+# doc_marker <name>: the integer from `<!-- pgdr-confirm-<name>: N -->` (exactly one).
+doc_marker() {
+  local -a hits
+  mapfile -t hits < <(sed -n "s/^<!-- pgdr-confirm-$1: \([0-9][0-9]*\) -->\$/\1/p" "$SCALE_DOC")
+  [[ ${#hits[@]} -eq 1 ]] || return 1
+  printf '%s\n' "${hits[0]}"
+}
+
+# flat <file>: the file's text with every run of whitespace squeezed to one space,
+# so a phrase wrapped across lines still matches.
+flat() {
+  tr -s '[:space:]' ' ' <"$1"
+}
+
+@test "the documented decline and no-terminal statuses are exactly the statuses cmd_reclaim returns" {
+  source "$SCRIPTS_DIR/pg-disk-reclaimer.bash"
+  local gate declined no_terminal
+  gate="$(doc_gate_level)"
+  declined="$(doc_marker exit-declined)"
+  no_terminal="$(doc_marker exit-no-terminal)"
+  install_gate_registry "$gate"
+
+  pgdr_confirm() { return 1; }
+  run cmd_reclaim --aggressiveness "$gate" --apply
+  [ "$status" -eq "$declined" ]
+
+  pgdr_confirm() { return 2; }
+  run cmd_reclaim --aggressiveness "$gate" --apply
+  [ "$status" -eq "$no_terminal" ]
+}
+
+@test "the two documented statuses are distinct, and neither is the generic error 1" {
+  local declined no_terminal
+  declined="$(doc_marker exit-declined)"
+  no_terminal="$(doc_marker exit-no-terminal)"
+  [ "$declined" -ne "$no_terminal" ]
+  [ "$declined" -ge 2 ]
+  [ "$no_terminal" -ge 2 ]
+}
+
+@test "the scale document states both statuses in prose, 'at most once', and no mid-run prompts" {
+  local declined no_terminal text
+  declined="$(doc_marker exit-declined)"
+  no_terminal="$(doc_marker exit-no-terminal)"
+  text="$(flat "$SCALE_DOC")"
+  [[ $text == *"exit with status $declined"* ]]
+  [[ $text == *"exit with status $no_terminal"* ]]
+  [[ $text == *"AT MOST ONCE"* ]]
+  [[ $text == *"MUST NOT prompt at any other point of the run"* ]]
+  [[ $text == *"Commands never prompt"* ]]
+}
+
+@test "--help states both statuses, 'at most once', and no mid-run prompts" {
+  local declined no_terminal text
+  declined="$(doc_marker exit-declined)"
+  no_terminal="$(doc_marker exit-no-terminal)"
+  run bash "$SCRIPT" --help
+  [ "$status" -eq 0 ]
+  text="$(tr -s '[:space:]' ' ' <<<"$output")"
+  [[ $text == *"(exit $declined)"* ]]
+  [[ $text == *"(exit $no_terminal)"* ]]
+  [[ $text == *"at most once per run"* ]]
+  [[ $text == *"no command prompts mid-run"* ]]
+}
+
+@test "the tldr page states both statuses, 'at most once', and no mid-run prompts" {
+  local declined no_terminal text
+  declined="$(doc_marker exit-declined)"
+  no_terminal="$(doc_marker exit-no-terminal)"
+  text="$(flat "$SCRIPTS_DIR/pg-disk-reclaimer.md")"
+  [[ $text == *"declining exits $declined"* ]]
+  [[ $text == *"no terminal to ask on exits $no_terminal"* ]]
+  [[ $text == *"at most once per run"* ]]
+  [[ $text == *"no command prompts mid-run"* ]]
+}
+
+@test "the nix option description states both statuses, 'at most once', and no mid-run prompts (local checkout only)" {
+  local module="$SCRIPTS_DIR/../../../home/programs/pg-disk-reclaimer/default.nix"
+  [[ -f $module ]] || skip "home module not reachable from the sandboxed package source"
+  local declined no_terminal text
+  declined="$(doc_marker exit-declined)"
+  no_terminal="$(doc_marker exit-no-terminal)"
+  text="$(flat "$module")"
+  [[ $text == *"declining exits $declined"* ]]
+  [[ $text == *"no terminal to ask on exits $no_terminal"* ]]
+  [[ $text == *"at most once"* ]]
+  [[ $text == *"no command prompts mid-run"* ]]
+}
