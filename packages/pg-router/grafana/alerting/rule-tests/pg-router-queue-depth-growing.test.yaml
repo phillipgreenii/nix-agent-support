@@ -1,0 +1,102 @@
+# promtool unit tests for the pg-router-queue-depth-growing alert. Run by the flake check
+# test-pg-router-alert-rules, which generates rules.yml next to this file: the Grafana rule's
+# refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 15m` and labels,
+# plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# What this proves that the Go replay (internal/alertrules/queue_depth_growing_test.go) cannot:
+# the PromQL itself (the 1h, 30m and two 15m deltas, the ratio against the 30m average and the
+# 54 scrape presence floor) evaluated by the real engine. These cases are the regression alarm
+# of the issue change emission work: a router queue of issue.changed events that grows at the
+# rate measured before the fix (113 an hour at the first measurement, 130 an hour at the
+# second) MUST fire, and a queue whose arrivals equal its completions MUST stay quiet.
+#
+# Time model: 30s scrapes, so a gauge that grows by 113 an hour steps by 113 / 120 = 0.941667
+# per sample, and 130 an hour by 130 / 120 = 1.083333. The condition first holds about half an
+# hour after the series starts (54 scrapes of the 30m window, and the second 15m delta needs
+# data from 15 to 30 minutes back), and `for` is 15m, so the alert is quiet at 10m and 30m and
+# firing by 1h30m.
+#
+# Finding recorded with these cases: the rule's `delta(30m) > 0.25 * avg_over_time(30m)` term is
+# a ratio, so a large standing backlog hides a steady 113 an hour. The growth is 56 over 30m,
+# which exceeds a quarter of the 30m average only while that average stays under 226, so a
+# lane that already holds about 200 or more events does not fire at this rate. The rule is NOT
+# changed for that: the positive cases start near empty, a named case below documents the
+# large-backlog shape as not firing, and pg-router-queue-slow-growth (a rate over 6h, with no
+# ratio against the backlog) is the rule that catches it.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: issue.changed growing 113 an hour from a near-empty queue fires after the window plus for
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "2+0.941667x1440"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []
+      - eval_time: 1h30m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts:
+          - exp_labels:
+              job: pg-router
+              type: issue.changed
+              severity: warning
+
+  - name: issue.changed growing 130 an hour from a near-empty queue fires after the window plus for
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "2+1.083333x1440"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []
+      - eval_time: 1h30m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts:
+          - exp_labels:
+              job: pg-router
+              type: issue.changed
+              severity: warning
+
+  - name: arrivals equal to completions hold the depth flat and never fire
+    interval: 30s
+    input_series:
+      # 113 an hour in, 113 an hour out: the gauge does not move.
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "6x1440"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_depth_growing)
+        eval_time: 8h
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 1h30m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []
+
+  - name: a large standing backlog hides a steady 113 an hour from the ratio term, slow-growth is the rule that catches it
+    interval: 30s
+    input_series:
+      # Starts at 400, so the 30m delta of 56 is under 0.25 times the 30m average (about 107
+      # at the start, more as it grows). Not firing here is a property of the rule, not of the
+      # test: see the finding in the file header. The same shape fires
+      # pg-router-queue-slow-growth in pg-router-queue-slow-growth.test.yaml.
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "400+0.941667x1440"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-queue-depth-growing
+        exp_alerts: []

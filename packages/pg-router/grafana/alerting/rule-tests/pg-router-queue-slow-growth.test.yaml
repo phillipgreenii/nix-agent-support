@@ -237,3 +237,91 @@ tests:
           - exp_labels:
               type: drain.pg2
               severity: warning
+
+  # The regression alarm of the issue change emission work (success criterion): the issue.changed
+  # enqueue rate measured before the fix was 113 an hour at the first measurement and 130 an hour
+  # at the second, against a drain of 64 an hour. 30s scrapes, so 113 an hour is 113 / 120 =
+  # 0.941667 per sample, 130 an hour is 130 / 120 = 1.083333 and 64 an hour is 64 / 120 = 0.533333.
+  # The arrivals floor of 6 is reached within minutes and the depth floor needs 108 scrapes of
+  # the last hour (54 minutes), so the alert is Pending from about 54m and fires after `for`
+  # 30m more, by 1h30m.
+  - name: arrivals at 113 an hour against a drain of 64 an hour fire
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="issue.changed",job="pg-router"}
+        values: "0+0.941667x1440"
+      - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}
+        values: "0+0.533333x1440"
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "8x1440"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: issue.changed
+              severity: warning
+
+  - name: arrivals at 130 an hour against a drain of 64 an hour fire
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="issue.changed",job="pg-router"}
+        values: "0+1.083333x1440"
+      - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}
+        values: "0+0.533333x1440"
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "8x1440"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: issue.changed
+              severity: warning
+
+  - name: arrivals at 113 an hour on a large standing backlog still fire, the shape pg-router-queue-depth-growing cannot see
+    interval: 30s
+    input_series:
+      # A backlog of 400 hides this growth from the ratio term of pg-router-queue-depth-growing
+      # (see rule-tests/pg-router-queue-depth-growing.test.yaml); this rule has no ratio
+      # against the backlog, only a floor of 5, so it fires.
+      - series: pg_router_enqueued_total{type="issue.changed",job="pg-router"}
+        values: "0+0.941667x1440"
+      - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}
+        values: "0+0.533333x1440"
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "400+0.408333x1440"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: issue.changed
+              severity: warning
+
+  - name: issue.changed arrivals equal to completions at 64 an hour (steady state) never fire
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="issue.changed",job="pg-router"}
+        values: "0+0.533333x1440"
+      - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}
+        values: "0+0.533333x1440"
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "8x1440"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_slow_growth)
+        eval_time: 8h
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
