@@ -418,7 +418,7 @@ func RecordSessionsPreservedForHuman(count int64, attrs []attribute.KeyValue) {
 // REDEFINED per the design's round-1 semantic post-check finding: callers
 // record this once the actual outcome is known — after launchAndWait
 // resolves (success/timeout/tmux-error), at an early preflight-failure
-// return (ErrNoPluginDir, trust failure, mcpconsent failure), or — for
+// return (ErrNoPluginDir, trust failure), or — for
 // route=reuse_live specifically, which never reaches launchAndWait or a
 // preflight-failure return — at ensureLocked's own trivial-success early
 // return. Never at branch selection in ensureLocked.

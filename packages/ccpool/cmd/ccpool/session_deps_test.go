@@ -53,25 +53,6 @@ func TestNewSessionDeps_wiresFailFastLaunchWait(t *testing.T) {
 	}
 }
 
-// TestNewSessionDeps_wiresCanonicalMCPSettingsPath confirms
-// cfg.Claude.CanonicalMCPSettingsPath reaches session.Deps.CanonicalMCPSettingsPath
-// (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md) — an
-// empty config value must stay empty (feature off), and a configured value must
-// be threaded through verbatim.
-func TestNewSessionDeps_wiresCanonicalMCPSettingsPath(t *testing.T) {
-	deps := newSessionDeps(config.Config{}, nil, nil)
-	if deps.CanonicalMCPSettingsPath != "" {
-		t.Errorf("CanonicalMCPSettingsPath = %q, want empty when config.Claude.CanonicalMCPSettingsPath is unset", deps.CanonicalMCPSettingsPath)
-	}
-
-	var cfg config.Config
-	cfg.Claude.CanonicalMCPSettingsPath = "/some/canonical/settings.local.json"
-	deps = newSessionDeps(cfg, nil, nil)
-	if deps.CanonicalMCPSettingsPath != "/some/canonical/settings.local.json" {
-		t.Errorf("CanonicalMCPSettingsPath = %q, want /some/canonical/settings.local.json", deps.CanonicalMCPSettingsPath)
-	}
-}
-
 // TestNewSessionDeps_wiresPoolAndMetricLabelAllowlist: every production
 // session.Deps carries the pool root (whose basename is every metric record's
 // pool attribute) and the metric-label allowlist of THE POOL'S OWN config. It

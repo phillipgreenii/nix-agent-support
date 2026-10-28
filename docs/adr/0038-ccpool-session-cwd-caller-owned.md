@@ -50,7 +50,8 @@ The directory is also a **trust-boundary input**, not merely a convenience. Befo
 canonicalises it (`filepath.EvalSymlinks`, `session.go:271`) so the trust key matches what Claude
 records, then **pre-trusts** it in `~/.claude.json` (`EnsureTrusted`, `session.go:274`) and
 pre-records MCP consent for that directory's `.mcp.json`
-(`mcpconsent.PreDisableUnclassified`, `session.go:279`). Choosing the working directory is
+(`mcpconsent.PreDisableUnclassified`, `session.go:279`; this write was removed on 2026-10-27, see
+[ADR 0052](0052-ccpool-mcp-consent-canonical-decisions-consultation.md)'s Amendment). Choosing the working directory is
 therefore choosing what the launched agent is trusted over.
 
 ### The claim this ADR is answering

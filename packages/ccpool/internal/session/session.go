@@ -18,7 +18,6 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/eventlog"
 	"github.com/phillipgreenii/ccpool/internal/launch"
-	"github.com/phillipgreenii/ccpool/internal/mcpconsent"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/telemetry"
@@ -237,14 +236,6 @@ type Deps struct {
 	Sleep     func(time.Duration) // injected delay for the cancel Escape burst (nil = no-op, for tests)
 	// PruneGrace guards the fresh-session race; zero falls back to defaultPruneGrace.
 	PruneGrace time.Duration
-	// CanonicalMCPSettingsPath, when non-empty, names a settings.local.json-shaped
-	// file consulted READ-ONLY before mcpconsent.PreDisableUnclassified's
-	// default-deny step: a server already classified there (but not yet in the
-	// worktree's own settings.local.json) has that classification copied in
-	// instead of being default-denied. Empty (the default) disables consultation
-	// entirely — pure default-deny, unchanged from before this field existed
-	// (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
-	CanonicalMCPSettingsPath string
 	// MetricLabelAllowlist is the cardinality guard for session labels on
 	// METRICS: the dotted label keys (for example "pgrouter.role") that may
 	// appear as metric attributes next to pool. Every other label is dropped
@@ -395,7 +386,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	// Every path below this point launches or resumes a claude session (steps
 	// 3-5), which always funnels through launchAndWait's own PluginDir guard.
 	// Fail fast HERE too — before Insert/Transition mutate the row, before
-	// EnsureTrusted/mcpconsent touch the filesystem — so a misconfigured
+	// EnsureTrusted touches the filesystem — so a misconfigured
 	// PluginDir (tc-24qs) never leaves a phantom `starting` row behind; the
 	// caller gets ErrNoPluginDir immediately instead of a row it must clean up
 	// after a 10-minute timeout.
@@ -413,17 +404,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		s.recordLaunchOutcome(externalID, "preflight", "error")
 		return Handle{}, fmt.Errorf("pre-trust %q: %w", cwd, err)
 	}
-	// Pre-record MCP consent so an automated launch does not stall on the
-	// interactive "New MCP server found" prompt for any unclassified server in
-	// the worktree's .mcp.json (pg2-80ji). No-op when the worktree has no
-	// .mcp.json. Same pre-launch window as trust, so no concurrent Claude writer.
-	// CanonicalMCPSettingsPath, when configured, is consulted read-only first so
-	// a server a human already classified elsewhere is copied in rather than
-	// default-denied (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
-	if err := mcpconsent.PreDisableUnclassified(cwd, s.d.CanonicalMCPSettingsPath); err != nil {
-		s.recordLaunchOutcome(externalID, "preflight", "error")
-		return Handle{}, fmt.Errorf("pre-disable unclassified MCP servers for %q: %w", cwd, err)
-	}
+	// ccpool writes NO settings file at launch: an unattended launch keeps
+	// unclassified .mcp.json servers from prompting through the deployment's
+	// --strict-mcp-config (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
 
 	if exists {
 		// 3. Resume IFF the Claude session still exists on disk (a fact, not a state).

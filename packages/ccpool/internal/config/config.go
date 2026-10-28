@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -99,15 +100,6 @@ type Claude struct {
 	DefaultCwd   string `toml:"default_cwd"`
 	DefaultModel string `toml:"default_model"`
 	Bin          string `toml:"bin"`
-	// CanonicalMCPSettingsPath, when non-empty, names a settings.local.json-shaped
-	// file consulted READ-ONLY before a fresh worktree's MCP servers are
-	// default-denied: a server already classified there is copied into the
-	// worktree's own settings.local.json instead. Empty (the default) is feature
-	// off — pure default-deny, unchanged (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
-	// This repo supplies only the mechanism; a deployment supplies the concrete
-	// path at runtime (this repo is a public flake — see its own CLAUDE.md's
-	// public-repository / no-employer-disclosure policy section).
-	CanonicalMCPSettingsPath string `toml:"canonical_mcp_settings_path"`
 }
 type List struct {
 	DoneTTL   Duration `toml:"done_ttl"`
@@ -243,9 +235,11 @@ func LoadForPool(root string) (Config, error) {
 func loadFrom(pc PoolContext) (Config, error) {
 	c := defaults()
 	if _, err := os.Stat(pc.ConfigPath); err == nil {
-		if _, err := toml.DecodeFile(pc.ConfigPath, &c); err != nil {
+		md, err := toml.DecodeFile(pc.ConfigPath, &c)
+		if err != nil {
 			return Config{}, fmt.Errorf("decode %s: %w", pc.ConfigPath, err)
 		}
+		warnRemovedKeys(pc.ConfigPath, md)
 	} else if !os.IsNotExist(err) {
 		return Config{}, fmt.Errorf("stat %s: %w", pc.ConfigPath, err)
 	}
@@ -261,6 +255,23 @@ func loadFrom(pc PoolContext) (Config, error) {
 		c.Tmux.Prefix = pc.Prefix
 	}
 	return c, nil
+}
+
+// removedKeyCanonicalMCPSettingsPath is the retired `[claude]` option that named
+// a settings file consulted before ccpool's launch-time MCP default-deny write.
+// ccpool no longer writes a settings file at launch, so the key does nothing
+// (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
+const removedKeyCanonicalMCPSettingsPath = "claude.canonical_mcp_settings_path"
+
+// warnRemovedKeys logs one line per retired key still present in a config.toml.
+// The key is ignored, never an error, so a config rendered before the option
+// was removed keeps loading.
+func warnRemovedKeys(path string, md toml.MetaData) {
+	for _, k := range md.Undecoded() {
+		if k.String() == removedKeyCanonicalMCPSettingsPath {
+			slog.Warn("ccpool: ignoring removed config key " + removedKeyCanonicalMCPSettingsPath + " in " + path)
+		}
+	}
 }
 
 // Helpers used by later plans / convenience accessors.

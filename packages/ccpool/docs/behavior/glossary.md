@@ -73,9 +73,10 @@ deployment-specific workflow built on top of ccpool, are out of this set's exten
 - **Folder trust** — the agent's own per-directory trust gate; ccpool pre-establishes it for a
   session's directory before launch so the session never hangs on an interactive trust prompt the
   caller cannot see.
-- **Unclassified-tool pre-denial** — ccpool's deny-by-default posture toward external tool servers
-  a session's directory declares but the deployment has not classified: pre-denied before launch,
-  never left to an interactive prompt.
+- **Strict servers mode** — the agent's launch mode in which only explicitly named external tool
+  servers load. The deployment supplies it for an unattended session, so a server a session's
+  directory declares but the deployment has not classified never loads and never raises an
+  interactive prompt; ccpool itself writes no settings file for this.
 
 ## Retry and the meter
 

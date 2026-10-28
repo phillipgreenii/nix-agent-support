@@ -53,7 +53,7 @@ stated as its own interface (`INTF-DENY`), not folded into ordinary observation.
   the six store states with what each obliges a consumer to conclude; the per-session status
   surface as a caller-read, never-pushed contract; session metadata as an opaque caller-owned KV;
   cancel, confirmed independent of any rendered affordance; autonomous mode's structural question
-  denial; reap sparing a human-awaited session; trust and tool-consent pre-writing; the budget
+  denial; reap sparing a human-awaited session; folder-trust pre-writing and the no-settings-write rule for tool-server consent; the budget
   meter's intent; notifications.
 - **Extent (out)** — the agent binary's own internal behavior; any workflow product built on top
   of ccpool (claims, roles, budgets-as-policy, work trackers); credential handling (the launched

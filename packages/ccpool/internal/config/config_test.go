@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -217,42 +219,70 @@ func TestLoad_claudeBinDefaultsToClaude(t *testing.T) {
 	}
 }
 
-// TestLoad_canonicalMCPSettingsPathDefaultsEmpty pins the feature-off default:
-// no config → the canonical-decisions consultation mechanism stays disabled
+// TestLoad_removedCanonicalMCPSettingsPathIsIgnoredWithDiagnostic pins the
+// compatibility contract for a config.toml rendered before ccpool stopped
+// writing a settings file at launch: the retired
+// claude.canonical_mcp_settings_path key still loads, changes nothing else, and
+// logs one line naming the key and the file
 // (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
-func TestLoad_canonicalMCPSettingsPathDefaultsEmpty(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
-	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
-	c, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if c.Claude.CanonicalMCPSettingsPath != "" {
-		t.Errorf("Claude.CanonicalMCPSettingsPath = %q, want empty (feature off by default)", c.Claude.CanonicalMCPSettingsPath)
-	}
-}
-
-// TestLoad_canonicalMCPSettingsPathTOMLOverride confirms the field decodes from
-// config.toml, since production wiring reads it as cfg.Claude.CanonicalMCPSettingsPath.
-func TestLoad_canonicalMCPSettingsPathTOMLOverride(t *testing.T) {
+func TestLoad_removedCanonicalMCPSettingsPathIsIgnoredWithDiagnostic(t *testing.T) {
 	dir := t.TempDir()
 	cfgDir := filepath.Join(dir, "cfg", "ccpool")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	body := "[claude]\ncanonical_mcp_settings_path = \"/some/canonical/settings.local.json\"\n"
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o600); err != nil {
+	cfgPath := filepath.Join(cfgDir, "config.toml")
+	body := "[claude]\nbin = \"my-claude\"\ncanonical_mcp_settings_path = \"/some/canonical/settings.local.json\"\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
 	c, err := Load()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Load with the removed key: %v", err)
 	}
-	if c.Claude.CanonicalMCPSettingsPath != "/some/canonical/settings.local.json" {
-		t.Errorf("Claude.CanonicalMCPSettingsPath = %q, want /some/canonical/settings.local.json", c.Claude.CanonicalMCPSettingsPath)
+	if c.Claude.Bin != "my-claude" {
+		t.Errorf("Claude.Bin = %q, want my-claude (the rest of the file must still apply)", c.Claude.Bin)
+	}
+	out := logs.String()
+	if n := strings.Count(out, "canonical_mcp_settings_path"); n != 1 {
+		t.Errorf("diagnostic mentions the key %d times, want exactly one line; log:\n%s", n, out)
+	}
+	if !strings.Contains(out, cfgPath) {
+		t.Errorf("diagnostic does not name the config file %q; log:\n%s", cfgPath, out)
+	}
+}
+
+// TestLoad_noRemovedKeyNoDiagnostic: a config without the retired key logs nothing.
+func TestLoad_noRemovedKeyNoDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("[claude]\nbin = \"x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("unexpected log output for a clean config: %s", logs.String())
 	}
 }
 

@@ -13,7 +13,7 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   pools MUST NOT share a substrate. Every session a pool launches MUST be marked excluded from a
   co-resident monitor's own actuation (`packages/pa-monitor/docs/behavior · INTF-NONUDGE`,
   `ACTOR-CCP-MONITOR`), and the
-  guardrails a pool establishes at launch (isolation, unclassified-tool pre-denial, the
+  guardrails a pool establishes at launch (isolation, the
   autonomous-mode question block) MUST NOT be weakened by a session-level setting.
 - **`INV-POOL-2`** <!-- uuid: c6506508-a27c-44ee-9901-f9eda11ba61c --> — Every pool MUST
   self-register in a machine-wide registry at creation, and a periodic, timer-driven sweep MUST
@@ -175,6 +175,9 @@ obligations, and ownership of a session's working directory.
 
 - **`INV-TRUST-1`** <!-- uuid: 80c7bc5c-0302-4c61-a2d5-31e6d0ba0973 --> — A session MUST NOT hang
   on an interactive trust or tool-consent gate the caller cannot see. ccpool MUST pre-establish
-  folder trust for a session's directory before launch. Its unclassified-tool pre-denial MUST
-  cover any external tool server that directory declares but the deployment has not classified —
-  deny-by-default, never left to an interactive prompt.
+  folder trust for a session's directory before launch. An external tool server that directory
+  declares but the deployment has not classified MUST NOT be left to an interactive prompt, and
+  ccpool MUST NOT write any settings file to prevent that: the deployment keeps such servers out
+  of an unattended session by launching the agent in its strict-servers mode (only explicitly
+  named servers load), so the set of enabled servers has one source, the deployment's own
+  configuration.

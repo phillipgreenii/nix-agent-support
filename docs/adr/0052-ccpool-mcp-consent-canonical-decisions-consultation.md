@@ -1,8 +1,63 @@
 # ccpool MCP consent: default-deny unclassified, with optional read-only canonical-decisions consultation
 
-**Status**: Accepted
-**Date**: 2026-08-18
+**Status**: Amended 2026-10-27 (bead `pg2-ennat7`): the Decision below is superseded by the
+Amendment that follows; the original text is kept as the record of what shipped and why.
+**Date**: 2026-08-18 (amended 2026-10-27)
 **Deciders**: Phillip Green II
+
+## Amendment (2026-10-27, bead `pg2-ennat7`, design `pg2-zw4t8`)
+
+**ccpool MUST NOT write any settings file at launch.** Decisions 1 to 5 below (the default-deny
+write of `disabledMcpjsonServers` into `<cwd>/.claude/settings.local.json` and the optional
+canonical-decisions consultation) are withdrawn. A session launch, new or resume, creates and
+modifies nothing under `<cwd>/.claude`. Operator ruling (Phillip, 2026-10-27, verbatim): "ccpool
+should not be modifying a user-level or project file on each session launch. I thought we were
+defining the list of MCP servers in nix/hm and it was used to generate which are enabled and
+allowed." and, on the replacement, "yes, explore the strict-mcp-config, that is how it should have
+been implemented to begin with."
+
+**Unattended servers are kept out by the deployment passing `--strict-mcp-config`.** A deployment
+supplies the flag in the argv prefix it puts in front of the flags ccpool builds (a pg-wrap spec
+`exec`, for new and resumed launches alike). With the flag claude loads only the servers named by
+`--mcp-config`, so no `.mcp.json` server can raise the "New MCP server found in this project"
+prompt that nothing in a headless pool worker can answer. Nix is then the only source of which MCP
+servers are enabled. ccpool itself has no MCP option: it neither emits the flag nor reads a
+settings file for it.
+
+**Why the write was removed.** The write read only the project's own `settings.local.json`, so a
+server a deployment had already classified in the managed `settings.json` looked "unclassified" and
+was appended to `disabledMcpjsonServers`. A disabled entry in any settings file rejects the server,
+so the write re-disabled five operator-enabled servers on 2026-10-27 within one launch's preflight,
+undoing a fix made minutes earlier. A launcher that rewrites a user-owned file on every launch
+cannot be reconciled with a declarative source of truth.
+
+**History of the strict-mode question.** Bead `pg2-80ji` introduced the pre-denial after an
+unattended interactive claude stalled on the approval prompt; its notes record that strict mode was
+tried in July 2026 and did NOT suppress the prompt, which is why the write existed. A live spike on
+2026-10-27 (claude 2.1.310, interactive TUI in tmux, one `.mcp.json` server named in no settings
+file) reversed that: without `--strict-mcp-config` the prompt appears, with it the prompt does not.
+That result, not the July observation, is the basis of this amendment. The sibling deployment
+change that lists the flag in every ccpool role's pg-wrap spec had to land first (bead
+`pg2-cp4mad`), because removing the write earlier would have let a new unclassified server stall a
+pool session.
+
+**Configuration compatibility.** The `[claude] canonical_mcp_settings_path` key and
+`session.Deps.CanonicalMCPSettingsPath` are removed. A `config.toml` that still carries the key
+loads normally, the key is ignored, and one `slog` warning line names the key and the file
+(`TestLoad_removedCanonicalMCPSettingsPathIsIgnoredWithDiagnostic`).
+
+**No ccpool-side strict flag.** An optional `claude.strict_mcp_config` option was considered for
+a pool that runs claude without a pg-wrap spec and not added: the handler module rejects a ccpool
+role on ccpool's unmanaged default pool (`unmanagedPoolAssertions`) and the deployment's
+`pg-router-ccpool-strict-mcp` check requires every ccpool role to carry a spec whose `exec` has the
+flag, so no unattended pool runs without one. A deployment that later runs a spec-less unattended
+pool MUST pass the flag some other way, and MAY then file a bead for the option.
+
+**Enforcement.** `TestEnsure_writesNoSettingsFileUnderCwd` (new and resume, with and without an
+existing `.claude`) asserts that nothing under `<cwd>/.claude` is created or changes content or
+mtime. Behavior docs: `INV-TRUST-1` in `packages/ccpool/docs/behavior/invariants.md`.
+
+## Original record (superseded by the Amendment above)
 
 ## Context
 
