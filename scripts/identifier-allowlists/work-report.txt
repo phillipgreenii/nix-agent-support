@@ -1,0 +1,17 @@
+# Allowed identifiers for work-report (guard: scripts/check-identifier-allowlist.sh, bead pg2-34s486).
+# One identifier per line; case and surrounding whitespace do not matter. List ONLY
+# known-safe identifiers, with a comment saying why: never a forbidden name, never a
+# real third-party name (CLAUDE.md "Public Repository - No ZipRecruiter Disclosure").
+
+# the operator's own handle (this module never carried the email entry).
+phillipgreenii
+
+# public bot accounts.
+dependabot
+policy-bot
+
+# generic placeholder identities.
+teammate
+alice
+bob
+review-bot

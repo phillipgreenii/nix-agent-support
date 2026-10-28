@@ -1667,6 +1667,53 @@
           pass_filenames = true;
           require_serial = true;
         };
+
+        # pg2-34s486: ONE enforcement point for the identifier allowlist guard
+        # (CLAUDE.md "Public Repository - No ZipRecruiter Disclosure", "Mechanical
+        # guard"). It replaced six drifting per-module Go copies
+        # (identifier_allowlist_test.go in pg-connector, pg-decider, pg-desk,
+        # pg-desk-shadow and pg-router-source-pg-desk; identifier_guard_test.go in
+        # work-report). The per-module config (root, scope, liveness canaries) is
+        # the MODULES table in scripts/check-identifier-allowlist.sh and each
+        # module's allowlist is scripts/identifier-allowlists/<module>.txt; its
+        # regression guard is tests/identifier-allowlist.bats (real script, real
+        # rg -P, real git, hermetic fixture, global rule V-3), which
+        # `run-unit-tests` runs on a diff that touches either. The hook is handed
+        # every changed path (`files` is unset on purpose, so the scope is NOT
+        # repeated here); the script returns at once when none lies in a module
+        # root and otherwise scans only the touched modules (about 0.7 s for all
+        # six). It needs git, so it skips inside the nix build sandbox (a no-git
+        # store copy); commit and `pg-hooks run pre-land` are the gates. NOTE: this
+        # hook only runs once the shared hook bundle is rebuilt in the canonical
+        # clone (`nix run .#install-pre-commit-hooks`).
+        identifier-allowlist = {
+          enable = true;
+          name = "identifier-allowlist";
+          description = "allowlist guard: no user identifier but the operator's in the guarded modules' fixtures (CLAUDE.md Mechanical guard, pg2-34s486)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "identifier-allowlist-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.gnused
+                pkgs.ripgrep
+              ];
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "identifier-allowlist: inside the nix build sandbox; skipping (no git checkout there; commit and pre-land run it)" >&2
+                  exit 0
+                fi
+
+                exec bash ${./scripts/check-identifier-allowlist.sh} "$@"
+              '';
+            }
+          }/bin/identifier-allowlist-hook";
+          language = "system";
+          pass_filenames = true;
+          require_serial = true;
+        };
       };
 
       # Per-clone hook bundle (pg2-pla9d, T20 wave 2, bead pg2-uq1km): the

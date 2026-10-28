@@ -1,0 +1,15 @@
+# Allowed identifiers for pg-desk-shadow (guard: scripts/check-identifier-allowlist.sh, bead pg2-34s486).
+# One identifier per line; case and surrounding whitespace do not matter. List ONLY
+# known-safe identifiers, with a comment saying why: never a forbidden name, never a
+# real third-party name (CLAUDE.md "Public Repository - No ZipRecruiter Disclosure").
+
+# the operator's own identity: the one exception the ruling allows.
+phillipgreenii
+phillipg@ziprecruiter.com
+
+# generic placeholder test identities (the pg2-wb9yb scrub convention).
+teammate
+review-bot
+
+# synthetic handle used by the shadow harness fixtures.
+tester
