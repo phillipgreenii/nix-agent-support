@@ -1,0 +1,17 @@
+#compdef pg-repo-runner
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '1:command:(tips workspace-tips verify sync build status)' \
+  '*::status option:->opts'
+
+case $state in
+opts)
+  if [[ ${words[1]} == status ]]; then
+    _arguments \
+      '--json[Print only the verdicts, as one JSON array]' \
+      '--repo[Only this repo'"'"'s verdicts]:repo key:'
+  fi
+  ;;
+esac

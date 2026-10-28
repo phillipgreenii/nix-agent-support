@@ -689,6 +689,17 @@
               pkgs = final;
               inherit bashBuilders;
             }).pg-rescue-push-branch.script;
+          # pg-repo-runner (bead pg2-zj2v7m, F1 of the async-runners design): the
+          # kernel and facade of the pg-router-managed repo runners. Single
+          # mkBashScript tool, so it takes `.script` directly. pg-nix-log-wrapped
+          # comes from the locked base flake by absolute store path (null if the
+          # locked base does not carry it).
+          pg-repo-runner =
+            (import ./packages/pg-repo-runner {
+              pkgs = final;
+              inherit bashBuilders;
+              pgNixLogWrapped = basePkgs.pg-nix-log-wrapped or null;
+            }).pg-repo-runner.script;
           # pg-rescue-resolve-conflict (docket pg2-q6a96, design D4): the argv of the
           # resolve-conflict-script pg-router role -- claim, worktree, rebase
           # under pg-rescue, push through pg-rescue-push-branch, close. Single
@@ -15218,6 +15229,91 @@
                     touch $out
                   '';
 
+              # pg-repo-runner HM module (bead pg2-zj2v7m, F1): the module renders
+              # ${XDG_CONFIG_HOME:-~/.config}/pg-repo-runner/config.toml from the
+              # allow-list. The eval cases live in tests/pg-repo-runner-hm-render.nix
+              # (push, verify and sync DEFAULT to false for every repo, no case enables
+              # push, the assertions fire for a missing root and a path-shaped key);
+              # this check then builds the rendered config.toml, reads it back with
+              # yq (push false for every repo, the documented keys present) and runs
+              # the REAL pg-repo-runner against it in a throwaway workspace (the
+              # allow-list, the per-role flag and the kernel admission all read what
+              # the module wrote). Nothing is applied and nothing is pushed.
+              test-pg-repo-runner-hm-render =
+                let
+                  r = import ./tests/pg-repo-runner-hm-render.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "pg-repo-runner-hm-render"
+                  {
+                    nativeBuildInputs = [
+                      r.live.package
+                      pkgs.git
+                      pkgs.jq
+                      pkgs.tomlq
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-repo-runner eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+
+                    # tj FILE JQ-FILTER: a value out of a rendered TOML file
+                    tj() { tq -o json -f "$1" . | jq -c "$2"; }
+
+                    for f in ${r.live.configDefaults} ${r.live.configFlagged}; do
+                      # the documented keys render, and NO repo enables push
+                      [ "$(tj "$f" '.repos | length')" = 3 ]
+                      [ "$(tj "$f" '[.repos[].push] | map(select(. == true)) | length')" = 0 ]
+                      [ "$(tj "$f" '[.repos[].push] | map(select(. == false)) | length')" = 3 ]
+                      [ "$(tj "$f" '.workspace_root')" = '"/example/ws"' ] || [ "$(tj "$f" '.workspace_root')" = '/example/ws' ]
+                      tj "$f" '.thresholds.nice_level' >/dev/null
+                      tj "$f" '.kill_switch' >/dev/null
+                    done
+                    # defaults only: every flag false, no max_load
+                    [ "$(tj ${r.live.configDefaults} '[.repos[] | (.verify, .sync, .push)] | map(select(. == true)) | length')" = 0 ]
+                    [ "$(tj ${r.live.configDefaults} '.thresholds | has("max_load")')" = false ]
+                    # flagged: the tunables arrive as set
+                    [ "$(tj ${r.live.configFlagged} '.thresholds.max_load')" = 8 ]
+                    [ "$(tj ${r.live.configFlagged} '.thresholds.nice_level')" = 15 ]
+                    [ "$(tj ${r.live.configFlagged} '.repos["nix-alpha"].verify')" = true ]
+
+                    # The real package against the module's real output: a throwaway
+                    # workspace with one real repo, the rendered config pointed at it.
+                    export HOME="$TMPDIR/home" XDG_STATE_HOME="$TMPDIR/state"
+                    mkdir -p "$HOME" "$TMPDIR/ws"
+                    ws="$(realpath "$TMPDIR/ws")"
+                    for k in nix-alpha nix-beta nix-gamma; do
+                      git -C "$ws" init -q "$k"
+                    done
+                    printf '[repos]\n[repos.nix-alpha]\n[repos.nix-beta]\n[repos.nix-gamma]\n' >"$ws/pn-workspace.toml"
+                    sed "s|^workspace_root = .*|workspace_root = \"$ws\"|" ${r.live.configFlagged} >"$TMPDIR/config.toml"
+                    export PG_REPO_RUNNER_CONFIG="$TMPDIR/config.toml" PG_REPO_RUNNER_LOADAVG=0.10
+
+                    rc=0
+                    PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner verify >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 2 ]
+                    grep -q "not implemented yet" out.txt
+                    # verify is on for nix-beta, sync is not: skipped with exit 0
+                    PG_ROUTER_ITEM_ID=nix-beta pg-repo-runner sync >out.txt 2>&1
+                    # nix-gamma has every flag off: skipped with exit 0
+                    PG_ROUTER_ITEM_ID=nix-gamma pg-repo-runner verify >out.txt 2>&1
+                    # a repo that is not in the module's allow-list: refused
+                    rc=0
+                    PG_ROUTER_ITEM_ID=nix-other pg-repo-runner verify >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 2 ]
+                    grep -q "not in the allow-list" out.txt
+                    # the load threshold the module rendered (8) is honored
+                    rc=0
+                    PG_REPO_RUNNER_LOADAVG=8.00 PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner verify >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 9 ]
+
+                    touch "$out"
+                  '';
+
               # pg-keep-awake keeper HM module (docket pg2-8bgxg.2, packet 17a): the HM
               # module renders ${XDG_CONFIG_HOME:-~/.config}/pg-keep-awake/config.toml,
               # validates it at build time with `pg-keep-awake config check`, asserts
@@ -16590,6 +16686,12 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-pg-repo-runner (bead pg2-zj2v7m). Same one-line idiom as above:
+            # without this the bats suites (real git, real lease) run in no gate.
+            // (import ./packages/pg-repo-runner {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-pg-rescue-resolve-conflict (docket pg2-q6a96). Same one-line idiom
             # as hand-to-human below (real-bd throwaway-DB fixture): without this
             # the suite would run in no gate at all.
@@ -16794,6 +16896,10 @@
             # mkBashScript tool) -- re-exported so
             # `nix build .#pg-rescue-push-branch` resolves via flake.packages.<system>.
             inherit (pkgs) pg-rescue-push-branch;
+            # pg-repo-runner is likewise an overlay-only attr (single mkBashScript
+            # tool) -- re-exported so `nix build .#pg-repo-runner` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) pg-repo-runner;
             # pg-rescue-resolve-conflict is likewise an overlay-only attr (single
             # mkBashScript tool) -- re-exported so
             # `nix build .#pg-rescue-resolve-conflict` resolves via flake.packages.<system>.
