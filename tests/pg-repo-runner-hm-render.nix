@@ -159,6 +159,11 @@ let
     "push default declared false" = declared.push.default == false;
     "verify default declared false" = declared.verify.default == false;
     "sync default declared false" = declared.sync.default == false;
+    "dryRun default declared true" = declared.dryRun.default == true;
+    "consumes default declared empty" = declared.consumes.default == [ ];
+    "defaults only: every repo dry-run on" = lib.all (r: r.dryRun) (
+      lib.attrValues (opts defaultsOnly).repos
+    );
     "defaults only: every repo push false" =
       noPush defaultsOnly && lib.length (lib.attrNames (opts defaultsOnly).repos) == 3;
     "defaults only: every repo verify and sync false" = lib.all (r: !r.verify && !r.sync) (

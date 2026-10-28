@@ -15601,6 +15601,9 @@
                       [ "$(tj "$f" '.repos | length')" = 3 ]
                       [ "$(tj "$f" '[.repos[].push] | map(select(. == true)) | length')" = 0 ]
                       [ "$(tj "$f" '[.repos[].push] | map(select(. == false)) | length')" = 3 ]
+                      # the push step's dry run is ON for every repo, and nothing is consumed
+                      [ "$(tj "$f" '[.repos[].dry_run] | map(select(. == true)) | length')" = 3 ]
+                      [ "$(tj "$f" '[.repos[].consumes | length] | add')" = 0 ]
                       [ "$(tj "$f" '.workspace_root')" = '"/example/ws"' ] || [ "$(tj "$f" '.workspace_root')" = '/example/ws' ]
                       tj "$f" '.thresholds.nice_level' >/dev/null
                       tj "$f" '.kill_switch' >/dev/null

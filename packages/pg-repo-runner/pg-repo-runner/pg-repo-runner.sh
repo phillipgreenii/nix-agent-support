@@ -52,8 +52,9 @@ Commands:
   verify           Role: check the repo tip named by PG_ROUTER_ITEM_ID
                    (<repo>@<sha>) with an immutable-snapshot nix flake check
   sync             Role: sync the repo named by PG_ROUTER_ITEM_ID (same): fetch,
-                   classify, fast-forward a behind clone, surface divergence
-                   (never pushes, rebases or resets)
+                   classify, fast-forward a behind clone, surface divergence,
+                   and for a repo with push = true (never by default) the gated,
+                   dry-run-first push of the verified tip (never rebases or resets)
   build            Role: build the whole workspace (same)
   status           Print the verdict store, the lease and the kill switch
 
@@ -95,7 +96,7 @@ the sampled 1-minute load in the record. A signal exit (128 + n) is a
 malfunction: exit 1, no verdict, pg-router retries. A verdict that already
 exists for <sha> ends the run at once (exit 0, no nix). verify needs a sha.
 
-sync, in its act step (report-only; it has no push step): the canonical clone
+sync, in its act step (it publishes nothing unless repos.<key>.push is true): the canonical clone
 MUST be steady (no core.worktree, on the primary branch, an empty
 `git status --porcelain`, no rebase, merge, cherry-pick or revert in progress),
 else the repo is skipped this pass ("yielded: canonical not steady") and never
@@ -103,10 +104,27 @@ repaired. Then `git fetch origin <primary>` (a remote-tracking ref update only)
 and the classification of `git rev-list --left-right --count
 origin/<primary>...<primary>`: 0,0 nothing; behind only `git merge --ff-only
 origin/<primary>` (a refusal is recorded, not retried this pass); ahead only the
-count is recorded and nothing else happens; diverged files ONE deduplicated bead
+count is recorded, and the push step below may run; diverged files ONE deduplicated bead
 "diverged, resolve with pn workspace rebase or /pn-workspace-sync" (closed when
 a later pass finds it no longer diverged). A fetch that fails is recorded and
 exits 0. The result of every pass is in the sync record that `status` prints.
+
+The push step (ADR 0108; only for a repo whose repos.<key>.push is exactly true, which
+nothing in this repository sets): the command is exactly
+`git -C <canonical clone> push origin <verified-sha>:refs/heads/<primary>`, never with
+a force flag, a + refspec, a deletion, another ref, --tags, --mirror or --no-verify,
+and never pn workspace push|update|apply. It runs only when, in the same pass: no kill
+switch is present; a check verdict green over the locked inputs exists for exactly the
+primary tip (and that tip is still the tip right before the push); the canonical
+precheck passed; origin/<primary> is an ancestor of the tip. Otherwise the record says
+`ahead` with "push withheld: <reason>". A tip that is red while a repos.<key>.consumes
+sibling has unpublished commits is "blocked, needs sibling push and relock: run pn
+workspace push" (a needs-relock transition). DRY RUN is the default: the pass records
+`push-dry-run` and logs the range it WOULD push, pushing nothing, until the flag file
+<state dir>/push-live/<repo> exists or repos.<key>.dry_run is false. A real push
+records `pushed` and one audit line (repo, remote, old and new remote sha, verdict
+reference, time) in push-audit.jsonl, the run log and stderr; a refused push is
+`push-rejected`, never forced, never retried in the pass.
 
 Failure surfacing (config [surface] enabled = true; off otherwise): a TRANSITION,
 never a steady state, files ONE P1 bead (the repo's label from surface.repo_labels,
@@ -135,7 +153,8 @@ Files and environment:
   $XDG_CONFIG_HOME/pg-repo-runner/config.toml   the config the home module renders
                                                 (override: PG_REPO_RUNNER_CONFIG)
   $XDG_STATE_HOME/pg-repo-runner/               state dir: run.log, lease,
-                                                verdicts/<repo>/<sha>.<kind>.json
+                                                verdicts/<repo>/<sha>.<kind>.json,
+                                                push-audit.jsonl, push-live/<repo>
   PG_ROUTER_ITEM_ID    the item pg-router offers; the roles read the repo from it
   PG_REPO_RUNNER_LOADAVG   replaces the 1-minute load reading (test seam)
   PG_REPO_RUNNER_MAX_LOAD  replaces the load threshold
@@ -165,7 +184,7 @@ decline() {
   exit "$RR_EXIT_BUSY"
 }
 
-# --- role bodies (sync and build are stubs; F5 and F8 replace them) ---------
+# --- role bodies (build is a stub; F8 replaces it) --------------------------
 
 # early_verify: before the admission steps. A verdict that is already stored for
 # the item's sha means the work is done (Idempotent Receiver): the run ends with
@@ -319,10 +338,9 @@ act_sync() {
       rr_log "sync: $repo ff-refused (merge --ff-only exit $rc); not retried this pass"
     fi
   elif ((behind == 0 && ahead > 0)); then
-    # A push candidate. There is no push step in this version: record the count
-    # and do nothing else (no bead, no notification).
-    rr_sync_record "$repo" "$branch" ahead 0 "$ahead" "$pre_behind" "" || return 1
-    rr_log "sync: $repo is $ahead commit(s) ahead of origin/$branch; nothing to do"
+    # A push candidate. The push step (rr_push_step, ADR 0108) records the count and
+    # does nothing else unless repos.<key>.push is true and every gate holds.
+    rr_push_step "$repo" "$path" "$branch" "$tip" "$ahead" "$pre_behind" || return 1
     rr_sync_not_diverged "$repo" "$tip" "ahead of origin/$branch only"
   else
     detail="behind $behind, ahead $ahead of origin/$branch"

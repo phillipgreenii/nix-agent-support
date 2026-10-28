@@ -6,7 +6,7 @@
 `pg-repo-runner/pg-repo-runner.bash`) with a home-manager module,
 `phillipgreenii.programs.pg-repo-runner` (`home/programs/pg-repo-runner`).
 
-Bead `pg2-zj2v7m` (F1) is the kernel, the verdict store and `status`. Bead `pg2-j0itft` (F2) is
+Bead `pg2-nvye55` (F6) is runner A's push step (below). Bead `pg2-zj2v7m` (F1) is the kernel, the verdict store and `status`. Bead `pg2-j0itft` (F2) is
 runner B, the post-land verifier: the `tips` source and the `verify` role (below). Bead `pg2-loswfh`
 (F3) is failure surfacing (below). The remaining
 role bodies land in later beads (A: `sync`, C: `build`; the source `workspace-tips`); each of those
@@ -14,9 +14,9 @@ stubs exits 2 with "not implemented".
 
 **No repo is enabled for push by this package, its module defaults, its tests or any deployment
 config in this repository.** `repos.<name>.push` defaults to `false` for every repo, the module
-asserts that default, and the kernel in this version contains no push at all. Enabling a repo needs
-an operator ruling recorded on a bead (ADR 0108, decision 1), and the first enablement runs dry-run
-(decision 6).
+asserts that default, and the only code that can publish (the push step of `sync`, below) never runs for
+a repo whose `push` is not exactly `true`. Enabling a repo needs an operator ruling recorded on a bead
+(ADR 0108, decision 1), and the first enablement runs dry-run (decision 6): `dry_run` defaults to true.
 
 ## Commands
 
@@ -25,7 +25,7 @@ an operator ruling recorded on a bead (ADR 0108, decision 1), and the first enab
 | `tips`           | Source: one JSONL record per allow-listed repo tip with no check verdict.     |
 | `workspace-tips` | Source (stub, exits 2).                                                       |
 | `verify`         | Role: an immutable-snapshot `nix flake check` of the tip, then a verdict.     |
-| `sync`           | Role: the kernel runs, then the stub exits 2.                                 |
+| `sync`           | Role: fetch, classify, fast-forward a behind clone, surface divergence, push. |
 | `build`          | Role (workspace-wide, no repo item): the kernel runs, then the stub exits 2.  |
 | `status`         | Prints the verdict store, the lease and the kill switch (`--json`, `--repo`). |
 
@@ -214,13 +214,46 @@ A diverged repo is never rebased, reset or forced (decision D3): the runner has 
 by the runner's own next pass that finds the repo no longer diverged (comment with the evidence, then close; only
 a bead with metadata `runner = pg-repo-runner`).
 
-**There is no push code path in this version.** `repos.<key>.push` is not read by `sync`; the push step is a
-later bead and is gated by ADR 0108. The tests prove it from three sides: a recording wrapper on every git
-call of the runner (no `push`, `rebase`, `reset`, `checkout`, `--force`, `--no-verify`), a `pre-push` hook in
-the canonical clone that leaves a marker if anything ever pushes, and the remote's ref, all with `push = true`
-forced in the config of that one test (the only config in this repository that sets it); and a source check
-that no git argv in the role code names `push`. A hand-applied push inserted into the ahead branch fails both
-the behavioural and the source tests (negative control, 2026-10-28).
+### The push step (ADR 0108, bead `pg2-nvye55`)
+
+An ahead-only repo (`behind 0, ahead > 0`) is a push candidate. The step does nothing but record the count
+unless `repos.<key>.push` is exactly `true` (no configuration in this repository sets it). The command is
+exactly
+
+```text
+git -C <canonical clone> push origin <verified-sha>:refs/heads/<primary>
+```
+
+(`rr_push_exec`, the only `git push` in the code base): no `--force`, `--force-with-lease`, `+` refspec,
+deletion, other ref, `--tags`, `--mirror` or `--no-verify` (the repo's own pre-push hooks run), and never
+`pn workspace push|update|apply`. Gates, all in the same pass; if one fails the record stays `ahead` with
+`push withheld: <reason>` and nothing is pushed:
+
+| Gate | Check                                                                                                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a)  | `push = true`, and no kill switch (`<state dir>/push.disabled`, the config `kill_switch` file, the pg-router `SYSTEM_PAUSE` gate that stops the role before it runs): re-read right before the push. |
+| (b)  | A `check` verdict, `green`, over the locked inputs, for exactly the primary tip; the tip is re-read right before the push (no partial push of a green ancestor).                                     |
+| (c)  | The canonical precheck of this pass passed (a dirty, off-primary or mid-operation clone is `yielded` before the step is reached).                                                                    |
+| (d)  | `origin/<primary>` is an ancestor of the tip. Otherwise the repo is diverged and takes the F5 branch (one deduplicated bead). A remote that moves after the check makes git refuse: `push-rejected`. |
+
+A red tip while a sibling named in `repos.<key>.consumes` has commits its remote lacks is "blocked, needs
+sibling push and relock: run `pn workspace push`": a `needs-relock` transition (one bead, one notification),
+closed by the runner's own next successful push. The runner never pushes the sibling.
+
+**Dry run (decision 6) is the default.** With `push = true` and the dry run on, the pass records
+`push-dry-run`, logs `would push <old>..<new> (N commit(s))` and one line per commit, and pushes nothing.
+The operator reviews the range, then removes the dry run: the flag file `<state dir>/push-live/<repo>`, or
+`repos.<key>.dry_run = false`.
+
+**Audit (decision 7).** A real push records `pushed` and writes one JSON record (`event`, `repo`, `remote`
+without credentials, `branch`, `oldRemoteSha`, `newRemoteSha`, `verdict` with its path, sha, result and
+finish time, `at`) to `<state dir>/push-audit.jsonl`, the run log (`push-audit {...}`) and stderr. A push
+that git refuses is `push-rejected`, never forced and not retried in the pass.
+
+The tests are `test-pg-repo-runner-push.bats` (real git, bare local remotes, a recording git wrapper, and a
+one-shot hook that moves the tip, the remote or the kill switch in the middle of a pass; negative control
+2026-10-28: a gate that always passes, and a `--force` inserted into the argv, both fail it) and a source
+guard that the push appears in exactly one code line with exactly the allowed argv.
 
 The result of every pass is `$XDG_STATE_HOME/pg-repo-runner/sync/<repo>.json` (`repo`, `branch`, `outcome`,
 `behind`, `ahead`, `behindBeforeFetch`, `detail`, `at`), printed by `status` under `sync:`.
@@ -263,6 +296,8 @@ retry_window = 3600 # seconds a tip item stays offered
 verify = false
 sync = false
 push = false
+dry_run = true # only read when push = true: log the range, push nothing
+consumes = [] # sibling repo keys whose unpublished commits can make this repo red
 ```
 
 Failure surfacing adds, when enabled:
@@ -348,10 +383,18 @@ measured duration and load of the real runner checks.
 - `pg-repo-runner/tests/test-pg-repo-runner-sync.bats`: runner A, report-only (F5). Real git against bare
   local remotes, a recording wrapper around every git call, a `pre-push` hook as a tripwire, and the REAL bd
   over a throwaway database for the diverged bead. Covers 0,0, behind-only (with a stale remote-tracking ref),
-  ahead-only (push forced to true), diverged (one bead, no ref change, closes on resolution), a dirty,
+  ahead-only (push forced to true, no green verdict), diverged (one bead, no ref change, closes on resolution), a dirty,
   mid-rebase, off-branch, `core.worktree` or marker-bearing canonical clone (skipped, `.git` hash unchanged), a
-  refused fast-forward, a failed fetch, and the absence of any push code path.
-- `checks.<system>.test-pg-repo-runner`: all five suites, built through `mkBashScript`.
+  refused fast-forward, a failed fetch.
+- `pg-repo-runner/tests/test-pg-repo-runner-push.bats`: the push step (F6). Real git against bare local
+  remotes (the fixture config sets `push = true` for one fixture repo only), a recording git wrapper, a
+  one-shot mid-pass hook. Proves the exact refspec and argv when every gate holds (remote ref moved, no other
+  ref changed, repo hook ran), no push with `push = false`, either kill-switch file, a kill switch appearing
+  mid-pass, no/red/error/superseded/override verdict, a verdict for an older sha, a moved tip, a dirty or
+  off-branch clone, a diverged remote, a remote that moves after the check (git refuses, no force), dry run
+  by default and its two ways out, the audit record, needs-relock surfacing, and that no argv ever carries a
+  forbidden flag.
+- `checks.<system>.test-pg-repo-runner`: all six suites, built through `mkBashScript`.
 - `checks.<system>.test-pg-repo-runner-hm-render`: evaluates the home module (push, verify and sync
   default to false for every repo, no case enables push, the assertions fire), builds the rendered
   `config.toml`, and runs the real package against it.

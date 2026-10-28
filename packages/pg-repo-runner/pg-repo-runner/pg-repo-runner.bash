@@ -804,11 +804,10 @@ rr_surface_green() {
 #
 # One pass over one repo (the item): precheck the canonical clone read-only,
 # fetch the primary branch's remote-tracking ref, classify behind/ahead, and
-# fast-forward a behind clone. It never rebases, resets, forces or pushes: a
-# diverged repo is SURFACED (one deduplicated bead, via the failure-surfacing
-# step), and an ahead repo is only RECORDED. There is no push code path in this
-# version (the push step is a later bead, behind ADR 0108); `repos.<key>.push`
-# is not read here.
+# fast-forward a behind clone. It never rebases, resets or forces: a diverged
+# repo is SURFACED (one deduplicated bead, via the failure-surfacing step), and an
+# ahead repo is RECORDED and handed to the push step (rr_push_step, below, behind
+# ADR 0108 and `repos.<key>.push`, which nothing in this repository sets).
 #
 # The result of every pass is a Memento in $RR_STATE_DIR/sync/<repo>.json that
 # `status` prints.
@@ -911,4 +910,179 @@ rr_sync_fetch() {
   GIT_TERMINAL_PROMPT=0 "${pre[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
     -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_GIT_BIN:-git}" \
     -C "$1" fetch --quiet --no-tags origin "+refs/heads/$2:refs/remotes/origin/$2"
+}
+
+# --- push (runner A's push step: F6, ADR 0108) -----------------------------
+#
+# The ONE place the runner publishes. The command is exactly
+#
+#   git -C <canonical clone> push origin <verified-sha>:refs/heads/<primary>
+#
+# (rr_push_exec): no force flag of any kind, no `+` refspec, no deletion, no other
+# ref, no --tags, no --mirror, no --no-verify (the repo's pre-push hooks run), and
+# never `pn workspace push|update|apply`. It runs only when every gate of ADR 0108
+# decision 3 holds in the same pass (rr_push_step), and only for a repo whose
+# `repos.<key>.push` is exactly true, which no configuration in this repository sets.
+# The first pass after enabling a repo is a dry run (decision 6): it logs the range it
+# WOULD push and pushes nothing, until the operator drops the flag file
+# <state dir>/push-live/<repo> (or sets `repos.<key>.dry_run = false`).
+
+# rr_push_live REPO: the dry-run mode was removed for REPO (flag file, or the
+# config option exactly false). Anything else is dry-run: the default.
+rr_push_live() {
+  [[ -e $RR_STATE_DIR/push-live/$1 ]] && return 0
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rr_jq -e --arg k "$1" '.repos[$k].dry_run == false' <<<"$RR_CONFIG_JSON" >/dev/null 2>&1
+}
+
+# rr_verdict_green REPO SHA: a check verdict for exactly SHA, green, over the locked
+# inputs (what a fresh clone sees). A verdict of another sha never matches.
+rr_verdict_green() {
+  local f="$RR_STATE_DIR/verdicts/$1/$2.check.json"
+  [[ -f $f ]] || return 1
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rr_jq -e --arg sha "$2" '.sha == $sha and .kind == "check" and .result == "green" and .inputs == "locked"' "$f" >/dev/null 2>&1
+}
+
+# rr_push_exec PATH SHA BRANCH: THE push. Never prompts, ends after 300 s when
+# `timeout` is available. Nothing else in this code base runs `git push`.
+rr_push_exec() {
+  local -a pre=()
+  if command -v timeout >/dev/null 2>&1; then pre=(timeout 300); fi
+  GIT_TERMINAL_PROMPT=0 "${pre[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
+    -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_GIT_BIN:-git}" \
+    -C "$1" push origin "$2:refs/heads/$3"
+}
+
+# rr_push_siblings_ahead REPO: prints the consumed siblings (repos.<key>.consumes)
+# whose canonical primary branch holds commits their remote lacks, one per line.
+# Read-only; RR_REPO_PATH is preserved.
+rr_push_siblings_ahead() {
+  local repo="$1" root sib saved="${RR_REPO_PATH:-}" br
+  root="$(rr_cfg '.workspace_root // empty')"
+  while IFS= read -r sib; do
+    [[ -n $sib ]] && rr_valid_key "$sib" || continue
+    rr_path_check "$root" "$sib" || continue
+    br="$(rr_repo_branch "$root" "$sib")" || continue
+    if (($(rr_git -C "$RR_REPO_PATH" rev-list --count "refs/remotes/origin/$br..refs/heads/$br" 2>/dev/null || echo 0) > 0)); then
+      printf '%s\n' "$sib"
+    fi
+  done < <(rr_jq -r --arg k "$repo" '(.repos[$k].consumes // [])[]' <<<"$RR_CONFIG_JSON")
+  RR_REPO_PATH="$saved"
+}
+
+# rr_push_withheld REPO BRANCH AHEAD PRE REASON: the push did not happen; the sync
+# record stays `ahead` and says why.
+rr_push_withheld() {
+  rr_sync_record "$1" "$2" ahead 0 "$3" "$4" "push withheld: $5" || return 1
+  rr_log "sync: $1 is $3 commit(s) ahead of origin/$2; push withheld: $5"
+}
+
+# rr_push_audit REPO PATH BRANCH OLD NEW VERDICT_FILE: ADR 0108 decision 7. One
+# record (repo, remote, old and new remote sha, verdict reference, time) appended to
+# $RR_STATE_DIR/push-audit.jsonl, written to the run log and to stderr as one
+# structured line.
+rr_push_audit() {
+  local repo="$1" path="$2" branch="$3" old="$4" new="$5" vf="$6" remote rec
+  remote="$(rr_git -C "$path" remote get-url origin 2>/dev/null | sed -E 's|//[^/@]*@|//|')"
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rec="$(rr_jq -nc --arg repo "$repo" --arg remote "$remote" --arg branch "$branch" \
+    --arg old "$old" --arg new "$new" --arg at "$(rr_now)" --arg vf "$vf" \
+    --slurpfile v "$vf" \
+    '{event: "push", repo: $repo, remote: $remote, branch: $branch, oldRemoteSha: $old,
+      newRemoteSha: $new, verdict: {path: $vf, sha: $v[0].sha, kind: $v[0].kind,
+      result: $v[0].result, finishedAt: $v[0].finishedAt}, at: $at}')" || return 1
+  printf '%s\n' "$rec" >>"$RR_STATE_DIR/push-audit.jsonl" || return 1
+  rr_log "push-audit $rec"
+  printf 'pg-repo-runner: push-audit %s\n' "$rec" >&2
+}
+
+# rr_push_step REPO PATH BRANCH TIP AHEAD PRE_BEHIND: the push candidate of a sync pass (the
+# repo is ahead only, the canonical precheck passed earlier in this same pass). Gates
+# of ADR 0108 decision 3, then dry-run, then the push. Returns 1 only when its own
+# record cannot be written; a withheld, refused or dry-run push is a normal exit.
+rr_push_step() {
+  local repo="$1" path="$2" branch="$3" tip="$4" ahead="$5" pre_behind="$6"
+  local vf kill old sibs cur out rc count
+
+  # (a) authorization: push is exactly true, and no kill switch
+  if ! rr_repo_flag "$repo" push; then
+    rr_sync_record "$repo" "$branch" ahead 0 "$ahead" "$pre_behind" "" || return 1
+    rr_log "sync: $repo is $ahead commit(s) ahead of origin/$branch; nothing to do"
+    return 0
+  fi
+  if kill="$(rr_kill_switch_active)"; then
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "kill switch present: $kill"
+    return
+  fi
+
+  # (b) a green check verdict for exactly the tip, which is the current primary tip
+  vf="$RR_STATE_DIR/verdicts/$repo/$tip.check.json"
+  if ! rr_verdict_green "$repo" "$tip"; then
+    if [[ -f $vf ]] && [[ "$(rr_jq -r '.result' "$vf" 2>/dev/null)" == red ]]; then
+      sibs="$(rr_push_siblings_ahead "$repo" | paste -sd, -)"
+      if [[ -n $sibs ]]; then
+        rr_surface_raise "$repo" needs-relock "$tip" \
+          "red under locked inputs while consumed sibling(s) $sibs have unpublished commits: run pn workspace push" ||
+          rr_log "surface: raising the needs-relock transition failed for $repo"
+        rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "blocked, needs sibling push and relock (siblings: $sibs): run pn workspace push"
+        return
+      fi
+      rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the check verdict for $tip is red"
+      return
+    fi
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "no green check verdict for the tip $tip"
+    return
+  fi
+  cur="$(rr_tip_of "$path" "$branch")" || cur=""
+  if [[ $cur != "$tip" ]]; then
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the tip moved to $cur"
+    return
+  fi
+
+  # (d) origin/<primary> is an ancestor of the verified sha (the push is a fast-forward)
+  old="$(rr_git -C "$path" rev-parse --verify -q "refs/remotes/origin/$branch^{commit}")" || old=""
+  if [[ -z $old ]] || ! rr_git -C "$path" merge-base --is-ancestor "$old" "$tip"; then
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "origin/$branch is not an ancestor of $tip"
+    return
+  fi
+
+  # the gates are re-read once more right before the act: the tip and the kill
+  # switch may have changed while the ancestry was checked
+  cur="$(rr_tip_of "$path" "$branch")" || cur=""
+  if [[ $cur != "$tip" ]]; then
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the tip moved to $cur"
+    return
+  fi
+  if kill="$(rr_kill_switch_active)"; then
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "kill switch present: $kill"
+    return
+  fi
+  count="$(rr_git -C "$path" rev-list --count "$old..$tip" 2>/dev/null || echo "$ahead")"
+
+  # dry run (decision 6): the default
+  if ! rr_push_live "$repo"; then
+    rr_sync_record "$repo" "$branch" push-dry-run 0 "$ahead" "$pre_behind" \
+      "dry run: would push $old..$tip ($count commit(s)) to origin $branch" || return 1
+    rr_log "sync: $repo dry run: would push $old..$tip ($count commit(s)) to origin refs/heads/$branch; nothing pushed"
+    rr_git -C "$path" log --oneline --max-count=50 "$old..$tip" 2>/dev/null |
+      while IFS= read -r out; do rr_log "sync: $repo dry run: would push $out"; done
+    return 0
+  fi
+
+  # the push
+  rc=0
+  out="$(rr_push_exec "$path" "$tip" "$branch" 2>&1)" || rc=$?
+  if ((rc != 0)); then
+    rr_sync_record "$repo" "$branch" push-rejected 0 "$ahead" "$pre_behind" \
+      "git push exited $rc; not retried this pass: $(tail -n 1 <<<"$out")" || return 1
+    rr_log "sync: $repo push refused (exit $rc); not forced, not retried this pass: $(tail -n 1 <<<"$out")"
+    return 0
+  fi
+  cur="$(rr_git -C "$path" rev-parse --verify -q "refs/remotes/origin/$branch^{commit}")" || cur="$tip"
+  rr_sync_record "$repo" "$branch" pushed 0 "$ahead" "$pre_behind" "pushed $old..$cur" || return 1
+  rr_push_audit "$repo" "$path" "$branch" "$old" "$cur" "$vf" ||
+    rr_log "sync: $repo: writing the push audit record failed"
+  rr_surface_resolve "$repo" needs-relock "$tip" "Pushed $tip to origin $branch: no longer blocked." ||
+    rr_log "surface: resolving the needs-relock transition failed for $repo"
 }

@@ -23,7 +23,8 @@ let
   cfg = config.phillipgreenii.programs.pg-repo-runner;
   tomlFormat = pkgs.formats.toml { };
 
-  # One allow-list entry. Every flag defaults to false; `push` is the one that
+  # One allow-list entry. Every flag defaults to false (`dryRun` defaults to true
+  # and only matters once `push` is on); `push` is the one that
   # publishes, and the assertion below pins its default.
   repoModule = _: {
     options = {
@@ -55,6 +56,29 @@ let
           the first enablement runs dry-run (decision 6).
         '';
       };
+      dryRun = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          While true (the default) a repo with `push = true` only LOGS the commit
+          range it would push (ADR 0108, decision 6). The operator reviews that
+          range, then sets this to false (or creates the flag file
+          `push-live/<repo>` in the runner's state directory). Renders as
+          `dry_run`. Has no effect while `push` is false.
+        '';
+      };
+      consumes = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "nix-repo-base" ];
+        description = ''
+          Workspace repo keys whose published state this repo's locked flake
+          inputs depend on. When this repo's tip is red under its locked inputs
+          while one of them has unpublished commits, the push is reported as
+          "blocked, needs sibling push and relock: run pn workspace push" (the
+          runner never pushes the sibling). Renders as `consumes`.
+        '';
+      };
     };
   };
 
@@ -68,7 +92,15 @@ let
       retry_window = cfg.thresholds.retryWindow;
     }
     // lib.optionalAttrs (cfg.thresholds.maxLoad != null) { max_load = cfg.thresholds.maxLoad; };
-    repos = lib.mapAttrs (_: r: { inherit (r) verify sync push; }) cfg.repos;
+    repos = lib.mapAttrs (_: r: {
+      inherit (r)
+        verify
+        sync
+        push
+        consumes
+        ;
+      dry_run = r.dryRun;
+    }) cfg.repos;
   }
   // lib.optionalAttrs cfg.surface.enable {
     surface = {

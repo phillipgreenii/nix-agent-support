@@ -12,9 +12,10 @@
 # script run as a subprocess. The only stand-in is the macOS notifier (a recording
 # script on PG_REPO_RUNNER_OSASCRIPT_BIN).
 #
-# The sync role has no push step. One test forces `push = true` for a repo to prove
-# that the flag changes nothing (the only config in this repository that does); the
-# recorded git argv, a pre-push hook and the remote's ref prove that no push happens.
+# The push step has its own suite (test-pg-repo-runner-push.bats). Here, one test
+# forces `push = true` for a repo WITHOUT a green verdict to prove that the flag alone
+# publishes nothing; the recorded git argv, a pre-push hook and the remote's ref prove
+# that no push happens.
 
 bats_require_minimum_version 1.5.0
 
@@ -322,7 +323,7 @@ assert_no_history_rewriting() {
 
 # ---- ahead only: record the count, never push ------------------------------
 
-@test "ahead-only records the count and runs no git push, even with push forced to true" {
+@test "ahead-only records the count and runs no git push, even with push forced to true but no green verdict" {
   write_config "$TDIR" true
   commit_file "$A" f
   commit_file "$A" f
@@ -568,27 +569,21 @@ assert_yielded() {
   [[ $output == *"nix-beta"*"in-sync"* ]]
 }
 
-# ---- there is no push code path --------------------------------------------
+# ---- the sync role itself has no push -----------------------------------------
 
-@test "the role code has no git push, no force and no push-flag read" {
+@test "the entry point (the sync role body) never hands push to git, and no code names a force flag" {
   local f
   for f in "$SCRIPTS_DIR/pg-repo-runner.sh" "$SCRIPTS_DIR/pg-repo-runner.bash"; do
-    # code lines only (comments dropped): no git invocation names push
-    run bash -c "grep -vE '^[[:space:]]*#' \"\$1\" | grep -nE '(rr_git|RR_GIT_BIN|\\bgit)\\b.*\\bpush\\b'" _ "$f"
-    [ "$status" -eq 1 ] || {
-      echo "$f: $output"
-      return 1
-    }
     run bash -c "grep -vE '^[[:space:]]*#' \"\$1\" | grep -nE -- '--force|force-with-lease|--no-verify|reset --hard|rebase'" _ "$f"
     # the help text and the bead body talk ABOUT rebase; no argv carries it
     [[ $output != *"rr_git"* ]] || {
       echo "$f: $output"
       return 1
     }
-    run bash -c "grep -vE '^[[:space:]]*#' \"\$1\" | grep -nE 'rr_repo_flag[^|]*push|\\.push'" _ "$f"
-    [ "$status" -eq 1 ] || {
-      echo "$f: $output"
-      return 1
-    }
   done
+  run bash -c "sed -e \"/<<'HELP'/,/^HELP\\$/d\" -e '/^[[:space:]]*#/d' \"\$1\" | grep -nE '(rr_git|RR_GIT_BIN|\\bgit)\\b.*\\bpush\\b'" _ "$SCRIPTS_DIR/pg-repo-runner.sh"
+  [ "$status" -eq 1 ] || {
+    echo "$output"
+    return 1
+  }
 }

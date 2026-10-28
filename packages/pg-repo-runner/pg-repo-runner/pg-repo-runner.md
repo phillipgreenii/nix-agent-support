@@ -23,6 +23,6 @@
 
 `PG_REPO_RUNNER_CONFIG={{path/to/config.toml}} pg-repo-runner status`
 
-- Sync one repo once (fetch, fast-forward a behind clone, record an ahead one, surface a diverged one; never pushes or rebases):
+- Sync one repo once (fetch, fast-forward a behind clone, record an ahead one, surface a diverged one; pushes only a repo whose config has push = true, dry run first; never rebases or forces):
 
 `PG_ROUTER_ITEM_ID={{repo-key}} pg-repo-runner sync`
