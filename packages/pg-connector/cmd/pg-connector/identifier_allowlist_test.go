@@ -30,10 +30,10 @@ import (
 // packages/pg-connector's testdata is absent from that sandbox regardless of
 // what root-scanning logic the retired PR tool's test binary contains.
 //
-// The fix mirrors the pattern packages/ccpool/cmd/ccpool/spec_citations_test.go
-// already documents for a Go MODULE boundary (as opposed to a same-module
-// surface split, which that file's sibling nix check handles instead): each
-// Go module gets its own copy of the guard, rooted at its own module root.
+// The fix mirrors the pattern the retired ccpool section-sign guard test
+// (since replaced by the `section-sign-citations` hook) used for a Go MODULE
+// boundary: each Go module gets its own copy of the guard, rooted at its own
+// module root.
 // packages/pg-connector's cmd/pg-connector already hosts a module-wide guard
 // in this same style — see TestBackendLayoutConvention in
 // layout_convention_test.go — so this file lives alongside it.
@@ -206,8 +206,8 @@ func scanTree(root string) (violations []string, scannedFiles int, err error) {
 
 // pgConnectorModuleRoot walks up from the test's working directory to the
 // directory holding go.mod — mirrors pgPrModuleRoot in
-// the retired PR tool's cmd/identifier_allowlist_test.go and ccpoolModuleRoot
-// in packages/ccpool/cmd/ccpool/spec_citations_test.go — so the guard covers
+// the retired PR tool's cmd/identifier_allowlist_test.go and the retired ccpool
+// section-sign guard's module-root helper — so the guard covers
 // the whole packages/pg-connector module regardless of which package under
 // it runs the test.
 func pgConnectorModuleRoot(t *testing.T) string {

@@ -1578,6 +1578,50 @@
           always_run = true;
           stages = [ "pre-rebase" ];
         };
+
+        # pg2-2yayms: ONE enforcement point for the section-sign citation ban
+        # (CLAUDE.md "Citation conventions", rule 3). It replaced four copies:
+        # the ccpool and pg-connector spec_citations_test.go Go tests, the nix
+        # check test-ccpool-surface-spec-citations, and prose that only described
+        # them. The guarded scope (ccpool module and surface, pg-connector
+        # module), its liveness canaries and the .db/.out/.test skips all live in
+        # scripts/check-section-sign-citations.sh (a table, so a new surface is one
+        # edit); its regression guard is tests/section-sign-citations.bats (real
+        # git, hermetic fixture, global rule V-3), which `run-unit-tests` runs on a
+        # diff that touches either. The hook is handed every changed path
+        # (`files` is unset on purpose, so the scope is NOT repeated here) and the
+        # script returns at once when none lies in scope; otherwise it scans the
+        # whole scope (about 0.2 s). It needs git, so it skips inside the nix
+        # build sandbox (a no-git store copy); commit and `pg-hooks run pre-land`
+        # are the gates. NOTE: this hook only runs once the shared hook bundle is
+        # rebuilt in the canonical clone (`nix run .#install-pre-commit-hooks`).
+        section-sign-citations = {
+          enable = true;
+          name = "section-sign-citations";
+          description = "ban the section sign in the ccpool and pg-connector surfaces (CLAUDE.md Citation conventions, pg2-2yayms)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "section-sign-citations-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.gnused
+              ];
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "section-sign-citations: inside the nix build sandbox; skipping (no git checkout there; commit and pre-land run it)" >&2
+                  exit 0
+                fi
+
+                exec bash ${./scripts/check-section-sign-citations.sh} "$@"
+              '';
+            }
+          }/bin/section-sign-citations-hook";
+          language = "system";
+          pass_filenames = true;
+          require_serial = true;
+        };
       };
 
       # Per-clone hook bundle (pg2-pla9d, T20 wave 2, bead pg2-uq1km): the
@@ -4315,82 +4359,6 @@
                     done
                     touch $out
                   '';
-
-              # Durable-citation guard for the ccpool surface OUTSIDE the Go
-              # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
-              #
-              # packages/ccpool/cmd/ccpool/spec_citations_test.go bans the section
-              # sign across the ccpool Go MODULE, but it walks up to go.mod and the
-              # module's nix src is rooted at ./packages (Pattern B) — so ccpool's
-              # nix modules under home/, darwin/, and nixos/ are outside BOTH that
-              # walk and the build sandbox tree, and are unreachable from Go. Same
-              # structural gap as any repo-root asset a Go module sandbox cannot see; this check
-              # closes it from the repo root. It found and retired
-              # home/programs/ccpool/default.nix's `spec <sign>8.1.1/<sign>14 step 6`.
-              #
-              # Scope is DELIBERATELY the ccpool surface, not the repo: repo-wide
-              # the glyph appears 534 times across 146 files (ADR prose, historical
-              # docs/superpowers/plans, other packages' own in-repo citations),
-              # nearly all legitimate, so a repo-wide ban would need an allowlist
-              # longer than the rule. See CLAUDE.md "Citation conventions".
-              #
-              # A NEW ccpool-surface directory MUST be added to `surface` below.
-              test-ccpool-surface-spec-citations =
-                let
-                  surface = lib.fileset.toSource {
-                    root = ./.;
-                    fileset = lib.fileset.unions [
-                      ./home/programs/ccpool
-                      ./darwin/modules/ccpool
-                      ./nixos/modules/ccpool
-                    ];
-                  };
-                in
-                pkgs.runCommand "test-ccpool-surface-spec-citations" { } ''
-                  # Build the glyph from its UTF-8 bytes so THIS file never
-                  # contains the character it forbids (the discipline the Go guard
-                  # gets from `string(rune(0x00a7))`), and so the match is
-                  # locale-independent in the sandbox (no UTF-8 locale there).
-                  sign="$(printf '\302\247')"
-
-                  # Liveness self-check, run FIRST: the expected violation count is
-                  # zero, so "found nothing" cannot double as proof the scan ran.
-                  # Assert the files this invariant exists for are really present —
-                  # a rename that moved one out from under the fileset must FAIL
-                  # loudly, not silently reduce coverage to nothing.
-                  for want in \
-                    home/programs/ccpool/default.nix \
-                    darwin/modules/ccpool/default.nix \
-                    nixos/modules/ccpool/default.nix; do
-                    if [ ! -f "${surface}/$want" ]; then
-                      echo "FAIL: guard never scanned $want — it was renamed or moved" >&2
-                      echo "      out from under this check; update the fileset in flake.nix" >&2
-                      exit 1
-                    fi
-                  done
-
-                  scanned="$(find ${surface} -type f | wc -l)"
-                  if [ "$scanned" -lt 3 ]; then
-                    echo "FAIL: guard scanned only $scanned file(s); the ccpool surface" >&2
-                    echo "      outside the Go module has at least 3" >&2
-                    exit 1
-                  fi
-
-                  hits="$(cd ${surface} && grep -rn -- "$sign" . || true)"
-                  if [ -n "$hits" ]; then
-                    echo "FAIL: forbidden section-sign citation on the ccpool surface:" >&2
-                    echo "$hits" >&2
-                    echo "ccpool's design specs live OUTSIDE this repo (the pn-workspace root's" >&2
-                    echo "docs/superpowers/specs/), are used once and abandoned, and are not a" >&2
-                    echo "durable record — so a section-number reference into them dangles." >&2
-                    echo "State the rule in the comment itself, or cite a durable in-repo owner" >&2
-                    echo "by number and PROSE heading name (e.g. \"ADR 0038's Context\")." >&2
-                    exit 1
-                  fi
-
-                  echo "ok: $scanned file(s) scanned on the ccpool surface outside the Go module; no section-sign citations"
-                  touch $out
-                '';
 
               # Stale-location guard for the tc-ql0o rule-pack moves out of the
               # always-on `pgii-agent-rules.md`:

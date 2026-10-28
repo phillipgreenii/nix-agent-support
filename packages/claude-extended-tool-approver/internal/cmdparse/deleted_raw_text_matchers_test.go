@@ -14,7 +14,7 @@ package cmdparse
 // just as much a regression, since the fuzz/property tests are what stand in
 // for the deleted invariant per ADR 0039's Enforcement "Fuzz continuity") for a
 // top-level declaration of any of the three names, using the same go/parser AST
-// approach the ccpool spec-citation guard uses (packages/ccpool/cmd/ccpool/spec_citations_test.go)
+// approach the retired ccpool spec-citation guard test used
 // rather than a substring grep — a grep would trip on this file's own doc
 // comment and on every historical "DELETED" note in parser.go/shellparse.go
 // that legitimately NAMES the three symbols without declaring them.

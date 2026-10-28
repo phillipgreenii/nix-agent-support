@@ -556,17 +556,20 @@ Rules for writing a citation into code, comments, or docs in this repo (RFC 2119
    once and then abandoned, and are slated for deletion — so every reference to them is guaranteed
    to dangle. State the rule in the code itself, or cite a durable in-repo ADR.
 
-Rule 3 is enforced **mechanically over the ccpool surface only** (bead `pg2-oxrha`, widened by
-`pg2-qkk8n`), by two guards that between them ban the section sign outright:
+Rule 3 is enforced **mechanically over the ccpool surface and the pg-connector module** (beads
+`pg2-oxrha`, `pg2-qkk8n`, `pg2-hidkm`, collapsed into one hook by `pg2-2yayms`), which together
+ban the section sign outright, by ONE pre-commit hook, `section-sign-citations`
+(`scripts/check-section-sign-citations.sh`, regression guard `tests/section-sign-citations.bats`).
+It runs at commit and under `pg-hooks run pre-land`, over `packages/ccpool/**`,
+`home/programs/ccpool/`, `darwin/modules/ccpool/`, `nixos/modules/ccpool/` and
+`packages/pg-connector/**` (every tracked file type, tests included, except `.db`, `.out` and
+`.test`). The guarded scope is ONE table (`SURFACES`) in that script, with its liveness canaries
+(a minimum file count and a required `default.nix` per surface, so an empty or mis-scoped scan
+fails loudly): a new surface MUST be added as a row there. The hook only runs once the hook
+bundle has been rebuilt (`nix run .#install-pre-commit-hooks`) after the hook was added or
+changed.
 
-- `packages/ccpool/cmd/ccpool/spec_citations_test.go` — the ccpool **Go module**
-  (`packages/ccpool/**`, every file type, tests included).
-- `checks.<system>.test-ccpool-surface-spec-citations` in `flake.nix` — the ccpool surface
-  **outside** that module (`home/programs/ccpool/`, `darwin/modules/ccpool/`,
-  `nixos/modules/ccpool/`), which the Go test structurally cannot reach. A new ccpool-surface
-  directory MUST be added to that check's fileset.
-
-The guarded scope is **deliberately the ccpool surface, not the repo**: repo-wide the section sign
+The guarded scope is **deliberately those surfaces, not the repo**: repo-wide the section sign
 appears 534 times across 146 files (ADR prose, historical `docs/superpowers/plans/`, other
 packages' own in-repo citations), nearly all of it legitimate, so a repo-wide ban would need an
 allowlist longer than the rule. Everywhere else rules 1-3 are convention, not a test.

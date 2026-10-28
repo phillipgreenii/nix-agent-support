@@ -21,11 +21,12 @@ mkGoApp {
   # read by no test or build).
   #
   # The five `*.nix` derivation files ARE included too (pg2-p5at3 fast-follow,
-  # not the original cut here): spec_citations_test.go's
-  # TestNoSectionSignCitationsUnderPgConnector — one of this same whole-module
-  # suite, and itself part of `./cmd` above — deliberately scans "every file
+  # not the original cut here): a section-sign citation guard test (since
+  # replaced by the `section-sign-citations` pre-commit hook, bead pg2-2yayms)
+  # — one of this same whole-module
+  # suite, and itself part of `./cmd` above — deliberately scanned "every file
   # type, not just Go" for forbidden section-sign citations, and its own
-  # wantNixFiles self-check (`t.Errorf("guard never scanned %s ...")`) fails
+  # wantNixFiles self-check (`t.Errorf("guard never scanned %s ...")`) failed
   # loudly if any of the 5 `*.nix` files is absent from the tree it walks
   # (pgConnectorModuleRoot, rooted at wherever go.mod lands in THIS src).
   # Excluding them was this fix's original premise ("irrelevant to go
