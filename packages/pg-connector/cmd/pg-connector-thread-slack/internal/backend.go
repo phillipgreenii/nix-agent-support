@@ -410,7 +410,9 @@ func canonicalThreadID(f *slackThreadFields) (string, bool) {
 func listPrompt(modifier string) string {
 	return fmt.Sprintf(`Using the Slack MCP tools already available to you, search Slack threads matching this modifier: %q.
 
-Search from the oldest matching thread forward, and return every currently-matching thread — this backend keeps no incremental cursor between calls, so always answer with the full current match set for this modifier, never a delta since some earlier call.
+Make exactly ONE call to the slack_search_public tool with this modifier, then answer from that one response. Do NOT call any other tool: no slack_read_thread, no slack_read_channel, no slack_read_user_profile, no slack_search_channels, and do not request further pages of results. Every call costs a model round trip and this poll has a tight time budget, so answer with what that single search response contains. Answer with the full current match set that single response carries — this backend keeps no incremental cursor between calls, so never a delta since some earlier call.
+
+A field the search response does not carry is left out ("participants", "started_by" and "last_reply_at": omit the key; "reply_count": 0; "mentions_me": false; "text": the empty string) rather than looked up with another call or guessed.
 
 Respond with ONLY one JSON object, no prose, no markdown code fence, matching exactly this shape:
 {"items": [{"id": <string>, "channel": <string>, "permalink": <string>, "started_by": <string>, "participants": [<string>, ...], "last_reply_at": <string>, "reply_count": <int>, "text": <string>, "mentions_me": <bool>}, ...]}

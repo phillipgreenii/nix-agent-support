@@ -109,6 +109,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -177,6 +178,26 @@ var allowedToolsArg = strings.Join(readOnlyTools, ",")
 const (
 	defaultMaxTurns = 6
 	maxMaxTurns     = 30
+)
+
+// Sizing constants for the list poll (bead pg2-lacaev). They are not read by
+// the exec path: they are the numbers the sizing regression guard
+// (TestListPollIsBoundedByTheSourcePeriod) derives its bound from, so a change
+// to the turn cap or to the longest deadline a config may arm that breaks the
+// bound fails a test instead of stalling a tick in production.
+//
+//   - sourcePeriod is how often the deployed thread source polls. The
+//     scheduler runs its sources serially inside one tick, so one source's
+//     worst case MUST leave most of the period to the others.
+//   - slowTurnLatency is the slowest per-turn latency measured under host load
+//     (101 s over 5 turns, bead pg2-lacaev).
+//   - listExpectedTurns is what listPrompt asks for: one search call, the turn
+//     that carries its result and the final reply. A run that needs more is a
+//     prompt regression; the turn cap above it is only the runaway brake.
+const (
+	sourcePeriod      = 30 * time.Minute
+	slowTurnLatency   = 25 * time.Second
+	listExpectedTurns = 3
 )
 
 // claudeOptions are the per-call options a `claude` config block carries

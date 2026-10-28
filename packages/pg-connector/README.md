@@ -169,6 +169,22 @@ run. A `claude` run is slower than the shared per-op defaults; raise this backen
 the `timeouts.list` / `timeouts.show` keys of the same config block (described under the
 per-backend deadline override).
 
+Decision record: the `list` poll's per-call work (bead `pg2-lacaev`). A deployed `thread-me`
+source (30 minute period, `claude -p` with `max_turns: 16`, a 120 s list deadline) saw about 90
+percent of its polls killed at the deadline: a successful call took about 100 s with 5 turns,
+while 3-turn runs took 11 to 43 s, so the turn count drives the duration. Two fixes were on the
+table: (1) cut the per-call work in this backend, or (2) raise the deployment's `timeouts.list`
+toward the 300 s cap. Option (1) was chosen: it lands in this repo, it attacks the cause (turns)
+rather than hiding it behind a longer stall of the serial tick (the router has no per-source
+timeout, so a failing poll stalls every later source), and the alert rule stays untouched.
+`listPrompt` now demands exactly one `slack_search_public` call, forbids every other tool and
+further result pages, and tells the model to omit a field the search response does not carry
+instead of looking it up (so `reply_count` may read 0, `mentions_me` false and `participants`
+empty for such an item). The sizing guard is `TestListPollIsBoundedByTheSourcePeriod` and its
+siblings (`sizing_test.go`): the worst poll (turn cap times the slowest measured turn, cut at the
+longest deadline a config may arm, plus the kill margin) must stay within half the source period.
+The deployment's `max_turns` can be lowered once a day of polls shows the new turn count.
+
 ## Subcommands
 
 | Command                                                           | Description                                                                                                                    |
