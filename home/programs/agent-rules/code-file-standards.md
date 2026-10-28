@@ -192,6 +192,113 @@ session and stamped the placeholder as the owner of 62 beads).
 - `$T` MUST be under a temporary root (`mktemp -d`); the approver refuses a repo-local
   `user.name`/`user.email`/`protocol.*` write that is not provably under one.
 
+### Tests That Run An External Command
+
+Code that runs an external program (`bd`, `gh`, `pg-connector`, `sh`, and so on) MUST do it through
+a seam a test can answer in process, and a test that stands in for such a program MUST use the
+shared fake for its language. It MUST NOT build the stand-in by re-executing the test binary.
+Design record: ADR 0001 (`docs/adr/0001-shared-command-runner-seam.md`) in repo `phillipgreenii-x`.
+
+Go (`github.com/phillipgreenii/x`, repo `phillipgreenii-x`; packages
+[`x/cmdrun`](https://github.com/phillipgreenii/x/tree/main/cmdrun) and
+[`x/cmdruntest`](https://github.com/phillipgreenii/x/tree/main/cmdruntest)):
+
+```go
+// production code (imports x/cmdrun only, never "testing")
+type Deps struct{ Run cmdrun.Runner } // nil means cmdrun.Exec
+
+res := run(ctx, cmdrun.Call{Name: "bd", Args: []string{"show", id}})
+```
+
+```go
+// a unit test (imports x/cmdruntest, the testing adapter)
+fake := cmdruntest.New(t)
+fake.On(cmdruntest.Match("bd", "show", "pg2-1")).Return(cmdruntest.Out(`{"id":"pg2-1"}`))
+deps := Deps{Run: fake.Runner()}
+// ... exercise the code, then assert on fake.Calls() (ordered, safe for concurrent use)
+```
+
+- Code under test MUST take a `cmdrun.Runner` (`Call` in, `Result` out, no `*exec.Cmd`), defaulting
+  to `cmdrun.Exec`. A seam that hands back an `*exec.Cmd` (a package variable set to
+  `exec.CommandContext`, or a `CmdFactory`) cannot be answered in process, so its only double is a
+  real process; it MUST NOT be introduced.
+- A test MUST answer the seam with `cmdruntest.Fake` (`On(...).Return/Respond/Seq`, limited with
+  `Times`/`Nth`). The fake fails the test on a call no rule answers; a test MUST NOT weaken that
+  with a catch-all rule to silence it.
+- A test MUST NOT re-execute the test binary to impersonate a tool (`GO_WANT_HELPER_PROCESS`,
+  `-test.run=^TestHelperProcess$`, `os.Args[0]` as the child).
+- An adapter that wraps `cmdrun.Exec` (to map a non-zero exit or a signal as its own callers
+  expect) MUST NOT re-test `Exec` in a copy of the same `sh -c` cases. It MUST run
+  `cmdruntest.RunContract(t, runner)` from a test carrying the `integration` build tag (real `sh`,
+  so it spawns processes); `cmdrun.Exec` itself already passes that suite in `x`.
+- A package SHOULD keep one fast real-process test through the seam (a `#!/bin/sh` stub on `PATH`
+  exercising the real `Exec` path, plus a missing-binary start-error case), as the migrated
+  `pg-router-source-pg-desk` and `ccpool-probe` do. That is a single-process real-tool test
+  (V-3), costs milliseconds, and stays in the unit tier.
+
+Class B exception: when the real process IS the thing under test (a wrapper that supervises a
+child, process groups and signals, a delegate that leaves a grandchild holding a pipe open, a
+`main` re-executed as itself), no `Runner` double can stand in, because the test exists to exercise
+the real `exec`. Such a test MAY re-execute the test binary or spawn real children. It is a
+multi-process test, so under V-4 it is an integration test, not a unit test:
+
+```go
+//go:build integration
+
+package runner
+```
+
+- It MUST sit behind a build tag (`integration`, the tag `x` and this repo already use) or an
+  opt-in switch, AND have its own check that runs it (`phillipg-nix-repo-base` ADR 0024: a suite
+  nothing runs cannot fail). It MUST NOT run in the unit gate (`go test ./...`, a `*-go-tests`
+  check, the `run-unit-tests` hook, `pg-hooks run pre-commit|pre-land`) and MUST NOT block a commit
+  or a land.
+- When a change to such a test or its subject warrants running it, the agent MUST file a bead gated
+  on that change being deployed (`pb:pb-gate-lifecycle`) whose work is to run the suite against
+  `main`. An agent MUST NOT raise a package test timeout to fit it into the unit gate.
+- The class B test MUST NOT be used as an excuse for a stand-in: a test that only answers "what does
+  the tool say" is class A (a stand-in for an external tool) and uses the fake.
+
+```mermaid
+flowchart TD
+  Q["The test needs an external command"] --> S{"Is the real process\nthe thing under test?"}
+  S -->|"No: it stands in for a tool"| A["Class A: cmdruntest.Fake via cmdrun.Runner\nunit tier"]
+  S -->|"Yes: supervision, signals, pipes"| B["Class B: real process or re-exec\nintegration tag plus its own check (V-4)"]
+  A --> R{"Wraps cmdrun.Exec?"}
+  R -->|"Yes"| C["cmdruntest.RunContract from an integration-tagged test"]
+  R -->|"No"| D["Done"]
+```
+
+Why (measured in `x`'s ADR 0001, Context and Measured cost, 2026-10-27; single runs of
+`nice -n 10 go test -p 4 -count=1` on a shared host whose load was not recorded, so they are size
+indicators, not predictions):
+
+- A race-built child is the cost, not spawning. In a throwaway module, `sh -c true` took 175.7 ms
+  over 20 runs under `-race` (175.7 / 20 = 8.8 ms each; 182.4 / 20 = 9.1 ms without `-race`),
+  while re-executing the test binary took 3.032 s over 3 runs under `-race` (3.032 / 3 = 1.01 s
+  each; 12.75 ms / 3 = 4.2 ms without `-race`). A real `sh` costs milliseconds; each fake call
+  made by re-exec costs about a second.
+- In `nix-agent-support` the class A packages measured, under `-race` against without it (package
+  time, seconds): `pg-desk/internal/gather` 208.7 against 1.4, `pg-desk/internal/sync` 253.9
+  against 1.6, `pg-router-source-pg-connector/cmd/...` 90.2 against 2.1,
+  `pg-router-source-pg-desk/cmd/...` 15.6 against 4.1, `pg-router-probe/cmd/pg-router-probe` 15.3
+  against 4.8, `ccpool-probe/cmd/ccpool-probe` 23.1 against 1.0. Summed: 208.7 + 253.9 + 90.2 +
+  15.6 + 15.3 + 23.1 = 606.8 s under `-race`, against 1.4 + 1.6 + 2.1 + 4.1 + 4.8 + 1.0 = 15.0 s
+  without. This is a sum of package times, not a module wall time (`-p 4` runs packages in
+  parallel).
+- The `pg-decider` fix (commit `c1911c5c8`, which replaced a `CmdFactory` with a `Runner` func)
+  measured `internal/apply` 289.7 s to 1.5 s, `cmd/pg-decider` 149 s to 2.4 s and `internal/view`
+  4.3 s to 1.3 s (`go test -race -count=1 -p 4`, wall per package). Before it, `pg-decider` hit the
+  300 s `pg-test-runner` cap with every test passing.
+- The ADR counted 21 test files containing `GO_WANT_HELPER_PROCESS` in `nix-agent-support`: 7 class
+  A (replaced by the fake) and 14 class B (kept, to be tagged).
+
+Code that predates this rule MAY keep its re-exec double until the file is next changed; at that
+point a class A test MUST be migrated to `cmdruntest.Fake`, and a class B test MUST gain the build
+tag and its own check. There is not yet a mechanical guard that flags `GO_WANT_HELPER_PROCESS` in an
+untagged file (ADR 0001 defers it until the class A migrations land, because it would fail on every
+file today), so a reviewer MUST look for the pattern by hand.
+
 ## Structured Data Files
 
 MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing (sed, awk, python).
