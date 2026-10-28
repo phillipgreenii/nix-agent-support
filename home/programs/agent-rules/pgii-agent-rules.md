@@ -85,7 +85,7 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 
 ### Unpushed Landing Debt (see `session-wrapup:wrap-up-session`)
 
-- **U-5** MUST NOT `git push`, `pn workspace push|update|apply`, or invoke `/pn-workspace-sync` or `/pn-workspace-update` on own initiative to clear unpushed work; REPORTING is in scope, PUBLISHING is not. (U-1..U-4, U-6: the wrap-up skill.)
+- **U-5** An agent session MUST NOT `git push`, `pn workspace push|update|apply`, or invoke `/pn-workspace-sync` or `/pn-workspace-update` on own initiative to clear unpushed work; REPORTING is in scope, PUBLISHING by an agent session is not. The one exception is the push step of the operator-enabled `pg-repo-runner`, within the scope of this repo's ADR 0108. An agent MUST NOT enable that step, widen its scope, or run it by hand to clear unpushed work. (U-1..U-4, U-6: the wrap-up skill.)
 
 ### Local Containers
 

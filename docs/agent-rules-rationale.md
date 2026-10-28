@@ -219,7 +219,11 @@ derivation / never-standing-bead / read-only-probe / one-line-reporting contract
 lives in `session-wrapup:wrap-up-session`'s `references/unpushed-landing-debt.md`. U-5 stays in the
 core: it is a bare prohibition against ANY push/apply/update at ANY moment, not only at session
 close-out, so it has no session-close-scoped trigger a skill could gate on (Design P1). Trimming
-the reporting duty (U-6) does NOT relax this restraint.
+the reporting duty (U-6) does NOT relax this restraint. U-5 carries ONE exception (ADR 0108,
+Accepted 2026-10-27 on `pg2-ukat2`): the push step of the operator-enabled `pg-repo-runner`, a
+daemon-started program that is not an agent session, so a reading of "on own initiative" alone would
+leave it unauthorized by omission. The rule therefore names the exception and its ADR, and forbids an
+agent from enabling the step, widening its scope, or running it by hand.
 
 ## Local Containers (C-1..C-4)
 

@@ -1,13 +1,21 @@
 # An operator-enabled unattended runner may publish within a defined scope
 
-**Status**: Proposed (amends the wording of rule U-5 of the global agent rules; becomes Accepted when the operator rules on decision D1 of the async runners design, recorded on `pg2-na2nr`)
+**Status**: Accepted 2026-10-27 (amends the wording of rule U-5 of the global agent rules; operator ruling recorded on `pg2-ukat2`, quoted below)
 **Date**: 2026-10-23
 **Deciders**: phillipg
 
-This ADR is filed with the design `docs/superpowers/specs/2026-10-23-pg-router-async-runners-design.md`
-(origin: `pg2-na2nr`) so that the implementation beads can cite it by number. It decides nothing by
-itself: a Proposed ADR authorizes no push. The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in
+This ADR was filed with the design `docs/superpowers/specs/2026-10-23-pg-router-async-runners-design.md`
+(origin: `pg2-na2nr`) so that the implementation beads can cite it by number. It was Proposed on
+2026-10-23 and authorized no push until accepted. The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in
 this record are to be read as in RFC 2119.
+
+**Acceptance.** Operator ruling (Phillip, 2026-10-27, recorded on `pg2-ukat2`, verbatim): "pg2-ukat2: i'm ok
+with them doing a push." It accepts decision D1 of the async runners design (`pg2-na2nr`), so this ADR
+is Accepted. The scope is not changed or widened by the ruling: decisions 1 to 9 stand as written.
+No repo is enabled for push by this ruling; enabling a repo needs a further operator ruling recorded
+on a bead (decision 1). The replacement U-5 wording of decision 8 was applied to
+`home/programs/agent-rules/pgii-agent-rules.md` under bead `pg2-rlsqq9`; it reaches the rendered
+global rules at the operator's next apply.
 
 ## Context
 
@@ -72,8 +80,8 @@ nix), and the workspace policy that `main` has no branch protection.
    largest case today) is a deliberate publication.
 7. **Audit.** Every push MUST write one record (repo, remote, old and new remote sha, verdict
    reference, time) to the runner's run log and emit it as a structured log line.
-8. **Proposed replacement wording for U-5**, to be applied by the operator to the global rules (this
-   ADR does not edit any rules file):
+8. **Replacement wording for U-5**, applied to the global rules source
+   (`home/programs/agent-rules/pgii-agent-rules.md`) under `pg2-rlsqq9`:
 
    > **U-5** An agent session MUST NOT `git push`, `pn workspace push|update|apply`, or invoke
    > `/pn-workspace-sync` or `/pn-workspace-update` on own initiative to clear unpushed work;
