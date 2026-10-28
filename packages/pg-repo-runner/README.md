@@ -8,9 +8,9 @@
 
 Beads: `pg2-zj2v7m` (F1) is the kernel, the verdict store and `status`; `pg2-j0itft` (F2) is runner B, the
 post-land verifier (the `tips` source and the `verify` role); `pg2-loswfh` (F3) is failure surfacing;
-`pg2-28h96s` (F5) is runner A's report-only `sync`; `pg2-nvye55` (F6) is runner A's push step. The
-remaining role body and source land in a later bead (C: `build` and `workspace-tips`); each of those
-stubs exits 2 with "not implemented". Operator procedures (state, status, kill switch, red tips, first
+`pg2-28h96s` (F5) is runner A's report-only `sync`; `pg2-nvye55` (F6) is runner A's push step;
+`pg2-xg9ppr` (F8) is runner C, the cross-repo workspace builder (the `workspace-tips` source and the
+`build` role, below). Operator procedures (state, status, kill switch, red tips, first
 enablement) are in the runbook `docs/runbooks/pg-repo-runner.md`; this README is the package reference.
 
 **No repo is enabled for push by this package, its module defaults, its tests or any deployment
@@ -21,14 +21,14 @@ a repo whose `push` is not exactly `true`. Enabling a repo needs an operator rul
 
 ## Commands
 
-| Command          | What it does                                                                  |
-| ---------------- | ----------------------------------------------------------------------------- |
-| `tips`           | Source: one JSONL record per allow-listed repo tip with no check verdict.     |
-| `workspace-tips` | Source (stub, exits 2).                                                       |
-| `verify`         | Role: an immutable-snapshot `nix flake check` of the tip, then a verdict.     |
-| `sync`           | Role: fetch, classify, fast-forward a behind clone, surface divergence, push. |
-| `build`          | Role (workspace-wide, no repo item): the kernel runs, then the stub exits 2.  |
-| `status`         | Prints the verdict store, the lease and the kill switch (`--json`, `--repo`). |
+| Command          | What it does                                                                   |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `tips`           | Source: one JSONL record per allow-listed repo tip with no check verdict.      |
+| `workspace-tips` | Source: the debounced workspace tip tuple, as `workspace@<hash>` (runner C).   |
+| `verify`         | Role: an immutable-snapshot `nix flake check` of the tip, then a verdict.      |
+| `sync`           | Role: fetch, classify, fast-forward a behind clone, surface divergence, push.  |
+| `build`          | Role (workspace-wide, item `workspace@<hash>`): `pn workspace build` in a set. |
+| `status`         | Prints the verdict store, the lease and the kill switch (`--json`, `--repo`).  |
 
 ## State, status and the kill switch
 
@@ -62,15 +62,15 @@ the config `kill_switch` file.
 `sync:` (repo, outcome, behind, ahead, behind-before-fetch, at); `--json` prints only the verdicts, as one
 array.
 
-**Reserved branch prefix.** `runner-build-` is reserved for the workspace builder (runner C, not implemented:
-`build` and `workspace-tips` exit 2). That runner will create its throwaway workforest set on a
-`runner-build-<utc timestamp>` branch and remove any leftover set with that prefix, so nobody MAY name a
-branch or a set that way. Nothing in this package creates or removes such a branch today.
+**Reserved branch prefix.** `runner-build-` is reserved for the workspace builder (runner C, below). That
+runner creates its throwaway workforest set on a `runner-build-<utc timestamp>` branch and removes any
+leftover set with that prefix, so nobody MAY name a branch or a set that way.
 
 ## The kernel (Template Method)
 
-A role runs these steps in order and stops at the first that fails. `build` skips steps 1 to 3
-(it names no repo).
+A role runs these steps in order and stops at the first that fails. `build` skips steps 2 and 3 (its
+item is `workspace@<hash>`, not a repo; the allow-list and path checks run over every repo of the set
+in its role body, before anything is created).
 
 1. **resolve.** `PG_ROUTER_ITEM_ID` (which pg-router always exports) is `<key>` or `<key>@<sha>`.
    `<key>` MUST be in the config allow-list (`repos.<key>`) AND be a repo key of
@@ -316,6 +316,98 @@ first real passes replace it (`behindBeforeFetch` next to the post-fetch `behind
 Total ahead on 2026-10-28: 2 + 0 + 2 + 9 + 0 + 33 + 0 = 46 (down from 308: the operator has been publishing).
 Behind after a real fetch is the post-deploy check (see the bead's verification).
 
+## Runner C: `workspace-tips` and `build`
+
+Bead `pg2-xg9ppr` (F8). One build of the WHOLE workspace at one tuple of primary tips, in a throwaway
+coordinated workforest set, never in a canonical working tree. It is the only runner that exercises the
+host's module system with the local siblings (what `pn workspace apply` does next).
+
+**Opt-in.** The set holds every repo of `pn-workspace.toml`, so every repo key MUST be on the allow-list
+with `repos.<key>.build = true` (default false, like every flag); otherwise the source emits nothing and the
+role refuses the whole run (exit 2) before it creates anything. All repos MUST share one primary branch
+(`workforest add` takes one start point). `thresholds.quiet_window` (default 900 s) is the Debounce.
+
+### `workspace-tips` (the source, a Debounce)
+
+Reads the primary tip of every repo (git objects only), hashes the sorted `repo=sha` lines (sha256), and
+prints one JSONL item, `{"id":"workspace@<hash>","type":"workspace-tips",...,"metadata":{"hash","branch","tips"}}`,
+only when (a) no `build` verdict is stored for that hash, so the tuple changed since the last build verdict,
+and (b) the tuple has been unchanged for the quiet window. The state is one file,
+`<state dir>/workspace-tips.json` (`{hash, since}`): the first sight of a tuple, and every change of it,
+restarts the window, so a burst of landings yields ONE event, for the final tuple (3 ticks of the 5 minute
+poll = 15 minutes with the defaults). Later ticks re-offer the same id until a verdict exists; the item
+expires after the retry window. It takes no lease and ignores the load and the kill switch.
+
+### `build` (the role)
+
+After the kernel steps (resolve of the item, idempotent receiver, kill switch, load, lease):
+
+1. The allow-list, path and tip checks over every repo (a refusal is exit 2, nothing created).
+2. **Leftovers first.** Any set directory or member-repo branch named `runner-build-*` whose encoded UTC
+   time is at or before this run's start (or that encodes none) is removed: the prefix `runner-build-` is
+   RESERVED for this runner, an operator-created set of that name would be removed too, and nothing
+   without the prefix is ever touched. A set from the future is left alone and logged.
+3. Latest wins: if the tuple is no longer the item's, a `superseded` verdict is stored and no pn runs.
+4. `PN_WORKSPACE_ROOT=<canonical root> pn workspace workforest add runner-build-<utc> refs/heads/<primary> --no-hooks`
+   (`--no-hooks`: no per-member `install-pre-commit-hooks`).
+5. The set's repos MUST hash to the item (a tip may have moved during creation); if not, the set is
+   removed and NO verdict is stored (the next tuple is offered again).
+6. In the set: `PN_WORKSPACE_ROOT=<set dir> nice -n <level> pn workspace build`. `pn` is NOT prefixed with
+   `pg-nix-log-wrapped` (it wraps its own nix call; a test proves the wrapper is never called).
+7. A `build` verdict keyed by the hash (`repo` is `workspace`, `inputs` is `override`, with `tips`, `set`,
+   `durationS`, `loadStart`, `loadEnd`): exit 0 is green, any other exit is red, and a red build exits 0.
+   Not verdicts: exit 75 (pn's single-flight lock is held) is busy (exit 9, the item is re-offered); a signal
+   exit, 69, 126, 127, a hook-trust refusal ("not trusted") and a workspace id collision (see below) are
+   malfunctions (exit 1, no verdict).
+8. The set is removed whatever happened (`pn workspace workforest remove <branch> --force`, a prune, and
+   `git branch -D <branch>` in each member repo, only for the reserved prefix). A run that dies with SIGKILL
+   leaves the set; step 2 of the next run removes it. After a full cycle the canonical clones are byte-identical:
+   the tests hash every file of `.git` and of the working tree, `git status --porcelain` and the refs.
+
+A red build is a `build-red` transition (F3): ONE P1 bead (`runner = pg-repo-runner`, `repo = workspace`,
+`kind = build-red`) and one notification; a newer red tuple only comments; a later green build comments and
+closes the runner's own bead. The bead carries `surface.repo_labels.workspace` when set, else the label of the
+workspace's terminal repo (the repo whose host closure the build realizes), else none (the bead stays
+pending, BF-1).
+
+The deployment MUST give the role a PATH that provides `pn`, `nix` and `darwin-rebuild`
+(`PG_REPO_RUNNER_PN_BIN` replaces `pn`), and the canonical workspace MUST have been trusted once with
+`pn workspace allow` (a set inherits the trust).
+
+### Known limit: pn's workspace id check
+
+`pn workspace build` runs the machine-local workspace id uniqueness check of its prelude
+(`checkWsidUnique`, nix-repo-base ADR 0012) against the root it runs in. A set carries a copy of the
+canonical `[workspace] id`, so once the canonical workspace has claimed the id (any apply or build from the
+canonical root does), a build in a set fails with `wsid "<id>" already used by workspace "<canonical root>"
+(must be unique per machine)`, exit 1. The runner reports that as a malfunction (exit 1, no verdict, the
+set removed) and never works around it (no edit of the set's `pn-workspace.toml`, no trust change, no
+private `XDG_DATA_HOME`, which would also hide nix's own trusted-settings). The tests prove it with the real
+pn (`real pn: a workspace id the canonical workspace already registered ...`). Runner C therefore needs
+`pn` to exempt a workforest set from that check before it can be enabled on a machine that has applied the
+workspace; no repo enables `build` in this repository.
+
+### Measurements (2026-10-28, a throwaway fixture only)
+
+Both were taken on a throwaway workspace (a bare-remote-backed `nix-alpha` flake and `nix-gamma`, a consumer
+that locks `alpha`; real pn `0.0.0-16add71a`, nix 2.34.9, `aarch64-darwin`), never on a real workspace.
+
+- **`nix flake check ... --override-input` does NOT rewrite `flake.lock`.** In the set's consumer repo,
+  `nix flake check --override-input alpha git+file://<set>/nix-alpha` and `pn workspace flake-check` both
+  left `git status --porcelain` empty and `git diff --stat` empty, while the locked `alpha` rev differed
+  from the overridden one. Control: the same flake edited to need a new lock entry, WITHOUT `--override-input`,
+  rewrote `flake.lock` (` M flake.lock`); WITH `--override-input` it left only the edit (` M flake.nix`).
+  `pn workspace build` (a `nix build` build command) printed an `Updated input 'alpha'` line (the override
+  differs from the lock), built `alpha-v2` (the overridden tip, not the locked `alpha-v1`) and left `flake.lock`
+  untouched: `git status --porcelain` showed only `?? result`. Inside a set none of this could reach a
+  canonical clone anyway.
+- **The `result` symlink lands in the set's terminal repo.** `pn workspace build` runs its build command with
+  its working directory set to the terminal repo directory of the root it runs in: in the canonical
+  workspace that is `<root>/nix-gamma` (a `result` symlink appeared there, untracked), in a set it is
+  `<set>/nix-gamma` (`?? result` in the set only; the canonical clone stayed clean). The fixture used
+  `nix build` as the build command; a real `darwin-rebuild build --flake` writes its `result` the same way
+  (out-link in the working directory) but that was not run (no darwin configuration in a throwaway).
+
 ## Configuration
 
 The home module renders `$XDG_CONFIG_HOME/pg-repo-runner/config.toml` (override with
@@ -329,10 +421,12 @@ kill_switch = "/path/to/state/pg-repo-runner/kill"
 max_load = 11.0 # omitted when unset: the core count
 nice_level = 10
 retry_window = 3600 # seconds a tip item stays offered
+quiet_window = 900 # seconds the workspace tip tuple must stay unchanged (runner C)
 
 [repos.nix-example]
 verify = false
 sync = false
+build = false # take part in the workspace build (runner C): EVERY workspace repo must opt in
 push = false
 dry_run = true # only read when push = true: log the range, push nothing
 consumes = [] # sibling repo keys whose unpublished commits can make this repo red
@@ -364,6 +458,9 @@ package.
 | `PG_REPO_RUNNER_NCPU`          | Replaces the core count used as the default threshold.         |
 | `PG_REPO_RUNNER_NIX_BIN`       | Replaces the nix binary (the bats suites use it to classify).  |
 | `PG_REPO_RUNNER_GIT_BIN`       | Replaces the git binary (the sync suite records git calls).    |
+| `PG_REPO_RUNNER_PN_BIN`        | Replaces the pn binary (default: `pn` on PATH).                |
+| `PG_REPO_RUNNER_EPOCH`         | Replaces the clock, in epoch seconds (the debounce tests).     |
+| `PG_REPO_RUNNER_QUIET_WINDOW`  | Replaces the quiet window, in seconds.                         |
 | `PG_REPO_RUNNER_BD_BIN`        | Replaces the bd binary (default: `bd` on PATH).                |
 | `PG_REPO_RUNNER_OSASCRIPT_BIN` | Replaces the macOS notifier (the surfacing suite records it).  |
 | `PG_REPO_RUNNER_RETRY_WINDOW`  | Replaces the tip item's retry window, in seconds.              |
@@ -432,7 +529,18 @@ measured duration and load of the real runner checks.
   off-branch clone, a diverged remote, a remote that moves after the check (git refuses, no force), dry run
   by default and its two ways out, the audit record, needs-relock surfacing, and that no argv ever carries a
   forbidden flag.
-- `checks.<system>.test-pg-repo-runner`: all six suites, built through `mkBashScript`.
+- `pg-repo-runner/tests/test-pg-repo-runner-workspace.bats`: runner C (F8). A miniature workspace of three
+  tiny repos (real git, bare local remotes, a real `pn-workspace.toml` and lock) and the REAL pn where one is on
+  PATH, else a stand-in doing the same set operations with real git (`RR_TEST_PN=fake` forces it); the build
+  command is a fixture script, so no nix runs. Proves: one event for a burst of tip changes, the quiet window,
+  the set created, built in at exactly the tuple's tips under `nice` and removed, a crash (SIGKILL of the runner
+  mid-build) leaving a leftover that the next run removes, only reserved-prefix sets older than the run going,
+  the canonical clones byte-identical before and after (green, red, crash and recovery), busy and malfunction
+  classification, and pn never being wrapped. Negative controls 2026-10-28: deleting the branch cleanup, and
+  removing the quiet-window wait, each fail it.
+- `pg-repo-runner/tests/test-pg-repo-runner-workspace-surface.bats`: a red build files one bead through F3
+  (real bd over a throwaway database), deduplicated, commented on a newer red, closed by a green build.
+- `checks.<system>.test-pg-repo-runner`: all eight suites, built through `mkBashScript`.
 - `checks.<system>.test-pg-repo-runner-hm-render`: evaluates the home module (push, verify and sync
   default to false for every repo, no case enables push, the assertions fire), builds the rendered
   `config.toml`, and runs the real package against it.

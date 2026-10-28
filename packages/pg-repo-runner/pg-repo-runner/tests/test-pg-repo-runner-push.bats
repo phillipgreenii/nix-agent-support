@@ -665,8 +665,12 @@ assert_argv_clean() {
   # git binary call of rr_push_exec
   [ "$(code "$SCRIPTS_DIR/pg-repo-runner.bash" | grep -c -F ' push origin ')" -eq 1 ]
   code "$SCRIPTS_DIR/pg-repo-runner.bash" | grep -B1 -F -- '-C "$1" push origin "$2:refs/heads/$3"' | head -n 1 | grep -qF '"${RR_GIT_BIN:-git}"'
+  # (the one --force the code carries is `pn workspace workforest remove <branch> --force`,
+  # which removes the runner's OWN throwaway runner-build- set: runner C, bead pg2-xg9ppr; it
+  # is exempted by its exact words below; the workspace suite proves a set without the reserved
+  # prefix is never touched)
   for f in "$SCRIPTS_DIR/pg-repo-runner.sh" "$SCRIPTS_DIR/pg-repo-runner.bash"; do
-    run bash -c "$(declare -f code); code \"\$1\" | grep -v ' fetch --quiet ' | grep -nE -- '--force|force-with-lease|--no-verify|--delete|--mirror|--tags|reset --hard|\"\\+refs|pn +workspace +(update|apply)'" _ "$f"
+    run bash -c "$(declare -f code); code \"\$1\" | grep -v -e ' fetch --quiet ' -e ' workforest remove ' | grep -nE -- '--force|force-with-lease|--no-verify|--delete|--mirror|--tags|reset --hard|\"\\+refs|pn +workspace +(update|apply)'" _ "$f"
     [ "$status" -eq 1 ] || {
       echo "$f: $output"
       return 1

@@ -2,9 +2,10 @@
 # pg-repo-runner - the facade of the pg-router-managed async runners (bead
 # pg2-zj2v7m, F1). This entry point owns argument parsing, the subcommand
 # dispatch and the kernel sequence; the steps themselves are the rr_* functions
-# in pg-repo-runner.bash. The role bodies of runners B, A and C land in later
-# beads: F1 provides the kernel and stubs that exit 2 "not implemented"; F2 (bead
-# pg2-j0itft) replaces the `tips` source and the `verify` role (runner B).
+# in pg-repo-runner.bash. The role bodies landed one bead at a time: F2 (bead
+# pg2-j0itft) is the `tips` source and the `verify` role (runner B), F5 and F6 the
+# `sync` role (runner A), F8 (bead pg2-xg9ppr) the `workspace-tips` source and the
+# `build` role (runner C).
 #
 # nix build already sources pg-repo-runner.bash ahead of this body
 # (mkBashScript's hasSupportBash injection); this guard only fires for a raw
@@ -28,6 +29,9 @@ export RR_NICE_BIN="${RR_NICE_BIN:-nice}"
 # average one: the bats suites use it to count and classify nix runs).
 export RR_NIX_BIN="${PG_REPO_RUNNER_NIX_BIN:-${RR_NIX_BIN:-}}"
 export RR_NIX_LOG_WRAPPED_BIN="${RR_NIX_LOG_WRAPPED_BIN:-}"
+# pn is an ambient runtime dependency (it is not in this flake); the workspace build
+# resolves it from the PATH of the run. PG_REPO_RUNNER_PN_BIN replaces it (a test seam).
+export RR_PN_BIN="${PG_REPO_RUNNER_PN_BIN:-${RR_PN_BIN:-pn}}"
 # bd and osascript are resolved from the ambient PATH (like every bd-calling script
 # here; the machine wrapper carries the tracker guards). The PG_REPO_RUNNER_* names
 # are the test seams for the failure-surfacing step: a real bd on a throwaway
@@ -47,15 +51,18 @@ Usage: pg-repo-runner COMMAND [OPTIONS]
 Commands:
   tips             Source: emit one JSONL item per allow-listed repo (verify on)
                    whose primary tip has no check verdict
-  workspace-tips   Source: emit the debounced workspace tip tuple (not
-                   implemented yet; exits 2)
+  workspace-tips   Source: emit the workspace tip tuple (workspace@<hash>) once
+                   it has been unchanged for the quiet window and has no build
+                   verdict
   verify           Role: check the repo tip named by PG_ROUTER_ITEM_ID
                    (<repo>@<sha>) with an immutable-snapshot nix flake check
   sync             Role: sync the repo named by PG_ROUTER_ITEM_ID (same): fetch,
                    classify, fast-forward a behind clone, surface divergence,
                    and for a repo with push = true (never by default) the gated,
                    dry-run-first push of the verified tip (never rebases or resets)
-  build            Role: build the whole workspace (same)
+  build            Role: build the whole workspace at the tip tuple named by
+                   PG_ROUTER_ITEM_ID (workspace@<hash>) in a throwaway workforest
+                   set, with pn workspace build
   status           Print the verdict store, the lease and the kill switch
 
 Options:
@@ -80,8 +87,7 @@ The roles run the kernel steps in this order, and stop at the first that fails:
   6. lease     One lease file in the state dir, shared by every role, taken
                without waiting. Held by a live process: exit 9. A dead owner (or
                a recycled pid) is reclaimed.
-  7. act       The role body (verify and sync are implemented; build is a stub
-               that exits 2 in this version).
+  7. act       The role body.
 
 verify, in its act step: <sha> MUST exist (else the run is skipped, exit 0); if
 the repo's primary branch no longer points at <sha> a "superseded" verdict is
@@ -126,6 +132,31 @@ records `pushed` and one audit line (repo, remote, old and new remote sha, verdi
 reference, time) in push-audit.jsonl, the run log and stderr; a refused push is
 `push-rejected`, never forced, never retried in the pass.
 
+workspace-tips and build (runner C; the allow-list needs repos.<key>.build = true for EVERY
+repo key of pn-workspace.toml, because the set holds them all): workspace-tips reads the
+primary tip of each repo, hashes the sorted "repo=sha" lines and prints one JSONL item
+`workspace@<sha256>` only when no build verdict exists for that hash AND the tuple has been
+unchanged for the quiet window (thresholds.quiet_window, default 900 s = 3 ticks of 5 minutes):
+the first sight of a tuple, or any tip change, restarts the window, so a burst of landings
+yields one event. build, in its act step, removes every leftover `runner-build-*` set or branch
+(a crashed run's; the prefix is reserved) first, then creates a set at the current tips
+
+  PN_WORKSPACE_ROOT=<workspace_root> pn workspace workforest add runner-build-<utc> \
+      refs/heads/<primary> --no-hooks
+
+checks that the set's tips hash to the item (else the set is removed and no verdict is stored),
+runs, in the set and under nice,
+
+  PN_WORKSPACE_ROOT=<set dir> nice -n <level> pn workspace build
+
+(pn is NOT prefixed with pg-nix-log-wrapped: it wraps its own nix call), stores a `build`
+verdict keyed by the hash (green on exit 0, red on any other exit; exit 75, pn's lock is
+held, is "busy" (9); 69, 126, 127, a signal exit, a hook-trust refusal and a wsid collision
+are malfunctions (1) with no verdict), and removes the set (`pn workspace workforest remove
+--force`, a prune, `git branch -D`) whatever the verdict. A red build is a `build-red`
+transition (one bead). The canonical clones' working trees and refs are never written, and
+nothing is pushed.
+
 Failure surfacing (config [surface] enabled = true; off otherwise): a TRANSITION,
 never a steady state, files ONE P1 bead (the repo's label from surface.repo_labels,
 metadata runner = pg-repo-runner) in the tracker surface.tracker_dir and posts ONE
@@ -140,7 +171,7 @@ another tracker, and it never reverts, resets, edits or pushes a repo.
 Exit codes:
   0  the run completed, whatever the verdict (a red check exits 0)
   9  busy: not now (kill switch, load, lease held); pg-router re-offers the item
-  2  usage error, refusal, or a role that is not implemented yet
+  2  usage error or a refusal
   1  malfunction (unreadable config, no load reading, state directory unusable)
 
 status [--json] [--repo KEY]:
@@ -184,7 +215,7 @@ decline() {
   exit "$RR_EXIT_BUSY"
 }
 
-# --- role bodies (build is a stub; F8 replaces it) --------------------------
+# --- role bodies ------------------------------------------------------------
 
 # early_verify: before the admission steps. A verdict that is already stored for
 # the item's sha means the work is done (Idempotent Receiver): the run ends with
@@ -361,10 +392,176 @@ rr_sync_not_diverged() {
   rr_surface_resolve "$1" diverged "$2" "No longer diverged: $3 (tip $2)." ||
     rr_log "surface: resolving the diverged transition failed for $1"
 }
+
+# early_build: a build verdict already stored for the item's tuple means the work is
+# done (Idempotent Receiver): exit 0, no pn, whatever the load or the lease.
+# shellcheck disable=SC2329  # invoked indirectly as "early_$role"
+early_build() {
+  if rr_verdict_exists workspace "$RR_ITEM_SHA" build; then
+    rr_log "exit=0 skipped: a build verdict for workspace@$RR_ITEM_SHA is already stored"
+    return 0
+  fi
+  return 1
+}
+
+# rr_ws_exit_cleanup: the EXIT trap of the build role: a run that ends (an error, a
+# signal) while its throwaway set exists removes it. A SIGKILL cannot run this; the
+# leftover removal of the next run covers that.
+# shellcheck disable=SC2329  # run from the EXIT trap string
+rr_ws_exit_cleanup() {
+  [[ -n ${RR_WS_SET:-} ]] || return 0
+  rr_ws_remove_set "$RR_WS_ROOT" "$RR_WS_SET" || rr_log "workspace: set $RR_WS_SET is still there; the next run removes it"
+  RR_WS_SET=""
+}
+
+# rr_ws_finish_set: removes this run's set now, on a path that ends the run.
+# shellcheck disable=SC2329  # called by act_build, which is itself invoked indirectly
+rr_ws_finish_set() {
+  [[ -n ${RR_WS_SET:-} ]] || return 0
+  if rr_ws_remove_set "$RR_WS_ROOT" "$RR_WS_SET"; then
+    rr_log "workspace: removed the set $RR_WS_SET"
+  else
+    rr_log "workspace: set $RR_WS_SET is still there; the next run removes it"
+  fi
+  RR_WS_SET=""
+}
+
+# act_build: runner C. See the help text for the sequence. The throwaway set is the
+# only tree anything runs in; the canonical clones are read (refs) and, for the set's
+# own branch, written and cleaned up, never their working trees.
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_build() {
-  rr_err "role 'build' is not implemented yet"
-  return 2
+  local root hash="$RR_ITEM_SHA" name setdir addlog log started finished t0 t1 load0 load1
+  local rc key head got="" extra tips_json now ok=1 text
+  root="$(rr_cfg '.workspace_root // empty')"
+  RR_WS_ROOT="$root"
+
+  # 1. resolve against the allow-list and read the current tips (read-only)
+  if ! rr_ws_collect "$root"; then
+    rr_err "workspace build refused: $RR_WS_WHY"
+    rr_log "refused: $RR_WS_WHY"
+    return 2
+  fi
+  mkdir -p "$RR_STATE_DIR/logs/workspace" || return 1
+
+  # 2. leftovers of a crashed run (we hold the lease, so no other run is alive)
+  rr_ws_remove_leftovers "$root" "$RR_RUN_EPOCH" ||
+    rr_log "workspace: a leftover could not be removed; carrying on"
+
+  # 3. latest wins: only the current tuple is built
+  if [[ $RR_WS_HASH != "$hash" ]]; then
+    now="$(rr_now)"
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    extra="$(rr_jq -nc --arg by "$RR_WS_HASH" '{supersededBy: $by}')" || return 1
+    rr_verdict_write workspace "$hash" build superseded override "$now" "$now" 0 "" "$extra" || return 1
+    rr_log "superseded: the tip tuple is now $RR_WS_HASH, not $hash; no pn run"
+    return 0
+  fi
+
+  # 4. the throwaway set, at the current tips
+  name="$(rr_ws_set_name "$RR_RUN_EPOCH")"
+  setdir="$root/.workforests/$name"
+  addlog="$RR_STATE_DIR/logs/workspace/$hash.add.log"
+  RR_WS_SET="$name"
+  rc=0
+  PN_WORKSPACE_ROOT="$root" rr_pn workspace workforest add "$name" "refs/heads/$RR_WS_BRANCH" --no-hooks >"$addlog" 2>&1 || rc=$?
+  if ((rc != 0)); then
+    rr_err "creating the set $name failed (pn exit $rc), output in $addlog"
+    rr_ws_finish_set
+    return 1
+  fi
+  rr_log "workspace: created the set $name"
+
+  # 5. the set holds exactly the tuple the item names (a tip may have moved between
+  # the read in step 1 and the creation)
+  while IFS='=' read -r key _; do
+    [[ -n $key ]] || continue
+    if ! head="$(rr_git -C "$setdir/$key" rev-parse --verify -q HEAD)"; then
+      rr_err "the set has no readable repo '$key' at $setdir/$key"
+      rr_ws_finish_set
+      return 1
+    fi
+    got+="$key=$head"$'\n'
+  done <<<"$RR_WS_TIPS"
+  got="$(printf '%s' "$got" | LC_ALL=C sort)"
+  if [[ "$(printf '%s\n' "$got" | sha256sum | cut -d' ' -f1)" != "$hash" ]]; then
+    rr_log "workspace: a tip moved while the set was created; no build, no verdict (the next tuple is offered again)"
+    rr_ws_finish_set
+    return 0
+  fi
+
+  # 6. the build, in the set, nothing wrapped around pn
+  log="$RR_STATE_DIR/logs/workspace/$hash.build.log"
+  started="$(rr_now)"
+  t0="$(rr_epoch)"
+  load0="$(rr_loadavg1)" || load0=""
+  rr_log "build start: pn workspace build in $setdir (load $load0)"
+  rc=0
+  (
+    cd "$setdir" || exit 1
+    PN_WORKSPACE_ROOT="$setdir" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
+      env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY \
+      "${RR_PN_BIN:-pn}" workspace build
+  ) >"$log" 2>&1 || rc=$?
+  t1="$(rr_epoch)"
+  finished="$(rr_now)"
+  load1="$(rr_loadavg1)" || load1=""
+  rr_log "build end: exit=$rc after $((t1 - t0))s (load $load1), output in $log"
+
+  # 7. classify: only a build that ran is a verdict
+  text="$(<"$log")"
+  if ((rc == 75)); then
+    rr_err "busy: pn holds its build/apply lock elsewhere (exit 75); the item is re-offered"
+    rr_ws_finish_set
+    return "$RR_EXIT_BUSY"
+  fi
+  if rr_signal_exit "$rc" || ((rc == 69 || rc == 126 || rc == 127)); then
+    rr_err "pn did not run to a result (exit $rc): a malfunction, no verdict is stored"
+    ok=0
+  elif ((rc != 0)) && [[ $text == *"not trusted"* ]]; then
+    rr_err "pn refused the set: its hooks are not trusted (run pn workspace allow on the workspace root): a malfunction, no verdict"
+    ok=0
+  elif ((rc != 0)) && [[ $text == *"must be unique per machine"* ]]; then
+    rr_err "pn refused the set: its workspace id is already registered to the canonical workspace (wsid check): a malfunction, no verdict"
+    ok=0
+  fi
+  if ((!ok)); then
+    rr_ws_finish_set
+    return 1
+  fi
+
+  # 8. the verdict, keyed by the tuple, then surfacing, then the set goes
+  tips_json="$(rr_ws_tips_json "$RR_WS_TIPS")" || {
+    rr_ws_finish_set
+    return 1
+  }
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  extra="$(rr_jq -nc --argjson d "$((t1 - t0))" --arg l0 "$load0" --arg l1 "$load1" \
+    --argjson tips "$tips_json" --arg set "$name" --arg branch "$RR_WS_BRANCH" \
+    '{durationS: $d, loadStart: ($l0 | tonumber? // null), loadEnd: ($l1 | tonumber? // null),
+      tips: $tips, set: $set, branch: $branch}')" || {
+    rr_ws_finish_set
+    return 1
+  }
+  if ((rc == 0)); then
+    rr_verdict_write workspace "$hash" build green override "$started" "$finished" "$rc" "$log" "$extra" || {
+      rr_ws_finish_set
+      return 1
+    }
+    rr_surface_resolve workspace build-red "$hash" \
+      "Green workspace build for workspace@$hash (pn workspace build, finished $finished, log $log)." ||
+      rr_log "surface: resolving the build-red transition failed for workspace@$hash"
+  else
+    rr_verdict_write workspace "$hash" build red override "$started" "$finished" "$rc" "$log" "$extra" || {
+      rr_ws_finish_set
+      return 1
+    }
+    rr_surface_raise workspace build-red "$hash" "red workspace build, exit $rc, tips: $(tr '\n' ' ' <<<"$RR_WS_TIPS"), log $log" ||
+      rr_log "surface: raising the build-red transition failed for workspace@$hash"
+  fi
+  rr_surface_flush_repo workspace || true
+  rr_ws_finish_set
+  return 0
 }
 
 # --- the kernel sequence ----------------------------------------------------
@@ -378,6 +575,8 @@ run_role() {
   rr_load_config || die "cannot load the config" 1
   root="$(rr_cfg '.workspace_root // empty')"
   [[ -n $root && -d $root ]] || die "config workspace_root is missing or not a directory" 1
+  # the start of THIS run: a runner-build- set older than it is a crashed run's leftover
+  RR_RUN_EPOCH="$(rr_epoch)"
 
   if [[ $scope == repo ]]; then
     # 1. resolve
@@ -407,6 +606,18 @@ run_role() {
     if declare -F "early_$role" >/dev/null && "early_$role"; then
       exit 0
     fi
+  else
+    # workspace scope (build): the item is `workspace@<sha256 of the tip tuple>`. The
+    # allow-list and path checks run in the role body, over every repo of the set,
+    # before anything is created.
+    item="${PG_ROUTER_ITEM_ID:-}"
+    [[ -n $item ]] || die "PG_ROUTER_ITEM_ID is not set (build needs workspace@<hash>)" 2
+    if ! rr_parse_item_id "$item" || [[ $RR_ITEM_REPO != workspace || ! $RR_ITEM_SHA =~ ^[0-9a-f]{64}$ ]]; then
+      die "build needs an item id workspace@<64 hex digits>, got: $item" 2
+    fi
+    if declare -F "early_$role" >/dev/null && "early_$role"; then
+      exit 0
+    fi
   fi
 
   # 4. kill switch
@@ -425,7 +636,14 @@ run_role() {
   1) decline "the lease is held by another run" ;;
   *) die "cannot use the state directory $RR_STATE_DIR" 1 ;;
   esac
-  trap 'rr_lease_release' EXIT
+  if [[ $scope == workspace ]]; then
+    # a signal ends the run through the EXIT trap, which removes the throwaway set
+    trap 'rr_ws_exit_cleanup; rr_lease_release' EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
+  else
+    trap 'rr_lease_release' EXIT
+  fi
 
   # 7. act
   rr_log "admitted"
@@ -493,6 +711,74 @@ run_tips() {
       die "cannot emit the item for '$key'" 1
   done <<<"$keys"
   rr_log "tips: done"
+  exit 0
+}
+
+# --- workspace-tips (the source of runner C) -------------------------------
+
+# run_workspace_tips: the Debounce in front of the workspace build. Reads the tip tuple
+# (rr_ws_collect), and prints ONE JSONL item `workspace@<hash>` on stdout, nothing else,
+# only when (a) no build verdict is stored for that hash and (b) the tuple has been
+# unchanged for the quiet window. The state is one file, $STATE/workspace-tips.json
+# ({hash, since}): the first sight of a tuple, and every change of it, restarts the
+# window and emits nothing, so a burst of landings yields one event for the final
+# tuple. It re-emits the same id on every later tick until a verdict exists (the id is
+# the de-duplication key; the item expires after the retry window). A tuple that is
+# not a valid build input (a repo not opted in, no tip) emits nothing and says why in
+# the run log. Not subject to the kill switch, the load check or the lease: it reads
+# refs and writes only its own state file.
+run_workspace_tips() {
+  local root now_e at expires hash prev since quiet tmp tips_json state
+  [[ $# -eq 0 ]] || die "workspace-tips takes no arguments" 2
+  # shellcheck disable=SC2034  # read by rr_log in pg-repo-runner.bash
+  RR_ROLE=workspace-tips
+  rr_init_state || die "cannot create the state directory" 1
+  rr_load_config || die "cannot load the config" 1
+  root="$(rr_cfg '.workspace_root // empty')"
+  [[ -n $root && -d $root ]] || die "config workspace_root is missing or not a directory" 1
+  if ! rr_ws_collect "$root"; then
+    rr_log "workspace-tips: not emitting: $RR_WS_WHY"
+    exit 0
+  fi
+  hash="$RR_WS_HASH"
+  if rr_verdict_exists workspace "$hash" build; then
+    rr_log "workspace-tips: a build verdict for workspace@$hash is already stored"
+    exit 0
+  fi
+  now_e="$(rr_epoch)"
+  state="$RR_STATE_DIR/workspace-tips.json"
+  prev=""
+  since=0
+  if [[ -f $state ]]; then
+    prev="$(rr_jq -r '.hash // ""' "$state" 2>/dev/null)" || prev=""
+    since="$(rr_jq -r '.since // 0' "$state" 2>/dev/null)" || since=0
+  fi
+  [[ $since =~ ^[0-9]+$ ]] || since=0
+  if [[ $prev != "$hash" ]]; then
+    tmp="$(mktemp "$RR_STATE_DIR/.workspace-tips.XXXXXX")" || die "cannot write the debounce state" 1
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    if ! rr_jq -nc --arg h "$hash" --argjson s "$now_e" '{hash: $h, since: $s}' >"$tmp" || ! mv -f "$tmp" "$state"; then
+      rm -f "$tmp"
+      die "cannot write the debounce state" 1
+    fi
+    rr_log "workspace-tips: the tip tuple is now workspace@$hash; the quiet window starts"
+    exit 0
+  fi
+  quiet="$(rr_quiet_window)"
+  if ((now_e - since < quiet)); then
+    rr_log "workspace-tips: workspace@$hash has been quiet for $((now_e - since))s of $quiet; waiting"
+    exit 0
+  fi
+  at="$(rr_iso_at "$now_e")"
+  expires="$(rr_iso_at "$((now_e + $(rr_retry_window)))")"
+  tips_json="$(rr_ws_tips_json "$RR_WS_TIPS")" || die "cannot render the tips" 1
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rr_jq -nc --arg hash "$hash" --arg branch "$RR_WS_BRANCH" --argjson tips "$tips_json" \
+    --arg at "$at" --arg exp "$expires" \
+    '{id: ("workspace@" + $hash), type: "workspace-tips", title: "workspace tips",
+      metadata: {hash: $hash, branch: $branch, tips: $tips}, at: $at, expiresAt: $exp}' ||
+    die "cannot emit the workspace item" 1
+  rr_log "workspace-tips: emitted workspace@$hash"
   exit 0
 }
 
@@ -593,10 +879,7 @@ done
 
 case "$cmd" in
 tips) run_tips "$@" ;;
-workspace-tips)
-  rr_err "command '$cmd' is not implemented yet"
-  exit 2
-  ;;
+workspace-tips) run_workspace_tips "$@" ;;
 verify | sync)
   [[ $# -eq 0 ]] || die "$cmd takes no arguments" 2
   run_role "$cmd" repo

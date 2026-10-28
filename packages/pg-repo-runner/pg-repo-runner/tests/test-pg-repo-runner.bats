@@ -71,6 +71,7 @@ EOF
   export PG_REPO_RUNNER_LOADAVG=0.50
   STATE="$XDG_STATE_HOME/pg-repo-runner"
   SLEEPER=""
+  BUILD_HASH="$(printf 'a%.0s' {1..64})"
 }
 
 teardown() {
@@ -140,15 +141,11 @@ role() {
 }
 
 # The kernel admitted the run: it reached the role body. The sync role runs for
-# real (a clean, in-sync clone: exit 0); build is still a stub (exit 2).
+# real (a clean, in-sync clone: exit 0).
 assert_admitted() {
   grep -q ' admitted$' "$STATE/run.log"
-  if [[ $output == *"is not implemented yet"* ]]; then
-    [ "$status" -eq 2 ]
-  else
-    [ "$status" -eq 0 ]
-    grep -q ' sync: nix-alpha in sync$' "$STATE/run.log"
-  fi
+  [ "$status" -eq 0 ]
+  grep -q ' sync: nix-alpha in sync$' "$STATE/run.log"
 }
 
 # The kernel stopped before the role body.
@@ -197,10 +194,11 @@ write_verdict() { # REPO SHA KIND RESULT
   [ "$status" -eq 2 ]
 }
 
-@test "workspace-tips is a stub that exits 2, not implemented" {
+@test "workspace-tips is a real source: with no repo opted in to build it emits nothing and exits 0" {
   run "${RUNNER[@]}" workspace-tips
-  [ "$status" -eq 2 ]
-  [[ $output == *"not implemented"* ]]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  grep -q "workspace-tips: not emitting: " "$STATE/run.log"
 }
 
 # ---- resolve: the allow-list ----------------------------------------------
@@ -363,7 +361,7 @@ write_verdict() { # REPO SHA KIND RESULT
   # every role shares the one lease
   role sync
   [ "$status" -eq 9 ]
-  role build ""
+  role build "workspace@$BUILD_HASH"
   [ "$status" -eq 9 ]
 }
 
@@ -396,16 +394,22 @@ write_verdict() { # REPO SHA KIND RESULT
   assert_admitted
 }
 
-# ---- the role stubs and the run log ---------------------------------------
+# ---- the role bodies and the run log --------------------------------------
 
-@test "sync runs for real and build reaches its stub once admitted" {
+@test "sync runs for real and build reaches its role body once admitted" {
   role sync
   assert_admitted
   [ "$status" -eq 0 ]
-  # build is workspace-wide: no repo item is needed
+  # build is workspace-wide: its item is workspace@<hash>, not a repo. This fixture
+  # opts no repo in to build, so the role body refuses (exit 2) before it creates anything.
+  role build "workspace@$BUILD_HASH"
+  [ "$status" -eq 2 ]
+  grep -q ' admitted$' "$STATE/run.log"
+  [[ $output == *"workspace build refused: "* ]]
+  # and it needs that item: a bare run is a usage error, before the kernel admits it
   role build ""
   [ "$status" -eq 2 ]
-  [[ $output == *"role 'build' is not implemented yet"* ]]
+  [[ $output == *"PG_ROUTER_ITEM_ID is not set"* ]]
 }
 
 @test "every run is explained in the run log under the state directory" {

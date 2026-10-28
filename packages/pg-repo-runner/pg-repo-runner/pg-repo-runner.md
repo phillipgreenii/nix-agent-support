@@ -26,3 +26,11 @@
 - Sync one repo once (fetch, fast-forward a behind clone, record an ahead one, surface a diverged one; pushes only a repo whose config has push = true, dry run first; never rebases or forces):
 
 `PG_ROUTER_ITEM_ID={{repo-key}} pg-repo-runner sync`
+
+- Print the debounced workspace tip tuple as JSONL (one `workspace@<hash>` item once the tuple has been quiet for the quiet window and has no build verdict):
+
+`pg-repo-runner workspace-tips`
+
+- Build the whole workspace at one tip tuple by hand (a throwaway `runner-build-*` workforest set and `pn workspace build`, then a verdict; a red build still exits `0`):
+
+`PG_ROUTER_ITEM_ID=workspace@{{hash}} pg-repo-runner build`

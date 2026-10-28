@@ -416,8 +416,15 @@ rr_nix_run() {
 
 # --- tips and verify helpers (runner B) -----------------------------------
 
-# rr_epoch: seconds since the epoch.
-rr_epoch() { date -u +%s; }
+# rr_epoch: seconds since the epoch. PG_REPO_RUNNER_EPOCH replaces the clock (the
+# documented seam the debounce tests use to walk through ticks).
+rr_epoch() {
+  if [[ ${PG_REPO_RUNNER_EPOCH:-} =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$PG_REPO_RUNNER_EPOCH"
+  else
+    date -u +%s
+  fi
+}
 
 # rr_iso_at EPOCH: an RFC 3339 UTC time.
 rr_iso_at() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
@@ -567,8 +574,20 @@ rr_bd_norm() {
 
 # rr_surface_label REPO: the repo label from surface.repo_labels, empty when none.
 rr_surface_label() {
+  local label root term
   # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
-  rr_jq -r --arg k "$1" '.surface.repo_labels[$k] // empty' <<<"$RR_CONFIG_JSON"
+  label="$(rr_jq -r --arg k "$1" '.surface.repo_labels[$k] // empty' <<<"$RR_CONFIG_JSON")"
+  if [[ -z $label && $1 == workspace ]]; then
+    # the workspace build has no repo of its own: it is filed under the label of the
+    # workspace's terminal repo (the repo whose host closure the build realizes),
+    # unless surface.repo_labels names a `workspace` label explicitly
+    root="$(rr_cfg '.workspace_root // empty')"
+    if term="$(rr_tq "$root/pn-workspace.toml" 2>/dev/null | rr_jq -r '.workspace.terminal // empty')" && [[ -n $term ]]; then
+      # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+      label="$(rr_jq -r --arg k "$term" '.surface.repo_labels[$k] // empty' <<<"$RR_CONFIG_JSON")"
+    fi
+  fi
+  printf '%s' "$label"
 }
 
 # rr_surface_title REPO KIND SHA: the bead title.
@@ -754,7 +773,7 @@ rr_surface_raise() {
     rr_log "surface: $repo $kind: transition at $sha"
   else
     last="$(rr_jq -r '.lastSha // ""' <<<"$rec")"
-    if [[ $kind == red && $sha != "$last" ]]; then
+    if [[ ($kind == red || $kind == build-red) && $sha != "$last" ]]; then
       # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
       rec="$(rr_jq -c --arg sha "$sha" --arg now "$now" '.lastSha = $sha | .updatedAt = $now' <<<"$rec")"
       rr_surface_store "$repo" "$kind" "$rec" || return 1
@@ -1085,4 +1104,195 @@ rr_push_step() {
     rr_log "sync: $repo: writing the push audit record failed"
   rr_surface_resolve "$repo" needs-relock "$tip" "Pushed $tip to origin $branch: no longer blocked." ||
     rr_log "surface: resolving the needs-relock transition failed for $repo"
+}
+
+# --- workspace build (runner C: F8) ----------------------------------------
+#
+# One build of the WHOLE workspace at one tuple of primary tips, in a throwaway
+# coordinated workforest set (`pn workspace workforest add ... --no-hooks`), never in
+# a canonical working tree. The tuple is every repo key of the canonical
+# pn-workspace.toml: the set holds all of them, so every one MUST be on the allow-list
+# with `build = true` (else the run is refused and nothing is created). The tuple's
+# identity is `workspace@<sha256 of the sorted "repo=sha" lines>`.
+#
+# The prefix `runner-build-` of a set's branch is RESERVED for this runner: any set or
+# branch carrying it that is older than the current lease owner's start is a leftover
+# of a crashed run and is removed first. Nothing else is ever removed.
+
+RR_WS_PREFIX="runner-build-"
+
+# rr_pn ARGS...: pn with the repository-location variables unset (a hook or worktree
+# environment would otherwise steer the git calls pn makes). PG_REPO_RUNNER_PN_BIN
+# replaces the binary (a test seam); pn is an ambient runtime dependency, like bd.
+rr_pn() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+    -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_PN_BIN:-pn}" "$@"
+}
+
+# rr_quiet_window: how long the tip tuple must stay unchanged before it is offered, in
+# seconds (PG_REPO_RUNNER_QUIET_WINDOW, else thresholds.quiet_window, else 900: 3 ticks
+# of 5 minutes). 0 is allowed.
+rr_quiet_window() {
+  local v="${PG_REPO_RUNNER_QUIET_WINDOW:-}"
+  [[ -n $v ]] || v="$(rr_cfg '.thresholds.quiet_window // empty')"
+  [[ $v =~ ^[0-9]+$ ]] || v=900
+  printf '%s' "$v"
+}
+
+# rr_ws_collect ROOT: reads the workspace tip tuple. Sets RR_WS_TIPS (sorted
+# "repo=sha" lines), RR_WS_BRANCH (the one primary branch every repo shares),
+# RR_WS_PATHS (the canonical path of every repo) and RR_WS_HASH. Returns 1 with the
+# reason in RR_WS_WHY when the tuple cannot be a build input: a repo that is not on the
+# allow-list with build = true, one that fails the path check, one with no primary tip,
+# or primary branches that differ (workforest add takes ONE start point for all repos).
+# It reads refs only. Call it without a subshell.
+# shellcheck disable=SC2034  # the RR_WS_* results are read by the source and the role
+rr_ws_collect() {
+  local root="$1" key branch tip keys="" b0=""
+  RR_WS_TIPS="" RR_WS_BRANCH="" RR_WS_WHY="" RR_WS_HASH=""
+  RR_WS_PATHS=()
+  local -a lines=()
+  if [[ ! -r $root/pn-workspace.toml ]] || ! keys="$(rr_tq "$root/pn-workspace.toml" 2>/dev/null | rr_jq -r '(.repos // {}) | keys[]')"; then
+    RR_WS_WHY="cannot read $root/pn-workspace.toml"
+    return 1
+  fi
+  if [[ -z $keys ]]; then
+    RR_WS_WHY="$root/pn-workspace.toml names no repo"
+    return 1
+  fi
+  while IFS= read -r key; do
+    if ! rr_valid_key "$key"; then
+      RR_WS_WHY="'$key' is not a plain repo key"
+      return 1
+    fi
+    if ! rr_repo_listed "$key"; then
+      RR_WS_WHY="repo '$key' is not in the allow-list"
+      return 1
+    fi
+    if ! rr_repo_flag "$key" build; then
+      RR_WS_WHY="build is not enabled for repo '$key' (the set holds every workspace repo, so every one must opt in)"
+      return 1
+    fi
+    if ! rr_path_check "$root" "$key"; then
+      RR_WS_WHY="$root/$key is not the top level of a git repository at that exact real path"
+      return 1
+    fi
+    branch="$(rr_repo_branch "$root" "$key")" || {
+      RR_WS_WHY="cannot read the primary branch of '$key'"
+      return 1
+    }
+    if [[ -z $b0 ]]; then
+      b0="$branch"
+    elif [[ $branch != "$b0" ]]; then
+      RR_WS_WHY="primary branches differ ('$key' has $branch, others $b0): one set start point cannot serve them"
+      return 1
+    fi
+    if [[ $b0 == -* ]] || ! rr_git check-ref-format "refs/heads/$b0"; then
+      RR_WS_WHY="the primary branch name is not usable: $b0"
+      return 1
+    fi
+    tip="$(rr_tip_of "$RR_REPO_PATH" "$branch")" || {
+      RR_WS_WHY="refs/heads/$branch of '$key' does not exist"
+      return 1
+    }
+    lines+=("$key=$tip")
+    RR_WS_PATHS+=("$RR_REPO_PATH")
+  done <<<"$keys"
+  RR_WS_TIPS="$(printf '%s\n' "${lines[@]}" | LC_ALL=C sort)"
+  RR_WS_BRANCH="$b0"
+  RR_WS_HASH="$(printf '%s\n' "$RR_WS_TIPS" | sha256sum | cut -d' ' -f1)"
+}
+
+# rr_ws_tips_json TIPS: the "repo=sha" lines as one JSON object {repo: sha}.
+rr_ws_tips_json() {
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  printf '%s\n' "$1" | rr_jq -Rn '[inputs | select(length > 0) | split("=") | {(.[0]): .[1]}] | add // {}'
+}
+
+# rr_ws_set_name EPOCH: the throwaway set's branch name for a run that started at EPOCH.
+rr_ws_set_name() {
+  printf '%s%s' "$RR_WS_PREFIX" "$(date -u -d "@$1" +%Y%m%dT%H%M%SZ)"
+}
+
+# rr_ws_name_epoch NAME: the epoch a set name encodes; fails for any other shape.
+rr_ws_name_epoch() {
+  local n="${1#"$RR_WS_PREFIX"}"
+  [[ $n =~ ^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z$ ]] || return 1
+  date -u -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}T${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}Z" +%s 2>/dev/null
+}
+
+# rr_ws_set_name_ok NAME: a reserved-prefix name made of safe characters only.
+rr_ws_set_name_ok() {
+  [[ $1 =~ ^runner-build-[A-Za-z0-9._-]+$ && $1 != *..* ]]
+}
+
+# rr_ws_leftovers ROOT: the names of every set directory and every member-repo branch
+# that carries the reserved prefix (RR_WS_PATHS is set by rr_ws_collect), one per line,
+# without duplicates.
+rr_ws_leftovers() {
+  local root="$1" f p
+  {
+    if [[ -d $root/.workforests ]]; then
+      while IFS= read -r -d '' f; do
+        basename "$f"
+      done < <(find "$root/.workforests" -mindepth 1 -maxdepth 1 -name "${RR_WS_PREFIX}*" -print0)
+    fi
+    for p in "${RR_WS_PATHS[@]}"; do
+      rr_git -C "$p" for-each-ref --format='%(refname:short)' "refs/heads/${RR_WS_PREFIX}*" 2>/dev/null
+    done
+  } | LC_ALL=C sort -u
+}
+
+# rr_ws_remove_set ROOT NAME: removes the runner's own throwaway set NAME and its
+# branches: `pn workspace workforest remove NAME --force`, a prune of the stale
+# worktree entries (a set directory that vanished leaves them behind, and a branch with
+# a worktree entry cannot be deleted), then `git branch -D NAME` in every member repo.
+# Only a reserved-prefix name is ever touched. Returns 1 when something is left.
+rr_ws_remove_set() {
+  local root="$1" name="$2" setdir p rc=0 log
+  rr_ws_set_name_ok "$name" || {
+    rr_err "refusing to remove '$name': not a reserved runner-build- set name"
+    return 2
+  }
+  mkdir -p "$RR_STATE_DIR/logs/workspace" || return 1
+  log="$RR_STATE_DIR/logs/workspace/set-cleanup.log"
+  setdir="$root/.workforests/$name"
+  if [[ -e $setdir ]]; then
+    PN_WORKSPACE_ROOT="$root" rr_pn workspace workforest remove "$name" --force >>"$log" 2>&1 ||
+      rr_log "workspace: removing the set $name failed (see $log)"
+  fi
+  PN_WORKSPACE_ROOT="$root" rr_pn workspace workforest prune >>"$log" 2>&1 || true
+  for p in "${RR_WS_PATHS[@]}"; do
+    if rr_git -C "$p" show-ref --verify -q "refs/heads/$name"; then
+      rr_git -C "$p" branch -D "$name" >>"$log" 2>&1 || {
+        rr_log "workspace: deleting branch $name in $p failed (see $log)"
+        rc=1
+      }
+    fi
+  done
+  [[ ! -e $setdir ]] || rc=1
+  return "$rc"
+}
+
+# rr_ws_remove_leftovers ROOT START_EPOCH: removes every leftover set older than the
+# run that holds the lease (a set name that encodes a time at or before START_EPOCH, or
+# no readable time at all: the prefix is reserved). A set that claims to be newer than
+# this run is left alone and logged: it cannot be a crashed predecessor. Returns 1 when
+# a leftover could not be removed.
+rr_ws_remove_leftovers() {
+  local root="$1" start="$2" name e rc=0
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    rr_ws_set_name_ok "$name" || {
+      rr_log "workspace: leftover '$name' has an unsafe name; left alone"
+      continue
+    }
+    if e="$(rr_ws_name_epoch "$name")" && ((e > start)); then
+      rr_log "workspace: $name is newer than this run (start $start); left alone"
+      continue
+    fi
+    rr_log "workspace: removing leftover set $name"
+    rr_ws_remove_set "$root" "$name" || rc=1
+  done < <(rr_ws_leftovers "$root")
+  return "$rc"
 }

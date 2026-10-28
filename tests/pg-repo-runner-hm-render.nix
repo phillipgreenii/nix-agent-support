@@ -83,12 +83,14 @@ let
       maxLoad = 8;
       niceLevel = 15;
       retryWindow = 900;
+      quietWindow = 300;
     };
     killSwitchPath = "/example/kill";
     repos = {
       nix-alpha = {
         verify = true;
         sync = true;
+        build = true;
       };
       nix-beta.verify = true;
       nix-gamma = { };
@@ -159,6 +161,7 @@ let
     "push default declared false" = declared.push.default == false;
     "verify default declared false" = declared.verify.default == false;
     "sync default declared false" = declared.sync.default == false;
+    "build default declared false" = declared.build.default == false;
     "dryRun default declared true" = declared.dryRun.default == true;
     "consumes default declared empty" = declared.consumes.default == [ ];
     "defaults only: every repo dry-run on" = lib.all (r: r.dryRun) (
@@ -169,6 +172,15 @@ let
     "defaults only: every repo verify and sync false" = lib.all (r: !r.verify && !r.sync) (
       lib.attrValues (opts defaultsOnly).repos
     );
+    "defaults only: no repo takes part in the workspace build" = lib.all (r: !r.build) (
+      lib.attrValues (opts defaultsOnly).repos
+    );
+    "defaults only: the quiet window is 3 ticks of 5 minutes" =
+      (opts defaultsOnly).thresholds.quietWindow == 900;
+    "flagged: build and the quiet window as set" =
+      (opts flagged).repos.nix-alpha.build
+      && !(opts flagged).repos.nix-beta.build
+      && (opts flagged).thresholds.quietWindow == 300;
     "flagged: push still false everywhere" = noPush flagged;
     "flagged: verify and sync as set" =
       (opts flagged).repos.nix-alpha.verify

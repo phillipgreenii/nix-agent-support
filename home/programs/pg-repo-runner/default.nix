@@ -44,6 +44,17 @@ let
           clone, surface divergence) for this repo.
         '';
       };
+      build = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Let this repo take part in the workspace build (runner C: the
+          `workspace-tips` source and the `build` role). The build runs in a
+          throwaway coordinated workforest set that holds EVERY repo of the
+          workspace's `pn-workspace.toml`, so the role refuses the whole run
+          unless every one of them is on the allow-list with `build = true`.
+        '';
+      };
       push = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -90,12 +101,14 @@ let
     thresholds = {
       nice_level = cfg.thresholds.niceLevel;
       retry_window = cfg.thresholds.retryWindow;
+      quiet_window = cfg.thresholds.quietWindow;
     }
     // lib.optionalAttrs (cfg.thresholds.maxLoad != null) { max_load = cfg.thresholds.maxLoad; };
     repos = lib.mapAttrs (_: r: {
       inherit (r)
         verify
         sync
+        build
         push
         consumes
         ;
@@ -180,6 +193,16 @@ in
           `thresholds.retry_window`.
         '';
       };
+      quietWindow = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 900;
+        description = ''
+          Seconds the workspace's tip tuple must stay unchanged before the
+          `workspace-tips` source offers it for a build (the Debounce of runner
+          C): 3 ticks of a 5 minute poll by default, so a burst of landings
+          yields one build. Renders as `thresholds.quiet_window`.
+        '';
+      };
     };
 
     killSwitchPath = lib.mkOption {
@@ -227,6 +250,8 @@ in
           The beads label of each allow-listed repo (the workspace's repo label
           lookup table). Machine- and workspace-specific, so it has no default.
           A repo with no entry is never filed label-less: its bead stays pending.
+          A red workspace build is filed under an optional `workspace` entry, else
+          under the label of the workspace's terminal repo.
           Every key of `repos` MUST have an entry (asserted). Renders as
           `surface.repo_labels`.
         '';

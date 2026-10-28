@@ -15662,7 +15662,7 @@
               # pg-repo-runner HM module (bead pg2-zj2v7m, F1): the module renders
               # ${XDG_CONFIG_HOME:-~/.config}/pg-repo-runner/config.toml from the
               # allow-list. The eval cases live in tests/pg-repo-runner-hm-render.nix
-              # (push, verify and sync DEFAULT to false for every repo, no case enables
+              # (push, verify, sync and build DEFAULT to false for every repo, no case enables
               # push, the assertions fire for a missing root and a path-shaped key);
               # this check then builds the rendered config.toml, reads it back with
               # yq (push false for every repo, the documented keys present) and runs
@@ -15707,7 +15707,10 @@
                       tj "$f" '.kill_switch' >/dev/null
                     done
                     # defaults only: every flag false, no max_load
-                    [ "$(tj ${r.live.configDefaults} '[.repos[] | (.verify, .sync, .push)] | map(select(. == true)) | length')" = 0 ]
+                    [ "$(tj ${r.live.configDefaults} '[.repos[] | (.verify, .sync, .build, .push)] | map(select(. == true)) | length')" = 0 ]
+                    [ "$(tj ${r.live.configDefaults} '.thresholds.quiet_window')" = 900 ]
+                    [ "$(tj ${r.live.configFlagged} '.thresholds.quiet_window')" = 300 ]
+                    [ "$(tj ${r.live.configFlagged} '.repos["nix-alpha"].build')" = true ]
                     [ "$(tj ${r.live.configDefaults} '.thresholds | has("max_load")')" = false ]
                     # flagged: the tunables arrive as set
                     [ "$(tj ${r.live.configFlagged} '.thresholds.max_load')" = 8 ]
@@ -15748,11 +15751,24 @@
                     grep -q ' admitted$' "$XDG_STATE_HOME/pg-repo-runner/run.log"
                     grep -q ' sync: nix-alpha ' "$XDG_STATE_HOME/pg-repo-runner/run.log"
                     [ -f "$XDG_STATE_HOME/pg-repo-runner/sync/nix-alpha.json" ]
-                    # build is still a stub: admitted by the kernel, then exit 2
+                    # build (F8) needs its item workspace@<hash>: a bare run is a usage error
                     rc=0
                     pg-repo-runner build >out.txt 2>&1 || rc=$?
                     [ "$rc" = 2 ]
-                    grep -q "not implemented yet" out.txt
+                    grep -q "PG_ROUTER_ITEM_ID is not set" out.txt
+                    # with an item it is admitted, then refuses: this throwaway workspace cannot be
+                    # read as a tip tuple (repos not opted in to build, no commits), so nothing is created
+                    rc=0
+                    PG_ROUTER_ITEM_ID=workspace@$(printf 'b%.0s' $(seq 1 64)) pg-repo-runner build >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 2 ]
+                    grep -q "workspace build refused: " out.txt
+                    # the workspace-tips source reads the same module-rendered allow-list and,
+                    # for the same reason, emits nothing and exits 0
+                    rc=0
+                    pg-repo-runner workspace-tips >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 0 ]
+                    [ ! -s out.txt ]
+                    grep -q "workspace-tips: not emitting: " "$XDG_STATE_HOME/pg-repo-runner/run.log"
                     # verify is on for nix-beta, sync is not: skipped with exit 0
                     PG_ROUTER_ITEM_ID=nix-beta pg-repo-runner sync >out.txt 2>&1
                     # nix-gamma has every flag off: skipped with exit 0
