@@ -5,6 +5,8 @@
 # the function level in tests/test-pg-disk-reclaimer-lib.bats, so this
 # file keeps only a CLI-level dispatch smoke test for each.
 
+load 'hermetic'
+
 setup() {
   # SCRIPTS_DIR: injected by nix check (raw src dir), or computed relative to
   # this test file for a local `bats tests/` run.
@@ -12,6 +14,18 @@ setup() {
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
   SCRIPT="$SCRIPTS_DIR/pg-disk-reclaimer.sh"
+
+  # These tests run the real CLI (list/validate/reclaim), which reads a registry
+  # from the environment and runs the commands it names. Isolate (tests/hermetic.bash)
+  # so they can never reach the operator's registry, and fail here if that did not hold.
+  TEST_DIR="$(mktemp -d)"
+  export TEST_DIR
+  pgdr_test_isolate "$TEST_DIR"
+  pgdr_test_assert_hermetic "$TEST_DIR"
+}
+
+teardown() {
+  rm -rf "$TEST_DIR"
 }
 
 run_pg_disk_reclaimer() {

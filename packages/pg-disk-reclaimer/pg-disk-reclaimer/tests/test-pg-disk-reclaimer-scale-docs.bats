@@ -5,6 +5,7 @@
 # tests keep it, the code constant (PGDR_CONFIRM_GATE_LEVEL), the live gate
 # behavior, --help, and the tldr page from drifting apart.
 bats_require_minimum_version 1.5.0
+load 'hermetic'
 
 setup() {
   # SCRIPTS_DIR: injected by nix check (raw src dir), or computed relative to
@@ -18,9 +19,8 @@ setup() {
 
   TEST_DIR="$(mktemp -d)"
   export TEST_DIR
-  export HOME="$TEST_DIR/home"
-  mkdir -p "$HOME"
-  unset XDG_CONFIG_HOME
+  pgdr_test_isolate "$TEST_DIR"
+  pgdr_test_assert_hermetic "$TEST_DIR"
 }
 
 teardown() {

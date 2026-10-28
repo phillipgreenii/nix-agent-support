@@ -7,9 +7,14 @@
 # that loads the REAL helper, with a PATH shim making ps (or lsof) fail, which is
 # the thing being tested. Nothing about bats' own skip/fail semantics is mocked.
 bats_require_minimum_version 1.5.0
+load 'hermetic'
 
 setup() {
   TESTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
+  # This suite never reaches the registry, but it runs the real bats and ps/lsof, so it
+  # gets the same isolated environment as the others (tests/hermetic.bash).
+  pgdr_test_isolate "$BATS_TEST_TMPDIR/env"
+  pgdr_test_assert_hermetic "$BATS_TEST_TMPDIR/env"
   SHIM="$BATS_TEST_TMPDIR/shim"
   mkdir -p "$SHIM"
   CASE="$BATS_TEST_TMPDIR/case.bats"

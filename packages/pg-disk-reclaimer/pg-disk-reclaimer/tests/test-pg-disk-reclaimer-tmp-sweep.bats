@@ -19,11 +19,19 @@
 bats_require_minimum_version 1.5.0
 
 load 'sweep-tools'
+load 'hermetic'
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
+  # The sweeps run the real find/rm/mv against throwaway roots under FX (hermetic by
+  # construction); the environment is isolated too (tests/hermetic.bash), in a
+  # directory apart from FX so no sweep root can contain it. The harness variable
+  # PGDR_TMP_SWEEP_LIB read on the next line survives isolation on purpose.
+  ENVROOT="$(mktemp -d)"
+  pgdr_test_isolate "$ENVROOT"
+  pgdr_test_assert_hermetic "$ENVROOT"
   LIB="${PGDR_TMP_SWEEP_LIB:-$SCRIPTS_DIR/pgdr-tmp-sweep.bash}"
   FX="$(mktemp -d /tmp/pgts.XXXXXX 2>/dev/null || mktemp -d)"
   FX="$(cd -P "$FX" && pwd -P)"
@@ -41,7 +49,7 @@ teardown() {
     done <"$PIDS"
   fi
   chmod -R u+rwx "$FX" 2>/dev/null || true
-  rm -rf "$FX"
+  rm -rf "$FX" "${ENVROOT:-}"
 }
 
 # ----- helpers ----------------------------------------------------------------

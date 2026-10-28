@@ -7,6 +7,7 @@
 # is used below wherever a case mixes a stderr error message with stdout
 # JSON/text, so the error line is never mistaken for part of stdout.
 bats_require_minimum_version 1.5.0
+load 'hermetic'
 # The registry loading + schema validation engine (pgdr_default_registry_path
 # / pgdr_validate_registry / pgdr_read_registry) is exercised below against
 # fixtures under tests/fixtures/ (bead pg2-txxyj.2). The variant-selection
@@ -86,19 +87,21 @@ setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
+
+  # Standard test isolation (tests/hermetic.bash): every location the code reads
+  # from the environment points under TEST_DIR, XDG_CONFIG_HOME starts unset so
+  # default-path tests aren't at the mercy of the outer environment, exported
+  # PGDR_* tunables are dropped, and the test fails here, before anything runs,
+  # if that did not hold. Isolation comes BEFORE sourcing: pg-disk-reclaimer.bash
+  # reads its PGDR_* tunables at source time.
+  TEST_DIR="$(mktemp -d)"
+  export TEST_DIR
+  pgdr_test_isolate "$TEST_DIR"
+  pgdr_test_assert_hermetic "$TEST_DIR"
+
   source "$SCRIPTS_DIR/pg-disk-reclaimer.bash"
 
   FIXTURES_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/fixtures" && pwd)"
-
-  # Standard test isolation (bash-scripting skill): isolate HOME, and start
-  # with XDG_CONFIG_HOME unset so default-path tests aren't at the mercy of
-  # whatever the outer environment happens to have set.
-  TEST_DIR="$(mktemp -d)"
-  export TEST_DIR
-  export REAL_HOME="${HOME:-}"
-  export HOME="$TEST_DIR/home"
-  mkdir -p "$HOME"
-  unset XDG_CONFIG_HOME
 }
 
 teardown() {

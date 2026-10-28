@@ -6,6 +6,7 @@
 # pg-disk-reclaimer.sh on a real pseudo-terminal (tests/pty_drive.py) and assert
 # what an operator would see.
 bats_require_minimum_version 1.5.0
+load 'hermetic'
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
@@ -26,9 +27,9 @@ setup() {
 
   TEST_DIR="$(mktemp -d)"
   export TEST_DIR
-  export HOME="$TEST_DIR/home"
+  pgdr_test_isolate "$TEST_DIR"
+  pgdr_test_assert_hermetic "$TEST_DIR"
   mkdir -p "$HOME/.config/pg-disk-reclaimer" "$TEST_DIR/area"
-  unset XDG_CONFIG_HOME
   MARKER_DIR="$TEST_DIR/markers"
   mkdir -p "$MARKER_DIR"
 
