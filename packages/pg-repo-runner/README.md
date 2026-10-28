@@ -6,11 +6,12 @@
 `pg-repo-runner/pg-repo-runner.bash`) with a home-manager module,
 `phillipgreenii.programs.pg-repo-runner` (`home/programs/pg-repo-runner`).
 
-Bead `pg2-nvye55` (F6) is runner A's push step (below). Bead `pg2-zj2v7m` (F1) is the kernel, the verdict store and `status`. Bead `pg2-j0itft` (F2) is
-runner B, the post-land verifier: the `tips` source and the `verify` role (below). Bead `pg2-loswfh`
-(F3) is failure surfacing (below). The remaining
-role bodies land in later beads (A: `sync`, C: `build`; the source `workspace-tips`); each of those
-stubs exits 2 with "not implemented".
+Beads: `pg2-zj2v7m` (F1) is the kernel, the verdict store and `status`; `pg2-j0itft` (F2) is runner B, the
+post-land verifier (the `tips` source and the `verify` role); `pg2-loswfh` (F3) is failure surfacing;
+`pg2-28h96s` (F5) is runner A's report-only `sync`; `pg2-nvye55` (F6) is runner A's push step. The
+remaining role body and source land in a later bead (C: `build` and `workspace-tips`); each of those
+stubs exits 2 with "not implemented". Operator procedures (state, status, kill switch, red tips, first
+enablement) are in the runbook `docs/runbooks/pg-repo-runner.md`; this README is the package reference.
 
 **No repo is enabled for push by this package, its module defaults, its tests or any deployment
 config in this repository.** `repos.<name>.push` defaults to `false` for every repo, the module
@@ -28,6 +29,43 @@ a repo whose `push` is not exactly `true`. Enabling a repo needs an operator rul
 | `sync`           | Role: fetch, classify, fast-forward a behind clone, surface divergence, push. |
 | `build`          | Role (workspace-wide, no repo item): the kernel runs, then the stub exits 2.  |
 | `status`         | Prints the verdict store, the lease and the kill switch (`--json`, `--repo`). |
+
+## State, status and the kill switch
+
+Everything the runner writes is under the state directory
+`${XDG_STATE_HOME:-$HOME/.local/state}/pg-repo-runner/` (mode `0700`; never a path under a repo). The
+paths below were checked against the built package.
+
+| Path under the state directory      | What it is                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| `run.log`                           | One line per step of every run (pg-router discards a role's stdout and stderr). |
+| `lease`                             | Single-flight lease, a symlink to `<pid>:<process start time>`.                 |
+| `verdicts/<repo>/<sha>.<kind>.json` | The verdict store.                                                              |
+| `logs/<repo>/<sha>.check.log`       | The nix output behind a `check` verdict.                                        |
+| `sync/<repo>.json`                  | The last sync pass of a repo.                                                   |
+| `surface/<repo>.<kind>.json`        | The failure transition records.                                                 |
+| `push.disabled`                     | Kill switch file (the runner never creates or removes it).                      |
+| `push-live/<repo>`                  | Dry-run exit flag for one repo (the operator creates it).                       |
+| `push-audit.jsonl`                  | One line per real push.                                                         |
+
+**Kill switch.** Two files stop every role (`verify`, `sync`, `build`; a hand run too) with exit 9: the
+state directory's `push.disabled` and the file named by `kill_switch` in the config (the home module
+defaults it to `<state dir>/kill`). `tips` ignores both. Beyond the files, `pg-router pause` (the
+`SYSTEM_PAUSE` gate) stops the deployment's roles, and `repos.<key>.push = false` (the default of every
+repo) keeps `sync` from reaching the push step. `pg-repo-runner status` prints `push.disabled` only, not
+the config `kill_switch` file.
+
+**`status`.** `pg-repo-runner status [--json] [--repo KEY]` reads the state directory only. The text form is
+`state dir:`, `kill switch:` (`absent` or the file), `lease:` (`free`, `held by <pid>:<start>` or `stale (...)`),
+`verdicts:` (a tab-separated row per verdict: repo, sha[0:12], kind, result, inputs, finishedAt),
+`open transitions:` (repo, kind, sha[0:12], bead id or `bead-pending`, `notified` or `notify-pending`) and
+`sync:` (repo, outcome, behind, ahead, behind-before-fetch, at); `--json` prints only the verdicts, as one
+array.
+
+**Reserved branch prefix.** `runner-build-` is reserved for the workspace builder (runner C, not implemented:
+`build` and `workspace-tips` exit 2). That runner will create its throwaway workforest set on a
+`runner-build-<utc timestamp>` branch and remove any leftover set with that prefix, so nobody MAY name a
+branch or a set that way. Nothing in this package creates or removes such a branch today.
 
 ## The kernel (Template Method)
 
@@ -120,9 +158,9 @@ renamed aside (atomic, so one reclaimer wins), re-checked, and taken. This is th
 ### Verdict store
 
 `$XDG_STATE_HOME/pg-repo-runner/verdicts/<repo>/<sha>.<kind>.json`, with the fields `repo`, `sha`,
-`kind` (`check` or `build`), `result` (`green`, `red`, `error`), `inputs` (`locked` or `override`),
+`kind` (`check` or `build`), `result` (`green`, `red`, `superseded`; the writer also accepts `error`, which no role writes today), `inputs` (`locked` or `override`),
 `startedAt`, `finishedAt`, `exit`, `logPath`, and for a verify check `durationS`, `loadStart`,
-`loadEnd`. `result` is also `superseded` (the tip moved before the check ran). `rr_verdict_write` builds the document in a temp file
+`loadEnd`. A `superseded` result means the tip moved before the check ran. `rr_verdict_write` builds the document in a temp file
 in the same directory and renames it over the final name, so a reader sees the old verdict or the
 new one, and a failed write leaves no temp file. The run log is
 `$XDG_STATE_HOME/pg-repo-runner/run.log` (pg-router discards a role's stdout and stderr, so this file
