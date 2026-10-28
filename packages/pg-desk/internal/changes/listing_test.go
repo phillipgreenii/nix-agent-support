@@ -198,3 +198,79 @@ func TestFlowWiredIsTrueOnlyForATypeWithARegisteredConsumer(t *testing.T) {
 		t.Fatalf("issue wired %v err %v, want true", wired, err)
 	}
 }
+
+func listingOKOf(t *testing.T, st *store.Store, query string) (string, bool) {
+	t.Helper()
+	v, found, err := st.GetMeta(MetaListingOKPrefix + query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v, found
+}
+
+// A complete successful listing stamps change_flow.listing_ok.<query>; a failed
+// or truncated one writes nothing, and never moves an earlier stamp.
+func TestRunStampsListingOKOnlyForACompleteListing(t *testing.T) {
+	e, st, _ := newListEngine(t, "okq", "truncq", "failq", "degq")
+	degraded := okListing()
+	degraded.Sources = []gather.ListChangesSource{{Backend: "b", Status: "succeeded"}, {Backend: "c", Status: "failed"}}
+	e.Lister = queryLister{
+		"okq":    {res: okListing()},
+		"truncq": {res: truncatedListing()},
+		"failq":  {err: errors.New("boom")},
+		"degq":   {res: degraded},
+	}
+	if _, _, err := runTick(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if v, found := listingOKOf(t, st, "okq"); !found || v != "2026-10-01T12:00:00Z" {
+		t.Errorf("okq listing_ok = %q found=%v, want the poll time", v, found)
+	}
+	for _, q := range []string{"truncq", "failq", "degq"} {
+		if v, found := listingOKOf(t, st, q); found {
+			t.Errorf("%s listing_ok = %q, want no key", q, v)
+		}
+	}
+	// A later failure and a later truncated listing leave the stamp as it was.
+	e.Now = func() time.Time { return time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC) }
+	e.Lister = queryLister{
+		"okq":    {err: errors.New("down")},
+		"truncq": {res: okListing()},
+		"failq":  {res: truncatedListing()},
+		"degq":   {res: degraded},
+	}
+	if _, _, err := runTick(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := listingOKOf(t, st, "okq"); v != "2026-10-01T12:00:00Z" {
+		t.Errorf("okq listing_ok moved to %q after a failed listing", v)
+	}
+	if v, found := listingOKOf(t, st, "truncq"); !found || v != "2026-10-01T13:00:00Z" {
+		t.Errorf("truncq listing_ok = %q found=%v after its first complete listing", v, found)
+	}
+	if v, found := listingOKOf(t, st, "failq"); found {
+		t.Errorf("failq listing_ok = %q after a truncated listing, want no key", v)
+	}
+}
+
+// A --cached call lists nothing, so it stamps nothing; only the issue type has
+// the key.
+func TestCachedCallAndOtherTypesStampNoListingOK(t *testing.T) {
+	e, st, _ := newListEngine(t, "okq")
+	e.Lister = queryLister{"okq": {res: okListing()}}
+	if _, _, err := runTick(t, e, Options{EntityType: "issue", Consumer: "router", Cached: true}); err != nil {
+		t.Fatal(err)
+	}
+	if v, found := listingOKOf(t, st, "okq"); found {
+		t.Errorf("a cached call stamped listing_ok = %q", v)
+	}
+	pe, pst, h := newPREngine(t, "open")
+	h.shows["7"] = showOutcome{facts: prOpenFacts}
+	pe.Lister = fakeLister{res: listing("7=F1")}
+	if _, _, err := runPRTick(t, pe); err != nil {
+		t.Fatal(err)
+	}
+	if v, found := listingOKOf(t, pst, "open"); found {
+		t.Errorf("a pr call stamped listing_ok = %q", v)
+	}
+}

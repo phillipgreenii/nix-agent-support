@@ -534,7 +534,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk backend {{ $labels.backend }} has not observed a watched query for over a day, or cannot read its observations"
-          description: "pg_desk_watched_source_observed_age_seconds has read over 86400 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest watched query of that backend has no successful feed observation for a day), or the series is missing while pg-desk is up (the store cannot answer). A watched open issue of that backend may differ from the tracker."
+          description: "pg_desk_watched_source_observed_age_seconds has read over 86400 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest watched query of that backend has no successful feed observation or complete listing, and no orphan read, for a day), or the series is missing while pg-desk is up (the store cannot answer). A watched open issue of that backend may differ from the tracker."
         data:
           - refId: A
             relativeTimeRange:

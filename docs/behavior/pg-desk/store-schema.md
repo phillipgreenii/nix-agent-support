@@ -395,9 +395,13 @@ failing issue never blocks every other issue's feed.
   baseline, written once and left alone after that, so the doctor and the outcome rules can tell a
   baseline open for more than one day (see [`changes.md`](changes.md)). The marker's presence ends the
   baseline; the open key stays.
-- **`change_flow.listing_ok.<query>`** holds the time of the last successful listing of a watched
-  query. `change_flow.listing.<type>.<query>` above is overwritten by every call, failures included, so
-  it cannot say when a query was last observed; this key can.
+- **`change_flow.listing_ok.<query>`** holds the RFC3339 UTC time of the last successful COMPLETE
+  listing of a watched listed (beads) query: a poll writes it only when the listing failed on no backend,
+  degraded on none and was not truncated, so a failed, degraded or truncated listing leaves it
+  unchanged, and a query whose listing never succeeded has no key.
+  `change_flow.listing.<type>.<query>` above is overwritten by every call, failures included, so it
+  cannot say when a query was last observed; this key can. The beads half of
+  `pg_desk_watched_source_observed_age_seconds` reads it (see [`serve.md`](serve.md)).
 
 ### PR lane state in `meta`
 

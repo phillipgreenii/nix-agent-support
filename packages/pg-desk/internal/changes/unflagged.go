@@ -137,3 +137,104 @@ func (e *Engine) unflaggedInstance(ctx context.Context, entityType, instance str
 	}
 	return nil
 }
+
+// recordListedUnflagged is the beads (listed, non-owning) half of the
+// unflagged-member count: for every instance named by a non-owning
+// watch.issue.backends entry it stores, in the same
+// change_flow.unflagged.<instance> record the owning half uses, the count of
+// distinct members of the persisted watch sets (the last COMPLETE listing) of
+// the instance's queries that pg-desk holds as an active entity whose watched
+// flag is not true. A member is matched to its instance by membership of the
+// query's persisted set, so an entity whose backend column is NULL still
+// counts. A query whose baseline is open (no marker) for less than
+// BaselineHoldSeconds is excluded, and a member pg-desk does not hold is never
+// counted. An instance is read only when every one of its queries was consulted
+// by this call (a --query call that skipped one would otherwise drop its
+// members), and a baseline read error keeps the previous count and degrades the
+// poll. Nothing is stored per member.
+func (e *Engine) recordListedUnflagged(entityType string, selected []string, st *pollState) {
+	if entityType != issueEntityType || e.Cfg == nil {
+		return
+	}
+	byInstance := map[string][]string{}
+	var instances []string
+	for _, q := range e.Cfg.NonOwningWatchQueries(entityType) {
+		b, ok := e.Cfg.WatchQueryBackend(entityType, q)
+		if !ok || b.Instance == "" {
+			continue
+		}
+		if _, seen := byInstance[b.Instance]; !seen {
+			instances = append(instances, b.Instance)
+		}
+		byInstance[b.Instance] = append(byInstance[b.Instance], q)
+	}
+	if len(instances) == 0 {
+		return
+	}
+	consulted := map[string]bool{}
+	for _, q := range selected {
+		consulted[q] = true
+	}
+	var held map[string]store.Entity // loaded once, only when an instance needs it
+	now := e.now().UTC()
+	for _, inst := range instances {
+		queries := byInstance[inst]
+		all := true
+		for _, q := range queries {
+			all = all && consulted[q]
+		}
+		if !all {
+			continue
+		}
+		members := map[string]bool{}
+		degraded := false
+		for _, q := range queries {
+			bs, err := ReadBaseline(e.Store, q)
+			if err != nil {
+				st.side = append(st.side, "unflagged read degraded: "+q)
+				degraded = true
+				break
+			}
+			// A baseline that has begun and not finished is excluded until it has
+			// been open one day; one with no readable open time is still in
+			// progress, so it is excluded as well.
+			if !bs.Done && (!bs.HasOpenSince || now.Sub(bs.OpenSince) < BaselineHoldSeconds*time.Second) {
+				continue
+			}
+			for id := range loadWatchSet(e.Store, entityType, q) {
+				members[id] = true
+			}
+		}
+		if degraded {
+			continue
+		}
+		if held == nil {
+			rows, err := e.Store.ListEntities()
+			if err != nil {
+				st.side = append(st.side, "unflagged read degraded: list entities: "+firstErrLine(err.Error()))
+				return
+			}
+			held = make(map[string]store.Entity, len(rows))
+			for _, ent := range rows {
+				if ent.EntityType == entityType {
+					held[ent.EntityID] = ent
+				}
+			}
+		}
+		count := 0
+		for id := range members {
+			// An inactive entity ended its watch on purpose (a closed bead's flag
+			// ends with its deactivation), so it is not an unflagged member.
+			if ent, ok := held[id]; ok && !ent.Inactive && (ent.Watched == nil || !*ent.Watched) {
+				count++
+			}
+		}
+		rec, err := json.Marshal(UnflaggedRecord{Count: count, At: now.Format(time.RFC3339)})
+		if err != nil {
+			continue
+		}
+		if err := e.Store.SetMeta(MetaUnflaggedPrefix+inst, string(rec)); err != nil {
+			e.warnf("changes: record unflagged count %s: %v\n", inst, err)
+		}
+	}
+}

@@ -266,6 +266,10 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	if err := recordListing(set, opts.EntityType, e.now().UTC().Format(time.RFC3339), listedSources); err != nil {
 		e.warnf("changes: persist listing status: %v\n", err)
 	}
+	e.recordListingOK(set, opts.EntityType, runs)
+	// The beads half of the unflagged-member count reads the persisted watch
+	// sets, which this poll's complete listings have just rewritten.
+	e.recordListedUnflagged(opts.EntityType, selected, st)
 
 	// The feed step of every owning instance runs after phases A-C2 and
 	// before phase D (and before any total early return).

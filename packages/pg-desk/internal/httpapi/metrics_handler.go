@@ -117,9 +117,9 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound),
 		metrics.WithIngestFailed(metrics.IngestFailedFromStore(st, cfg.OwningInstances(changes.EntityTypeIssue),
 			func() time.Time { return nowUTC() })),
-		metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedFromStore(st, metrics.OwningQueriesByInstance(cfg),
+		metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedForConfig(st, cfg,
 			func() time.Time { return nowUTC() })),
-		metrics.WithUnflaggedMembers(metrics.UnflaggedMembersFromStore(st, metrics.OwningQueriesByInstance(cfg))),
+		metrics.WithUnflaggedMembers(metrics.UnflaggedMembersForConfig(st, cfg)),
 		metrics.WithWatchedEntities(metrics.WatchedEntitiesFromStore(st)),
 		metrics.WithOldestOrphanReadAge(metrics.OldestOrphanReadAgeFromStore(st, cfg,
 			func() time.Time { return nowUTC() }))); err != nil {

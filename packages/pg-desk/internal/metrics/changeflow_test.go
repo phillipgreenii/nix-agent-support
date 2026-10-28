@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -519,5 +520,120 @@ func TestUnflaggedMembersSeriesIsTheStoredCountPerInstance(t *testing.T) {
 	}
 	if want := map[string]int64{"jira-a": 4, "jira-b": 0}; !reflect.DeepEqual(got, want) {
 		t.Errorf("counts = %v, want %v", got, want)
+	}
+}
+
+// listedOutcomeConfig serves the watched queries "open" and "mine" from the
+// beads instance beads-a, and "other" from beads-b; "stray" has no backends
+// entry and "feed" is an owning (feed) query.
+func listedOutcomeConfig() *config.Config {
+	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
+	cfg.Watch.Issue.Queries = []string{"open", "mine", "other", "stray", "feed"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"open":  {Instance: "beads-a"},
+		"mine":  {Instance: "beads-a"},
+		"other": {Instance: "beads-b"},
+		"feed":  {Instance: "jira-a", OwnsChanges: true},
+	}
+	return cfg
+}
+
+func TestListedQueriesByInstanceIsTheNonOwningQueriesWithABackendsEntry(t *testing.T) {
+	got := ListedQueriesByInstance(listedOutcomeConfig())
+	want := map[string][]string{"beads-a": {"open", "mine"}, "beads-b": {"other"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListedQueriesByInstance = %v, want %v", got, want)
+	}
+}
+
+// The beads observed age is the OLDEST of the instance's listing_ok times and
+// its orphans' last successful read; another instance's orphan and a query
+// with no key do not count, and an instance with nothing reads 0.
+func TestListedSourceObservedAgeIsTheOldestOfListingsAndOrphans(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	cfg := listedOutcomeConfig()
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	yes := true
+	for k, ago := range map[string]time.Duration{
+		changes.MetaListingOKPrefix + "open":  48 * time.Hour,
+		changes.MetaListingOKPrefix + "other": time.Hour,
+		changes.MetaListingOKPrefix + "stray": 90 * time.Hour, // names no instance
+	} {
+		if err := st.SetMeta(k, now.Add(-ago).Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hyd := now.Add(-time.Hour).Format(time.RFC3339Nano)
+	okAt := now.Add(-30 * time.Minute).Format(time.RFC3339Nano)
+	seedWatchedIssue(t, st, "bd-orphan", hyd, true, &yes, "beads-a", okAt) // an orphan of beads-a, read 30 minutes ago
+	seedWatchedIssue(t, st, "bd-other", hyd, true, &yes, "beads-b", now.Add(-72*time.Hour).Format(time.RFC3339Nano))
+	reader := func() map[string]int64 {
+		t.Helper()
+		got, err := outcomePoints(t, MetricWatchedSourceObservedAge,
+			WithWatchedSourceObserved(WatchedSourceObservedForConfig(st, cfg, func() time.Time { return now })), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	got := reader()
+	// beads-a: listing 48h against orphan 30m: the 48h listing is oldest.
+	// beads-b: its orphan read 72h ago is older than its 1h listing.
+	// jira-a (owning, "feed"): no feed_observed key yet.
+	want := map[string]int64{"beads-a": 48 * 3600, "beads-b": 72 * 3600, "jira-a": 0}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ages = %v, want %v", got, want)
+	}
+	// A fresh listing leaves the 30 minute orphan as the oldest source of beads-a.
+	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", now.Add(-time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMeta(changes.MetaListingOKPrefix+"mine", now.Add(-2*time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if got := reader()["beads-a"]; got != 30*60 {
+		t.Errorf("beads-a age = %d, want %d (the orphan's last read)", got, 30*60)
+	}
+	// No value recorded at all reads 0.
+	empty, err := outcomePoints(t, MetricWatchedSourceObservedAge,
+		WithWatchedSourceObserved(WatchedSourceObservedForConfig(store.OpenNewSchemaForTest(t), cfg, func() time.Time { return now })), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]int64{"beads-a": 0, "beads-b": 0, "jira-a": 0}; !reflect.DeepEqual(empty, want) {
+		t.Errorf("fresh ages = %v, want %v", empty, want)
+	}
+	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", "yesterday"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outcomePoints(t, MetricWatchedSourceObservedAge,
+		WithWatchedSourceObserved(WatchedSourceObservedForConfig(st, cfg, func() time.Time { return now })), true); err == nil {
+		t.Error("an unparseable listing_ok must fail the scrape")
+	}
+}
+
+// The unflagged series carries every beads instance too, from the same stored
+// record, and a deployment with neither kind keeps the one backendless 0.
+func TestUnflaggedSeriesCoversBeadsInstancesAndKeepsThePlaceholder(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	if err := st.SetMeta(changes.MetaUnflaggedPrefix+"beads-a", `{"count":3,"at":"2026-10-10T11:55:00Z"}`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := outcomePoints(t, MetricIssueUnflaggedMembers, WithUnflaggedMembers(UnflaggedMembersForConfig(st, listedOutcomeConfig())), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]int64{"beads-a": 3, "beads-b": 0, "jira-a": 0}; !reflect.DeepEqual(got, want) {
+		t.Errorf("counts = %v, want %v", got, want)
+	}
+	none := &config.Config{}
+	for name, opt := range map[string]ChangeFlowOption{
+		MetricWatchedSourceObservedAge: WithWatchedSourceObserved(WatchedSourceObservedForConfig(st, none, time.Now)),
+		MetricIssueUnflaggedMembers:    WithUnflaggedMembers(UnflaggedMembersForConfig(st, none)),
+	} {
+		got, err := outcomePoints(t, name, opt, true)
+		if err != nil || !reflect.DeepEqual(got, map[string]int64{"": 0}) {
+			t.Errorf("%s with no instance = %v, %v, want one backendless 0", name, got, err)
+		}
 	}
 }

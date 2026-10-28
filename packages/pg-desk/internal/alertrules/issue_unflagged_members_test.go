@@ -1,12 +1,16 @@
 package alertrules
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -81,4 +85,100 @@ func TestIssueUnflaggedMembersRuleAgreesWithTheEmittedSeries(t *testing.T) {
 
 func TestIssueUnflaggedMembersUIDIsRegisteredWithTheRouterProbe(t *testing.T) {
 	assertProbeRegistered(t, unflaggedUID)
+}
+
+// quietHydrator answers every hydration with nothing written: the poll notes it
+// and carries on, which is all these tests need from the pipeline.
+type quietHydrator struct{}
+
+func (quietHydrator) RunEntityChange(context.Context, string, string, gather.ChangeKind, pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
+	return pipeline.EntityChangeResult{}, nil
+}
+
+type listedLister struct{ res gather.ListFingerprintsResult }
+
+func (l listedLister) ListFingerprints(context.Context, string, string) (gather.ListFingerprintsResult, error) {
+	return l.res, nil
+}
+
+// TestBeadsUnflaggedSeriesFromARealPollFiresClearsAndHoldsABaseline drives the
+// real poll over a beads instance's watched query: three held members have no
+// watched flag. While the query's baseline has been open under one day they are
+// excluded (the series reads 0 and the rule is quiet); once it has been open
+// over a day the series reads 3 and the rule fires; flagging them clears it.
+func TestBeadsUnflaggedSeriesFromARealPollFiresClearsAndHoldsABaseline(t *testing.T) {
+	nd := outcomeNoDataState(t, unflaggedUID)
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	st := store.OpenNewSchemaForTest(t)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
+	cfg.Watch.Issue.Queries = []string{"open"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"open": {Instance: "beads-a"}}
+	res := gather.ListFingerprintsResult{
+		Sources:      []gather.ListChangesSource{{Backend: "b", Status: "succeeded"}},
+		Fingerprints: map[string]string{},
+	}
+	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
+		fp := "F1"
+		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+			0, now.Add(-time.Hour).Format(time.RFC3339), true, &fp, []string{"reconcile"}, "sweep", now.Add(-time.Hour).Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+		res.Entities = append(res.Entities, gather.ListedEntity{ID: id, Title: id})
+		res.Fingerprints[id] = "F2" // differs from the stored list_fp, so the baseline must hydrate, and the quiet hydrator never marks it
+	}
+	eng := &changes.Engine{Cfg: cfg, Store: st, Hydrator: quietHydrator{}, Lister: listedLister{res: res}, Now: func() time.Time { return now }}
+	poll := func() {
+		t.Helper()
+		_, err := eng.Run(context.Background(), changes.Options{EntityType: "issue", Consumer: "router"}, func(changes.Envelope) error { return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	emit := func() []outcomeSample {
+		return emittedOutcome(t, metrics.MetricIssueUnflaggedMembers, metrics.WithUnflaggedMembers(metrics.UnflaggedMembersForConfig(st, cfg)))
+	}
+	setOpen := func(ago time.Duration) {
+		t.Helper()
+		if err := st.SetMeta(changes.MetaBaselineOpenPrefix+"open", now.Add(-ago).Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The baseline has been open one hour and cannot finish (nothing is written
+	// by the quiet hydrator): its members are excluded.
+	setOpen(time.Hour)
+	poll()
+	series := emit()
+	if len(series) != 1 || series[0].backend != "beads-a" || series[0].v != 0 {
+		t.Fatalf("series = %+v, want one beads-a sample at 0 while the baseline is under a day old", series)
+	}
+	if got, noData := outcomeFiring(evalOutcomeExpr(series, true), 0, nd); len(got) != 0 || noData {
+		t.Errorf("a baseline in progress fired %v (noData alert %v)", got, noData)
+	}
+	// Open for over a day: the three unflagged members count and the rule fires.
+	setOpen(25 * time.Hour)
+	poll()
+	series = emit()
+	if len(series) != 1 || series[0].v != 3 {
+		t.Fatalf("series = %+v, want one beads-a sample at 3", series)
+	}
+	if got, _ := outcomeFiring(evalOutcomeExpr(series, true), 0, nd); len(got) != 1 || got[0] != "beads-a" {
+		t.Errorf("firing = %v, want [beads-a]", got)
+	}
+	// The members get their flag: the next poll reads 0 and the alert clears.
+	yes := true
+	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
+		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	poll()
+	series = emit()
+	if got, noData := outcomeFiring(evalOutcomeExpr(series, true), 0, nd); len(got) != 0 || noData {
+		t.Errorf("after flagging fired %v (noData alert %v), series %+v", got, noData, series)
+	}
+	// pg-desk down: the rule stays quiet whatever the series.
+	if got, noData := outcomeFiring(evalOutcomeExpr(nil, false), 0, nd); len(got) != 0 || noData {
+		t.Errorf("pg-desk down: fired %v (noData alert %v)", got, noData)
+	}
 }

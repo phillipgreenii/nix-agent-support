@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -202,5 +203,162 @@ func TestUnflaggedIsSkippedWithoutAMemberReaderOrAFailedFeed(t *testing.T) {
 	_, _, _ = f.run("router")
 	if len(m.asked) != 0 {
 		t.Errorf("a failed feed must not list members: %v", m.asked)
+	}
+}
+
+// newListedUnflaggedEngine is an issue engine whose queries are all served by
+// the beads instance "beads-a" (a non-owning backends entry).
+func newListedUnflaggedEngine(t *testing.T, queries ...string) (*Engine, *store.Store) {
+	t.Helper()
+	e, st, _ := newListEngine(t, queries...)
+	e.Cfg.Watch.Issue.Backends = map[string]config.WatchBackend{}
+	for _, q := range queries {
+		e.Cfg.Watch.Issue.Backends[q] = config.WatchBackend{Instance: "beads-a"}
+	}
+	return e, st
+}
+
+func seedListedSet(t *testing.T, st *store.Store, query string, ids ...string) {
+	t.Helper()
+	set := map[string]bool{}
+	for _, id := range ids {
+		set[id] = true
+	}
+	if err := saveWatchSet(st, "issue", query, set); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func recordListed(t *testing.T, e *Engine, queries ...string) *pollState {
+	t.Helper()
+	st := &pollState{hydrated: map[string]error{}, notes: map[string][]string{}}
+	e.recordListedUnflagged("issue", queries, st)
+	return st
+}
+
+// Three members of the last complete listing without a watched flag count (a
+// NULL flag and a NULL backend included, one listed by two queries once); a
+// flagged member, an inactive one and one pg-desk does not hold do not.
+func TestListedUnflaggedCountsMembersOfTheLastListingWithoutAFlag(t *testing.T) {
+	e, st := newListedUnflaggedEngine(t, "open", "mine")
+	seedListedSet(t, st, "open", "bd-1", "bd-2", "bd-3", "bd-4", "bd-5", "bd-gone")
+	seedListedSet(t, st, "mine", "bd-1")
+	seedHeld(t, st, "bd-1", "beads-a", boolp(false)) // listed by two queries: once
+	seedHeld(t, st, "bd-2", "beads-a", nil)
+	seedRow(t, st, "bd-3", "F", "2026-10-01T11:00:00Z", true) // NULL backend still matched by membership
+	seedHeld(t, st, "bd-4", "beads-a", boolp(true))           // flagged
+	seedRow(t, st, "bd-5", "F", "2026-10-01T11:00:00Z", false)
+	seedHeld(t, st, "bd-out", "beads-a", nil) // held but in no listing
+	if sp := recordListed(t, e, "open", "mine"); len(sp.side) != 0 {
+		t.Fatalf("side = %v", sp.side)
+	}
+	rec, found := unflaggedCount(t, st, "beads-a")
+	if !found || rec.Count != 3 || rec.At != "2026-10-01T12:00:00Z" {
+		t.Fatalf("record = %+v found=%v, want count 3 at the poll time", rec, found)
+	}
+	// Flagging the members clears the count at the next read.
+	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
+		if err := st.SetEntityColumns("o/r", "issue", id, nil, boolp(true)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordListed(t, e, "open", "mine")
+	if rec, _ := unflaggedCount(t, st, "beads-a"); rec.Count != 0 {
+		t.Errorf("after flagging, count = %d, want 0", rec.Count)
+	}
+}
+
+// A query whose baseline has been open under one day and has no marker is
+// excluded; once open for over a day its members count; a marker ends the hold.
+func TestListedUnflaggedExcludesABaselineOpenUnderADay(t *testing.T) {
+	e, st := newListedUnflaggedEngine(t, "fresh", "old")
+	seedListedSet(t, st, "fresh", "bd-1", "bd-2")
+	seedListedSet(t, st, "old", "bd-3")
+	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
+		seedHeld(t, st, id, "beads-a", nil)
+	}
+	set := func(k, v string) {
+		t.Helper()
+		if err := st.SetMeta(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{"fresh", "old"} { // newListEngine wrote markers
+		if err := st.DeleteMeta(MetaBaselinePrefix + q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(MetaBaselineOpenPrefix+"fresh", "2026-10-01T11:00:00Z") // one hour old
+	set(MetaBaselineOpenPrefix+"old", "2026-09-29T11:00:00Z")   // three days old
+	recordListed(t, e, "fresh", "old")
+	if rec, _ := unflaggedCount(t, st, "beads-a"); rec.Count != 1 {
+		t.Fatalf("count = %d, want 1 (only the old baseline's member)", rec.Count)
+	}
+	set(MetaBaselineOpenPrefix+"fresh", "2026-09-30T11:00:00Z") // 25 hours old
+	recordListed(t, e, "fresh", "old")
+	if rec, _ := unflaggedCount(t, st, "beads-a"); rec.Count != 3 {
+		t.Fatalf("count = %d, want 3 once the baseline has been open over a day", rec.Count)
+	}
+	// A baseline begun but with no readable open time stays excluded; a marker
+	// ends the hold whatever the open time was.
+	if err := st.DeleteMeta(MetaBaselineOpenPrefix + "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	recordListed(t, e, "fresh", "old")
+	if rec, _ := unflaggedCount(t, st, "beads-a"); rec.Count != 1 {
+		t.Fatalf("count = %d, want 1 with no open time", rec.Count)
+	}
+	set(MetaBaselinePrefix+"fresh", "2026-10-01T11:30:00Z")
+	recordListed(t, e, "fresh", "old")
+	if rec, _ := unflaggedCount(t, st, "beads-a"); rec.Count != 3 {
+		t.Fatalf("count = %d, want 3 with the marker written", rec.Count)
+	}
+}
+
+// An instance is read only when this call consulted all of its queries, and a
+// non-owning query without a backends entry names no instance.
+func TestListedUnflaggedNeedsEveryQueryOfTheInstanceAndABackendsEntry(t *testing.T) {
+	e, st := newListedUnflaggedEngine(t, "open", "mine")
+	seedListedSet(t, st, "open", "bd-1")
+	seedHeld(t, st, "bd-1", "beads-a", nil)
+	recordListed(t, e, "open") // --query open skipped "mine"
+	if _, found := unflaggedCount(t, st, "beads-a"); found {
+		t.Error("a partial call stored a count")
+	}
+	recordListed(t, e, "open", "mine")
+	if rec, found := unflaggedCount(t, st, "beads-a"); !found || rec.Count != 1 {
+		t.Errorf("record = %+v found=%v, want 1", rec, found)
+	}
+	e2, st2, _ := newListEngine(t, "open")
+	seedListedSet(t, st2, "open", "bd-1")
+	seedHeld(t, st2, "bd-1", "beads-a", nil)
+	recordListed(t, e2, "open")
+	if keys, _ := st2.ListMetaPrefix(MetaUnflaggedPrefix); len(keys) != 0 {
+		t.Errorf("a query with no backends entry stored %v", keys)
+	}
+}
+
+// Run stores the count once a poll has hydrated and flagged the baseline's
+// members (zero), through the real poll.
+func TestRunStoresTheListedUnflaggedCount(t *testing.T) {
+	e, st, _ := newUnbaselinedEngine(t, "open")
+	e.Cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"open": {Instance: "beads-a"}}
+	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F2")}
+	if _, _, err := runTick(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if rec, found := unflaggedCount(t, st, "beads-a"); !found || rec.Count != 0 {
+		t.Fatalf("record = %+v found=%v, want a stored zero", rec, found)
+	}
+	// A member whose flag is lost afterwards is counted by the next poll.
+	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, boolp(false)); err != nil {
+		t.Fatal(err)
+	}
+	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F2")}
+	if _, _, err := runTick(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := unflaggedCount(t, st, "beads-a"); rec.Count != 1 {
+		t.Errorf("count = %d, want 1", rec.Count)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -20,6 +21,36 @@ import (
 // Telemetry (D24): the write emits no OpenTelemetry or Prometheus output and
 // logs only a stderr warning when the meta write fails.
 const metaListingPrefix = "change_flow.listing."
+
+// MetaListingOKPrefix prefixes change_flow.listing_ok.<query>: the RFC3339 UTC
+// time of the last successful COMPLETE listing of a watched listed (beads)
+// query. The stored listing value above is overwritten at every call, failures
+// included, so it cannot say when a query was last observed; this key is
+// written only by a listing that succeeded in full (no failure, no degraded
+// backend, nothing truncated) and is what the beads half of
+// pg_desk_watched_source_observed_age_seconds reads. A query whose listing
+// never succeeded has no key.
+const MetaListingOKPrefix = "change_flow.listing_ok."
+
+// recordListingOK stamps change_flow.listing_ok.<query> for every listed query
+// of an issue call whose listing was complete (the standard that lets a
+// listing shrink a watched set, see listComplete). A failed, degraded or
+// truncated listing leaves the key untouched. Best-effort: a write error is a
+// warning, never a failed call.
+func (e *Engine) recordListingOK(set func(key, value string) error, entityType string, runs []queryRun) {
+	if entityType != issueEntityType {
+		return
+	}
+	at := e.now().UTC().Format(time.RFC3339)
+	for _, r := range runs {
+		if r.err != nil || !listComplete(r.res) {
+			continue
+		}
+		if err := set(MetaListingOKPrefix+r.query, at); err != nil {
+			e.warnf("changes: persist listing_ok %s: %v\n", r.query, err)
+		}
+	}
+}
 
 func listingKey(entityType, query string) string {
 	return metaListingPrefix + entityType + "." + query

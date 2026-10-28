@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -250,5 +251,61 @@ func assertProbeRegistered(t *testing.T, uid string) {
 	}
 	if !regexp.MustCompile(`(?m)^\t"` + regexp.QuoteMeta(uid) + `",$`).Match(b) {
 		t.Errorf("%s is not listed in registeredRuleUIDs", uid)
+	}
+}
+
+// TestBeadsWatchedSourceNotObservedRuleAgreesWithTheEmittedSeries feeds the
+// model with what the gauge emits for a beads instance: a listing_ok two days
+// old fires, an orphan read 30 minutes ago does not hide it (the oldest source
+// decides), a fresh listing clears it, and a deployment that never listed
+// reads 0 and never pages.
+func TestBeadsWatchedSourceNotObservedRuleAgreesWithTheEmittedSeries(t *testing.T) {
+	nd := outcomeNoDataState(t, "pg-desk-watched-source-not-observed")
+	st := store.OpenNewSchemaForTest(t)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
+	cfg.Watch.Issue.Queries = []string{"open"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"open": {Instance: "beads-a"}}
+	opt := func(s *store.Store) metrics.ChangeFlowOption {
+		return metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedForConfig(s, cfg, func() time.Time { return now }))
+	}
+	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", now.Add(-48*time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	fp, yes := "F1", true
+	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "bd-o", Facts: `{}`, AsOf: "x"},
+		0, now.Add(-time.Hour).Format(time.RFC3339), true, &fp, []string{"reconcile"}, "sweep", now.Add(-time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	backend, okAt := "beads-a", now.Add(-30*time.Minute).Format(time.RFC3339Nano)
+	if err := st.SetEntityColumns("o/r", "issue", "bd-o", &backend, &yes); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetEntityReadTimes("o/r", "issue", "bd-o", nil, &okAt); err != nil {
+		t.Fatal(err)
+	}
+	series := emittedOutcome(t, metrics.MetricWatchedSourceObservedAge, opt(st))
+	if len(series) != 1 || series[0].backend != "beads-a" || series[0].v != 48*3600 {
+		t.Fatalf("series = %+v, want one beads-a sample at %d", series, 48*3600)
+	}
+	if got, _ := outcomeFiring(evalOutcomeExpr(series, true), watchedSourceBoundSeconds, nd); len(got) != 1 || got[0] != "beads-a" {
+		t.Errorf("a two day old listing: firing = %v, want [beads-a]", got)
+	}
+	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", now.Add(-time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	series = emittedOutcome(t, metrics.MetricWatchedSourceObservedAge, opt(st))
+	if len(series) != 1 || series[0].v != 30*60 {
+		t.Fatalf("series = %+v, want the orphan's 30 minutes", series)
+	}
+	if got, noData := outcomeFiring(evalOutcomeExpr(series, true), watchedSourceBoundSeconds, nd); len(got) != 0 || noData {
+		t.Errorf("a fresh listing fired %v (noData alert %v)", got, noData)
+	}
+	fresh := emittedOutcome(t, metrics.MetricWatchedSourceObservedAge, opt(store.OpenNewSchemaForTest(t)))
+	if len(fresh) != 1 || fresh[0].v != 0 {
+		t.Fatalf("a deployment that never listed must read 0, got %+v", fresh)
+	}
+	if got, noData := outcomeFiring(evalOutcomeExpr(fresh, true), watchedSourceBoundSeconds, nd); len(got) != 0 || noData {
+		t.Errorf("a fresh deployment fired %v (noData alert %v)", got, noData)
 	}
 }
