@@ -576,7 +576,7 @@ rr_surface_title() {
   local repo="$1" kind="$2" sha="${3:0:12}"
   case "$kind" in
   red) printf '%s: primary tip %s fails nix flake check' "$repo" "$sha" ;;
-  diverged) printf '%s: primary branch has diverged from its remote' "$repo" ;;
+  diverged) printf '%s: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync' "$repo" ;;
   needs-relock) printf '%s: push blocked: needs relock' "$repo" ;;
   build-red) printf '%s: workspace build is red at %s' "$repo" "$sha" ;;
   esac
@@ -588,6 +588,14 @@ rr_surface_body() {
   printf 'pg-repo-runner saw a transition on %s: %s (at %s).\n\n' "$repo" "$kind" "$sha"
   [[ -z $detail ]] || printf 'Evidence: %s\n\n' "$detail"
   printf 'Read-only facts: `pg-repo-runner status` lists the verdicts and the open transitions.\n\n'
+  if [[ $kind == diverged ]]; then
+    printf 'The primary branch has commits the remote lacks AND the remote has commits it lacks. '
+    printf 'The runner never rebases, resets or forces: resolve it from a session or the operator '
+    printf 'shell with `pn workspace rebase` or `/pn-workspace-sync`. The runner closes this bead '
+    printf 'on its next pass that finds the branch no longer diverged (it closes only beads '
+    printf 'carrying metadata runner = pg-repo-runner).\n'
+    return 0
+  fi
   printf 'The expectation is FIX-FORWARD: land a fix, which produces a new tip and a new verdict. '
   printf 'The runner never reverts, resets or edits a repo. When a later tip that descends from '
   printf 'this one is green, the runner comments here with the green verdict and closes this bead '
@@ -790,4 +798,117 @@ rr_surface_green() {
   else
     rr_log "surface: $repo red: green at $sha does not descend from the red tip $last; left open"
   fi
+}
+
+# --- sync (runner A, report-only: F5) -------------------------------------
+#
+# One pass over one repo (the item): precheck the canonical clone read-only,
+# fetch the primary branch's remote-tracking ref, classify behind/ahead, and
+# fast-forward a behind clone. It never rebases, resets, forces or pushes: a
+# diverged repo is SURFACED (one deduplicated bead, via the failure-surfacing
+# step), and an ahead repo is only RECORDED. There is no push code path in this
+# version (the push step is a later bead, behind ADR 0108); `repos.<key>.push`
+# is not read here.
+#
+# The result of every pass is a Memento in $RR_STATE_DIR/sync/<repo>.json that
+# `status` prints.
+
+# rr_sync_store REPO JSON: atomic write (temp file, then rename).
+rr_sync_store() {
+  local dir="$RR_STATE_DIR/sync" tmp
+  mkdir -p "$dir" || return 1
+  tmp="$(mktemp "$dir/.$1.XXXXXX")" || return 1
+  if ! printf '%s\n' "$2" >"$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv -f "$tmp" "$dir/$1.json" || {
+    rm -f "$tmp"
+    return 1
+  }
+}
+
+# rr_sync_record REPO BRANCH OUTCOME BEHIND AHEAD PRE_BEHIND DETAIL
+# BEHIND, AHEAD and PRE_BEHIND are integers or empty (unknown). PRE_BEHIND is
+# the behind count read from the remote-tracking ref BEFORE the fetch: the stale
+# reading the design warns about, kept next to the real one.
+rr_sync_record() {
+  local rec
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rec="$(rr_jq -nc --arg repo "$1" --arg branch "$2" --arg outcome "$3" \
+    --arg behind "$4" --arg ahead "$5" --arg pre "$6" --arg detail "$7" --arg at "$(rr_now)" \
+    '{repo: $repo, branch: $branch, outcome: $outcome,
+      behind: ($behind | tonumber? // null), ahead: ($ahead | tonumber? // null),
+      behindBeforeFetch: ($pre | tonumber? // null), detail: $detail, at: $at}')" || return 1
+  rr_sync_store "$1" "$rec"
+}
+
+# rr_sync_records_json: every sync record as one JSON array, by repo.
+rr_sync_records_json() {
+  local f
+  local -a files=()
+  if [[ -d $RR_STATE_DIR/sync ]]; then
+    while IFS= read -r -d '' f; do
+      files+=("$f")
+    done < <(find "$RR_STATE_DIR/sync" -type f -name '*.json' ! -name '.*' -print0 | sort -z)
+  fi
+  if ((${#files[@]} == 0)); then
+    echo '[]'
+    return 0
+  fi
+  rr_jq -s 'sort_by(.repo)' "${files[@]}"
+}
+
+# rr_sync_steady PATH BRANCH: the canonical-clone precheck, read-only (R-3).
+# Succeeds when the clone has no core.worktree, is on BRANCH, has an empty
+# `git status --porcelain` and no rebase, merge, cherry-pick or revert in
+# progress. Otherwise prints the reason and returns 1. It takes no git lock and
+# writes nothing (GIT_OPTIONAL_LOCKS=0: not even a refreshed index).
+rr_sync_steady() {
+  local path="$1" branch="$2" gitdir head porcelain m
+  if rr_git -C "$path" config --local --get core.worktree >/dev/null 2>&1; then
+    echo "core.worktree is set"
+    return 1
+  fi
+  head="$(rr_git -C "$path" symbolic-ref --short -q HEAD 2>/dev/null)" || head=""
+  if [[ $head != "$branch" ]]; then
+    echo "HEAD is ${head:-detached}, not $branch"
+    return 1
+  fi
+  gitdir="$(rr_git -C "$path" rev-parse --absolute-git-dir 2>/dev/null)" || {
+    echo "cannot read the git directory"
+    return 1
+  }
+  for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+    if [[ -e $gitdir/$m ]]; then
+      echo "a $m operation is in progress"
+      return 1
+    fi
+  done
+  porcelain="$(GIT_OPTIONAL_LOCKS=0 rr_git -C "$path" status --porcelain 2>/dev/null)" || {
+    echo "git status failed"
+    return 1
+  }
+  if [[ -n $porcelain ]]; then
+    echo "the working tree is not clean"
+    return 1
+  fi
+}
+
+# rr_sync_counts PATH BRANCH: prints "<behind> <ahead>" of refs/heads/BRANCH
+# against refs/remotes/origin/BRANCH, or returns 1 when either ref is missing.
+rr_sync_counts() {
+  rr_git -C "$1" rev-list --left-right --count "refs/remotes/origin/$2...refs/heads/$2" 2>/dev/null
+}
+
+# rr_sync_fetch PATH BRANCH: updates the remote-tracking ref of BRANCH and
+# nothing else of the clone (no working tree, no local branch). The refspec is
+# explicit so that a clone without a default fetch refspec cannot silently keep
+# a stale ref. Never prompts, and ends after 300 s when `timeout` is available.
+rr_sync_fetch() {
+  local -a pre=()
+  if command -v timeout >/dev/null 2>&1; then pre=(timeout 300); fi
+  GIT_TERMINAL_PROMPT=0 "${pre[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
+    -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_GIT_BIN:-git}" \
+    -C "$1" fetch --quiet --no-tags origin "+refs/heads/$2:refs/remotes/origin/$2"
 }

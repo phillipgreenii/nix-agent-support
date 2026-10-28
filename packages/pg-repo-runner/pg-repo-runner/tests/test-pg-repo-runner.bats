@@ -139,11 +139,16 @@ role() {
   fi
 }
 
-# The kernel admitted the run: it reached the role body, which is a stub.
+# The kernel admitted the run: it reached the role body. The sync role runs for
+# real (a clean, in-sync clone: exit 0); build is still a stub (exit 2).
 assert_admitted() {
-  [ "$status" -eq 2 ]
-  [[ $output == *"is not implemented yet"* ]]
   grep -q ' admitted$' "$STATE/run.log"
+  if [[ $output == *"is not implemented yet"* ]]; then
+    [ "$status" -eq 2 ]
+  else
+    [ "$status" -eq 0 ]
+    grep -q ' sync: nix-alpha in sync$' "$STATE/run.log"
+  fi
 }
 
 # The kernel stopped before the role body.
@@ -393,11 +398,10 @@ write_verdict() { # REPO SHA KIND RESULT
 
 # ---- the role stubs and the run log ---------------------------------------
 
-@test "sync and build reach their stub once admitted" {
+@test "sync runs for real and build reaches its stub once admitted" {
   role sync
   assert_admitted
-  [[ $output == *"role 'sync' is not implemented yet"* ]]
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 0 ]
   # build is workspace-wide: no repo item is needed
   role build ""
   [ "$status" -eq 2 ]
@@ -409,7 +413,7 @@ write_verdict() { # REPO SHA KIND RESULT
   PG_REPO_RUNNER_LOADAVG=99 role sync
   [ -f "$STATE/run.log" ]
   grep -q "role=sync item=nix-alpha@$ALPHA_SHA admitted" "$STATE/run.log"
-  grep -q 'exit=2' "$STATE/run.log"
+  grep -q 'exit=0' "$STATE/run.log"
   grep -q 'exit=9 busy: 1-minute load 99 is not below ' "$STATE/run.log"
 }
 
@@ -491,7 +495,7 @@ write_verdict() { # REPO SHA KIND RESULT
 
 # ---- no repo is enabled for push -----------------------------------------
 
-@test "the fixture allow-list enables push for no repo, and the kernel never touches a remote" {
+@test "the fixture allow-list enables push for no repo, and a sync pass never moves a remote ref" {
   [ "$(tq -o json -f "$TEST_DIR/config.toml" . | jq '[.repos[].push] | map(select(. == true)) | length')" = 0 ]
   local before
   before="$(git -C "$TEST_DIR/remotes/alpha.git" rev-parse main)"

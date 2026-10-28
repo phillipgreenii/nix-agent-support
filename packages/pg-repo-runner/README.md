@@ -144,7 +144,7 @@ plugin). It is off unless the config carries `[surface] enabled = true`.
 | Transition                                   | Raised by                                                 |
 | -------------------------------------------- | --------------------------------------------------------- |
 | `red`: a repo's primary tip fails its check  | `verify` (this version)                                   |
-| `diverged`                                   | `rr_surface_raise REPO diverged SHA [DETAIL]` (runner A)  |
+| `diverged`                                   | `sync` (runner A), `rr_surface_raise REPO diverged SHA`   |
 | `needs-relock`: `push blocked: needs relock` | `rr_surface_raise REPO needs-relock SHA [DETAIL]`         |
 | `build-red`: the workspace build is red      | `rr_surface_raise REPO build-red SHA [DETAIL]` (runner C) |
 
@@ -182,6 +182,68 @@ deployment's pg-router role MUST put the machine's `bd` on that PATH.
 cannot set the `runner` metadata and cannot close a bead, which the auto-close needs, so the runner
 files, comments and closes through `bd` directly and reads its own label map from `surface.repo_labels`.
 The chain is the pg-rescue-side counterpart for any caller that wants the same filing through pg-rescue.
+
+## Sync (runner A, report-only)
+
+Bead `pg2-28h96s` (F5). `PG_ROUTER_ITEM_ID=<repo> pg-repo-runner sync` is one pass over one repo of the
+allow-list (`repos.<key>.sync = true`), after the kernel steps (resolve, path, enabled, kill, load, lease).
+Dependency order across repos is the order in which the deployment's `repo.sync` events are offered, not
+something this tool sequences. The pass:
+
+1. **Precheck, read-only (R-3).** The canonical clone MUST have no `core.worktree`, be on the primary branch
+   (from `pn-workspace.toml`, default `main`), have an empty `git status --porcelain` and no rebase, merge,
+   cherry-pick or revert in progress. Otherwise the repo is skipped this pass, the record says
+   `yielded` with `canonical not steady: <reason>`, and nothing is repaired: no fetch, no stash, no checkout. The
+   precheck writes nothing (`GIT_OPTIONAL_LOCKS=0`: not even a refreshed index), which the tests prove by
+   hashing the whole `.git` directory before and after.
+2. **Fetch.** `git fetch origin +refs/heads/<primary>:refs/remotes/origin/<primary>`: a remote-tracking
+   ref update only. The count read BEFORE the fetch is kept as `behindBeforeFetch`, because a remote-tracking
+   ref that was never fetched understates "behind" (the design's stale-ref caveat); the classification re-reads
+   after the fetch. A failed fetch is recorded (`fetch-failed`) and the pass exits 0: an unreachable remote is
+   not a malfunction of the runner, and the next event retries.
+3. **Classify** `git rev-list --left-right --count origin/<primary>...<primary>`:
+
+| Behind, ahead | Outcome (`status`) | Action                                                                                                                 |
+| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| 0, 0          | `in-sync`          | Nothing (an open `diverged` bead of the runner is closed).                                                             |
+| more, 0       | `fast-forwarded`   | `git merge --ff-only origin/<primary>` in the clean canonical clone. A refusal is `ff-refused`, recorded, not retried. |
+| 0, more       | `ahead`            | Record the count and do NOTHING else: no bead, no notification (unpushed commits are not in themselves a problem).     |
+| more, more    | `diverged`         | ONE deduplicated bead (the F3 transition) "diverged, resolve with pn workspace rebase or /pn-workspace-sync".          |
+
+A diverged repo is never rebased, reset or forced (decision D3): the runner has no such code. The bead is closed
+by the runner's own next pass that finds the repo no longer diverged (comment with the evidence, then close; only
+a bead with metadata `runner = pg-repo-runner`).
+
+**There is no push code path in this version.** `repos.<key>.push` is not read by `sync`; the push step is a
+later bead and is gated by ADR 0108. The tests prove it from three sides: a recording wrapper on every git
+call of the runner (no `push`, `rebase`, `reset`, `checkout`, `--force`, `--no-verify`), a `pre-push` hook in
+the canonical clone that leaves a marker if anything ever pushes, and the remote's ref, all with `push = true`
+forced in the config of that one test (the only config in this repository that sets it); and a source check
+that no git argv in the role code names `push`. A hand-applied push inserted into the ahead branch fails both
+the behavioural and the source tests (negative control, 2026-10-28).
+
+The result of every pass is `$XDG_STATE_HOME/pg-repo-runner/sync/<repo>.json` (`repo`, `branch`, `outcome`,
+`behind`, `ahead`, `behindBeforeFetch`, `detail`, `at`), printed by `status` under `sync:`.
+
+### Evidence table (the first bead re-reads "behind")
+
+The design's table was computed on 2026-10-23 without a fetch. Re-read on 2026-10-28 with
+`git rev-list --left-right --count origin/main...main` in each canonical clone, again WITHOUT a fetch (the
+implementing session opened no network connection), so "behind" is still the stale reading; the runner's
+first real passes replace it (`behindBeforeFetch` next to the post-fetch `behind` in the record).
+
+| Repo                | Behind (stale refs) | Ahead, 2026-10-23 | Ahead, 2026-10-28 |
+| ------------------- | ------------------- | ----------------- | ----------------- |
+| `nix-repo-base`     | 0                   | 8                 | 2                 |
+| `nix-personal`      | 0                   | 1                 | 0                 |
+| `nix-support-apps`  | 0                   | 48                | 2                 |
+| `nix-ziprecruiter`  | 0                   | 70                | 9                 |
+| `nix-overlay`       | 0                   | 0                 | 0                 |
+| `nix-agent-support` | 0                   | 181               | 33                |
+| `x`                 | 0                   | 0                 | 0                 |
+
+Total ahead on 2026-10-28: 2 + 0 + 2 + 9 + 0 + 33 + 0 = 46 (down from 308: the operator has been publishing).
+Behind after a real fetch is the post-deploy check (see the bead's verification).
 
 ## Configuration
 
@@ -282,7 +344,13 @@ measured duration and load of the real runner checks.
   dolt server, never the shared tracker); the only stand-ins are nix (as above) and a recording script
   for the macOS notifier. Proves one bead and one notification per transition, no duplicates, the
   auto-close of only the runner's own bead on a green descendant, and that every failure stays owed.
-- `checks.<system>.test-pg-repo-runner`: all four suites, built through `mkBashScript`.
+- `pg-repo-runner/tests/test-pg-repo-runner-sync.bats`: runner A, report-only (F5). Real git against bare
+  local remotes, a recording wrapper around every git call, a `pre-push` hook as a tripwire, and the REAL bd
+  over a throwaway database for the diverged bead. Covers 0,0, behind-only (with a stale remote-tracking ref),
+  ahead-only (push forced to true), diverged (one bead, no ref change, closes on resolution), a dirty,
+  mid-rebase, off-branch, `core.worktree` or marker-bearing canonical clone (skipped, `.git` hash unchanged), a
+  refused fast-forward, a failed fetch, and the absence of any push code path.
+- `checks.<system>.test-pg-repo-runner`: all five suites, built through `mkBashScript`.
 - `checks.<system>.test-pg-repo-runner-hm-render`: evaluates the home module (push, verify and sync
   default to false for every repo, no case enables push, the assertions fire), builds the rendered
   `config.toml`, and runs the real package against it.

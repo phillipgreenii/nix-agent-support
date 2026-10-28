@@ -49,7 +49,9 @@ Commands:
                    implemented yet; exits 2)
   verify           Role: check the repo tip named by PG_ROUTER_ITEM_ID
                    (<repo>@<sha>) with an immutable-snapshot nix flake check
-  sync             Role: sync the repo named by PG_ROUTER_ITEM_ID (same)
+  sync             Role: sync the repo named by PG_ROUTER_ITEM_ID (same): fetch,
+                   classify, fast-forward a behind clone, surface divergence
+                   (never pushes, rebases or resets)
   build            Role: build the whole workspace (same)
   status           Print the verdict store, the lease and the kill switch
 
@@ -75,8 +77,8 @@ The roles run the kernel steps in this order, and stop at the first that fails:
   6. lease     One lease file in the state dir, shared by every role, taken
                without waiting. Held by a live process: exit 9. A dead owner (or
                a recycled pid) is reclaimed.
-  7. act       The role body (verify is implemented; sync and build are stubs
-               that exit 2 in this version).
+  7. act       The role body (verify and sync are implemented; build is a stub
+               that exits 2 in this version).
 
 verify, in its act step: <sha> MUST exist (else the run is skipped, exit 0); if
 the repo's primary branch no longer points at <sha> a "superseded" verdict is
@@ -90,6 +92,19 @@ green on exit 0, red on any other non-zero exit, with the measured duration and
 the sampled 1-minute load in the record. A signal exit (128 + n) is a
 malfunction: exit 1, no verdict, pg-router retries. A verdict that already
 exists for <sha> ends the run at once (exit 0, no nix). verify needs a sha.
+
+sync, in its act step (report-only; it has no push step): the canonical clone
+MUST be steady (no core.worktree, on the primary branch, an empty
+`git status --porcelain`, no rebase, merge, cherry-pick or revert in progress),
+else the repo is skipped this pass ("yielded: canonical not steady") and never
+repaired. Then `git fetch origin <primary>` (a remote-tracking ref update only)
+and the classification of `git rev-list --left-right --count
+origin/<primary>...<primary>`: 0,0 nothing; behind only `git merge --ff-only
+origin/<primary>` (a refusal is recorded, not retried this pass); ahead only the
+count is recorded and nothing else happens; diverged files ONE deduplicated bead
+"diverged, resolve with pn workspace rebase or /pn-workspace-sync" (closed when
+a later pass finds it no longer diverged). A fetch that fails is recorded and
+exits 0. The result of every pass is in the sync record that `status` prints.
 
 Failure surfacing (config [surface] enabled = true; off otherwise): a TRANSITION,
 never a steady state, files ONE P1 bead (the repo's label from surface.repo_labels,
@@ -110,7 +125,8 @@ Exit codes:
 
 status [--json] [--repo KEY]:
   Prints every stored verdict (optionally one repo's), whether the lease is free,
-  held or stale, whether a kill file is present, and the open failure transitions. --json prints only the
+  held or stale, whether a kill file is present, the open failure transitions and
+  the last sync result of each repo. --json prints only the
   verdicts, as one JSON array. It reads the state directory and nothing else.
 
 Files and environment:
@@ -240,8 +256,88 @@ act_verify() {
 }
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_sync() {
-  rr_err "role 'sync' is not implemented yet"
-  return 2
+  local repo="$RR_ITEM_REPO" root branch path reason pre_counts pre_behind counts behind ahead tip detail rc
+
+  path="$RR_REPO_PATH"
+  root="$(rr_cfg '.workspace_root // empty')"
+  branch="$(rr_repo_branch "$root" "$repo")" || {
+    rr_err "cannot read the primary branch of '$repo' from pn-workspace.toml"
+    return 1
+  }
+  rr_git check-ref-format "refs/heads/$branch" || {
+    rr_err "the primary branch name of '$repo' is not a valid ref name: $branch"
+    return 1
+  }
+
+  # 1. precheck, read-only: a canonical clone that is not steady is skipped this
+  # pass and never repaired (R-3).
+  if reason="$(rr_sync_steady "$path" "$branch")"; then :; else
+    rr_sync_record "$repo" "$branch" yielded "" "" "" "canonical not steady: $reason" || return 1
+    rr_log "sync: $repo yielded: canonical not steady: $reason"
+    return 0
+  fi
+
+  # 2. fetch: a remote-tracking ref update only. The counts read BEFORE it are
+  # the stale ones (kept in the record), the classification below re-reads.
+  pre_counts="$(rr_sync_counts "$path" "$branch")" || pre_counts=""
+  pre_behind="${pre_counts%%[[:space:]]*}"
+  if ! rr_sync_fetch "$path" "$branch"; then
+    rr_sync_record "$repo" "$branch" fetch-failed "" "" "$pre_behind" "git fetch origin $branch failed" || return 1
+    rr_log "sync: $repo fetch-failed (not a malfunction of the runner: the next pass retries)"
+    return 0
+  fi
+
+  # 3. classify, from the refs the fetch just updated
+  if ! counts="$(rr_sync_counts "$path" "$branch")"; then
+    rr_sync_record "$repo" "$branch" no-remote-ref "" "" "$pre_behind" "origin/$branch does not exist after the fetch" || return 1
+    rr_log "sync: $repo has no origin/$branch after the fetch"
+    return 0
+  fi
+  read -r behind ahead <<<"$counts"
+  tip="$(rr_tip_of "$path" "$branch")" || {
+    rr_err "the primary branch refs/heads/$branch of '$repo' does not exist"
+    return 1
+  }
+
+  if ((behind == 0 && ahead == 0)); then
+    rr_sync_record "$repo" "$branch" in-sync 0 0 "$pre_behind" "" || return 1
+    rr_log "sync: $repo in sync"
+    rr_sync_not_diverged "$repo" "$tip" "in sync with origin/$branch"
+  elif ((behind > 0 && ahead == 0)); then
+    rc=0
+    rr_git -C "$path" merge --ff-only --quiet "refs/remotes/origin/$branch" >/dev/null 2>&1 || rc=$?
+    if ((rc == 0)); then
+      tip="$(rr_tip_of "$path" "$branch")" || tip=""
+      rr_sync_record "$repo" "$branch" fast-forwarded "$behind" 0 "$pre_behind" "now at $tip" || return 1
+      rr_log "sync: $repo fast-forwarded $behind commit(s) to $tip"
+      rr_sync_not_diverged "$repo" "$tip" "fast-forwarded to origin/$branch"
+    else
+      rr_sync_record "$repo" "$branch" ff-refused "$behind" 0 "$pre_behind" "git merge --ff-only exited $rc; not retried this pass" || return 1
+      rr_log "sync: $repo ff-refused (merge --ff-only exit $rc); not retried this pass"
+    fi
+  elif ((behind == 0 && ahead > 0)); then
+    # A push candidate. There is no push step in this version: record the count
+    # and do nothing else (no bead, no notification).
+    rr_sync_record "$repo" "$branch" ahead 0 "$ahead" "$pre_behind" "" || return 1
+    rr_log "sync: $repo is $ahead commit(s) ahead of origin/$branch; nothing to do"
+    rr_sync_not_diverged "$repo" "$tip" "ahead of origin/$branch only"
+  else
+    detail="behind $behind, ahead $ahead of origin/$branch"
+    rr_sync_record "$repo" "$branch" diverged "$behind" "$ahead" "$pre_behind" "$detail" || return 1
+    rr_log "sync: $repo diverged ($detail); surfaced, not touched"
+    rr_surface_raise "$repo" diverged "$tip" "$detail" ||
+      rr_log "surface: raising the diverged transition failed for $repo"
+  fi
+  # a bead or notification still owed from an earlier pass is finished here
+  rr_surface_flush_repo "$repo" || true
+  return 0
+}
+
+# rr_sync_not_diverged REPO TIP EVIDENCE: the repo is not diverged any more;
+# closes the runner's own open diverged bead, if there is one.
+rr_sync_not_diverged() {
+  rr_surface_resolve "$1" diverged "$2" "No longer diverged: $3 (tip $2)." ||
+    rr_log "surface: resolving the diverged transition failed for $1"
 }
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_build() {
@@ -381,7 +477,7 @@ run_tips() {
 # --- status -----------------------------------------------------------------
 
 run_status() {
-  local json=0 repo="" verdicts lease kill="" transitions
+  local json=0 repo="" verdicts lease kill="" transitions syncs
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --json) json=1 ;;
@@ -433,6 +529,17 @@ run_status() {
   else
     printf 'open transitions:\n'
     rr_jq -r '.[] | [.repo, .kind, .lastSha[0:12], (.bead | if . == "" then "bead-pending" else . end), (if .notified then "notified" else "notify-pending" end)] | @tsv' <<<"$transitions"
+  fi
+  syncs="$(rr_sync_records_json)" || syncs='[]'
+  if [[ -n $repo ]]; then
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    syncs="$(rr_jq -c --arg r "$repo" 'map(select(.repo == $r))' <<<"$syncs")"
+  fi
+  if [[ $(rr_jq 'length' <<<"$syncs") -eq 0 ]]; then
+    printf 'sync: none\n'
+  else
+    printf 'sync:\n'
+    rr_jq -r '.[] | [.repo, .outcome, ("behind " + (.behind | tostring)), ("ahead " + (.ahead | tostring)), ("behind-before-fetch " + (.behindBeforeFetch | tostring)), .at] | @tsv' <<<"$syncs"
   fi
   exit 0
 }
