@@ -92,16 +92,31 @@ install_gate_registry() {
   [[ "$output" == *"remove-$gate"* ]]
 }
 
-@test "behavior: at the documented gate level a declined confirmation skips removeCommand" {
+@test "behavior: at the documented gate level a declined confirmation runs nothing and exits 2" {
   source "$SCRIPTS_DIR/pg-disk-reclaimer.bash"
   local gate
   gate="$(doc_gate_level)"
-  install_gate_registry "$gate"
+  install_gate_registry "$((gate - 1))" "$gate"
   pgdr_confirm() { return 1; }
 
-  run --separate-stderr cmd_reclaim --aggressiveness "$gate" --apply "item-$gate"
+  run --separate-stderr cmd_reclaim --aggressiveness "$gate" --apply
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"remove-"* ]]
+}
+
+@test "behavior: a run with several gated items asks exactly once" {
+  source "$SCRIPTS_DIR/pg-disk-reclaimer.bash"
+  local gate
+  gate="$(doc_gate_level)"
+  install_gate_registry "$gate" "$((gate + 1))"
+  pgdr_confirm() {
+    echo "CONFIRM-CALLED"
+    return 0
+  }
+
+  run cmd_reclaim --aggressiveness "$((gate + 1))" --apply
   [ "$status" -eq 0 ]
-  [[ "$output" != *"remove-$gate"* ]]
+  [ "$(grep -c 'CONFIRM-CALLED' <<<"$output")" -eq 1 ]
 }
 
 @test "the scale document defines every level 0 through 5" {

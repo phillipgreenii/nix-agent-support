@@ -804,14 +804,54 @@ JSON
   [[ "$output" =~ "remove-low" ]]
 }
 
-@test "cmd_reclaim's confirm gate: a 'no' answer skips removeCommand for that item only, other selected items still proceed" {
+@test "cmd_reclaim's confirmation gates the whole run: a 'no' runs nothing, not even the ungated items, and exits 2" {
   install_reclaim_registry
   pgdr_confirm() { return 1; }
   run cmd_reclaim --aggressiveness 5 --apply low-item high-item
-  [ "$status" -eq 0 ]
-  [[ "$output" =~ "remove-low" ]]
-  [[ "$output" =~ "skipping 'high-item'" ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not confirmed; nothing was run"* ]]
+  [[ ! "$output" =~ "remove-low" ]]
   [[ ! "$output" =~ "remove-high" ]]
+}
+
+@test "cmd_reclaim asks at most once per run, however many selected items are gated, and before any removeCommand" {
+  install_size_registry \
+    "$(size_item lo "$SHARED_TMPDIR/low-item" 'echo 1024' 'echo dry-lo' 1)" \
+    "$(size_item hi4 "$SHARED_TMPDIR/high-item" 'echo 1024' 'echo dry-hi4' 4)" \
+    "$(size_item hi5 "$SHARED_TMPDIR/real-item" 'echo 1024' 'echo dry-hi5' 5)"
+  pgdr_confirm() {
+    echo "CONFIRM-CALLED:$1"
+    return 0
+  }
+  run cmd_reclaim --aggressiveness 5 --apply
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'CONFIRM-CALLED' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"hi4,hi5"* ]]
+  # The prompt precedes every removeCommand, and the plan (sizes) precedes the prompt.
+  [[ "$output" == *"hi5: size: 1.0M"*"CONFIRM-CALLED"*"remove-lo"*"remove-hi4"*"remove-hi5"* ]]
+}
+
+@test "cmd_reclaim with no terminal to confirm on says so, runs nothing and exits 3 (not a decline)" {
+  install_reclaim_registry
+  pgdr_confirm() { return 2; }
+  run cmd_reclaim --aggressiveness 5 --apply low-item high-item
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"no terminal to confirm level 4+ item(s) (high-item); nothing was run"* ]]
+  [[ "$output" != *"not confirmed"* ]]
+  [[ ! "$output" =~ "remove-low" ]]
+  [[ ! "$output" =~ "remove-high" ]]
+}
+
+@test "cmd_reclaim never reads input in a command: a removeCommand and a dryRunCommand that read stdin get EOF" {
+  mkdir -p "$TEST_DIR/stdin-item"
+  local item
+  item=$(size_item stdin-item "$TEST_DIR/stdin-item" 'echo 1' 'read -r x && echo dry-got-$x || echo dry-eof' 1 |
+    jq '.variants[0].removeCommand = "read -r x && echo remove-got-$x || echo remove-eof"')
+  install_size_registry "$item"
+  run cmd_reclaim --aggressiveness 1 stdin-item
+  [[ "$output" == *"dry-eof"* ]]
+  run cmd_reclaim --aggressiveness 1 --apply stdin-item
+  [[ "$output" == *"remove-eof"* ]]
 }
 
 @test "cmd_reclaim requires --aggressiveness even with an explicit id given" {
@@ -1276,18 +1316,28 @@ install_long_line_registry() {
   [[ ! "$output" == *"$(printf 'X%.0s' $(seq 1 300))"* ]]
 }
 
-@test "cmd_reclaim --apply shows the size before removal and totals what was reclaimed, excluding a declined item" {
+@test "cmd_reclaim --apply shows each size before removal and totals what was reclaimed (1024 + 4096 KiB = 5120 KiB = 5.0M)" {
+  mkdir -p "$TEST_DIR/lo" "$TEST_DIR/hi"
+  install_size_registry \
+    "$(size_item lo "$TEST_DIR/lo" 'echo 1024' 'echo dry-lo' 1)" \
+    "$(size_item hi "$TEST_DIR/hi" 'echo 4096' 'echo dry-hi' 5)"
+  pgdr_confirm() { return 0; }
+  run cmd_reclaim --aggressiveness 5 --apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lo: size: 1.0M"*"hi: size: 4.0M"*"remove-lo"*"remove-hi"* ]]
+  [[ "$output" == *"total reclaimed: 5.0M (2 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim --apply prints no total when the confirmation is declined" {
   mkdir -p "$TEST_DIR/lo" "$TEST_DIR/hi"
   install_size_registry \
     "$(size_item lo "$TEST_DIR/lo" 'echo 1024' 'echo dry-lo' 1)" \
     "$(size_item hi "$TEST_DIR/hi" 'echo 4096' 'echo dry-hi' 5)"
   pgdr_confirm() { return 1; }
   run cmd_reclaim --aggressiveness 5 --apply
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"lo: size: 1.0M"* ]]
-  [[ "$output" == *"remove-lo"* ]]
-  [[ "$output" == *"skipping 'hi' (not confirmed)"* ]]
-  [[ "$output" == *"total reclaimed: 1.0M (1 sized, 0 unknown)"* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"total reclaimed"* ]]
+  [[ "$output" != *"remove-"* ]]
 }
 
 @test "cmd_reclaim excludes an item whose command failed from the total" {

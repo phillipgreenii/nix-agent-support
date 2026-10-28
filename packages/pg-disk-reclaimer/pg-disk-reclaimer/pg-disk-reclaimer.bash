@@ -444,7 +444,7 @@ pgdr_display_output() {
   # registry under `set -euo pipefail` -- like the nix-wrapped binary runs
   # it -- since bats' own `run` helper neutralizes `errexit` and so cannot
   # exercise this failure mode at all.)
-  if out=$(timeout "$timeout_seconds" bash -c "$display_command" 2>&1); then
+  if out=$(timeout "$timeout_seconds" bash -c "$display_command" 2>&1 </dev/null); then
     status=0
   else
     status=$?
@@ -758,35 +758,42 @@ cmd_validate() {
 }
 
 # PGDR_CONFIRM_GATE_LEVEL: the aggressiveness level at and above which
-# cmd_reclaim --apply requires an interactive pgdr_confirm before a variant's
-# removeCommand runs. Authoritative definition of the whole 0-5 scale:
-# docs/aggressiveness-scale.md (next to this file); a bats drift test
-# (tests/test-pg-disk-reclaimer-scale-docs.bats) asserts that document's
-# confirm-gate marker equals this value, so change both together.
+# cmd_reclaim --apply asks for ONE interactive pgdr_confirm, before any
+# removeCommand runs, that gates the whole run. Authoritative definition of
+# the whole 0-5 scale: docs/aggressiveness-scale.md (next to this file); a
+# bats drift test (tests/test-pg-disk-reclaimer-scale-docs.bats) asserts that
+# document's confirm-gate marker equals this value, so change both together.
 PGDR_CONFIRM_GATE_LEVEL=4
 
-# pgdr_confirm: prompts PROMPT and reads a y/N confirmation directly from
-# the controlling terminal (/dev/tty), returning 0 for an explicit y/yes
-# answer and 1 for anything else -- including no controlling terminal at
-# all (read fails, reply stays empty). "No" is the safe default.
+# pgdr_confirm: prints PROMPT on the controlling terminal (/dev/tty) and reads
+# a y/N answer from it. Returns 0 for an explicit y/yes, 1 for anything else
+# (the safe default), and 2 when there is no controlling terminal to ask on,
+# so the caller can say so instead of reporting a decline.
 #
-# Deliberately reads /dev/tty rather than stdin: cmd_reclaim's aggressive
-# (>=4) confirmation gate below MUST NOT be bypassable by piping an answer
-# in (e.g. `yes | pg-disk-reclaimer reclaim --apply --aggressiveness 5`),
-# since that pipe is exactly the non-interactive path -- cron/Taskfile/
-# CI -- the gate exists to keep impossible (operator decision, final; see
-# cmd_reclaim below). Reading /dev/tty means such a context simply has no
-# controlling terminal to read from and always gets the safe "no".
+# The prompt is written to /dev/tty explicitly. `read -p` writes its prompt to
+# stderr, and a `2>/dev/null` on the read (as an earlier version had) discarded
+# it, leaving the operator staring at a hung-looking tool (bead pg2-6zh4ni).
+#
+# Deliberately uses /dev/tty rather than stdin: cmd_reclaim's confirmation MUST
+# NOT be bypassable by piping an answer in (e.g. `yes | pg-disk-reclaimer
+# reclaim --apply --aggressiveness 5`), since that pipe is exactly the
+# non-interactive path -- cron/Taskfile/CI -- the gate exists to keep
+# impossible (operator decision, final; see cmd_reclaim below).
 #
 # Kept as its own small function precisely so a caller/bats test can
-# override/stub it out instead of ever touching a real terminal -- tests
-# MUST do this rather than exercise the real read, which would hang
-# waiting on input that never arrives in a non-interactive test run.
+# override/stub it out instead of touching a real terminal. The one test that
+# exercises the real function does so under a pty (tests/test-pg-disk-reclaimer-
+# confirm-pty.bats), never against the test runner's own terminal.
 pgdr_confirm() {
   local prompt="$1"
   local reply=""
 
-  read -r -p "$prompt" reply </dev/tty 2>/dev/null || true
+  if ! { : >/dev/tty; } 2>/dev/null; then
+    return 2
+  fi
+
+  printf '%s' "$prompt" >/dev/tty
+  IFS= read -r reply </dev/tty || true
 
   case "$reply" in
   [yY] | [yY][eE][sS])
@@ -885,7 +892,7 @@ pgdr_size_kb() {
   # the number) so a macOS TCC denial can still be recognised below.
   local err_file err=""
   err_file=$(mktemp)
-  if out=$(timeout "$timeout_seconds" bash -c "$cmd" 2>"$err_file"); then
+  if out=$(timeout "$timeout_seconds" bash -c "$cmd" 2>"$err_file" </dev/null); then
     status=0
   else
     status=$?
@@ -1123,15 +1130,19 @@ pgdr_print_dry_run_output() {
 # is already handled). With --verbose one line is printed to stderr and
 # the item is still skipped, still not a failure.
 #
-# Aggressiveness >= 4 confirmation gate (operator decision, final): any
-# selected variant with aggressiveness >= 4 is gated behind an
-# interactive pgdr_confirm prompt immediately before its removeCommand
-# runs -- ONLY under --apply. A dry run never prompts, at any
-# aggressiveness, since it never reaches a real removeCommand. Declining
-# skips running removeCommand for THAT item only (not counted as a
-# failure -- it is a deliberate choice, not an error); other selected
-# items still proceed. There is NO bypass of any kind (no flag, no env
-# var, no non-interactive path) -- do not add one.
+# Aggressiveness >= 4 confirmation gate (operator decision, final; one prompt
+# per run, Phillip 2026-10-28, bead pg2-6zh4ni): a run prompts AT MOST ONCE,
+# before any removeCommand runs, and only under --apply when some selected
+# variant has aggressiveness >= PGDR_CONFIRM_GATE_LEVEL. That one answer
+# gates the whole run: declining (return 2) or having no terminal to ask on
+# (return 3) runs NOTHING. A dry run never prompts, at any aggressiveness.
+# After the prompt nothing in the run reads input, and every command (display,
+# size, dry-run, remove) gets stdin from /dev/null so one that tries to fails
+# fast instead of hanging behind a prompt nobody can see. There is NO bypass of
+# any kind (no flag, no env var, no non-interactive path) -- do not add one.
+#
+# The run is two passes: pass 1 resolves and sizes every selected item, the
+# --apply plan and the single confirmation follow, and pass 2 runs the items.
 #
 # dryRunCommand/removeCommand are trusted operator-authored strings from
 # the registry JSON (not user input), so running them via `eval` is safe
@@ -1139,12 +1150,13 @@ pgdr_print_dry_run_output() {
 # (e.g. claude-status-line's scripts.nix, agent-script.nix).
 #
 # Exit status: 0 if every dry-run/remove command that actually ran
-# exited 0 AND every explicitly-requested id was valid (an item skipped
-# via decline does not count against this); 1 if --aggressiveness was
-# missing, at least one explicitly-requested id was bad (unknown,
-# informational-only, or above the ceiling), or any command that ran
-# exited non-zero. Neither a bad id nor a failing item's command stops
-# any OTHER selected item from being attempted.
+# exited 0 AND every explicitly-requested id was valid; 1 if
+# --aggressiveness was missing, at least one explicitly-requested id was
+# bad (unknown, informational-only, or above the ceiling), or any command
+# that ran exited non-zero; 2 if the confirmation was declined; 3 if it was
+# needed but there is no terminal. 2 and 3 mean nothing was run. Neither a
+# bad id nor a failing item's command stops any OTHER selected item from
+# being attempted.
 cmd_reclaim() {
   local max_aggressiveness=""
   local apply=0
@@ -1215,9 +1227,15 @@ cmd_reclaim() {
   local -a bucket_kb=(0 0 0 0) bucket_n=(0 0 0 0)
   local held_total_kb=0 unknown_count=0 failed_count=0
   local item
+
+  # Pass 1: resolve and size every selected item into parallel arrays, so the
+  # whole plan is known before anything runs (the single confirmation below
+  # needs it, and so does the operator reading the prompt).
+  local -a r_id=() r_level=() r_dry=() r_remove=() r_path=() r_size_kb=() \
+  r_size_label=() r_held_kb=() r_held_label=() r_kind_idx=()
   while IFS= read -r item; do
     local id aggressiveness dry_run_command remove_command path size_command
-    local size_kb size_result size_label dry_out
+    local size_kb size_result size_label
     local size_kind size_method held_command held_kb held_result held_label kind_idx
     id=$(jq -r '.id' <<<"$item")
     aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
@@ -1238,7 +1256,7 @@ cmd_reclaim() {
     fi
 
     # Size the item before anything runs, so the operator sees it ahead of
-    # an --apply confirm prompt. NOT a bare $(...) assignment: a failing
+    # the --apply confirm prompt. NOT a bare $(...) assignment: a failing
     # size computation must be an explicit "unknown" marker, never fatal
     # under the nix wrapper's `set -euo pipefail`.
     size_kb=""
@@ -1265,15 +1283,69 @@ cmd_reclaim() {
       size_label="unknown ($size_result)"
     fi
 
+    r_id+=("$id")
+    r_level+=("$aggressiveness")
+    r_dry+=("$dry_run_command")
+    r_remove+=("$remove_command")
+    r_path+=("$path")
+    r_size_kb+=("$size_kb")
+    r_size_label+=("$size_label")
+    r_held_kb+=("$held_kb")
+    r_held_label+=("$held_label")
+    r_kind_idx+=("$kind_idx")
+  done < <(jq -c '.[]' <<<"$selected")
+
+  local n_items=${#r_id[@]} i
+
+  # Under --apply the plan (each item's size) is printed first, then the ONE
+  # confirmation covers the whole run. Dry-run output stays interleaved with
+  # each item's own dry-run command in pass 2.
+  if [[ $apply -eq 1 ]]; then
+    local -a gated_ids=()
+    for ((i = 0; i < n_items; i++)); do
+      printf '%s: size: %s\n' "${r_id[i]}" "${r_size_label[i]}"
+      [[ -n ${r_held_label[i]} ]] && printf '%s: held, not removable: %s\n' "${r_id[i]}" "${r_held_label[i]}"
+      if [[ ${r_level[i]} -ge $PGDR_CONFIRM_GATE_LEVEL ]]; then
+        gated_ids+=("${r_id[i]}")
+      fi
+    done
+
+    if ((${#gated_ids[@]} > 0)); then
+      local confirm_status=0 gated_list
+      gated_list=$(
+        IFS=,
+        printf '%s' "${gated_ids[*]}"
+      )
+      pgdr_confirm "pg-disk-reclaimer: run --apply for the $n_items item(s) above, including level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_list)? This is the only confirmation. [y/N] " || confirm_status=$?
+      if [[ $confirm_status -eq 2 ]]; then
+        echo "pg-disk-reclaimer: no terminal to confirm level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_list); nothing was run" >&2
+        return 3
+      elif [[ $confirm_status -ne 0 ]]; then
+        echo "pg-disk-reclaimer: not confirmed; nothing was run" >&2
+        return 2
+      fi
+    fi
+  fi
+
+  # Pass 2: run every item. No prompt happens here, and every command gets
+  # stdin from /dev/null, so a command that tries to read input fails fast
+  # instead of hanging behind a prompt the operator cannot see.
+  for ((i = 0; i < n_items; i++)); do
+    id="${r_id[i]}"
+    kind_idx="${r_kind_idx[i]}"
+    size_kb="${r_size_kb[i]}"
+    held_kb="${r_held_kb[i]}"
+
     if [[ $apply -eq 0 ]]; then
-      printf '%s: size: %s\n' "$id" "$size_label"
-      [[ -n $held_label ]] && printf '%s: held, not removable: %s\n' "$id" "$held_label"
+      printf '%s: size: %s\n' "$id" "${r_size_label[i]}"
+      [[ -n ${r_held_label[i]} ]] && printf '%s: held, not removable: %s\n' "$id" "${r_held_label[i]}"
 
       # stdout+stderr captured together so a long single-line dry run (go
       # clean -n prints its `rm -rf` line on a stream we should not guess)
       # can be collapsed; see pgdr_print_dry_run_output.
-      if dry_out=$(eval "$dry_run_command" 2>&1); then
-        pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
+      local dry_out
+      if dry_out=$(eval "${r_dry[i]}" 2>&1 </dev/null); then
+        pgdr_print_dry_run_output "${r_path[i]}" "$verbose" "$dry_out"
         if [[ -n $size_kb ]]; then
           bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
           bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))
@@ -1289,7 +1361,7 @@ cmd_reclaim() {
           # explicit reason, as the size path does.
           printf '(dry run unavailable (no Full Disk Access))\n'
         else
-          pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
+          pgdr_print_dry_run_output "${r_path[i]}" "$verbose" "$dry_out"
         fi
         echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
         overall_status=1
@@ -1298,17 +1370,7 @@ cmd_reclaim() {
       continue
     fi
 
-    printf '%s: size: %s\n' "$id" "$size_label"
-    [[ -n $held_label ]] && printf '%s: held, not removable: %s\n' "$id" "$held_label"
-
-    if [[ $aggressiveness -ge $PGDR_CONFIRM_GATE_LEVEL ]]; then
-      if ! pgdr_confirm "pg-disk-reclaimer: reclaim '$id' at aggressiveness $aggressiveness -- run its removeCommand? [y/N] "; then
-        echo "pg-disk-reclaimer: skipping '$id' (not confirmed)" >&2
-        continue
-      fi
-    fi
-
-    if eval "$remove_command"; then
+    if eval "${r_remove[i]}" </dev/null; then
       if [[ -n $size_kb ]]; then
         bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
         bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))
@@ -1321,7 +1383,7 @@ cmd_reclaim() {
       overall_status=1
       failed_count=$((failed_count + 1))
     fi
-  done < <(jq -c '.[]' <<<"$selected")
+  done
 
   # No total when nothing ran (a run where every item was skipped stays
   # silent, matching the quiet-by-default missing-path contract). A failed

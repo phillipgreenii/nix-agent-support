@@ -110,9 +110,11 @@ Aggressiveness scale:
     4  costly or irreversible  network refill, lost rollback/history,
                                or live shared state
     5  hardest to recover      slow, manual rebuild of user-visible state
-  Under --apply, a selected variant at level >= 4 asks for interactive
-  confirmation (read from the terminal; there is no bypass). A dry run
-  never prompts. The authoritative definition is
+  Under --apply, a selection that includes a variant at level >= 4 asks
+  for ONE interactive confirmation (on the terminal; there is no bypass)
+  after printing the plan and before anything runs. Declining runs nothing
+  (exit 2); no terminal runs nothing (exit 3). A dry run never prompts, and
+  no command prompts mid-run. The authoritative definition is
   packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md
   in the phillipgreenii-nix-agent-support repository.
 

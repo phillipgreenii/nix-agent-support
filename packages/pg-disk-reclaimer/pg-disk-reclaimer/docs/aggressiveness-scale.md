@@ -19,12 +19,26 @@ document are to be interpreted as described in RFC 2119.
 - `N` is a non-negative integer. A registry variant's level MUST be a
   non-negative integer and MUST be unique within its item.
 - `reclaim` is a dry run unless `--apply` is given.
-- Confirmation gate: under `--apply`, `reclaim` MUST ask for interactive
-  confirmation (read from the controlling terminal, never from stdin) before
-  running the `removeCommand` of any selected variant whose level is `>= 4`.
-  A declined confirmation skips only that item. A dry run MUST NOT prompt at
-  any level. There MUST NOT be any flag, environment variable, or
-  non-interactive path that bypasses the gate. Levels 0 to 3 MUST NOT prompt.
+- Confirmation gate: one run prompts AT MOST ONCE, and that one answer gates
+  the whole run.
+  - `reclaim --apply` MUST ask for interactive confirmation when any selected
+    variant's level is `>= 4`. It MUST ask before any `removeCommand` runs, and
+    it MUST NOT prompt at any other point of the run.
+  - Before the prompt, `reclaim` MUST print the plan: each selected item with
+    its size. The prompt MUST be visible on the controlling terminal, and the
+    answer MUST be read from that terminal, never from stdin.
+  - A declined confirmation MUST run nothing and exit with status 2. When a
+    confirmation is needed but there is no controlling terminal, `reclaim` MUST
+    say so, run nothing and exit with status 3; it MUST NOT report that as a
+    decline.
+  - A dry run MUST NOT prompt at any level, and neither MUST an `--apply` run
+    whose selection has no variant at level `>= 4`.
+  - There MUST NOT be any flag, environment variable, or non-interactive path
+    that bypasses the gate.
+- Commands never prompt. A registry `displayCommand`, `sizeCommand`,
+  `heldSizeCommand`, `dryRunCommand` and `removeCommand` MUST NOT ask for
+  input. `reclaim` and `list` run each with standard input from `/dev/null`, so
+  a command that tries to read fails instead of hanging.
 - The gate level is the code constant `PGDR_CONFIRM_GATE_LEVEL` in
   `pg-disk-reclaimer.bash`. The marker line below MUST equal that constant; the
   bats suite `tests/test-pg-disk-reclaimer-scale-docs.bats` fails when they
@@ -42,8 +56,9 @@ flowchart LR
     L4 --> L5["5 hardest to recover"]
 ```
 
-Levels to the left of the gate run under `--apply` without a prompt; levels 4
-and 5 prompt once per item.
+A run whose selection stops left of the gate runs under `--apply` without a
+prompt. A selection that includes level 4 or 5 prompts once, before anything
+runs, for the whole run.
 
 ## Levels
 
