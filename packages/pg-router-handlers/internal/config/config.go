@@ -9,10 +9,9 @@
 // pool-wide scalars (MaxFeedback/MaxWorker/gates/roles/queries), which have
 // no meaning on this side of the wire boundary.
 //
-// Default() below is deliberately a plain Go literal, mirroring
-// packages/pg-router/internal/config.Default()'s own values for the fields
-// this module shares with it, so today's behavior is unchanged for a
-// deployment that never overrides them.
+// Default() below is deliberately a plain Go literal. Most fields started as
+// a copy of packages/pg-router/internal/config.Default()'s values, but it
+// does not track core: Effort and Model carry this module's own defaults.
 //
 // Validate's real claude --permission-mode enum check (docket pg2-oju6w Task
 // 5.7) lives HERE, not on pg-router's own Config: this module is the side
@@ -25,6 +24,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 )
@@ -254,6 +254,32 @@ func ValidateEffortOverride(effort string) error {
 	return fmt.Errorf("effort %q: not one of %s (omit it to use the handler default)", effort, strings.Join(ValidEfforts, ", "))
 }
 
+// validateModelName checks a claude --model value, handler-wide or per role
+// (bead pg2-vsepbz, INV-CCH-40): "" (no --model) or a model name or alias with
+// no whitespace and no leading "-". Model IDs are deliberately not enumerated:
+// claude owns that list. The shape check stops a value that would split into
+// extra argv words or be read by claude as a flag.
+func validateModelName(model string) error {
+	if model == "" {
+		return nil
+	}
+	if strings.IndexFunc(model, unicode.IsSpace) >= 0 || strings.HasPrefix(model, "-") {
+		return fmt.Errorf("model %q: must be a model name or alias with no whitespace and no leading \"-\"", model)
+	}
+	return nil
+}
+
+// ValidateModelOverride checks a role's model override (INV-CCH-40): "" (no
+// override, the handler-wide Model applies) or a name validateModelName
+// accepts. An invalid value would otherwise surface only when claude starts,
+// as a failed launch.
+func ValidateModelOverride(model string) error {
+	if err := validateModelName(model); err != nil {
+		return fmt.Errorf("%w (omit it to use the handler default)", err)
+	}
+	return nil
+}
+
 // Validate rejects a Config whose PermissionMode is not one of the claude
 // --permission-mode values this module knows how to forward. Docket
 // pg2-oju6w Task 5.7: this is the real enum check pg-router's own Config used
@@ -264,6 +290,9 @@ func ValidateEffortOverride(effort string) error {
 func (c Config) Validate() error {
 	if !validPermissionModes[c.PermissionMode] {
 		return fmt.Errorf("invalid permissionMode %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
+	}
+	if err := validateModelName(c.Model); err != nil {
+		return fmt.Errorf("launch config %w", err)
 	}
 	if err := c.validateLease(); err != nil {
 		return err
@@ -383,10 +412,12 @@ func MergeAllowedTools(base string, extra []string) string {
 	return strings.Join(merged, ",")
 }
 
-// Default returns this module's own baseline Config. Values mirror
-// packages/pg-router/internal/config.Default()'s corresponding fields as of
-// the 2026-09-11 move, so a deployment that supplies no overrides observes
-// unchanged behavior.
+// Default returns this module's own baseline Config. Most values started as a
+// copy of packages/pg-router/internal/config.Default()'s corresponding fields
+// at the 2026-09-11 move, but it no longer mirrors core: Effort ("medium") and
+// Model ("claude-sonnet-5-5") are this module's own handler-wide defaults
+// (bead pg2-vsepbz, INV-CCH-40, INV-CCH-31), while core's own Default() still
+// says effort "max" and no model. A role that sets neither takes these values.
 func Default() Config {
 	return Config{
 		WorktreeDir:         "",
@@ -397,8 +428,8 @@ func Default() Config {
 		NeedsInputStall:     DefaultNeedsInputStall,
 		WorktreeQuietWindow: 2 * time.Minute,
 		WorktreeQuietMax:    10 * time.Minute,
-		Effort:              "max",
-		Model:               "",
+		Effort:              "medium",
+		Model:               "claude-sonnet-5-5",
 		Autonomous:          true,
 		PermissionMode:      "dontAsk",
 		AllowedTools:        baseAllowedTools,

@@ -109,11 +109,10 @@ type CCPoolConfig struct {
 	// widen every role.
 	ExtraAllowedTools []string
 	// Effort (bead pg2-svkob, INV-CCH-31) overrides, for THIS role's dispatches
-	// only, the handler-wide launch-config effort (config.Config.Effort, "max" by
+	// only, the handler-wide launch-config effort (config.Config.Effort, "medium" by
 	// default), which is what `ccpool new --effort` and so `claude --effort`
 	// receive (applied in buildDeps). "" (an absent key) keeps the handler-wide
-	// value, so a role that never sets it is unchanged. Validated at load: empty
-	// or one of config.ValidEfforts.
+	// value. Validated at load: empty or one of config.ValidEfforts.
 	Effort string
 	// Precheck (bead pg2-nk6th.3, INV-CCH-22) opts this role in to a dispatch
 	// precheck; the zero value leaves the historical behavior (the role named

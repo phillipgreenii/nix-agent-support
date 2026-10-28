@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -369,5 +370,62 @@ func TestValidateEffortOverride(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), bad) {
 			t.Errorf("ValidateEffortOverride(%q) = %v, want an error naming it", bad, err)
 		}
+	}
+}
+
+// TestValidateModelOverride (bead pg2-vsepbz, INV-CCH-40): a role's model
+// override is empty or a model name or alias with no whitespace and no leading
+// dash; model IDs are deliberately not enumerated.
+func TestValidateModelOverride(t *testing.T) {
+	for _, ok := range []string{"", "sonnet", "claude-sonnet-5-5", "claude-opus-5-5[1m]"} {
+		if err := ValidateModelOverride(ok); err != nil {
+			t.Errorf("ValidateModelOverride(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{" claude-sonnet-5-5", "claude sonnet", "-p", "--model", "claude-sonnet-5-5\n"} {
+		err := ValidateModelOverride(bad)
+		if err == nil || !strings.Contains(err.Error(), "model") || !strings.Contains(err.Error(), fmt.Sprintf("%q", bad)) {
+			t.Errorf("ValidateModelOverride(%q) = %v, want an error naming model and the value", bad, err)
+			continue
+		}
+		if !strings.HasSuffix(err.Error(), "(omit it to use the handler default)") {
+			t.Errorf("ValidateModelOverride(%q) = %v, want the omit advice", bad, err)
+		}
+	}
+}
+
+// TestValidate_handlerWideModel (INV-CCH-40): the handler-wide launch-config
+// model follows the same rule, and its error carries no "omit" advice.
+func TestValidate_handlerWideModel(t *testing.T) {
+	for _, ok := range []string{"", "sonnet", "claude-opus-5-5[1m]"} {
+		c := Default()
+		c.Model = ok
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() with Model=%q = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"-p", "a b", " sonnet"} {
+		c := Default()
+		c.Model = bad
+		err := c.Validate()
+		if err == nil || !strings.HasPrefix(err.Error(), "launch config model ") {
+			t.Errorf("Validate() with Model=%q = %v, want an error starting \"launch config model\"", bad, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "omit") {
+			t.Errorf("Validate() with Model=%q = %v, want no omit advice", bad, err)
+		}
+	}
+}
+
+// TestDefault_modelAndEffort (INV-CCH-40, INV-CCH-31): the handler-wide
+// defaults are the pinned Sonnet model at medium effort.
+func TestDefault_modelAndEffort(t *testing.T) {
+	d := Default()
+	if d.Model != "claude-sonnet-5-5" {
+		t.Errorf("Default().Model = %q, want claude-sonnet-5-5", d.Model)
+	}
+	if d.Effort != "medium" {
+		t.Errorf("Default().Effort = %q, want medium", d.Effort)
 	}
 }

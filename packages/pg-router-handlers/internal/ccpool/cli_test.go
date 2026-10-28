@@ -45,7 +45,8 @@ func TestEnsure_argv(t *testing.T) {
 		"--env", "WORKSPACE_ROOT=/repo",
 		"--permission-mode", "dontAsk",
 		"--allowed-tools", config.Default().AllowedTools,
-		"--effort", "max",
+		"--effort", "medium",
+		"--model", "claude-sonnet-5-5",
 		"--autonomous",
 	}
 	if !reflect.DeepEqual((*got)[0], want) {
@@ -77,7 +78,7 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 }
 
 func TestEnsure_argv_includesAutonomous(t *testing.T) {
-	cli, got, _ := newSpy() // config.Default() => Autonomous true, PermissionMode dontAsk, Effort max
+	cli, got, _ := newSpy() // config.Default() => Autonomous true, PermissionMode dontAsk, Effort medium, Model claude-sonnet-5-5
 	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,8 @@ func TestEnsure_argv_includesAutonomous(t *testing.T) {
 		"new", "s", "--cwd", "/r",
 		"--permission-mode", "dontAsk",
 		"--allowed-tools", config.Default().AllowedTools,
-		"--effort", "max",
+		"--effort", "medium",
+		"--model", "claude-sonnet-5-5",
 		"--autonomous",
 	}
 	if !reflect.DeepEqual((*got)[0], want) {
@@ -119,6 +121,7 @@ func TestEnsure_allowedTools(t *testing.T) {
 	cfg.PermissionMode = "dontAsk"
 	cfg.AllowedTools = "Read,Bash(git *)"
 	cfg.Effort = ""
+	cfg.Model = ""
 	cfg.Autonomous = false // isolate this test to allowlist positioning
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
@@ -140,6 +143,7 @@ func TestEnsure_allowedToolsEmptyOmitsFlag(t *testing.T) {
 	cfg.PermissionMode = ""
 	cfg.AllowedTools = "" // empty => no --allowed-tools flag
 	cfg.Effort = ""
+	cfg.Model = ""
 	cfg.Autonomous = false // isolate this test to allowedTools behavior
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
