@@ -162,6 +162,15 @@ const (
 	// a retry storm is visible; the cap on retries per event is
 	// roles.MaxDispatchRetriesCap.
 	MetricDispatchRetries = "pg_router_dispatch_retries"
+	// MetricDispatchFailed counts each dispatch that ENDED failed, per event
+	// type and role: a handler error that is not re-run (orchestrator.
+	// DispatchFailedObserver, so a transient attempt that is retried is NOT
+	// counted) and a panic recovered from a listener's Offer (OnDispatchFailure).
+	// It is the per-event series behind pg-router-event-dispatch-failed;
+	// pg_router_failures_total keeps its own labels and still counts every failed
+	// attempt. Both labels are bounded: type by the configured bindings, role by
+	// the configured roles (DEC-OBS-5).
+	MetricDispatchFailed = "pg_router_dispatch_failed"
 	// MetricLiveness reports 1 while the daemon's last tick is within its
 	// liveness window, else 0. Registered ONLY when New is given WithLiveness
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
@@ -487,6 +496,7 @@ type Emitter struct {
 	deduped         metric.Int64Counter
 	enqueueRejected metric.Int64Counter
 	dispatchRetries metric.Int64Counter
+	dispatchFailed  metric.Int64Counter
 	dispatchLatency metric.Float64Histogram
 	queueWait       metric.Float64Histogram
 	run             metric.Float64Histogram
@@ -836,6 +846,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if err != nil {
 		return nil, err
 	}
+	dispatchFailed, err := m.Int64Counter(
+		MetricDispatchFailed,
+		metric.WithUnit("{dispatch}"),
+		metric.WithDescription("dispatches that ended failed (a handler error not re-run, or a recovered panic in Offer), per event type and role; a transient attempt that is re-run is not counted"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	dispatchLatency, err := m.Float64Histogram(
 		MetricDispatchLatency,
 		metric.WithUnit("ms"),
@@ -1100,6 +1118,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.deduped = deduped
 	e.enqueueRejected = enqueueRejected
 	e.dispatchRetries = dispatchRetries
+	e.dispatchFailed = dispatchFailed
 	e.dispatchLatency = dispatchLatency
 	e.queueWait = queueWait
 	e.run = run
@@ -1480,11 +1499,12 @@ func (e *Emitter) OnDeclined(_, listenerID, reason string) {
 // OTHER delivery-side class (INV-OBS-1): an outright dispatch failure where
 // the core could not hand the event over at all — currently, a panic
 // recovered from a Listener's Offer implementation (see
-// eventqueue.Queue's offerSafely). evtType is accepted for the same interface-
-// symmetry reason OnDeclined's doc gives and is likewise not part of the
-// label set; the class dimension is FailureClassDispatchFail and listenerID
-// (the role name) is the config-bounded "role" label (bead pg2-nimab).
-func (e *Emitter) OnDispatchFailure(_, listenerID string) {
+// eventqueue.Queue's offerSafely). evtType is NOT part of the failures label
+// set (the class dimension is FailureClassDispatchFail and listenerID, the role
+// name, is the config-bounded "role" label, bead pg2-nimab); it labels the
+// per-event pg_router_dispatch_failed_total series, which this also increments.
+func (e *Emitter) OnDispatchFailure(evtType, listenerID string) {
+	e.recordDispatchFailed(evtType, listenerID)
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("class", FailureClassDispatchFail),
 		attribute.String("role", listenerID),
@@ -1566,6 +1586,24 @@ func isUpstreamKilled(msg string) bool {
 	return strings.Contains(msg, UpstreamKilledScriptoutSentinel) &&
 		(strings.Contains(msg, UpstreamKilledSignalSentinel) ||
 			strings.Contains(msg, UpstreamKilledDeadlineSentinel))
+}
+
+// OnDispatchFailed implements orchestrator.DispatchFailedObserver
+// (structurally, like OnHandlerFailure): a handler error ended a dispatch with
+// no re-run after it, so the per-event failed-dispatch series counts it once.
+// A retried attempt never reaches here (it reaches OnDispatchRetry), and
+// pg_router_failures_total is untouched: OnHandlerFailure already counted the
+// attempt there. The panic path counts through OnDispatchFailure instead, so the
+// two are mutually exclusive per dispatch.
+func (e *Emitter) OnDispatchFailed(evtType, listenerID string) {
+	e.recordDispatchFailed(evtType, listenerID)
+}
+
+func (e *Emitter) recordDispatchFailed(evtType, listenerID string) {
+	e.dispatchFailed.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("type", evtType),
+		attribute.String("role", listenerID),
+	))
 }
 
 // OnDispatchRetry implements orchestrator.DispatchRetryObserver

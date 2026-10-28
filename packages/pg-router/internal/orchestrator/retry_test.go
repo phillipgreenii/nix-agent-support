@@ -445,3 +445,74 @@ func TestE2E_CommandQueryWithoutExpiresAt_GetsExactlyOneAttempt(t *testing.T) {
 		t.Fatalf("retry observer calls = %d, want 0", n)
 	}
 }
+
+// fakeDispatchFailedObserver records every OnDispatchFailed call.
+type fakeDispatchFailedObserver struct {
+	calls []struct{ evtType, role string }
+}
+
+func (f *fakeDispatchFailedObserver) OnDispatchFailed(evtType, listenerID string) {
+	f.calls = append(f.calls, struct{ evtType, role string }{evtType, listenerID})
+}
+
+// The failed-dispatch series counts a dispatch once, when it ENDS failed: a
+// retried transient attempt is not counted, the exhausting attempt is, and a
+// success is not.
+func TestOffer_DispatchFailedObserver_CountsOnlyTheDispatchThatEndedFailed(t *testing.T) {
+	h := &seqHandler{errs: []error{killedErr, killedErr, killedErr}}
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.Handler = h
+	fobs := &fakeDispatchFailedObserver{}
+	o.DispatchFailedObserver = fobs
+	role := roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}, MaxDispatchRetries: 2}
+	l := o.NewListener(context.Background(), role)
+	evt := retryEvent("e1")
+
+	for i := 1; i <= 2; i++ {
+		if got := l.Offer(eventqueue.Offering{ID: "dsp", Event: evt}); got.Accepted {
+			t.Fatalf("attempt %d must be a retry decline, got %+v", i, got)
+		}
+		if n := len(fobs.calls); n != 0 {
+			t.Fatalf("attempt %d (re-run): failed-dispatch calls = %d, want 0", i, n)
+		}
+	}
+	if got := l.Offer(eventqueue.Offering{ID: "dsp", Event: evt}); !got.Accepted {
+		t.Fatalf("attempt 3 exhausts the retries and must be accepted, got %+v", got)
+	}
+	if len(fobs.calls) != 1 || fobs.calls[0].evtType != "pr.changed" || fobs.calls[0].role != "desk-pr" {
+		t.Fatalf("failed-dispatch calls = %+v, want one {pr.changed desk-pr}", fobs.calls)
+	}
+	// A success afterwards (the handler's script is exhausted) is not a failure.
+	if got := l.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e2")}); !got.Accepted {
+		t.Fatalf("success must be accepted, got %+v", got)
+	}
+	if len(fobs.calls) != 1 {
+		t.Fatalf("failed-dispatch calls after a success = %d, want 1", len(fobs.calls))
+	}
+}
+
+// A deterministic failure ends the dispatch at once: counted once. A shutdown
+// cut is not a failure and is not counted.
+func TestOffer_DispatchFailedObserver_DeterministicCountedShutdownNot(t *testing.T) {
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.Handler = &seqHandler{errs: []error{&wireclient.ExitError{Role: "desk-pr", Code: 1, Detail: "invalid_argument: bad PR id"}}}
+	fobs := &fakeDispatchFailedObserver{}
+	o.DispatchFailedObserver = fobs
+	role := roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}}
+	l := o.NewListener(context.Background(), role)
+	l.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e1")})
+	if len(fobs.calls) != 1 {
+		t.Fatalf("deterministic failure: failed-dispatch calls = %d, want 1", len(fobs.calls))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	o.Handler = &seqHandler{errs: []error{killedErr}}
+	fobs2 := &fakeDispatchFailedObserver{}
+	o.DispatchFailedObserver = fobs2
+	l2 := o.NewListener(ctx, role)
+	cancel()
+	l2.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e2")})
+	if len(fobs2.calls) != 0 {
+		t.Fatalf("shutdown cut: failed-dispatch calls = %d, want 0", len(fobs2.calls))
+	}
+}

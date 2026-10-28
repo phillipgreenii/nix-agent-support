@@ -1,0 +1,82 @@
+# promtool unit tests for the pg-router-event-dispatch-failed alert (docket pg2-2qyyh.5,
+# INV-ICD-21 item 4): a decider dispatch for an issue.changed event ended failed. Run by the
+# flake check test-pg-router-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's
+# `for: 5m` and labels (severity: warning), plus a recording rule
+# `wrapped:<uid with _>` over the same expression.
+#
+# Time model: 30s series, rules evaluate every minute. A counter that steps from 0 to 1 at 10m
+# makes increase(...[1h]) at least 1 from 10m to about 70m, so the alert is Pending from about
+# 10m and Firing from about 15m: not firing at 12m, firing at 20m, and quiet again once the step
+# has left the 1h window (at 80m).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a failed issue.changed dispatch fires after for, labelled with its type and role
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="issue.changed",role="decider",job="pg-router"}
+        values: "0x20 1x280"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts:
+          - exp_labels:
+              type: issue.changed
+              role: decider
+              severity: warning
+      - eval_time: 80m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts: []
+
+  - name: failures of another event type stay quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="pr.changed",role="pr-role",job="pg-router"}
+        values: "0x20 1x280"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_event_dispatch_failed)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts: []
+
+  - name: no failures at all stay quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="issue.changed",role="decider",job="pg-router"}
+        values: "3x300"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts: []
+
+  - name: the series of another role fires on its own, the quiet role stays quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="issue.changed",role="decider",job="pg-router"}
+        values: "2x300"
+      - series: pg_router_dispatch_failed_total{type="issue.changed",role="decider-b",job="pg-router"}
+        values: "0x20 1x280"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-event-dispatch-failed
+        exp_alerts:
+          - exp_labels:
+              type: issue.changed
+              role: decider-b
+              severity: warning

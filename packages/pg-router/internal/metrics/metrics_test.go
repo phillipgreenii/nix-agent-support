@@ -1656,3 +1656,60 @@ func TestOnDeclined_ShutdownHandBackIsNotAFailure(t *testing.T) {
 		t.Errorf("failures total = %d, want 1 (only the busy decline)", total)
 	}
 }
+
+// pg_router_dispatch_failed_total{type,role}: one increment per dispatch that
+// ENDED failed, from OnDispatchFailed (a handler error not re-run) and from
+// OnDispatchFailure (a recovered panic); none for a transient retry
+// (OnHandlerFailure + OnDispatchRetry), and pg_router_failures_total keeps its
+// own labels and still counts every failed attempt.
+func TestDispatchFailedSeriesCountsEndedDispatchesByTypeAndRole(t *testing.T) {
+	h := newHarness(t)
+	// A retried attempt: the handler failure and the retry hook, no failed dispatch.
+	h.emitter.OnHandlerFailure("dsp-1", "issue.changed", "decider", errors.New("boom"))
+	h.emitter.OnDispatchRetry("decider", "killed")
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassHandlerError); got != 1 {
+		t.Fatalf("failures[handler-error] = %d, want 1", got)
+	}
+	if got := findMetricOK(h.collect(t), MetricDispatchFailed); got {
+		t.Fatalf("%s present after a retried attempt, want absent", MetricDispatchFailed)
+	}
+
+	// The same dispatch's last attempt ends it failed.
+	h.emitter.OnHandlerFailure("dsp-1", "issue.changed", "decider", errors.New("boom"))
+	h.emitter.OnDispatchFailed("issue.changed", "decider")
+	// A second type and role, and a recovered panic.
+	h.emitter.OnDispatchFailed("pr.changed", "pr-role")
+	h.emitter.OnDispatchFailure("issue.changed", "decider")
+
+	rm := h.collect(t)
+	df := findMetric(t, rm, MetricDispatchFailed)
+	if got := sumForBoth(df, "type", "issue.changed", "role", "decider"); got != 2 {
+		t.Fatalf("dispatch_failed[issue.changed,decider] = %d, want 2 (one handler error, one panic)", got)
+	}
+	if got := sumForBoth(df, "type", "pr.changed", "role", "pr-role"); got != 1 {
+		t.Fatalf("dispatch_failed[pr.changed,pr-role] = %d, want 1", got)
+	}
+	// The failures series keeps its labels: no type label, class and role as before.
+	f := findMetric(t, rm, MetricFailures)
+	if got := sumForBoth(f, "class", FailureClassHandlerError, "role", "decider"); got != 2 {
+		t.Fatalf("failures[handler-error,decider] = %d, want 2 (every attempt)", got)
+	}
+	if got := sumFor(f, "type", "issue.changed"); got != -1 {
+		t.Fatalf("failures carries a type label (sum %d), want none", got)
+	}
+	if got := sumForBoth(f, "class", FailureClassDispatchFail, "role", "decider"); got != 1 {
+		t.Fatalf("failures[dispatch-fail,decider] = %d, want 1", got)
+	}
+}
+
+func findMetricOK(rm metricdata.ResourceMetrics, name string) bool {
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -207,6 +207,22 @@ is not counted and two stops on a fresh series read as 1 (the 3rd pages); the se
 pre-initialized because the core does not know the role set. Singles stay visible in the metric
 (`pg_router_failures_total{reason="budget-exceeded"}`).
 
+**Amended** (docket `pg2-2qyyh.5`, `INV-ICD-21` item 4: a failed decider run with no later change).
+The router now exposes the per-event series that item needs: `pg_router_dispatch_failed_total{type,role}`
+(the instrument is registered as `pg_router_dispatch_failed`; the Prometheus exporter appends `_total`).
+It counts a dispatch **once, when it ends failed**: a handler error that is not re-run (the role's
+`max_dispatch_retries` spent, a deterministic failure, or the event's window closed) and a panic
+recovered from a listener's offer; a transient attempt that is re-run is counted only by
+`pg_router_dispatch_retries_total`. `pg_router_failures_total` is **unchanged** (same labels, still
+one count per failed attempt), and `type` is added to no existing series. The rule
+`pg-router-event-dispatch-failed` pages on `sum by (type, role) (increase(pg_router_dispatch_failed_total{type="issue.changed"}[1h])) >= 1`
+held 5 minutes. **Accepted limitation:** the counter has no per-entity label, so the rule cannot tell
+whether the issue changed since the failure; its description names that approximation. A brand-new
+series does not count its first increment (`increase()` takes it as the baseline), so the first
+failure of a role after a restart is not counted. The rule is registered with `pg-router-probe`; its
+model test is `internal/alertrules/event_dispatch_failed_test.go` and its promtool cases are
+`grafana/alerting/rule-tests/pg-router-event-dispatch-failed.test.yaml`.
+
 ### `DEC-OBS-4` — a source is persistently failing when it has not succeeded for max(3 x its period, 30m); a pause is not a failure <!-- uuid: 91571075-a2d2-4e39-8e31-4ce6e7f020c9 -->
 
 **Decided** (operator approval, Phillip, 2026-10-05; bead `pg2-tv11a`). The core exports two gauges per

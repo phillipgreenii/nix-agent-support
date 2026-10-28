@@ -851,6 +851,64 @@ groups:
                     type: gt
                     params: [0]
 
+      # A failed issue.changed dispatch (docket pg2-2qyyh.5, INV-ICD-21 item 4): the
+      # decider run for an issue ended failed after the router's retry window and
+      # nothing re-runs it until that issue changes again, so a failure here waits
+      # for the next change, as for PRs. internal/metrics counts every dispatch that
+      # ENDED failed in pg_router_dispatch_failed_total{type,role} (a handler error
+      # that is not re-run, or a recovered panic in Offer; a transient attempt that
+      # is re-run is not counted). The counter has no per-entity label, so the rule
+      # CANNOT tell whether the issue changed since the failure; it pages on the
+      # failure itself and the description says so. Scoped to issue.changed; the
+      # residual pg-router-failure-rate keeps its own series untouched.
+      #
+      # The `>= 1` lives in the PromQL expr (the threshold evaluator has no gte; the
+      # node is the usual `gt 0`, so an empty result is NoData -> OK). `for: 5m`
+      # holds out a single scrape artefact; the 1h window then keeps the alert up
+      # for about an hour after the failure. increase() sees a NEW series' first
+      # sample as its baseline, so the very first failure of a role after a
+      # pg-router restart is not counted (the series is not pre-initialized because
+      # the core does not know the role set); that undercount is accepted.
+      - uid: pg-router-event-dispatch-failed
+        title: pg-router a decider dispatch for an issue.changed event ended failed (by role)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router role {{ $labels.role }} had an issue.changed dispatch end failed in the last hour"
+          description: 'sum by (type, role) (increase(pg_router_dispatch_failed_total{type="issue.changed"}[1h])) >= 1 for type {{ $labels.type }} role {{ $labels.role }} -- a decider run for an issue ended failed after the router''s retry window (the role''s max_dispatch_retries and the event''s expiry), and the router does not run it again until that issue changes. This rule cannot tell whether the issue changed since the failure: the counter carries no per-entity label, so it approximates "a failed decider run with no later change" by "a failed decider run in the last hour". The handler error text and the eventlog name the issue. The first failure of a role after a pg-router restart is not counted (increase() takes a new series'' first sample as its baseline). Every failed attempt, retried or not, still counts in pg_router_failures_total.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (type, role) (increase(pg_router_dispatch_failed_total{type="issue.changed"}[1h])) >= 1
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # Triager failures (pg2-u2yub, operator-extracted from pg2-68005's triager
       # follow-ups): an escalation-triage role's handler failures are counted
       # by internal/metrics OnHandlerFailure as class=handler-error,

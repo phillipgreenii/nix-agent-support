@@ -22,6 +22,17 @@ type DispatchRetryObserver interface {
 	OnDispatchRetry(role, class string)
 }
 
+// DispatchFailedObserver is notified once per dispatch that ENDED failed: a
+// handler error that is not handed back for a dispatch re-run (a deterministic
+// failure, or a transient one whose retries are spent or whose window is closed).
+// A transient attempt that is re-run reaches DispatchRetryObserver instead, so the
+// two are mutually exclusive per attempt, unlike HandlerFailureObserver, which
+// sees every failed attempt. The production implementation is metrics.Emitter's
+// pg_router_dispatch_failed_total{type,role}. nil disables the notification.
+type DispatchFailedObserver interface {
+	OnDispatchFailed(evtType, listenerID string)
+}
+
 // classifyTransient reports whether err is a transient handler failure worth
 // one more bounded attempt, and which class (see transient.Classify).
 func classifyTransient(err error) (class string, ok bool) {

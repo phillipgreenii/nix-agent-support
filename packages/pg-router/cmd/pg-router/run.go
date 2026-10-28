@@ -393,6 +393,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
 	// pg_router_dispatch_retries_total{role,class} (bead pg2-yu5y2).
 	o.DispatchRetryObserver = emitter
+	// pg_router_dispatch_failed_total{type,role}: a dispatch that ended failed.
+	o.DispatchFailedObserver = emitter
 	// pg_router_role_{last_progress_age_seconds,unsuccessful_since_progress,
 	// busy_since_progress}{role}, counted in roleListener.Offer (docket pg2-12gr4.8).
 	o.RoleProgressObserver = emitter

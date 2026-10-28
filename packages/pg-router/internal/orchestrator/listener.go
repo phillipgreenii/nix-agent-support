@@ -210,6 +210,9 @@ type roleListener struct {
 	// dispatch (bead pg2-yu5y2), captured at construction like the observers
 	// above; nil disables the notification, not the retry.
 	retryObs DispatchRetryObserver
+	// failedObs is notified of a dispatch that ended failed (not re-run),
+	// captured at construction like the observers above; nil disables it.
+	failedObs DispatchFailedObserver
 	// progressObs is notified of each offer's outcome for the role-progress
 	// gauges, captured at construction like the observers above; nil disables it.
 	progressObs RoleProgressObserver
@@ -242,6 +245,7 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		reg: o.Registry, resourceLimitObs: o.ResourceLimitObserver,
 		handlerFailureObs: o.HandlerFailureObserver,
 		retryObs:          o.DispatchRetryObserver,
+		failedObs:         o.DispatchFailedObserver,
 		progressObs:       o.RoleProgressObserver,
 		skippedObs:        o.SkippedObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
@@ -525,6 +529,10 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
 	}
 	l.retries.forget(evt.ID)
+	if err != nil && l.failedObs != nil {
+		// The dispatch ended failed: no re-run follows (shouldRetry said no above).
+		l.failedObs.OnDispatchFailed(evt.Type, l.role.Name)
+	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err, meta)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone, StartedAt: adopted}
 }

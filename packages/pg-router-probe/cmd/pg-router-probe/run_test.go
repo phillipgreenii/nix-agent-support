@@ -353,6 +353,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-router-budget-stops",
 		"pg-router-upstream-killed",
 		"pg-router-queue-slow-growth",
+		"pg-router-event-dispatch-failed",
 		"pg-conn-jira-daemon-down",
 		"pg-conn-jira-query-stale",
 		"pg-conn-jira-consumer-stuck",

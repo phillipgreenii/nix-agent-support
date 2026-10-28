@@ -124,6 +124,11 @@ import (
 //     over 6h while its consumer IS working, which pg-router-queue-stalled
 //     cannot see (pg2-53n39 added it, pg2-fp65l registered it). The rule
 //     carries no escalation label, so its bead goes to the triager.
+//   - pg-router-event-dispatch-failed: a dispatch for an issue.changed event
+//     ended failed after the retry window (pg_router_dispatch_failed_total), so
+//     the issue waits for its next change; the rule cannot tell whether the
+//     issue changed since (docket pg2-2qyyh.5). The rule carries no escalation
+//     label, so its bead goes to the triager.
 //   - the eleven pg-conn-jira-* rules of the Jira daemon's alert file
 //     (packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml,
 //     docket pg2-2qyyh.2): daemon-down, query-stale, consumer-stuck, settle-holding,
@@ -174,6 +179,7 @@ var registeredRuleUIDs = []string{
 	"pg-router-budget-stops",
 	"pg-router-upstream-killed",
 	"pg-router-queue-slow-growth",
+	"pg-router-event-dispatch-failed",
 	"pg-conn-jira-daemon-down",
 	"pg-conn-jira-query-stale",
 	"pg-conn-jira-consumer-stuck",

@@ -568,6 +568,14 @@ sequenceDiagram
     (`DEC-OBS-3`). The other post-accept classes are
     **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
     its outcomes is the handler's own concern on the handler's own surface;
+  - **dispatch_failed** — counter, per `type` and `role`: a **dispatch that ended failed**, once per
+    dispatch: a handler error that the core does **not** re-run (a deterministic failure, or a
+    transient one whose bounded re-runs are spent or whose retry window has closed), or a panic
+    recovered from a listener's offer. A transient attempt the core re-runs is **not** counted here
+    (it counts under `dispatch_retries`), and the **failure rate** member above keeps its own labels
+    and still counts every failed attempt. `type` is bounded by the configured bindings and `role`
+    by the configured roles (`DEC-OBS-5`). It is the per-event source for an alert on a failed run
+    that nothing will re-run until the entity changes again (`DEC-OBS-3`, amended);
   - **unconsumed-expired** — counter, per `type`: events that expired with no handler accepting them,
     which under `INV-EVT-4` is a **genuine miss** and is the concrete "no event misses" signal
     (`INV-DISP-3`, its **declared but inactive this run** case together with the ordinary miss);
