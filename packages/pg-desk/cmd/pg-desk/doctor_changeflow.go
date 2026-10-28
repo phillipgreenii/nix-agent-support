@@ -39,6 +39,10 @@ const consumerStalledMultiple = 3
 //     --router-config is given, otherwise consumer_stale_after);
 //   - the sweep sizing bound active_count / N x poll_interval <= D, only
 //     when --router-config supplies the poll interval;
+//   - the issue change-flow gates of the owning backends (doctorIssueGates):
+//     dispatch and watched mismatches, an id served by two backends, a backend
+//     with active entities and no watched query, a dropped feed key, an old
+//     failed-ingest entry and a baseline open for more than a day;
 //   - and, reported but never a failure, the entities with repeated degraded
 //     hydrations, the active Jira issues stored without a status category,
 //     and (with --router-config) the decider roles bound per type.
@@ -81,6 +85,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 	}
 
 	doctorWatchedQueries(ctx, w, st, cfg, failures)
+	doctorIssueGates(ctx, w, st, cfg, now, failures)
 	doctorStalledConsumers(w, checkCfg, rc, flow, now, failures)
 	doctorSweepBound(w, checkCfg, rc, flow, failures)
 	doctorRepeatedDegraded(w, flow)

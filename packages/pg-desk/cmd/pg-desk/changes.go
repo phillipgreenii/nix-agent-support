@@ -19,6 +19,12 @@ import (
 // tests replace it.
 var changesNow = func() time.Time { return time.Now().UTC() }
 
+// changesCapabilityReader picks the reader of the first-poll dispatch check
+// (the gatherer in production). A nil result skips the check; tests that run
+// `changes` many times in one process replace it so only the test that is
+// about the check pays for it.
+var changesCapabilityReader = func(g *gather.Gatherer) changes.Capabilityer { return g }
+
 func init() {
 	for _, t := range typedEntityTypes {
 		typeGroup(t).AddCommand(newChangesCmd(t))
@@ -120,13 +126,16 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 		Store: st,
 		// The gatherer lists and reads a backend's feed; the pipeline hydrates
 		// and commits (a listed entity, or a feed row of an owning backend).
-		Lister:   gatherer,
-		Feeder:   gatherer,
-		Members:  gatherer,
-		Hydrator: pl,
-		Ingester: pl,
-		Now:      changesNow,
-		Warn:     cmd.ErrOrStderr(),
+		Lister:  gatherer,
+		Feeder:  gatherer,
+		Members: gatherer,
+		// The first poll of the process checks the owning backends' dispatch
+		// configuration against their capabilities answers.
+		Capabilities: changesCapabilityReader(gatherer),
+		Hydrator:     pl,
+		Ingester:     pl,
+		Now:          changesNow,
+		Warn:         cmd.ErrOrStderr(),
 	}
 	jsonOut := resolveJSONOutput(f.jsonOut)
 	out, err := eng.Run(cmd.Context(), changes.Options{

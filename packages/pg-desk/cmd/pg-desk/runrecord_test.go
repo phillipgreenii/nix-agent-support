@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
@@ -27,6 +28,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	runRecordLogPath = func() string { return filepath.Join(dir, runRecordLogName) }
+	// The once-per-process dispatch check of `issue changes` would otherwise
+	// land on whichever test polls first; the one test about it opts in.
+	changesCapabilityReader = func(*gather.Gatherer) changes.Capabilityer { return nil }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

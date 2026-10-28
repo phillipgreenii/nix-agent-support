@@ -85,8 +85,12 @@ type Engine struct {
 	// Members reads an owning backend's query members and baseline state for
 	// the unflagged-member count; nil skips that read.
 	Members MemberReader
-	Now     func() time.Time
-	Warn    io.Writer
+	// Capabilities reads a backend's capabilities answer for the start-up
+	// dispatch check of the first issue poll of a process; nil skips the
+	// check.
+	Capabilities Capabilityer
+	Now          func() time.Time
+	Warn         io.Writer
 
 	// setMeta replaces Store.SetMeta for the best-effort listing-status
 	// write; tests use it to inject a write failure.
@@ -142,6 +146,9 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	// An owning backend's queries are read from its change feed; every other
 	// query is listed and diffed exactly as before.
 	queries, owningQueries := e.splitQueries(opts.EntityType, selected)
+	// The first issue poll of a process checks the configured dispatch against
+	// each owning backend's own capabilities answer.
+	e.startupDispatchCheck(ctx, opts.EntityType)
 	// Liveness: every real call stamps the consumer's seen_at, even one that
 	// ends in total failure [design 6.9].
 	if err := e.Store.RegisterConsumer(opts.Consumer, opts.EntityType, e.now()); err != nil {

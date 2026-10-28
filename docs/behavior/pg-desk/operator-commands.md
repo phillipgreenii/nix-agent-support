@@ -372,6 +372,13 @@ has been cut over to the change-flow schema:
     about itself, and an issue id served by watched queries of two different backends;
   - active `issue` entities of a backend for which no watched query is declared, so that a missing
     declaration is loud.
+
+  Each gate prints one line, `<gate>: ok`, `<gate>: FAIL (<what tripped it>)` naming the backend instance,
+  query or entity, or `<gate>: UNREACHABLE (<error>)` when the backend's daemon answered `unavailable` (a
+  degraded run, never a pass); a FAIL and an UNREACHABLE both fail `doctor`. The dispatch comparison is
+  also run once, at the start of the first `issue changes` poll of a process: each mismatch is logged as a
+  warning line and the outcome is stored under `change_flow.dispatch_check.<instance>`.
+
 - **Issue change-flow reports** (never gates): the watched count per backend, the member count of each
   watched query, and an entity pg-desk holds that nothing watches.
 - **Repeated degraded hydrations.** The entities whose hydration degraded or failed on at least two

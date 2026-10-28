@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -815,5 +817,355 @@ func TestSyncErrorRemedyIsPhaseAware(t *testing.T) {
 	got := describeSyncRetry(r, true, syncErrorRemedy(store.NewSchemaVersion, "plan", "o/r#2"))
 	if strings.Contains(got, "; fix the cause, then pg-desk reconcile") {
 		t.Errorf("the schema-2 indicator still names the failing command: %s", got)
+	}
+}
+
+// ---- Issue change-flow gates of the owning backends (T-8, doctor half) ----
+
+const (
+	gateInst = "owning-demo"
+
+	gateCapsOK = `{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo",` +
+		`"vocabulary":{"owns_changes":true},"queries":{"q-mine":{"watched":true},"q-team":{"watched":true}}}]}`
+	gateHealthOK = `{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo","status":{"queries":[` +
+		`{"name":"q-mine","baseline_at":"2026-10-01T00:00:00Z"},{"name":"q-team","baseline_open_age_seconds":3600}]}}]}`
+	gateUnavailable = `{"error":{"code":"unavailable","message":"daemon is down"}}`
+)
+
+// gateFixture is a cut-over store and a config with two owning queries on one
+// instance and two beads-style queries on two other instances, over a scripted
+// pg-connector answering `issue capabilities` and `issue health` from files.
+type gateFixture struct {
+	t    *testing.T
+	seed *store.Store
+	cfg  *config.Config
+	dir  string
+}
+
+func newGateFixture(t *testing.T) *gateFixture {
+	t.Helper()
+	cfg := openTestConfig("o/r")
+	cfg.TicketPatterns = []string{`[A-Z][A-Z0-9]+-[0-9]+`}
+	cfg.Watch.Issue.Queries = []string{"q-mine", "q-team", "bd-a", "bd-b"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"q-mine": {Instance: gateInst, OwnsChanges: true},
+		"q-team": {Instance: gateInst, OwnsChanges: true},
+		"bd-a":   {Instance: "beads-a"},
+		"bd-b":   {Instance: "beads-b"},
+	}
+	f := &gateFixture{t: t, cfg: cfg, dir: t.TempDir()}
+	f.seed = newSchemaDoctor(t, cfg)
+	orig := doctorProbeQuery
+	t.Cleanup(func() { doctorProbeQuery = orig })
+	doctorProbeQuery = func(context.Context, *config.Config, string, string) error { return nil }
+	f.caps(gateCapsOK, 0)
+	f.health(gateHealthOK, 0)
+	installFakePGConnector(t, fmt.Sprintf(`D=%q
+echo "$*" >> "$D/calls.log"
+case "$2" in
+  capabilities) cat "$D/caps.json"; exit "$(cat "$D/caps.exit")" ;;
+  health) cat "$D/health.json"; exit "$(cat "$D/health.exit")" ;;
+esac
+echo '{"entities":[]}'`, f.dir))
+	return f
+}
+
+func (f *gateFixture) write(name, body string) {
+	f.t.Helper()
+	if err := os.WriteFile(filepath.Join(f.dir, name), []byte(body), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *gateFixture) caps(body string, exit int) {
+	f.write("caps.json", body)
+	f.write("caps.exit", fmt.Sprint(exit))
+}
+
+func (f *gateFixture) health(body string, exit int) {
+	f.write("health.json", body)
+	f.write("health.exit", fmt.Sprint(exit))
+}
+
+// seedOwningEntity writes an issue entity carrying the owning backend (active
+// or deactivated).
+func (f *gateFixture) seedOwningEntity(id string, active bool) {
+	f.t.Helper()
+	inst := gateInst
+	at := doctorNow.Format(time.RFC3339)
+	e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{"issue_show":{"state":"open","status_category":"new"}}`, AsOf: at}
+	if _, err := f.seed.WriteEntityStateWithLogOpts(e, 0, at, active, nil, []string{"added"}, "test", at, store.WriteOptions{Backend: &inst}); err != nil {
+		f.t.Fatalf("seed owning entity %s: %v", id, err)
+	}
+}
+
+func (f *gateFixture) failIngest(id string, firstFailedAt time.Time) {
+	f.t.Helper()
+	if err := f.seed.RecordIngestFailure(store.IngestFailure{
+		Instance: gateInst, EntityID: id, Seq: 7, StoreIdentity: "s1", Kinds: []string{"status_changed"},
+		FirstFailedAt: firstFailedAt.UTC().Format(time.RFC3339), LastError: "hydration failed: boom",
+	}); err != nil {
+		f.t.Fatalf("record ingest failure: %v", err)
+	}
+}
+
+// wantGate runs doctor and requires failure naming gate with every fragment in
+// the gate's own output line.
+func wantGateFailure(t *testing.T, gate, verdict string, fragments ...string) {
+	t.Helper()
+	stdout, err := runDoctorCmd(t)
+	if err == nil || !strings.Contains(err.Error(), gate) {
+		t.Fatalf("doctor err = %v, want a failure naming %q\n%s", err, gate, stdout)
+	}
+	var line string
+	for _, l := range strings.Split(stdout, "\n") {
+		if strings.Contains(l, gate+": "+verdict) {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("stdout has no %q line:\n%s", gate+": "+verdict, stdout)
+	}
+	for _, frag := range fragments {
+		if !strings.Contains(line, frag) {
+			t.Errorf("gate line lacks %q:\n%s", frag, line)
+		}
+	}
+}
+
+func TestDoctorIssueGatesCleanConfigurationPasses(t *testing.T) {
+	f := newGateFixture(t)
+	f.seedOwningEntity("J-1", true)
+	// A cursor_expired record older than 24 hours and a young failed ingest
+	// both pass.
+	if err := f.seed.SetMeta(changes.MetaFeedCursorExpiredPrefix+gateInst, doctorNow.Add(-25*time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	f.failIngest("J-9", doctorNow.Add(-5*time.Minute))
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor on a clean owning configuration: %v\n%s", err, stdout)
+	}
+	for _, gate := range []string{gateNameDispatch, gateNameTwoBackends, gateNameNoWatchedQuery, gateNameCursorExpired, gateNameFailedIngestAge, gateNameBaselineOpen} {
+		if !strings.Contains(stdout, gate+": ok") {
+			t.Errorf("stdout lacks %q:\n%s", gate+": ok", stdout)
+		}
+	}
+	if !strings.Contains(stdout, "issue change-flow gates:") {
+		t.Errorf("stdout lacks the gates heading:\n%s", stdout)
+	}
+}
+
+func TestDoctorIssueGatesDispatchMismatchesNameInstanceAndQuery(t *testing.T) {
+	cases := []struct {
+		name  string
+		caps  string
+		exit  int
+		frags []string
+	}{
+		{
+			"owns_changes differs", `{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":false},` +
+				`"queries":{"q-mine":{"watched":true},"q-team":{"watched":true}}}]}`, 0,
+			[]string{"owns_changes_differs", gateInst},
+		},
+		{
+			"query missing", `{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":true},` +
+				`"queries":{"q-mine":{"watched":true}}}]}`, 0,
+			[]string{"query_missing", gateInst, "q-team"},
+		},
+		{
+			"watched differs", `{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":true},` +
+				`"queries":{"q-mine":{"watched":true},"q-team":{"watched":false}}}]}`, 0,
+			[]string{"watched_differs", gateInst, "q-team"},
+		},
+		{
+			"instance unanswered", `{"error":{"code":"boom","message":"capabilities exploded"}}`, 1,
+			[]string{"instance_unanswered", gateInst},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGateFixture(t)
+			f.caps(tc.caps, tc.exit)
+			wantGateFailure(t, gateNameDispatch, "FAIL", tc.frags...)
+		})
+	}
+}
+
+func TestDoctorIssueGatesAnIDServedByTwoBackendsFails(t *testing.T) {
+	f := newGateFixture(t)
+	// Two non-owning queries of two different instances hold the same id, and
+	// the entity row has no backend column yet.
+	for _, q := range []string{"bd-a", "bd-b"} {
+		if err := f.seed.SetMeta("change_flow.watchset.issue."+q, `["pg2-77"]`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := doctorNow.Format(time.RFC3339)
+	if _, err := f.seed.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pg2-77", Facts: `{}`, AsOf: at}, 0, at, true, []string{"added"}, "test", at); err != nil {
+		t.Fatal(err)
+	}
+	wantGateFailure(t, gateNameTwoBackends, "FAIL", "pg2-77", "beads-a", "beads-b")
+}
+
+func TestDoctorIssueGatesBackendWithActiveEntitiesAndNoWatchedQueryFails(t *testing.T) {
+	f := newGateFixture(t)
+	f.seedOwningEntity("J-1", true)
+	f.caps(`{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":true},`+
+		`"queries":{"q-mine":{"watched":false},"q-team":{"watched":false}}}]}`, 0)
+	wantGateFailure(t, gateNameNoWatchedQuery, "FAIL", gateInst, "no watched query")
+}
+
+func TestDoctorIssueGatesNoWatchedQueryIgnoresBackendsWithoutActiveEntities(t *testing.T) {
+	f := newGateFixture(t)
+	// The instance reports no watched query but holds no active issue entity;
+	// a beads entity (another backend) never trips the gate either.
+	f.caps(`{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":true},`+
+		`"queries":{"q-mine":{"watched":false},"q-team":{"watched":false}}}]}`, 0)
+	f.seedOwningEntity("J-1", false)
+	other := "beads-a"
+	at := doctorNow.Format(time.RFC3339)
+	if _, err := f.seed.WriteEntityStateWithLogOpts(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pg2-1", Facts: `{}`, AsOf: at},
+		0, at, true, nil, []string{"added"}, "test", at, store.WriteOptions{Backend: &other}); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _ := runDoctorCmd(t)
+	if !strings.Contains(stdout, gateNameNoWatchedQuery+": ok") {
+		t.Errorf("the gate tripped without an active entity of the owning instance:\n%s", stdout)
+	}
+}
+
+func TestDoctorIssueGatesCursorExpiredFailsOnlyWhileYoungerThanADay(t *testing.T) {
+	f := newGateFixture(t)
+	key := changes.MetaFeedCursorExpiredPrefix + gateInst
+	if err := f.seed.SetMeta(key, doctorNow.Add(-23*time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	wantGateFailure(t, gateNameCursorExpired, "FAIL", gateInst, "dropped-key runbook")
+
+	// A record of 24 hours or more passes, and the key is never deleted.
+	if err := f.seed.SetMeta(key, doctorNow.Add(-24*time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("an expiry older than a day must pass: %v\n%s", err, stdout)
+	}
+	if _, found, _ := f.seed.GetMeta(key); !found {
+		t.Error("doctor deleted the cursor_expired record")
+	}
+}
+
+func TestDoctorIssueGatesFailedIngestOlderThanItsBoundFails(t *testing.T) {
+	f := newGateFixture(t)
+	f.failIngest("J-9", doctorNow.Add(-31*time.Minute)) // default bound is 30m
+	wantGateFailure(t, gateNameFailedIngestAge, "FAIL", gateInst, "J-9", "30m0s")
+
+	// The configured bound is the one in effect.
+	f.cfg.Hydration.IngestFailedMaxAge = "2h"
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("an entry younger than the configured 2h bound must pass: %v\n%s", err, stdout)
+	}
+}
+
+func TestDoctorIssueGatesBaselineOpenMoreThanADayFailsNamingQueryAndMembers(t *testing.T) {
+	f := newGateFixture(t)
+	f.health(`{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[`+
+		`{"name":"q-mine","baseline_at":"2026-10-01T00:00:00Z"},{"name":"q-team","baseline_open_age_seconds":90000}]}}]}`, 0)
+	f.failIngest("J-9", doctorNow.Add(-time.Minute))
+	wantGateFailure(t, gateNameBaselineOpen, "FAIL", gateInst, "q-team", "90000", "J-9")
+}
+
+func TestDoctorIssueGatesBaselineOpenUnderADayPasses(t *testing.T) {
+	f := newGateFixture(t)
+	f.health(`{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[`+
+		`{"name":"q-team","baseline_open_age_seconds":3600}]}}]}`, 0)
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("a baseline open for 3600s must pass: %v\n%s", err, stdout)
+	}
+	// The age is read through `issue health`, never the feed wire.
+	calls, _ := os.ReadFile(filepath.Join(f.dir, "calls.log"))
+	if !strings.Contains(string(calls), "issue health --backend owning-demo") || strings.Contains(string(calls), "changes") {
+		t.Errorf("calls:\n%s", calls)
+	}
+}
+
+func TestDoctorIssueGatesUnavailableDaemonIsUnreachableNotAPass(t *testing.T) {
+	f := newGateFixture(t)
+	f.caps(gateUnavailable, 1)
+	f.health(gateUnavailable, 1)
+	stdout, err := runDoctorCmd(t)
+	if err == nil {
+		t.Fatalf("doctor passed with the daemon unavailable:\n%s", stdout)
+	}
+	for _, gate := range []string{gateNameDispatch, gateNameNoWatchedQuery, gateNameBaselineOpen} {
+		if !strings.Contains(stdout, gate+": UNREACHABLE (") {
+			t.Errorf("stdout lacks %q:\n%s", gate+": UNREACHABLE", stdout)
+		}
+		if !strings.Contains(err.Error(), gate) {
+			t.Errorf("failure list %q lacks %q", err, gate)
+		}
+	}
+	if strings.Contains(stdout, "instance_unanswered") {
+		t.Errorf("an unavailable daemon was reported as a mismatch, not as unreachable:\n%s", stdout)
+	}
+}
+
+func TestDoctorIssueGatesWithoutOwningBackendRunsNoDaemonCall(t *testing.T) {
+	f := newGateFixture(t)
+	f.cfg.Watch.Issue.Queries = []string{"bd-a"}
+	f.cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"bd-a": {Instance: "beads-a"}}
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	if calls, _ := os.ReadFile(filepath.Join(f.dir, "calls.log")); strings.Contains(string(calls), "capabilities") || strings.Contains(string(calls), "health") {
+		t.Errorf("a beads-only configuration asked an owning backend:\n%s", calls)
+	}
+}
+
+// The first `issue changes` poll of a process runs the dispatch check through
+// the real command: the mismatch lands as a warning line and in the meta key.
+func TestChangesFirstPollLogsDispatchMismatchAndRecordsIt(t *testing.T) {
+	origReader := changesCapabilityReader
+	t.Cleanup(func() { changesCapabilityReader = origReader })
+	changesCapabilityReader = func(g *gather.Gatherer) changes.Capabilityer { return g }
+	changes.ResetStartupDispatchCheck()
+	t.Cleanup(changes.ResetStartupDispatchCheck)
+
+	f := owningFeedFixture(t)
+	feedConnector(t, f, oneRowFeed)
+	f.showIssue("J-1", "2026-09-30T00:00:00Z")
+	// feedConnector's script has no capabilities verb: answer it with a
+	// backend that reports the owning query unwatched.
+	f.write("caps.json", `{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":true},"queries":{"jira-q":{"watched":false}}}]}`)
+	installFakePGConnector(t, fmt.Sprintf(`D=%q
+echo "$*" >> "$D/calls.log"
+v="$2"
+if [ "$v" = capabilities ]; then cat "$D/caps.json"; exit 0; fi
+if [ "$v" = changes ]; then cat "$D/feed.json"; exit 0; fi
+if [ "$v" = changes-ack ]; then echo '{"consumer":"pg-desk","acked_seq":6}'; exit 0; fi
+if [ "$v" = health ]; then echo '{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}'; exit 0; fi
+if [ "$v" = list ]; then echo '{"entities":[],"present_ids":[],"truncated":false}'; exit 0; fi
+if [ "$v" = show ]; then cat "$D/show-$3.json"; exit 0; fi
+exit 99`, f.dir))
+
+	_, stderr, rerr := runChangesCmd(t, "issue", "--consumer", "router", "--json")
+	if rerr != nil {
+		t.Fatalf("changes: %v", rerr)
+	}
+	if !strings.Contains(stderr, "dispatch check: watched_differs: backend owning-demo query jira-q") {
+		t.Errorf("stderr lacks the mismatch warning:\n%s", stderr)
+	}
+	v, found, merr := f.seed.GetMeta(changes.MetaDispatchCheckPrefix + feedTestInstance)
+	if merr != nil || !found || !strings.Contains(v, "watched_differs") || !strings.Contains(v, `"at":"2026-10-01T12:00:00Z"`) {
+		t.Errorf("meta = %q %v %v, want the recorded mismatch", v, found, merr)
+	}
+	// A second poll of the same process does not check again.
+	_, stderr, rerr = runChangesCmd(t, "issue", "--consumer", "router", "--json")
+	if rerr != nil || strings.Contains(stderr, "dispatch check") {
+		t.Errorf("second poll: err = %v, stderr = %q", rerr, stderr)
 	}
 }
