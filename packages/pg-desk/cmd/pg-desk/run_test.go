@@ -831,7 +831,8 @@ func TestHydrateJiraIssueWithNoOwningInstanceKeepsTheUnpinnedPath(t *testing.T) 
 }
 
 // A NULL-backend id that resolves to an owning backend is in the gate's
-// scope: a change row appended for it is withheld until it is watched.
+// scope (as is every issue entity): a change row appended for it is withheld
+// until it is watched.
 func TestHydrateJiraIssueANullBackendOwningIDIsGatedUntilWatched(t *testing.T) {
 	f := newBackendFixture(t, "PROJ-9")
 	st, err := deskStoreOpen()

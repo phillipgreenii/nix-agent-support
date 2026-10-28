@@ -37,7 +37,18 @@ func (s *Store) SetGateScope(scope GateScope) {
 	s.gateScope.Store(&scope)
 }
 
-// OwningGateScope is the first rollout scope of the gate: an entity of type
+// AllIssueGateScope is the final scope of the gate (the step 4 scope): every
+// entity of type issue is in scope, whatever its backend column says, so an
+// issue entity that is not watched appends no change_log row for any cause.
+// It reads nothing and never errors; a PR or thread entity is out of scope.
+func AllIssueGateScope() GateScope {
+	return func(_ *sql.Tx, _, entityType, _, _ string) (bool, error) {
+		return entityType == "issue", nil
+	}
+}
+
+// OwningGateScope is the first rollout scope of the gate (the step 2 scope,
+// kept for its tests; production installs AllIssueGateScope): an entity of type
 // issue whose backend column names an instance in owning, or whose backend is
 // NULL and whose id resolve maps to an owning instance (the resolver covers
 // the ids that predate the backend column's backfill; a nil resolve resolves

@@ -2,7 +2,6 @@ package changes
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -364,7 +363,7 @@ func TestFailedOrDegradedOrphanReadLeavesItWatchedAndDueAgain(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, st, h := newOrphanEngine(t)
-			e.Store.SetGateScope(issueGateScope)
+			e.Store.SetGateScope(store.AllIssueGateScope())
 			seedOrphan(t, st, "bd-o1")
 			okBefore := "2026-10-01T10:00:00Z"
 			attemptBefore := "2026-10-01T10:00:01Z"
@@ -401,12 +400,6 @@ func TestFailedOrDegradedOrphanReadLeavesItWatchedAndDueAgain(t *testing.T) {
 	}
 }
 
-// issueGateScope is a test delivery-gate scope that is true for every issue,
-// so the tests do not depend on the owning-backend scope of the gate.
-func issueGateScope(_ *sql.Tx, _, entityType, _, _ string) (bool, error) {
-	return entityType == "issue", nil
-}
-
 func changeRows(t *testing.T, st *store.Store, id string) []store.ChangeRecord {
 	t.Helper()
 	all, err := st.ListChangesAfter("issue", 0, 0)
@@ -427,7 +420,7 @@ func changeRows(t *testing.T, st *store.Store, id string) []store.ChangeRecord {
 // read times, and the entity is not read again at the next poll.
 func TestNotFoundOrphanReadAppendsOneRemovedRowThenEndsTheWatch(t *testing.T) {
 	e, st, h := newOrphanEngine(t)
-	e.Store.SetGateScope(issueGateScope)
+	e.Store.SetGateScope(store.AllIssueGateScope())
 	seedOrphan(t, st, "bd-o1")
 	h.notFound["bd-o1"] = true
 	e.Lister = fakeLister{res: listing()}
@@ -477,7 +470,7 @@ func TestNotFoundOrphanReadAppendsOneRemovedRowThenEndsTheWatch(t *testing.T) {
 // then the flag is cleared and the entity is inactive; no removed row.
 func TestClosedOrphanReadAppendsClosedThenEndsTheWatch(t *testing.T) {
 	e, st, h := newOrphanEngine(t)
-	e.Store.SetGateScope(issueGateScope)
+	e.Store.SetGateScope(store.AllIssueGateScope())
 	seedOrphan(t, st, "bd-o1")
 	h.facts = map[string]string{"bd-o1": `{"issue_show":{"id":"bd-o1","state":"closed","title":"t"}}`}
 	h.kindsOf = map[string][]string{"bd-o1": {"closed"}}

@@ -104,15 +104,18 @@ func TestRefreshIsRegisteredUnderEveryTypeGroup(t *testing.T) {
 func TestRefreshHappyPathHydratesOneEntityAndExitsZero(t *testing.T) {
 	for _, tc := range []struct {
 		typ, id string
+		extra   []string
 		prep    func(f *refreshFixture)
 	}{
-		{"issue", "bd-1", func(f *refreshFixture) { f.showIssue("bd-1", "2026-09-30T00:00:00Z") }},
-		{"thread", "C1/1700.5", func(f *refreshFixture) { f.showThread("C1/1700.5") }},
+		// An issue row is appended only for a watched issue, so the happy path
+		// asks for the one-off watch; the unwatched contrast is its own test.
+		{"issue", "bd-1", []string{"--watch"}, func(f *refreshFixture) { f.showIssue("bd-1", "2026-09-30T00:00:00Z") }},
+		{"thread", "C1/1700.5", nil, func(f *refreshFixture) { f.showThread("C1/1700.5") }},
 	} {
 		t.Run(tc.typ, func(t *testing.T) {
 			f := newRefreshFixture(t)
 			tc.prep(f)
-			out, err := runRefreshCmd(t, tc.typ, tc.id)
+			out, err := runRefreshCmd(t, tc.typ, append([]string{tc.id}, tc.extra...)...)
 			if err != nil {
 				t.Fatalf("refresh: %v", err)
 			}
@@ -138,10 +141,26 @@ func TestRefreshHappyPathHydratesOneEntityAndExitsZero(t *testing.T) {
 	}
 }
 
-func TestRefreshFailureKeepsSnapshotAndEntityStaysDue(t *testing.T) {
+// An unwatched issue is hydrated by refresh but appends no row (INV-ICD-16).
+func TestRefreshOfAnUnwatchedIssueAppendsNoRow(t *testing.T) {
 	f := newRefreshFixture(t)
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
 	if _, err := runRefreshCmd(t, "issue", "bd-1"); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	e := f.entity("issue", "bd-1")
+	if e.Inactive || e.HydratedAt == "" || e.Version == 0 {
+		t.Errorf("entity after refresh = %+v, want active and hydrated", e)
+	}
+	if hist, herr := f.seed.ListEntityHistory("o/r", "issue", "bd-1", 0); herr != nil || len(hist) != 0 {
+		t.Errorf("history = %+v, %v; want no record for an unwatched issue", hist, herr)
+	}
+}
+
+func TestRefreshFailureKeepsSnapshotAndEntityStaysDue(t *testing.T) {
+	f := newRefreshFixture(t)
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	if _, err := runRefreshCmd(t, "issue", "bd-1", "--watch"); err != nil {
 		t.Fatalf("first refresh: %v", err)
 	}
 	before := f.entity("issue", "bd-1")
@@ -402,7 +421,7 @@ func newBackendFixture(t *testing.T, seedIDs ...string) *backendFixture {
 	for _, id := range seedIDs {
 		ents = append(ents, [2]string{"issue", id})
 	}
-	open, seed := seedLinkStore(t, ents...)
+	open, seed := seedLinkStoreWatching(t, false, ents...)
 	cfg := backendTestConfig()
 	withOpenSeams(t, cfg, open)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())

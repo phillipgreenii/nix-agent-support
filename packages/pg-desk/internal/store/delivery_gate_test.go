@@ -328,3 +328,67 @@ func TestDeliveryGate_ScopeErrorPropagates(t *testing.T) {
 		t.Errorf("err = %v, want boom", err)
 	}
 }
+
+// The step 4 scope: every issue entity is gated whatever its backend column
+// says (an owning instance, a beads instance, NULL), and a non-issue entity is
+// not.
+func TestAllIssueGateScope_GatesEveryIssueRegardlessOfBackend(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	s.SetGateScope(AllIssueGateScope())
+	for _, tc := range []struct{ id, backend string }{
+		{"K-1", gateOwning}, {"B-1", gateOther}, {"PLAIN-1", ""},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			v := gateSeed(t, s, tc.id, tc.backend, nil)
+			base := gateRows(t, s, tc.id)
+			gateWrite(t, s, tc.id, v, []string{"fields_changed"}, WriteOptions{})
+			if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, tc.id, []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq != 0 {
+				t.Errorf("AppendEntityChange = (%d, %v), want (0, nil)", seq, err)
+			}
+			if _, changed, err := s.SetAnnotationSeq(KVAnnotation{
+				Repo: gateRepo, EntityType: gateIssueTyp, EntityID: tc.id, Key: "wip", Value: "true",
+				Origin: gateOrigin, SetBy: "op", SetAt: gateAt,
+			}); err != nil || !changed {
+				t.Errorf("annotation = (%v, %v), want (true, nil)", changed, err)
+			}
+			if got := gateRows(t, s, tc.id); got != base {
+				t.Errorf("rows = %d, want %d: an unwatched issue appended", got, base)
+			}
+
+			// Watched, the same entity appends again.
+			if err := s.SetEntityColumns(gateRepo, gateIssueTyp, tc.id, nil, gateBool(true)); err != nil {
+				t.Fatal(err)
+			}
+			if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, tc.id, []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
+				t.Errorf("watched AppendEntityChange = (%d, %v), want a sequence", seq, err)
+			}
+		})
+	}
+
+	// A PR entity is not an issue.
+	if _, err := s.WriteEntityWithLog(
+		Entity{Repo: gateRepo, EntityType: "pr", EntityID: "example/repo#1", Facts: `{}`, AsOf: gateAt},
+		0, []string{"created"}, "sync", gateAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := s.ListChangesAfter("pr", 0, 10); err != nil || len(rows) != 1 {
+		t.Errorf("pr rows = %d, %v; want 1", len(rows), err)
+	}
+}
+
+// Under the all-issue scope a clearing write still appends its closed row of a
+// watched entity of ANY backend, and the row is readable after the clear.
+func TestAllIssueGateScope_ClosedRowOfAWatchedBeadsIssueSurvivesTheClear(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	s.SetGateScope(AllIssueGateScope())
+	v := gateSeed(t, s, "B-1", gateOther, gateBool(true))
+	base := gateRows(t, s, "B-1")
+	gateWrite(t, s, "B-1", v, []string{"closed"}, WriteOptions{ClearWatchedAfterAppend: true})
+	if got := gateRows(t, s, "B-1"); got != base+1 {
+		t.Errorf("rows = %d, want %d", got, base+1)
+	}
+	if e := gateEntity(t, s, "B-1"); e.Watched == nil || *e.Watched {
+		t.Errorf("watched = %v, want false", e.Watched)
+	}
+}

@@ -206,28 +206,24 @@ func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err er
 	return repo, repo + "#" + n, nil
 }
 
-// installIssueGate installs the delivery gate (INV-ICD-16) on st with the
-// scope cfg defines: an issue entity of an owning backend, or a NULL-backend
-// id that resolves to one, appends no change_log row until it is watched.
-// Every production store-open path calls it (directly, or through
-// openDeskStore, openRunStore and openGatedStore), so no write reaches
-// change_log around the gate.
+// installIssueGate installs the delivery gate (INV-ICD-16) on st: every issue
+// entity appends no change_log row until it is watched. Every production
+// store-open path calls it (directly, or through openDeskStore, openRunStore
+// and openGatedStore), so no write reaches change_log around the gate.
 func installIssueGate(st *store.Store, cfg *config.Config) {
 	pipeline.InstallIssueGate(st, cfg)
 }
 
-// openGatedStore opens through open and installs the gate from the config the
-// deskConfigLoad seam yields. A config that cannot be loaded lists no owning
-// instance, so nothing is in scope and no gate is installed; a verb that
-// needs the config fails on its own.
+// openGatedStore opens through open and installs the gate. The gate's scope
+// no longer depends on the configuration, so it is installed even when the
+// configuration cannot be loaded; a verb that needs the config fails on its
+// own.
 func openGatedStore(open func() (*store.Store, error)) (*store.Store, error) {
 	st, err := open()
 	if err != nil {
 		return nil, err
 	}
-	if cfg, cerr := deskConfigLoad(context.Background()); cerr == nil {
-		installIssueGate(st, cfg)
-	}
+	installIssueGate(st, nil)
 	return st, nil
 }
 

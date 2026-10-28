@@ -46,12 +46,12 @@ func (g *scriptedBackendGatherer) GatherEntityWatch(ctx context.Context, id, bac
 }
 
 // frPipeline is a pipeline over a fresh new-schema store with the delivery
-// gate installed for the owning instance.
+// production gate installed (every issue entity).
 func frPipeline(t *testing.T) (*Pipeline, *scriptedBackendGatherer) {
 	t.Helper()
 	g := &scriptedBackendGatherer{t: t, result: ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)}
 	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{"issue": g})
-	p.store.SetGateScope(store.OwningGateScope(map[string]bool{frInstance: true}, func(string) (string, bool) { return "", false }))
+	InstallIssueGate(p.store, nil)
 	return p, g
 }
 

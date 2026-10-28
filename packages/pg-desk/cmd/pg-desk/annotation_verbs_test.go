@@ -104,6 +104,25 @@ func TestAnnotateWritesRowAndOneChangeRecord(t *testing.T) {
 	wantOneAnnotationChange(t, seed, "issue", "K-1", []string{"created@sync"}, "decider:land.ready")
 }
 
+// An annotation on an unwatched issue is stored but appends no change row
+// (INV-ICD-16); the verb still succeeds.
+func TestAnnotateAnUnwatchedIssueStoresTheValueAndAppendsNoRow(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"issue", "K-1"})
+	off := false
+	if err := seed.SetEntityColumns("o/r", "issue", "K-1", nil, &off); err != nil {
+		t.Fatal(err)
+	}
+	withOpenSeams(t, linkTestConfig(), open)
+
+	if _, err := runGroupCmd(t, newAnnotateCmd, "issue", "K-1", "--key", "ready_to_land", "--value", "true"); err != nil {
+		t.Fatalf("annotate: %v", err)
+	}
+	wantAnnotation(t, seed, "issue", "K-1", "ready_to_land", "true", "pg-desk", "alice")
+	if got, want := kindsOf(t, seed, "issue", "K-1"), []string{"created@sync"}; !equalStrings(got, want) {
+		t.Errorf("history = %v, want %v (no row for an unwatched issue)", got, want)
+	}
+}
+
 func TestAnnotateReplacesAValue(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"})
 	withOpenSeams(t, linkTestConfig(), open)

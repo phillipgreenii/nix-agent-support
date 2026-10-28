@@ -44,7 +44,19 @@ func linkTestConfig() *config.Config {
 // seedLinkStore cuts a fresh store over and writes the named entities
 // (pr ids "o/r#N", issue ids as given), returning the open func and a seed
 // handle for further direct writes.
+//
+// The delivery gate covers every issue entity, so the issues seeded here are
+// WATCHED (the propagation and annotation tests expect their rows); the
+// unwatched contrast is seedLinkStoreWatching with false.
 func seedLinkStore(t *testing.T, ents ...[2]string) (open func() (*store.Store, error), seed *store.Store) {
+	t.Helper()
+	return seedLinkStoreWatching(t, true, ents...)
+}
+
+// seedLinkStoreWatching is seedLinkStore with the watched mark of the seeded
+// issue entities chosen: false leaves it NULL, as a hydration that never
+// watched the entity does.
+func seedLinkStoreWatching(t *testing.T, watchIssues bool, ents ...[2]string) (open func() (*store.Store, error), seed *store.Store) {
 	t.Helper()
 	path := storeAtVersion(t, "new")
 	open = func() (*store.Store, error) { return store.Open(path) }
@@ -65,9 +77,16 @@ func seedLinkStore(t *testing.T, ents ...[2]string) (open func() (*store.Store, 
 		); err != nil {
 			t.Fatalf("seed %v: %v", e, err)
 		}
+		if e[0] == "issue" && watchIssues {
+			if err := seed.SetEntityColumns("o/r", e[0], e[1], nil, &watchedTrue); err != nil {
+				t.Fatalf("watch %v: %v", e, err)
+			}
+		}
 	}
 	return open, seed
 }
+
+var watchedTrue = true
 
 // kindsOf lists "kind@origin" for each record of one entity, oldest first.
 func kindsOf(t *testing.T, st *store.Store, entityType, id string) []string {
@@ -153,6 +172,30 @@ func TestLinkAddAppendsLinkChangedForBothEntities(t *testing.T) {
 	}
 	if got := kindsOf(t, seed, "issue", "K-1"); !equalStrings(got, want) {
 		t.Errorf("issue records = %v, want %v", got, want)
+	}
+}
+
+// A link between a PR and an issue that is NOT watched stores the link and
+// appends link_changed for the PR only: the gate withholds the issue's row.
+func TestLinkAddToAnUnwatchedIssueAppendsNoRowForTheIssue(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}, [2]string{"issue", "K-1"})
+	off := false
+	if err := seed.SetEntityColumns("o/r", "issue", "K-1", nil, &off); err != nil {
+		t.Fatal(err)
+	}
+	withOpenSeams(t, linkTestConfig(), open)
+
+	if _, err := runLink(t, "pr", "add", "5", "issue:K-1"); err != nil {
+		t.Fatal(err)
+	}
+	if links, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5"); len(links) != 1 {
+		t.Errorf("links = %+v, want the link stored although the issue row is withheld", links)
+	}
+	if got, want := kindsOf(t, seed, "pr", "o/r#5"), []string{"created@sync", "link_changed@pg-desk"}; !equalStrings(got, want) {
+		t.Errorf("pr records = %v, want %v", got, want)
+	}
+	if got, want := kindsOf(t, seed, "issue", "K-1"), []string{"created@sync"}; !equalStrings(got, want) {
+		t.Errorf("issue records = %v, want %v (no row for an unwatched issue)", got, want)
 	}
 }
 
@@ -448,7 +491,7 @@ func issueRowCount(t *testing.T, st *store.Store, id string) int {
 // instance: the link is recorded, but the delivery gate withholds the
 // link_changed row of an unwatched issue, while a watched one still gets it.
 func TestLinkAddAppendsNoRowForUnwatchedOwningIssue(t *testing.T) {
-	open, seed := seedLinkStore(t, [2]string{"issue", "K-1"}, [2]string{"issue", "K-2"})
+	open, seed := seedLinkStoreWatching(t, false, [2]string{"issue", "K-1"}, [2]string{"issue", "K-2"})
 	withOpenSeams(t, owningLinkConfig("jira-1"), open)
 	instance := "jira-1"
 	for _, id := range []string{"K-1", "K-2"} {
