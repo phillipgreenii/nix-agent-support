@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/parknote"
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
@@ -41,6 +43,8 @@ func newIsolation(cfg roles.IsolationConfig, deps Deps) Isolation {
 		return pathIsolation{path: cfg.Path}
 	case "workforest":
 		return workforestIsolation{cmd: deps.Cmd}
+	case BeadWorktreeIsolation:
+		return beadWorktreeIsolation{cfg: cfg, repoRoot: deps.Cfg.RepoRoot, git: parknote.OSGit{}}
 	default:
 		return errIsolation{err: fmt.Errorf("unknown isolation type %q", cfg.Type)}
 	}
@@ -127,6 +131,63 @@ func (w workforestIsolation) workspaceRoot(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("workspace info: empty root")
 	}
 	return info.Root, nil
+}
+
+// BeadWorktreeIsolation is the IsolationConfig.Type that looks at the worktree a
+// drain worker left on drain/<item id> instead of creating one (bead
+// pg2-b49ydt).
+const BeadWorktreeIsolation = "bead-worktree"
+
+// beadWorktreeIsolation points a read-only-in-intent role (an escalation
+// triager that must READ the work a stuck or budget-stopped drain worker left)
+// at an EXISTING worktree on drain/<item id>, found across cfg.Repos with the
+// lookup the handler's park note already uses (parknote.Locate). With none, the
+// session runs in cfg.Fallback.
+//
+// It creates, resets, cleans and removes NOTHING: no `git worktree add`, no
+// `remove`, no branch change, no mkdir. Every git call is a read. The type is
+// also the reason the teardown paths must not remove the directory: they learn
+// it from the session row (ccpool.MetaKeyKeepWorktree), see ccpool.go.
+//
+// Read-only access to the found worktree is NOT enforced: the session is an
+// ordinary claude session and can write there. The role prompt must forbid
+// edits (docs/behavior/pg-router-handler-ccpool/invariants.md, INV-CCH-39).
+type beadWorktreeIsolation struct {
+	cfg      roles.IsolationConfig
+	repoRoot string
+	git      parknote.Git
+}
+
+func (b beadWorktreeIsolation) Ensure(ctx context.Context, itemID string) (string, error) {
+	repos := b.cfg.Repos
+	if len(repos) == 0 {
+		repos = []string{b.repoRoot}
+	}
+	loc, err := parknote.Locate(ctx, b.git, itemID, repos)
+	if err != nil {
+		return "", fmt.Errorf("bead-worktree %s: %w", itemID, err)
+	}
+	switch len(loc.Worktrees) {
+	case 0:
+		if len(loc.BranchOnly) > 0 {
+			slog.Info("bead-worktree: drain branch has no worktree; using the fallback directory",
+				"bead", itemID, "repos", loc.BranchOnly)
+		}
+		fb := b.cfg.Fallback
+		if fb == "" {
+			fb = b.repoRoot
+		}
+		if st, err := os.Stat(fb); err != nil || !st.IsDir() {
+			return "", fmt.Errorf("bead-worktree %s: no drain worktree found in %s and fallback %q is not an existing directory",
+				itemID, strings.Join(repos, ", "), fb)
+		}
+		return fb, nil
+	case 1:
+		return loc.Worktrees[0].Path, nil
+	default:
+		return "", fmt.Errorf("bead-worktree %s: found a drain/%s worktree in more than one configured repository, refusing to pick one: %s",
+			itemID, itemID, loc.Describe())
+	}
 }
 
 // errIsolation always fails Ensure — see newIsolation's default case.

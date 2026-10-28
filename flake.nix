@@ -8627,6 +8627,27 @@
                           ];
                         };
                       };
+                      # pg2-b49ydt: a role that only looks at the work a drain
+                      # worker left. The enum accepts the type and repos/fallback
+                      # render under the Go field names.
+                      triager = {
+                        handler = ccpoolHandler;
+                        ccpool = {
+                          actor = "triager-actor";
+                          completion = "close-only";
+                          onFailure = "unclaim";
+                          onDispatchFail = "leave";
+                          promptBody = "triager prompt";
+                          isolation = {
+                            type = "bead-worktree";
+                            repos = [
+                              "/fixture/repo-a"
+                              "/fixture/repo-b"
+                            ];
+                            fallback = "/fixture/workspace-root";
+                          };
+                        };
+                      };
                     };
                   };
                   twoRolesJson = rolesJsonDir twoRoles;
@@ -9697,6 +9718,12 @@
                         [ "$(jq -r .ccpool.isolation.Prefetch.DiffBase "$twoRolesJson/feedback.json")" = origin/main ]
                         [ "$(jq -r .ccpool.isolation.Prefetch.Timeout "$twoRolesJson/feedback.json")" = 3m ]
                         [ "$(jq -r .ccpool.isolation.Prefetch.Rev "$twoRolesJson/feedback.json")" = '{{index .Item.Metadata "head_sha"}}' ]
+                        # pg2-b49ydt: bead-worktree isolation renders its type, repos and
+                        # fallback; no other role's file carries Repos/Fallback.
+                        [ "$(jq -r .ccpool.isolation.Type "$twoRolesJson/triager.json")" = bead-worktree ]
+                        [ "$(jq -c .ccpool.isolation.Repos "$twoRolesJson/triager.json")" = '["/fixture/repo-a","/fixture/repo-b"]' ]
+                        [ "$(jq -r .ccpool.isolation.Fallback "$twoRolesJson/triager.json")" = /fixture/workspace-root ]
+                        jq -e '.ccpool.isolation | has("Repos") or has("Fallback") | not' "$twoRolesJson/feedback.json" >/dev/null
                         [ "$(jq -r .name "$twoRolesJson/worker.json")" = worker ]
                         [ "$(jq -r .type "$twoRolesJson/worker.json")" = command ]
                         [ "$(jq -c .command.argv "$twoRolesJson/worker.json")" = '["worker-bin","--flag"]' ]

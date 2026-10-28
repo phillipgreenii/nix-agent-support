@@ -350,7 +350,13 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// its own working tree (pg2-yukh).
 	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
 	env["WORKSPACE_ROOT"] = wt
-	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))); err != nil {
+	meta := ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))
+	if cc.Isolation.Type == BeadWorktreeIsolation {
+		// The directory is not this handler's: every teardown path leaves it alone
+		// (bead pg2-b49ydt, ccpool.MetaKeyKeepWorktree).
+		meta[ccpool.MetaKeyKeepWorktree] = "1"
+	}
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, meta); err != nil {
 		// Could not create a READY session. The bead was never dispatched and no
 		// bead is mutated here (the handler never claims beads; the session does).
 		// Whatever the failure was (a failed or timed-out ccpool new, a wrapper
@@ -693,7 +699,8 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // (never removable — same invariant watchdog/terminal.go's safeToReset
 // enforces for the reset path), "path" isolation is one FIXED directory
 // reused across every dispatch (removing it after one dispatch would break
-// the next one that reuses it), and "workforest" isolation has its own,
+// the next one that reuses it), "bead-worktree" isolation looks at a worktree
+// a drain worker made and owns, and "workforest" isolation has its own,
 // unrelated lifecycle (pn-workspace-rules) — none of those are a per-bead
 // git worktree this executor itself created and may unilaterally remove.
 //

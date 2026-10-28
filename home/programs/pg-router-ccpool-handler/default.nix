@@ -868,6 +868,12 @@ let
           Type = roleCfg.ccpool.isolation.type;
           Path = roleCfg.ccpool.isolation.path;
         }
+        // lib.optionalAttrs (roleCfg.ccpool.isolation.type == "bead-worktree") {
+          # bead-worktree (bead pg2-b49ydt): Go field names, rendered only for
+          # that type so every other role's file is byte-for-byte unchanged.
+          Repos = roleCfg.ccpool.isolation.repos;
+          Fallback = roleCfg.ccpool.isolation.fallback;
+        }
         // lib.optionalAttrs roleCfg.ccpool.isolation.prefetch.enable {
           # prefetch (bead pg2-hh32y): omitted unless enabled, so a role that
           # never opts in decodes `Prefetch == nil` (unchanged behavior).
@@ -1455,12 +1461,49 @@ let
                         "none"
                         "path"
                         "workforest"
+                        "bead-worktree"
                       ];
                       default = "";
                       description = ''
                         How this ccpool role's WORKSPACE_ROOT is prepared
                         (`roles.IsolationConfig.Type`); `""` means "worktree"
                         (the long-standing default).
+
+                        `"bead-worktree"` (bead pg2-b49ydt) is for a role that only needs to
+                        LOOK at the work a drain worker left: at dispatch it searches
+                        `repos` for an existing worktree on branch `drain/<item id>` and
+                        runs the session there, or in `fallback` when none exists. It
+                        creates, resets, cleans and removes nothing, and no teardown path
+                        removes what it found. A bead with a drain worktree in more than
+                        one of `repos` fails the dispatch. Read-only access is NOT
+                        enforced: the session can write in the found worktree, so the role
+                        prompt MUST forbid edits.
+                      '';
+                    };
+                    repos = lib.mkOption {
+                      type = lib.types.listOf lib.types.str;
+                      default = [ ];
+                      example = [
+                        "/path/to/repo-a"
+                        "/path/to/repo-b"
+                      ];
+                      description = ''
+                        Absolute paths of the repository checkouts a `"bead-worktree"` role
+                        searches for a `drain/<item id>` worktree (`roles.IsolationConfig.Repos`).
+                        Empty means the handler's `repoRoot` only. The order is only the
+                        order of the search: a bead found in two repositories fails, it is
+                        never resolved by position. Valid only with `type = "bead-worktree"`.
+                      '';
+                    };
+                    fallback = lib.mkOption {
+                      type = lib.types.str;
+                      default = "";
+                      example = "/path/to/workspace-root";
+                      description = ''
+                        Absolute path of the existing directory a `"bead-worktree"` role
+                        runs in when no `drain/<item id>` worktree exists
+                        (`roles.IsolationConfig.Fallback`); never created. Empty means the
+                        handler's `repoRoot`. Valid only with `type = "bead-worktree"`.
                       '';
                     };
                     path = lib.mkOption {

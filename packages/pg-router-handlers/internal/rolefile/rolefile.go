@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -208,6 +209,23 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 		}
 		if err := executor.ValidatePrefetch(*pf); err != nil {
 			return roles.Role{}, fmt.Errorf("role config %s: isolation.%w", path, err)
+		}
+	}
+	// isolation.repos and isolation.fallback (bead pg2-b49ydt) belong to the
+	// bead-worktree type alone, and name directories that must be absolute
+	// (the handler's working directory is not the role's).
+	if iso := rf.CCPool.Isolation; iso.Type != executor.BeadWorktreeIsolation {
+		if len(iso.Repos) > 0 || iso.Fallback != "" {
+			return roles.Role{}, fmt.Errorf("role config %s: isolation.repos and isolation.fallback require type %q, not %q", path, executor.BeadWorktreeIsolation, iso.Type)
+		}
+	} else {
+		for i, repo := range iso.Repos {
+			if !filepath.IsAbs(repo) {
+				return roles.Role{}, fmt.Errorf("role config %s: isolation.repos[%d] must be an absolute path, got %q", path, i, repo)
+			}
+		}
+		if iso.Fallback != "" && !filepath.IsAbs(iso.Fallback) {
+			return roles.Role{}, fmt.Errorf("role config %s: isolation.fallback must be an absolute path, got %q", path, iso.Fallback)
 		}
 	}
 	r.CCPool = &roles.CCPoolConfig{

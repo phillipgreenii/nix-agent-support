@@ -75,7 +75,9 @@ Extensions:
   never a secret, and exactly one outcome record follows it, success included (`INV-CCH-35`). Every
   start of a ccpool-backed session passes the whole environment again, and a send first checks that
   the session is live (`INV-CCH-38`). A role that needs no working tree runs in one fixed directory,
-  with no per-dispatch worktree (`INV-CCH-39`).
+  with no per-dispatch worktree, and a role that only needs to look at a drain worker's work runs
+  in that worker's existing worktree, or in a fixed fallback directory, without creating, changing or
+  removing anything (`INV-CCH-39`).
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is
   not worth running (`INV-CCH-22`): before any capacity, isolation or launch step this module
   either COMPLETES the event as skipped, when it is moot (a bead already closed, a PR already

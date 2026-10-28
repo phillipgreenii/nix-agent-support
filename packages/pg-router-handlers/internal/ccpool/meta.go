@@ -57,6 +57,16 @@ const (
 	// MetaKeyPurgeAttempts counts the purge_pending retries made for a row (a
 	// decimal integer), for the retry's own log line. Never a --label.
 	MetaKeyPurgeAttempts = "pgrouter.purge_attempts"
+	// MetaKeyKeepWorktree marks a session whose working directory this handler
+	// did NOT create and must never remove (bead pg2-b49ydt): a role with
+	// "bead-worktree" isolation looks at the worktree a drain worker left on
+	// drain/<bead>, or at a configured fallback directory. The teardown paths
+	// (shutdown sweep, closed-bead reconcile, stale-session reconcile, the
+	// purge_pending retry) run for sessions of EVERY role without knowing the
+	// role's isolation type, so the type travels on the session row: a row
+	// carrying this key is purged, but its working directory and any branch are
+	// left exactly as they were. Stamped at dispatch; never a --label.
+	MetaKeyKeepWorktree = "pgrouter.keep_worktree"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -117,6 +127,11 @@ func (s Session) LeaseUntil() (time.Time, bool) { return ParseMetaTime(s.Meta[Me
 // LaunchedAt returns the instant the dispatch launched the session; ok is
 // false when the session carries no (parseable) launch time.
 func (s Session) LaunchedAt() (time.Time, bool) { return ParseMetaTime(s.Meta[MetaKeyLaunchedAt]) }
+
+// KeepsWorktree reports whether the session's working directory is not this
+// handler's to remove (MetaKeyKeepWorktree): teardown purges the row and leaves
+// the directory and branches alone.
+func (s Session) KeepsWorktree() bool { return s.Meta[MetaKeyKeepWorktree] != "" }
 
 // PurgePending reports whether the session carries the two-phase-teardown
 // marker (MetaKeyPurgePending): its row is kept until its worktree is gone.

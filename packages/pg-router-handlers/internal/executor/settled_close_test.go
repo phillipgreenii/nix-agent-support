@@ -483,7 +483,7 @@ func busyCfg() config.Config {
 }
 
 func TestSettledClose_deferredWhileSubagentsActive_everyIsolationType(t *testing.T) {
-	for _, typ := range []string{"", "worktree", "none", "path", "workforest"} {
+	for _, typ := range []string{"", "worktree", "none", "path", "workforest", "bead-worktree"} {
 		t.Run("isolation="+typ, func(t *testing.T) {
 			cfg := busyCfg()
 			cc := newSettleCC("sess-1", fixedState(ccpool.StateIdle))

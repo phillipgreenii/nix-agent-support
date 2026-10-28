@@ -87,7 +87,12 @@ func pathStrictlyUnder(path, dir string) bool {
 // and only then purge the row. It returns true iff the row was purged; on any
 // failure the row is left, still carrying purge_pending, for the next retry.
 func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
-	if keepWorktree {
+	// A bead-worktree session's directory is never ours to remove, even if a
+	// stray purge_pending marker reached its row (bead pg2-b49ydt).
+	if s.KeepsWorktree() {
+		slog.Info("teardown: worktree kept -- the session's isolation does not own it (bead-worktree)",
+			"session", s.ExternalID, "cwd", s.CWD)
+	} else if keepWorktree {
 		slog.Info("teardown: worktree kept -- another live session still uses it",
 			"session", s.ExternalID, "cwd", s.CWD)
 	} else if !removeWorktreeForPurge(ctx, open, repoRoot, worktreeDir, s) {

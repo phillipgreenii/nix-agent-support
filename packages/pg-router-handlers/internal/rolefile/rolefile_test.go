@@ -399,6 +399,43 @@ func TestDecodeRole_rejectsInvalidPrefetch(t *testing.T) {
 	}
 }
 
+// bead-worktree isolation (bead pg2-b49ydt): the type, its repos and its
+// fallback decode with the Go field names the nix module renders; repos and
+// fallback belong to that type alone and must be absolute.
+func TestDecodeRole_decodesBeadWorktreeIsolation(t *testing.T) {
+	iso := `{"Type":"bead-worktree","Repos":["/r/one","/r/two"],"Fallback":"/ws"}`
+	r, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(iso)))
+	if err != nil {
+		t.Fatalf("DecodeRole: %v", err)
+	}
+	got := r.CCPool.Isolation
+	if got.Type != "bead-worktree" || len(got.Repos) != 2 || got.Repos[0] != "/r/one" || got.Repos[1] != "/r/two" || got.Fallback != "/ws" {
+		t.Fatalf("Isolation = %+v, want the configured fields", got)
+	}
+	// Repos and Fallback are optional: the handler's repo root stands in.
+	if _, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"bead-worktree","Repos":[],"Fallback":""}`))); err != nil {
+		t.Fatalf("empty repos/fallback must decode: %v", err)
+	}
+}
+
+func TestDecodeRole_rejectsInvalidBeadWorktreeIsolation(t *testing.T) {
+	tests := map[string]string{
+		"relative repo":           `{"Type":"bead-worktree","Repos":["rel/path"]}`,
+		"relative fallback":       `{"Type":"bead-worktree","Fallback":"ws"}`,
+		"repos on the default":    `{"Repos":["/r/one"]}`,
+		"repos on worktree":       `{"Type":"worktree","Repos":["/r/one"]}`,
+		"fallback on none":        `{"Type":"none","Fallback":"/ws"}`,
+		"prefetch needs worktree": `{"Type":"bead-worktree","Prefetch":{"Rev":"abc1234"}}`,
+	}
+	for name, iso := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(iso))); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
+
 // TestDecodeRole_worktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): absent => 0
 // (no override: the handler default applies), a duration string => that value,
 // a malformed, zero, or negative value is rejected.

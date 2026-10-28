@@ -1398,6 +1398,7 @@ func TestUsesWorktreeIsolation(t *testing.T) {
 		{"none", false},
 		{"path", false},
 		{"workforest", false},
+		{"bead-worktree", false},
 	}
 	for _, tc := range cases {
 		if got := usesWorktreeIsolation(roles.IsolationConfig{Type: tc.typ}); got != tc.want {
@@ -1425,7 +1426,7 @@ func TestCleanupWorktree_emptyPathNoop(t *testing.T) {
 }
 
 func TestCleanupWorktree_nonWorktreeIsolationNoop(t *testing.T) {
-	for _, typ := range []string{"none", "path", "workforest"} {
+	for _, typ := range []string{"none", "path", "workforest", "bead-worktree"} {
 		t.Run(typ, func(t *testing.T) {
 			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}}}
 			e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())

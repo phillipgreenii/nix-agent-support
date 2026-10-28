@@ -217,7 +217,7 @@ func discover(ctx context.Context, g Git, bead string, dirs []string) (found []W
 			found = append(found, measure(ctx, g, dir, primary, e.path, e.branch))
 		}
 		if !haveBranch && !seen["branch:"+drainBranchPrefix+bead] {
-			if _, err := gitOut(ctx, g, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+drainBranchPrefix+bead); err == nil {
+			if branchExists(ctx, g, dir, bead) {
 				seen["branch:"+drainBranchPrefix+bead] = true
 				found = append(found, measure(ctx, g, dir, primary, "", drainBranchPrefix+bead))
 			}
@@ -293,4 +293,11 @@ func parseWorktrees(out string) []wtEntry {
 		}
 	}
 	return res
+}
+
+// branchExists reports whether dir's repository has the local branch
+// drain/<bead>.
+func branchExists(ctx context.Context, g Git, dir, bead string) bool {
+	_, err := gitOut(ctx, g, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+drainBranchPrefix+bead)
+	return err == nil
 }

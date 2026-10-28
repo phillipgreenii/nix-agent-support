@@ -371,6 +371,12 @@ func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktre
 // worktreeDir) and keepWorktree=true keep the single-phase purge with no
 // marker.
 func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
+	// A "bead-worktree" session's directory is a drain worker's worktree this
+	// handler never created (bead pg2-b49ydt, R3): purge the row, remove nothing.
+	// The type travels on the row (ccpool.MetaKeyKeepWorktree) because this
+	// teardown runs for sessions of every role. closeSinglePhase repeats the
+	// check so no caller can reach the force-remove around it.
+	keepWorktree = keepWorktree || s.KeepsWorktree()
 	if keepWorktree || !twoPhaseEligible(s, repoRoot, worktreeDir) {
 		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
 	}
@@ -399,6 +405,11 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
 		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false
+	}
+	if s.KeepsWorktree() {
+		slog.Info("teardown: worktree kept -- the session's isolation does not own it (bead-worktree)",
+			"session", s.ExternalID, "cwd", s.CWD)
+		return true
 	}
 	if keepWorktree {
 		slog.Info("teardown: worktree kept -- another live session still uses it",

@@ -437,7 +437,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   then purges the record. A worktree directory that no longer exists, or one under the worktree
   directory that git no longer knows as a worktree, counts as gone (the husk is deleted and git's
   stale registrations pruned). A session whose working directory is not such a worktree (no
-  isolation, or an unrelated path) is purged in one step, as is a session whose worktree another
+  isolation, an unrelated path, or a `bead-worktree` session's drain worktree, which is never
+  removed, `INV-CCH-39`) is purged in one step, as is a session whose worktree another
   live session of the pool still uses (`INV-CCH-15`; any state, since a redispatch for the bead
   reuses the directory). A failed or interrupted removal leaves the record in place. Each
   dispatch-time reconcile of the pool MUST first retry at most one such record, whether or not its
@@ -1191,8 +1192,8 @@ changes a core gate or `INV-LIFE-2`.
     split triager reads and writes only beads. An escalation triager needs at most READ access to a
     branch or worktree an earlier session left for the bead, which it reaches by naming the repository
     by absolute path (`git -C <path>`), because its working directory is no longer a repository.
-    The escalation triage role of a tracker whose beads live in a repository keeps the default
-    per-bead worktree until a follow-up decides what that role needs.
+    The escalation triage role of a tracker whose beads live in a repository may use the
+    `bead-worktree` isolation below instead of the default per-bead worktree (bead `pg2-b49ydt`).
   - **No persistent role worktree.** No role has a persistent, role-named, writable worktree: no triage
     role needs one, and one MUST NOT be built for them (operator ruling, 2026-10-27: a triager uses a
     single named worktree per role only if it needs its own, and may need only to look at an existing
@@ -1201,6 +1202,37 @@ changes a core gate or `INV-LIFE-2`.
     `git worktree remove`, and its session's working directory is the configured path. The teardown
     of its session, which tries to remove the session's working directory as a worktree, finds a
     directory outside any repository, removes nothing and does not warn (`INV-CCH-20`).
+  - **A role that only looks: `bead-worktree` isolation.** A role that needs to READ the work a stuck
+    or budget-stopped drain worker left MAY run with the `bead-worktree` isolation (bead
+    `pg2-b49ydt`). At dispatch the handler searches the role's configured repositories, in order, for a
+    worktree checked out on the branch `drain/<bead>`: the same lookup the park note uses to name the
+    drain work it left behind, except that only a worktree on that branch counts (a branch with no
+    worktree, or a worktree git still lists whose directory is gone, does not).
+    - **Found.** The session's working directory and `WORKSPACE_ROOT` are that worktree.
+    - **Not found.** They are the role's configured fallback directory (the workspace root; an
+      existing directory, never created), and no git worktree command runs at all. With no repositories
+      configured the handler's repository root is searched; with no fallback it is that
+      repository root too.
+    - **Ambiguous: found in two repositories.** A bead with a drain worktree in more than one
+      configured repository MUST fail the dispatch with an error naming each; the handler MUST NOT pick
+      one, in any configured order. A configured repository that cannot be searched is an error, not
+      "not found". The same worktree reached through two configured checkouts of one repository counts
+      once.
+    - **Nothing is created, changed or removed.** The type MUST NOT create, reset, clean or remove
+      anything, and a dispatch ends leaving the found worktree, its branch and its uncommitted files
+      exactly as they were. Because every teardown path (the shutdown sweep, the closed-bead and
+      stale-session reconciles, the `purge_pending` retry, `INV-CCH-20`) runs for sessions of every role
+      without knowing the role's isolation, the type is stamped on the session row at dispatch
+      (`pgrouter.keep_worktree`); a row carrying it is purged and its directory is never removed, even
+      when the directory lies under the handler's worktree directory. The dispatch-end cleanup, the
+      abandoned-worktree reclaim, the orphan reconcile and the worktree-keyed sweep (`INV-CCH-19`) are
+      scoped to the `worktree` isolation and never act on it; the sweep also matches only a worktree
+      directly under the worktree directory on its own `pg-router/<bead>` branch, which a
+      `drain/<bead>` worktree is not.
+    - **Access is NOT enforced read-only.** The session is an ordinary session and can write in the
+      found worktree. The role's prompt MUST forbid edits; nothing in the handler prevents them.
+    - **Scope.** The type is for roles that look; it is not a persistent role worktree (see "No
+      persistent role worktree" above) and it takes no pre-fetch (`INV-CCH-21`).
   - **The origin gate is unchanged.** A `path` role is gated by the origin watched at its OWN path
     (`INV-CCH-10`), not by the handler-wide repository root: a role moved to a directory that is not a
     watched repository is no longer declined while that repository's origin is down, and a `path`

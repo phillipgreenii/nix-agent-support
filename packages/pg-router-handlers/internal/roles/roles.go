@@ -130,10 +130,24 @@ type IsolationConfig struct {
 	// <WorktreeDir>/<itemID> off RepoRoot — the default), "none" (no isolation;
 	// WORKSPACE_ROOT = RepoRoot), "path" (create-or-reuse one fixed configured
 	// directory, see Path), or "workforest" (create-or-reuse a coordinated
-	// multi-repo set keyed by item id).
+	// multi-repo set keyed by item id), or "bead-worktree" (look at an existing
+	// drain/<item id> worktree in Repos, else Fallback; creates and removes
+	// nothing, see Repos and Fallback).
 	Type string
 	// Path is the fixed directory to create-or-reuse; set iff Type == "path".
 	Path string
+	// Repos (bead pg2-b49ydt) are the repository checkouts a "bead-worktree"
+	// role searches, in order, for a worktree on drain/<item id>. Empty means
+	// just the handler's RepoRoot. Set only with Type == "bead-worktree". The
+	// order is only the order of the search and of any error message: a bead
+	// found in two repositories fails the dispatch, it is never resolved by
+	// position.
+	Repos []string
+	// Fallback (bead pg2-b49ydt) is the directory a "bead-worktree" role runs in
+	// when no drain/<item id> worktree exists in Repos (the pn workspace root, for
+	// a deployment whose triager has no tree of its own). It is never created.
+	// Empty means the handler's RepoRoot. Set only with Type == "bead-worktree".
+	Fallback string
 	// Prefetch (bead pg2-hh32y), when non-nil, has the HANDLER pin the freshly
 	// ensured worktree to a commit and pre-generate the diff before the session
 	// starts, instead of leaving the model to fetch/checkout/diff on its own

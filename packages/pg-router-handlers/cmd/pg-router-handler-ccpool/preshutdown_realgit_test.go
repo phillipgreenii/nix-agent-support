@@ -78,3 +78,103 @@ func TestCloseSinglePhase_pathIsolationNonGitCwdRemovesNothing(t *testing.T) {
 		t.Errorf("teardown must report there is no worktree to remove; log:\n%s", buf.String())
 	}
 }
+
+// A "bead-worktree" session runs in a worktree a drain worker made on
+// drain/<bead> (bead pg2-b49ydt, R3). Every teardown path runs for sessions of
+// every role without the role in hand, and closeSinglePhase force-removes
+// whatever linked worktree the session's cwd is, so the type travels on the row
+// (ccpool.MetaKeyKeepWorktree) and the teardown must purge the row and remove
+// NOTHING: not the worktree (dirty or not), not its branch. Proven against real
+// git for both teardown shapes: the single-phase purge (a cwd outside the
+// handler's worktree directory) and the two-phase purge (a cwd under it), through
+// closeSession, finishPurge (the purge_pending retry) and the shutdown sweep.
+func TestTeardown_beadWorktreeSessionNeverRemovesTheFoundWorktree(t *testing.T) {
+	for _, where := range []string{"outside the handler's worktree dir", "inside the handler's worktree dir"} {
+		for _, keep := range []bool{true, false} {
+			name := where + "/row marked bead-worktree"
+			if !keep {
+				name = where + "/unmarked row (negative control: the removal is real)"
+			}
+			t.Run(name, func(t *testing.T) {
+				h := newSweepHarness(t)
+				dir := filepath.Join(h.fixture, "drain-wt")
+				if where[0] == 'i' {
+					dir = filepath.Join(h.wtDir, "bead-1")
+				}
+				const branch = "drain/bead-1"
+				if out, err := h.client(h.repo).Run(t.Context(), "worktree", "add", "-b", branch, dir); err != nil {
+					t.Fatalf("fixture worktree: %v\n%s", err, out)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "uncommitted.txt"), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				meta := map[string]string{ccpool.MetaKeyBead: "bead-1"}
+				if keep {
+					meta[ccpool.MetaKeyKeepWorktree] = "1"
+				}
+				s := ccpool.Session{ExternalID: "pg-router-triager-bead-1", State: ccpool.StateIdle, CWD: dir, Meta: meta}
+				cc := &fakeCC{ListSeq: [][]ccpool.Session{{s}}}
+
+				if !closeSession(t.Context(), cc, h.opener, h.repo, h.wtDir, s, false) {
+					t.Fatal("closeSession = false, want true: the row was purged")
+				}
+				if len(cc.ClosedPurge) == 0 || !cc.ClosedPurge[len(cc.ClosedPurge)-1] {
+					t.Errorf("the row must end purged; ClosedPurge=%v", cc.ClosedPurge)
+				}
+
+				list, err := h.client(h.repo).Run(t.Context(), "worktree", "list", "--porcelain")
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, statErr := os.Stat(filepath.Join(dir, "uncommitted.txt"))
+				listed := strings.Contains(string(list), "worktree "+dir+"\n")
+				if keep {
+					if statErr != nil || !listed {
+						t.Errorf("the found worktree must be left untouched: stat=%v listed=%v\n%s", statErr, listed, list)
+					}
+					if ok, err := h.client(h.repo).RefExists(t.Context(), "refs/heads/"+branch); err != nil || !ok {
+						t.Errorf("branch %s must survive: %v", branch, err)
+					}
+				} else if statErr == nil || listed {
+					t.Errorf("negative control: without the marker the worktree must be force-removed (single-phase) or removed (two-phase); stat=%v listed=%v", statErr, listed)
+				}
+			})
+		}
+	}
+}
+
+// The purge_pending retry (finishPurge) and the shutdown sweep honour the same
+// marker.
+func TestTeardown_beadWorktreeMarkerHonouredByFinishPurgeAndShutdownSweep(t *testing.T) {
+	h := newSweepHarness(t)
+	dir := filepath.Join(h.wtDir, "bead-2") // under the worktree dir: the shape that is eligible for removal
+	if out, err := h.client(h.repo).Run(t.Context(), "worktree", "add", "-b", "drain/bead-2", dir); err != nil {
+		t.Fatalf("fixture worktree: %v\n%s", err, out)
+	}
+	s := ccpool.Session{
+		ExternalID: "pg-router-triager-bead-2", State: ccpool.StateIdle, CWD: dir,
+		Meta: map[string]string{
+			ccpool.MetaKeyBead: "bead-2", ccpool.MetaKeyKeepWorktree: "1", ccpool.MetaKeyPurgePending: purgeMarkerValue,
+		},
+	}
+	cc := &fakeCC{}
+	if !finishPurge(t.Context(), cc, h.opener, h.repo, h.wtDir, s, false) {
+		t.Fatal("finishPurge = false, want the row purged")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("finishPurge must leave the worktree: %v", err)
+	}
+
+	s.Meta = map[string]string{ccpool.MetaKeyBead: "bead-2", ccpool.MetaKeyKeepWorktree: "1"}
+	cc = &fakeCC{ListSeq: [][]ccpool.Session{{s}}}
+	if n := teardownAllSessions(t.Context(), cc, h.opener, &orphanBD{}, "pg-router-", h.repo, h.wtDir); n != 1 {
+		t.Fatalf("shutdown sweep closed %d, want 1", n)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the shutdown sweep must leave the worktree: %v", err)
+	}
+	if ok, err := h.client(h.repo).RefExists(t.Context(), "refs/heads/drain/bead-2"); err != nil || !ok {
+		t.Errorf("branch drain/bead-2 must survive: %v", err)
+	}
+}
