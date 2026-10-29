@@ -139,16 +139,47 @@ detect_open_pr() {
   printf '%s' "$json"
 }
 
-# detect_mr_bead: print the id of an open merge-request-type bead, or
-# nothing when beads (`bd`) is absent, unreachable (e.g. no beads
-# database for this repo), there is none, or the call errors for any
-# reason. `bd` is an optional source — this must never fail the tool
-# (spec §4.2 graceful degradation).
+# detect_mr_bead <remote> <branch>: print the id of an open merge-request-type
+# bead that belongs to THIS repo and the CURRENT branch, or nothing when
+# beads (`bd`) is absent, unreachable (e.g. no beads database for this
+# repo), there is none, or the call errors for any reason. `bd` is an
+# optional source -- this must never fail the tool (spec 4.2 graceful
+# degradation).
+#
+# The beads tracker is shared across repos, so an unscoped lookup would let
+# any repo's merge-request anchor flip every other repo to `pull-request`.
+# pg-desk mints the anchor with metadata `repo` (the PR's repository, the
+# `<repo>#<n>` of its title), `branch` (the PR head branch) and `state` (the
+# PR state); see docs/adr/0009-pg-pr-bead-schema.md and
+# packages/pg-desk/internal/sync/rules.go (anchor metadata). A bead is this
+# repo's and branch's only when metadata.branch equals <branch> AND
+# metadata.repo equals the remote URL's `owner/name` slug (or just its
+# `name`) AND metadata.state is not merged/closed. A bead without those keys
+# (e.g. a title-adopted anchor with no metadata) cannot be scoped and is
+# ignored. bd's --json output is a bare array or a {"data":[...]} envelope
+# depending on BD_JSON_ENVELOPE (beads-lifecycle J-1), so both are accepted.
 detect_mr_bead() {
-  local json
+  local remote="${1:-}" branch="${2:-}" url slug name rest owner json
+  [ -n "$remote" ] && [ -n "$branch" ] || return 0
   command -v bd >/dev/null 2>&1 || return 0
-  json="$(bd list --type=merge-request --json 2>/dev/null)" || return 0
-  printf '%s' "$json" | jq -r '.data[0].id // empty' 2>/dev/null || true
+  url="$(git remote get-url "$remote" 2>/dev/null)" || return 0
+  url="${url%/}"
+  url="${url%.git}"
+  name="${url##*[/:]}"
+  rest="${url%[/:]*}"
+  owner="${rest##*[/:]}"
+  slug="$owner/$name"
+  [ -n "$name" ] || return 0
+  json="$(bd list --type=merge-request -n 0 --json 2>/dev/null)" || return 0
+  printf '%s' "$json" | jq -r --arg branch "$branch" --arg slug "$slug" --arg name "$name" '
+    (if type == "object" and has("data") then .data else . end)
+    | if type == "array" then . else [] end
+    | map(select(type == "object" and (.metadata | type) == "object"
+        and .metadata.branch == $branch
+        and (.metadata.repo == $slug or .metadata.repo == $name)
+        and (((.metadata.state // "") | tostring | ascii_downcase) as $s
+             | ($s != "merged" and $s != "closed"))))
+    | .[0].id // empty' 2>/dev/null || true
 }
 
 # resolve_strategy: print exactly two lines — (1) the resolved strategy
@@ -168,7 +199,8 @@ detect_mr_bead() {
 #      so it cannot infer either — reported as-is.
 #   3. else no remote at all rules out `pull-request` outright ->
 #      `ff-merge-to-main`.
-#   4. else an open PR or an open merge-request bead -> `pull-request`.
+#   4. else an open PR, or an open merge-request bead scoped to this repo
+#      and branch (detect_mr_bead), -> `pull-request`.
 #   5. else the tool cannot infer -> null (empty line 1).
 # current_worktree_root: print the absolute path to the top level of the
 # CURRENT worktree -- i.e. wherever this tool is invoked from, resolved to
@@ -833,9 +865,9 @@ resolve_strategy() {
   fi
 
   if [ -n "$mr_bead" ]; then
-    printf 'pull-request\nan open merge-request bead was found: %s\n' "$mr_bead"
+    printf 'pull-request\nan open merge-request bead for this repo and branch was found: %s\n' "$mr_bead"
     return
   fi
 
-  printf '\nremote present, no open PR or merge-request bead, and no strategy declared -- cannot infer a strategy\n'
+  printf '\nremote present, no open PR or scoped merge-request bead, and no strategy declared -- cannot infer a strategy\n'
 }

@@ -128,9 +128,14 @@ skill and the Tier R rules.
     disqualifier).
   - **Open PR for the branch** (`gh` / forge CLI / a configured PR-probe, each only
     when available) → `pull-request`.
-  - **Open merge-request tracker bead** (`bd list --type=merge-request`) →
-    `pull-request`. **Optional**; if beads is absent/unreachable it contributes
-    nothing and the tool does not fail.
+  - **Open merge-request tracker bead scoped to this repo and branch**
+    (`bd list --type=merge-request`, kept only when the pg-desk anchor metadata
+    `repo` matches the remote URL's `owner/name` or `name`, `branch` equals the
+    current branch, and `state` is not merged/closed) → `pull-request`. The
+    tracker is shared across repos, so an unscoped or foreign anchor MUST NOT
+    count; a bead lacking those keys is ignored. **Optional**; if beads is
+    absent/unreachable it contributes nothing and the tool does not fail. `bd`
+    JSON is accepted as a bare array or a `{"data":[...]}` envelope.
   - Caveats: a remote merely _existing_ does NOT imply PR; a **merged/closed** PR
     means work is already integrated.
 - **Graceful degradation:** any optional source that errors (beads down, `gh`
@@ -146,20 +151,20 @@ skill and the Tier R rules.
   "canonical": { "branch": "main", "dirty": false },
   "remote": "origin", // null when the repo has no remote
   "open_pr": { "number": 42, "state": "open", "url": "…" }, // null when none
-  "mr_bead": "pg2-abcd" // null / omitted when beads unavailable
+  "mr_bead": "pg2-abcd" // null when beads is unavailable or no anchor matches this repo and branch
 }
 ```
 
-| Property           | What it is                           | Why the agent needs it                                                                              |
-| ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `strategy`         | the determined method, or `null`     | the advisory answer; `null` ⇒ agent decides from facts/context                                      |
-| `reason`           | human-readable explanation           | agent summarizes to the user; transparency (also carries provenance, e.g. "declared" vs "inferred") |
-| `primary_branch`   | resolved primary branch              | handler target; R-8 comparison; agent computes "commits ahead"                                      |
-| `canonical.branch` | what the canonical clone is on now   | agent surfaces R-3 / a canonical-advancing method halts (R-8) if `≠ primary_branch`                 |
-| `canonical.dirty`  | whether the canonical clone is dirty | R-3; ff-merge halts, PR surfaces                                                                    |
-| `remote`           | remote name/url, or `null`           | no-remote ⇒ PR impossible                                                                           |
-| `open_pr`          | PR number/state/url, or `null`       | PR indicator                                                                                        |
-| `mr_bead`          | merge-request bead id, or `null`     | optional PR indicator                                                                               |
+| Property           | What it is                                                | Why the agent needs it                                                                              |
+| ------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `strategy`         | the determined method, or `null`                          | the advisory answer; `null` ⇒ agent decides from facts/context                                      |
+| `reason`           | human-readable explanation                                | agent summarizes to the user; transparency (also carries provenance, e.g. "declared" vs "inferred") |
+| `primary_branch`   | resolved primary branch                                   | handler target; R-8 comparison; agent computes "commits ahead"                                      |
+| `canonical.branch` | what the canonical clone is on now                        | agent surfaces R-3 / a canonical-advancing method halts (R-8) if `≠ primary_branch`                 |
+| `canonical.dirty`  | whether the canonical clone is dirty                      | R-3; ff-merge halts, PR surfaces                                                                    |
+| `remote`           | remote name/url, or `null`                                | no-remote ⇒ PR impossible                                                                           |
+| `open_pr`          | PR number/state/url, or `null`                            | PR indicator                                                                                        |
+| `mr_bead`          | merge-request bead id for this repo and branch, or `null` | optional PR indicator                                                                               |
 
 Dropped after review: `strategy_source` (absence of `strategy` is sufficient;
 provenance lives in `reason`), `subject.*` (the agent already knows its own branch /
@@ -272,7 +277,7 @@ open_pr:null}` → agent uses other context; if still unsure, **asks the user**
 "main", canonical:{branch:"some-other-branch"}}` → agent **halts** (R-8) and reports.
 7. **Nothing to integrate:** report has `primary_branch:"main"`; agent finds `0`
    commits ahead → reports "already integrated / nothing to do".
-8. **Beads unavailable:** `mr_bead:null`; the tool still returns a strategy from the
+8. **Beads unavailable, or only a foreign anchor exists:** `mr_bead:null`; the tool still returns a strategy from the
    other signals and does not fail.
 
 ## 5. Implementation map (verified homes)

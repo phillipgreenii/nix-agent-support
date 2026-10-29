@@ -38,20 +38,20 @@ determine," surface that, and fall back to asking. On success you get:
   "canonical": { "branch": "main", "dirty": false },
   "remote": "origin", // null when the repo has no remote
   "open_pr": { "number": 42, "state": "open", "url": "…" }, // null when none
-  "mr_bead": "pg2-abcd" // null when beads is unavailable or none exists
+  "mr_bead": "pg2-abcd" // null when beads is unavailable or no anchor matches this repo and branch
 }
 ```
 
-| Field              | Meaning                                        | Why it matters here                                                               |
-| ------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------- |
-| `strategy`         | recommended method, or `null`                  | advisory only; `null` means you must decide (Step 5)                              |
-| `reason`           | human-readable explanation                     | summarize to the user; also tells you "declared" vs "inferred" provenance         |
-| `primary_branch`   | the repo's resolved primary branch             | compare against your own current branch; the handler's target                     |
-| `canonical.branch` | what the canonical clone (main worktree) is on | anomaly check (Step 3) — MUST equal `primary_branch` in steady state (Tier R R-1) |
-| `canonical.dirty`  | whether the canonical clone has local changes  | anomaly check (Step 3) — a canonical clone MUST be clean in steady state (R-3)    |
-| `remote`           | remote name, or `null`                         | no remote ⇒ `pull-request` is infeasible                                          |
-| `open_pr`          | PR number/state/url, or `null`                 | corroborates a `pull-request` strategy                                            |
-| `mr_bead`          | merge-request tracker bead id, or `null`       | optional corroborating signal; absence never fails the tool                       |
+| Field              | Meaning                                                   | Why it matters here                                                                                         |
+| ------------------ | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `strategy`         | recommended method, or `null`                             | advisory only; `null` means you must decide (Step 5)                                                        |
+| `reason`           | human-readable explanation                                | summarize to the user; also tells you "declared" vs "inferred" provenance                                   |
+| `primary_branch`   | the repo's resolved primary branch                        | compare against your own current branch; the handler's target                                               |
+| `canonical.branch` | what the canonical clone (main worktree) is on            | anomaly check (Step 3) — MUST equal `primary_branch` in steady state (Tier R R-1)                           |
+| `canonical.dirty`  | whether the canonical clone has local changes             | anomaly check (Step 3) — a canonical clone MUST be clean in steady state (R-3)                              |
+| `remote`           | remote name, or `null`                                    | no remote ⇒ `pull-request` is infeasible                                                                    |
+| `open_pr`          | PR number/state/url, or `null`                            | corroborates a `pull-request` strategy                                                                      |
+| `mr_bead`          | merge-request bead id for THIS repo and branch, or `null` | optional corroborating signal; a foreign repo's or branch's bead never counts; absence never fails the tool |
 
 ## Step 2 — Nothing to integrate?
 

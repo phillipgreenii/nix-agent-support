@@ -95,6 +95,43 @@ link_real_tools() {
   done
 }
 
+# --- merge-request bead (mr_bead) helpers -----------------------------------
+# stub_bd <json> [exit]: fake `bd` that prints <json> verbatim and exits <exit>.
+stub_bd() {
+  local json="$1" code="${2:-0}"
+  printf '%s' "$json" >"$STUB_BIN/bd.out"
+  cat >"$STUB_BIN/bd" <<EOS
+#!/usr/bin/env bash
+cat "$STUB_BIN/bd.out"
+exit $code
+EOS
+  chmod +x "$STUB_BIN/bd"
+}
+
+# bd_shape <bare|envelope> <array-json>: render the same bead list in either
+# of bd's two --json output shapes (bare array when BD_JSON_ENVELOPE is
+# unset, e.g. unattended sessions; envelope otherwise).
+bd_shape() {
+  if [ "$1" = bare ]; then
+    printf '%s' "$2"
+  else
+    printf '{"schema_version":1,"data":%s}' "$2"
+  fi
+}
+
+# mr_bead_json <id> <repo> <branch> [state]: one pg-desk anchor bead.
+mr_bead_json() {
+  printf '{"id":"%s","issue_type":"merge-request","metadata":{"repo":"%s","branch":"%s","state":"%s"}}' \
+    "$1" "$2" "$3" "${4:-open}"
+}
+
+# run_with_bd_only: put the stub bd plus the real tools (no gh) on PATH, run.
+# PATH is overridden for the one `run` only, so it can be called in a loop.
+run_with_bd_only() {
+  [ -e "$STUB_BIN/jq" ] || link_real_tools
+  PATH="$STUB_BIN" run bash "$BIN"
+}
+
 @test "prints valid JSON with a strategy field" {
   run bash "$BIN"
   [ "$status" -eq 0 ]
@@ -257,19 +294,6 @@ EOF
   echo "$output" | jq -e '.open_pr == null'
 }
 
-@test "mr_bead: a merge-request bead surfaces as mr_bead" {
-  mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/bd" <<'EOF'
-#!/usr/bin/env bash
-echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
-EOF
-  chmod +x "$STUB_BIN/bd"
-  PATH="$STUB_BIN:$PATH"
-  run bash "$BIN"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.mr_bead == "pg2-abcd"'
-}
-
 @test "gh/bd absent: open_pr and mr_bead are null and the tool still exits 0" {
   mkdir -p "$STUB_BIN"
   link_real_tools
@@ -306,21 +330,6 @@ EOF
   echo "$output" | jq -e '.strategy == "pull-request"'
 }
 
-@test "strategy: an open merge-request bead (undeclared, remote present) infers pull-request" {
-  git remote add origin https://example.invalid/o/r.git
-  mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/bd" <<'EOF'
-#!/usr/bin/env bash
-echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
-EOF
-  chmod +x "$STUB_BIN/bd"
-  link_real_tools
-  PATH="$STUB_BIN"
-  run bash "$BIN"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.strategy == "pull-request"'
-}
-
 @test "strategy: remote present, no PR/bead, undeclared cannot be inferred" {
   git remote add origin https://example.invalid/o/r.git
   mkdir -p "$STUB_BIN"
@@ -336,6 +345,240 @@ EOF
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.strategy == "pull-request" and (.reason | test("infeasible"; "i"))'
+}
+
+# ---------------------------------------------------------------------------
+# Use cases 1-10 (bead pg2-5nsdtf): strategy resolution and the merge-request
+# bead signal. Each bd-dependent case runs against BOTH bd output shapes.
+# ---------------------------------------------------------------------------
+
+@test "use case 1: declared ff-merge-to-main wins outright even with a remote and an open PR" {
+  git remote add origin https://example.invalid/o/r.git
+  git config pgii-integrate-branch.strategy ff-merge-to-main
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/gh" <<'EOF2'
+#!/usr/bin/env bash
+echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
+EOF2
+  chmod +x "$STUB_BIN/gh"
+  PATH="$STUB_BIN:$PATH"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "ff-merge-to-main" and (.reason | test("declared"))'
+}
+
+@test "use case 1: declared pull-request wins outright when a remote resolves" {
+  git remote add origin https://example.invalid/o/r.git
+  git config pgii-integrate-branch.strategy pull-request
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "pull-request" and (.reason | test("declared")) and (.reason | test("infeasible"; "i") | not)'
+}
+
+@test "use case 3: ambiguous remote (several remotes, no upstream) cannot infer and says why" {
+  git remote add origin https://example.invalid/o/r.git
+  git remote add bitbucket https://example.invalid/o2/r2.git
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == null and .remote == null and (.reason | test("ambiguous"; "i"))'
+}
+
+@test "use case 5: a closed PR counts as no open PR and does not infer pull-request" {
+  git remote add origin https://example.invalid/o/r.git
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/gh" <<'EOF2'
+#!/usr/bin/env bash
+echo '{"number":42,"state":"CLOSED","url":"https://example.invalid/o/r/pull/42"}'
+EOF2
+  chmod +x "$STUB_BIN/gh"
+  link_real_tools
+  PATH="$STUB_BIN"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.open_pr == null and .strategy == null'
+}
+
+@test "use case 6: an own merge-request bead (this repo and branch) infers pull-request, bare array and envelope" {
+  git remote add origin https://example.invalid/o/r.git
+  for shape in bare envelope; do
+    stub_bd "$(bd_shape "$shape" "[$(mr_bead_json pg2-abcd o/r main)]")"
+    run_with_bd_only
+    [ "$status" -eq 0 ] || { echo "$shape: status $status" >&2; return 1; }
+    echo "$output" | jq -e '.mr_bead == "pg2-abcd" and .strategy == "pull-request" and (.reason | test("merge-request bead"))' || {
+      echo "$shape: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 6: no merge-request bead (empty list) is not inferred, bare array and envelope" {
+  git remote add origin https://example.invalid/o/r.git
+  for shape in bare envelope; do
+    stub_bd "$(bd_shape "$shape" "[]")"
+    run_with_bd_only
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mr_bead == null and .strategy == null' || {
+      echo "$shape: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 6: mr_bead surfaces by itself (no remote -> ff-merge-to-main still wins)" {
+  # No remote: detect_mr_bead is not consulted, PR is impossible.
+  stub_bd "$(bd_shape bare "[$(mr_bead_json pg2-abcd o/r main)]")"
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == null and .strategy == "ff-merge-to-main"'
+}
+
+@test "use case 7: remote present and nothing found cannot infer a strategy" {
+  git remote add origin https://example.invalid/o/r.git
+  link_real_tools
+  PATH="$STUB_BIN"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == null and (.reason | test("cannot infer"))'
+}
+
+@test "use case 8: bd erroring exits 0 with null mr_bead" {
+  git remote add origin https://example.invalid/o/r.git
+  stub_bd "boom" 3
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == null and .strategy == null'
+}
+
+@test "use case 8: bd unreachable (non-zero exit with JSON error body) exits 0 with null mr_bead" {
+  git remote add origin https://example.invalid/o/r.git
+  stub_bd '{"error":"no beads database found"}' 1
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == null and .strategy == null'
+}
+
+@test "use case 8: gh absent and bd absent with a remote degrade to null and exit 0" {
+  git remote add origin https://example.invalid/o/r.git
+  link_real_tools
+  PATH="$STUB_BIN"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.open_pr == null and .mr_bead == null and .strategy == null'
+}
+
+@test "use case 9: non-JSON bd output yields null mr_bead and exit 0" {
+  git remote add origin https://example.invalid/o/r.git
+  stub_bd "Error: not a beads repository"
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == null and .strategy == null'
+}
+
+@test "use case 9: bd output of an unexpected JSON type (object without data, scalar) yields null" {
+  git remote add origin https://example.invalid/o/r.git
+  for body in '{"schema_version":1}' '"x"' 'null' '42'; do
+    stub_bd "$body"
+    run_with_bd_only
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mr_bead == null' || {
+      echo "body $body: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 9: bare-array and envelope bd output give the same mr_bead" {
+  git remote add origin https://example.invalid/o/r.git
+  local list got_bare got_env
+  list="[$(mr_bead_json pg2-abcd o/r main)]"
+  stub_bd "$(bd_shape bare "$list")"
+  run_with_bd_only
+  got_bare="$(echo "$output" | jq -r '.mr_bead')"
+  stub_bd "$(bd_shape envelope "$list")"
+  run_with_bd_only
+  got_env="$(echo "$output" | jq -r '.mr_bead')"
+  [ "$got_bare" = pg2-abcd ]
+  [ "$got_bare" = "$got_env" ]
+}
+
+@test "use case 10: a foreign repo's merge-request bead does not flip this repo, bare array and envelope" {
+  git remote add origin https://example.invalid/o/r.git
+  for shape in bare envelope; do
+    stub_bd "$(bd_shape "$shape" "[$(mr_bead_json pg2-foreign other/repo main)]")"
+    run_with_bd_only
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mr_bead == null and .strategy == null' || {
+      echo "$shape: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 10: this repo's bead for ANOTHER branch does not flip this branch, bare array and envelope" {
+  git remote add origin https://example.invalid/o/r.git
+  for shape in bare envelope; do
+    stub_bd "$(bd_shape "$shape" "[$(mr_bead_json pg2-otherbranch o/r some-other-branch)]")"
+    run_with_bd_only
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mr_bead == null and .strategy == null' || {
+      echo "$shape: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 10: a merged or closed anchor for this repo and branch does not count" {
+  git remote add origin https://example.invalid/o/r.git
+  for st in merged closed MERGED; do
+    stub_bd "$(bd_shape bare "[$(mr_bead_json pg2-old o/r main "$st")]")"
+    run_with_bd_only
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mr_bead == null' || {
+      echo "state $st: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 10: a bead with no metadata (unscopable) is ignored" {
+  git remote add origin https://example.invalid/o/r.git
+  stub_bd "$(bd_shape bare '[{"id":"pg2-nometa","issue_type":"merge-request"}]')"
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == null and .strategy == null'
+}
+
+@test "use case 10: scoped lookup picks the own bead out of a mixed list, bare array and envelope" {
+  git remote add origin git@example.invalid:o/r.git
+  local list
+  list="[$(mr_bead_json pg2-foreign other/repo main),$(mr_bead_json pg2-otherbranch o/r feat),$(mr_bead_json pg2-own o/r main)]"
+  for shape in bare envelope; do
+    stub_bd "$(bd_shape "$shape" "$list")"
+    run_with_bd_only
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mr_bead == "pg2-own" and .strategy == "pull-request"' || {
+      echo "$shape: $output" >&2
+      return 1
+    }
+  done
+}
+
+@test "use case 10: metadata.repo may be the bare repo name (https URL with .git suffix)" {
+  git remote add origin https://example.invalid/o/r.git
+  stub_bd "$(bd_shape bare "[$(mr_bead_json pg2-short r main)]")"
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == "pg2-short"'
+}
+
+@test "use case 10: the bead is matched against the CURRENT branch from a linked worktree" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  git remote add origin https://example.invalid/o/r.git
+  add_worktree feat
+  stub_bd "$(bd_shape bare "[$(mr_bead_json pg2-main o/r main),$(mr_bead_json pg2-feat o/r feat)]")"
+  run_with_bd_only
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == "pg2-feat"'
 }
 
 @test "facts: unrecognized argument is a usage error" {

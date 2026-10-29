@@ -14,7 +14,8 @@ integrate-branch-support: Advisory: report a repo's integration facts + recommen
 Usage: integrate-branch-support [--facts | --prek-branch-diff [--no-reuse] | --bundle-refresh <old-sha>]
 
 With no option, print one JSON object (strategy, reason, primary_branch,
-canonical, remote, open_pr, mr_bead) describing how the current branch
+canonical, remote, open_pr, mr_bead -- the merge-request bead scoped to
+this repo and branch, else null) describing how the current branch
 should be integrated.
 
 Options:
@@ -203,7 +204,7 @@ remote_reason=""
 open_pr_json="$(detect_open_pr)"
 [ -n "$open_pr_json" ] || open_pr_json="null"
 
-mr_bead_val="$(detect_mr_bead)"
+mr_bead_val="$(detect_mr_bead "$remote_val" "$(current_branch)")"
 
 declared_strategy="$(git config --get pgii-integrate-branch.strategy 2>/dev/null || true)"
 
