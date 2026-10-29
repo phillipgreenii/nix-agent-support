@@ -1,3 +1,80 @@
 schema = 3
+cachePackages = [
+  'github.com/dustin/go-humanize',
+  'github.com/google/uuid',
+  'github.com/mattn/go-isatty',
+  'github.com/ncruces/go-strftime',
+  'github.com/remyoudompheng/bigfft',
+  'golang.org/x/sys/unix',
+  'modernc.org/libc',
+  'modernc.org/libc/errno',
+  'modernc.org/libc/fcntl',
+  'modernc.org/libc/fts',
+  'modernc.org/libc/grp',
+  'modernc.org/libc/honnef.co/go/netdb',
+  'modernc.org/libc/langinfo',
+  'modernc.org/libc/limits',
+  'modernc.org/libc/netdb',
+  'modernc.org/libc/netinet/in',
+  'modernc.org/libc/poll',
+  'modernc.org/libc/pthread',
+  'modernc.org/libc/pwd',
+  'modernc.org/libc/signal',
+  'modernc.org/libc/stdio',
+  'modernc.org/libc/stdlib',
+  'modernc.org/libc/sys/socket',
+  'modernc.org/libc/sys/stat',
+  'modernc.org/libc/sys/types',
+  'modernc.org/libc/termios',
+  'modernc.org/libc/time',
+  'modernc.org/libc/unistd',
+  'modernc.org/libc/utime',
+  'modernc.org/libc/uuid/uuid',
+  'modernc.org/libc/wctype',
+  'modernc.org/mathutil',
+  'modernc.org/memory',
+  'modernc.org/sqlite',
+  'modernc.org/sqlite/lib',
+  'modernc.org/sqlite/vtab'
+]
 
 [mod]
+  [mod.'github.com/dustin/go-humanize']
+    version = 'v1.0.1'
+    hash = 'sha256-yuvxYYngpfVkUg9yAmG99IUVmADTQA0tMbBXe0Fq0Mc='
+
+  [mod.'github.com/google/uuid']
+    version = 'v1.6.0'
+    hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
+
+  [mod.'github.com/mattn/go-isatty']
+    version = 'v0.0.24'
+    hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
+
+  [mod.'github.com/ncruces/go-strftime']
+    version = 'v1.0.0'
+    hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
+
+  [mod.'github.com/remyoudompheng/bigfft']
+    version = 'v0.0.0-20230129092748-24d4a6f8daec'
+    hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
+
+  [mod.'golang.org/x/sys']
+    version = 'v0.47.0'
+    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
+
+  [mod.'modernc.org/libc']
+    version = 'v1.75.7'
+    hash = 'sha256-Iq3Pcr3RrbhC82RWDM1I4gyKh3V/HI1gVQzoGR+0YYo='
+
+  [mod.'modernc.org/mathutil']
+    version = 'v1.7.1'
+    hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
+
+  [mod.'modernc.org/memory']
+    version = 'v1.12.1'
+    hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
+
+  [mod.'modernc.org/sqlite']
+    version = 'v1.59.0'
+    hash = 'sha256-CaNi9UvS9y6aiiSy3GUlRHX84og+i4MWOZmxbFONeb4='

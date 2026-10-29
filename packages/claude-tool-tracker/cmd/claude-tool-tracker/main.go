@@ -1,5 +1,6 @@
 // Command claude-tool-tracker appends tool-event lines to the tracker's event
-// log (`append`) and records Claude Code hook input (`hook`). See README.md.
+// log (`append`), records Claude Code hook input (`hook`) and ingests the log
+// into SQLite (`ingest`). See README.md.
 package main
 
 import (
@@ -24,7 +25,7 @@ const hookDeadline = 2 * time.Second
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: claude-tool-tracker append|hook|--version")
+		fmt.Fprintln(os.Stderr, "usage: claude-tool-tracker append|hook|ingest|--version")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -38,6 +39,8 @@ func main() {
 		os.Exit(0)
 	case "append":
 		os.Exit(runAppend(os.Args[2:], os.Stdin, os.Stderr))
+	case "ingest":
+		os.Exit(runIngest(os.Args[2:], os.Stdout, os.Stderr))
 	case "--version", "version":
 		fmt.Println(Version)
 	default:

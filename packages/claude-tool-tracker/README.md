@@ -4,7 +4,7 @@ Appends one event line per call to the tracker's event log, and records Claude C
 input. Every later part of the tracker (ingest, the mod, CETA's own events) writes and reads the
 line format documented here. Per-kind `data` fields: [docs/event-kinds.md](docs/event-kinds.md).
 
-Standard library only. Design: `docs/superpowers/specs/2026-10-14-claude-tool-tracker-design.md`.
+Standard library plus the pure-Go SQLite driver (`modernc.org/sqlite`, no cgo). Design: `docs/superpowers/specs/2026-10-14-claude-tool-tracker-design.md`.
 
 ## Event format
 
@@ -79,11 +79,42 @@ When a line would exceed it, the producer shortens `data` and still writes one l
 Envelope fields are never shortened. A reader that needs a full input (CETA's `evaluate` replay)
 must treat an event with `data._truncated` as incomplete.
 
+## Ingest
+
+```
+claude-tool-tracker ingest [--db PATH] [--events-dir DIR]
+```
+
+Reads the event files into a SQLite database and publishes the views in
+[docs/views.md](docs/views.md), the only interface for readers (open the database read-only).
+Defaults: `--db` is `$XDG_STATE_HOME/claude-tool-tracker/tracker.db`, `--events-dir` is the events
+directory above.
+
+- Only files matching the whole pattern `tool-events.<session_id>.<source>.jsonl` are read; the name
+  is parsed from the right, so `source` has no dot. Anything else is ignored.
+- Idempotent: `event_id` is unique, so re-ingest adds nothing. Incremental: the byte offset reached
+  in each file is remembered; a trailing line without its newline is left for the next run; a file
+  that shrank is read again from the start.
+- A line that is not valid JSON, or lacks a required field, is skipped and counted. Kinds ingest
+  does not know are stored (view `annotations`).
+- Each call gets a stable integer `call_id` at first ingest. An event without `tool_use_id` is
+  stored and counted but belongs to no call.
+- A call's `cwd` maps to a repo name; a git worktree maps to its main checkout's name.
+- Schema changes are in-place migrations (`PRAGMA user_version`): the database is the lasting
+  record once spooled files are past retention.
+- Output, one line per file then a total, tab-separated:
+  `<file>\tlines=N new=N duplicate=N skipped_invalid_json=N skipped_missing_field=N`. Exit `0` even
+  when lines were skipped (they are reported, not fatal); `1` for an unreadable directory, file or
+  database; `2` for a usage error. Run it repeatedly; two runs at once wait for each other.
+
 ## Layout
 
 | Path                       | Holds                                                        |
 | -------------------------- | ------------------------------------------------------------ |
 | `cmd/claude-tool-tracker/` | the binary; its tests build and run it                       |
 | `internal/events/`         | envelope, validation, file naming, modes, shortening, append |
+| `internal/ingest/`         | event files to database rows, skipped-line counts            |
+| `internal/store/`          | SQLite schema, migrations, published views                   |
+| `internal/repo/`           | working directory to repo name (worktree-aware)              |
 | `internal/hook/`           | hook JSON to tracker events                                  |
 | `testdata/`                | real-shaped hook input fixtures                              |
