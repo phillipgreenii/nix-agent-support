@@ -301,4 +301,4 @@ file today), so a reviewer MUST look for the pattern by hand.
 
 ## Structured Data Files
 
-MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing (sed, awk, python).
+MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing (sd, sed, awk, python). `sd PAT REPL FILE...` rewrites FILE in place with no backup: preview with `sd -p` first, and run it only on files under version control.

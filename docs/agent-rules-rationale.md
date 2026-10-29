@@ -230,6 +230,17 @@ or `pn workspace apply`, or invoke `/pn-workspace-update`, on its own initiative
 kept unchanged. Whether the runner's own push gate in ADR 0108 stays is likewise undecided and
 needs its own ruling; U-5 still forbids an agent from enabling that step or widening its scope.
 
+## Modern CLI tool preference (CT-1)
+
+- CT-1: agents retried because BSD `sed` and GNU `sed` disagree on flags (`-i`, `\+`, `\n`); `sd`,
+  `rg`, `fd` and `ast-grep` behave the same on every machine. The rule is advisory (a PreToolUse
+  nudge that blocks `sed` is a possible follow-up). It was added only after CETA classified `sd` and
+  `ast-grep` (bead pg2-5dduq3, blocked by the W3 approver work), so it never steers agents to a tool
+  that prompts or silently writes. The `sd` in-place and no-backup warning lives in the rule itself
+  because it is the one surprising behaviour. Provenance: operator request, Phillip, 2026-10-28.
+  Prefix `CT-` is distinct from the tracker family `T-1`..`T-3` and the tripwire guard's `[FBDPWRU]`
+  bracket.
+
 ## Local Containers (C-1..C-4)
 
 Origin: docket `pg2-a01hh` (local container monitoring and reclaim). Containers in ANY state pin

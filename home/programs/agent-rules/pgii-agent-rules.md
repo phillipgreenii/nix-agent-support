@@ -99,6 +99,8 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 - Before recommending paid/licensed software, confirm the cost with the user.
 - When telling the user which file to view/open, ALWAYS give the full absolute path (many concurrent worktrees run across sessions).
 - Default to NOT publishing work as a Claude Artifact; only on explicit request or when a shareable page is clearly the point, and ask before publishing proactively.
+- **CT-1** In Bash, an agent MUST prefer `sd` over `sed` for substitution, `rg` over `grep`, `fd` over `find`, and SHOULD use `ast-grep` for syntax-aware rewrites; the Read/Grep/Glob tools come first where they fit.
+  `sd PAT REPL FILE...` edits in place with no backup (`-p` previews); `sed -n 'A,Bp'` stays for line ranges.
 
 ### Git Workflow
 
