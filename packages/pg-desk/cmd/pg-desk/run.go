@@ -44,16 +44,17 @@ var runStoreOpen = func() (*store.Store, error) { return store.Open(store.Defaul
 // a fixture bead-to-PR resolution without a real pg-connector subprocess
 // on $PATH. Production wraps beadref.Resolver.ResolvePR (Phase 10, docket
 // pg2-2j5ac.34): given a beads-tracker issue-type entity's id, resolve the
-// (repo, entityID) of the PR it is about, by the SAME title/metadata keys
-// the sync stage's forward direction uses [design: 7.2, 7.5].
+// (repo, entityID) of the PR it is about, by beadref.ClassifyBead's
+// title/metadata keys [design: 7.2, 7.5].
 var runResolveBeadPR = func(ctx context.Context, cfg *config.Config, beadID string) (repo, entityID string, err error) {
 	return beadref.NewResolver(cfg).ResolvePR(ctx, beadID)
 }
 
 // runCmd implements `pg-desk run <type> <id> --change
-// added|changed|removed|sweep`: the three-stage gather/interpret/store
-// pipeline for one entity (internal/pipeline), for <type>=pr; and, for
-// <type>=issue, a resolve-then-interpret-ONLY re-run
+// added|changed|removed|sweep` for <type>=issue and <type>=thread. (`run pr`,
+// the gather/interpret/store/sync run for a PR, was removed with the sync
+// stage; the daemon is the PR feed.) For <type>=issue it is a
+// resolve-then-interpret-ONLY re-run
 // (pipeline.Pipeline.RunInterpretOnly) — never a second gather, and never
 // the sync stage [design: 7.2, 6.1; Binding decisions] — split two ways by
 // the incoming id's own SHAPE (checked first, via ticketkey.MatchesShape
@@ -76,7 +77,7 @@ var runResolveBeadPR = func(ctx context.Context, cfg *config.Config, beadID stri
 // gather or sync.
 var runCmd = &cobra.Command{
 	Use:   "run <type> <id>",
-	Short: "Run the gather/interpret/store pipeline once for one entity",
+	Short: "Re-interpret the PRs linked to one issue or thread",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		start := time.Now()
@@ -152,10 +153,10 @@ func logRunFailure(w io.Writer, entityType, entityID, change string, err error) 
 func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 	entityType, entityID := args[0], args[1]
 	switch entityType {
-	case "issue", "pr", "thread":
+	case "issue", "thread":
 		// implemented below
 	default:
-		return pipeline.TagStage(runStageArgs, fmt.Errorf("run: unknown entity type %q (want pr, issue, or thread)", entityType))
+		return pipeline.TagStage(runStageArgs, fmt.Errorf("run: unknown entity type %q (want issue or thread; `run pr` was removed with the sync stage)", entityType))
 	}
 
 	cfg, err := runConfigLoad(cmd.Context())
@@ -168,13 +169,7 @@ func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	// The sync stage's per-write "anchor write ... cause=" lines go to stderr
-	// AND a bounded file under the state dir: a router command role's stderr
-	// is discarded on success (bead pg2-kwwn2).
-	syncLogger, closeSyncLog := newAnchorWriteLogger(cmd.ErrOrStderr(), anchorWriteLogPath(), anchorWriteLogMaxBytes)
-	defer func() { _ = closeSyncLog() }()
-
-	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()), pipeline.WithSyncLogger(syncLogger), pipeline.WithRunRecordWriter(rec))
+	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()), pipeline.WithRunRecordWriter(rec))
 	change := gather.ChangeKind(runF.change)
 
 	switch entityType {
@@ -191,7 +186,7 @@ func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 		return runThread(cmd.Context(), p, cfg, st, entityID, change)
 	}
 
-	return p.Run(cmd.Context(), entityType, entityID, change)
+	return nil
 }
 
 // runJiraIssue implements run issue's Jira half (docket pg2-2j5ac.40,

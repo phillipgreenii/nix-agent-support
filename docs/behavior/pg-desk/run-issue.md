@@ -31,7 +31,7 @@ matching neither shape is this dispatch's own well-formed error, never a silent 
 ## What triggers it
 
 **Beads backend:** a beads-tracker issue-type entity — an anchor, feedback cycle, or
-review-request bead (see [`sync.md`](sync.md)'s "Bead shapes" table) — closing, changing, or being
+review-request bead (titled `<repo>#<n>: ...`, `process-feedback: <repo>#<n>` or `review-pr: <repo>#<n>`) — closing, changing, or being
 added/swept.
 
 **Jira:** a Jira issue already cross-referenced to one or more PRs (see
@@ -85,8 +85,7 @@ Given the triggering bead's id, `run issue`:
 1. Reads the bead's CURRENT title and metadata via `pg-connector issue show <id>` — never through
    `internal/gather.Gatherer.Gather`, which rejects any entity type other than `pr` outright (see
    [`gather.md`](gather.md)).
-2. Classifies that title/metadata with the SAME bead-shape parser [`sync.md`](sync.md)'s adoption
-   step uses for its own forward direction (PR -> bead) — one parser, not two. An anchor or
+2. Classifies that title/metadata with the bead-shape parser `beadref.ClassifyBead` (it moved here from the deleted sync package) — one parser. An anchor or
    review-request bead resolves by its `repo`/`pr_number` metadata; a feedback cycle resolves the
    same way, or by its exact `process-feedback: <repo>#<n>` title when a pre-existing cycle
    predates that metadata; a title-adopted merge-request bead (titled `<repo>#<n>: ...`, no

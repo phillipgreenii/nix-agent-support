@@ -5,9 +5,9 @@
 // this to resolve a triggering bead id BEFORE re-running stage 2
 // (interpret) for its linked PR: it never invokes internal/gather (which
 // rejects any entityType other than "pr" outright — see that package's own
-// doc comment) and is not itself the sync stage.
+// doc comment).
 //
-// Classification reuses internal/sync.ClassifyBead verbatim — the SAME
+// Classification reuses ClassifyBead verbatim — the SAME
 // title/metadata recognition rules the sync stage's forward direction (PR
 // -> bead) uses, applied here in reverse (bead -> PR) [design: 7.2, 7.5;
 // this docket's Binding decisions: "The bead-to-PR match uses the SAME
@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
-	desksync "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 	"github.com/phillipgreenii/x/cmdrun"
 )
 
@@ -70,7 +69,7 @@ func (r *Resolver) ResolvePR(ctx context.Context, beadID string) (repo, entityID
 	if err != nil {
 		return "", "", fmt.Errorf("beadref: show bead %s: %w", beadID, err)
 	}
-	_, repo, prNumber, ok := desksync.ClassifyBead(title, metadata)
+	_, repo, prNumber, ok := ClassifyBead(title, metadata)
 	if !ok {
 		return "", "", fmt.Errorf(
 			"beadref: bead %s (title %q) matches no known bead shape (anchor, feedback-cycle, review-request, or a title-adopted merge-request)",

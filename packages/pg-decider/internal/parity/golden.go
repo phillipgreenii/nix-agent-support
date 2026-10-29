@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
 )
 
@@ -271,111 +269,6 @@ func RunGate(ctx context.Context, env Env) ([]Outcome, error) {
 }
 
 // ---- freeze: the one-time recording of the old plans -----------------------
-
-// Freeze records the golden: it runs every scenario through BOTH sides (the old
-// sync stage of the pg-desk named by env, and the decider), requires the diff
-// against explained to be clean, and returns one golden per scenario. It exists
-// to be run once, before the sync stage is removed; the old-side runner (RunOld)
-// and this function are deleted with it. explained is the list of documented
-// differences between the two sides, keyed by scenario.
-func Freeze(ctx context.Context, env Env, explained map[string][]Expected, from Frozen) ([]*Golden, error) {
-	scs, err := Scenarios()
-	if err != nil {
-		return nil, err
-	}
-	for name := range explained {
-		if _, err := scenarioNamed(scs, name); err != nil {
-			return nil, fmt.Errorf("parity: explained differences name scenario %q, which does not exist", name)
-		}
-	}
-	var out []*Golden
-	for _, sc := range scs {
-		g, err := freezeScenario(ctx, env, sc, explained[sc.Name], from)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, g)
-	}
-	return out, nil
-}
-
-func scenarioNamed(scs []Scenario, name string) (Scenario, error) {
-	for _, sc := range scs {
-		if sc.Name == name {
-			return sc, nil
-		}
-	}
-	return Scenario{}, errors.New("no such scenario")
-}
-
-func freezeScenario(ctx context.Context, env Env, sc Scenario, explained []Expected, from Frozen) (*Golden, error) {
-	fx, err := LoadFixture(sc)
-	if err != nil {
-		return nil, err
-	}
-	old, err := RunOld(ctx, env, sc)
-	if err != nil {
-		return nil, fmt.Errorf("freeze %s: old side: %w", sc.Name, err)
-	}
-	nw, err := RunNew(ctx, env, sc)
-	if err != nil {
-		return nil, fmt.Errorf("freeze %s: decider side: %w", sc.Name, err)
-	}
-	oe, err := NormalizeOld(fx, old)
-	if err != nil {
-		return nil, err
-	}
-	ne, err := NormalizeNew(nw)
-	if err != nil {
-		return nil, err
-	}
-	rep := Diff(sc.Name, oe, ne, explained)
-	if !rep.Clean() {
-		return nil, fmt.Errorf("freeze %s: the old and decider plans differ in ways no explained difference covers (unexplained %v, missing %v)", sc.Name, rep.Unexplained, rep.Missing)
-	}
-	want, err := ApplyExplained(oe, explained)
-	if err != nil {
-		return nil, fmt.Errorf("freeze %s: %w", sc.Name, err)
-	}
-	if !equalEntries(want, ne) {
-		return nil, fmt.Errorf("freeze %s: the decider plan %v is not the old plan with the explained differences applied %v", sc.Name, ne, want)
-	}
-	return &Golden{Scenario: sc.Name, FrozenFrom: from, OldPlan: nonNil(oe), Explained: nonNilExpected(explained), ExpectedPlan: nonNil(want)}, nil
-}
-
-func nonNil(es []Entry) []Entry {
-	if es == nil {
-		return []Entry{}
-	}
-	return es
-}
-
-func nonNilExpected(xs []Expected) []Expected {
-	if xs == nil {
-		return []Expected{}
-	}
-	return xs
-}
-
-// WriteGoldens writes each golden to <dir>/<scenario>/expected-plan.json, where
-// dir is the testdata directory. It refuses to overwrite a golden: it is
-// frozen once.
-func WriteGoldens(dir string, gs []*Golden) error {
-	for _, g := range gs {
-		p := filepath.Join(dir, g.Scenario, GoldenFile)
-		if _, err := os.Stat(p); err == nil {
-			return fmt.Errorf("parity: %s already exists: the golden is frozen once and is edited by hand, never refrozen", p)
-		}
-		b, err := json.MarshalIndent(g, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(p, append(b, '\n'), 0o644); err != nil {
-			return fmt.Errorf("parity: write %s: %w", p, err)
-		}
-	}
-	return nil
-}
 
 // goldenNames lists the scenario directories that hold a golden, for tests.
 func goldenNames() ([]string, error) {

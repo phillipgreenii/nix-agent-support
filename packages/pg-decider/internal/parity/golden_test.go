@@ -276,7 +276,7 @@ func TestLegacyRowStoreHelperRefusesANonLegacyStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sb, cleanup, err := newSandbox(env, fx, "helper", "off")
+	sb, cleanup, err := newSandbox(env, fx, "helper")
 	if err != nil {
 		t.Fatal(err)
 	}

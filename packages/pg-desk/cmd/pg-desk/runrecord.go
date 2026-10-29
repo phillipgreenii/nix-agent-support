@@ -2,7 +2,9 @@ package main
 
 import (
 	"io"
+	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
@@ -22,8 +24,8 @@ const (
 	// runRecordLogName is the file, in the same directory as store.db.
 	runRecordLogName = "run-record.log"
 
-	// runRecordLogMaxBytes bounds the live file the way anchorWriteLogMaxBytes
-	// does: an open that finds it at or above this size rotates it to
+	// runRecordLogMaxBytes bounds the live file the way a log file
+	// is bounded: an open that finds it at or above this size rotates it to
 	// runRecordLogName+".1" first. A run record is about 250 bytes, so this
 	// holds well over a day of records at the current event rate.
 	runRecordLogMaxBytes int64 = 8 << 20
@@ -59,4 +61,59 @@ func recordEarlyFailure(w io.Writer, entityType, entityID string, change gather.
 		return
 	}
 	pipeline.WriteRunRecord(w, time.Now(), time.Since(start), "", pipeline.PathEarly, entityType, entityID, change, "error", "", err)
+}
+
+// lazyLogFile is an io.Writer that opens (creating the directory, rotating
+// when oversized) the log file on the first Write, so a run that logs
+// nothing creates nothing. A failed open drops the lines: the log is
+// diagnostic and must never fail or slow a run.
+type lazyLogFile struct {
+	path     string
+	maxBytes int64
+
+	mu     sync.Mutex
+	opened bool
+	f      *os.File
+}
+
+func (l *lazyLogFile) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.opened {
+		l.opened = true
+		l.f = openBoundedAppend(l.path, l.maxBytes)
+	}
+	if l.f == nil {
+		return len(p), nil
+	}
+	return l.f.Write(p)
+}
+
+// Close closes the file if it was ever opened.
+func (l *lazyLogFile) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.f == nil {
+		return nil
+	}
+	err := l.f.Close()
+	l.f = nil
+	return err
+}
+
+// openBoundedAppend opens path for appending, first rotating it to
+// path+".1" if it already holds maxBytes or more. It returns nil on any
+// failure.
+func openBoundedAppend(path string, maxBytes int64) *os.File {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil
+	}
+	if fi, err := os.Stat(path); err == nil && fi.Size() >= maxBytes {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil
+	}
+	return f
 }

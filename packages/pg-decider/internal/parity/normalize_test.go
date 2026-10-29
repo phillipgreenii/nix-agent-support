@@ -2,70 +2,12 @@ package parity
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 )
 
 func ptr(s string) *string { return &s }
-
-func TestNormalizeOldMapsObservedRowKinds(t *testing.T) {
-	fx := &Fixture{Name: "x", Entities: []string{"acme/api#1"}}
-	old := OldResult{Rows: map[string][]PlannedRow{
-		"acme/api#1": {
-			{Kind: "review-request", ContentHash: "h3"},
-			{Kind: "anchor", ContentHash: "h1"},
-			{Kind: "feedback-cycle", ContentHash: "h2"},
-		},
-	}}
-	got, err := NormalizeOld(fx, old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []Entry{
-		{"acme/api#1", "anchor", OpCreate},
-		{"acme/api#1", "process-feedback", OpCreate},
-		{"acme/api#1", "review-pr", OpCreate},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
-
-func TestNormalizeOldRejectsUnknownRowKind(t *testing.T) {
-	fx := &Fixture{Name: "x", Entities: []string{"acme/api#1"}}
-	old := OldResult{Rows: map[string][]PlannedRow{"acme/api#1": {{Kind: "mystery"}}}}
-	if _, err := NormalizeOld(fx, old); err == nil || !strings.Contains(err.Error(), "mystery") {
-		t.Fatalf("err = %v, want one naming the unknown kind", err)
-	}
-}
-
-func TestNormalizeOldDerivesAdoptionFromFixtureBeadShapes(t *testing.T) {
-	fx := &Fixture{
-		Name:     "x",
-		Entities: []string{"acme/api#7"},
-		Beads: []BeadFixture{
-			{ID: "a", Title: "acme/api#7: Some title"},
-			{ID: "r", Title: "review-pr: acme/api#7", State: "closed"},
-			{ID: "f", Title: "process-feedback: acme/api#7"},
-			{ID: "o", Title: "an unrelated bead"},
-			{ID: "p", Title: "review-pr: acme/api#8"},
-		},
-	}
-	got, err := NormalizeOld(fx, OldResult{Rows: map[string][]PlannedRow{"acme/api#7": nil}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []Entry{
-		{"acme/api#7", "anchor", OpAdopt},
-		{"acme/api#7", "process-feedback", OpAdopt},
-		{"acme/api#7", "review-pr", OpAdopt},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
 
 func TestNormalizeNewMapsEveryOpAndKind(t *testing.T) {
 	plan := action.PlanResult{Actions: []action.Action{

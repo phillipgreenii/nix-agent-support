@@ -522,7 +522,7 @@ With them go the `reconcile` kind for issue, the `sweep` and `local-reconcile` o
 the deterministic jitter, the per-tier cap and the sizing bound. A failed decider run is not
 re-emitted by anything; the issue is decided again at its next change. The `sweep.*` configuration
 keys remain for the other types (`pr`, `thread`); the issue flow does not read them. The old
-top-level `pg-desk sweep` bulk backfill is unrelated and unchanged.
+top-level `pg-desk sweep` bulk backfill was deleted with the sync stage (packet P9a-2).
 
 The retirement ships with the release that carries it. Rolling it back means reverting that release,
 which brings the old tiers and the flood of re-emitted issues back; the additive `watched`, `backend`
@@ -599,7 +599,7 @@ hydrated is reported by its own series (`pg_desk_pr_unhydrated`), not by this on
 
 `hydration.read_issue_deps` (boolean, default `false`; home-module option `hydration.readIssueDeps`)
 switches issue-dependency hydration on. It applies to every path that hydrates an issue: `changes`,
-`refresh`, `run issue`, `sweep` and `reconcile` all hydrate through the one gatherer the pipeline
+`refresh` and `run issue` hydrate through the one gatherer the pipeline
 builds, and that gatherer reads the key.
 
 - **Off (the default).** An issue hydration reads `issue show` only. The stored facts carry

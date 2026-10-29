@@ -19,9 +19,7 @@ below. "Schema version 2 tables" describes what the cutover changes.
   by gather.
 - **`interpretation`** — ownership, enrichment, urgency, category, feedback dispositions,
   approvals, gate state, match reasons, panel placement, `ready_to_promote`, `degraded`, and
-  `sync_error`. Written by interpret; the `sync_error` field is written by sync (Phase 10, see
-  [`sync.md`](sync.md)) only on a sync failure for that entity, via the SAME writer, never a
-  separate column or table.
+  `sync_error`. Written by interpret. The `sync_error` column is no longer written by anything (the sync stage was deleted, packet P9a-2); a version-1 row may still carry an old value.
 - **`xref`** — cross-reference edges (`from`/`to` type and id, the evidence that produced the
   link, first-seen and last-confirmed times). This table's schema exists in Phase 9's ladder;
   starting Phase 13 (docket `pg2-2j5ac.40`) it is written by gather's own ticket-key scan (see
@@ -35,8 +33,8 @@ below. "Schema version 2 tables" describes what the cutover changes.
   pipeline stage writes this table.
 - **`ledger`** — entity-to-bead-id mapping by kind, the last-synced content hash, the row's last-checked
   time (`last_synced_at`, advanced on every sync of the entity even when nothing changed, so an
-  unchanged anchor check is recorded here and never on the bead; see [`sync.md`](sync.md)), and the
-  last-reviewed head SHA. Written by sync (Phase 10, [`sync.md`](sync.md)): a `plan`-mode row
+  unchanged anchor check was recorded here and never on the bead), and the
+  last-reviewed head SHA. No code writes or reads the table any more (the accessors went with the sync stage, packet P9a-2); it stays in the version-1 ladder until the cutover drops it. It was written by the deleted sync stage: a `plan`-mode row
   carries an empty `bead_id` (nothing was actually created) and a content hash of the fields the
   write WOULD set; an `apply`-mode row carries the real `bead_id` and a content hash of the fields
   the write DID set — the same hash for the same input regardless of mode, which is what makes the
@@ -44,20 +42,13 @@ below. "Schema version 2 tables" describes what the cutover changes.
   `review-request` kind row, where it is the head of the last review REQUEST sync made (not of a
   completed review). The `review-request` row also carries `first_seen_head_sha` and
   `first_seen_head_at`, the head sync is waiting out and when it first saw it (both empty when no
-  head is pending; see [`sync.md`](sync.md)'s "Review settle window"). On a version-1 store those
+  head is pending). On a version-1 store those
   two columns are added to `ledger` by an idempotent column ensure on open (not a rung of the
   version ladder, so `user_version` stays `1`); the cutover drops the whole table.
 - **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
-  migrations, `heartbeat`, and `sweep` (`last_sweep`, bead `pg2-gznpe`) — `last_run` is reserved in
+  migrations and `heartbeat` (the `last_sweep` key, written by the deleted `pg-desk sweep`, is no longer written) — `last_run` is reserved in
   this same table but not yet written by any command (a separate, pre-existing gap; not this
-  bead's scope). It also holds per-entity keys: `reconcile`'s own stamps and
-  deferral counters (see [`operator-commands.md`](operator-commands.md)), and `sync_retry.<entity id>`, the retry
-  indicator of a PR's recorded `sync_error` (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s
-  "Automatic retry"): attempts so far, the retry bound, the state (`retrying`, `exhausted` or
-  `non-transient`), the last failure time and, while retrying, the next retry time. It is written
-  on every failed run of a PR that has a recorded `sync_error` and deleted by that PR's next
-  successful run. Keeping it in `meta` needs no schema change; it has meaning only on version 1,
-  since the cutover drops `sync_error`.
+  bead's scope). The per-entity keys of the deleted `reconcile` (its stamps and deferral counters) and of the `sync_error` retry state (`sync_retry.<entity id>`) are no longer written; a store may still hold old ones, which nothing reads.
 
 ## Schema versions and the cutover
 

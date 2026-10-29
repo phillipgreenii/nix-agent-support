@@ -184,10 +184,11 @@ func TestG5GuardAllowlist(t *testing.T) {
 	}
 }
 
-// TestPreCutoverAllowlistIsMinimal pins the allowlist to the one known entry.
-func TestPreCutoverAllowlistIsMinimal(t *testing.T) {
-	if len(PreCutoverAllowlist) != 1 || PreCutoverAllowlist[0] != "internal/sync/connector.go" {
-		t.Fatalf("PreCutoverAllowlist = %v, want exactly internal/sync/connector.go", PreCutoverAllowlist)
+// TestPreCutoverAllowlistIsEmpty pins the allowlist empty: its only entry,
+// internal/sync/connector.go, was deleted with the sync stage.
+func TestPreCutoverAllowlistIsEmpty(t *testing.T) {
+	if len(PreCutoverAllowlist) != 0 {
+		t.Fatalf("PreCutoverAllowlist = %v, want empty", PreCutoverAllowlist)
 	}
 }
 

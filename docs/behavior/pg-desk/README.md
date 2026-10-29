@@ -13,8 +13,8 @@ backend it targets is always a config key, never a literal, so the same generici
 which agent tracker `pg-desk` signals through. The G5 guard `TestNoDecisionLogicInPgDesk`
 (`packages/pg-desk/internal/guards`) pins the boundary in code: pg-desk production code MUST NOT
 contain the `focus-item` or `dedup_key` literals, exec `bd`, or pass a tracker write verb
-(`issue create|update|comment|close`) to the connector, with one allowlist of the retiring
-pre-cutover write path (`internal/sync/connector.go`) that the change-flow cutover release deletes.
+(`issue create|update|comment|close`) to the connector. The allowlist of the retiring pre-cutover
+write path (`internal/sync/connector.go`) is empty: that file went with the sync stage.
 
 This set describes intended behavior only — no implementation code, no data-structure or
 call-site detail below that floor. It is this docket's (Phase 9 of the pg-desk and connector
@@ -25,9 +25,9 @@ this set and MUST NOT contradict it without a docket design amendment.
 
 ## Scope (Phase 9, widened by Phase 10)
 
-In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes — added by Phase
-10, docket pg2-2j5ac.34), the `run` pipeline, `sweep` (bead `pg2-gznpe`'s bulk backfill over every
-stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
+In scope: `store` and its schema, `gather`, `interpret`, the `run issue` and `run thread` re-interpret
+path (the legacy `sync` stage, `reconcile`, `sweep` and `run pr` were deleted by the PR lane refactor,
+packet P9a-2), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
 verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `issue changes` and `thread changes` (see [`changes.md`](changes.md); there is no `pr changes`, the daemon is the PR feed), the focus configuration keys (`focus.*`, `bead_id_pattern`, see [`config.md`](config.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
@@ -61,8 +61,7 @@ back here — not the full list.
 | [`store-schema.md`](store-schema.md)           | The SQLite store, its version ladder, schema cutover and tables                                                                    |
 | [`gather.md`](gather.md)                       | Pipeline stage 1 — facts, only through `pg-connector`                                                                              |
 | [`interpret.md`](interpret.md)                 | Pipeline stage 2 — pure, deterministic derivation                                                                                  |
-| [`sync.md`](sync.md)                           | Pipeline stage 3 — agent-visible bead writes (all modes)                                                                           |
-| [`pipeline-run.md`](pipeline-run.md)           | `pg-desk run` and the three-stage pipeline shape                                                                                   |
+| [`pipeline-run.md`](pipeline-run.md)           | `pg-desk run issue`/`run thread`, the run record and failure diagnosis                                                             |
 | [`run-issue.md`](run-issue.md)                 | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                                            |
 | [`run-thread.md`](run-thread.md)               | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                             |
 | [`serve.md`](serve.md)                         | `pg-desk serve`, soak-port only this phase                                                                                         |
@@ -79,7 +78,7 @@ back here — not the full list.
 | [`attention.md`](attention.md)                 | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
 | [`freshness.md`](freshness.md)                 | `pg-desk freshness`, the dashboard `sources[]` and `pg_desk_source_age_seconds` — per-source data age, the staleness threshold     |
 | [`focus.md`](focus.md)                         | `pg-desk focus` — the daily-focus command group: shared flags, exit codes, period addressing, `--json` contract, run record        |
-| [`operator-commands.md`](operator-commands.md) | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
+| [`operator-commands.md`](operator-commands.md) | `show`, `status`, `doctor`, `heartbeat`, `heartbeat-item`                                                                          |
 
 ## Telemetry declaration (D24)
 
@@ -101,10 +100,8 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   series of its own; every non-dry-run `select`, `pull`, `close` and `select --repair` leaves one run
   record row in the store and prints the same record as one `pg-desk.focus-select/v1` JSON line on
   stderr — see [`focus.md`](focus.md)'s "Telemetry and logs".
-- **Logs:** `run` logs structured JSON to stderr (pg-router captures it) and adds a three-stage
-  timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)
-  into that same line rather than a separate stream (see [`sync.md`](sync.md)); `run issue`'s and
-  `run thread`'s own interpret-only re-runs fold into that same structured line too, logged
+- **Logs:** `run` logs structured JSON to stderr (pg-router captures it); `run issue`'s and
+  `run thread`'s own interpret-only re-runs write that structured line, logged
   against the resolved PR's own entity id — once per linked PR, which can re-interpret more than
   one on either path (see [`run-issue.md`](run-issue.md) and [`run-thread.md`](run-thread.md)); a
   degraded Jira `issue show` during gather's own ticket-key scan is named `issue show`, and a
@@ -115,8 +112,9 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
 
 ## Status
 
-Phase 9's `store`/`gather`/`interpret`/`run` pipeline and CLI surface, Phase 10's `sync` (all
-three modes) and beads-backend `run issue` bead -> PR resolution, and Phase 13's Jira half
+Phase 9's `store`/`gather`/`interpret`/`run` pipeline and CLI surface (its `sync` stage, `run pr`,
+`reconcile` and `sweep` were deleted by the PR lane refactor, packet P9a-2) and Phase 10's beads-backend
+`run issue` bead -> PR resolution, and Phase 13's Jira half
 (docket `pg2-2j5ac.40`: gather's ticket-key scan and cross-reference writes, `run issue`'s
 Jira-id reverse resolution, and layered urgency's Jira signal) and Slack half (gather's
 linked-threads eighth input, and `run thread`'s permalink/ticket-key cross-references and

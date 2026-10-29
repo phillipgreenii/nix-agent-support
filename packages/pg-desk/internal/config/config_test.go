@@ -45,7 +45,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		"ticket_patterns", "agents", "approver_allowlist",
 		"verdict_generations", "check_interpreters",
 		"ci_only_attempts_threshold", "review_exempt_checks", "area_labels", "jira", "category_vocabulary",
-		"urgency", "agent_tracker_backend", "actor", "sync",
+		"urgency", "agent_tracker_backend", "actor",
 		"heartbeat_period", "stale_after", "serve", "open",
 		// links (bead pg2-apuyx) postdates the section-7.8 table: the
 		// read-only `links` verb's URL knobs.
@@ -69,7 +69,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 	// The three grouped keys that carry their own sub-keys per the section
 	// 7.8 table: repos[] (remote, beads_dir), jira (high_priority_values,
 	// incident_labels, incident_issue_types), urgency (labels, keywords,
-	// thresholds), sync (mode), serve (addr, log), open (chrome_bin),
+	// thresholds), serve (addr, log), open (chrome_bin),
 	// agents[] (login, approval_regex, policy).
 	cases := []struct {
 		name string
@@ -81,10 +81,6 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"AgentConfig", reflect.TypeOf(AgentConfig{}), []string{"login", "approval_regex", "policy"}},
 		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types", "in_progress_statuses", "done_statuses"}},
 		{"UrgencyConfig", reflect.TypeOf(UrgencyConfig{}), []string{"labels", "keywords", "thresholds"}},
-		// sync.retry (bead pg2-xb6fs) postdates the section-7.8 table: the
-		// automatic-retry bounds for a recorded sync_error.
-		{"SyncConfig", reflect.TypeOf(SyncConfig{}), []string{"mode", "retry", "review_settle_window"}},
-		{"SyncRetryConfig", reflect.TypeOf(SyncRetryConfig{}), []string{"max_retries", "initial_backoff", "max_backoff"}},
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
@@ -241,20 +237,6 @@ func TestLoadFile_FullExample(t *testing.T) {
 		t.Errorf("actor: got %q", cfg.Actor)
 	}
 
-	if cfg.Sync.Mode != "off" {
-		t.Errorf("sync.mode: got %q", cfg.Sync.Mode)
-	}
-	maxRetries, initialBackoff, maxBackoff, err := cfg.Sync.Retry.Resolve()
-	if err != nil {
-		t.Fatalf("sync.retry: Resolve: %v", err)
-	}
-	if maxRetries != 5 || initialBackoff != 2*time.Minute || maxBackoff != time.Hour {
-		t.Errorf("sync.retry: got (%d, %s, %s), want (5, 2m0s, 1h0m0s)", maxRetries, initialBackoff, maxBackoff)
-	}
-	if got := cfg.ReviewSettleWindow(); got != 5*time.Minute {
-		t.Errorf("sync.review_settle_window: got %s, want 5m0s", got)
-	}
-
 	if cfg.HeartbeatPeriod != "5m" {
 		t.Errorf("heartbeat_period: got %q", cfg.HeartbeatPeriod)
 	}
@@ -401,47 +383,6 @@ func writeYAML(t *testing.T, dir, content string) string {
 		t.Fatal(err)
 	}
 	return p
-}
-
-// TestSyncRetryResolve_Defaults: an absent sync.retry block resolves to the
-// documented defaults (10 retries, 1m initial backoff, 30m cap).
-func TestSyncRetryResolve_Defaults(t *testing.T) {
-	maxRetries, initialBackoff, maxBackoff, err := SyncRetryConfig{}.Resolve()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if maxRetries != 10 || initialBackoff != time.Minute || maxBackoff != 30*time.Minute {
-		t.Fatalf("defaults = (%d, %s, %s), want (10, 1m0s, 30m0s)", maxRetries, initialBackoff, maxBackoff)
-	}
-}
-
-// TestSyncRetryResolve_ExplicitZeroDisablesRetry: max_retries: 0 is honored
-// (not replaced by the default).
-func TestSyncRetryResolve_ExplicitZeroDisablesRetry(t *testing.T) {
-	zero := 0
-	maxRetries, _, _, err := SyncRetryConfig{MaxRetries: &zero}.Resolve()
-	if err != nil || maxRetries != 0 {
-		t.Fatalf("Resolve(max_retries: 0) = (%d, %v), want (0, nil)", maxRetries, err)
-	}
-}
-
-func TestLoadFile_SyncRetryInvalidValuesFail(t *testing.T) {
-	for name, block := range map[string]string{
-		"negative max_retries":      "max_retries: -1",
-		"unparseable backoff":       "initial_backoff: soon",
-		"zero backoff":              "initial_backoff: 0s",
-		"negative max_backoff":      "max_backoff: -5m",
-		"max below initial backoff": "initial_backoff: 10m\n    max_backoff: 5m",
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\nsync:\n  retry:\n    "+block+"\n")
-			_, err := LoadFile(p)
-			if err == nil || !strings.Contains(err.Error(), "sync.retry") {
-				t.Fatalf("LoadFile: err = %v, want a sync.retry validation error", err)
-			}
-		})
-	}
 }
 
 func TestLoadFile_Minimal(t *testing.T) {
@@ -793,9 +734,11 @@ func TestLoadFile_LegacyWatchPRKeyIsIgnored(t *testing.T) {
 	}
 }
 
-// TestLoadFile_LegacyKeysStillLoad pins that the keys slated for removal in
-// Phase 10 (sync, agent_tracker_backend, heartbeat_period) still load next to
-// the new change-flow keys, so the primary branch stays deployable.
+// TestLoadFile_LegacyKeysStillLoad pins that a configuration still carrying
+// the removed sync: block (removed with the sync stage, PR lane refactor
+// packet P9a-2) and the legacy agent_tracker_backend and heartbeat_period keys
+// loads next to the change-flow keys: an unknown key is ignored, so a
+// deployment that has not dropped it yet keeps working.
 func TestLoadFile_LegacyKeysStillLoad(t *testing.T) {
 	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
 sync:
@@ -809,7 +752,7 @@ watch:
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if cfg.Sync.Mode != "off" || cfg.AgentTrackerBackend != "beads" || cfg.HeartbeatPeriod != "5m" {
+	if cfg.AgentTrackerBackend != "beads" || cfg.HeartbeatPeriod != "5m" {
 		t.Fatalf("legacy keys not preserved: %+v", cfg)
 	}
 }
@@ -956,63 +899,6 @@ func TestFreshnessKeys_InvalidFail(t *testing.T) {
 			_, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+tc.block))
 			if err == nil || !strings.Contains(err.Error(), tc.key) {
 				t.Fatalf("LoadFile: err = %v, want an error naming %s", err, tc.key)
-			}
-		})
-	}
-}
-
-// TestReviewSettleWindow_Resolve: sync.review_settle_window defaults to
-// DefaultReviewSettleWindow when unset, honors an explicit zero (no window)
-// and rejects a negative or unparseable value (bead pg2-a9yhn).
-func TestReviewSettleWindow_Resolve(t *testing.T) {
-	for name, tc := range map[string]struct {
-		in      string
-		want    time.Duration
-		wantErr bool
-	}{
-		"unset defaults":   {in: "", want: DefaultReviewSettleWindow},
-		"blank defaults":   {in: "  ", want: DefaultReviewSettleWindow},
-		"explicit minutes": {in: "5m", want: 5 * time.Minute},
-		"explicit zero":    {in: "0", want: 0},
-		"explicit 0s":      {in: "0s", want: 0},
-		"negative":         {in: "-1m", wantErr: true},
-		"unparseable":      {in: "soon", wantErr: true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := SyncConfig{ReviewSettleWindow: tc.in}.ResolveReviewSettleWindow()
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("ResolveReviewSettleWindow(%q) err = %v, wantErr %v", tc.in, err, tc.wantErr)
-			}
-			if err == nil && got != tc.want {
-				t.Fatalf("ResolveReviewSettleWindow(%q) = %s, want %s", tc.in, got, tc.want)
-			}
-		})
-	}
-	if DefaultReviewSettleWindow != 2*time.Minute {
-		t.Fatalf("DefaultReviewSettleWindow = %s, want 2m (documented in sync.md)", DefaultReviewSettleWindow)
-	}
-}
-
-// TestReviewSettleWindow_ConfigAccessor: the Config accessor falls back to
-// the default for a nil config, and returns the configured value otherwise.
-func TestReviewSettleWindow_ConfigAccessor(t *testing.T) {
-	var nilCfg *Config
-	if got := nilCfg.ReviewSettleWindow(); got != DefaultReviewSettleWindow {
-		t.Fatalf("nil config window = %s, want default", got)
-	}
-	cfg := &Config{Sync: SyncConfig{ReviewSettleWindow: "0"}}
-	if got := cfg.ReviewSettleWindow(); got != 0 {
-		t.Fatalf("explicit zero window = %s, want 0", got)
-	}
-}
-
-func TestLoadFile_ReviewSettleWindowInvalidFails(t *testing.T) {
-	for name, v := range map[string]string{"negative": "-1m", "unparseable": "soon"} {
-		t.Run(name, func(t *testing.T) {
-			p := writeYAML(t, t.TempDir(), "self_login: a\nrepos:\n  - remote: o/r\nsync:\n  review_settle_window: "+v+"\n")
-			_, err := LoadFile(p)
-			if err == nil || !strings.Contains(err.Error(), "review_settle_window") {
-				t.Fatalf("LoadFile: err = %v, want a review_settle_window validation error", err)
 			}
 		})
 	}

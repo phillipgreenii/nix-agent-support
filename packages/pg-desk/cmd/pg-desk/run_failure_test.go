@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,10 +66,22 @@ func openRunTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-// TestRunFailureLine_ByStage proves every way `run pr` can fail emits exactly
+// TestRunFailureLine_ByStage proves every way `run` can fail emits exactly
 // one stage-tagged run_failed line on stderr and still returns the error (so
 // main.go's exit 1 contract is unchanged).
 func TestRunFailureLine_ByStage(t *testing.T) {
+	t.Run("run pr was removed", func(t *testing.T) {
+		stubRunSeams(t)
+		stderr, runErr := runWithStderr(t, "pr", "acme/widgets#9")
+		if runErr == nil || !strings.Contains(runErr.Error(), "run pr") {
+			t.Fatalf("RunE error = %v, want the removed `run pr` named", runErr)
+		}
+		lines := runFailureLines(t, stderr)
+		if len(lines) != 1 || lines[0].Stage != runStageArgs || lines[0].EntityType != "pr" {
+			t.Fatalf("run_failed lines = %+v, want one with stage %q (stderr: %s)", lines, runStageArgs, stderr)
+		}
+	})
+
 	t.Run("unknown entity type", func(t *testing.T) {
 		stubRunSeams(t)
 		stderr, runErr := runWithStderr(t, "pull-request", "1")
@@ -88,7 +99,7 @@ func TestRunFailureLine_ByStage(t *testing.T) {
 		runConfigLoad = func(ctx context.Context) (*config.Config, error) {
 			return nil, errors.New("no config file found")
 		}
-		stderr, runErr := runWithStderr(t, "pr", "acme/widgets#9")
+		stderr, runErr := runWithStderr(t, "issue", "acme/widgets#9")
 		if runErr == nil || !strings.Contains(runErr.Error(), "no config file found") {
 			t.Fatalf("RunE error = %v, want the config failure unchanged", runErr)
 		}
@@ -97,8 +108,8 @@ func TestRunFailureLine_ByStage(t *testing.T) {
 			t.Fatalf("want exactly one run_failed line, got %d (stderr: %s)", len(lines), stderr)
 		}
 		l := lines[0]
-		if l.Stage != runStageConfig || l.ErrorClass != "error" || l.EntityType != "pr" || l.EntityID != "acme/widgets#9" {
-			t.Fatalf("run_failed line = %+v, want stage %q, class error, entity pr acme/widgets#9", l, runStageConfig)
+		if l.Stage != runStageConfig || l.ErrorClass != "error" || l.EntityType != "issue" || l.EntityID != "acme/widgets#9" {
+			t.Fatalf("run_failed line = %+v, want stage %q, class error, entity issue acme/widgets#9", l, runStageConfig)
 		}
 		if !strings.Contains(l.Error, "no config file found") {
 			t.Fatalf("run_failed error = %q, want the original message", l.Error)
@@ -109,7 +120,7 @@ func TestRunFailureLine_ByStage(t *testing.T) {
 		stubRunSeams(t)
 		runConfigLoad = func(ctx context.Context) (*config.Config, error) { return issueTestCfg(), nil }
 		runStoreOpen = func() (*store.Store, error) { return nil, errors.New("open: database is locked") }
-		stderr, runErr := runWithStderr(t, "pr", "acme/widgets#9")
+		stderr, runErr := runWithStderr(t, "issue", "acme/widgets#9")
 		if runErr == nil {
 			t.Fatal("expected an error")
 		}
@@ -134,29 +145,6 @@ func TestRunFailureLine_ByStage(t *testing.T) {
 		lines := runFailureLines(t, stderr)
 		if len(lines) != 1 || lines[0].Stage != runStageResolveBead {
 			t.Fatalf("run_failed lines = %+v, want stage %q (stderr: %s)", lines, runStageResolveBead, stderr)
-		}
-	})
-
-	t.Run("pipeline gather stage", func(t *testing.T) {
-		stubRunSeams(t)
-		runConfigLoad = func(ctx context.Context) (*config.Config, error) { return issueTestCfg(), nil }
-		st := openRunTestStore(t)
-		runStoreOpen = func() (*store.Store, error) { return st, nil }
-		// No pg-connector on PATH: gather cannot even start the child, which is
-		// a stage-tagged pipeline failure without any fake seam.
-		t.Setenv("PATH", t.TempDir())
-
-		stderr, runErr := runWithStderr(t, "pr", "acme/widgets#9")
-		if runErr == nil {
-			t.Fatal("expected an error when pg-connector cannot be started")
-		}
-		lines := runFailureLines(t, stderr)
-		if len(lines) != 1 || lines[0].Stage != "gather" {
-			t.Fatalf("run_failed lines = %+v, want one with stage gather (stderr: %s)", lines, stderr)
-		}
-		// The pipeline's own per-entity line carries the same stage.
-		if !strings.Contains(stderr, `"outcome":"error"`) || !strings.Contains(stderr, `"stage":"gather"`) {
-			t.Fatalf("pipeline log line should carry stage gather, stderr: %s", stderr)
 		}
 	})
 }
@@ -194,86 +182,5 @@ func TestRunFailureLine_NotEmittedOnSuccess(t *testing.T) {
 	}
 	if lines := runFailureLines(t, stderr); len(lines) != 0 {
 		t.Fatalf("a successful run must not emit run_failed, got %+v", lines)
-	}
-}
-
-// TestRunCmd_SyncStageFailureExitsOneAndRecordsSyncError is the CLI-layer
-// proof of pg2-kftf9.1 (bead pg2-pyewq): a sync-stage failure of `pg-desk run
-// pr`, driven through a stub pg-connector on PATH, makes the cobra RunE return
-// a non-nil error (main() turns that into os.Exit(exitCodeFor(err)), which is
-// 1 for a plain error), writes a stage-tagged run_failed line, persists the
-// sync_error on the interpretation row, and a later successful run clears it.
-// internal/pipeline's own tests prove Run returns the error; this proves the
-// CLI hands it on unchanged, which is what pg-router's exit-1 handling sees.
-//
-// Delete with the sync stage and `run pr` (pg2-6mo45.3.37) together with the
-// sync_error column and alerts (pg2-6mo45.3.34).
-func TestRunCmd_SyncStageFailureExitsOneAndRecordsSyncError(t *testing.T) {
-	stubRunSeams(t)
-	cfg := issueTestCfg()
-	cfg.Sync.Mode = "apply"
-	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
-	// run closes the store it is handed, so every run opens the same on-disk
-	// file afresh and the assertions below read it through their own handle.
-	store.SetSynchronousForTests("OFF")
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	runStoreOpen = func() (*store.Store, error) { return store.Open(dbPath) }
-	syncError := func() string {
-		t.Helper()
-		st, err := store.Open(dbPath)
-		if err != nil {
-			t.Fatalf("reopen store: %v", err)
-		}
-		defer func() { _ = st.Close() }()
-		interp, found, err := st.GetInterpretation("acme/widgets", "pr", "acme/widgets#9")
-		if err != nil || !found {
-			t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
-		}
-		return interp.SyncError
-	}
-
-	// The stub serves a minimal open PR of mine to gather, an empty answer to
-	// every other read, and fails only the sync stage's `issue create`, so the
-	// failure can only come from sync. The marker file flips it to success for
-	// the recovery run.
-	okMarker := filepath.Join(t.TempDir(), "sync-ok")
-	installFakePGConnector(t, `case "$1 $2" in
-"pr show")
-  echo '{"protocolVersion":1,"schemaVersion":4,"result":{"repo":"acme/widgets","number":9,"title":"fix: x","state":"open","head_sha":"abc123","author":"me"}}' ;;
-"issue create")
-  if [ -e `+okMarker+` ]; then
-    echo '{"protocolVersion":1,"result":{"id":"bd-anchor-1"}}'
-  else
-    echo '{"protocolVersion":1,"error":{"code":"unavailable","message":"sync stub failure"}}'
-    exit 1
-  fi ;;
-*)
-  echo '{"protocolVersion":1,"result":{"entities":[]}}' ;;
-esac`)
-
-	stderr, runErr := runWithStderr(t, "pr", "acme/widgets#9")
-	if runErr == nil {
-		t.Fatalf("expected a sync-stage failure to make run return an error (stderr: %s)", stderr)
-	}
-	if code := exitCodeFor(runErr); code != 1 {
-		t.Fatalf("exitCodeFor(%v) = %d, want 1", runErr, code)
-	}
-	lines := runFailureLines(t, stderr)
-	if len(lines) != 1 || lines[0].Stage != "sync" {
-		t.Fatalf("run_failed lines = %+v, want exactly one with stage sync (stderr: %s)", lines, stderr)
-	}
-	if got := syncError(); !strings.Contains(got, "sync stub failure") {
-		t.Fatalf("interpretation.SyncError = %q, want the stub failure recorded", got)
-	}
-
-	// Recovery: the same run, now succeeding, exits clean and clears sync_error.
-	if err := os.WriteFile(okMarker, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if stderr, runErr = runWithStderr(t, "pr", "acme/widgets#9"); runErr != nil {
-		t.Fatalf("retry run: %v (stderr: %s)", runErr, stderr)
-	}
-	if got := syncError(); got != "" {
-		t.Fatalf("interpretation.SyncError = %q after a successful retry, want cleared", got)
 	}
 }

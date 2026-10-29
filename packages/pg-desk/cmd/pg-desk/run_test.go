@@ -94,15 +94,15 @@ func TestRunCmdRequiresConfigAndStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rootCmd has no run subcommand: %v", err)
 	}
-	runErr := cmd.RunE(cmd, []string{"pr", "1"})
+	runErr := cmd.RunE(cmd, []string{"issue", "anchor-1"})
 	if runErr == nil {
-		t.Fatal("run pr: expected an error when config loading fails, got nil")
+		t.Fatal("run issue: expected an error when config loading fails, got nil")
 	}
 	if !strings.Contains(runErr.Error(), "no config file found") {
-		t.Fatalf("run pr: error = %q, want it to wrap the config-load failure", runErr.Error())
+		t.Fatalf("run issue: error = %q, want it to wrap the config-load failure", runErr.Error())
 	}
 	if storeOpenCalled {
-		t.Fatal("run pr: runStoreOpen was called despite a config-load failure")
+		t.Fatal("run issue: runStoreOpen was called despite a config-load failure")
 	}
 }
 

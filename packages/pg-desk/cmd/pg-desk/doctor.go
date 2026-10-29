@@ -16,9 +16,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/beadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // defaultServeAddr mirrors serve's own default synopsis
@@ -102,7 +102,7 @@ func probeServe(addr string, timeout, slowAfter time.Duration) error {
 // doctorWorkBeadsQuery is the same `issue list --query` name
 // internal/gather's gatherWorkBeads and internal/sync's adoption sweep
 // already fetch — every anchor/feedback-cycle/review-request bead
-// currently on the tracker, classified by title (sync.ClassifyBead).
+// currently on the tracker, classified by title (beadref.ClassifyBead).
 const doctorWorkBeadsQuery = "work-beads"
 
 // doctorFanOutIssueList execs `pg-connector issue list --query work-beads`
@@ -185,7 +185,7 @@ func doctorHasLabel(labels []string, want string) bool {
 //
 // Algorithm, ported field-for-field from StrandedSelfCycles: list every
 // bead the fan-out returns; keep only OPEN ones whose title identifies a
-// feedback cycle (sync.ClassifyBead, kind == sync.KindFeedbackCycle); drop
+// feedback cycle (beadref.ClassifyBead, kind == beadref.KindFeedbackCycle); drop
 // any already labeled "mine" (not stranded); drop any this store has no
 // interpretation on record for (cannot attribute self — the original
 // "no parent bead or unknown self" skip, conservatively kept); for the
@@ -207,8 +207,8 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 		if e.State != "" && e.State != "open" {
 			continue
 		}
-		kind, repo, prNumber, ok := sync.ClassifyBead(e.Title, e.Metadata)
-		if !ok || kind != sync.KindFeedbackCycle {
+		kind, repo, prNumber, ok := beadref.ClassifyBead(e.Title, e.Metadata)
+		if !ok || kind != beadref.KindFeedbackCycle {
 			continue
 		}
 		if doctorHasLabel(e.Labels, "mine") {

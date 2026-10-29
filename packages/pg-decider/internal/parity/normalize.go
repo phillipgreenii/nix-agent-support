@@ -3,7 +3,6 @@ package parity
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 )
@@ -48,67 +47,9 @@ const (
 	kindAnnotationPref  = "annotation:"
 )
 
-var oldKinds = map[string]string{
-	"anchor":         KindAnchor,
-	"feedback-cycle": KindProcessFeedback,
-	"review-request": KindReviewPR,
-}
-
 var newKinds = map[string]bool{
 	KindAnchor: true, KindProcessFeedback: true, KindReviewPR: true, KindFixCI: true, KindResolveConflict: true,
 	KindFocusItem: true,
-}
-
-// NormalizeOld maps the old side to entries. Two sources feed it, and they are
-// kept apart on purpose:
-//
-//   - OBSERVED: each planned ledger row is one create entry (anchor,
-//     feedback-cycle -> process-feedback, review-request -> review-pr).
-//   - MODELLED, adoption only: the old sync adopts, before creating anything,
-//     every work bead of the entity it recognises by shape (docs/behavior/
-//     pg-desk/sync.md "Adoption": `<repo>#<n>: ` title prefix is the anchor, the
-//     exact titles `review-pr: <entity>` and `process-feedback: <entity>` are
-//     the children). Adoption makes no ledger row with an empty bead id, so the
-//     old runner cannot see it; it is derived from the fixture's beads by that
-//     one documented classifier, so a bead the new side fails to adopt shows as
-//     a difference instead of vanishing.
-//
-// The old side's closes, reopens and field refreshes of existing beads are NOT
-// modelled: they are unobservable here, and the new side's matching entries are
-// listed in the expected diff (id UNOBS) rather than guessed at.
-func NormalizeOld(fx *Fixture, old OldResult) ([]Entry, error) {
-	var out []Entry
-	for entity, rows := range old.Rows {
-		for _, r := range rows {
-			kind, ok := oldKinds[r.Kind]
-			if !ok {
-				return nil, fmt.Errorf("parity: old row kind %q for %s is not one of anchor, feedback-cycle, review-request", r.Kind, entity)
-			}
-			out = append(out, Entry{entity, kind, OpCreate})
-		}
-	}
-	for _, entity := range fx.Entities {
-		for _, b := range fx.Beads {
-			if kind, ok := oldAdoptionKind(b.Title, entity); ok {
-				out = append(out, Entry{entity, kind, OpAdopt})
-			}
-		}
-	}
-	sortEntries(out)
-	return out, nil
-}
-
-// oldAdoptionKind classifies a bead title the way the old sync adoption does.
-func oldAdoptionKind(title, entity string) (string, bool) {
-	switch {
-	case title == "review-pr: "+entity:
-		return KindReviewPR, true
-	case title == "process-feedback: "+entity:
-		return KindProcessFeedback, true
-	case strings.HasPrefix(title, entity+": "):
-		return KindAnchor, true
-	}
-	return "", false
 }
 
 // NormalizeNew maps the raw pg-decider plan of each entity to entries. An

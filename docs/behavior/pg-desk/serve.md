@@ -495,6 +495,5 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
-`sync_error` is populated once sync runs and fails for a PR (Phase 10, see
-[`sync.md`](sync.md)) — it is no longer unconditionally empty. Any payload field this dashboard
+`sync_error` is no longer populated by anything (the sync stage was deleted, packet P9a-2). Any payload field this dashboard
 could eventually carry from cross-referencing is Phase 13.

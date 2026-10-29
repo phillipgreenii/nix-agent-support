@@ -8,8 +8,9 @@ package classify
 // ignores would lose a real change. The field list is DERIVED by parsing the
 // rule sources, never hand-copied: a field counts as "read" when it appears as
 // a string-literal index key on a show map (show["state"], oldShow[...]) or as
-// a string element of the issueKindFields residual table, in issue.go or in
-// the sync rule source rules.go. Keys the normaliser drops (the volatile
+// a string element of the issueKindFields residual table, in issue.go
+// (the sync rule source rules.go went with the sync stage, PR lane refactor
+// packet P9a-2). Keys the normaliser drops (the volatile
 // ones) are skipped: a normalised payload never carries them.
 
 import (
@@ -24,7 +25,7 @@ import (
 )
 
 // issueRuleSources are the files parsed for the read-set.
-var issueRuleSources = []string{"issue.go", "../sync/rules.go"}
+var issueRuleSources = []string{"issue.go"}
 
 // issueReadFields parses the rule sources and returns the sorted, distinct
 // top-level issue_show keys they read.

@@ -50,7 +50,7 @@ func RunNew(ctx context.Context, env Env, sc Scenario) (NewResult, error) {
 	if err != nil {
 		return NewResult{}, err
 	}
-	sb, cleanup, err := newSandbox(env, fx, "new", "off")
+	sb, cleanup, err := newSandbox(env, fx, "new")
 	if err != nil {
 		return NewResult{}, err
 	}

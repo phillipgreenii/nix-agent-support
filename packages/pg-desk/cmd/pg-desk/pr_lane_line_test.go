@@ -45,9 +45,8 @@ func recordRun(t *testing.T, st *store.Store, configured, mode string, residual 
 
 func intPtr(n int) *int { return &n }
 
-func laneLineCfg(syncMode, laneMode string) *config.Config {
+func laneLineCfg(laneMode string) *config.Config {
 	c := openTestConfig("o/r")
-	c.Sync.Mode = syncMode
 	c.PRLane.Mode = laneMode
 	return c
 }
@@ -69,30 +68,29 @@ func prLaneLineCases(t *testing.T) []struct {
 		st   *store.Store
 	}{
 		{"no configuration", nil, laneLineStore(t, "new", nil)},
-		{"no store", laneLineCfg("off", "off"), nil},
-		{"old-schema store", laneLineCfg("off", "off"), laneLineStore(t, "old", nil)},
-		{"lane off, nothing recorded", laneLineCfg("off", "off"), laneLineStore(t, "new", nil)},
-		{"nothing set", laneLineCfg("", ""), laneLineStore(t, "new", nil)},
-		{"invalid lane mode", laneLineCfg("off", "aplly"), laneLineStore(t, "new", nil)},
-		{"legacy sync plan, lane off", laneLineCfg("plan", "off"), laneLineStore(t, "new", nil)},
-		{"lane plan, one plan run", laneLineCfg("off", "plan"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
+		{"no store", laneLineCfg("off"), nil},
+		{"old-schema store", laneLineCfg("off"), laneLineStore(t, "old", nil)},
+		{"lane off, nothing recorded", laneLineCfg("off"), laneLineStore(t, "new", nil)},
+		{"nothing set", laneLineCfg(""), laneLineStore(t, "new", nil)},
+		{"invalid lane mode", laneLineCfg("aplly"), laneLineStore(t, "new", nil)},
+		{"lane plan, one plan run", laneLineCfg("plan"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
 			recordRun(t, st, "plan", "plan", intPtr(3), at(8))
 		})},
-		{"lane apply, not flipped yet", laneLineCfg("off", "apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
+		{"lane apply, not flipped yet", laneLineCfg("apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
 			recordRun(t, st, "plan", "plan", intPtr(3), at(8))
 		})},
-		{"lane apply, flipped, residual left", laneLineCfg("off", "apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
+		{"lane apply, flipped, residual left", laneLineCfg("apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
 			recordRun(t, st, "apply", "apply", intPtr(2), at(9))
 		})},
-		{"lane apply, flipped, residual cleared", laneLineCfg("off", "apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
+		{"lane apply, flipped, residual cleared", laneLineCfg("apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
 			recordRun(t, st, "apply", "apply", intPtr(2), at(9))
 			recordRun(t, st, "apply", "apply", intPtr(0), at(9))
 		})},
-		{"lane apply, by-hand plan run after the flip", laneLineCfg("off", "apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
+		{"lane apply, by-hand plan run after the flip", laneLineCfg("apply"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
 			recordRun(t, st, "apply", "apply", intPtr(2), at(9))
 			recordRun(t, st, "apply", "plan", intPtr(7), time.Date(2026, 10, 2, 9, 30, 0, 0, time.UTC))
 		})},
-		{"lane plan after a rollback from apply", laneLineCfg("off", "plan"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
+		{"lane plan after a rollback from apply", laneLineCfg("plan"), laneLineStore(t, "new", func(t *testing.T, st *store.Store) {
 			recordRun(t, st, "apply", "apply", intPtr(2), at(9))
 			recordRun(t, st, "plan", "plan", intPtr(1), at(9))
 		})},
@@ -147,7 +145,7 @@ func TestStatusAndDoctorPrintTheLiveLaneLine(t *testing.T) {
 	t.Cleanup(func() { changesNow = origNow })
 	changesNow = func() time.Time { return laneLineNow }
 
-	cfg := laneLineCfg("off", "apply")
+	cfg := laneLineCfg("apply")
 	path := storeAtVersion(t, "new")
 	seed, err := store.Open(path)
 	if err != nil {
@@ -159,7 +157,7 @@ func TestStatusAndDoctorPrintTheLiveLaneLine(t *testing.T) {
 	withOpenSeams(t, cfg, open)
 	stubDoctorSeams(t, nil, nil, nil)
 
-	const want = "pr lane: legacy sync off, lane apply, flipped 2026-10-02T09:00:00Z, never-hydrated 1 (oldest 394h0m0s), residual 1 (oldest 1h0m0s), last run 2026-10-02T09:00:00Z"
+	const want = "pr lane: lane apply, flipped 2026-10-02T09:00:00Z, never-hydrated 1 (oldest 394h0m0s), residual 1 (oldest 1h0m0s), last run 2026-10-02T09:00:00Z"
 	statusOut, err := runStatusCmd(t)
 	if err != nil {
 		t.Fatalf("status: %v", err)

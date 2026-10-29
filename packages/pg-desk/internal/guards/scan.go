@@ -37,18 +37,11 @@ var writeVerbs = map[string]bool{
 
 // PreCutoverAllowlist is the ONE allowlist of retiring pre-cutover files
 // (slash-separated, relative to the module root) that legitimately write to
-// the tracker. Each entry is deleted by the change-flow cutover release
-// (bead pg2-2j5ac.52.22, which removes internal/sync); the guard fails on a
-// stale entry so the deletion cannot be forgotten.
-//
-//   - internal/sync/connector.go: argv carries `issue create` and
-//     `issue update`.
-//
-// The allowlist is exactly the set of non-test files the scanner reported on
-// the tree at the time the guard landed; nothing else is allowlisted.
-var PreCutoverAllowlist = []string{
-	"internal/sync/connector.go", // deleted by the change-flow cutover release
-}
+// the tracker. It is empty: its only entry, internal/sync/connector.go, was
+// deleted with the sync stage (PR lane refactor, packet P9a-2). The guard
+// still fails on a stale entry, so an entry added later cannot outlive its
+// file.
+var PreCutoverAllowlist = []string{}
 
 // The single documented exemption: the rank's candidacy exclusion reads the
 // bead metadata key `dedup_key` (a read-only check, not dedup logic). The

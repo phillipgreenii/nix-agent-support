@@ -6,36 +6,20 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
-
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
-
-// showRefresh runs the pipeline for one entity before show renders it —
-// packet 6's own exported convenience entry point, pinned by this packet's
-// Contract as "the pg-desk show --refresh entry point that packet 13
-// depends on" [pipeline.go's own doc comment: "packet 8's show --refresh
-// calls directly to re-run the pipeline for one entity without shelling out
-// to the pg-desk run CLI"]. A package-level var so tests can stub it
-// without a real pg-connector on $PATH.
-var showRefresh = pipeline.Run
 
 // showCmdFlags is a named type (rather than an inline anonymous struct) so
 // tests can build and pass a value of this exact type without repeating the
 // field list at every call site.
 type showCmdFlags struct {
-	refresh bool
 	jsonOut bool
 }
 
 var showFlags showCmdFlags
 
-// showCmd implements `pg-desk show <pr> [--refresh]`
-// [docs/behavior/pg-desk/operator-commands.md]. Exit codes: 0 on success,
-// including a degraded --refresh run (degraded is not a failure); 1 when
-// <pr> does not resolve, or the store/pipeline cannot be read or written.
+// showCmd implements `pg-desk show <pr>`
+// [docs/behavior/pg-desk/operator-commands.md]. Exit codes: 0 on success; 1
+// when <pr> does not resolve, or the store cannot be read.
 var showCmd = &cobra.Command{
 	Use:   "show <pr>",
 	Short: "Print a PR's stored interpretation",
@@ -46,8 +30,6 @@ var showCmd = &cobra.Command{
 }
 
 func init() {
-	showCmd.Flags().BoolVar(&showFlags.refresh, "refresh", false,
-		"Re-run the pipeline for this PR before printing its interpretation")
 	showCmd.Flags().BoolVar(&showFlags.jsonOut, "json", false,
 		"Print a machine-readable JSON payload instead of the human table")
 	rootCmd.AddCommand(showCmd)
@@ -72,37 +54,6 @@ type showPayload struct {
 	Hidden         bool   `json:"hidden"`
 	HiddenReason   string `json:"hidden_reason,omitempty"`
 	WIP            bool   `json:"wip"`
-	// PlannedSyncRows carries this PR's own planned (not-yet-applied) sync
-	// writes, populated only when sync.mode is "plan" [design 7.5, 7.7].
-	// nil (omitted from JSON) in off/apply mode, or when plan mode has
-	// nothing planned for this PR yet.
-	PlannedSyncRows []plannedSyncRow `json:"planned_sync_rows,omitempty"`
-}
-
-// plannedSyncRow is one kind's planned ledger row, rendered for
-// `pg-desk show`'s planned-sync-writes surface — see internal/sync's own
-// package doc comment ("Planned rows and the ledger's existing columns")
-// for why an empty bead_id is the "this is planned, not applied" signal.
-type plannedSyncRow struct {
-	Kind        string `json:"kind"`
-	ContentHash string `json:"content_hash"`
-}
-
-// plannedSyncRowsFor reads this PR's own ledger rows (the three kinds
-// design section 7.5 pins) and returns the ones with no real bead_id yet —
-// this PR's own planned sync writes.
-func plannedSyncRowsFor(st *store.Store, repo, entityID string) ([]plannedSyncRow, error) {
-	var out []plannedSyncRow
-	for _, kind := range []string{"anchor", "feedback-cycle", "review-request"} {
-		entry, found, err := st.GetLedger(repo, entityTypePR, entityID, kind)
-		if err != nil {
-			return nil, fmt.Errorf("get ledger %s: %w", kind, err)
-		}
-		if found && entry.BeadID == "" {
-			out = append(out, plannedSyncRow{Kind: kind, ContentHash: entry.LastSyncedContentHash})
-		}
-	}
-	return out, nil
 }
 
 func runShow(cmd *cobra.Command, ref string) error {
@@ -114,12 +65,6 @@ func runShow(cmd *cobra.Command, ref string) error {
 	repo, id, err := resolvePRRef(cfg, ref)
 	if err != nil {
 		return fmt.Errorf("show: %w", err)
-	}
-
-	if showFlags.refresh {
-		if err := showRefresh(cmd.Context(), entityTypePR, id, gather.ChangeSweep); err != nil {
-			return fmt.Errorf("show: refresh: %w", err)
-		}
 	}
 
 	st, err := openDeskStore()
@@ -165,14 +110,6 @@ func runShow(cmd *cobra.Command, ref string) error {
 		WIP:            wip,
 	}
 
-	if cfg.Sync.Mode == sync.ModePlan {
-		planned, plannedErr := plannedSyncRowsFor(st, repo, id)
-		if plannedErr != nil {
-			return fmt.Errorf("show: %w", plannedErr)
-		}
-		payload.PlannedSyncRows = planned
-	}
-
 	if resolveJSONOutput(showFlags.jsonOut) {
 		return writeShowJSON(cmd.OutOrStdout(), payload)
 	}
@@ -201,17 +138,6 @@ func renderShow(w io.Writer, p showPayload) error {
 		p.ReadyToPromote, p.Degraded, orDash(p.AsOf), p.Hidden, p.WIP,
 	); err != nil {
 		return err
-	}
-	if len(p.PlannedSyncRows) == 0 {
-		return nil
-	}
-	if _, err := io.WriteString(w, "planned_sync_rows:\n"); err != nil {
-		return err
-	}
-	for _, row := range p.PlannedSyncRows {
-		if _, err := fmt.Fprintf(w, "  %s: content_hash=%s\n", row.Kind, row.ContentHash); err != nil {
-			return err
-		}
 	}
 	return nil
 }

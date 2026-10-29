@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -365,50 +366,26 @@ func TestAnnotationRoundTripPRLevelAndCommentLevel(t *testing.T) {
 	}
 }
 
-func TestLedgerRoundTrip(t *testing.T) {
-	s := OpenForTest(t)
+// ledgerRowForTest is one row of the version-1 ledger table, written by raw
+// SQL: the Go accessors went with the sync stage (PR lane refactor, packet
+// P9a-2), but the table stays in the schema ladder until the schema-2 cutover
+// drops it, and the cutover and column-ensure tests still need rows in it.
+type ledgerRowForTest struct {
+	Repo, EntityType, EntityID, Kind, BeadID string
+	LastSyncedContentHash, LastSyncedAt      string
+	LastReviewedHeadSHA                      string
+}
 
-	l := LedgerEntry{
-		Repo:                  "owner/repo",
-		EntityType:            "pull_request",
-		EntityID:              "42",
-		Kind:                  "anchor",
-		BeadID:                "pg2-abcde",
-		LastSyncedContentHash: "abc123",
-		LastSyncedAt:          "2026-09-16T00:00:00Z",
-		LastReviewedHeadSHA:   "deadbeef",
-		FirstSeenHeadSHA:      "feedface",
-		FirstSeenHeadAt:       "2026-09-16T00:01:00Z",
-	}
-	if err := s.UpsertLedger(l); err != nil {
-		t.Fatalf("UpsertLedger: %v", err)
-	}
-
-	got, found, err := s.GetLedger(l.Repo, l.EntityType, l.EntityID, l.Kind)
-	if err != nil {
-		t.Fatalf("GetLedger: %v", err)
-	}
-	if !found {
-		t.Fatalf("GetLedger: not found")
-	}
-	if got != l {
-		t.Fatalf("GetLedger round-trip = %+v, want %+v", got, l)
-	}
-
-	all, err := s.ListLedger()
-	if err != nil || len(all) != 1 || all[0] != l {
-		t.Fatalf("ListLedger = %+v, %v; want exactly %+v", all, err, l)
-	}
-
-	// An upsert with the settle fields cleared must clear them (a settled or
-	// abandoned pending head is not remembered).
-	l.FirstSeenHeadSHA, l.FirstSeenHeadAt = "", ""
-	if err := s.UpsertLedger(l); err != nil {
-		t.Fatalf("UpsertLedger (clear): %v", err)
-	}
-	got, _, err = s.GetLedger(l.Repo, l.EntityType, l.EntityID, l.Kind)
-	if err != nil || got != l {
-		t.Fatalf("GetLedger after clear = %+v, %v; want %+v", got, err, l)
+// seedLedgerRowForTest inserts r into s's ledger table (a version-1 store).
+func seedLedgerRowForTest(t *testing.T, s *Store, r ledgerRowForTest) {
+	t.Helper()
+	if _, err := s.sql.Exec(
+		`INSERT INTO ledger (repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Repo, r.EntityType, r.EntityID, r.Kind, r.BeadID,
+		nullableString(r.LastSyncedContentHash), nullableString(r.LastSyncedAt), nullableString(r.LastReviewedHeadSHA),
+	); err != nil {
+		t.Fatalf("seed ledger row: %v", err)
 	}
 }
 
@@ -422,10 +399,8 @@ func TestOpenAddsLedgerSettleColumnsToOldStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	old := LedgerEntry{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Kind: "review-request", BeadID: "b-1", LastReviewedHeadSHA: "aaaa"}
-	if err := s.UpsertLedger(old); err != nil {
-		t.Fatalf("UpsertLedger: %v", err)
-	}
+	old := ledgerRowForTest{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Kind: "review-request", BeadID: "b-1", LastReviewedHeadSHA: "aaaa"}
+	seedLedgerRowForTest(t, s, old)
 	for _, col := range []string{"first_seen_head_sha", "first_seen_head_at"} {
 		if _, err := s.sql.Exec(`ALTER TABLE ledger DROP COLUMN ` + col); err != nil {
 			t.Fatalf("simulate old store: drop %s: %v", col, err)
@@ -453,9 +428,15 @@ func TestOpenAddsLedgerSettleColumnsToOldStore(t *testing.T) {
 		if v, err := s2.SchemaVersion(); err != nil || v != 1 {
 			t.Errorf("Open #%d: SchemaVersion = %d, %v; want 1 (the column ensure is not a ladder rung)", i, v, err)
 		}
-		got, found, err := s2.GetLedger(old.Repo, old.EntityType, old.EntityID, old.Kind)
-		if err != nil || !found || got != old {
-			t.Errorf("Open #%d: GetLedger = %+v, found=%v, err=%v; want %+v", i, got, found, err, old)
+		var beadID, headSHA string
+		var firstSeen sql.NullString
+		if err := s2.sql.QueryRow(
+			`SELECT bead_id, last_reviewed_head_sha, first_seen_head_sha FROM ledger WHERE repo = ? AND entity_type = ? AND entity_id = ? AND kind = ?`,
+			old.Repo, old.EntityType, old.EntityID, old.Kind,
+		).Scan(&beadID, &headSHA, &firstSeen); err != nil {
+			t.Errorf("Open #%d: read the old ledger row: %v", i, err)
+		} else if beadID != old.BeadID || headSHA != old.LastReviewedHeadSHA || firstSeen.Valid {
+			t.Errorf("Open #%d: ledger row = (%q, %q, %v); want (%q, %q, empty settle state)", i, beadID, headSHA, firstSeen, old.BeadID, old.LastReviewedHeadSHA)
 		}
 		if err := s2.Close(); err != nil {
 			t.Fatalf("Close #%d: %v", i, err)

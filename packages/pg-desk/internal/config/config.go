@@ -15,14 +15,12 @@
 // policy), approver_allowlist, verdict_generations, check_interpreters,
 // ci_only_attempts_threshold, review_exempt_checks, jira (high_priority_values, incident_labels,
 // incident_issue_types), category_vocabulary, urgency (labels, keywords,
-// thresholds), agent_tracker_backend, actor, sync.mode, heartbeat_period,
+// thresholds), agent_tracker_backend, actor, heartbeat_period,
 // stale_after, serve.addr, serve.log, and open.chrome_bin — all 21 keys are
-// typed here now, most consumed by this docket's later packets;
-// agent_tracker_backend starts Phase 10, sync.mode/jira.*/ticket_patterns
-// start Phase 10/13 respectively (present but unused by this phase's own
-// code). sync.retry (max_retries, initial_backoff, max_backoff) postdates
-// that table: it bounds the automatic retry of a recorded sync_error (bead
-// pg2-xb6fs; see SyncRetryConfig).
+// typed here now, most consumed by this docket's later packets. The sync:
+// block (mode, retry, review_settle_window) was removed with the sync stage
+// (PR lane refactor, packet P9a-2); a configuration that still carries it is
+// read without error, the unknown key being ignored.
 //
 // Several fields that lived nested under the retired PR tool's repos[] entries
 // (team_members, watch_labels, ticket_patterns, check_interpreters) are
@@ -127,11 +125,6 @@ type Config struct {
 	// used a hardcoded daemon actor name; pg-desk takes it from config
 	// instead).
 	Actor string `yaml:"actor,omitempty" json:"actor,omitempty"`
-
-	// Sync is unconsumed until Phase 10 — Mode is not yet a real
-	// configuration key at all this phase (present but unused by this
-	// phase's own code).
-	Sync SyncConfig `yaml:"sync,omitempty" json:"sync,omitempty"`
 
 	// PRLane holds the PR lane's keys. Mode is the one source of the lane
 	// mode that pg-desk can read (the router's per-role JSON is not readable
@@ -969,22 +962,6 @@ type UrgencyConfig struct {
 	Thresholds map[string]int `yaml:"thresholds,omitempty" json:"thresholds,omitempty"`
 }
 
-// SyncConfig configures the sync stage (Phase 10). Mode is one of "off",
-// "plan", or "apply" once that phase lands; unconsumed by this packet's own
-// code.
-type SyncConfig struct {
-	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	// Retry bounds the automatic retry of a recorded sync_error (bead
-	// pg2-xb6fs). Every key is optional; see SyncRetryConfig.Resolve for the
-	// defaults.
-	Retry SyncRetryConfig `yaml:"retry,omitempty" json:"retry,omitempty"`
-	// ReviewSettleWindow is how long a PR head MUST stay unchanged before
-	// sync re-requests a review of it (bead pg2-a9yhn; a Go
-	// time.ParseDuration string; default DefaultReviewSettleWindow, "0"
-	// disables the window). See ReviewSettleWindowResolve.
-	ReviewSettleWindow string `yaml:"review_settle_window,omitempty" json:"review_settle_window,omitempty"`
-}
-
 // PR lane modes (config.yaml's pr_lane.mode).
 const (
 	PRLaneModeOff   = "off"
@@ -1014,121 +991,6 @@ func (c *Config) PRLaneMode() string {
 	default:
 		return PRLaneModeOff
 	}
-}
-
-// DefaultReviewSettleWindow is the default sync.review_settle_window (bead
-// pg2-a9yhn). A burst of pushes to one PR must not start a review of every
-// intermediate head: a review costs ~16 minutes and several dollars, and one
-// whose head moved is refused at submit. The window is measured from the
-// first sync run that SAW the new head, so it is at least the polling cadence
-// that surfaces pushes (60s for the operator's own PRs, 120s for the team's)
-// long and in practice a little longer; 2m lets a typical fixup push
-// (commit, notice a typo, push again) land inside one window while adding
-// only that much latency to the one review that follows.
-const DefaultReviewSettleWindow = 2 * time.Minute
-
-// ReviewSettleWindow returns the resolved sync.review_settle_window: the
-// default when unset, 0 (no window) for an explicit zero, and
-// DefaultReviewSettleWindow for an invalid value (finalize rejects an
-// invalid value at config load, so that fallback is reached only by a Config
-// built in code).
-func (c *Config) ReviewSettleWindow() time.Duration {
-	if c == nil {
-		return DefaultReviewSettleWindow
-	}
-	d, err := c.Sync.ResolveReviewSettleWindow()
-	if err != nil {
-		return DefaultReviewSettleWindow
-	}
-	return d
-}
-
-// ResolveReviewSettleWindow parses sync.review_settle_window. Unset is
-// DefaultReviewSettleWindow; zero is allowed and means "no window" (the head
-// is acted on as soon as it is seen); a negative or unparseable value is an
-// error.
-func (s SyncConfig) ResolveReviewSettleWindow() (time.Duration, error) {
-	v := strings.TrimSpace(s.ReviewSettleWindow)
-	if v == "" {
-		return DefaultReviewSettleWindow, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return 0, fmt.Errorf("review_settle_window: %w", err)
-	}
-	if d < 0 {
-		return 0, fmt.Errorf("review_settle_window %q must not be negative", s.ReviewSettleWindow)
-	}
-	return d, nil
-}
-
-// Defaults for sync.retry (bead pg2-xb6fs). A transient sync failure is
-// retried with exponential backoff — 1m, 2m, 4m, 8m, 16m, then 30m for
-// every later retry — for at most 10 automatic retries, after which the row
-// stays a sync_error (exhausted) until an operator acts. The backoff is the
-// EARLIEST a retry may run: reconcile, the scheduled pass that performs
-// retries, only runs as often as its external scheduler invokes it.
-const (
-	DefaultSyncRetryMaxRetries     = 10
-	DefaultSyncRetryInitialBackoff = time.Minute
-	DefaultSyncRetryMaxBackoff     = 30 * time.Minute
-)
-
-// SyncRetryConfig is config.yaml's sync.retry block.
-type SyncRetryConfig struct {
-	// MaxRetries bounds automatic retries after the original failure
-	// (default DefaultSyncRetryMaxRetries). 0 disables automatic retry;
-	// negative is rejected. A pointer so an explicit 0 is distinguishable
-	// from an absent key.
-	MaxRetries *int `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
-	// InitialBackoff is the wait before the first retry, doubled for each
-	// later one (a Go time.ParseDuration string; default "1m").
-	InitialBackoff string `yaml:"initial_backoff,omitempty" json:"initial_backoff,omitempty"`
-	// MaxBackoff caps the doubled wait (a Go time.ParseDuration string;
-	// default "30m"). MUST NOT be below InitialBackoff.
-	MaxBackoff string `yaml:"max_backoff,omitempty" json:"max_backoff,omitempty"`
-}
-
-// Resolve applies the defaults and parses the durations. It fails on a
-// negative max_retries, an unparseable or non-positive duration, or a
-// max_backoff below initial_backoff; finalize calls it so a bad value fails
-// config load (and therefore every command and doctor) loudly.
-func (r SyncRetryConfig) Resolve() (maxRetries int, initialBackoff, maxBackoff time.Duration, err error) {
-	maxRetries = DefaultSyncRetryMaxRetries
-	if r.MaxRetries != nil {
-		if *r.MaxRetries < 0 {
-			return 0, 0, 0, fmt.Errorf("max_retries %d must not be negative", *r.MaxRetries)
-		}
-		maxRetries = *r.MaxRetries
-	}
-	initialBackoff, err = parsePositiveDuration("initial_backoff", r.InitialBackoff, DefaultSyncRetryInitialBackoff)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	maxBackoff, err = parsePositiveDuration("max_backoff", r.MaxBackoff, DefaultSyncRetryMaxBackoff)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	if maxBackoff < initialBackoff {
-		return 0, 0, 0, fmt.Errorf("max_backoff %s must not be below initial_backoff %s", maxBackoff, initialBackoff)
-	}
-	return maxRetries, initialBackoff, maxBackoff, nil
-}
-
-// parsePositiveDuration parses v (def when empty) and rejects a value that
-// is not a positive duration.
-func parsePositiveDuration(name, v string, def time.Duration) (time.Duration, error) {
-	if strings.TrimSpace(v) == "" {
-		return def, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return 0, fmt.Errorf("%s: %w", name, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("%s %q must be positive", name, v)
-	}
-	return d, nil
 }
 
 // ServeConfig configures `pg-desk serve`.
@@ -1267,12 +1129,6 @@ func finalize(cfg *Config) error {
 				return err
 			}
 		}
-	}
-	if _, _, _, err := cfg.Sync.Retry.Resolve(); err != nil {
-		return fmt.Errorf("sync.retry: %w", err)
-	}
-	if _, err := cfg.Sync.ResolveReviewSettleWindow(); err != nil {
-		return fmt.Errorf("sync: %w", err)
 	}
 	if err := validateChangeFlow(cfg); err != nil {
 		return err

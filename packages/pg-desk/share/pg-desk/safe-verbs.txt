@@ -1,7 +1,6 @@
 # Verbs of pg-desk that run on a store migrated to schema 2 (one verb path per line).
 # Generated from the classification table in cmd/pg-desk/verbs_schema2_test.go:
 # regenerate with PG_DESK_UPDATE_SAFE_VERBS=1 nice -n 10 go test ./cmd/pg-desk -run TestVerbExhaustiveness
-# run and sweep are safe only under sync.mode off: the sync stage reads the ledger that schema 2 drops.
 attention explain
 attention list
 doctor
@@ -55,7 +54,6 @@ pr wip
 run
 serve
 status
-sweep
 thread annotate
 thread changes
 thread consumer forget

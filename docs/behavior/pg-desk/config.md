@@ -86,8 +86,9 @@ These keys and rules are what the deployment configures for that.
   with what each backend reports about itself, including each query's `watched` value; a mismatch is a
   `doctor` gate (see [`operator-commands.md`](operator-commands.md), "doctor").
 - **No `sweep.*` for `issue`.** The `issue` flow no longer reads the `sweep.*` keys, because it runs
-  neither sweep tier. They apply to `pr` and `thread` only, with their meaning in
-  [`changes.md`](changes.md).
+  neither sweep tier. They apply to `thread` only (the daemon feeds `pr`; the legacy sync `sync:` keys and the
+  `pg-desk reconcile` and `sweep` verbs that read them are deleted), with their meaning in
+  [`changes.md`](changes.md). `sweep.reconcile_age` stays because the thread local tier reads it.
 - **`hydration.orphan_max_per_poll`** (home-module option `hydration.orphanMaxPerPoll`, positive
   integer) bounds how many orphans are read by id in one poll. An orphan is a watched, still-open issue
   of a backend with no change feed that no watched query lists any longer (a one-off watch, or an issue
@@ -129,7 +130,7 @@ that wants it MUST declare that query watched.
   stay valid and mean an unwatched query, and nothing MUST be watched by default.
 - **INV-CONFIG-7.** <!-- uuid: 41cab3ca-54a0-4d19-9a42-0ba9eacd3193 --> `watch.issue.queries` MUST list exactly the queries marked watched, rendered from the same source
   as the backend's query block, and a mismatch with what the backend reports MUST be a `doctor` gate.
-- **INV-CONFIG-8.** <!-- uuid: 1e697425-fee0-4fc8-b372-00e0633d92c6 --> The `issue` flow MUST NOT read any `sweep.*` key; `pr` and `thread` still read them.
+- **INV-CONFIG-8.** <!-- uuid: 1e697425-fee0-4fc8-b372-00e0633d92c6 --> The `issue` flow MUST NOT read any `sweep.*` key; `thread` still reads them.
 - **INV-CONFIG-9.** <!-- uuid: 193683c6-4588-4dac-9c6d-676cad254617 --> At most `hydration.orphan_max_per_poll` orphans MUST be read per poll, read first out of the
   `hydration.max_per_poll` budget; its default is a recommendation, and a non-positive value MUST fail the
   load with an error naming the key.

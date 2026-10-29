@@ -145,3 +145,32 @@ func TestSweepInputsForTier(t *testing.T) {
 		t.Errorf("remote with overrides = %+v", got)
 	}
 }
+
+// TestSweepKeysAreStillReadForTheNonPRTypes is the packet P9a-2 decision test
+// for the sweep.* keys: after the PR reconcile and the PR due backlog went,
+// sweep.max_age, sweep.max_per_poll and sweep.reconcile_age are each still read
+// by the change flow for a non-PR type (a thread), so none of them is removed.
+// Setting a key changes the thread's sweep inputs; a key nothing read would not.
+func TestSweepKeysAreStillReadForTheNonPRTypes(t *testing.T) {
+	tf := TypeFlow{Type: "thread", Active: 5}
+	base := &config.Config{}
+	cap := 3
+	cases := []struct {
+		key  string
+		set  func(c *config.Config)
+		tier string
+	}{
+		{"sweep.max_age", func(c *config.Config) { c.Sweep.MaxAge = "90m" }, TierRemote},
+		{"sweep.max_per_poll", func(c *config.Config) { c.Sweep.MaxPerPoll = &cap }, TierRemote},
+		{"sweep.reconcile_age", func(c *config.Config) { c.Sweep.ReconcileAge = "7m" }, TierLocal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			cfg := &config.Config{}
+			tc.set(cfg)
+			if got, def := SweepInputsForTier(cfg, tf, tc.tier), SweepInputsForTier(base, tf, tc.tier); got == def {
+				t.Fatalf("setting %s left the %q thread sweep inputs at the default %+v: nothing reads the key", tc.key, tc.tier, def)
+			}
+		})
+	}
+}

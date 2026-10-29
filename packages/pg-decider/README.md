@@ -106,8 +106,9 @@ against a real tracker.
 ### The golden
 
 Each `expected-plan.json` was recorded once, before the sync stage was removed, by running the old
-sync stage (`pg-desk run pr`, `sync.mode = plan`) and the decider side by side
-(`pg-decider-parity freeze`). It holds:
+sync stage (`pg-desk run pr`, `sync.mode = plan`) and the decider side by side. The old-side runner
+and the `freeze` subcommand that did it were deleted with the sync stage, so the golden is now only
+edited by hand. It holds:
 
 - `frozen_from`: the agent-support `main` commit and the pg-desk build the old plans came from. Every
   file carries the same pin (a test refuses a set frozen twice).
@@ -124,8 +125,7 @@ An entry the golden lists that the decider no longer plans is a STALE expected e
 gate; an entry the decider plans that the golden does not list fails it too. An intended behavior
 change is recorded by editing `expected_plan` AND adding its `explained` entry in the same change;
 `ParseGolden` refuses a file whose `expected_plan` is not `old_plan` with the explained differences
-applied. The golden is edited by hand after the freeze and is never re-recorded (`freeze` refuses to
-overwrite one).
+applied. The golden is edited by hand and is never re-recorded (the tool that recorded it is gone).
 
 Scenario `19-legacy-version-0-row` is seeded the legacy way: a store helper (`legacy_store.go`,
 driving `sqlite3`) writes the entity row an old-schema store held, into a schema-1 store before the

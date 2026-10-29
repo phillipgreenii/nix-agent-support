@@ -164,7 +164,7 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := q.persist("pr", "1", facts, interp); err != nil {
+	if err := q.persist("pr", "1", facts, interp); err != nil {
 		t.Fatal(err)
 	}
 	viaPR, _, _ := st.GetEntity("acme/widgets", "pr", "1")

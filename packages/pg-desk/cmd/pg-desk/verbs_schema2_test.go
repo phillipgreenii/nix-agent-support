@@ -129,17 +129,14 @@ func verbClasses() map[string]verbClass {
 		"heartbeat":         safe(),
 		"heartbeat-item":    safe(),
 		"hide":              safe("1", "test"),
-		"ledger":            unsafe("reads the entity-to-bead ledger that the schema-2 cutover drops (the verb is a stub)"),
 		"links":             safe(testPR),
 		"migrate":           unsafe("the one-way schema cutover itself: it refuses a store that is already at schema 2"),
 		"open":              unsafe("execs the operator-configured browser opener"),
-		"reconcile":         unsafe("lists the entity-to-bead ledger that the schema-2 cutover drops"),
-		"run":               safe("pr", "1"),
+		"run":               safe("issue", "1"),
 		"serve":             {Safe: true, Args: []string{"--addr", "127.0.0.1:0"}, Daemon: true},
 		"show": unsafe("reads the old per-column annotation table and the ledger, which schema 2 replaced or " +
 			"dropped; pr show is the schema-2 verb"),
 		"status": safe(),
-		"sweep":  safe(),
 		"unhide": safe("1"),
 		"wip":    safe("on", "1"),
 	}
@@ -218,8 +215,7 @@ func safeVerbList(classes map[string]verbClass) []string {
 
 const safeVerbsHeader = "# Verbs of pg-desk that run on a store migrated to schema 2 (one verb path per line).\n" +
 	"# Generated from the classification table in cmd/pg-desk/verbs_schema2_test.go:\n" +
-	"# regenerate with PG_DESK_UPDATE_SAFE_VERBS=1 nice -n 10 go test ./cmd/pg-desk -run TestVerbExhaustiveness\n" +
-	"# run and sweep are safe only under sync.mode off: the sync stage reads the ledger that schema 2 drops.\n"
+	"# regenerate with PG_DESK_UPDATE_SAFE_VERBS=1 nice -n 10 go test ./cmd/pg-desk -run TestVerbExhaustiveness\n"
 
 func renderSafeVerbs(verbs []string) string {
 	return safeVerbsHeader + strings.Join(verbs, "\n") + "\n"
@@ -316,7 +312,7 @@ func TestClassificationRejectsAnUnclassifiedVerb(t *testing.T) {
 	for k, v := range classes {
 		noReason[k] = v
 	}
-	noReason["ledger"] = verbClass{}
+	noReason["migrate"] = verbClass{}
 	if got := classificationProblems(tree, noReason); len(got) != 1 || !strings.Contains(got[0], "without a reason") {
 		t.Errorf("an unsafe entry without a reason must fail, got %v", got)
 	}
@@ -726,23 +722,24 @@ func TestSchemaErrorDetectionRejectsAMigrationBreak(t *testing.T) {
 }
 
 // TestHarnessSeesARealMigrationBreak is the negative control for the whole
-// walk: the legacy top-level reconcile lists the entity-to-bead ledger that the
-// schema-2 cutover dropped, so running it on the migrated store MUST be flagged. It proves the
+// walk: the legacy top-level show reads the old per-column annotation table that the
+// schema-2 cutover replaced, so running it on the migrated store MUST be flagged. It proves the
 // fixture really is at schema 2 and the check really reads the verbs' output;
-// without it a harness that ran nothing would pass every verb. If reconcile is
+// without it a harness that ran nothing would pass every verb. If show is
 // ever ported to schema 2, point this at another verb the table marks unsafe
-// for a dropped-table or dropped-column reason (it was hide until pg2-ifsje
-// ported the top-level hide, unhide, wip and feedback verbs).
+// for a dropped-table or dropped-column reason (it was reconcile until the
+// sync stage was deleted, and hide until pg2-ifsje ported the top-level hide,
+// unhide, wip and feedback verbs).
 func TestHarnessSeesARealMigrationBreak(t *testing.T) {
 	classes := verbClasses()
-	if classes["reconcile"].Safe {
-		t.Fatal("this control needs reconcile to be classified unsafe")
+	if classes["show"].Safe {
+		t.Fatal("this control needs show to be classified unsafe")
 	}
-	res := newVerbFixture(t).run("reconcile", nil)
+	res := newVerbFixture(t).run("show", []string{"1"})
 	if res.err != nil {
 		t.Fatal(res.err)
 	}
 	if schemaOrLedgerError(res) == "" {
-		t.Errorf("legacy reconcile ran clean on a schema-2 store; the check would miss a migration break:\nstdout: %s\nstderr: %s", res.stdout, res.stderr)
+		t.Errorf("legacy show ran clean on a schema-2 store; the check would miss a migration break:\nstdout: %s\nstderr: %s", res.stdout, res.stderr)
 	}
 }

@@ -77,7 +77,7 @@ func TestRunRecord_EarlyFailureAppendsOneRecord(t *testing.T) {
 	origChange := runF.change
 	t.Cleanup(func() { runF.change = origChange })
 	runF.change = "sweep"
-	if runErr := cmd.RunE(cmd, []string{"pr", "12"}); runErr == nil {
+	if runErr := cmd.RunE(cmd, []string{"issue", "anchor-12"}); runErr == nil {
 		t.Fatal("want an error")
 	}
 
@@ -86,11 +86,11 @@ func TestRunRecord_EarlyFailureAppendsOneRecord(t *testing.T) {
 		t.Fatalf("want one record, got %d: %v", len(recs), recs)
 	}
 	r := recs[0]
-	if r["entity_type"] != "pr" || r["entity_id"] != "12" || r["change"] != "sweep" || r["path"] != "early" ||
-		r["outcome"] != "error" || r["stage"] != "config" || r["pr"] != float64(12) {
+	if r["entity_type"] != "issue" || r["entity_id"] != "anchor-12" || r["change"] != "sweep" || r["path"] != "early" ||
+		r["outcome"] != "error" || r["stage"] != "config" {
 		t.Errorf("early-failure record = %v", r)
 	}
-	for _, k := range []string{"duration_ms", "content_hash_changed", "anchor_written", "ts"} {
+	for _, k := range []string{"duration_ms", "ts"} {
 		if _, ok := r[k]; !ok {
 			t.Errorf("record missing %q: %v", k, r)
 		}

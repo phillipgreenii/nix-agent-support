@@ -113,10 +113,9 @@ type sandbox struct {
 }
 
 // newSandbox builds the run's directories, config, PATH and fake connector.
-// side labels the run directory ("old" or "new"); syncMode is the config's
-// sync.mode. The returned cleanup removes the run directory only when the
+// side labels the run directory. The returned cleanup removes the run directory only when the
 // runner made the base temp dir itself (Env.TempDir empty).
-func newSandbox(env Env, fx *Fixture, side, syncMode string) (*sandbox, func(), error) {
+func newSandbox(env Env, fx *Fixture, side string) (*sandbox, func(), error) {
 	noop := func() {}
 	if err := env.validate(); err != nil {
 		return nil, noop, err
@@ -199,7 +198,7 @@ func newSandbox(env Env, fx *Fixture, side, syncMode string) (*sandbox, func(), 
 	if err := os.WriteFile(sb.callLog, nil, 0o644); err != nil {
 		return fail(fmt.Errorf("parity: make call log: %w", err))
 	}
-	if err := os.WriteFile(sb.configPath, []byte(configYAML(syncMode)), 0o644); err != nil {
+	if err := os.WriteFile(sb.configPath, []byte(configYAML()), 0o644); err != nil {
 		return fail(fmt.Errorf("parity: write config: %w", err))
 	}
 	deciderConfig := filepath.Join(filepath.Dir(sb.configPath), "pg-decider.json")
@@ -222,16 +221,14 @@ func newSandbox(env Env, fx *Fixture, side, syncMode string) (*sandbox, func(), 
 
 // configYAML is the synthetic pg-desk config both sides run under: one
 // repository, the operator as the acting identity, one teammate.
-func configYAML(syncMode string) string {
+func configYAML() string {
 	return fmt.Sprintf(`self_login: phillipgreenii
 team_members:
   - teammate
 repos:
   - remote: %s
 actor: parity-harness
-sync:
-  mode: %s
-`, FixtureRepo, syncMode)
+`, FixtureRepo)
 }
 
 // storePath is where pg-desk keeps this run's store.

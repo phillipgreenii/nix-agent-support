@@ -10,7 +10,6 @@ import (
 	_ "modernc.org/sqlite" // same driver internal/store registers
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // storeAtVersion builds a store file in a temp dir at the requested state
@@ -56,11 +55,7 @@ func storeAtVersion(t *testing.T, kind string) string {
 // commands under test must reach the store only through the raw seam.
 func withRawStoreAt(t *testing.T, path string) {
 	t.Helper()
-	// sync.mode "plan" is the config that makes status read the ledger, the
-	// riskiest thing to do to a store without one.
-	cfg := openTestConfig("o/r")
-	cfg.Sync.Mode = sync.ModePlan
-	withOpenSeams(t, cfg, func() (*store.Store, error) { return store.OpenRaw(path) })
+	withOpenSeams(t, openTestConfig("o/r"), func() (*store.Store, error) { return store.OpenRaw(path) })
 	deskStoreOpen = func() (*store.Store, error) {
 		t.Errorf("deskStoreOpen (Open: migrates and version-gates) was called; this command must open through deskStoreOpenRaw")
 		return nil, errors.New("deskStoreOpen must not be used here")

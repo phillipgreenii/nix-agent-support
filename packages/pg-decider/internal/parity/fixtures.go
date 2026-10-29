@@ -3,17 +3,17 @@
 // decider plans, and the comparison of that plan with the scenario's frozen
 // golden (golden.go).
 //
-// internal/sync is an internal package of another Go module, so this package
-// cannot import it. Instead it EXECS the built binaries:
+// This package never imports another Go module's internal packages. It EXECS the
+// built binaries:
 //
 //   - RunNew loads a fixture into a fresh store (pg-desk migrate --cutover, then
 //     pg-desk pr refresh) and runs pg-decider plan. The gate uses only this side.
-//   - RunOld loads the same fixture through the pre-cutover code path (pg-desk
-//     run with sync.mode = plan) and reads back the writes sync planned. It ran
-//     once, to record the golden (Freeze); the gate no longer calls it, and it
-//     is deleted with the sync stage.
 //
-// Both are hermetic: a fresh state directory, config, HOME and PATH, with a
+// The old-side runner (the pre-cutover pg-desk run with sync.mode = plan) and
+// the Freeze that recorded the goldens from it were deleted with the sync stage
+// (PR lane refactor, packet P9a-2); the goldens stay frozen.
+//
+// The run is hermetic: a fresh state directory, config, HOME and PATH, with a
 // fixture-driven fake pg-connector first (and only) on PATH. The package imports
 // neither packages/pg-desk nor any internal/sync.
 package parity

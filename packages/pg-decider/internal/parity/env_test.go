@@ -136,7 +136,7 @@ func TestFixtureSandboxIsHermetic(t *testing.T) {
 	t.Setenv("HOME", "/real/home")
 
 	env := fakeEnv(t)
-	sb, cleanup, err := newSandbox(env, fakeScenarioFixture(t), "old", "plan")
+	sb, cleanup, err := newSandbox(env, fakeScenarioFixture(t), "new")
 	if err != nil {
 		t.Fatalf("newSandbox: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestFixtureSandboxIsHermetic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"self_login: phillipgreenii", "remote: acme/api", "mode: plan"} {
+	for _, want := range []string{"self_login: phillipgreenii", "remote: acme/api"} {
 		if !strings.Contains(string(cfg), want) {
 			t.Errorf("config lacks %q:\n%s", want, cfg)
 		}
@@ -199,7 +199,7 @@ func TestFixtureSandboxPrefersTheUnwrappedBinary(t *testing.T) {
 	writeExe(t, env.PgDeskBin, "#!/bin/sh\nexport PATH="+filepath.Dir(env.PgConnectorBin)+":$PATH\nexec .pg-desk-wrapped \"$@\"\n")
 	wrapped := writeExe(t, filepath.Join(filepath.Dir(env.PgDeskBin), ".pg-desk-wrapped"), "#!/bin/sh\nexit 0\n")
 
-	sb, cleanup, err := newSandbox(env, fakeScenarioFixture(t), "new", "off")
+	sb, cleanup, err := newSandbox(env, fakeScenarioFixture(t), "new")
 	if err != nil {
 		t.Fatalf("newSandbox: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestFixtureSandboxRefusesAWrapperItCannotUnwrap(t *testing.T) {
 	// .pg-desk-wrapped to use instead: the real connector would be reachable.
 	writeExe(t, env.PgDeskBin, "#!/bin/sh\nexport PATH="+filepath.Dir(env.PgConnectorBin)+":$PATH\nexec /elsewhere/pg-desk \"$@\"\n")
 
-	_, cleanup, err := newSandbox(env, fakeScenarioFixture(t), "old", "plan")
+	_, cleanup, err := newSandbox(env, fakeScenarioFixture(t), "new")
 	if err == nil {
 		cleanup()
 		t.Fatal("a wrapper that exposes the real pg-connector must be refused")
@@ -228,9 +228,6 @@ func TestFixtureSandboxRefusesAWrapperItCannotUnwrap(t *testing.T) {
 func TestFixtureRunnersRejectAnInvalidEnv(t *testing.T) {
 	sc := Scenario{Name: "01-x", Dir: "testdata/01-x", Entities: []string{"acme/api#1"}}
 	bad := Env{}
-	if _, err := RunOld(context.Background(), bad, sc); err == nil {
-		t.Error("RunOld accepted an empty Env")
-	}
 	if _, err := RunNew(context.Background(), bad, sc); err == nil {
 		t.Error("RunNew accepted an empty Env")
 	}

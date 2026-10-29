@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
@@ -53,6 +54,19 @@ var newWantAbsent = map[string][]rule{
 	// The new side reads closed items however the work-beads listing is
 	// filtered, so scenario 15 plans exactly what scenario 14 does.
 	"15-": {{"create", "review-pr", "review.head-advanced"}, {"reopen", "review-pr", "review.head-advanced"}, {"reopen", "process-feedback", "feedback.digest-changed"}},
+}
+
+// wantFor returns the expectation of table whose prefix names the scenario.
+func wantFor[T any](t *testing.T, table map[string]T, name string) T {
+	t.Helper()
+	for prefix, v := range table {
+		if strings.HasPrefix(name, prefix) {
+			return v
+		}
+	}
+	t.Fatalf("scenario %s has no expectation in the table; add one", name)
+	var zero T
+	return zero
 }
 
 func hasAction(p action.PlanResult, r rule) bool {
@@ -156,4 +170,31 @@ func TestRunNewIsHermetic(t *testing.T) {
 	assertRunArtifacts(t, env.TempDir, "new-", []string{
 		"pr show acme/api#110 --fresh", "issue show bd-110a --fresh", "issue show bd-110r --fresh", "issue show bd-110f --fresh",
 	})
+}
+
+// assertRunArtifacts finds the single run directory under temp with the given
+// prefix and checks its store and the fake connector's call log.
+func assertRunArtifacts(t *testing.T, temp, prefix string, wantCalls []string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(temp, prefix+"*"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("want exactly one %s* run dir under %s, got %v (%v)", prefix, temp, matches, err)
+	}
+	run := matches[0]
+	if _, err := os.Stat(filepath.Join(run, "state", "pg-desk", "store.db")); err != nil {
+		t.Errorf("the store is not under the run dir: %v", err)
+	}
+	log, err := os.ReadFile(filepath.Join(run, "connector-calls.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(log), "\n")
+	for _, w := range wantCalls {
+		if !contains(lines, w) {
+			t.Errorf("the fake pg-connector never saw %q; calls:\n%s", w, log)
+		}
+	}
+	if strings.Contains(string(log), "unsupported") {
+		t.Errorf("call log mentions an unsupported call:\n%s", log)
+	}
 }

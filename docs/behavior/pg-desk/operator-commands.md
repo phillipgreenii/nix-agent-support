@@ -1,36 +1,30 @@
-# pg-desk — show, status, sweep, reconcile, pr head-check, pr lane-record, pr mark-inactive, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
+# pg-desk — show, status, pr head-check, pr lane-record, pr mark-inactive, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
 
 ## show
 
-`pg-desk show <pr> [--refresh]` prints the store's interpretation for one PR with its `as_of`
-time, and — when `sync.mode` is `plan` — that PR's own planned sync writes (kind and content
-hash; see [`sync.md`](sync.md)). `--refresh` MUST run the pipeline (see
-[`pipeline-run.md`](pipeline-run.md)) for that id first, then print the resulting interpretation.
-This replaces the retired PR tool's `pr view` enrichment display and `sync --pr N` as the manual re-check
-(D20) — the bead-writing call sites this docket's design retargets point here.
+`pg-desk show <pr>` prints the store's interpretation for one PR with its `as_of` time. It never
+gathers: the legacy `--refresh` flag, which ran the gather, interpret, store and sync pipeline for the
+PR first, was removed with the sync stage (PR lane refactor, packet P9a-2); `pg-desk pr refresh`
+re-reads a PR, and `pg-desk pr show` is the schema-2 view. The planned-sync-writes section went with
+the `ledger` table's accessors.
 
-Exit codes: `0` on success, including when `--refresh` completes a degraded run (degraded is not
-a failure — see [`gather.md`](gather.md)); `1` when `<pr>` does not resolve, or the store cannot
-be read or written. `show`'s own failure modes never exceed the `run` contract's exit-`1` case
-when `--refresh` is given. A config-load failure (needed only to check `sync.mode`) degrades to
-omitting the planned-sync-writes section rather than failing `show` outright.
+Exit codes: `0` on success; `1` when `<pr>` does not resolve, or the store cannot be read.
 
 ## status
 
 `pg-desk status` prints the store path and schema version, entity and interpretation counts, the
-last heartbeat/run/sweep times and degraded rows. It prints no `sync_error` count or retry split,
+last heartbeat and run times and degraded rows. It prints no `sync_error` count or retry split,
 no stalest-anchor-check age, no planned sync rows and no `pg-connector ledger show` section: the
 sync-era lines were removed with the sync lane (P9a-1).
 
 It prints one live `pr lane` line (the static line of the guards phase, replaced once the composed
-command exists). Its first part names the legacy sync's mode (`sync.mode`, `off` when unset) and the
-PR lane's mode (`pr_lane.mode`, see [`config.md`](config.md), `off` when missing or invalid, the one
-source of the mode); a configuration that cannot be loaded prints `unknown` for both modes and
+command exists). Its first part names the PR lane's mode (`pr_lane.mode`, see [`config.md`](config.md), `off` when missing or invalid, the one
+source of the mode); a configuration that cannot be loaded prints `unknown` for the mode and
 nothing more. The rest is read from the persisted store state (the lane keys in `meta`, see
 [`store-schema.md`](store-schema.md), and the never-hydrated set), never from the run-record file:
 
 ```text
-pr lane: legacy sync off, lane apply, flipped 2026-10-02T09:00:00Z, never-hydrated 1 (oldest 394h0m0s), residual 1 (oldest 1h0m0s), last run 2026-10-02T09:00:00Z
+pr lane: lane apply, flipped 2026-10-02T09:00:00Z, never-hydrated 1 (oldest 394h0m0s), residual 1 (oldest 1h0m0s), last run 2026-10-02T09:00:00Z
 ```
 
 - `flipped <time>` is the persisted flip time, the time of the first recorded run in `apply` that
@@ -84,111 +78,12 @@ the gates and reports are `doctor`'s. On a store that has not been cut over, the
 
 `status` also prints the `focus:` block described under `doctor` below, from the same shared
 health model, with every tripped gate marked `FAIL` (`status` itself never fails on one: its exit
-code is unchanged). It has no `--router-config`, so the reconcile consumer lag line reads `n/a`.
+code is unchanged). It has no `--router-config`, so the consumer lag line reads `n/a`.
 On a store without the focus tables the block is the single line `focus: unmigrated`.
 
 Exit codes: `0` on success; `1` when the store cannot be opened. A config-load failure (needed
-only to check `sync.mode`, and to read the sweep bound's inputs) degrades to omitting the planned-sync-rows section rather than failing
+only to read the sweep bound's inputs) degrades to omitting that section rather than failing
 `status` outright — status's own exit-code floor stays "1 only when the store cannot be opened."
-
-## sweep
-
-`pg-desk sweep` (bead `pg2-gznpe`) is the operator's bulk backfill command: it re-runs the full
-`gather` -> `interpret` -> `store` -> `sync` pipeline (see [`pipeline-run.md`](pipeline-run.md)),
-always with `--change sweep`, for EVERY entity currently in the store — the same pipeline call a
-single `pg-desk run pr <id>` uses (an absent `--change` already defaults to `sweep`; this command
-just automates that call across every tracked entity rather than requiring an operator to
-enumerate and re-run each one by hand). This is the only way to force a full recompute of every
-entity after a `gather`/`interpret` schema or enrichment change — otherwise an entity only
-refreshes on its own next webhook-triggered event, and a change that adds a field (e.g. a new
-`Enrichment` field) silently leaves any untouched-since entity stale.
-
-Every entity is attempted even after an earlier one fails (mirrors `run issue`/`run thread`'s own
-"attempt every one, join errors" convention) — a handful of stale or since-deleted entities must
-not stop the rest of the backfill. Once the pass over every entity completes, `sweep` stamps
-`meta.last_sweep` (surfaced as `last_sweep_at` on the `serve` dashboard — see
-[`serve.md`](serve.md) — and as `last_sweep` in `status`'s own output above), even when one or
-more individual entities failed: the SWEEP itself completed, mirroring `run`'s own
-"degraded-but-completed is still success" contract.
-
-`sweep` is distinct from, and does NOT implement, [`sync.md`](sync.md)'s still-out-of-scope
-"store-wide sweep that re-verifies every ledger row whose entity has left every gathered query" —
-that needs a driver over the `ledger` table (which entities have vanished from every live query);
-`sweep` only re-runs the pipeline for entities the `entity` table already knows about.
-
-Exit codes: `0` when every entity's pipeline run succeeds (including a degraded run — see
-[`gather.md`](gather.md)); `1` when the config or store cannot be opened, or when one or more
-entities' pipeline run failed (naming which).
-
-## reconcile
-
-`pg-desk reconcile` is the event-independent repair pass for PRs that left the open set. Closure
-is otherwise driven only by the one-shot `--change removed` event, and `pr-sweep` lists only PRs
-matching the open queries, so a single failed closure would leave a merge-request anchor open
-forever. `reconcile` reads the store and re-drives, through the same `run pr <id> --change
-removed` path (so closure stays ledger-guarded and re-entrant), every PR entity that has any of:
-
-- a `kind=anchor` ledger row that is not `closed` (with a non-empty bead id) whose PR is absent
-  from the current open set and whose `--change removed` re-read reports as merged, closed, or
-  not found; a PR still `open` is left alone; or
-- a recorded `interpretation.sync_error` whose automatic retry is due (see [`sync.md`](sync.md)'s
-  "Automatic retry"), re-driven regardless of PR state (a successful run clears it). A row with
-  no recorded retry state yet is due.
-
-- a `kind=review-request` ledger row whose pending head has finished waiting out its settle window
-  (`sync.review_settle_window`, see [`sync.md`](sync.md)'s "Review settle window"), re-driven by an
-  ordinary `run pr <id> --change sweep` so the review of the settled head is requested without
-  waiting for an unrelated event for that PR.
-
-A `sync_error` row whose retry is not due — still backing off, exhausted, or non-transient — is
-held: `reconcile` MUST NOT re-drive it through either bullet above (its open anchor is not re-read
-either, since that re-drive would be one more retry of the same failing sync). This is how a
-transient failure heals on a later scheduled pass with no operator action, while a persistent one
-stops after the retry bound. `--retry-all` lifts the hold for one run: every recorded `sync_error`
-is re-driven now, whatever its retry state — the operator's manual repair once the cause is fixed.
-
-The open set is the PR ids that the watched PR queries list right now (no `watch.pr.queries` key exists after the PR lane refactor, packet P9a-3, so the set is empty until `reconcile` itself is deleted), read
-with one cheap ids-only listing per query before any re-read. `reconcile` MUST NOT re-read an
-open anchor whose PR a watched query still lists: such a PR cannot have left the open set, and
-the re-read is the expensive call. A listing that fails, or a gatherer or configuration that
-cannot list, only shrinks the open set (down to empty), so the anchors it would have excluded are
-re-read as before; it never skips a closure. It logs
-`{"event":"reconcile_open_set","open_ids":N,"skipped_open":S,"candidates":C}` once per run when
-the open set was read.
-
-The same counts are also recorded in the store at the end of every run (`meta.reconcile.last_run`:
-the open-set size and `skipped_open` when the open set was read, the candidate count, how many
-candidates the run deferred, and when it finished). `serve` no longer exports them: the
-`pg_desk_reconcile_*` gauges were removed with the sync lane (P9a-1).
-
-`reconcile` MUST be idempotent: once an anchor is closed and `sync_error` is empty, the entity is
-no longer re-driven. Every candidate is attempted even after one fails; failures are joined into
-one error, with one exception: a candidate whose READ of the PR (the re-read that confirms its
-anchor's PR left the open set, or the closed-anchor audit's re-read) fails transiently — the
-connector child was killed, a deadline expired, or pg-connector answered `unavailable` — is
-DEFERRED, not failed. `reconcile` logs
-`{"event":"reconcile_deferred","entity_id":...,"error_class":...,"consecutive":N,"max":3,...}`,
-leaves the candidate in place for the next scheduled run, and does not count it toward exit `1`.
-A candidate deferred on `3` runs in a row (`meta.reconcile.deferred.<id>`, cleared by its next
-successful attempt) fails the next run, so a read that keeps failing still reaches the failure
-metric. A non-transient read failure (for example `unauthenticated`), and any failure of the
-closure re-drive itself (which records its own `sync_error` and retry state), fail the run
-immediately. It takes no positional arguments and does not stamp `meta.last_sweep`. `pg-desk`
-ships no scheduler: an external scheduler (for example a pg-router timer or launchd job) MUST
-invoke `pg-desk reconcile` periodically — without `--retry-all`, so the retry policy holds.
-
-`reconcile` is bounded per run so a large backlog converges across successive scheduled runs
-instead of being killed mid-pass. `--budget <duration>` (default `4m`; `0` = unbounded) stops
-`reconcile` from starting new candidates once that much wall-clock time has elapsed (the candidate
-in flight finishes). Candidates are visited oldest-checked first, using a per-entity
-`meta.reconcile.checked.<id>` stamp written after every attempt, so each bounded run resumes where
-the previous one stopped. Re-reads are serial (the gatherer is not safe for concurrent calls).
-
-Exit codes: `0` when every candidate succeeds (including none) and also when the budget ran out
-with candidates remaining — that case is distinguishable only by the stderr JSON line
-`{"event":"reconcile_budget_exhausted","processed":N,"remaining":M}`; `1` when config or store
-cannot be opened, or when any candidate's re-drive failed (naming which; a deferred transient read
-failure is not one, until it repeats), even if the budget also ran out.
 
 ## pr head-check
 
@@ -207,7 +102,7 @@ An abbreviated `--head-sha` of at least 7 characters matches by prefix. The verb
 nothing in the store, needs no schema cutover, and issues the one `pg-connector` call named above.
 A review prompt SHOULD run it at the review's mid-point (about 10 minutes in) and again immediately
 before it submits, and stop early on exit `4`; the next review request, for the new head, is
-created by sync once that head settles (see [`sync.md`](sync.md)). The prompt belongs to the
+created by the PR lane once that head settles. The prompt belongs to the
 deployment that runs the review, not to this repo.
 
 ## issue refresh --watch
@@ -519,11 +414,10 @@ classification naming a verb that does not exist. Every safe verb is run, in its
 a real store migrated to schema 2 under a deployment-style configuration; it passes when it runs
 without a schema or ledger error (it MAY still exit non-zero for another reason, such as a missing
 entity or no reachable connector). The unsafe verbs today are the legacy top-level `show` (replaced by
-`pr show`), `reconcile` and `ledger` (both read the dropped ledger) and
+`pr show`) and
 `migrate` (a one-shot cutover verb), and the `open` verbs (they exec the configured browser opener). The
 top-level `hide`, `unhide`, `wip` and `feedback list|set` are safe: they dispatch on the store schema
-like the typed `pr` forms. `run` and `sweep` are safe only while `sync.mode` is
-`off`: the sync stage reads the ledger.
+like the typed `pr` forms. `run` (issue and thread only) is safe: it reads no ledger.
 
 The list of safe verbs is written into the package output as `share/pg-desk/safe-verbs.txt`, one verb
 path per line (for example `pr refresh`), blank lines and `#` comments allowed. The same test verifies
@@ -571,13 +465,10 @@ can drift.
 
 ## Telemetry and logs
 
-All six commands emit nothing over OpenTelemetry or Prometheus through Phase 10 (D24). `status`'s
+All the commands here emit nothing over OpenTelemetry or Prometheus through Phase 10 (D24). `status`'s
 counts and `doctor`'s checks are read-side reporting only, not an exported metrics surface — that
-surface is `serve`'s minimal `/metrics` (see [`serve.md`](serve.md)). `sweep` is the one exception
-to "logs only ordinary CLI report/error text" below: because it calls the SAME per-entity pipeline
-`run` does (see [`pipeline-run.md`](pipeline-run.md)), it carries `run`'s own structured-JSON
-logging contract too — one line per entity, to stderr, plus the three-stage timeline under
-`sweep`'s own `--verbose`. `show`, `status`, `doctor`, `heartbeat`, and `heartbeat-item` carry no
+surface is `serve`'s minimal `/metrics` (see [`serve.md`](serve.md)). Every command here logs only ordinary CLI report/error text, with no structured-JSON contract.
+`show`, `status`, `doctor`, `heartbeat`, and `heartbeat-item` carry no
 such contract; each of those five logs only ordinary CLI report/error text. The `focus:` block of
 `doctor` and `status` emits no OpenTelemetry or Prometheus signal of its own: it reads the same
 health model that `serve` exposes as the `pg_desk_focus_*` families (see [`serve.md`](serve.md)).

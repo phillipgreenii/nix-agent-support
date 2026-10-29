@@ -1,63 +1,25 @@
-// Package pipeline implements pg-desk's run pipeline (docket pg2-2j5ac.32,
-// Phase 9, packet 6; sync stage wired by docket pg2-2j5ac.34, Phase 10):
-// the gather -> interpret -> store -> sync wiring for one entity, `pg-desk
-// run`'s own exit-code contract, and structured JSON logging [design doc
-// "7.9 Failure handling and logging"].
-//
-// This packet implements the PR-type pipeline only: an issue or thread
-// event additionally re-running stage 2 only (design section 7.2) is
-// Phase 10 (beads backend) / Phase 13 (Jira, threads) — cmd/pg-desk/run.go
-// stubs those types at the CLI layer before this package is ever reached.
-// The sync stage below runs only for entityType == "pr" for the same
-// reason.
+// Package pipeline implements pg-desk's interpret-only run path
+// (RunInterpretOnly, used by `pg-desk run issue` and `run thread`), the
+// generic per-entity hydration pipeline (RunGenericEntity, RunEntityChange)
+// and pg-desk's structured JSON run records [design doc "7.9 Failure
+// handling and logging"]. The legacy gather -> interpret -> store -> sync run
+// for a pull request, its Reconcile and Sweep passes and the sync_error retry
+// bookkeeping were removed with the sync stage (PR lane refactor, packet
+// P9a-2): the daemon is the PR feed now.
 //
 // # Exit codes [Binding decisions]
 //
-// Run returns nil on success or on a degraded-but-completed run (pr-pool
-// exit 0), and a non-nil error on a triggering-entity fetch failure, a
-// store error, or a sync-stage failure (pr-pool exit 1; a sync failure is
-// ALSO recorded as sync_error first — pg2-kftf9.1). cmd/pg-desk/main.go's RunE dispatch maps
-// any non-nil error to exit 1 and never calls os.Exit with another code,
-// so this package need not (and must not) call os.Exit itself: returning
-// nil/error is the whole contract, and it is never 9 and never a raw
-// pg-connector exit code by construction.
+// An entry point returns nil on success or on a degraded-but-completed run
+// (pg-router exit 0), and a non-nil error on a store or interpret failure
+// (pg-router exit 1). cmd/pg-desk/main.go's RunE dispatch maps any non-nil
+// error to exit 1 and never calls os.Exit with another code, so this package
+// need not (and must not) call os.Exit itself.
 //
 // # annotation is never touched here
 //
 // dispositions in the persisted interpretation row are the interpret
-// stage's own rule-set verdict, verbatim — no annotation-table override
-// merge. internal/interpret/disposition.go's ApplyDispositionOverrides
-// exists for a caller that reads the store's per-comment overrides, but
-// that read is not part of this packet's pinned Contract ("Consumes:
-// ... the store's entity/interpretation/meta writer methods (packet 3)"
-// — annotation is deliberately absent from that list). A full pipeline
-// run therefore leaves the annotation table byte-identical, satisfying
-// this packet's own acceptance criterion, and never calls
-// Store.UpsertAnnotation (internal/store/annotation.go's own doc comment:
-// "no pipeline stage ... calls UpsertAnnotation").
-//
-// # sync_error
-//
-// sync_error is a sync-only column (internal/store's own Interpretation
-// doc comment) — no OTHER stage in this package's own code ever writes it.
-// A store error in gather/interpret/persist's own code path is still the
-// exit-1 case above; only a failure from the sync stage itself (below) sets
-// sync_error, and it does so via the SAME existing UpsertInterpretation
-// writer persist already uses, never a new store method. The sync failure
-// is then ALSO returned as a Run-level error (pg2-kftf9.1) so pg-router
-// retries it — see the sync stage's own doc comment below.
-//
-// # Automatic retry of a sync_error (bead pg2-xb6fs)
-//
-// Every failed PR run of an entity that has a recorded sync_error — whether
-// the sync stage itself failed, or an earlier stage failed on a later
-// attempt — counts one attempt in that entity's store.SyncRetry, classified
-// and scheduled by internal/sync's RetryPolicy (transient failures back off
-// exponentially up to a retry bound; non-transient ones are never retried
-// automatically). A successful PR run deletes the state along with clearing
-// sync_error. Reconcile re-drives only the sync_error rows whose retry is
-// due, so a transient failure heals on a later scheduled pass without an
-// operator, and a persistent one stops after the bound.
+// stage's own rule-set verdict, verbatim: no annotation-table override
+// merge, and no call to Store.UpsertAnnotation.
 package pipeline
 
 import (
@@ -65,13 +27,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,7 +38,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // gatherer is the subset of *gather.Gatherer's API this package depends
@@ -94,20 +51,8 @@ type gatherer interface {
 	Gather(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error)
 }
 
-// syncer is the subset of *sync.Syncer's API this package depends on,
-// defined locally for the same reason gatherer is: tests inject a fake
-// implementation without needing a real pg-connector subprocess on $PATH.
-// *sync.Syncer satisfies this interface by construction.
-type syncer interface {
-	Sync(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error
-	// AnchorStale/StampClosedAnchor back Reconcile's closed-anchor audit
-	// (bead pg2-a6aw6).
-	AnchorStale(ctx context.Context, repo, entityID string) (bool, error)
-	StampClosedAnchor(ctx context.Context, repo, entityID, reason string) error
-}
-
-// Pipeline wires gather -> interpret -> store -> sync for one entity per
-// Run call. Not safe for concurrent Run calls on the same entity — mirrors
+// Pipeline wires gather, interpret and store for one entity per call. Not
+// safe for concurrent calls on the same entity — mirrors
 // gather.Gatherer's own "not safe for concurrent Gather calls" contract,
 // since Pipeline holds exactly one Gatherer.
 type Pipeline struct {
@@ -119,20 +64,12 @@ type Pipeline struct {
 	entityGatherers map[string]gather.EntityGatherer
 	// extractors is the per-type link-extractor registry run after persist.
 	extractors ExtractorRegistry
-	syncer     syncer
 	clock      interpret.Clock
 	verbose    bool
 	out        io.Writer
 	// recordOut, when non-nil, receives every run record in addition to out
 	// (bead pg2-dpml1).
 	recordOut io.Writer
-
-	reconcileBudget time.Duration // 0 = unbounded (pg2-a5z69)
-
-	// retryPolicy schedules and bounds automatic retries of a recorded
-	// sync_error; retryAll makes Reconcile ignore it (pg2-xb6fs).
-	retryPolicy sync.RetryPolicy
-	retryAll    bool
 }
 
 // Option configures a Pipeline constructed by New.
@@ -150,29 +87,6 @@ func WithClock(c interpret.Clock) Option {
 // [design 7.9: "--verbose on run prints the three-stage timeline"].
 func WithVerbose(v bool) Option {
 	return func(p *Pipeline) { p.verbose = v }
-}
-
-// WithReconcileBudget bounds one Reconcile pass to roughly d of wall-clock
-// time (bead pg2-a5z69). The budget is checked between candidates, so the
-// candidate in flight always finishes; d <= 0 means unbounded.
-func WithReconcileBudget(d time.Duration) Option {
-	return func(p *Pipeline) { p.reconcileBudget = d }
-}
-
-// WithReconcileRetryAll makes Reconcile re-drive every recorded sync_error
-// now, ignoring the automatic-retry policy — backoff, the retry bound, and
-// the non-transient classification alike (bead pg2-xb6fs). It is the
-// operator's manual repair (`pg-desk reconcile --retry-all`) once the cause
-// of an exhausted or non-transient row is fixed; scheduled runs never set it.
-func WithReconcileRetryAll(v bool) Option {
-	return func(p *Pipeline) { p.retryAll = v }
-}
-
-// WithSyncLogger overrides the logger the sync stage writes its diagnostics
-// to (the per-write "anchor write ... cause=" line, bead pg2-kwwn2); the
-// default is slog.Default().
-func WithSyncLogger(l *slog.Logger) Option {
-	return func(p *Pipeline) { p.syncer = sync.New(p.cfg, p.store, sync.WithLogger(l)) }
 }
 
 // WithLogWriter overrides where structured JSON logs are written.
@@ -209,10 +123,8 @@ func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
 		gatherer:        g,
 		entityGatherers: g.EntityGatherers(),
 		extractors:      NewExtractorRegistry(cfg, st, repoOf(cfg)),
-		syncer:          sync.New(cfg, st),
 		clock:           interpret.SystemClock{},
 		out:             os.Stderr,
-		retryPolicy:     sync.RetryPolicyFor(cfg),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -233,40 +145,26 @@ type stageEvent struct {
 // decisions), or "error" (non-nil Run error; also pr-pool exit 1).
 //
 // The same line is the persistent per-run record (bead pg2-dpml1; see
-// WithRunRecordWriter): Ts, Path, Repo, PR, ContentHashChanged, AnchorWritten
-// and AnchorCause exist so a day of records can say how many sweep runs were
-// true no-ops and how many caught a change the changes feed had not reported.
+// WithRunRecordWriter): Ts, Path, Repo and PR make a day of records countable.
 type runLogLine struct {
 	// Ts is the run's end time, RFC 3339 UTC, from the pipeline clock.
 	Ts         string `json:"ts"`
 	EntityType string `json:"entity_type"`
 	EntityID   string `json:"entity_id"`
-	// Repo and PR identify the pull request (PR is its number) so a record
-	// joins the sync stage's anchor-write log, whose `repo` and `pr` fields
-	// carry the same values. Both are omitted for a non-PR entity.
+	// Repo and PR identify the pull request (PR is its number). Both are
+	// omitted for a non-PR entity.
 	Repo string `json:"repo,omitempty"`
 	PR   int    `json:"pr,omitempty"`
-	// Path names which entry point produced the record: "full" (gather,
-	// interpret, store, sync), "interpret_only" (`run issue`, which
-	// re-interprets stored facts and neither gathers nor syncs) or "early"
+	// Path names which entry point produced the record: "interpret_only"
+	// (`run issue` and `run thread`, which re-interpret stored facts and do
+	// not gather) or "early"
 	// (a failure before the pipeline ran: args, config, store open, bead
 	// resolution).
-	Path   string `json:"path"`
-	Change string `json:"change"`
-	// ContentHashChanged is true when this run's gathered facts differ in
-	// substance from the stored row (contentSignature: as_of, cache
-	// provenance, transient mergeability and other PRs' work beads are
-	// ignored), or no row existed yet. It is false for a run that never
-	// gathered. It is a measure only; nothing branches on it.
-	ContentHashChanged bool `json:"content_hash_changed"`
-	// AnchorWritten is true when the sync stage applied an anchor bead
-	// write; AnchorCause is that write's cause (the anchor-write log's
-	// vocabulary), set only then.
-	AnchorWritten bool   `json:"anchor_written"`
-	AnchorCause   string `json:"anchor_cause,omitempty"`
-	Outcome       string `json:"outcome"`
-	Degraded      string `json:"degraded,omitempty"`
-	Error         string `json:"error,omitempty"`
+	Path     string `json:"path"`
+	Change   string `json:"change"`
+	Outcome  string `json:"outcome"`
+	Degraded string `json:"degraded,omitempty"`
+	Error    string `json:"error,omitempty"`
 	// Stage and ErrorClass are set only on an "error" line whose error
 	// carries a *StageError (bead pg2-gp50o): the pipeline stage that failed
 	// and a coarse failure class (Class* constants), so a failure pg-router
@@ -274,155 +172,6 @@ type runLogLine struct {
 	Stage      string `json:"stage,omitempty"`
 	ErrorClass string `json:"error_class,omitempty"`
 	DurationMs int64  `json:"duration_ms"`
-}
-
-// Run executes the gather -> interpret -> store pipeline once for one
-// entity. See the package doc comment for the exit-code contract. For a PR
-// entity it then records the run's outcome in the entity's sync_error retry
-// state (see the package doc's "Automatic retry" section); a failure to
-// record it is a store error and fails Run too.
-func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
-	runErr := p.run(ctx, entityType, entityID, change)
-	if entityType != entityTypePR {
-		return runErr
-	}
-	if err := p.recordSyncRetry(entityID, runErr); err != nil {
-		err = TagStage(StageSyncRetryState, err)
-		if runErr == nil {
-			return fmt.Errorf("pipeline: %w", err)
-		}
-		return errors.Join(runErr, fmt.Errorf("pipeline: %w", err))
-	}
-	return runErr
-}
-
-// recordSyncRetry updates entityID's retry state after one PR run: a
-// success deletes it (the run also cleared sync_error); a failure of an
-// entity that has a recorded sync_error counts one more attempt, classified
-// from runErr. A failure of an entity with no recorded sync_error (an
-// ordinary gather or store failure) records nothing: there is no sync_error
-// to retry, and pg-router already retries the failed event itself.
-func (p *Pipeline) recordSyncRetry(entityID string, runErr error) error {
-	if runErr == nil {
-		if err := p.store.DeleteSyncRetry(entityID); err != nil {
-			return fmt.Errorf("clear sync retry state %s: %w", entityID, err)
-		}
-		return nil
-	}
-	interp, found, err := p.store.GetInterpretation(p.repo(), entityTypePR, entityID)
-	if err != nil {
-		return fmt.Errorf("read interpretation for sync retry state %s: %w", entityID, err)
-	}
-	if !found || interp.SyncError == "" {
-		return nil
-	}
-	prev, _, err := p.store.GetSyncRetry(entityID)
-	if err != nil {
-		// A corrupt state value restarts the count rather than wedging the
-		// row: the zero value is what a first failure would see.
-		prev = store.SyncRetry{}
-	}
-	next := p.retryPolicy.NextState(prev, runErr, p.clock.Now())
-	if err := p.store.SetSyncRetry(entityID, next); err != nil {
-		return fmt.Errorf("record sync retry state %s: %w", entityID, err)
-	}
-	return nil
-}
-
-// run is Run's pipeline body, without the retry-state bookkeeping.
-func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
-	runStart := p.clock.Now()
-	var timeline []stageEvent
-	var obs runObs
-
-	stageStart := p.clock.Now()
-	facts, err := p.gatherer.Gather(ctx, entityType, entityID, change)
-	timeline = append(timeline, stageEvent{Stage: "gather", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
-	if err != nil {
-		err = TagStage(StageGather, err)
-		p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: gather %s %s: %w", entityType, entityID, err)
-	}
-
-	if change == gather.ChangeRemoved {
-		// Binding decisions > "--change removed": an id the store does not
-		// know is a no-op — exits 0, no rows written. This applies to
-		// every RemovedState (open/merged/closed/not_found) alike; only
-		// whether the store has EVER heard of this (repo, type, id) decides
-		// the no-op, not what the re-read found.
-		_, known, getErr := p.store.GetEntity(p.repo(), entityType, entityID)
-		if getErr != nil {
-			getErr = TagStage(StageKnownCheck, getErr)
-			p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", getErr, runStart)
-			return fmt.Errorf("pipeline: check entity known %s %s: %w", entityType, entityID, getErr)
-		}
-		if !known {
-			p.logRunObs(pathFull, obs, entityType, entityID, change, "noop", facts.Degraded, nil, runStart)
-			return nil
-		}
-	}
-
-	stageStart = p.clock.Now()
-	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
-	timeline = append(timeline, stageEvent{Stage: "interpret", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
-	if err != nil {
-		err = TagStage(StageInterpret, err)
-		p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
-	}
-
-	obs.hashChanged = p.factsChanged(entityType, entityID, facts)
-
-	stageStart = p.clock.Now()
-	interpRow, err := p.persist(entityType, entityID, facts, interp)
-	timeline = append(timeline, stageEvent{Stage: "store", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
-	if err != nil {
-		err = TagStage(StageStore, err)
-		p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: store %s %s: %w", entityType, entityID, err)
-	}
-
-	// Sync stage (docket pg2-2j5ac.34, Phase 10) — entityType == "pr" only
-	// (see the package doc comment), and only once the entity/interpretation
-	// rows above are durably persisted. A sync failure is recorded ON that
-	// same interpretation row (sync_error, the diagnostic) AND returned as a
-	// Run error (pg2-kftf9.1): a swallowed failure exited 0, so pg-router
-	// treated the dispatch as success and never retried (25 merge-request
-	// anchors stayed open after their PRs closed). Returning it makes the
-	// event retry with pg-router's backoff and count in its failure metrics.
-	// It is still an ordinary error -> exit 1 via main.go: never os.Exit(9),
-	// never a raw pg-connector exit code. Retries are safe: sync closure is
-	// ledger-guarded and re-entrant, and the next successful run's persist
-	// rewrites the row with an empty sync_error.
-	if entityType == entityTypePR {
-		syncCtx, tally := sync.WithWriteTally(ctx)
-		syncErr := p.syncer.Sync(syncCtx, p.repo(), entityID, change, facts, interp)
-		obs.anchorWritten, obs.anchorCause = tally.AnchorWritten(), tally.AnchorCause()
-		if syncErr != nil {
-			interpRow.SyncError = syncErr.Error()
-			if upsertErr := p.store.UpsertInterpretation(interpRow); upsertErr != nil {
-				// A failure to even RECORD the sync error is a genuine store
-				// error (this package's own exit-1 case), unlike the sync
-				// failure itself.
-				upsertErr = TagStage(StageRecordSyncError, upsertErr)
-				p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", upsertErr, runStart)
-				return fmt.Errorf("pipeline: record sync_error %s %s: %w", entityType, entityID, upsertErr)
-			}
-			syncErr = TagStage(StageSync, syncErr)
-			p.logRunObs(pathFull, obs, entityType, entityID, change, "error", interp.Degraded, syncErr, runStart)
-			return fmt.Errorf("pipeline: sync %s %s: %w", entityType, entityID, syncErr)
-		}
-	}
-
-	outcome := "ok"
-	if interp.Degraded != "" {
-		outcome = "degraded"
-	}
-	p.logRunObs(pathFull, obs, entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
-	if p.verbose {
-		p.printTimeline(timeline)
-	}
-	return nil
 }
 
 // RunInterpretOnly re-runs stage 2 (interpret) only, for an entity whose
@@ -452,500 +201,51 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	case gather.ChangeAdded, gather.ChangeChanged, gather.ChangeRemoved, gather.ChangeSweep:
 	default:
 		err := TagStage(StageInterpretOnlyArgs, fmt.Errorf("pipeline: interpret-only %s %s: change kind %q is not one of added/changed/removed/sweep", entityType, entityID, change))
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return err
 	}
 
 	entity, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
 	if err != nil {
 		err = TagStage(StageLoadFacts, err)
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only get entity %s %s: %w", entityType, entityID, err)
 	}
 	if !found {
 		noEntityErr := TagStage(StageLoadFacts, fmt.Errorf("pipeline: interpret-only %s %s: no stored entity facts (never gathered)", entityType, entityID))
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", noEntityErr, runStart)
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", noEntityErr, runStart)
 		return noEntityErr
 	}
 
 	var facts gather.Facts
 	if err := json.Unmarshal([]byte(entity.Facts), &facts); err != nil {
 		err = TagStage(StageLoadFacts, err)
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only decode stored facts %s %s: %w", entityType, entityID, err)
 	}
 
 	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
 	if err != nil {
 		err = TagStage(StageInterpret, err)
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
 	}
 
-	// Preserve any sync_error a prior sync-stage run already recorded on
-	// this row: this path never invokes sync (see doc comment above), so
-	// it must not silently erase it. Zero value ("") when no
-	// interpretation row exists yet, or none was ever recorded — same
-	// effect as a fresh row.
-	prior, _, err := p.store.GetInterpretation(p.repo(), entityType, entityID)
-	if err != nil {
+	if err := p.persist(entityType, entityID, facts, interp); err != nil {
 		err = TagStage(StageStore, err)
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: interpret-only get prior interpretation %s %s: %w", entityType, entityID, err)
-	}
-
-	interpRow, err := p.persist(entityType, entityID, facts, interp)
-	if err != nil {
-		err = TagStage(StageStore, err)
-		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only store %s %s: %w", entityType, entityID, err)
-	}
-	if prior.SyncError != "" {
-		interpRow.SyncError = prior.SyncError
-		if err := p.store.UpsertInterpretation(interpRow); err != nil {
-			err = TagStage(StageStore, err)
-			p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
-			return fmt.Errorf("pipeline: interpret-only restore sync_error %s %s: %w", entityType, entityID, err)
-		}
 	}
 
 	outcome := "ok"
 	if interp.Degraded != "" {
 		outcome = "degraded"
 	}
-	p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
+	p.logRunObs(pathInterpretOnly, entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
 	if p.verbose {
 		p.printTimeline([]stageEvent{{Stage: "interpret", DurationMs: p.clock.Now().Sub(runStart).Milliseconds()}})
 	}
 	return nil
-}
-
-// Sweep implements `pg-desk sweep` (bead pg2-gznpe): the operator's
-// "recompute everything" backfill — it re-runs the full gather/interpret/
-// store/sync pipeline (Run, above; change is always ChangeSweep, matching
-// the manual per-entity workaround this command replaces:
-// `pg-desk run pr <id>` with no --change, which already defaults to
-// sweep) for every entity in entities, in the given order, then stamps
-// meta.last_sweep once the pass over the whole list has been attempted.
-//
-// Every entity is attempted even after an earlier one fails — mirrors
-// cmd/pg-desk/run.go's own runJiraIssue/runThread "attempt every one,
-// join errors" convention, one layer down: a handful of stale or
-// since-deleted entities must not stop the rest of the backfill. Errors
-// (per-entity Run failures, and a meta.last_sweep write failure) are
-// joined into a single returned error; last_sweep is still stamped even
-// when one or more entities failed, since the SWEEP ITSELF — the attempt
-// to recompute every entity — did complete, mirroring Run's own "a
-// degraded-but-completed run is still success" contract (see the package
-// doc comment) rather than requiring every entity to succeed before the
-// dashboard's last_sweep_at is allowed to advance.
-//
-// This is distinct from, and does NOT implement, sync.md's still-out-of-
-// scope "store-wide sweep that re-verifies every ledger row whose entity
-// has left every gathered query" — that needs a driver over the LEDGER
-// table (which entities have vanished from every live query); this Sweep
-// only re-runs the pipeline for entities the ENTITY table already knows
-// about.
-func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
-	var errs []error
-	for _, e := range entities {
-		if err := p.Run(ctx, e.EntityType, e.EntityID, gather.ChangeSweep); err != nil {
-			errs = append(errs, fmt.Errorf("sweep %s %s: %w", e.EntityType, e.EntityID, err))
-		}
-	}
-
-	now := p.clock.Now().UTC().Format(time.RFC3339)
-	if err := p.store.SetMeta(store.MetaKeyLastSweep, now); err != nil {
-		errs = append(errs, fmt.Errorf("sweep: record meta.last_sweep: %w", err))
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("pipeline: sweep: %w", errors.Join(errs...))
-	}
-	return nil
-}
-
-// Reconcile implements `pg-desk reconcile` (bead pg2-kftf9.2): an
-// event-independent repair pass over the ledger. Closure is otherwise
-// driven only by the one-shot `removed` event, so a PR that has left every
-// open query is never visited again and a single failed closure was
-// permanent. Reconcile re-drives, via the SAME Run(ChangeRemoved) path the
-// event uses (so closure stays ledger-guarded and re-entrant), every PR
-// entity that has either
-//
-//   - a non-closed anchor ledger row whose PR is now merged/closed/gone
-//     (confirmed by a `--change removed` re-read; an anchor whose PR is
-//     still open is left alone), or
-//   - a recorded sync_error whose automatic retry is due (re-driven
-//     regardless of PR state; a successful run clears it).
-//
-// # Automatic retry (bead pg2-xb6fs)
-//
-// A sync_error row is re-driven only when sync.RetryDue says so: its
-// transient failure's backoff has elapsed and the retry bound is not
-// reached, or it has no recorded retry state yet. An exhausted or
-// non-transient row, or one still backing off, is HELD: it is not re-driven
-// by either path above (an open anchor on a held row is not re-read
-// either — re-driving it would be one more retry of the same failing sync),
-// though a closed-anchor audit still runs. WithReconcileRetryAll lifts the
-// hold for an operator's manual repair.
-//
-// A PR whose review request is waiting out a head's settle window
-// (sync.review_settle_window, bead pg2-a9yhn) is also a candidate once that
-// window has elapsed: sync runs only on events, so a quiet PR whose last push
-// settled would otherwise wait for its next unrelated event before the review
-// of that head is requested. Such a candidate is re-driven by an ordinary
-// sweep run, which reopens the review bead through the same ledger-guarded
-// path. How soon after the window this happens is bounded by how often the
-// scheduler runs reconcile.
-//
-// It also audits every ledger-closed anchor once (bead pg2-a6aw6): an
-// anchor closed by an earlier review can keep stale bead metadata
-// (state=open, no closed_at); a stale one is stamped with the truthful
-// terminal state from a fresh PR re-read, with no operator action.
-//
-// It is idempotent: once an anchor is closed, audited and sync_error is
-// empty the entity is no longer a candidate. Every candidate is attempted even after
-// one fails; failures are joined into the returned error (exit 1). Unlike
-// Sweep it does not touch meta.last_sweep.
-//
-// # Transient failures (bead pg2-hpakl)
-//
-// Every open anchor is re-read: the open-set filter that skipped an anchor a
-// watched PR query still listed is gone with watch.pr.queries (PR lane
-// refactor, packet P9a-3; the daemon is the PR feed).
-//
-// A candidate whose READ of the PR (the peek, or the closed-anchor audit's
-// re-read) fails transiently (a killed or timed-out connector child, or
-// pg-connector's `unavailable` code, see transientClass) is logged as
-// {"event":"reconcile_deferred",...} and does NOT fail the pass: the next
-// scheduled pass retries it, since it keeps its place as a candidate. It fails
-// the pass again once it has been deferred reconcileMaxDeferrals passes in a
-// row (meta reconcile.deferred.<id>, cleared by its next success). Every
-// other failure (a non-transient read failure, or any failure of the closure
-// Run, which carries its own sync_error and retry bound) fails the pass at
-// once.
-//
-// # Budget and convergence (bead pg2-a5z69)
-//
-// Each candidate costs a pg-connector re-read (~4s), so a large backlog can
-// outlive the caller's timeout. With WithReconcileBudget set, Reconcile
-// stops starting new candidates once the budget elapsed and returns nil
-// (NOT an error: a budget stop is progress, not a failed re-drive) after
-// logging a {"event":"reconcile_budget_exhausted","processed":N,
-// "remaining":M} line. Candidates are visited oldest-checked first, using a
-// per-entity meta stamp (reconcile.checked.<id>) written after every attempt
-// (success, still-open, or failure), so successive bounded runs cover the
-// whole backlog rather than re-reading the same head of the list.
-func (p *Pipeline) Reconcile(ctx context.Context) error {
-	repo := p.repo()
-	ledger, err := p.store.ListLedger()
-	if err != nil {
-		return fmt.Errorf("pipeline: reconcile: %w", err)
-	}
-	interps, err := p.store.ListInterpretations()
-	if err != nil {
-		return fmt.Errorf("pipeline: reconcile: %w", err)
-	}
-
-	// Split the sync_error rows into due (re-driven below) and held (not
-	// re-driven by either path) per the automatic-retry policy (pg2-xb6fs).
-	now := p.clock.Now()
-	var syncErrDue []string
-	held := map[string]bool{}
-	for _, i := range interps {
-		if i.Repo != repo || i.EntityType != entityTypePR || i.SyncError == "" {
-			continue
-		}
-		due := p.retryAll
-		if !due {
-			r, found, rErr := p.store.GetSyncRetry(i.EntityID)
-			// Unreadable state is treated like none: due, so the re-drive
-			// records fresh state.
-			due = rErr != nil || sync.RetryDue(r, found, now)
-		}
-		if due {
-			syncErrDue = append(syncErrDue, i.EntityID)
-		} else {
-			held[i.EntityID] = true
-		}
-	}
-
-	// needsPeek[id]=true: anchor-open candidate that must be confirmed
-	// merged/closed first; false: sync_error candidate, always re-driven.
-	// An id absent from needsPeek is not re-driven (audit-only).
-	needsPeek := map[string]bool{}
-	audit := map[string]bool{}
-	settle := map[string]bool{} // review settle window elapsed (pg2-a9yhn)
-	var order []string
-	inOrder := map[string]bool{}
-	touch := func(id string) {
-		if !inOrder[id] {
-			inOrder[id] = true
-			order = append(order, id)
-		}
-	}
-	add := func(id string, peek bool) {
-		prev, seen := needsPeek[id]
-		touch(id)
-		if !seen {
-			needsPeek[id] = peek
-			return
-		}
-		needsPeek[id] = prev && peek
-	}
-	settleWindow := p.cfg.ReviewSettleWindow()
-	for _, l := range ledger {
-		if l.Repo == repo && l.EntityType == entityTypePR && !held[l.EntityID] && sync.SettleDue(l, settleWindow, now) {
-			settle[l.EntityID] = true
-			touch(l.EntityID)
-		}
-		if l.Repo != repo || l.EntityType != entityTypePR || l.Kind != sync.KindAnchor || l.BeadID == "" {
-			continue
-		}
-		if l.LastSyncedContentHash != sync.ClosedSentinel {
-			if held[l.EntityID] {
-				continue
-			}
-			add(l.EntityID, true)
-			continue
-		}
-		// Closed anchor: audit its bead's metadata once (pg2-a6aw6).
-		_, audited, mErr := p.store.GetMeta(reconcileAuditedKeyPrefix + l.EntityID)
-		if mErr != nil {
-			return fmt.Errorf("pipeline: reconcile: %w", mErr)
-		}
-		if !audited {
-			audit[l.EntityID] = true
-			touch(l.EntityID)
-		}
-	}
-	for _, id := range syncErrDue {
-		add(id, false)
-	}
-
-	// Oldest-checked (or never-checked) first; stable so ties keep the
-	// deterministic ledger/interpretation order.
-	checkedAt := map[string]string{}
-	deferrals := map[string]int{}
-	for _, id := range order {
-		v, _, mErr := p.store.GetMeta(reconcileCheckedKeyPrefix + id)
-		if mErr != nil {
-			return fmt.Errorf("pipeline: reconcile: %w", mErr)
-		}
-		checkedAt[id] = v
-		d, found, mErr := p.store.GetMeta(reconcileDeferredKeyPrefix + id)
-		if mErr != nil {
-			return fmt.Errorf("pipeline: reconcile: %w", mErr)
-		}
-		if found {
-			n, aErr := strconv.Atoi(d)
-			if aErr != nil || n < 0 {
-				n = 0 // a corrupt counter restarts the count rather than wedging the row
-			}
-			deferrals[id] = n
-		}
-	}
-	sort.SliceStable(order, func(a, b int) bool { return checkedAt[order[a]] < checkedAt[order[b]] })
-
-	start := p.clock.Now()
-	var errs []error
-	deferred := 0
-	// The run's summary is persisted however the loop ends (completion, budget
-	// stop, or failures), so serve can export it (bead pg2-q89ng).
-	defer func() { p.recordReconcileLastRun(len(order), &deferred) }()
-	for idx, id := range order {
-		if p.reconcileBudget > 0 && idx > 0 && p.clock.Now().Sub(start) >= p.reconcileBudget {
-			line, _ := json.Marshal(map[string]any{
-				"event": "reconcile_budget_exhausted", "processed": idx, "remaining": len(order) - idx,
-			})
-			_, _ = fmt.Fprintln(p.out, string(line))
-			break
-		}
-		p.markReconcileChecked(id)
-		err := p.reconcileCandidate(ctx, id, needsPeek, settle, audit)
-		switch {
-		case err == nil:
-			if deferrals[id] > 0 {
-				_ = p.store.DeleteMeta(reconcileDeferredKeyPrefix + id) // best-effort, like the stamp
-			}
-		case deferrable(ctx, err, deferrals[id]):
-			deferrals[id]++
-			deferred++
-			_ = p.store.SetMeta(reconcileDeferredKeyPrefix+id, strconv.Itoa(deferrals[id]))
-			line, _ := json.Marshal(map[string]any{
-				"event": "reconcile_deferred", "entity_id": id, "error_class": transientClass(err),
-				"consecutive": deferrals[id], "max": reconcileMaxDeferrals, "error": err.Error(),
-			})
-			_, _ = fmt.Fprintln(p.out, string(line))
-		default:
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("pipeline: reconcile: %w", errors.Join(errs...))
-	}
-	return nil
-}
-
-// recordReconcileLastRun persists the run summary (sync.ReconcileLastRun) for
-// the pg_desk_reconcile_* gauges. Best-effort, like the other reconcile meta
-// stamps: an unwritable summary must not fail the pass. The open-set fields
-// stay unset: no open set is read any more.
-func (p *Pipeline) recordReconcileLastRun(candidates int, deferred *int) {
-	s := sync.ReconcileLastRun{At: p.clock.Now().UTC().Format(time.RFC3339), Candidates: candidates, Deferred: *deferred}
-	_ = sync.WriteReconcileLastRun(p.store, s)
-}
-
-// reconcileCandidate runs one candidate's re-drive, settled-review re-run and
-// closed-anchor audit.
-func (p *Pipeline) reconcileCandidate(ctx context.Context, id string, needsPeek, settle, audit map[string]bool) error {
-	if peek, redrive := needsPeek[id]; redrive {
-		if err := p.reconcileRedrive(ctx, id, peek); err != nil {
-			return err
-		}
-	}
-	if settle[id] {
-		// Re-driven through the ordinary run path; the anchor-closure
-		// path above (if it ran) already cleared the pending head when
-		// the PR had left the open set, so this is then a cheap no-op.
-		if err := p.Run(ctx, entityTypePR, id, gather.ChangeSweep); err != nil {
-			return fmt.Errorf("reconcile %s: settled review: %w", id, err)
-		}
-	}
-	if audit[id] {
-		if err := p.reconcileAuditClosedAnchor(ctx, p.repo(), id); err != nil {
-			return fmt.Errorf("reconcile %s: %w", id, err)
-		}
-	}
-	return nil
-}
-
-// reconcileMaxDeferrals is how many CONSECUTIVE passes may defer one
-// candidate's transient failure before the next such failure is a failure
-// (exit 1) again: a read that keeps being killed is a real problem, not a
-// blip, and must reach the failure metric (bead pg2-hpakl).
-const reconcileMaxDeferrals = 3
-
-// readError marks a failure of Reconcile's own read of a PR (the peek that
-// confirms an anchor's PR left the open set, or the closed-anchor audit's
-// re-read), as opposed to a failure of the closure Run that follows. Its text
-// is the wrapped error's, unchanged.
-type readError struct{ err error }
-
-func (e *readError) Error() string { return e.err.Error() }
-func (e *readError) Unwrap() error { return e.err }
-
-// deferrable reports whether err is a transient connector failure that this
-// pass may log as deferred instead of failing on: a candidate READ (readError)
-// whose child was killed, whose deadline expired, or which pg-connector
-// answered "unavailable". A failed closure Run is never deferred: it records
-// sync_error and its own retry state, and its exit-1 contract is unchanged.
-// Nor is it ever deferred when the pass's own context is done (the caller is
-// cancelling the whole run), once the candidate has already been deferred
-// reconcileMaxDeferrals passes in a row, or for any other class: non-transient
-// failures (a missing binary, a store error, an auth or validation failure)
-// still fail the run.
-func deferrable(ctx context.Context, err error, priorDeferrals int) bool {
-	var re *readError
-	if !errors.As(err, &re) || ctx.Err() != nil || priorDeferrals >= reconcileMaxDeferrals {
-		return false
-	}
-	return transientClass(err) != ""
-}
-
-// unavailableRe matches pg-connector's `unavailable` wire code as the gather
-// layer renders it into an error ("...: exit 1: unavailable: <message>").
-var unavailableRe = regexp.MustCompile(`exit \d+: unavailable:`)
-
-// transientClass returns the deferrable class of err (ClassKilled,
-// ClassDeadline or "unavailable"), or "" when err is not deferrable.
-func transientClass(err error) string {
-	switch ClassifyError(err) {
-	case ClassKilled:
-		return ClassKilled
-	case ClassDeadline:
-		return ClassDeadline
-	}
-	var ce *sync.ConnectorError
-	if errors.As(err, &ce) && ce.Code == "unavailable" {
-		return "unavailable"
-	}
-	if unavailableRe.MatchString(err.Error()) {
-		return "unavailable"
-	}
-	return ""
-}
-
-// reconcileRedrive re-drives closure for one candidate: peek=true confirms
-// the PR left the open set first (a still-open PR is left alone).
-func (p *Pipeline) reconcileRedrive(ctx context.Context, id string, peek bool) error {
-	if peek {
-		facts, err := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
-		if err != nil {
-			return &readError{fmt.Errorf("reconcile %s: %w", id, err)}
-		}
-		if facts.RemovedState == "open" {
-			return nil // still open: nothing to close
-		}
-	}
-	if err := p.Run(ctx, entityTypePR, id, gather.ChangeRemoved); err != nil {
-		return fmt.Errorf("reconcile %s: %w", id, err)
-	}
-	return nil
-}
-
-// reconcileAuditClosedAnchor repairs a closed anchor whose bead metadata
-// was left stale (state=open, no closed_at) by an earlier review that
-// closed it before handleClosure stamped the terminal state (bead
-// pg2-a6aw6). Policy: the truthful state comes from a fresh PR re-read
-// (merged, else closed), closed_at is the repair time, and each anchor is
-// audited exactly once (reconcile.anchor-audited.<id>) so the per-anchor
-// `issue show` cost is not repaid on every pass. A PR that has since
-// reopened is left unmarked and unrepaired.
-func (p *Pipeline) reconcileAuditClosedAnchor(ctx context.Context, repo, id string) error {
-	stale, err := p.syncer.AnchorStale(ctx, repo, id)
-	if err != nil {
-		return err
-	}
-	if stale {
-		facts, gErr := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
-		if gErr != nil {
-			return &readError{gErr}
-		}
-		if facts.RemovedState == "open" || facts.RemovedState == "" {
-			return nil
-		}
-		reason := "closed"
-		if facts.RemovedState == "merged" {
-			reason = "merged"
-		}
-		if err := p.syncer.StampClosedAnchor(ctx, repo, id, reason); err != nil {
-			return err
-		}
-	}
-	// Best-effort mark: a failed stamp only costs one repeated audit.
-	_ = p.store.SetMeta(reconcileAuditedKeyPrefix+id, p.clock.Now().UTC().Format(time.RFC3339Nano))
-	return nil
-}
-
-// reconcileAuditedKeyPrefix prefixes the per-entity meta key recording that
-// a closed anchor's bead metadata has been audited (and repaired if stale).
-const reconcileAuditedKeyPrefix = "reconcile.anchor-audited."
-
-// reconcileCheckedKeyPrefix prefixes the per-entity meta key recording when
-// Reconcile last attempted that entity (RFC3339Nano UTC).
-const reconcileCheckedKeyPrefix = "reconcile.checked."
-
-// reconcileDeferredKeyPrefix prefixes the per-entity meta key counting the
-// consecutive passes that deferred that entity's transient failure; deleted by
-// the entity's next successful attempt.
-const reconcileDeferredKeyPrefix = "reconcile.deferred."
-
-// markReconcileChecked stamps id as attempted now. Best-effort: a failed
-// stamp only costs ordering fidelity on the next run, never correctness.
-func (p *Pipeline) markReconcileChecked(id string) {
-	_ = p.store.SetMeta(reconcileCheckedKeyPrefix+id, p.clock.Now().UTC().Format(time.RFC3339Nano))
 }
 
 // entityTypePR is the one entity type the sync stage runs for — mirrors
@@ -964,16 +264,13 @@ func (p *Pipeline) repo() string {
 }
 
 // persist writes facts and interp to the entity and interpretation
-// tables, returning the interpretation row it wrote so the sync stage
-// (Run, above) can update its sync_error field via the SAME writer, on the
-// SAME row, rather than reconstructing it or adding a new store method.
-// Never touches the annotation table — see the package doc comment.
-func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) (store.Interpretation, error) {
+// tables. Never touches the annotation table — see the package doc comment.
+func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) error {
 	repo := p.repo()
 
 	factsJSON, err := json.Marshal(facts)
 	if err != nil {
-		return store.Interpretation{}, fmt.Errorf("marshal facts: %w", err)
+		return fmt.Errorf("marshal facts: %w", err)
 	}
 	// entity.as_of prefers the data's own as-of (from pg-connector, via
 	// gather); it falls back to the interpretation's clock-stamped as-of
@@ -998,28 +295,28 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, inte
 		ContentHash: contentHash(factsJSON),
 		HeadSHA:     facts.HeadSHA,
 	}); err != nil {
-		return store.Interpretation{}, fmt.Errorf("upsert entity: %w", err)
+		return fmt.Errorf("upsert entity: %w", err)
 	}
 
 	enrichmentJSON, err := json.Marshal(interp.Enrichment)
 	if err != nil {
-		return store.Interpretation{}, fmt.Errorf("marshal enrichment: %w", err)
+		return fmt.Errorf("marshal enrichment: %w", err)
 	}
 	urgencyJSON, err := json.Marshal(interp.Urgency)
 	if err != nil {
-		return store.Interpretation{}, fmt.Errorf("marshal urgency: %w", err)
+		return fmt.Errorf("marshal urgency: %w", err)
 	}
 	dispositionsJSON, err := json.Marshal(interp.Dispositions)
 	if err != nil {
-		return store.Interpretation{}, fmt.Errorf("marshal dispositions: %w", err)
+		return fmt.Errorf("marshal dispositions: %w", err)
 	}
 	approvalsJSON, err := json.Marshal(interp.Approvals)
 	if err != nil {
-		return store.Interpretation{}, fmt.Errorf("marshal approvals: %w", err)
+		return fmt.Errorf("marshal approvals: %w", err)
 	}
 	matchReasonsJSON, err := json.Marshal(interp.MatchReasons)
 	if err != nil {
-		return store.Interpretation{}, fmt.Errorf("marshal match reasons: %w", err)
+		return fmt.Errorf("marshal match reasons: %w", err)
 	}
 
 	interpRow := store.Interpretation{
@@ -1037,13 +334,12 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, inte
 		Panel:          interp.Panel,
 		ReadyToPromote: interp.ReadyToPromote,
 		Degraded:       interp.Degraded != "",
-		SyncError:      "", // set by the sync stage (Run, above) only on a sync failure
 		AsOf:           interp.AsOf,
 	}
 	if err := p.store.UpsertInterpretation(interpRow); err != nil {
-		return store.Interpretation{}, fmt.Errorf("upsert interpretation: %w", err)
+		return fmt.Errorf("upsert interpretation: %w", err)
 	}
-	return interpRow, nil
+	return nil
 }
 
 // contentHash is this packet's own deterministic content-hash algorithm
@@ -1059,127 +355,11 @@ func contentHash(factsJSON []byte) string {
 
 // Paths a run record can name (runLogLine.Path).
 const (
-	pathFull          = "full"
 	pathInterpretOnly = "interpret_only"
 	// PathEarly labels a record written by WriteRunRecord for a failure
 	// before any pipeline ran.
 	PathEarly = "early"
 )
-
-// runObs is what a run observed beyond its outcome, for the per-run record.
-type runObs struct {
-	hashChanged   bool
-	anchorWritten bool
-	anchorCause   string
-}
-
-// factsChanged reports whether facts differ in substance from the facts
-// already stored for the entity (see contentSignature for what is ignored).
-// No stored row counts as changed; so does an unreadable or undecodable one,
-// since a record that wrongly says "nothing changed" would hide a real change.
-func (p *Pipeline) factsChanged(entityType, entityID string, facts gather.Facts) bool {
-	prior, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
-	if err != nil || !found {
-		return true
-	}
-	var priorFacts gather.Facts
-	if err := json.Unmarshal([]byte(prior.Facts), &priorFacts); err != nil {
-		return true
-	}
-	return contentSignature(priorFacts) != contentSignature(facts)
-}
-
-// contentSignature hashes facts with everything that moves while the pull
-// request itself does not removed (bead pg2-7vz6p; the run-record
-// content_hash_changed measure was true on ~96% of sweep runs before this):
-//
-//   - every `as_of` key, at any depth: a re-read stamps a new one;
-//   - `served_from` and `age_seconds` on pr_show and on each jira_issues
-//     entry: the connector's read-through-cache provenance; and each
-//     jira_issues entry's `entity_meta`, which can flip without a content
-//     change;
-//   - pr_show `mergeable` unless CONFLICTING and `merge_state_status` unless
-//     DIRTY: GitHub recomputes mergeability lazily and reports UNKNOWN in
-//     between, so only a conflict starting or stopping counts (the same rule
-//     as pg-connector's own change hash);
-//   - work_beads reduced to this PR's own beads (gather.PRWorkBeadsView): the
-//     stored value is the FULL work-beads answer, so a write to any other
-//     PR's bead used to change every PR's signature. THE volatile field.
-//
-// Head, comments, reviews, CI and this PR's own beads still count.
-func contentSignature(facts gather.Facts) string {
-	b, err := json.Marshal(facts)
-	if err != nil {
-		return ""
-	}
-	var v map[string]any
-	if err := json.Unmarshal(b, &v); err != nil {
-		return ""
-	}
-	normalizeVolatile(v)
-	stripAsOf(v)
-	b, err = json.Marshal(v) // map keys marshal sorted: deterministic
-	if err != nil {
-		return ""
-	}
-	return contentHash(b)
-}
-
-// normalizeVolatile removes, in place, the facts fields contentSignature
-// documents as moving without the pull request changing.
-func normalizeVolatile(facts map[string]any) {
-	show, _ := facts["pr_show"].(map[string]any)
-	if show != nil {
-		delete(show, "served_from")
-		delete(show, "age_seconds")
-		if m, ok := show["mergeable"].(string); ok && m != "CONFLICTING" {
-			delete(show, "mergeable")
-		}
-		if s, ok := show["merge_state_status"].(string); ok && s != "DIRTY" {
-			delete(show, "merge_state_status")
-		}
-	}
-	if issues, ok := facts["jira_issues"].(map[string]any); ok {
-		for _, raw := range issues {
-			if issue, ok := raw.(map[string]any); ok {
-				delete(issue, "served_from")
-				delete(issue, "age_seconds")
-				delete(issue, "entity_meta")
-			}
-		}
-	}
-	// The PR's identity comes from its own pr_show; without it the work-beads
-	// value cannot be narrowed and is compared whole (never read as "no
-	// change").
-	repo, _ := show["repo"].(string)
-	number, _ := show["number"].(float64)
-	if workBeads, ok := facts["work_beads"]; ok && repo != "" && number > 0 {
-		raw, err := json.Marshal(workBeads)
-		if err != nil {
-			return
-		}
-		if view, ok := gather.PRWorkBeadsView(raw, repo, int(number)); ok {
-			var narrowed any
-			if err := json.Unmarshal(view, &narrowed); err == nil {
-				facts["work_beads"] = narrowed
-			}
-		}
-	}
-}
-
-func stripAsOf(v any) {
-	switch t := v.(type) {
-	case map[string]any:
-		delete(t, "as_of")
-		for _, c := range t {
-			stripAsOf(c)
-		}
-	case []any:
-		for _, c := range t {
-			stripAsOf(c)
-		}
-	}
-}
 
 // prNumberOf returns the pull-request number an entity id names, which is the
 // whole id when numeric or the digits after the last '#' in a qualified
@@ -1203,26 +383,15 @@ func WriteRunRecord(w io.Writer, now time.Time, d time.Duration, repo, path, ent
 	if w == nil {
 		return
 	}
-	WriteRunRecordObs(w, now, d, repo, path, entityType, entityID, change, outcome, degraded, runErr, false, false, "")
-}
-
-// WriteRunRecordObs is WriteRunRecord with the hash-changed and anchor fields.
-func WriteRunRecordObs(w io.Writer, now time.Time, d time.Duration, repo, path, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, hashChanged, anchorWritten bool, anchorCause string) {
-	if w == nil {
-		return
-	}
 	line := runLogLine{
-		Ts:                 now.UTC().Format(time.RFC3339),
-		EntityType:         entityType,
-		EntityID:           entityID,
-		Path:               path,
-		Change:             string(change),
-		ContentHashChanged: hashChanged,
-		AnchorWritten:      anchorWritten,
-		AnchorCause:        anchorCause,
-		Outcome:            outcome,
-		Degraded:           degraded,
-		DurationMs:         d.Milliseconds(),
+		Ts:         now.UTC().Format(time.RFC3339),
+		EntityType: entityType,
+		EntityID:   entityID,
+		Path:       path,
+		Change:     string(change),
+		Outcome:    outcome,
+		Degraded:   degraded,
+		DurationMs: d.Milliseconds(),
 	}
 	if entityType == entityTypePR {
 		line.Repo = repo
@@ -1245,10 +414,10 @@ func WriteRunRecordObs(w io.Writer, now time.Time, d time.Duration, repo, path, 
 // record (WithRunRecordWriter). Never returns an error: a log-encoding
 // failure (which cannot happen for this fixed, all-string/int/bool shape)
 // falls back to a plain line rather than losing the run's outcome entirely.
-func (p *Pipeline) logRunObs(path string, obs runObs, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, start time.Time) {
+func (p *Pipeline) logRunObs(path string, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, start time.Time) {
 	now := p.clock.Now()
 	for _, w := range []io.Writer{p.out, p.recordOut} {
-		WriteRunRecordObs(w, now, now.Sub(start), p.repo(), path, entityType, entityID, change, outcome, degraded, runErr, obs.hashChanged, obs.anchorWritten, obs.anchorCause)
+		WriteRunRecord(w, now, now.Sub(start), p.repo(), path, entityType, entityID, change, outcome, degraded, runErr)
 	}
 }
 
@@ -1256,7 +425,7 @@ func (p *Pipeline) logRunObs(path string, obs runObs, entityType, entityID strin
 // not themselves log, namely `run issue` for a ticket with no linked PR (a
 // "noop" the invocation would otherwise leave no trace of).
 func (p *Pipeline) RecordRun(entityType, entityID string, change gather.ChangeKind, outcome string, start time.Time) {
-	p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, outcome, "", nil, start)
+	p.logRunObs(pathInterpretOnly, entityType, entityID, change, outcome, "", nil, start)
 }
 
 // Now returns the pipeline clock's current time, so a caller can take the
@@ -1273,31 +442,6 @@ func (p *Pipeline) printTimeline(timeline []stageEvent) {
 		}
 		fmt.Fprintln(p.out, string(b))
 	}
-}
-
-// Run is the package-level convenience entry point pinned by this
-// packet's Contract ("Produces ... an EXPORTED internal/pipeline
-// function ... that packet 8's show --refresh calls directly to re-run
-// the pipeline for one entity without shelling out to the pg-desk run
-// CLI"). It loads config and opens/closes pg-desk's own default store
-// itself, so a caller needs nothing but ctx/entityType/entityID/change —
-// exactly the shape a single-entity refresh needs. cmd/pg-desk/run.go
-// does NOT use this: it needs --verbose/log-writer control this
-// convenience wrapper deliberately omits, so it constructs its own
-// Pipeline via New instead.
-func Run(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		return fmt.Errorf("pipeline: load config: %w", err)
-	}
-	st, err := store.Open(store.DefaultPath())
-	if err != nil {
-		return fmt.Errorf("pipeline: open store: %w", err)
-	}
-	InstallIssueGate(st, cfg)
-	defer func() { _ = st.Close() }()
-
-	return New(cfg, st).Run(ctx, entityType, entityID, change)
 }
 
 func repoOf(cfg *config.Config) string {

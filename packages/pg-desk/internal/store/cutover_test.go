@@ -84,13 +84,11 @@ func buildSyntheticPreMigrationDB(t *testing.T, path string) {
 		}
 	}
 
-	for i, l := range []LedgerEntry{
+	for _, l := range []ledgerRowForTest{
 		{Repo: repo, EntityType: "pr", EntityID: repo + "#1", Kind: "anchor", BeadID: "bead-1", LastSyncedContentHash: "h1", LastSyncedAt: "2026-09-04T00:00:00Z"},
 		{Repo: repo, EntityType: "pr", EntityID: repo + "#2", Kind: "review-request", BeadID: "bead-2", LastReviewedHeadSHA: "bbbb2222"},
 	} {
-		if err := s.UpsertLedger(l); err != nil {
-			t.Fatalf("seed ledger %d: %v", i, err)
-		}
+		seedLedgerRowForTest(t, s, l)
 	}
 
 	if err := s.SetMeta(MetaKeyLastHeartbeat, "2026-09-10T00:00:00Z"); err != nil {

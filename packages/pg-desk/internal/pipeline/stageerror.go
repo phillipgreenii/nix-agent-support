@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // Stage names identify which step of a `pg-desk run` failed. They appear in
@@ -18,9 +16,6 @@ const (
 	StageKnownCheck        = "known_check"
 	StageInterpret         = "interpret"
 	StageStore             = "store"
-	StageRecordSyncError   = "record_sync_error"
-	StageSync              = "sync"
-	StageSyncRetryState    = "sync_retry_state"
 	StageLoadFacts         = "load_facts"
 	StageInterpretOnlyArgs = "validate_change"
 )
@@ -39,8 +34,6 @@ const (
 	ClassKilled = "killed"
 	// ClassStoreBusy: the SQLite store was locked by another process.
 	ClassStoreBusy = "store_busy"
-	// ClassConnector: pg-connector answered with a failure wire code.
-	ClassConnector = "connector"
 	// ClassError: anything else.
 	ClassError = "error"
 )
@@ -104,10 +97,6 @@ func ClassifyError(err error) string {
 		return ClassKilled
 	case strings.Contains(msg, "database is locked"), strings.Contains(msg, "SQLITE_BUSY"):
 		return ClassStoreBusy
-	}
-	var ce *sync.ConnectorError
-	if errors.As(err, &ce) {
-		return ClassConnector
 	}
 	return ClassError
 }

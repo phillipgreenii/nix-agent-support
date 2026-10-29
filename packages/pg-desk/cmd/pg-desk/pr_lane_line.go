@@ -30,9 +30,10 @@ import (
 // the lane state is unavailable; it is never printed as zeros, which would
 // read as a healthy lane.
 //
-// Format (one line; the segments after "lane <mode>" are the live part):
+// Format (one line; the segments after "lane <mode>" are the live part; the
+// legacy "legacy sync <mode>" segment went with the sync stage):
 //
-//	pr lane: legacy sync <sync>, lane <mode>, flipped <RFC3339|not yet>,
+//	pr lane: lane <mode>, flipped <RFC3339|not yet>,
 //	never-hydrated <n> (oldest <age>), residual <n> (oldest <age>)|n/a (...),
 //	last run <RFC3339|never>
 //
@@ -40,14 +41,10 @@ import (
 // from the configured one adds ", recorded lane mode <m>" before the residual.
 func prLaneLine(cfg *config.Config, st *store.Store, now time.Time) string {
 	if cfg == nil {
-		return "pr lane: legacy sync unknown, lane unknown (configuration unavailable)"
-	}
-	syncMode := cfg.Sync.Mode
-	if syncMode == "" {
-		syncMode = "off" // the same default the sync stage applies to an absent key
+		return "pr lane: lane unknown (configuration unavailable)"
 	}
 	mode := cfg.PRLaneMode()
-	head := fmt.Sprintf("pr lane: legacy sync %s, lane %s", syncMode, mode)
+	head := "pr lane: lane " + mode
 
 	if st == nil {
 		return head + ", lane state unavailable (no store)"

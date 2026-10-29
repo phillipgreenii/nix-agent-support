@@ -1093,64 +1093,6 @@
           require_serial = true;
         };
 
-        # pg2-o0z8u: pg-desk's depth-first closure (pg2-seeo8, pg2-ubvmh) is
-        # deterministic code whose correctness hinges on a real tool's
-        # semantics (bd >= 1.3.1 refuses to close a parent with an open
-        # child), so its regression guard runs against a REAL bd in a
-        # throwaway embedded store (global rule V-3): the `contract`-tagged
-        # `TestClosure_RealBD_*` tests in packages/pg-desk/internal/sync. No
-        # default check runs the `contract` tag (`run-unit-tests` is unit only
-        # and pg-desk has no hermetic nix tier for it: the sandbox has no bd),
-        # so, like `ceta-agreement-test` above, this path-scoped hook is what
-        # puts the suite under the commit-time and `pg-hooks run pre-land`
-        # runs. Scope: pg-desk's sync package and the pg-connector code its
-        # closure execs (the umbrella plus the issue-beads backend, which the
-        # test builds from source). Cost is the point (three real `bd init`s,
-        # about a minute and a half), paid only on diffs touching these paths.
-        # A missing `bd` or `go` is a LOUD failure, never a skip: an
-        # absence-keyed skip would let a PATH breakage no-op the only gate.
-        #
-        # pg2-9rq3r: the same hook also runs `TestReviewReopen_RealBD_*`, the
-        # review-request reopen against a claim held by a dead review session
-        # (one more `bd init` per test). Those tests expire a lease by editing
-        # the embedded store's `leases` table with the `dolt` CLI (bd offers
-        # no TTL knob and no `bd sql` on an embedded store), so `dolt` is a
-        # required tool here too and its absence is equally loud.
-        pg-desk-closure-contract-test = {
-          enable = true;
-          name = "pg-desk-closure-contract-test";
-          description = "pg-desk closure and review reopen: run the contract-tagged real-bd depth-first closure and expired-claim reopen tests (pg2-o0z8u, pg2-9rq3r)";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "pg-desk-closure-contract-test-hook";
-              runtimeInputs = [ pkgs.git ];
-              text = ''
-                # No bd in the nix build sandbox (and no network/module cache):
-                # this runs on the operator's machine via pg-hooks only.
-                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                  echo "pg-desk-closure-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
-                  exit 0
-                fi
-
-                for tool in go bd dolt; do
-                  if ! command -v "$tool" >/dev/null 2>&1; then
-                    echo "pg-desk-closure-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
-                    exit 1
-                  fi
-                done
-
-                top="$(git rev-parse --show-toplevel)"
-                cd "$top/packages/pg-desk"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Closure|ReviewReopen)_RealBD_' ./internal/sync/
-              '';
-            }
-          }/bin/pg-desk-closure-contract-test-hook";
-          language = "system";
-          files = "^packages/(pg-desk/(internal/sync/|go\\.(mod|sum)$)|pg-connector/(cmd/pg-connector/|cmd/pg-connector-issue-beads/|pkg/))";
-          pass_filenames = false;
-          require_serial = true;
-        };
-
         # docket pg2-6mo45.3, packet P3b1b: pg-pr-change's not-found escalation
         # looks for an earlier escalation in EVERY status, closed included, with
         # `pg-connector search` against the beads tracker. Whether that lookup
@@ -1159,7 +1101,7 @@
         # (global rule V-3): the `contract`-tagged `TestPRChangeRealBD_*` tests in
         # packages/pg-decider/internal/prchange, which build the real pg-desk,
         # pg-decider, pg-pr-change, pg-connector and pg-connector-issue-beads from
-        # source. Like `pg-desk-closure-contract-test` above: the nix sandbox has no
+        # source. Like the other contract-tagged hooks: the nix sandbox has no
         # bd, so `checks.<system>.pg-pr-change-real-tools` covers everything else
         # (the real pg-desk, pg-decider and pg-pr-change against a fixture-driven
         # connector) and this path-scoped hook is what puts the real-tracker half
@@ -1235,8 +1177,7 @@
         # property of a REAL tool, so the regression guard runs against a real
         # bd in a throwaway embedded store (global rule V-3): the
         # `contract`-tagged `TestTerminal_RealBD_*` tests in
-        # packages/pg-router-handlers/internal/watchdog. Like
-        # `pg-desk-closure-contract-test` above: no default check runs the
+        # packages/pg-router-handlers/internal/watchdog. Like the other contract-tagged hooks: no default check runs the
         # `contract` tag and the nix sandbox has no bd, so this path-scoped
         # hook is what puts the suite under the commit-time and
         # `pg-hooks run pre-land` runs. Cost is two `bd init`s' worth of tests
@@ -1298,7 +1239,7 @@
         # rule V-3): the `contract`-tagged `TestReconcile_RealBD_*` tests in
         # packages/work-report/internal/degraded, which drive Reconcile through
         # the real pg-connector and pg-connector-issue-beads binaries built from
-        # this repo. Like `pg-desk-closure-contract-test` above: no default
+        # this repo. Like the other contract-tagged hooks: no default
         # check runs the `contract` tag and the nix sandbox has no bd, so this
         # path-scoped hook puts the suite under the commit-time and
         # `pg-hooks run pre-land` runs. A missing `bd` or `go` is a LOUD
@@ -8047,7 +7988,7 @@
               # pkg/scriptout/conformance), so root the fileset at packages/ and
               # pass modRoot, mirroring packages/pg-desk/default.nix's own `src`.
               # No testDeps: every subprocess the suite spawns is the test binary
-              # itself re-exec'd as a wire double (beadref/gather/sync
+              # itself re-exec'd as a wire double (beadref/gather
               # helperCmdFactory), and internal/browser's darwin tests stub Chrome
               # with a t.TempDir() script.
               #
