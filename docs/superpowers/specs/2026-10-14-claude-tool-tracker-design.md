@@ -2,7 +2,7 @@
 
 Date: 2026-10-14
 Repo: `phillipgreenii-nix-agent-support` (public: no employer-specific detail in code, tests, comments or docs)
-Status: draft for operator review; one open question (rollout, section 8.3)
+Status: approved (operator, 2026-10-29); rollout (section 8.3) amended per the same ruling
 Origin: handoff bead `pg2-tbbpt`, workstream 1. Evidence: `docs/investigations/2026-10-13-claude-code-mods-spike.md`
 (the "spike doc" below), measured on Claude Code 2.1.296.
 
@@ -315,8 +315,8 @@ record.
 
 ### 8.3 Rollout: this laptop first, cut-over per machine
 
-AWAITING OPERATOR CONFIRMATION (asked 2026-10-14, no answer yet; this is the author's call until
-then). CETA runs on more than one machine: this laptop and the homelab `monorepod` host, per this
+DECIDED (Phillip, 2026-10-29): approved, with the cut-over gated on the tracker recording. CETA runs on more
+than one machine: this laptop and the homelab `monorepod` host, per this
 repo's `CLAUDE.md`. The spike measured only this laptop, which has managed settings; a host without
 them may behave differently for mods. So:
 
@@ -326,12 +326,18 @@ them may behave differently for mods. So:
   compared there. The mechanism (an option on CETA's home-manager module that the consuming flake
   sets, or another way) is the builder's call, but a machine nobody has checked MUST keep CETA's
   recording.
+- CETA MUST NOT drop its recording (the `PermissionRequest`, `PermissionDenied`, `PostToolUseFailure`
+  and `SessionEnd` hooks; writes to `tool_decisions`, outcomes and `decision_trace_entries`) on a machine
+  until the tracker is observed recording on that machine. The CETA side of the switch MUST NOT be
+  flipped there before that observation (operator ruling, Phillip, 2026-10-29: "i want to make sure the
+  tool tracking is happening before removing it from ceta").
 - Another machine joins by enabling the tracker, repeating live checks 1-4, and passing the
   comparison there.
 
 ### 8.4 Cut-over
 
-On a machine, only when its comparison is clean, or every difference is explained and the operator
+On a machine, only when the tracker is observed recording there (section 8.3) AND its comparison is
+clean, or every difference is explained and the operator accepts it:
 accepts it:
 
 - CETA stops writing `tool_decisions`, outcomes and `decision_trace_entries`, and stops flushing
