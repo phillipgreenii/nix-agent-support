@@ -366,14 +366,14 @@ func TestRequestCountsEachResultAndFoldsAnythingElseToError(t *testing.T) {
 	f := newFixture(t, nil)
 	for _, r := range []string{
 		origin.ResultOK, origin.ResultOK, origin.ResultError, origin.ResultRateLimited,
-		origin.ResultUnauthenticated, origin.ResultRefused, "PROJ-123 exploded",
+		origin.ResultUnauthenticated, origin.ResultRefused, origin.ResultNotFound, "PROJ-123 exploded",
 	} {
 		f.tel.Request(r, time.Second)
 	}
 	p := points(t, f.metric(MetricJiraRequests))
 	want := map[string]float64{
 		"result=ok": 2, "result=error": 2, "result=rate_limited": 1,
-		"result=unauthenticated": 1, "result=refused": 1,
+		"result=unauthenticated": 1, "result=refused": 1, "result=not_found": 1,
 	}
 	if len(p) != len(want) {
 		t.Errorf("requests = %v, want %v", p, want)

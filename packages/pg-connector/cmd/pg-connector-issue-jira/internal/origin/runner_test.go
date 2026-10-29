@@ -847,3 +847,13 @@ func TestInnerRunner_EmptyEnvIsNotInherited(t *testing.T) {
 		t.Fatalf("an empty pjira_env inherited the process environment: %q", out)
 	}
 }
+
+func TestNotFoundIsItsOwnKindNotAnOriginError(t *testing.T) {
+	r := newRig(t, rigOpts{rate: 100})
+	r.inner.handle = func([]string) (string, error) { return "", errors.New("pjira: issue zr-abc12 not found") }
+	_, err := r.run.Run(context.Background(), "issue", "--", "zr-abc12")
+	var ce *CallError
+	if !errors.As(err, &ce) || ce.Kind != KindNotFound {
+		t.Fatalf("err = %v, want a CallError of kind not_found", err)
+	}
+}

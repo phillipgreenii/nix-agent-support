@@ -22,6 +22,9 @@ const (
 	ResultRateLimited     = "rate_limited"
 	ResultUnauthenticated = "unauthenticated"
 	ResultRefused         = "refused"
+	// ResultNotFound is a call pjira answered "not found": the caller named an
+	// issue that does not exist, which is the caller's miss, not an origin fault.
+	ResultNotFound = "not_found"
 )
 
 // Failure kinds of a CallError, which are also the governor outcome words.
@@ -29,6 +32,7 @@ const (
 	KindRateLimited     = "rate_limited"
 	KindUnauthenticated = "unauthenticated"
 	KindError           = "error"
+	KindNotFound        = "not_found"
 )
 
 // Call says what one origin call is for. It rides on the context (WithCall).
@@ -81,7 +85,7 @@ type Auth interface {
 // failed. Error is the inner error's text, so a message classifier
 // (internal.ClassifyPjiraError) keeps working on it.
 type CallError struct {
-	// Kind is KindRateLimited, KindUnauthenticated or KindError.
+	// Kind is KindRateLimited, KindUnauthenticated, KindNotFound or KindError.
 	Kind string
 	Err  error
 }
@@ -268,6 +272,8 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 		kind = KindRateLimited
 	case errors.Is(internal.ClassifyPjiraError(text), scriptout.ErrUnauthenticated):
 		kind = KindUnauthenticated
+	case errors.Is(internal.ClassifyPjiraError(text), scriptout.ErrNotFound):
+		kind = KindNotFound
 	}
 	spend.Outcome = kind
 	if kind == KindRateLimited {

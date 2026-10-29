@@ -483,12 +483,12 @@ func (t *Telemetry) RecordEvictions(n int) {
 	}
 }
 
-// requestResultLabel passes one of the five result words origin reports and
+// requestResultLabel passes one of the six result words origin reports and
 // folds anything else to "error".
 func requestResultLabel(result string) string {
 	switch result {
 	case origin.ResultOK, origin.ResultError, origin.ResultRateLimited,
-		origin.ResultUnauthenticated, origin.ResultRefused:
+		origin.ResultUnauthenticated, origin.ResultRefused, origin.ResultNotFound:
 		return result
 	default:
 		return origin.ResultError
