@@ -50,7 +50,7 @@ package cmddesc
 //	                          set, gate clear, push-inject, log compact, run,
 //	                          run-until-idle, run-role, run-query, doctor, tui,
 //	                          ingest-event, self-status.
-//	silver-bullet-tick-probe  NOT A PACKAGE OF THIS REPO. It ships in a consumer's
+//	example-tick-probe  NOT A PACKAGE OF THIS REPO. It ships in a consumer's
 //	                          monorepo, and this public repo MUST NOT name that
 //	                          consumer's tools (repo CLAUDE.md, "No ZipRecruiter
 //	                          Disclosure"). Its decision belongs in the consumer

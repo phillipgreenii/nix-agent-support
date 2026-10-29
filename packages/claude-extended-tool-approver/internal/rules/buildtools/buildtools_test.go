@@ -348,7 +348,7 @@ func TestBuildtools_ApprovedScripts(t *testing.T) {
 // exact schema shape a real rules.json buildtools block would carry.
 func silverBulletBuildtoolsConfig() configrules.BuildtoolsConfig {
 	return configrules.BuildtoolsConfig{
-		ApprovedScripts:    []string{"silver-bullet-tick-probe", "silver-bullet-watch-poller.sh"},
+		ApprovedScripts:    []string{"example-tick-probe", "silver-bullet-watch-poller.sh"},
 		ApprovedScriptDirs: []string{".claude/skills/silver-bullet/scripts"},
 	}
 }
@@ -359,15 +359,15 @@ func silverBulletBuildtoolsConfig() configrules.BuildtoolsConfig {
 func TestBuildtools_SilverBullet_NamedScripts_Approve(t *testing.T) {
 	r := New(testPE(), silverBulletBuildtoolsConfig())
 	commands := []string{
-		"silver-bullet-tick-probe",
-		"silver-bullet-tick-probe --pr=123 --worktree=/foo",
-		"/repo/.claude/bin/silver-bullet-tick-probe --pr=123 --worktree=/foo",
-		".claude/bin/silver-bullet-tick-probe --pr=123",
+		"example-tick-probe",
+		"example-tick-probe --pr=123 --worktree=/foo",
+		"/repo/.claude/bin/example-tick-probe --pr=123 --worktree=/foo",
+		".claude/bin/example-tick-probe --pr=123",
 		"silver-bullet-watch-poller.sh",
 		"silver-bullet-watch-poller.sh --pr=123 --worktree=/foo",
 		"/repo/.claude/bin/silver-bullet-watch-poller.sh --pr=123 --worktree=/foo",
 		"bash silver-bullet-watch-poller.sh --pr=123",
-		"sh /repo/.claude/bin/silver-bullet-tick-probe --pr=123",
+		"sh /repo/.claude/bin/example-tick-probe --pr=123",
 	}
 	for _, cmd := range commands {
 		input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": cmd})}
@@ -435,8 +435,8 @@ func TestBuildtools_ApprovedScriptDirs_SimilarPathsAbstain(t *testing.T) {
 		// the skill directory itself, one level up from scripts/
 		".claude/skills/silver-bullet/run-me",
 		// a basename that merely resembles a part-1 named script
-		"silver-bullet-tick-probe-fake",
-		"bin/silver-bullet-tick-probe-imposter",
+		"example-tick-probe-fake",
+		"bin/example-tick-probe-imposter",
 	}
 	for _, cmd := range commands {
 		input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": cmd})}
