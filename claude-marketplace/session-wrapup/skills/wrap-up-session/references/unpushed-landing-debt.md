@@ -51,9 +51,11 @@ U-5 alone remains unconditionally in the core `pgii-agent-rules.md`.
   output or the remediation path if they want it.
 
 (**U-5**, unmoved: discharging the debt is OUTWARD-FACING and operator-authorized. An agent MUST
-NOT `git push`, `pn workspace push`, `pn workspace update`, or `pn workspace apply`, and MUST NOT
+NOT push a primary branch, `pn workspace push`, `pn workspace update`, or `pn workspace apply`, and MUST NOT
 invoke `/pn-workspace-sync` or `/pn-workspace-update`, on its own initiative to clear it. REPORTING
-is in scope; PUBLISHING by an agent session is not. The one exception is the push step of the
+is in scope; PUBLISHING the primary branch by an agent session is not. An agent session MAY push its
+own non-primary work branch, switch branches, and manage its own worktrees (operator ruling,
+Phillip, 2026-10-28, `pg2-pn6l7b`). The one exception for the primary branch is the push step of the
 operator-enabled `pg-repo-runner`, within the scope of ADR 0108 of the `nix-agent-support` repo; an
 agent MUST NOT enable that step, widen its scope, or run it by hand to clear the debt. Trimming the
 reporting duty above — U-6 — does NOT relax this restraint. See the core `pgii-agent-rules.md`'s Unpushed Landing Debt section for its authoritative

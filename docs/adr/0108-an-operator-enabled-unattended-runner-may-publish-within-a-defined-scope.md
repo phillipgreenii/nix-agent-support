@@ -83,12 +83,21 @@ nix), and the workspace policy that `main` has no branch protection.
 8. **Replacement wording for U-5**, applied to the global rules source
    (`home/programs/agent-rules/pgii-agent-rules.md`) under `pg2-rlsqq9`:
 
-   > **U-5** An agent session MUST NOT `git push`, `pn workspace push|update|apply`, or invoke
-   > `/pn-workspace-sync` or `/pn-workspace-update` on own initiative to clear unpushed work;
-   > REPORTING is in scope, PUBLISHING by an agent session is not. The one exception is the push step
-   > of the operator-enabled `pg-repo-runner`, within the scope of this repo's ADR 0108. An agent
-   > MUST NOT enable that step, widen its scope, or run it by hand to clear unpushed work.
-   > (U-1..U-4, U-6: the wrap-up skill.)
+   > **U-5** An agent session MUST NOT push a primary branch, run `pn workspace push|update|apply`,
+   > or invoke `/pn-workspace-sync` or `/pn-workspace-update` on own initiative to clear unpushed
+   > work; REPORTING is in scope, PUBLISHING the primary branch by an agent session is not. An agent
+   > session MAY push its own non-primary work branch, switch branches, and create and remove its
+   > own worktrees (operator ruling, Phillip, 2026-10-28, `pg2-pn6l7b`). The one exception for the
+   > primary branch is the push step of the operator-enabled `pg-repo-runner`, within the scope of
+   > this repo's ADR 0108. An agent MUST NOT enable that step, widen its scope, or run it by hand to
+   > clear unpushed work. (U-1..U-4, U-6: the wrap-up skill.)
+
+   **Amendment, 2026-10-29 (`pg2-kwbhc2`).** The operator ruling of 2026-10-28 on `pg2-pn6l7b`
+   (verbatim: "agents should be able to manipulate the git repo, ... they can push, they can switch
+   branches, they clean create/cleanup their worktree if needed.") and the approval of the
+   reconciliation on `pg2-kwbhc2` (Phillip, 2026-10-29: "yes, this is approved") narrowed U-5's
+   prohibition to the primary branch and the `pn workspace` publishing verbs. This ADR's scope (the
+   `pg-repo-runner` primary-branch push, decisions 1 to 7) is unchanged.
 
 9. **The 2026-10-22 PR-branch push ruling is unchanged.** It is cited as precedent for an
    operator-authorized unattended push and is neither widened nor narrowed by this ADR.

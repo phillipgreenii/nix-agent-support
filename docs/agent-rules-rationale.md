@@ -223,7 +223,11 @@ the reporting duty (U-6) does NOT relax this restraint. U-5 carries ONE exceptio
 Accepted 2026-10-27 on `pg2-ukat2`): the push step of the operator-enabled `pg-repo-runner`, a
 daemon-started program that is not an agent session, so a reading of "on own initiative" alone would
 leave it unauthorized by omission. The rule therefore names the exception and its ADR, and forbids an
-agent from enabling the step, widening its scope, or running it by hand.
+agent from enabling the step, widening its scope, or running it by hand. A second ruling (Phillip,
+2026-10-28, `pg2-pn6l7b`, approved for the rule text on `pg2-kwbhc2` 2026-10-29) narrowed the
+prohibition itself: an agent session MAY push its own non-primary work branch, switch branches and
+manage its own worktrees; the primary branch and the `pn workspace push|update|apply` verbs stay
+reserved to the operator.
 
 ## Local Containers (C-1..C-4)
 
