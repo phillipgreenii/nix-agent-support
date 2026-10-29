@@ -295,12 +295,12 @@ func TestExplainUnknownKeyIsNotHeldAndExitsZero(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-44: an unmigrated store is exit 1.
-func TestExplainUnmigratedStoreExitsOne(t *testing.T) {
+// Traces INV-FOCUS-44: an unmigrated store is exit 2 (usage).
+func TestExplainUnmigratedStoreIsUsage(t *testing.T) {
 	newFocusFixture(t, "old")
 	_, _, err := explain(t, "o/r#1")
-	if err == nil || focusExitCode(err) != 1 {
-		t.Fatalf("err = %v, want exit 1", err)
+	if err == nil || focusExitCode(err) != 2 {
+		t.Fatalf("err = %v, want exit 2 (usage)", err)
 	}
 	var fe *focusError
 	if !errors.As(err, &fe) || !strings.Contains(fe.msg, "not migrated") || !strings.Contains(fe.Remedy(), "migrate --cutover") {
@@ -308,12 +308,12 @@ func TestExplainUnmigratedStoreExitsOne(t *testing.T) {
 	}
 }
 
-func TestExplainUsageErrorsExitOne(t *testing.T) {
+func TestExplainUsageErrorsExitTwo(t *testing.T) {
 	newExplainFixture(t)
 	for _, args := range [][]string{{}, {"a", "b"}, {"not a key!"}, {"--date", "nope", "1"}, {"--period", "week", "1"}, {"other/repo#4"}} {
 		_, _, err := explain(t, args...)
-		if err == nil || focusExitCode(err) != 1 {
-			t.Errorf("explain %v: err = %v, want exit 1", args, err)
+		if err == nil || focusExitCode(err) != 2 {
+			t.Errorf("explain %v: err = %v, want exit 2 (usage)", args, err)
 		}
 	}
 }

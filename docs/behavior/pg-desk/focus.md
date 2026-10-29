@@ -40,20 +40,29 @@ today's verb onto yesterday.
 
 ## Exit codes
 
-The focus verbs use pg-desk's established scheme with its established meanings, so a caller scripting
-`pg-desk` and `pg-connector` together needs no special case.
+The focus verbs follow the workspace's exit-code convention (ADR 0042): `0` ok, `1` an unexpected
+error, `2` usage, and every specific outcome a caller may branch on at `3` and up. `1` carries no
+branchable meaning: it is what a crash or an unplanned failure looks like, so a caller MUST NOT read
+it as any particular outcome.
 
 | Exit | Meaning                                                                                       |
 | ---- | --------------------------------------------------------------------------------------------- |
 | `0`  | The verb did what was asked; routine skips are reported on stderr and are not a failure.      |
-| `1`  | Usage error, malformed reply or stdin, a store that is not migrated for the focus tables.     |
-| `2`  | Partial: part of the work applied or part of the data was missing; what was applied is valid. |
+| `1`  | An unexpected error: none of the outcomes below. Read the stderr line.                        |
+| `2`  | Usage error, malformed reply or stdin, a store that is not migrated for the focus tables.     |
 | `3`  | Total failure.                                                                                |
 | `6`  | The addressed period is closed. Used only by `focus`.                                         |
+| `8`  | Partial: part of the work applied or part of the data was missing; what was applied is valid. |
 
 `4`, `5` and `7` are never used by a focus verb: `4` belongs to `head-check`, `5` to a retired
 multi-candidate code, and `7` once meant "the plan changed since the draft was made", a guard the
-design dropped when the tool began storing the draft itself. None of the three is reused.
+design dropped when the tool began storing the draft itself. None of the three is reused, which is
+why partial is `8`. The focus scheme is therefore not the one the typed verbs and `pg-connector` use
+for a fan-out (`2` partial, `3` total): a caller that scripts both reads each by its own table.
+
+Until 2026-10-28 (bead `pg2-rfxl3y`) usage was `1` and partial `2`. A run record row written before
+then carries no `exit_scheme` member and is read under that older table, so the run statistics do not
+re-label the history.
 
 Checks run in one fixed order: usage and flag errors, then the period-closed check, then reading the
 stored draft, then parsing of the reply, then the write. A run doomed by an earlier check never
@@ -63,7 +72,7 @@ out, for example `period 2026-10-09 is closed; use --date <tomorrow>`.
 ## Unmigrated store
 
 A store that has not been cut over to the schema that carries the focus tables is refused: the verb
-exits `1`, the message names the problem (the store is not migrated for the focus tables) and the
+exits `2`, the message names the problem (the store is not migrated for the focus tables) and the
 remedy (`pg-desk migrate --cutover`), and nothing is applied. This is the refusal every other typed
 verb gives.
 
@@ -82,7 +91,8 @@ store and the same record printed as ONE structured JSON line on stderr, contrac
 session, whose stderr is gone by the next week. The record carries:
 
 - the run's identity: `contract`, `verb` (`select`, `pull`, `close` or `repair`), `run_id`, `period`,
-  `dry_run`, `actor` and `exit_code`;
+  `dry_run`, `actor`, `exit_code` and `exit_scheme`, the exit-code table `exit_code` is read under
+  (`2`, the table above);
 - the cap in force, and how many plan rows were kept although their bead is claimed or deferred;
 - the counts of ranked and selected rows, of rows removed from the plan by cause (`operator`, `cap`,
   `dropped` or `new_period`), and the lists of forced, hand-added, absorbed and hydrated entities by
@@ -105,7 +115,9 @@ dry run prints the same line with `dry_run` true and writes no row. The run iden
 by time, generated without any new dependency.
 
 The words the run statistics derive from the exit code are `ok`, `partial`, `total`, `period_closed`,
-`usage` and `empty` (a select that selected nothing and removed nothing).
+`usage` and `empty` (a select that selected nothing and removed nothing). Exit `1`, an unexpected
+error, is counted as `total`, never as `usage`; a row with no `exit_scheme` is read under the table
+in force before the migration (`1` usage, `2` partial).
 
 ## Invariants
 
@@ -113,12 +125,14 @@ The words the run statistics derive from the exit code are `ok`, `partial`, `tot
   `focus.time_zone`, and MUST NOT take it from a stored draft.
 - **INV-FOCUS-2.** <!-- uuid: d14de951-d14e-43ac-856f-8c907eaee79e --> `--period` MUST accept `day` and reject every other value as a usage error, and
   MUST be hidden from help until a second value is implemented.
-- **INV-FOCUS-3.** <!-- uuid: 6d0ad0d4-9991-43b3-982b-9a01f76241bd --> A focus verb MUST exit with `0`, `1`, `2`, `3` or `6` only, and MUST NOT use `4`,
-  `5` or `7`.
+- **INV-FOCUS-3.** <!-- uuid: 6d0ad0d4-9991-43b3-982b-9a01f76241bd --> A focus verb MUST exit with `0`, `1`, `2`, `3`, `6` or `8` only, and MUST NOT use
+  `4`, `5` or `7`. Exit `1` MUST mean only an unexpected error and MUST NOT be given to any specific
+  outcome; a usage error MUST be `2`, and partial, total failure and a closed period MUST be `8`, `3`
+  and `6`. A run record row MUST carry the `exit_scheme` its `exit_code` was written under.
 - **INV-FOCUS-4.** <!-- uuid: dacb232e-6a48-4648-b12e-d75700101a11 --> Every non-zero exit MUST print one line on stderr naming the problem and the way
   out.
 - **INV-FOCUS-5.** <!-- uuid: fafebdc0-9aab-402f-84e8-d9f4857627b3 --> A focus verb MUST refuse a store that is not migrated for the focus tables with exit
-  `1`, name the problem and apply nothing.
+  `2`, name the problem and apply nothing.
 - **INV-FOCUS-6.** <!-- uuid: e6541cf4-346b-4947-aa18-3e063a6410ff --> A verb that writes and addresses a day other than today MUST print
   `NOTE: writing into period <date>, not today`.
 - **INV-FOCUS-7.** <!-- uuid: b95807f4-ed98-4bb2-971c-81989e40102d --> Every `--json` output MUST carry `contract` `pg-desk.focus/v1`, and the output of a
@@ -265,9 +279,10 @@ source outside every recorded watch set reads `unwatched` in the bead column.
 | Exit | Meaning                                                                                                                                                        |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Coverage complete (a small routine hydration backlog is a notice), including a legitimately empty candidate set and an empty `focus.operator_identities` list. |
-| `2`  | Coverage incomplete: a listing degraded, failed or unknown, or a due backlog above `focus.coverage_backlog_max`. The table is shown, never silently omitted.   |
+| `8`  | Coverage incomplete: a listing degraded, failed or unknown, or a due backlog above `focus.coverage_backlog_max`. The table is shown, never silently omitted.   |
 | `3`  | Total failure: no candidates are computable (an empty set and every known listing failed). Nothing is stored.                                                  |
-| `1`  | Usage error (`--cap` not positive, `--cap` with an applicable draft, a bad `--date`) or a store that is not migrated.                                          |
+| `2`  | Usage error (`--cap` not positive, `--cap` with an applicable draft, a bad `--date`) or a store that is not migrated.                                          |
+| `1`  | An unexpected error.                                                                                                                                           |
 
 An empty `focus.operator_identities` list is not a failure: `show` and `replan` print
 `NOTICE focus.operator_identities is empty: no Jira issue can be a candidate by assignment` and
@@ -330,8 +345,8 @@ what separates them for a human.
   inside a transaction that re-checks that the period has no plan rows; `replan` MUST write only the
   single draft row.
 - **INV-FOCUS-17.** <!-- uuid: 13de1564-59de-4dfb-b6c5-50e2faf0e858 --> `show` and `replan` MUST exit `0` for complete coverage (an empty candidate set
-  and an empty identity list included), `2` for incomplete coverage, `3` for no computable
-  candidates and `1` for a usage error or an unmigrated store, and MUST NOT exit `6`.
+  and an empty identity list included), `8` for incomplete coverage, `3` for no computable
+  candidates and `2` for a usage error or an unmigrated store, and MUST NOT exit `6`.
 - **INV-FOCUS-18.** <!-- uuid: 60cf3c5e-6bad-43d8-b2ef-cef67ce171c1 --> The bead column MUST use only the "Shown as" words of the state-by-outcome table,
   defined once in code.
 
@@ -352,7 +367,7 @@ of separators all work):
 | `cap=N`  | Re-cap. `N` is a positive integer (ASCII digits, at least 1); `cap=` may appear once.                                                                                                                                   |
 
 Keywords are case-insensitive. An exact repeat of `ok`, `+<key>` or `-<key>` is harmless and counts once.
-These are usage errors (exit 1, one line naming the problem and the way out, no selection state
+These are usage errors (exit 2, one line naming the problem and the way out, no selection state
 changed, the caller re-prompts): an EMPTY reply (`reply ok to accept`, so a closed stdin in a
 non-interactive run can never apply the whole plan), an unrecognized token, a sign with no key, `cap=`
 with a value that is empty, zero, negative, not a number or too large, `cap=` twice, a conflicting pair
@@ -419,7 +434,7 @@ earlier period's plan), the routine skips (`finished`, `no-longer-candidate`, `a
 assigns no `rank_position`, performs no store write and takes no transaction.
 
 - **INV-FOCUS-19.** <!-- uuid: 54f7a46e-93b6-465f-af4d-07d28f1c7873 --> A reply MUST be parsed completely before any selection state is applied: a
-  malformed, empty or conflicting reply MUST be a usage error (exit 1) that changes no state.
+  malformed, empty or conflicting reply MUST be a usage error (exit 2) that changes no state.
 - **INV-FOCUS-20.** <!-- uuid: e3879433-aa3d-4f6f-9ac8-4a657d63019c --> The final set MUST be computed from the draft's order and MUST NOT recompute the
   rank; a bare `ok` over a plan MUST NOT remove or add by rank.
 - **INV-FOCUS-21.** <!-- uuid: 7776c56b-efdb-423c-8170-3653202f91cc --> A reply `cap=N` MUST delete rows only when `N` is below the persisted period cap and
@@ -445,9 +460,9 @@ saw` on stderr and records `fresh_order` in the run record. A second lock that f
 already consumed by a concurrent lock, pull or replan reads the plan as it now stands and computes
 afresh the same way.
 
-**The order of checks.** The first failing check decides the exit code: usage and flag errors (`1`),
-the period is closed (`6`), a malformed reply (`1`), a first lock for an earlier or a future period
-(`1`), hand-add hydration (`1`), then the writes (`3`, or `2` partial, or `0`). A malformed reply over
+**The order of checks.** The first failing check decides the exit code: usage and flag errors (`2`),
+the period is closed (`6`), a malformed reply (`2`), a first lock for an earlier or a future period
+(`2`), hand-add hydration (`2`), then the writes (`3`, or `8` partial, or `0`). A malformed reply over
 a closed period is therefore `6`, and a run that is doomed by an earlier check never hydrates.
 
 **Hand-add hydration** is a separate, reported pre-step, not part of the atomic parse: a key the store
@@ -471,8 +486,8 @@ steps leaves rows without annotations, which `--repair` mends.
 period key is greater than every other period's key that holds rows and is not later than today in
 `focus.time_zone`, the same transaction deletes every row of every other period (cause `new_period`;
 a closed period's own row, `closed_at` and note stay), and a period that was never closed is named in
-the preview. A first lock for an earlier period is exit `1` (`period <date> is earlier than the
-current plan (<date>); history is not rewritten`) and one for a future date is exit `1` (`period
+the preview. A first lock for an earlier period is exit `2` (`period <date> is earlier than the
+current plan (<date>); history is not rewritten`) and one for a future date is exit `2` (`period
 <date> is in the future; plan it on the day`). An EMPTY first lock replaces nothing but still applies
 `-key` deletions, writes its run row (outcome `empty`) and deletes the draft, so with no `-key` it
 writes nothing but that row and the draft deletion.
@@ -484,10 +499,10 @@ rewritten and a deletion leaves a gap. A hand-add has no tier. `-key` deletes th
 EVERY period (so the annotation reads `none` and the decider always holds the bead), and a row whose
 source is terminal stays and is shown finished.
 
-**Exit codes.** `0` applied (or previewed); `1` a usage error, including a first lock for an earlier
-or a future period, with no selection state changed; `2` the rows committed but some annotation write
-failed (the run record says which; run `select --repair`); `3` a write failed outright and the
-transaction rolled back; `6` the period is closed.
+**Exit codes.** `0` applied (or previewed); `1` an unexpected error; `2` a usage error, including a
+first lock for an earlier or a future period, with no selection state changed; `3` a write failed
+outright and the transaction rolled back; `6` the period is closed; `8` the rows committed but some
+annotation write failed (the run record says which; run `select --repair`).
 
 **Merge.** `--merge KEEP=ABSORBED` (repeatable, comma-separated) records an EXTERNAL `references` link
 from the kept entity to the absorbed one with reason `focus:merge`; it writes no row, no annotation
@@ -546,7 +561,7 @@ record. Both forms read one table, so `show` and the echo cannot drift.
 - **INV-FOCUS-24.** <!-- uuid: 882e96a5-61eb-4405-955c-50a87265b10c --> A first lock MUST replace the plan (delete every row of every other period) only
   when the final set is non-empty, the period key is greater than every other period's key that holds
   rows and the period is not later than today in `focus.time_zone`; otherwise an earlier or a future
-  first lock MUST be exit `1` and an empty one MUST replace nothing.
+  first lock MUST be exit `2` and an empty one MUST replace nothing.
 - **INV-FOCUS-25.** <!-- uuid: 4456bff2-e818-4b4f-80fe-e4294ae11762 --> A strike (`-key`) MUST delete the entity's rows in every period, and the
   `focus_selected` annotation of every affected entity MUST be the maximum period key over its rows,
   else `none`.
@@ -591,16 +606,16 @@ candidate at all is a routine skip, not a failure; each skip is one stderr line,
 `not-a-candidate`. A request whose every key is such a skip exits `0`.
 
 **The period rules.** A pull never replaces a plan, so two live plans can never exist. A pull into a
-period that has no rows while ANOTHER period holds rows is exit `1` with the remedy
-`lock today's plan first: run show, then select --apply`; a pull into a future period is exit `1`; a
+period that has no rows while ANOTHER period holds rows is exit `2` with the remedy
+`lock today's plan first: run show, then select --apply`; a pull into a future period is exit `2`; a
 pull into a closed period is exit `6`, terminal. The first two are checked again INSIDE the pull's
 transaction, so a lock that commits after the verb read the store still refuses the pull and leaves
 no period row behind.
 
-**Exit codes.** `0` done, including nothing left to pull and routine skips; `1` usage, the no-plan and
-the future-period cases; `2` the rows committed but some `focus_selected` annotation writes failed
-(`select --repair` mends them); `3` a store write failure, or no named key has an entity row at all;
-`6` the period is closed. A candidate source that failed or degraded does not change the exit code: a
+**Exit codes.** `0` done, including nothing left to pull and routine skips; `1` an unexpected error;
+`2` usage, the no-plan and the future-period cases; `3` a store write failure, or no named key has an
+entity row at all; `6` the period is closed; `8` the rows committed but some `focus_selected`
+annotation writes failed (`select --repair` mends them). A candidate source that failed or degraded does not change the exit code: a
 `NOTICE` line on stderr names it, so a pull that looks complete cannot hide a missing source.
 
 **Output.** Text is the CHANGES block of `select` over the rows selected (one line per key with its
@@ -621,7 +636,7 @@ leaves even an empty period behind. A non-dry-run `pull` writes one run record r
 - **INV-FOCUS-33.** <!-- uuid: 7d9d3282-cd3e-46f3-937b-efed670eb7ed --> A positional argument of `pull` MUST be a key; a count MUST be `--top K` only, and
   `--top` together with a key MUST be a usage error; a bare invocation MUST write nothing.
 - **INV-FOCUS-34.** <!-- uuid: 960ac684-72b0-446e-906f-0ea8e1027f8d --> A `pull` into a period with no rows while another period holds rows, and a `pull`
-  into a future period, MUST be exit `1`, checked inside the pull's transaction; a `pull` into a closed
+  into a future period, MUST be exit `2`, checked inside the pull's transaction; a `pull` into a closed
   period MUST be exit `6`.
 - **INV-FOCUS-35.** <!-- uuid: 321bbe26-14df-44e7-a00b-fd46135411ba --> A named key that is already selected or is no longer a candidate MUST be a routine
   skip (exit `0`); only a request in which no named key has an entity row MUST be exit `3`.
@@ -655,9 +670,9 @@ recorded close time. A closed day cannot be amended or reopened this phase; `sel
 exit `6` with `period <date> is closed; use --date <tomorrow>`. Two concurrent closes serialize on
 the transaction, and the loser decides again against what the winner recorded.
 
-**Exit codes.** `0` closed, or already closed with the same summary; `1` usage: a malformed stdin
-(empty, not one JSON object, no `summary`, a `summary` that is not a string, more than one JSON
-value), a `--date` later than today, a store not yet migrated; `3` the store write failed (nothing
+**Exit codes.** `0` closed, or already closed with the same summary; `1` an unexpected error; `2`
+usage: a malformed stdin (empty, not one JSON object, no `summary`, a `summary` that is not a string,
+more than one JSON value), a `--date` later than today, a store not yet migrated; `3` the store write failed (nothing
 is written: the close, the draft deletion and the period row commit together or not at all); `6`
 already closed with a different summary. Checks run in that order: usage and flag errors, the store,
 the closed-period comparison, then the write.
@@ -679,7 +694,7 @@ already closed reports what the real run would: exit `0` for the same summary, `
   it MUST be exit `0` (`already closed`), with a different summary exit `6` naming the recorded close
   time and keeping the recorded summary. A closed period MUST NOT be reopened or amended.
 - **INV-FOCUS-39.** <!-- uuid: 40aad5ff-ea2a-4af2-a179-c4a22ba3de79 --> `close` MUST read the summary as a string member of ONE JSON object on stdin;
-  a malformed stdin or a `--date` later than today MUST be exit `1`.
+  a malformed stdin or a `--date` later than today MUST be exit `2`.
 - **INV-FOCUS-40.** <!-- uuid: 000ca2b7-6e42-4332-90c2-7abd437399a5 --> `close` MUST NOT execute a tracker write verb; the per-bead progress notes MUST
   be written by the caller before it calls `close`.
 - **INV-FOCUS-41.** <!-- uuid: 9a3d4f9b-2de9-4779-9bca-574b355cc4d5 --> A `close --dry-run` MUST write nothing in any table, including the period row.
@@ -726,8 +741,8 @@ the period as for every verb: it selects the plan rows to read and the day the r
 
 **An unknown key** (no stored entity) prints `<key>: not held by pg-desk` and `run_id: null` and
 exits `0`, the house convention of `attention explain`; its `--json` has `candidate` false and the
-reason `not-in-store`. **An unmigrated store** exits `1` with the usual refusal. A malformed key or a
-repository other than the configured one is a usage error, exit `1`.
+reason `not-in-store`. **An unmigrated store** exits `2` with the usual refusal. A malformed key or a
+repository other than the configured one is a usage error, exit `2`.
 
 **`--json`** prints `contract` `pg-desk.focus/v1`, `verb` `explain`, and the members the text shows:
 `key`, `candidate`, `reasons`, `via` (`{seed_key, relation, more}` or null), `tier`, `deciding`
@@ -744,7 +759,7 @@ nothing; its output is the whole of what it leaves behind.
 - **INV-FOCUS-43.** <!-- uuid: 4a963197-7c76-4297-a218-5a999134e3c0 --> `explain` MUST compute from the live rows only, MUST carry no flip-history member
   in text or `--json`, and MUST label the decider's skip reasons as recomputed now.
 - **INV-FOCUS-44.** <!-- uuid: c517a931-b234-46ad-998d-c46ad260c4c3 --> `explain` MUST accept the key forms `select` accepts; an unknown key MUST print
-  that it is not held and exit `0`, and an unmigrated store MUST exit `1`.
+  that it is not held and exit `0`, and an unmigrated store MUST exit `2`.
 
 ## Help, the tldr page and shell completions
 
@@ -761,7 +776,7 @@ effect on pull requests or beads, and an empty list yields no Jira candidates, n
 group's help carries the morning flow as its example.
 
 **`pg-desk focus select --help`** documents the reply grammar (`ok`, `-<key>`, `+<key>`, `cap=N`, the
-separators and what an empty reply does), the exit codes `0`, `1`, `2`, `3` and `6` one per line, and
+separators and what an empty reply does), the exit codes `0`, `1`, `2`, `3`, `6` and `8` one per line, and
 `--dry-run` and `--apply`, with examples that preview, lock, and strike or add or re-cap. It names no
 exit code outside that set.
 
@@ -790,7 +805,7 @@ nothing; a completion writes no run record.
 - **INV-FOCUS-46.** <!-- uuid: f18fbe09-941f-44d9-9e3e-ef8982f22dae --> Wherever the help mentions `focus.operator_identities` it MUST describe it as a
   Jira-only key.
 - **INV-FOCUS-47.** <!-- uuid: 9246dde4-73c3-4e5c-a6b6-edbe9212fc97 --> `focus select --help` MUST document the reply grammar with examples, the exit codes
-  `0`, `1`, `2`, `3` and `6`, and `--dry-run`.
+  `0`, `1`, `2`, `3`, `6` and `8`, and `--dry-run`.
 - **INV-FOCUS-48.** <!-- uuid: 04dcd0f1-6658-4dcd-a9b7-28d9c0b52142 --> The key completion of `explain` and `pull` MUST read the store read-only, MUST NOT
   write, call the tracker or the network, MUST give up after a short time limit, and MUST print
   nothing on any error.

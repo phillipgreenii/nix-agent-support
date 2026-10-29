@@ -26,7 +26,7 @@ import (
 // they are recomputed now from the same view and labelled so.
 //
 // Key forms: the same as select (focus.ParseKey). An unknown key prints "not
-// held" and exits 0; an unmigrated store exits 1.
+// held" and exits 0; an unmigrated store exits 2.
 //
 // Telemetry (D24): the verb emits no OpenTelemetry and no Prometheus signal,
 // writes no focus_run row and logs nothing; its output is the whole of what
@@ -58,8 +58,9 @@ not recalled).
 focus.time_zone): it selects the plan rows to read and the day the rank is
 computed for. explain writes nothing and creates no period row.
 
-Exit codes: 0 (an unknown key prints "not held" and exits 0), 1 usage error or
-a store not yet migrated, 3 the store could not be read.`,
+Exit codes: 0 (an unknown key prints "not held" and exits 0), 1 an unexpected
+error, 2 usage error or a store not yet migrated, 3 the store could not be
+read.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return focusUsageError(fmt.Sprintf("focus explain takes exactly one key, got %d", len(args)),

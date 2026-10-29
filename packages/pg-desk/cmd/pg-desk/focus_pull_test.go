@@ -197,12 +197,12 @@ func TestPullTopWithAKeyIsUsage(t *testing.T) {
 	before := f.snapshot(t)
 	for _, args := range [][]string{{"--top", "2", "1"}, {"3", "--top", "1"}} {
 		_, _, err := pull(t, args...)
-		assertFocusExit(t, err, 1, "--top cannot be used together with a key")
+		assertFocusExit(t, err, 2, "--top cannot be used together with a key")
 	}
 	_, _, err := pull(t, "--top", "0")
-	assertFocusExit(t, err, 1, "must be positive")
+	assertFocusExit(t, err, 2, "must be positive")
 	_, _, err = pull(t, "--top", "-1")
-	assertFocusExit(t, err, 1, "must be positive")
+	assertFocusExit(t, err, 2, "must be positive")
 	if got := f.snapshot(t); got != before {
 		t.Errorf("a usage error changed the store:\n%s\n---\n%s", before, got)
 	}
@@ -212,7 +212,7 @@ func TestPullUnresolvableKeyIsUsage(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	_, _, err := pull(t, "not a key")
-	assertFocusExit(t, err, 1, "cannot resolve key")
+	assertFocusExit(t, err, 2, "cannot resolve key")
 	if f.count(t, "focus_selection") != 0 {
 		t.Errorf("rows were written")
 	}
@@ -275,8 +275,8 @@ func TestPullDryRunReportsExactlyWhatAnApplyDoes(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-34: a pull into a period with no rows is exit 1.
-func TestPullIntoNewPeriodBeforeFirstLockExitsOne(t *testing.T) {
+// Traces INV-FOCUS-34: a pull into a period with no rows is exit 2 (usage).
+func TestPullIntoNewPeriodBeforeFirstLockIsUsage(t *testing.T) {
 	f := newSelFixture(t)
 	y := f.pr(t, 9, "yesterday", "2026-10-08T08:00:00Z")
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -285,7 +285,7 @@ func TestPullIntoNewPeriodBeforeFirstLockExitsOne(t *testing.T) {
 
 	for _, args := range [][]string{{"--top", "1"}, {"o/r#1"}, {"--top", "1", "--dry-run"}, {}} {
 		_, _, err := pull(t, args...)
-		assertFocusExit(t, err, 1, "lock today's plan first: run show, then select --apply")
+		assertFocusExit(t, err, 2, "lock today's plan first: run show, then select --apply")
 	}
 	if _, found, _ := f.st.FocusPeriodGet("day", showToday); found {
 		t.Errorf("a refused pull left a focus_period row behind")
@@ -299,18 +299,18 @@ func TestPullIntoNewPeriodBeforeFirstLockExitsOne(t *testing.T) {
 		t.Errorf("the refused writing pulls recorded no run row")
 	}
 	for _, r := range f.runs(t) {
-		if r.Verb != "pull" || !r.Exit.Valid || r.Exit.Int64 != 1 {
-			t.Errorf("run = %+v, want pull recorded as exit 1", r)
+		if r.Verb != "pull" || !r.Exit.Valid || r.Exit.Int64 != 2 {
+			t.Errorf("run = %+v, want pull recorded as exit 2 (usage)", r)
 		}
 	}
 }
 
-// Traces INV-FOCUS-34: a pull into a future period is exit 1.
-func TestPullIntoFuturePeriodIsExitOne(t *testing.T) {
+// Traces INV-FOCUS-34: a pull into a future period is exit 2 (usage).
+func TestPullIntoFuturePeriodIsUsage(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	_, _, err := pull(t, "--top", "1", "--date", "2026-10-11")
-	assertFocusExit(t, err, 1, "2026-10-11 is in the future")
+	assertFocusExit(t, err, 2, "2026-10-11 is in the future")
 	if _, found, _ := f.st.FocusPeriodGet("day", "2026-10-11"); found {
 		t.Errorf("a refused pull created the future period")
 	}
@@ -319,8 +319,8 @@ func TestPullIntoFuturePeriodIsExitOne(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-34: the exit 1 check runs inside the transaction.
-func TestPullExitOneCheckRunsInsideTheTransaction(t *testing.T) {
+// Traces INV-FOCUS-34: the usage (exit 2) check runs inside the transaction.
+func TestPullUsageCheckRunsInsideTheTransaction(t *testing.T) {
 	f := newSelFixture(t)
 	y := f.pr(t, 9, "yesterday", "2026-10-08T08:00:00Z")
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -332,7 +332,7 @@ func TestPullExitOneCheckRunsInsideTheTransaction(t *testing.T) {
 	focusPullBeforeTx = func(*store.Store) { f.lock(t, showYesterday, 6, y) }
 
 	_, _, err := pull(t, "o/r#1")
-	assertFocusExit(t, err, 1, "lock today's plan first: run show, then select --apply")
+	assertFocusExit(t, err, 2, "lock today's plan first: run show, then select --apply")
 	if _, found, _ := f.st.FocusPeriodGet("day", showToday); found {
 		t.Errorf("the refused transaction left a focus_period row behind")
 	}
@@ -437,14 +437,14 @@ func TestPullAnnotationIsTheMaxPeriodKeyAndARerunIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestPullPartialAnnotationFailureIsExitTwoAndTheRowsStay(t *testing.T) {
+func TestPullPartialAnnotationFailureIsExitEightAndTheRowsStay(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	f.pr(t, 2, "bravo", "2026-10-09T09:00:00Z")
 	f.useAnnotator(t, func(a focus.Annotator) focus.Annotator { return failingFor{inner: a, id: "o/r#2"} })
 
 	_, _, err := pull(t, "--top", "2")
-	assertFocusExit(t, err, 2, "select --repair")
+	assertFocusExit(t, err, 8, "select --repair")
 	if len(f.plan(t, showToday)) != 2 {
 		t.Fatalf("the rows did not commit")
 	}
@@ -452,8 +452,8 @@ func TestPullPartialAnnotationFailureIsExitTwoAndTheRowsStay(t *testing.T) {
 		t.Errorf("the failed entity was annotated: %q", got)
 	}
 	r := f.lastRun(t)
-	if !r.Exit.Valid || r.Exit.Int64 != 2 {
-		t.Fatalf("run exit = %+v, want 2", r.Exit)
+	if !r.Exit.Valid || r.Exit.Int64 != 8 {
+		t.Fatalf("run exit = %+v, want 8", r.Exit)
 	}
 	// The repair mends it.
 	f.useAnnotator(t, nil)
@@ -547,16 +547,16 @@ func TestPullExitCodes(t *testing.T) {
 			name: "ok: every key a routine skip", args: []string{"o/r#1"},
 			prep: func(t *testing.T, f *selFixture) { f.lock(t, showToday, 6, prKey(1)) }, code: 0,
 		},
-		{name: "usage: --top with a key", args: []string{"--top", "1", "o/r#1"}, code: 1, want: "--top cannot be used together with a key"},
-		{name: "usage: bad date", args: []string{"--top", "1", "--date", "x"}, code: 1, want: "pass --date YYYY-MM-DD"},
+		{name: "usage: --top with a key", args: []string{"--top", "1", "o/r#1"}, code: 2, want: "--top cannot be used together with a key"},
+		{name: "usage: bad date", args: []string{"--top", "1", "--date", "x"}, code: 2, want: "pass --date YYYY-MM-DD"},
 		{
 			name: "usage: no plan while another period holds rows", args: []string{"--top", "1"},
 			prep: func(t *testing.T, f *selFixture) {
 				f.pr(t, 9, "old", "2026-10-08T08:00:00Z")
 				f.lock(t, showYesterday, 6, prKey(9))
-			}, code: 1, want: "lock today's plan first: run show, then select --apply",
+			}, code: 2, want: "lock today's plan first: run show, then select --apply",
 		},
-		{name: "usage: future period", args: []string{"--top", "1", "--date", "2026-10-12"}, code: 1, want: "is in the future"},
+		{name: "usage: future period", args: []string{"--top", "1", "--date", "2026-10-12"}, code: 2, want: "is in the future"},
 		{name: "total: no named key has an entity row", args: []string{"o/r#99"}, code: 3, want: "none of the named keys has an entity row"},
 		{
 			name: "period closed", args: []string{"--top", "1"},
@@ -584,7 +584,7 @@ func TestPullExitCodes(t *testing.T) {
 // TestPullHelpNamesTheRulesAndTheExitCodes keeps the verb's help honest.
 func TestPullHelpNamesTheRulesAndTheExitCodes(t *testing.T) {
 	c := newFocusPullCmd()
-	for _, want := range []string{"--top", "--dry-run", "ALWAYS a key", "lock today's plan first", "6 period closed"} {
+	for _, want := range []string{"--top", "--dry-run", "ALWAYS a key", "lock today's plan first", "2 usage", "3 a store", "6 period closed", "8 rows"} {
 		if !strings.Contains(c.Long+c.Use, want) {
 			t.Errorf("pull help lacks %q", want)
 		}

@@ -98,12 +98,18 @@ The collector outlives agent sessions (a launchd agent is out of scope). It writ
 `<scratch>/collector/ticks.jsonl` and `collector.log` and exits when a stop or kill condition fires
 or on `SIGTERM`/`SIGINT`.
 
-| Exit | Meaning                                                                                   |
-| ---- | ----------------------------------------------------------------------------------------- |
-| 0    | Stopped on request (`--max-ticks`, signal)                                                |
-| 1    | Generic error (unexpected; read the message)                                              |
-| 2    | Refused to start (safety check, missing tool, a second collector holding the lock)        |
-| 4    | Kill criterion tripped (spend ceiling, failed ticks, sandbox denial, rejected write verb) |
+| Exit | Meaning                                                                                                  |
+| ---- | -------------------------------------------------------------------------------------------------------- |
+| 0    | Stopped on request (`--max-ticks`, signal)                                                               |
+| 1    | Generic error (unexpected; read the message). Never a kill: a collector error that is not a kill exits 1 |
+| 2    | Usage error (a bad or missing flag, an unknown command)                                                  |
+| 3    | Refused to start (safety check, missing tool, a second collector holding the lock)                       |
+| 4    | Kill criterion tripped (spend ceiling, failed ticks, sandbox denial, rejected write verb)                |
+
+The other commands share the table: `2` for a usage error, `1` for an unexpected error (`prepare`
+and `report` exit `1` when the work itself fails), `3` when `probe`, `adapter-exercise` or `exec` find
+the scratch directory unusable or `probe`'s safety self-test fails, and `4` when `adapter-exercise` or
+`exec` sees a sandbox denial.
 
 ### Resume
 
@@ -128,7 +134,7 @@ Never copy the scratch store or edit `ticks.jsonl` by hand.
 `run` starts the scratch `pg-connector-github serve` as its own sandboxed child (same environment
 checks as every other child, output in `<scratch>/logs/daemon.out.log`) and waits until
 `status --json` reports it serving (exit 0 or 2) before the first slot; it refuses to start
-(exit 2, `refusing to start: daemon: ...`) when the daemon never serves or the scratch directory was
+(exit 3, `refusing to start: daemon: ...`) when the daemon never serves or the scratch directory was
 prepared without one. It restarts a child whose process dies (counted) and stops it on exit or
 signal. Every executed and every skipped tick row carries a `daemon` sample (`state` healthy,
 degraded or down from the status exit 0, 2 or 3; `status_exit`; `alive`; cumulative `restarts`). A
@@ -358,8 +364,10 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
     `phillipgreenii.programs.pg-desk.shadow.enable = true` is set in the consuming flake. The adapter's
     installed wrapper (like `pg-desk`'s) prepends the real `pg-desk`; until that flag is applied,
     `prepare --tool-dir` finds a locally built unwrapped copy, which is what the smoke exercised.
-11. Exit codes: the collector uses 2 (refused to start) and 4 (kill) and keeps 1 for a generic error,
-    following the repo rule that exit 1 carries no branchable meaning.
+11. Exit codes: the collector uses 2 (usage), 3 (refused to start) and 4 (kill, only for a kill
+    criterion) and keeps 1 for a generic error, following the repo rule that exit 1 carries no
+    branchable meaning. Before bead `pg2-rfxl3y` (2026-10-28) a refusal was 2, shared with usage, and
+    any collector error that was not a kill exited 4 as if it were one.
 12. Baselines drifted since the filing snapshot (916 sweep rows, 879 hash-changed): 923 and 884 at
     20:05Z the same day, 95.8 percent; the report recomputes them from the copied run record.
 13. Correction 5 no longer holds for rows written after per-change event ids landed (observed

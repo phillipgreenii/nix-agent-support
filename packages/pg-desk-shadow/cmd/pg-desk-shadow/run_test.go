@@ -178,8 +178,8 @@ func TestCmdRunRefusesAScratchDirectoryPreparedWithoutTheDaemon(t *testing.T) {
 			for attempt := 1; attempt <= 2; attempt++ {
 				var stdout, stderr strings.Builder
 				code := run([]string{"run", "--scratch", l.Root, "--max-ticks", "1"}, &stdout, &stderr)
-				if code != exitRefuse {
-					t.Fatalf("attempt %d: exit %d, want %d (refused)\nstdout: %s\nstderr: %s", attempt, code, exitRefuse, stdout.String(), stderr.String())
+				if code != exitRefused {
+					t.Fatalf("attempt %d: exit %d, want %d (refused)\nstdout: %s\nstderr: %s", attempt, code, exitRefused, stdout.String(), stderr.String())
 				}
 				for _, want := range []string{"pg-desk-shadow run: refusing to start: daemon:", "prepared without the daemon", "run prepare again"} {
 					if !strings.Contains(stderr.String(), want) {
@@ -192,6 +192,95 @@ func TestCmdRunRefusesAScratchDirectoryPreparedWithoutTheDaemon(t *testing.T) {
 			}
 			if _, err := os.Stat(l.TicksFile()); err == nil {
 				t.Error("a tick was recorded although the run was refused")
+			}
+		})
+	}
+}
+
+// The exit-code vocabulary is pinned: 1 is the generic, unexpected error and
+// carries no branchable meaning; 2 is usage only; the specific outcomes sit at
+// 3 and up (bead pg2-rfxl3y, docs/runbooks/pg-desk-shadow-compare.md).
+func TestExitCodeVocabularyIsPinned(t *testing.T) {
+	for name, c := range map[string]struct{ got, want int }{
+		"exitOK":      {exitOK, 0},
+		"exitError":   {exitError, 1},
+		"exitUsage":   {exitUsage, 2},
+		"exitRefused": {exitRefused, 3},
+		"exitKill":    {exitKill, 4},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", name, c.got, c.want)
+		}
+	}
+}
+
+// A usage error (no command, an unknown command, a bad or missing flag, exec
+// without a command) exits 2 and never touches a scratch directory.
+func TestUsageErrorsExit2(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "never-prepared")
+	for name, args := range map[string][]string{
+		"no command":                 nil,
+		"unknown command":            {"bogus"},
+		"prepare without --scratch":  {"prepare"},
+		"prepare with a bad points":  {"prepare", "--scratch", missing, "--daemon-points-per-hour", "0"},
+		"run without --scratch":      {"run"},
+		"run with an unknown flag":   {"run", "--nope"},
+		"probe with an unknown flag": {"probe", "--nope"},
+		"report without --scratch":   {"report"},
+		"exec without a command":     {"exec", "--scratch", missing},
+		"adapter-exercise bad flag":  {"adapter-exercise", "--nope"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr strings.Builder
+			if code := run(args, &stdout, &stderr); code != exitUsage {
+				t.Errorf("run(%q) = %d, want %d (usage)\nstderr: %s", args, code, exitUsage, stderr.String())
+			}
+			if _, err := os.Stat(missing); err == nil {
+				t.Errorf("run(%q) created the scratch directory on a usage error", args)
+			}
+		})
+	}
+}
+
+// runExit is the collector-result mapping of `run`: a real KILL verdict from
+// the collector exits 4 with a KILL line, any other Run error exits 1 (it is
+// not a kill verdict), and a clean stop exits 0.
+func TestRunExitMapsOnlyAKillVerdictToExitKill(t *testing.T) {
+	// A real kill verdict: one tick spends 1,600 points under the 1,500 default.
+	kill := oneTickSpending(t, 1600, 0, 0)
+	if !errors.Is(kill, collector.ErrKill) {
+		t.Fatalf("setup: the over-spend tick must trip a kill criterion, got %v", kill)
+	}
+	for name, c := range map[string]struct {
+		err      error
+		want     int
+		wantLine string
+		noLine   string
+	}{
+		"clean stop":          {err: nil, want: exitOK},
+		"a real kill verdict": {err: kill, want: exitKill, wantLine: "pg-desk-shadow run: KILL: "},
+		"a wrapped kill":      {err: fmt.Errorf("slot 3: %w", kill), want: exitKill, wantLine: "pg-desk-shadow run: KILL: "},
+		"a non-kill error":    {err: errors.New("record the tick: no space left on device"), want: exitError, wantLine: "pg-desk-shadow run: record the tick", noLine: "KILL"},
+		"a cancelled context": {err: context.Canceled, want: exitError, wantLine: "pg-desk-shadow run: ", noLine: "KILL"},
+		"a wrapped deadline":  {err: fmt.Errorf("tick: %w", context.DeadlineExceeded), want: exitError, noLine: "KILL"},
+		// The same text as collector.ErrKill is not the kill verdict: only the
+		// sentinel itself (errors.Is) is.
+		"a lookalike text":        {err: errors.New("kill criterion"), want: exitError, noLine: "KILL:"},
+		"a scrubbed non-kill one": {err: errors.New("poll example-login failed"), want: exitError, noLine: "example-login"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stderr strings.Builder
+			if got := runExit(c.err, &stderr, []string{"example-login"}); got != c.want {
+				t.Errorf("runExit(%v) = %d, want %d", c.err, got, c.want)
+			}
+			if c.wantLine != "" && !strings.Contains(stderr.String(), c.wantLine) {
+				t.Errorf("stderr %q lacks %q", stderr.String(), c.wantLine)
+			}
+			if c.noLine != "" && strings.Contains(stderr.String(), c.noLine) {
+				t.Errorf("stderr %q must not contain %q", stderr.String(), c.noLine)
+			}
+			if c.err == nil && stderr.Len() != 0 {
+				t.Errorf("a clean stop prints nothing, got %q", stderr.String())
 			}
 		})
 	}

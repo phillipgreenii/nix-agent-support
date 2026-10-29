@@ -12,7 +12,7 @@
 
 `echo "{{ok -1234 +ZZ-9 cap=4}}" | pg-desk focus select --dry-run`
 
-- Step 3: lock the plan with the same reply (exit 2 means an annotation write failed: run `pg-desk focus select --repair`):
+- Step 3: lock the plan with the same reply (exit 8 means an annotation write failed: run `pg-desk focus select --repair`):
 
 `echo "{{ok}}" | pg-desk focus select --apply`
 

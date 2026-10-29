@@ -491,7 +491,7 @@ func TestUnreadableDraftIsTreatedAsAbsent(t *testing.T) {
 			if ok, err := f.st.FocusDraftStore(bad, showToday); err != nil || !ok {
 				t.Fatalf("seed: %v %v", ok, err)
 			}
-			// The existence guard never exits 1 for a bad draft and stores nothing.
+			// The existence guard never exits non-zero for a bad draft and stores nothing.
 			before := f.snapshot(t)
 			_, _, err := show(t, "--json", "--no-store")
 			mustOK(t, err)
@@ -743,9 +743,9 @@ func TestShowCapWithAnApplicableDraftIsAUsageError(t *testing.T) {
 	_, _, err := show(t)
 	mustOK(t, err)
 	_, _, err = show(t, "--cap", "3")
-	assertFocusExit(t, err, 1, "--cap cannot be used with an applicable stored draft")
+	assertFocusExit(t, err, 2, "--cap cannot be used with an applicable stored draft")
 	_, _, err = show(t, "--cap", "0")
-	assertFocusExit(t, err, 1, "--cap 0 must be positive")
+	assertFocusExit(t, err, 2, "--cap 0 must be positive")
 	_ = f
 }
 
@@ -775,8 +775,8 @@ func TestShowTruncatesAndFootnotesWithoutAll(t *testing.T) {
 }
 
 // TestFocusExitCodesShowAndReplan covers the show exit-code rows of the spec: coverage
-// complete 0, a degraded or failed listing 2, a backlog above
-// focus.coverage_backlog_max 2, no candidates computable 3, unmigrated 1.
+// complete 0, a degraded or failed listing 8, a backlog above
+// focus.coverage_backlog_max 8, no candidates computable 3, unmigrated 2.
 //
 // Traces INV-FOCUS-17: the exit codes of show and replan.
 func TestFocusExitCodesShowAndReplan(t *testing.T) {
@@ -796,8 +796,8 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 	}{
 		{"complete", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "ok") }, 0, ""},
 		{"empty set with ok listings", func(t *testing.T, f *showFixture) { setListing(t, f, "mine", "ok") }, 0, ""},
-		{"degraded listing", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "degraded") }, 2, "coverage incomplete"},
-		{"failed listing with candidates", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "failed") }, 2, "coverage incomplete"},
+		{"degraded listing", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "degraded") }, 8, "coverage incomplete"},
+		{"failed listing with candidates", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "failed") }, 8, "coverage incomplete"},
 		{"unknown listing", func(t *testing.T, f *showFixture) {
 			f.pr(t, 1, "a", showAt)
 			f.cfg.Watch.PR.Queries = []string{"never-ran"}
@@ -806,7 +806,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			if err := f.st.RegisterConsumer("pg-router", "pr", time.Date(2026, 10, 10, 11, 0, 0, 0, time.UTC)); err != nil {
 				t.Fatal(err)
 			}
-		}, 2, "never-ran"},
+		}, 8, "never-ran"},
 		{"pr query with no status and no pr flow wired is not watched", func(t *testing.T, f *showFixture) {
 			f.pr(t, 1, "a", showAt)
 			f.cfg.Watch.PR.Queries = []string{"never-ran"}
@@ -827,7 +827,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			setListing(t, f, "mine", "ok")
 			n := 1
 			f.cfg.Focus.CoverageBacklogMax = &n
-		}, 2, "backlog"},
+		}, 8, "backlog"},
 		{"old hydrated issues are no backlog", func(t *testing.T, f *showFixture) {
 			// With no age sweep for issue, an entity hydrated long ago is not
 			// owed a hydration: coverage reads complete however old it is.
@@ -867,7 +867,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			if tc.code != 0 {
 				assertFocusExit(t, err, tc.code, tc.want)
 			}
-			if tc.code == 2 {
+			if tc.code == 8 {
 				mustContain(t, out, "coverage: INCOMPLETE", "o/r#1") // shown, never silently omitted
 			}
 			if got := f.snapshot(t); got != before {
@@ -880,7 +880,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 		f.pr(t, 1, "a", showAt)
 		setListing(t, f, "mine", "degraded")
 		_, _, err := replan(t)
-		assertFocusExit(t, err, 2, "coverage incomplete")
+		assertFocusExit(t, err, 8, "coverage incomplete")
 		if _, found := f.draftRow(t); !found {
 			t.Errorf("replan with incomplete coverage must still store its draft")
 		}
@@ -888,7 +888,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 	t.Run("unmigrated store", func(t *testing.T) {
 		newFocusFixture(t, "old")
 		_, _, err := show(t)
-		assertFocusExit(t, err, 1, "pg-desk migrate --cutover")
+		assertFocusExit(t, err, 2, "pg-desk migrate --cutover")
 	})
 	t.Run("a total failure stores no draft", func(t *testing.T) {
 		f := newShowFixture(t)

@@ -23,7 +23,7 @@ import (
 // link row is the whole record.
 
 // ParseMerges parses the values of repeated --merge flags into pairs. Every
-// failure is an ErrUsage (exit 1, nothing applied).
+// failure is an ErrUsage (exit 2, nothing applied).
 func ParseMerges(values []string, cfg *config.Config) ([]Merge, error) {
 	const remedy = "write --merge <keepKey>=<absorbedKey>"
 	var out []Merge

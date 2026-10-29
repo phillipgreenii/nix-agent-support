@@ -588,7 +588,7 @@ func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	step("flow wired, nothing recorded", `mine unknown (no listing status recorded)`,
-		`pr "mine": ok (probe), listing unknown (no listing status recorded)`, 2)
+		`pr "mine": ok (probe), listing unknown (no listing status recorded)`, 8)
 
 	if err := w.st.SetMeta("change_flow.listing.pr.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
 		t.Fatal(err)

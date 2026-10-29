@@ -245,7 +245,7 @@ type PullResult struct {
 // holds rows is a *UsageError, each with nothing written. A key already in the
 // plan by then (a concurrent pull) is left out and reported in Raced. Any
 // other error is exit 3 (the transaction rolled back); a nil error with
-// ExitCode 2 is partial: the rows committed but an annotation write failed.
+// ExitCode 8 is partial: the rows committed but an annotation write failed.
 func Pull(ctx context.Context, d LockDeps, in PullInput) (PullResult, error) {
 	res := PullResult{RunID: in.RunID}
 	repo := d.repo()

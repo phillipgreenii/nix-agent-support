@@ -71,7 +71,7 @@ type CoverageReport struct {
 
 // ComputeCoverage reads the coverage of the watched types at now. entities
 // are the stored entity rows of the configured repository (Inputs.Entities).
-// Exit 2 (incomplete) is State.Incomplete: any listing degraded, failed or
+// Exit 8 (incomplete) is State.Incomplete: any listing degraded, failed or
 // unknown, or a due backlog above focus.coverage_backlog_max of its type. A
 // backlog within the bound is a Notice only. For issue the backlog counts only
 // pending hydrations (watched entities never hydrated and the failed-ingest

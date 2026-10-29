@@ -57,9 +57,10 @@ without a plan, and never with --no-store); reply to lock it in with
 stores nothing. --no-store computes and renders but never stores and never
 re-renders a stored draft.
 
-Exit codes: 0 coverage complete, 2 coverage incomplete (a listing degraded or
+Exit codes: 0 coverage complete, 8 coverage incomplete (a listing degraded or
 failed, or a hydration backlog above focus.coverage_backlog_max), 3 no
-candidates computable, 1 usage error or an unmigrated store.`,
+candidates computable, 2 usage error or an unmigrated store, 1 an unexpected
+error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusShow(cmd) },
 	}
@@ -256,7 +257,7 @@ func planDraftLine(g *focusGather) string {
 }
 
 // finishFocusScreen prints the screen (text or the --json document) and
-// returns the coverage exit: 0, 2 or 3.
+// returns the coverage exit: 0, 8 or 3.
 func finishFocusScreen(cmd *cobra.Command, env *focusEnv, g *focusGather, s *focusScreen) error {
 	if env.JSON {
 		if err := printFocusJSON(cmd.OutOrStdout(), s.Verb, s.payload(), ""); err != nil {

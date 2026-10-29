@@ -28,13 +28,22 @@ import (
 // logs nothing. The durable record is the focus_run row (written in the lock
 // transaction, finalized by the verb) and the annotation's change_log record.
 
-// Exit codes Lock reports (the focus scheme of the spec's section 7).
+// Exit codes of the focus scheme (docs/behavior/pg-desk/focus.md, "Exit
+// codes"; INV-FOCUS-3). 1 is the generic, unexpected error: it carries no
+// branchable meaning, so no specific outcome is ever given it. 2 is usage, as
+// for every tool of the workspace (ADR 0042). The specific outcomes sit at 3
+// and up: 3 total failure, 6 period closed, 8 partial. 4 (head-check's), 5
+// (a retired multi-candidate code) and 7 (removed by ruling RV-A) are never
+// used by a focus verb. Before the 2026-10-28 migration (bead pg2-rfxl3y)
+// usage was 1 and partial 2; store.FocusExitScheme tells the two apart in a
+// stored run record.
 const (
 	ExitOK           = 0
-	ExitUsage        = 1
-	ExitPartial      = 2
+	ExitUnexpected   = 1
+	ExitUsage        = 2
 	ExitTotal        = 3
 	ExitPeriodClosed = 6
+	ExitPartial      = 8
 )
 
 // Outcome words of LockResult.Outcome (the vocabulary of the run statistics).
@@ -212,11 +221,11 @@ func decideFirstLock(firstLock, nonEmpty bool, key, today string, otherHolds boo
 // Lock is `select --apply` over final set in.Final (see the file comment). A
 // preview (no Apply, or DryRun) computes everything and writes nothing.
 //
-// Errors carry the exit code through LockResult.ExitCode: a *UsageError is 1
+// Errors carry the exit code through LockResult.ExitCode: a *UsageError is 2
 // (a first lock for an earlier or a future period; no selection state
 // changed), ErrPeriodClosed is 6, ErrPlanChanged is returned with nothing
 // written and ExitCode 0 for the caller to retry, any other error is 3 (the
-// transaction rolled back). A nil error with ExitCode 2 is partial: the rows
+// transaction rolled back). A nil error with ExitCode 8 is partial: the rows
 // committed but some annotation writes failed.
 func Lock(ctx context.Context, d LockDeps, in LockInput) (LockResult, error) {
 	res := LockResult{RunID: in.RunID}

@@ -23,7 +23,7 @@ type focusPeriod struct {
 // today in focus.time_zone. --date (any 2006-1-2 spelling) names the day,
 // else the day containing now in the configured zone. --period must be
 // "day", the only implemented value; any other value, and an unparseable
-// --date, is a usage error (exit 1). A nil cfg addresses time.Local.
+// --date, is a usage error (exit 2). A nil cfg addresses time.Local.
 func resolveFocusPeriod(cmd *cobra.Command, cfg *config.Config, now time.Time) (focusPeriod, bool, error) {
 	if pt, err := cmd.Flags().GetString(focusFlagPeriod); err == nil && pt != focusPeriodTypeDay {
 		return focusPeriod{}, false, focusUsageError(

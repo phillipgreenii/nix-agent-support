@@ -108,10 +108,17 @@ type focusCounts struct {
 	DriftRows       int                      `json:"drift_rows"`
 	FreshOrder      bool                     `json:"fresh_order"`
 	Coverage        focusCoverageSummary     `json:"coverage"`
+	// ExitScheme is the exit-code scheme the record's exit_code is under
+	// (store.FocusExitScheme), so the run statistics read a row written
+	// before the exit-code migration under the scheme it was written in.
+	// normalized always sets it to the current scheme.
+	ExitScheme int `json:"exit_scheme"`
 }
 
-// normalized returns a copy with every nil slice replaced by an empty one.
+// normalized returns a copy with every nil slice replaced by an empty one
+// and ExitScheme set to the current scheme.
 func (c focusCounts) normalized() focusCounts {
+	c.ExitScheme = store.FocusExitScheme
 	if c.Forced == nil {
 		c.Forced = []string{}
 	}

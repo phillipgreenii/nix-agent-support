@@ -278,18 +278,18 @@ func TestCloseDecoderIgnoresUnknownMembersAndRequiresAStringSummary(t *testing.T
 		g := newSelFixture(t)
 		before := g.tables(t, "focus_period")
 		_, _, err := closeVerb(t, bad)
-		assertFocusExit(t, err, 1, "focus close")
+		assertFocusExit(t, err, 2, "focus close")
 		if got := g.tables(t, "focus_period"); got != before {
 			t.Errorf("malformed stdin %q wrote a period row", bad)
 		}
 	}
 }
 
-// Traces INV-FOCUS-39: a --date later than today is exit 1.
-func TestCloseFutureDateIsExitOne(t *testing.T) {
+// Traces INV-FOCUS-39: a --date later than today is exit 2 (usage).
+func TestCloseFutureDateIsUsage(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, summaryJSON(t, "x"), "--date", "2026-10-11")
-	assertFocusExit(t, err, 1, "later than today")
+	assertFocusExit(t, err, 2, "later than today")
 	if _, found := f.period(t, "2026-10-11"); found {
 		t.Errorf("a future close created a period row")
 	}
@@ -302,14 +302,14 @@ func TestCloseFutureDateIsExitOne(t *testing.T) {
 func TestCloseFailuresStillWriteTheRunRow(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, `{}`)
-	assertFocusExit(t, err, 1, "")
-	if r := f.lastRun(t); r.Verb != "close" || !r.Exit.Valid || r.Exit.Int64 != 1 {
-		t.Errorf("run = %+v, want exit 1 recorded", r)
+	assertFocusExit(t, err, 2, "")
+	if r := f.lastRun(t); r.Verb != "close" || !r.Exit.Valid || r.Exit.Int64 != 2 {
+		t.Errorf("run = %+v, want exit 2 (usage) recorded", r)
 	}
 	// A usage error under --dry-run writes no row.
 	g := newSelFixture(t)
 	_, _, err = closeVerb(t, `{}`, "--dry-run")
-	assertFocusExit(t, err, 1, "")
+	assertFocusExit(t, err, 2, "")
 	if n := len(g.runs(t)); n != 0 {
 		t.Errorf("a dry run wrote %d run rows", n)
 	}
@@ -319,27 +319,27 @@ func TestFocusExitCodesClose(t *testing.T) {
 	t.Run("usage: malformed stdin", func(t *testing.T) {
 		newSelFixture(t)
 		_, _, err := closeVerb(t, "nope")
-		assertFocusExit(t, err, 1, "pipe {")
+		assertFocusExit(t, err, 2, "pipe {")
 	})
 	t.Run("usage: period week", func(t *testing.T) {
 		newSelFixture(t)
 		_, _, err := closeVerb(t, summaryJSON(t, "x"), "--period", "week")
-		assertFocusExit(t, err, 1, "pass --period day")
+		assertFocusExit(t, err, 2, "pass --period day")
 	})
 	t.Run("usage: bad date", func(t *testing.T) {
 		newSelFixture(t)
 		_, _, err := closeVerb(t, summaryJSON(t, "x"), "--date", "x")
-		assertFocusExit(t, err, 1, "pass --date YYYY-MM-DD")
+		assertFocusExit(t, err, 2, "pass --date YYYY-MM-DD")
 	})
 	t.Run("usage: unmigrated store", func(t *testing.T) {
 		newFocusFixture(t, "old")
 		_, _, err := closeVerb(t, summaryJSON(t, "x"))
-		assertFocusExit(t, err, 1, "pg-desk migrate --cutover")
+		assertFocusExit(t, err, 2, "pg-desk migrate --cutover")
 	})
 	t.Run("usage: future date", func(t *testing.T) {
 		newSelFixture(t)
 		_, _, err := closeVerb(t, summaryJSON(t, "x"), "--date", "2026-12-01")
-		assertFocusExit(t, err, 1, "later than today")
+		assertFocusExit(t, err, 2, "later than today")
 	})
 	t.Run("ok", func(t *testing.T) {
 		newSelFixture(t)

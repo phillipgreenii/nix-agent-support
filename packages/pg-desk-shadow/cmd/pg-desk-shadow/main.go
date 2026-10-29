@@ -29,11 +29,18 @@ import (
 	"github.com/phillipgreenii/pg-desk-shadow/internal/shim"
 )
 
-// Exit codes.
+// Exit codes (docs/runbooks/pg-desk-shadow-compare.md). 1 is the generic,
+// unexpected error and carries no branchable meaning (ADR 0042: 1 unexpected,
+// 2 usage, 3 and up specific). exitKill is returned ONLY for a kill verdict:
+// a kill criterion the collector tripped (collector.ErrKill), or a sandbox
+// denial seen by a one-shot command (adapter-exercise, exec), which is the
+// same criterion; any other collector error is exitError.
 const (
-	exitOK     = 0
-	exitRefuse = 2
-	exitKill   = 4
+	exitOK      = 0
+	exitError   = 1 // unexpected: read the message
+	exitUsage   = 2 // a flag or argument error, a missing required flag, an unknown command
+	exitRefused = 3 // refused to start: the scratch directory or its environment failed a check
+	exitKill    = 4 // a kill criterion tripped
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -53,7 +60,7 @@ commands:
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(stderr, usage)
-		return exitRefuse
+		return exitUsage
 	}
 	switch args[0] {
 	case "prepare":
@@ -75,7 +82,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 	_, _ = fmt.Fprintf(stderr, "pg-desk-shadow: unknown command %q\n%s", args[0], usage)
-	return exitRefuse
+	return exitUsage
 }
 
 func newFlags(name string, stderr io.Writer) *flag.FlagSet {
@@ -102,15 +109,15 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 	var toolDirs string
 	fs.StringVar(&toolDirs, "tool-dir", "", "comma-separated extra directories searched for tools after PATH")
 	if err := fs.Parse(args); err != nil {
-		return exitRefuse
+		return exitUsage
 	}
 	if o.Root == "" {
 		_, _ = fmt.Fprintln(stderr, "pg-desk-shadow prepare: --scratch is required")
-		return exitRefuse
+		return exitUsage
 	}
 	if err := scratch.ValidateDaemonPoints(o.DaemonPointsPerHour); err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow prepare: --daemon-points-per-hour: %v\n", err)
-		return exitRefuse
+		return exitUsage
 	}
 	o.Queries = strings.Split(queries, ",")
 	if toolDirs != "" {
@@ -122,7 +129,7 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 	l, m, err := prepare.Prepare(ctx, o)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow prepare: %v\n", collector.Scrub(err.Error(), m.Scrub))
-		return exitRefuse
+		return exitError
 	}
 	_, _ = fmt.Fprintf(stdout, "prepared %s (phase %s, seeded %v, bd mode %s)\n", l.Root, m.Phase, m.Seeded, m.BDMode)
 	return exitOK
@@ -160,27 +167,27 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	fs.IntVar(&cfg.MaxTicks, "max-ticks", 0, "stop after this many executed ticks (0 = run until stopped)")
 	noScan := fs.Bool("no-denial-log-scan", false, "do not read the system log for sandbox denials")
 	if err := fs.Parse(args); err != nil {
-		return exitRefuse
+		return exitUsage
 	}
 	if root == "" {
 		_, _ = fmt.Fprintln(stderr, "pg-desk-shadow run: --scratch is required")
-		return exitRefuse
+		return exitUsage
 	}
 	l, m, r, err := load(root)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	unlock, err := collector.Lock(l)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	defer unlock()
 	logf, err := os.OpenFile(l.CollectorLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: %v\n", err)
-		return exitRefuse
+		return exitError
 	}
 	defer func() { _ = logf.Close() }()
 	cfg.Layout, cfg.Manifest, cfg.Exec = l, m, r
@@ -196,26 +203,26 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	dm, closeDaemonLog, err := newDaemon(l, m, r, cfg.Log)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: daemon: %s\n", collector.Scrub(err.Error(), m.Scrub))
-		return exitRefuse
+		return exitRefused
 	}
 	defer closeDaemonLog()
 	cfg.Daemon = dm
 	c, err := collector.New(cfg)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: %v\n", err)
-		return exitRefuse
+		return exitError
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := c.SelfCheck(ctx); err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	// The daemon child: started (and waited for) before the first slot, stopped
 	// when this function returns for any reason, including a signal.
 	if err := dm.Start(ctx); err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: daemon: %s\n", collector.Scrub(err.Error(), m.Scrub))
-		return exitRefuse
+		return exitRefused
 	}
 	defer func() {
 		if err := dm.Stop(); err != nil {
@@ -224,18 +231,26 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}()
 	if err := c.Recover(ctx); err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: resume: %v\n", err)
-		return exitRefuse
+		return exitError
 	}
-	err = c.Run(ctx, fileExists(l.StateFile()))
+	return runExit(c.Run(ctx, fileExists(l.StateFile())), stderr, m.Scrub)
+}
+
+// runExit maps the collector's Run result to the process exit code and
+// prints its one stderr line: nil is exitOK; a kill criterion
+// (collector.ErrKill, wrapped) is exitKill with a "KILL:" line; any other
+// error is exitError (an unexpected failure, not a kill verdict). scrub is the
+// manifest's list of strings to blank from the message.
+func runExit(err error, stderr io.Writer, scrub []string) int {
 	switch {
 	case err == nil:
 		return exitOK
 	case errors.Is(err, collector.ErrKill):
-		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: KILL: %v\n", collector.Scrub(err.Error(), m.Scrub))
+		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: KILL: %v\n", collector.Scrub(err.Error(), scrub))
 		return exitKill
 	}
-	_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: %v\n", collector.Scrub(err.Error(), m.Scrub))
-	return exitKill
+	_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: %v\n", collector.Scrub(err.Error(), scrub))
+	return exitError
 }
 
 // killLimit is the run's spend kill ceiling: an explicit --kill-points-per-hour
@@ -278,16 +293,16 @@ func cmdProbe(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("probe", stderr)
 	root := fs.String("scratch", "", "prepared scratch directory")
 	if err := fs.Parse(args); err != nil {
-		return exitRefuse
+		return exitUsage
 	}
 	l, m, _, err := load(*root)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "probe: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	if err := safety.SelfTest(context.Background(), m.SandboxExec, safety.Resolve(l.Root), l.TmpDir()); err != nil {
 		_, _ = fmt.Fprintf(stderr, "probe: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	_, _ = fmt.Fprintln(stdout, "probe ok: sandbox denies a write outside the scratch directory and allows the permitted ones")
 	return exitOK
@@ -297,27 +312,27 @@ func cmdAdapter(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("adapter-exercise", stderr)
 	root := fs.String("scratch", "", "prepared scratch directory")
 	if err := fs.Parse(args); err != nil {
-		return exitRefuse
+		return exitUsage
 	}
 	l, m, r, err := load(*root)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "adapter-exercise: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	bin := filepath.Join(l.BinDir(), "pg-router-source-pg-desk")
 	if !fileExists(bin) {
 		_, _ = fmt.Fprintln(stderr, "adapter-exercise: pg-router-source-pg-desk was not found at prepare time")
-		return exitRefuse
+		return exitRefused
 	}
 	res, err := r.Run(context.Background(), 5*time.Minute, bin, "pr", "--consumer", "shadow-adapter", "--limit", "5")
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "adapter-exercise: %v\n", collector.Scrub(err.Error(), m.Scrub))
-		return exitRefuse
+		return exitError
 	}
 	var items []map[string]any
 	if jerr := json.Unmarshal([]byte(res.Stdout), &items); jerr != nil {
 		_, _ = fmt.Fprintf(stderr, "adapter-exercise: exit %d, output is not a JSON array: %s\n", res.Exit, collector.Scrub(res.Stderr, m.Scrub))
-		return exitRefuse
+		return exitError
 	}
 	_, _ = fmt.Fprintf(stdout, "adapter-exercise ok: exit %d, %d item(s), denied=%v\n", res.Exit, len(items), res.Denied)
 	if res.Denied {
@@ -334,18 +349,18 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	liveStore := fs.String("live-store", "", "live store for the optional head-SHA comparison")
 	selftest := fs.Bool("selftest", false, "run the whole pipeline on synthetic logs")
 	if err := fs.Parse(args); err != nil {
-		return exitRefuse
+		return exitUsage
 	}
 	if *selftest {
 		if err := report.SelfTest(stdout); err != nil {
 			_, _ = fmt.Fprintln(stderr, err)
-			return exitRefuse
+			return exitError
 		}
 		return exitOK
 	}
 	if *root == "" {
 		_, _ = fmt.Fprintln(stderr, "pg-desk-shadow report: --scratch is required")
-		return exitRefuse
+		return exitUsage
 	}
 	dirs := []string{*root}
 	if *combine != "" {
@@ -356,7 +371,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	rep, err := report.Build(dirs, p)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow report: %v\n", err)
-		return exitRefuse
+		return exitError
 	}
 	dir := *out
 	if dir == "" {
@@ -365,7 +380,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	jp, mp, err := report.Write(rep, dir)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow report: %v\n", err)
-		return exitRefuse
+		return exitError
 	}
 	_, _ = fmt.Fprintf(stdout, "wrote %s and %s\n", mp, jp)
 	return exitOK
@@ -406,22 +421,22 @@ func cmdExec(args []string, stdout, stderr io.Writer) int {
 	root := fs.String("scratch", "", "prepared scratch directory")
 	timeout := fs.Duration("timeout", 2*time.Minute, "deadline")
 	if err := fs.Parse(args); err != nil {
-		return exitRefuse
+		return exitUsage
 	}
 	argv := fs.Args()
 	if len(argv) == 0 {
 		_, _ = fmt.Fprintln(stderr, "exec: a command is required after the flags")
-		return exitRefuse
+		return exitUsage
 	}
 	_, _, r, err := load(*root)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "exec: %v\n", err)
-		return exitRefuse
+		return exitRefused
 	}
 	res, err := r.Run(context.Background(), *timeout, argv...)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "exec: %v\n", err)
-		return exitRefuse
+		return exitError
 	}
 	_, _ = io.WriteString(stdout, res.Stdout)
 	_, _ = io.WriteString(stderr, res.Stderr)

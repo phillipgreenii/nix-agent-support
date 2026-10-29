@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -26,10 +27,12 @@ import (
 // of their own; the run record (focus_run row plus one structured stderr
 // line) is the whole of what a verb leaves behind (see focus_run.go).
 
-// exitPeriodClosed is the focus-only exit code for "the addressed period is
-// closed". 4 (head-check's), 5 (the retired df-pull code) and 7 (removed by
-// ruling RV-A) are never used by a focus verb.
-const exitPeriodClosed = 6
+// The focus exit codes are the focus.Exit* constants (internal/focus/lock.go):
+// 0 ok, 1 an unexpected error (no branchable meaning), 2 usage, 3 total
+// failure, 6 period closed, 8 partial. 4 (head-check's), 5 (the retired
+// df-pull code) and 7 (removed by ruling RV-A) are never used by a focus verb.
+// The focus scheme is not the typed verbs' (typed.go): their partial is 2.
+const exitPeriodClosed = focus.ExitPeriodClosed
 
 // focusContract is the contract string every focus --json output carries in
 // its `contract` member, the convention show.md's own contract follows.
@@ -76,8 +79,8 @@ func focusGroup() *cobra.Command {
 period (a day), kept in the pg-desk store.
 
 Every verb addresses ONE period: --date, else today in focus.time_zone. The
-exit codes are pg-desk's own scheme: 0 ok, 1 usage error or a store not yet
-migrated, 2 partial, 3 total failure, 6 period closed. Every non-zero exit
+exit codes: 0 ok, 1 unexpected error, 2 usage error or a store not yet
+migrated, 3 total failure, 6 period closed, 8 partial. Every non-zero exit
 prints a one-line remedy on stderr. --json (or PG_DESK_OUTPUT=json) prints one
 object whose contract member is "` + focusContract + `".
 
@@ -106,7 +109,7 @@ Jira candidates.`,
   pg-desk focus replan
   pg-desk focus pull --top 2
   echo '{"summary": "shipped the fix"}' | pg-desk focus close`,
-		Args: cobra.NoArgs,
+		Args: focusUsageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}
 	rootCmd.AddCommand(focusGroupCmd)
@@ -139,20 +142,41 @@ func focusOneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-// focusUsageError is exit 1: a usage or flag error, a malformed reply or
+// focusUsageError is exit 2: a usage or flag error, a malformed reply or
 // stdin, a store that is not migrated for the focus tables. msg names the
 // problem, remedy the one-line way out.
 func focusUsageError(msg, remedy string) error {
-	return &focusError{code: 1, msg: msg, remedy: remedy}
+	return &focusError{code: focus.ExitUsage, msg: msg, remedy: remedy}
 }
 
-// focusPartialError is exit 2 and focusTotalError exit 3, with a remedy.
+// focusPartialError is exit 8 and focusTotalError exit 3, with a remedy.
 func focusPartialError(msg, remedy string) error {
-	return &focusError{code: exitPartial, msg: msg, remedy: remedy}
+	return &focusError{code: focus.ExitPartial, msg: msg, remedy: remedy}
 }
 
 func focusTotalError(msg, remedy string) error {
-	return &focusError{code: exitTotal, msg: msg, remedy: remedy}
+	return &focusError{code: focus.ExitTotal, msg: msg, remedy: remedy}
+}
+
+// focusUsageArgs wraps a cobra positional-argument validator so that its
+// error (an unexpected argument, an unknown verb) is a usage error, exit 2,
+// with a remedy, instead of the bare cobra error main would exit 1 on. An
+// error that already carries a focus code is returned unchanged.
+func focusUsageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
+	if validate == nil {
+		return nil
+	}
+	return func(cmd *cobra.Command, args []string) error {
+		err := validate(cmd, args)
+		if err == nil {
+			return nil
+		}
+		var fe *focusError
+		if errors.As(err, &fe) {
+			return err
+		}
+		return focusUsageError(err.Error(), "see "+cmd.CommandPath()+" --help")
+	}
 }
 
 // focusPeriodClosedError is exit 6: the addressed period is closed. The
@@ -167,7 +191,8 @@ func focusPeriodClosedError(periodKey string) error {
 }
 
 // focusExitCode is the exit code of err under the focus scheme: the code of
-// the first error in the chain that carries one, else 1.
+// the first error in the chain that carries one, else 1 (an unexpected
+// error, which carries no branchable meaning).
 func focusExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -192,8 +217,10 @@ func ensureFocusRemedy(err error, remedy string) error {
 // addFocusFlags registers the flags every focus verb shares on c and makes
 // its errors single-line: --date, --period (accepted for the day it names and
 // hidden from help until a second value exists) and --json. A flag-parse
-// error becomes a usage error with a remedy.
+// error, and an error of the verb's positional-argument validator, becomes a
+// usage error with a remedy (exit 2, not the bare cobra error's 1).
 func addFocusFlags(c *cobra.Command) {
+	c.Args = focusUsageArgs(c.Args)
 	c.Flags().String(focusFlagDate, "", "Period day YYYY-MM-DD (default: today in focus.time_zone)")
 	c.Flags().String(focusFlagPeriod, focusPeriodTypeDay, "Period type (only \"day\" is implemented)")
 	_ = c.Flags().MarkHidden(focusFlagPeriod)

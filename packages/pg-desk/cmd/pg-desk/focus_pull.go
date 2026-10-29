@@ -26,10 +26,10 @@ import (
 // and what is left to pull, nothing written). Pull is uncapped.
 //
 // Check order (the exit code a run takes is the first failing check): usage
-// and flag errors (exit 1), period closed (6), a pull into a future period or
-// into a period that has no rows while another period holds rows (1; the same
+// and flag errors (exit 2), period closed (6), a pull into a future period or
+// into a period that has no rows while another period holds rows (2; the same
 // checks run again inside the pull's transaction), the request (3 when no
-// named key has an entity row at all), then the writes (3, 2 partial, 0).
+// named key has an entity row at all), then the writes (3, 8 partial, 0).
 //
 // Output: the CHANGES block of select (focus.RenderChanges) over the rows
 // selected; each routine skip is one stderr line `skip <key>: <reason>`;
@@ -74,13 +74,13 @@ runs unless struck. Nothing is minted here: pull writes selection state and
 the focus_selected annotation the decider reacts to.
 
 A pull never replaces a plan: into a period that has no rows while another
-period holds rows it is exit 1 (lock today's plan first: run show, then
+period holds rows it is exit 2 (lock today's plan first: run show, then
 select --apply), and so is a pull into a future period.
 
-Exit codes: 0 done (including nothing left to pull and routine skips), 1 usage
-or the no-plan and future-period cases, 2 rows committed but an annotation
-write failed (run select --repair), 3 a store write failed or no named key has
-an entity row, 6 period closed.`,
+Exit codes: 0 done (including nothing left to pull and routine skips), 1 an
+unexpected error, 2 usage or the no-plan and future-period cases, 3 a store
+write failed or no named key has an entity row, 6 period closed, 8 rows
+committed but an annotation write failed (run select --repair).`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusPull(cmd, args) },
 		// The keys complete from the store's candidates not yet in the plan
@@ -103,7 +103,7 @@ type pullRun struct {
 }
 
 // finish ends the run with err's exit code when no row-writing path did: a
-// writing run still writes its focus_run row (exit 1, 3 and 6 are counted by
+// writing run still writes its focus_run row (exit 2, 3 and 6 are counted by
 // the run statistics), then prints the stderr line.
 func (p *pullRun) finish(err error) error {
 	if p.done {

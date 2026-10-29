@@ -32,8 +32,8 @@ import (
 // be amended or reopened this phase.
 //
 // Check order (the exit code a run takes is the first failing check): usage
-// and flag errors (1: --period, --date, a malformed stdin, a --date later than
-// today), then the store (1 when not migrated), then the closed-period
+// and flag errors (2: --period, --date, a malformed stdin, a --date later than
+// today), then the store (2 when not migrated), then the closed-period
 // comparison (0 or 6), then the write (3).
 //
 // Output: one text line, `closed <date>` or `already closed <date> (same
@@ -76,9 +76,10 @@ is kept and the message names when the day was closed. A closed day cannot be
 amended or reopened. --dry-run reports the resolved close_note and writes
 nothing, not even the period row.
 
-Exit codes: 0 closed (or already closed with the same summary), 1 usage
-(malformed stdin, a --date later than today, a store not yet migrated), 3 a
-store write failed, 6 already closed with a different summary.`,
+Exit codes: 0 closed (or already closed with the same summary), 1 an
+unexpected error, 2 usage (malformed stdin, a --date later than today, a store
+not yet migrated), 3 a store write failed, 6 already closed with a different
+summary.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusClose(cmd) },
 	}
@@ -97,7 +98,7 @@ type closeRun struct {
 }
 
 // finish ends the run with err's exit code when the write path did not: a
-// writing run still writes its focus_run row (exit 1, 3 and 6 are counted by
+// writing run still writes its focus_run row (exit 2, 3 and 6 are counted by
 // the run statistics), then prints the stderr line.
 func (c *closeRun) finish(err error) error {
 	if c.done {

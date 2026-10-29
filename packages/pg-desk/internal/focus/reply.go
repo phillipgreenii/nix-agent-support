@@ -31,7 +31,7 @@ import (
 
 // ErrUsage is the sentinel every usage problem of this package wraps (match
 // it with errors.Is). The verbs map it to the scaffold's focusUsageError
-// (exit 1, no state changed).
+// (exit 2, no state changed).
 var ErrUsage = errors.New("focus: usage error")
 
 // UsageError is a usage problem with a one-line remedy. It matches ErrUsage.

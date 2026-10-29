@@ -723,6 +723,9 @@ func TestFocusRunInsertAndFinalize(t *testing.T) {
 	}
 }
 
+// TestFocusRunStats reads rows written before the exit-code migration (no
+// counts_json.exit_scheme): scheme 1, where 1 was usage and 2 partial.
+// TestFocusRunStatsReadsEachRowUnderItsExitScheme covers scheme 2.
 func TestFocusRunStats(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	i := func(n int) *int { return &n }
@@ -772,6 +775,56 @@ func TestFocusRunStats(t *testing.T) {
 	empty, err := OpenNewSchemaForTest(t).FocusRunStats()
 	if err != nil || len(empty.ByVerbOutcome) != 0 || empty.LastSelectAt != "" || empty.LastLockDraftAgeSeconds != nil || empty.LastLockDriftRows != nil {
 		t.Errorf("stats of a store with no runs = %+v, %v", empty, err)
+	}
+}
+
+// A row carrying counts_json.exit_scheme 2 (every row finalized after the
+// exit-code migration, bead pg2-rfxl3y) is read under scheme 2: 1 is an
+// unexpected error (counted total, never usage), 2 usage, 3 total, 6
+// period_closed, 8 partial. A row without the member, or with an unreadable
+// one, keeps its scheme-1 reading, so the history is not re-labelled.
+func TestFocusRunStatsReadsEachRowUnderItsExitScheme(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	i := func(n int) *int { return &n }
+	const v2 = `{"selected":1,"exit_scheme":2}`
+	runs := []FocusRun{
+		{RunID: "n1", Verb: "pull", ExitCode: i(1), CountsJSON: v2},                       // unexpected: total
+		{RunID: "n2", Verb: "pull", ExitCode: i(2), CountsJSON: v2},                       // usage
+		{RunID: "n3", Verb: "pull", ExitCode: i(8), CountsJSON: v2},                       // partial
+		{RunID: "n4", Verb: "pull", ExitCode: i(3), CountsJSON: v2},                       // total
+		{RunID: "n5", Verb: "pull", ExitCode: i(6), CountsJSON: v2},                       // period_closed
+		{RunID: "n6", Verb: "pull", ExitCode: i(0), CountsJSON: v2},                       // ok
+		{RunID: "n7", Verb: "pull", ExitCode: i(4), CountsJSON: v2},                       // outside the scheme: total
+		{RunID: "o1", Verb: "close", ExitCode: i(1), CountsJSON: `{}`},                    // scheme 1: usage
+		{RunID: "o2", Verb: "close", ExitCode: i(2), CountsJSON: `{}`},                    // scheme 1: partial
+		{RunID: "o3", Verb: "close", ExitCode: i(8), CountsJSON: `{}`},                    // scheme 1 never had 8: total
+		{RunID: "o4", Verb: "close", ExitCode: i(2), CountsJSON: `{"exit_scheme":"two"}`}, // unreadable member: scheme 1, partial
+		{RunID: "o5", Verb: "close", ExitCode: i(2), CountsJSON: `not json`},              // undecodable: scheme 1, partial
+	}
+	for _, r := range runs {
+		r.Actor, r.StartedAt = "op", "2026-10-28T08:00:00Z"
+		if _, err := s.FocusRunInsert(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := s.FocusRunStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[[2]string]int{
+		{"pull", "total"}: 3, {"pull", "usage"}: 1, {"pull", "partial"}: 1, {"pull", "period_closed"}: 1, {"pull", "ok"}: 1,
+		{"close", "usage"}: 1, {"close", "partial"}: 3, {"close", "total"}: 1,
+	}
+	if len(st.ByVerbOutcome) != len(want) {
+		t.Errorf("ByVerbOutcome = %v, want %v", st.ByVerbOutcome, want)
+	}
+	for k, n := range want {
+		if st.ByVerbOutcome[k] != n {
+			t.Errorf("ByVerbOutcome[%v] = %d, want %d (all: %v)", k, st.ByVerbOutcome[k], n, st.ByVerbOutcome)
+		}
+	}
+	if FocusExitScheme != 2 || FocusExitSchemeMember != "exit_scheme" {
+		t.Errorf("FocusExitScheme = %d, member %q; the run record's marker is pinned to 2 / exit_scheme", FocusExitScheme, FocusExitSchemeMember)
 	}
 }
 

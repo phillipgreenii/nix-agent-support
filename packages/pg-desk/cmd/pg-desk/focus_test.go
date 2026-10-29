@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	_ "modernc.org/sqlite" // same driver internal/store registers
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -24,7 +26,8 @@ var focusFixedNow = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 // the real verbs use, in the spec's check order. It lives in the test only:
 // production registers no verb in this packet.
 //
-//	--exit 0|1|2|3   the exit the stub reports (0 and 2 print the table)
+//	--exit 0|1|2|3|8 the exit the stub reports (0 and 8 print the table; 1 is
+//	                 a bare error, the unexpected case)
 //	--readonly       the stub is a reading verb (no NOTE, no run row)
 //	--dry-run        the stub writes no run row
 func newStubFocusVerb() *cobra.Command {
@@ -63,13 +66,15 @@ func newStubFocusVerb() *cobra.Command {
 				if err := printFocusJSON(cmd.OutOrStdout(), "stubverb", map[string]any{"period": env.Period.Key}, runID); err != nil {
 					return finish(err)
 				}
-			} else if exit == 0 || exit == 2 {
+			} else if exit == 0 || exit == 8 {
 				fmt.Fprintf(cmd.OutOrStdout(), "TABLE %s\n", env.Period.Key)
 			}
 			switch exit {
 			case 1:
-				return finish(focusUsageError("stub usage problem", "fix the stub and re-run"))
+				return finish(ensureFocusRemedy(errors.New("stub bug: an unplanned failure"), "report the stub bug"))
 			case 2:
+				return finish(focusUsageError("stub usage problem", "fix the stub and re-run"))
+			case 8:
 				return finish(focusPartialError("stub partial", "re-run the stub"))
 			case 3:
 				return finish(focusTotalError("stub total failure", "check the stub store"))
@@ -189,11 +194,11 @@ func TestFocusSharedFlagsAndHiddenPeriod(t *testing.T) {
 	// Anything else is a usage error with a remedy.
 	for _, bad := range []string{"week", "sprint", "month", ""} {
 		_, _, err := runFocusVerb(t, "--period", bad)
-		assertFocusExit(t, err, 1, "--period")
+		assertFocusExit(t, err, 2, "--period")
 	}
 	// An unknown flag is a usage error with a remedy too.
 	_, _, err = runFocusVerb(t, "--nope")
-	assertFocusExit(t, err, 1, "stubverb --help")
+	assertFocusExit(t, err, 2, "stubverb --help")
 }
 
 // assertFocusExit checks the exit code and that the error is the one-line
@@ -218,11 +223,11 @@ func assertFocusExit(t *testing.T, err error, code int, want string) {
 	}
 }
 
-// Traces INV-FOCUS-5: an unmigrated store is refused with exit 1 and nothing applied.
+// Traces INV-FOCUS-5: an unmigrated store is refused with exit 2 (usage) and nothing applied.
 func TestFocusUnmigratedStoreRefusal(t *testing.T) {
 	f := newFocusFixture(t, "old")
 	_, stderr, err := runFocusVerb(t)
-	assertFocusExit(t, err, 1, "not migrated for the focus tables")
+	assertFocusExit(t, err, 2, "not migrated for the focus tables")
 	if !strings.Contains(err.Error(), "pg-desk migrate --cutover") {
 		t.Errorf("refusal must name the way out, got %q", err)
 	}
@@ -267,7 +272,7 @@ func TestFocusNoteForNonTodayDateOnWritingVerbs(t *testing.T) {
 	}
 	// An unparseable date is a usage error and prints nothing else.
 	_, _, err = runFocusVerb(t, "--date", "tomorrow")
-	assertFocusExit(t, err, 1, `--date "tomorrow"`)
+	assertFocusExit(t, err, 2, `--date "tomorrow"`)
 }
 
 // Traces INV-FOCUS-1: the addressed period never comes from a stored draft.
@@ -326,7 +331,7 @@ func TestResolveFocusPeriod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p, today, err := resolveFocusPeriod(newCmd(tc.args...), tc.cfg, now)
 			if tc.wantErr {
-				assertFocusExit(t, err, 1, "")
+				assertFocusExit(t, err, 2, "")
 				return
 			}
 			if err != nil {
@@ -401,8 +406,9 @@ func TestDraftPredicates(t *testing.T) {
 }
 
 // TestFocusExitCodes is the verb x documented-code table. It grows with each
-// verb packet; this packet covers what exists: usage, an unmigrated store, a
-// closed period, partial and total failure, for the stub verb.
+// verb packet; this packet covers what exists: an unexpected error, usage
+// (including an unexpected positional argument), an unmigrated store, a closed
+// period, partial and total failure, for the stub verb.
 //
 // Traces INV-FOCUS-3, INV-FOCUS-4: the exit codes, and one stderr line naming the problem and the way out.
 func TestFocusExitCodes(t *testing.T) {
@@ -430,11 +436,13 @@ func TestFocusExitCodes(t *testing.T) {
 		wantRemedy string // substring of the stderr remedy; "" for exit 0
 	}{
 		{name: "ok", kind: "new", wantCode: 0, wantTable: true},
-		{name: "usage: stub reports usage", kind: "new", args: []string{"--exit", "1"}, wantCode: 1, wantRemedy: "fix the stub"},
-		{name: "usage: period week", kind: "new", args: []string{"--period", "week"}, wantCode: 1, wantRemedy: "pass --period day"},
-		{name: "usage: bad date", kind: "new", args: []string{"--date", "x"}, wantCode: 1, wantRemedy: "pass --date YYYY-MM-DD"},
-		{name: "usage: unmigrated store", kind: "old", wantCode: 1, wantRemedy: "pg-desk migrate --cutover"},
-		{name: "partial", kind: "new", args: []string{"--exit", "2"}, wantCode: 2, wantTable: true, wantRemedy: "re-run"},
+		{name: "unexpected: a bare error", kind: "new", args: []string{"--exit", "1"}, wantCode: 1, wantRemedy: "report the stub bug"},
+		{name: "usage: stub reports usage", kind: "new", args: []string{"--exit", "2"}, wantCode: 2, wantRemedy: "fix the stub"},
+		{name: "usage: period week", kind: "new", args: []string{"--period", "week"}, wantCode: 2, wantRemedy: "pass --period day"},
+		{name: "usage: bad date", kind: "new", args: []string{"--date", "x"}, wantCode: 2, wantRemedy: "pass --date YYYY-MM-DD"},
+		{name: "usage: unexpected argument", kind: "new", args: []string{"extra"}, wantCode: 2, wantRemedy: "see pg-desk focus stubverb --help"},
+		{name: "usage: unmigrated store", kind: "old", wantCode: 2, wantRemedy: "pg-desk migrate --cutover"},
+		{name: "partial", kind: "new", args: []string{"--exit", "8"}, wantCode: 8, wantTable: true, wantRemedy: "re-run"},
 		{name: "total failure", kind: "new", args: []string{"--exit", "3"}, wantCode: 3, wantRemedy: "check the stub store"},
 		{
 			name: "period closed", kind: "new", args: []string{"--date", "2026-10-09"}, wantCode: 6,
@@ -468,29 +476,68 @@ func TestFocusExitCodes(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-3: a focus verb exits with 0, 1, 2, 3 or 6 only.
-func TestFocusExitCodeVocabularyIsPinned(t *testing.T) {
-	if exitPeriodClosed != 6 {
-		t.Errorf("exitPeriodClosed = %d, want 6", exitPeriodClosed)
+// An unknown verb, or any argument to the bare group, is a usage error with
+// a remedy (exit 2), not the bare cobra error main would exit 1 on.
+//
+// Traces INV-FOCUS-3, INV-FOCUS-4: usage is 2, with one stderr line naming the way out.
+func TestFocusGroupUnknownVerbIsUsage(t *testing.T) {
+	// cobra keeps a flag's value between in-process executions: a `focus
+	// --help` run by an earlier test would otherwise turn this run into help.
+	if h := focusGroup().Flags().Lookup("help"); h != nil {
+		_ = h.Value.Set("false")
 	}
-	for name, err := range map[string]error{
-		"usage":   focusUsageError("m", "r"),
-		"partial": focusPartialError("m", "r"),
-		"total":   focusTotalError("m", "r"),
-		"closed":  focusPeriodClosedError("2026-10-09"),
+	var out bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&out)
+	rootCmd.SetArgs([]string{"focus", "nosuchverb"})
+	t.Cleanup(func() { rootCmd.SetOut(nil); rootCmd.SetErr(nil); rootCmd.SetArgs(nil) })
+	err := rootCmd.ExecuteContext(context.Background())
+	assertFocusExit(t, err, 2, "see pg-desk focus --help")
+}
+
+// Traces INV-FOCUS-3: a focus verb exits with 0, 1, 2, 3, 6 or 8 only, 1 is
+// only ever the unexpected error, and 4, 5 and 7 are never used.
+func TestFocusExitCodeVocabularyIsPinned(t *testing.T) {
+	for name, c := range map[string]struct{ got, want int }{
+		"focus.ExitOK":           {focus.ExitOK, 0},
+		"focus.ExitUnexpected":   {focus.ExitUnexpected, 1},
+		"focus.ExitUsage":        {focus.ExitUsage, 2},
+		"focus.ExitTotal":        {focus.ExitTotal, 3},
+		"focus.ExitPeriodClosed": {focus.ExitPeriodClosed, 6},
+		"focus.ExitPartial":      {focus.ExitPartial, 8},
+		"exitPeriodClosed":       {exitPeriodClosed, 6},
 	} {
-		switch c := exitCodeFor(err); c {
-		case 1, 2, 3, 6:
-		default:
-			t.Errorf("%s error exits %d, outside the focus vocabulary 0/1/2/3/6", name, c)
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", name, c.got, c.want)
 		}
 	}
-	if got := exitCodeFor(focusUsageError("m", "r")); got != 1 {
-		t.Errorf("usage = %d", got)
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"usage":      {focusUsageError("m", "r"), 2},
+		"partial":    {focusPartialError("m", "r"), 8},
+		"total":      {focusTotalError("m", "r"), 3},
+		"closed":     {focusPeriodClosedError("2026-10-09"), 6},
+		"unexpected": {ensureFocusRemedy(errors.New("boom"), "r"), 1},
+	} {
+		got := exitCodeFor(tc.err)
+		if got != tc.want {
+			t.Errorf("%s error exits %d, want %d", name, got, tc.want)
+		}
+		switch got {
+		case 1, 2, 3, 6, 8:
+		default:
+			t.Errorf("%s error exits %d, outside the focus vocabulary 0/1/2/3/6/8", name, got)
+		}
+	}
+	// A bare error with no focus code is the unexpected case, exit 1.
+	if got := focusExitCode(errors.New("boom")); got != 1 {
+		t.Errorf("a bare error = %d, want 1 (unexpected)", got)
 	}
 	// ensureFocusRemedy keeps the code and adds a remedy to a bare error.
-	wrapped := ensureFocusRemedy(newExitError(exitTotal, fmt.Errorf("boom")), "look at the store")
-	if exitCodeFor(wrapped) != exitTotal || !strings.HasSuffix(wrapped.Error(), "; look at the store") {
+	wrapped := ensureFocusRemedy(newExitError(focus.ExitTotal, fmt.Errorf("boom")), "look at the store")
+	if exitCodeFor(wrapped) != focus.ExitTotal || !strings.HasSuffix(wrapped.Error(), "; look at the store") {
 		t.Errorf("ensureFocusRemedy = %q (exit %d)", wrapped, exitCodeFor(wrapped))
 	}
 	if got := ensureFocusRemedy(focusUsageError("m", "r"), "other"); got.Error() != "m; r" {
@@ -580,8 +627,9 @@ func TestFocusRunRowWrittenByStubVerbs(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{},                                    // ok
-		{"--exit", "1"},                       // usage
-		{"--exit", "2"},                       // partial
+		{"--exit", "1"},                       // unexpected: counted as total
+		{"--exit", "2"},                       // usage
+		{"--exit", "8"},                       // partial
 		{"--exit", "3"},                       // total failure, store writable
 		{"--date", "2026-10-09"},              // period closed
 		{"--readonly", "--date", "2026-10-9"}, // reading verb: no row
@@ -593,7 +641,7 @@ func TestFocusRunRowWrittenByStubVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FocusRunStats: %v", err)
 	}
-	for outcome, want := range map[string]int{"ok": 1, "usage": 1, "partial": 1, "total": 1, "period_closed": 1} {
+	for outcome, want := range map[string]int{"ok": 1, "usage": 1, "partial": 1, "total": 2, "period_closed": 1} {
 		if got := stats.ByVerbOutcome[[2]string{"select", outcome}]; got != want {
 			t.Errorf("runs{select,%s} = %d, want %d (all: %v)", outcome, got, want, stats.ByVerbOutcome)
 		}
@@ -602,8 +650,8 @@ func TestFocusRunRowWrittenByStubVerbs(t *testing.T) {
 	for _, n := range stats.ByVerbOutcome {
 		total += n
 	}
-	if total != 5 {
-		t.Errorf("focus_run rows = %d, want 5 (a reading verb and a dry run write none): %v", total, stats.ByVerbOutcome)
+	if total != 6 {
+		t.Errorf("focus_run rows = %d, want 6 (a reading verb and a dry run write none): %v", total, stats.ByVerbOutcome)
 	}
 }
 

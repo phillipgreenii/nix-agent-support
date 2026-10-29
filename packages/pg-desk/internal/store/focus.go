@@ -645,10 +645,12 @@ type FocusRunStats struct {
 // FocusRunStats reads the run statistics (spec section 8.2). The outcome
 // word is derived from each focus_run row: exit_code 0 is ok, except a select
 // whose counts_json.selected is 0 and whose counts_json.removed counts are all
-// zero, which is empty; 2 is partial; 3 or NULL (a crash left the run
-// unfinalised) is total; 6 is period_closed; 1 is usage. Any other code is
-// counted as total (fail closed). A row is written only by a non-dry-run, so
-// every row counts.
+// zero, which is empty; 2 is usage; 8 is partial; 6 is period_closed; 3, 1 (an
+// unexpected error) or NULL (a crash left the run unfinalised) is total. A row
+// finalized before the exit-code migration (no counts_json.exit_scheme, see
+// FocusExitScheme) is read under the old scheme, where 1 was usage and 2
+// partial. Any other code is counted as total (fail closed). A row is written
+// only by a non-dry-run, so every row counts.
 func (s *Store) FocusRunStats() (FocusRunStats, error) {
 	out := FocusRunStats{ByVerbOutcome: map[[2]string]int{}}
 	if err := s.RequireNewSchema(); err != nil {
@@ -691,26 +693,65 @@ func (s *Store) FocusRunStats() (FocusRunStats, error) {
 	return out, nil
 }
 
+// FocusExitScheme is the version of the focus exit-code scheme a run record
+// was finalized under, written as counts_json member FocusExitSchemeMember
+// by every finalize. Scheme 2 (bead pg2-rfxl3y): 0 ok, 1 unexpected, 2 usage,
+// 3 total, 6 period closed, 8 partial. A row without the member predates it
+// and was written under scheme 1: 0 ok, 1 usage, 2 partial, 3 total, 6
+// period closed. The codes are the focus package's focus.Exit* constants
+// (this package cannot import it).
+const (
+	FocusExitScheme       = 2
+	FocusExitSchemeMember = "exit_scheme"
+)
+
 // focusRunOutcome derives the outcome word of one run row.
 func focusRunOutcome(r FocusRun) string {
 	if r.ExitCode == nil {
 		return "total"
 	}
-	switch *r.ExitCode {
-	case 0:
+	code := *r.ExitCode
+	if code == 0 {
 		if r.Verb == "select" && focusRunIsEmpty(r.CountsJSON) {
 			return "empty"
 		}
 		return "ok"
-	case 1:
-		return "usage"
+	}
+	if focusRunExitScheme(r.CountsJSON) < FocusExitScheme {
+		switch code {
+		case 1:
+			return "usage"
+		case 2:
+			return "partial"
+		case 6:
+			return "period_closed"
+		}
+		return "total" // 3 and any code outside scheme 1
+	}
+	switch code {
 	case 2:
+		return "usage"
+	case 8:
 		return "partial"
 	case 6:
 		return "period_closed"
-	default: // 3 and any code outside the focus scheme
-		return "total"
 	}
+	return "total" // 3, 1 (unexpected) and any code outside the scheme
+}
+
+// focusRunExitScheme is the counts_json exit_scheme member, 1 when it is
+// absent or the document is undecodable (a row finalized before the member
+// existed).
+func focusRunExitScheme(countsJSON string) int {
+	var counts map[string]json.RawMessage
+	if json.Unmarshal([]byte(countsJSON), &counts) != nil {
+		return 1
+	}
+	var scheme int
+	if raw, ok := counts[FocusExitSchemeMember]; !ok || json.Unmarshal(raw, &scheme) != nil || scheme < 1 {
+		return 1
+	}
+	return scheme
 }
 
 // focusRunIsEmpty reports counts_json.selected == 0 and every

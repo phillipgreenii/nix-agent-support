@@ -23,7 +23,8 @@ prints and stores nothing. On a closed period it prints the plan and stores
 nothing. On a period with no plan it prints what show prints (the first plan is
 the degenerate replan). It never prompts and writes no run record.
 
-Exit codes are show's: 0, 2 (coverage incomplete), 3, 1.`,
+Exit codes are show's: 0, 8 (coverage incomplete), 3, 2 (usage), 1
+(unexpected).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusReplan(cmd) },
 	}

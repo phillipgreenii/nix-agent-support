@@ -351,12 +351,12 @@ func TestSelectCapFlagWithStoredDraftIsUsageError(t *testing.T) {
 	tabs := []string{"focus_selection", "focus_period", "focus_draft", "annotation"}
 	before := f.tables(t, tabs...)
 	_, _, err := sel(t, "ok", "--apply", "--cap", "2")
-	assertFocusExit(t, err, 1, "--cap cannot be used with an applicable stored draft")
+	assertFocusExit(t, err, 2, "--cap cannot be used with an applicable stored draft")
 	if f.tables(t, tabs...) != before {
 		t.Errorf("a usage error changed selection state")
 	}
-	if r := f.lastRun(t); !r.Exit.Valid || r.Exit.Int64 != 1 {
-		t.Errorf("run = %+v, want the usage error recorded as exit 1", r)
+	if r := f.lastRun(t); !r.Exit.Valid || r.Exit.Int64 != 2 {
+		t.Errorf("run = %+v, want the usage error recorded as exit 2", r)
 	}
 }
 
@@ -551,7 +551,7 @@ func (a failingFor) SetFocusSelected(repo, typ, id, value, origin, actor, at str
 	return a.inner.SetFocusSelected(repo, typ, id, value, origin, actor, at)
 }
 
-func TestSelectAnnotationFailureExitsTwoAndRepairMendsIt(t *testing.T) {
+func TestSelectAnnotationFailureExitsEightAndRepairMendsIt(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	f.pr(t, 2, "bravo", "2026-10-09T09:00:00Z")
@@ -559,7 +559,7 @@ func TestSelectAnnotationFailureExitsTwoAndRepairMendsIt(t *testing.T) {
 	f.useAnnotator(t, func(a focus.Annotator) focus.Annotator { return failingFor{inner: a, id: "o/r#2"} })
 
 	_, _, err := sel(t, "ok", "--apply")
-	assertFocusExit(t, err, 2, "select --repair")
+	assertFocusExit(t, err, 8, "select --repair")
 	if len(f.plan(t, showToday)) != 2 {
 		t.Fatalf("the rows did not commit")
 	}
@@ -567,8 +567,8 @@ func TestSelectAnnotationFailureExitsTwoAndRepairMendsIt(t *testing.T) {
 		t.Fatalf("the failed entity was annotated: %q", got)
 	}
 	r := f.lastRun(t)
-	if !r.Exit.Valid || r.Exit.Int64 != 2 {
-		t.Fatalf("run exit = %+v, want 2 recorded as partial", r.Exit)
+	if !r.Exit.Valid || r.Exit.Int64 != 8 {
+		t.Fatalf("run exit = %+v, want 8 recorded as partial", r.Exit)
 	}
 	failed := 0
 	for _, a := range r.Counts["annotations"].([]any) {
@@ -704,7 +704,7 @@ func TestLockOverDegradedSourceRecordsCoverage(t *testing.T) {
 	if err := f.st.SetMeta("change_flow.listing.pr.mine", string(v)); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _ = show(t) // exit 2: coverage incomplete, the draft is still stored
+	_, _, _ = show(t) // exit 8: coverage incomplete, the draft is still stored
 	_, _, err := sel(t, "ok", "--apply")
 	mustOK(t, err)
 	cov, _ := f.lastRun(t).Counts["coverage"].(map[string]any)
@@ -723,16 +723,16 @@ func TestCheckOrderIsUsageThenClosedThenReplyThenHydrationThenWrite(t *testing.T
 	h := &writingHydrator{st: f.st}
 	withHydrator(t, h)
 
-	// A malformed reply over a closed period is exit 6, not 1.
+	// A malformed reply over a closed period is exit 6, not 2.
 	_, _, err := sel(t, "bogus", "--apply", "--date", "2026-10-09")
 	assertFocusExit(t, err, 6, "period 2026-10-09 is closed")
 	// Over an open period the malformed reply is a usage error.
 	_, _, err = sel(t, "bogus", "--apply")
-	assertFocusExit(t, err, 1, "unrecognized token")
-	// A doomed run never hydrates: a first lock for a future date is exit 1
+	assertFocusExit(t, err, 2, "unrecognized token")
+	// A doomed run never hydrates: a first lock for a future date is exit 2
 	// before the hand-add of an unknown key would be hydrated.
 	_, _, err = sel(t, "ok +J-9", "--apply", "--date", "2026-10-11")
-	assertFocusExit(t, err, 1, "is in the future")
+	assertFocusExit(t, err, 2, "is in the future")
 	if h.calls != 0 {
 		t.Errorf("a doomed run hydrated %d keys", h.calls)
 	}
@@ -741,8 +741,8 @@ func TestCheckOrderIsUsageThenClosedThenReplyThenHydrationThenWrite(t *testing.T
 	for _, r := range f.runs(t) {
 		outcomes[r.Exit.Int64]++
 	}
-	if outcomes[6] != 1 || outcomes[1] != 2 {
-		t.Errorf("recorded exits = %v, want one 6 and two 1", outcomes)
+	if outcomes[6] != 1 || outcomes[2] != 2 {
+		t.Errorf("recorded exits = %v, want one 6 and two 2", outcomes)
 	}
 	if got := f.count(t, "focus_selection"); got != 0 {
 		t.Errorf("a doomed run wrote %d rows", got)
@@ -753,23 +753,23 @@ func TestFocusExitCodesSelect(t *testing.T) {
 	t.Run("period week", func(t *testing.T) {
 		newSelFixture(t)
 		_, _, err := sel(t, "ok", "--period", "week")
-		assertFocusExit(t, err, 1, "pass --period day")
+		assertFocusExit(t, err, 2, "pass --period day")
 	})
 	t.Run("empty reply", func(t *testing.T) {
 		f := newSelFixture(t)
 		f.pr(t, 1, "alpha", showAt)
 		_, _, err := sel(t, "", "--apply")
-		assertFocusExit(t, err, 1, "reply is empty")
+		assertFocusExit(t, err, 2, "reply is empty")
 	})
 	t.Run("unmigrated store", func(t *testing.T) {
 		newFocusFixture(t, "old")
 		_, _, err := sel(t, "ok", "--apply")
-		assertFocusExit(t, err, 1, "pg-desk migrate --cutover")
+		assertFocusExit(t, err, 2, "pg-desk migrate --cutover")
 	})
 	t.Run("repair takes no merge", func(t *testing.T) {
 		newSelFixture(t)
 		_, _, err := sel(t, "", "--repair", "--merge", "1=2")
-		assertFocusExit(t, err, 1, "--repair takes no --merge")
+		assertFocusExit(t, err, 2, "--repair takes no --merge")
 	})
 	t.Run("write failed outright", func(t *testing.T) {
 		f := newSelFixture(t)
@@ -829,7 +829,7 @@ func TestFirstLockOfALaterPeriodReplacesThePlan(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-24: an earlier or future first lock is exit 1; an empty one replaces nothing.
+// Traces INV-FOCUS-24: an earlier or future first lock is exit 2; an empty one replaces nothing.
 func TestFirstLockEarlierOrFutureIsUsageAndEmptyReplacesNothing(t *testing.T) {
 	f := newSelFixture(t)
 	a := f.pr(t, 1, "a", "2026-10-09T08:00:00Z")
@@ -837,9 +837,9 @@ func TestFirstLockEarlierOrFutureIsUsageAndEmptyReplacesNothing(t *testing.T) {
 	f.lock(t, showToday, 6, a)
 
 	_, _, err := sel(t, "ok", "--apply", "--date", "2026-10-09")
-	assertFocusExit(t, err, 1, "period 2026-10-09 is earlier than the current plan (2026-10-10); history is not rewritten")
+	assertFocusExit(t, err, 2, "period 2026-10-09 is earlier than the current plan (2026-10-10); history is not rewritten")
 	_, _, err = sel(t, "ok", "--apply", "--date", "2026-10-11")
-	assertFocusExit(t, err, 1, "period 2026-10-11 is in the future; plan it on the day")
+	assertFocusExit(t, err, 2, "period 2026-10-11 is in the future; plan it on the day")
 	if got := strings.Join(f.planKeys(t, showToday), ","); got != "o/r#1" {
 		t.Errorf("a refused first lock changed the plan: %s", got)
 	}
@@ -1069,7 +1069,7 @@ func TestMergeSelfIsUsageAndAbsorbedKeyAlreadyInThePlanStays(t *testing.T) {
 	f.pr(t, 1, "kept", "2026-10-09T08:00:00Z")
 	f.pr(t, 2, "absorbed", "2026-10-09T09:00:00Z")
 	_, _, err := sel(t, "ok", "--apply", "--merge", "1=1")
-	assertFocusExit(t, err, 1, "cannot merge")
+	assertFocusExit(t, err, 2, "cannot merge")
 	f.lock(t, showToday, 6, prKey(2))
 	_, _, err = sel(t, "ok", "--apply", "--merge", "1=2")
 	mustOK(t, err)

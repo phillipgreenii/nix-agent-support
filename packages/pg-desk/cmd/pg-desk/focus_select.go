@@ -27,8 +27,8 @@ import (
 // table and reads no reply.
 //
 // Check order (the exit code a run takes is the first failing check): usage
-// and flag errors (exit 1), period closed (6), reply (1), the first-lock rule
-// (1), hand-add hydration (1), then the writes (3, 2 partial, 0).
+// and flag errors (exit 2), period closed (6), reply (2), the first-lock rule
+// (2), hand-add hydration (2), then the writes (3, 8 partial, 0).
 //
 // Output (spec section 7.2 step 7): a preview prints the draft and then the
 // CHANGES block (focus.RenderChanges) and nothing else; --dry-run and --apply
@@ -101,11 +101,12 @@ Nothing is minted here: select writes selection state only.
 
 Exit codes:
   0  applied (or previewed)
-  1  usage (including a malformed reply and a first lock for an earlier or a
+  1  an unexpected error
+  2  usage (including a malformed reply and a first lock for an earlier or a
      future period) or a store not yet migrated
-  2  rows committed but an annotation write failed (run select --repair)
   3  a write failed outright
-  6  period closed`,
+  6  period closed
+  8  rows committed but an annotation write failed (run select --repair)`,
 		Example: `  # preview what an accepting reply would lock; nothing is written
   echo ok | pg-desk focus select --dry-run
 
@@ -115,7 +116,7 @@ Exit codes:
   # strike one entity, add another, and keep the first 4 rows
   echo "ok -1234 +ZZ-9 cap=4" | pg-desk focus select --apply
 
-  # re-write missing focus_selected annotations after exit 2
+  # re-write missing focus_selected annotations after exit 8
   pg-desk focus select --repair`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusSelect(cmd) },
@@ -194,7 +195,7 @@ type selectRun struct {
 }
 
 // finishEarly ends the run with err's exit code when no row-writing path did:
-// a non-dry run still writes its focus_run row (exit 1, 3 and 6 are counted by
+// a non-dry run still writes its focus_run row (exit 2, 3 and 6 are counted by
 // the run statistics), then prints the stderr line.
 func (s *selectRun) finishEarly(err error) error {
 	if s.done {
