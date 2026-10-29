@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
 	"github.com/spf13/cobra"
@@ -34,10 +35,19 @@ type showResult struct {
 	CreatedAt             string           `json:"created_at"`
 	SandboxEnabled        *int             `json:"sandbox_enabled"`
 	Trace                 []showTraceEntry `json:"trace,omitempty"`
+	// Filled only under --source tracker (omitted otherwise).
+	SettledBy        string `json:"settled_by,omitempty"`
+	Settlement       string `json:"settlement,omitempty"`
+	ConvertedAsk     *bool  `json:"converted_ask,omitempty"`
+	EngineVerdict    string `json:"engine_verdict,omitempty"`
+	DeliveredVerdict string `json:"delivered_verdict,omitempty"`
+	IsError          *bool  `json:"is_error,omitempty"`
+	DenialReason     string `json:"denial_reason,omitempty"`
 }
 
 func newShowCmd() *cobra.Command {
 	var format string
+	var src sourceFlags
 	cmd := &cobra.Command{
 		Use:   "show ID [ID ...]",
 		Short: "Show full details and rule-trace for logged decision rows",
@@ -48,15 +58,19 @@ Use --format=json for machine-readable output or --format=table
 (default) for a human-readable tabular view.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runShow(format, args)
+			if err := src.validate(); err != nil {
+				return err
+			}
+			runShow(format, args, src)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: json|table")
+	addSourceFlags(cmd, &src)
 	return cmd
 }
 
-func runShow(formatVal string, args []string) {
+func runShow(formatVal string, args []string, src sourceFlags) {
 	format := &formatVal
 
 	ids, err := parseIDs(args)
@@ -65,6 +79,16 @@ func runShow(formatVal string, args []string) {
 		os.Exit(1)
 	}
 
+	var results []showResult
+	if src.isTracker() {
+		results = showTrackerResults(src, ids)
+	} else {
+		results = showCetaResults(ids)
+	}
+	writeShow(*format, results)
+}
+
+func showCetaResults(ids []int) []showResult {
 	// show only ever reads rows/trace entries — it never writes to the ask
 	// log, so it opens read-only (pg2-cbihz).
 	store, err := asklog.NewReadOnlyStore(asklog.DefaultDBPath())
@@ -115,8 +139,11 @@ func runShow(formatVal string, args []string) {
 			})
 		}
 	}
+	return results
+}
 
-	switch *format {
+func writeShow(format string, results []showResult) {
+	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -152,4 +179,53 @@ func runShow(formatVal string, args []string) {
 		}
 		_ = w.Flush()
 	}
+}
+
+// showTrackerResults is show's --source tracker path: the ids are the
+// tracker's call_ids, and the rows come from its published views. show does not
+// replay: the engine trace belongs to the ceta.trace annotation, which the
+// miss-analysis packet renders.
+func showTrackerResults(src sourceFlags, ids []int) []showResult {
+	a := openTrackerOrExit(src)
+	defer func() { _ = a.Close() }()
+	rows, err := a.RowsByIDs(ids, loadTrackerLabels())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	results := make([]showResult, len(rows))
+	for i, r := range rows {
+		res := showResult{
+			ID:             r.CallID,
+			SessionID:      r.SessionID,
+			CWD:            r.CWD,
+			ToolName:       r.ToolName,
+			ToolInputJSON:  r.ToolInputJSON,
+			ToolSummary:    r.ToolSummary,
+			HookReason:     r.Reason,
+			Outcome:        r.Outcome,
+			Excluded:       r.Excluded,
+			ExcludedReason: r.Label.ExcludedReason,
+			CreatedAt:      time.UnixMilli(r.StartMs).UTC().Format(time.RFC3339),
+			SandboxEnabled: sandboxEnabledPtr(r.SandboxEnabled),
+
+			SettledBy:        r.SettledBy,
+			Settlement:       r.Settlement,
+			EngineVerdict:    r.EngineVerdict,
+			DeliveredVerdict: r.DeliveredVerdict,
+			IsError:          r.IsError,
+			DenialReason:     r.DenialReason,
+		}
+		conv := r.ConvertedAsk
+		res.ConvertedAsk = &conv
+		if r.HookDecision != nil {
+			res.HookDecision = *r.HookDecision
+		}
+		if r.CorrectDec != nil {
+			res.CorrectDec = *r.CorrectDec
+		}
+		res.CorrectDecExplanation = r.Label.CorrectDecExplanation
+		results[i] = res
+	}
+	return results
 }

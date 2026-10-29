@@ -1,0 +1,18 @@
+[
+  {
+    "key": "approved",
+    "count": 1
+  },
+  {
+    "key": "denied",
+    "count": 1
+  },
+  {
+    "key": "pending",
+    "count": 1
+  },
+  {
+    "key": "rejected",
+    "count": 1
+  }
+]

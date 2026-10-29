@@ -1,0 +1,1 @@
+{"schema":"tool-events/1","event_id":"b03","ts":1790000000103,"source":"ceta","kind":"ceta.verdict","session_id":"sess-b","tool_use_id":"tu-b1","data":{"verdict":"ask","delivered":"reject","reason":"network","rule":"net-guard","sandbox_enabled":true}}

@@ -1,0 +1,9 @@
+{"schema":"tool-events/1","event_id":"b01","ts":1790000000101,"source":"tracker","kind":"tracker.call_start","session_id":"sess-b","tool_use_id":"tu-b1","data":{"tool":"Bash","input":{"command":"curl example.invalid"},"cwd":"/"}}
+{"schema":"tool-events/1","event_id":"b02","ts":1790000000102,"source":"tracker","kind":"tracker.pre_tool","session_id":"sess-b","tool_use_id":"tu-b1","data":{"permission_mode":"dontAsk","tool_name":"Bash","cwd":"/nonexistent/example-repo"}}
+{"schema":"tool-events/1","event_id":"b04","ts":1790000000104,"source":"tracker","kind":"tracker.check","session_id":"sess-b","tool_use_id":"tu-b1","data":{"decision":"deny","hook":"PreToolUse","reason":"network"}}
+{"schema":"tool-events/1","event_id":"b05","ts":1790000000105,"source":"tracker","kind":"tracker.call_end","session_id":"sess-b","tool_use_id":"tu-b1","data":{"outcome":"refused","error":"network"}}
+{"schema":"tool-events/1","event_id":"b11","ts":1790000000111,"source":"tracker","kind":"tracker.call_start","session_id":"sess-b","tool_use_id":"tu-b2","data":{"tool":"Write","input":{"file_path":"/nonexistent/example-repo/x.txt","content":"hi"},"cwd":"/nonexistent/example-repo"}}
+{"schema":"tool-events/1","event_id":"b12","ts":1790000000112,"source":"tracker","kind":"tracker.pre_tool","session_id":"sess-b","tool_use_id":"tu-b2","data":{"permission_mode":"default","tool_name":"Write","cwd":"/nonexistent/example-repo"}}
+{"schema":"tool-events/1","event_id":"b13","ts":1790000000113,"source":"tracker","kind":"tracker.check","session_id":"sess-b","tool_use_id":"tu-b2","data":{"decision":"allow","reason":"rule"}}
+{"schema":"tool-events/1","event_id":"b14","ts":1790000000114,"source":"tracker","kind":"tracker.call_end","session_id":"sess-b","tool_use_id":"tu-b2","data":{"outcome":"ok"}}
+not json

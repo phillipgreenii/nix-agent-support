@@ -1,0 +1,4 @@
+ID  TOOL  SUMMARY          HOOK     OUTCOME   CORRECT  SANDBOX
+1   Bash  unknown-cmd-xyz  abstain  approved  -        -
+2   Bash  unknown-cmd-xyz  abstain  denied    -        -
+4   Bash  unknown-cmd-xyz  deny     rejected  -        -

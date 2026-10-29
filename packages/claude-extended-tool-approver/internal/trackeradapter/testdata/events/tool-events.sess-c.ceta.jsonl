@@ -1,0 +1,1 @@
+{"schema":"tool-events/1","event_id":"c01","ts":1790000000201,"source":"ceta","kind":"ceta.verdict","session_id":"sess-c","tool_use_id":"tu-c1","data":{"verdict":"abstain","delivered":"abstain","sandbox_enabled":false}}

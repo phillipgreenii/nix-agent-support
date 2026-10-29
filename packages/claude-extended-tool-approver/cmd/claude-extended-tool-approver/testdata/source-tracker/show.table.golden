@@ -1,0 +1,4 @@
+ID  TOOL   SUMMARY                                 HOOK     OUTCOME     CORRECT  SANDBOX
+1   Bash   git status                              allow    approved    -        on
+21  Write  Write: /nonexistent/example-repo/x.txt           approved    -        -
+25                                                 abstain  unresolved  -        off

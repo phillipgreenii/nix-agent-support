@@ -48,6 +48,9 @@ type evaluateFilters struct {
 	// --include-retired). A baseline captured under a different list would
 	// disagree on every row under the roots that differ.
 	RetiredRoots string `json:"retired_roots"`
+	// Source is "tracker" when the rows came from the tracker database and empty for
+	// the ask log, so a baseline from one history is refused against the other.
+	Source string `json:"source,omitempty"`
 }
 
 // evaluateReport is the envelope `evaluate` reads and writes for baseline

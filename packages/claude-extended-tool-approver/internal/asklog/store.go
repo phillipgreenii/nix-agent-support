@@ -1021,6 +1021,30 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version: 10,
+		up: func(tx *sql.Tx) error {
+			// tracker_labels holds the operator's offline-validation labels for
+			// calls the claude-tool-tracker recorded (--source tracker). The
+			// tracker's own database is read-only to CETA and its integer call_id
+			// is an implementation detail of one database file, so a label is
+			// keyed by the call's lasting identity: session_id + tool_use_id.
+			// That key survives any re-ingest of the tracker database. Additive
+			// (a new table only), so rows already in tool_decisions are untouched
+			// and their labels keep working under --source ceta.
+			_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS tracker_labels (
+				session_id                        TEXT NOT NULL,
+				tool_use_id                       TEXT NOT NULL,
+				correct_hook_decision             TEXT,
+				correct_hook_decision_explanation TEXT,
+				excluded                          INTEGER NOT NULL DEFAULT 0,
+				excluded_reason                   TEXT,
+				PRIMARY KEY (session_id, tool_use_id)
+			)`)
+			return err
+		},
+	},
 }
 
 // existingColumns returns the set of column names currently present on table,

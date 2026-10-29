@@ -18,6 +18,7 @@ type reportEntry struct {
 
 func newReportCmd() *cobra.Command {
 	var groupBy, format, since string
+	var src sourceFlags
 	var missesOnly bool
 	var days int
 	cmd := &cobra.Command{
@@ -38,7 +39,10 @@ and "unresolved"): with nothing having decided the call, the hook cannot have
 disagreed with anything.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runReport(groupBy, missesOnly, format, days, since)
+			if err := src.validate(); err != nil {
+				return err
+			}
+			runReport(groupBy, missesOnly, format, days, since, src)
 			return nil
 		},
 	}
@@ -47,10 +51,11 @@ disagreed with anything.`,
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: json|table")
 	cmd.Flags().IntVar(&days, "days", 0, "Only report rows from the last N days")
 	cmd.Flags().StringVar(&since, "since", "", "Only report rows after this date (ISO8601)")
+	addSourceFlags(cmd, &src)
 	return cmd
 }
 
-func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal int, sinceVal string) {
+func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal int, sinceVal string, src sourceFlags) {
 	groupBy := &groupByVal
 	missesOnly := &missesOnlyVal
 	format := &formatVal
@@ -62,20 +67,9 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 		sinceDate = time.Now().AddDate(0, 0, -*days).UTC().Format(time.RFC3339)
 	}
 
-	// report only ever reads rows to summarize them — it never writes to the
-	// ask log, so it opens read-only (pg2-cbihz).
-	store, err := asklog.NewReadOnlyStore(asklog.DefaultDBPath())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() { _ = store.Close() }()
-
-	rows, err := store.QueryRows(sinceDate)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
+	// report only ever reads rows to summarize them — it never writes to the ask
+	// log, so it opens read-only (pg2-cbihz).
+	rows, _ := loadSourceRows(src, sinceDate)
 
 	counts := map[string]int{}
 	for _, row := range rows {
@@ -108,7 +102,11 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 		entries = append(entries, reportEntry{Key: k, Count: v})
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Count > entries[j].Count
+		// ties break on the key so the output is deterministic
+		if entries[i].Count != entries[j].Count {
+			return entries[i].Count > entries[j].Count
+		}
+		return entries[i].Key < entries[j].Key
 	})
 
 	switch *format {

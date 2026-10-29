@@ -10,6 +10,7 @@ import (
 
 func newSetCorrectDecisionCmd() *cobra.Command {
 	var decision, explanation string
+	var src sourceFlags
 	cmd := &cobra.Command{
 		Use:   "set-correct-decision ID [ID ...]",
 		Short: "Set the ground-truth decision for logged rows",
@@ -19,18 +20,22 @@ are used by 'evaluate' and 'compare' as the source of truth when
 categorizing rows as correct or incorrect.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runSetCorrectDecision(decision, explanation, args)
+			if err := src.validate(); err != nil {
+				return err
+			}
+			runSetCorrectDecision(decision, explanation, args, src)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&decision, "decision", "", "Correct decision: allow|deny|ask|abstain (required)")
 	cmd.Flags().StringVar(&explanation, "explanation", "", "Why this is the correct decision (required)")
+	addSourceFlags(cmd, &src)
 	_ = cmd.MarkFlagRequired("decision")
 	_ = cmd.MarkFlagRequired("explanation")
 	return cmd
 }
 
-func runSetCorrectDecision(decisionVal, explanationVal string, args []string) {
+func runSetCorrectDecision(decisionVal, explanationVal string, args []string, src sourceFlags) {
 	decision := &decisionVal
 	explanation := &explanationVal
 
@@ -48,6 +53,24 @@ func runSetCorrectDecision(decisionVal, explanationVal string, args []string) {
 	if len(ids) == 0 {
 		fmt.Fprintf(os.Stderr, "error: at least one ID is required\n")
 		os.Exit(1)
+	}
+
+	if src.isTracker() {
+		// A tracker call is labelled under its lasting session_id + tool_use_id, in
+		// CETA's own database; the tracker database itself is never written.
+		keys := resolveTrackerKeys(src, ids)
+		store, err := asklog.NewStore(asklog.DefaultDBPath())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		defer func() { _ = store.Close() }()
+		if err := store.SetTrackerCorrectDecision(keys, *decision, *explanation); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Set correct_hook_decision=%q on %d row(s)\n", *decision, len(ids))
+		return
 	}
 
 	// set-correct-decision genuinely WRITES (UPDATE ... SET

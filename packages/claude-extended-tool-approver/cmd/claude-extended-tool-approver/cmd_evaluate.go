@@ -55,11 +55,21 @@ type evalResult struct {
 	AgentType      *string         `json:"agent_type"`
 	OutcomeNotes   *string         `json:"outcome_notes"`
 	ToolResponse   json.RawMessage `json:"tool_response"`
+	// The fields below are filled only under --source tracker (omitted otherwise,
+	// so --source ceta output is unchanged). They come from the tracker views.
+	SettledBy        string `json:"settled_by,omitempty"`
+	Settlement       string `json:"settlement,omitempty"`
+	ConvertedAsk     *bool  `json:"converted_ask,omitempty"`
+	EngineVerdict    string `json:"engine_verdict,omitempty"`
+	DeliveredVerdict string `json:"delivered_verdict,omitempty"`
+	IsError          *bool  `json:"is_error,omitempty"`
+	DenialReason     string `json:"denial_reason,omitempty"`
 }
 
 func newEvaluateCmd() *cobra.Command {
 	var days int
 	var since, settingsPath, format, approvalSource, baseline string
+	var src sourceFlags
 	var missesOnly, includeRetired bool
 	var retiredRoots []string
 	var corpusPaths []string
@@ -121,6 +131,14 @@ A baseline captured under different filters (--days/--since/--approval-source/
 bare-array --format json shape (and the jq recipe above) is unchanged when
 --baseline is not given.
 
+--source tracker replays the calls the claude-tool-tracker recorded (read-only,
+from its published views; --tracker-db overrides the path) instead of CETA's ask
+log. The default is --source ceta. The two histories are never mixed; under
+tracker, ids are the tracker's call_id and each row also carries settled_by,
+settlement, converted_ask, engine_verdict, delivered_verdict, is_error and
+denial_reason. Operator labels stay in CETA's database (set-correct-decision and
+mark-excluded take the same --source), keyed by session_id + tool_use_id.
+
 --corpus <path> switches evaluate to an entirely different grading source: the
 labeled internal/goldencorpus corpus (e.g.
 internal/goldencorpus/testdata/corpus.json and/or
@@ -134,6 +152,9 @@ cannot be combined with the ask-log-only flags (--days/--since/--settings/
 --approval-source/--baseline/--misses-only).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := src.validate(); err != nil {
+				return err
+			}
 			if len(corpusPaths) > 0 {
 				if days > 0 || since != "" || settingsPath != "" || approvalSource != "" || baseline != "" || missesOnly || includeRetired || len(retiredRoots) > 0 {
 					fmt.Fprintln(os.Stderr, "error: --corpus cannot be combined with --days/--since/--settings/--approval-source/--baseline/--misses-only/--include-retired/--retired-root (it grades a fixed corpus file, not the ask log)")
@@ -146,7 +167,7 @@ cannot be combined with the ask-log-only flags (--days/--since/--settings/
 			if !includeRetired {
 				roots = append(append(roots, defaultRetiredRoots...), retiredRoots...)
 			}
-			runEvaluate(days, since, settingsPath, format, approvalSource, baseline, missesOnly, roots)
+			runEvaluate(days, since, settingsPath, format, approvalSource, baseline, missesOnly, roots, src)
 			return nil
 		},
 	}
@@ -159,13 +180,14 @@ cannot be combined with the ask-log-only flags (--days/--since/--settings/
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show rows where hook is wrong")
 	cmd.Flags().BoolVar(&includeRetired, "include-retired", false, "Keep rows under retired roots as misses instead of categorizing them retired-root")
 	cmd.Flags().StringArrayVar(&retiredRoots, "retired-root", nil, "Absolute root to treat as retired, in addition to the built-in list (repeatable)")
+	addSourceFlags(cmd, &src)
 	cmd.Flags().StringArrayVar(&corpusPaths, "corpus", nil, "Path to a goldencorpus JSON file (repeatable); grades the corpus's own expected_verdict instead of replaying the ask log")
 	return cmd
 }
 
 // runEvaluate replays the ask log. retiredRoots is the (possibly empty) list
 // of roots under which a row is categorized "retired-root" instead of replayed.
-func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal, baselineVal string, missesOnlyVal bool, retiredRoots []string) {
+func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal, baselineVal string, missesOnlyVal bool, retiredRoots []string, src sourceFlags) {
 	days := &daysVal
 	since := &sinceVal
 	settingsPath := &settingsPathVal
@@ -178,20 +200,10 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		sinceDate = time.Now().AddDate(0, 0, -*days).UTC().Format(time.RFC3339)
 	}
 
-	// evaluate only ever replays rows through QueryRows — it never writes to
-	// the ask log, so it opens read-only (pg2-cbihz).
-	store, err := asklog.NewReadOnlyStore(asklog.DefaultDBPath())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() { _ = store.Close() }()
-
-	rows, err := store.QueryRows(sinceDate)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error querying rows: %v\n", err)
-		os.Exit(1)
-	}
+	// evaluate only ever reads rows — it never writes to the ask log, so it opens
+	// read-only (pg2-cbihz); --source tracker reads the tracker views read-only.
+	rows, trackerRows := loadSourceRows(src, sinceDate)
+	var err error
 
 	var se *settingseval.SettingsEvaluator
 	if *settingsPath != "" {
@@ -243,6 +255,9 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 			PermissionMode: row.PermissionMode,
 			AgentType:      row.AgentType,
 			OutcomeNotes:   row.OutcomeNotes,
+		}
+		if tr, ok := trackerRows[row.ID]; ok {
+			r.applyTracker(tr)
 		}
 		if row.ToolResponse != nil && *row.ToolResponse != "" {
 			r.ToolResponse = json.RawMessage(*row.ToolResponse)
@@ -316,6 +331,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 			MissesOnly:     *missesOnly,
 			Settings:       *settingsPath,
 			RetiredRoots:   strings.Join(retiredRoots, ","),
+			Source:         trackerSourceTag(src),
 		}, counts, results)
 		return
 	}

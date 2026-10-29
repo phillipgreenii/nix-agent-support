@@ -1,0 +1,5 @@
+{"schema":"tool-events/1","event_id":"a03","ts":1790000000003,"source":"ceta","kind":"ceta.verdict","session_id":"sess-a","tool_use_id":"tu-a1","data":{"verdict":"approve","delivered":"approve","reason":"read-only","rule":"git-readonly","sandbox_enabled":true}}
+{"schema":"tool-events/1","event_id":"a04","ts":1790000000004,"source":"ceta","kind":"ceta.command_class","session_id":"sess-a","tool_use_id":"tu-a1","data":{"class":"git status"}}
+{"schema":"tool-events/1","event_id":"a05","ts":1790000000005,"source":"ceta","kind":"ceta.trace","session_id":"sess-a","tool_use_id":"tu-a1","data":{"trace":[{"rule_order":1,"rule_name":"git-readonly","decision":"approve","reason":"read-only"}]}}
+{"schema":"tool-events/1","event_id":"a13","ts":1790000000013,"source":"ceta","kind":"ceta.verdict","session_id":"sess-a","tool_use_id":"tu-a2","data":{"verdict":"ask","delivered":"ask","reason":"destructive","rule":"rm-guard","sandbox_enabled":false}}
+{"schema":"tool-events/1","event_id":"a14","ts":1790000000014,"source":"ceta","kind":"ceta.command_class","session_id":"sess-a","tool_use_id":"tu-a2","data":{"class":"rm"}}

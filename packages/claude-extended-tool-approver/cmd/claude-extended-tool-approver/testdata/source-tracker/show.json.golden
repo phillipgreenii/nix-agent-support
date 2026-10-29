@@ -1,0 +1,42 @@
+[
+  {
+    "id": 4,
+    "session_id": "sess-a",
+    "cwd": "/nonexistent/example-repo",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"rm -rf build\"}",
+    "tool_summary": "rm -rf build",
+    "hook_decision": "ask",
+    "hook_reason": "destructive",
+    "outcome": "failed",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:20Z",
+    "sandbox_enabled": 0,
+    "settled_by": "person",
+    "settlement": "approved",
+    "converted_ask": false,
+    "engine_verdict": "ask",
+    "delivered_verdict": "ask",
+    "is_error": true
+  },
+  {
+    "id": 16,
+    "session_id": "sess-b",
+    "cwd": "/",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"curl example.invalid\"}",
+    "tool_summary": "curl example.invalid",
+    "hook_decision": "ask",
+    "hook_reason": "network",
+    "outcome": "rejected",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:20Z",
+    "sandbox_enabled": 1,
+    "settled_by": "ceta",
+    "settlement": "refused",
+    "converted_ask": true,
+    "engine_verdict": "ask",
+    "delivered_verdict": "reject",
+    "is_error": false
+  }
+]
