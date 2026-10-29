@@ -8669,8 +8669,11 @@
                   == true;
                 # pg2-zuc5x: the liveness alert that DID fire during the
                 # 2026-10-15..19 outage stays at a <= 15 minute threshold and
-                # keeps treating "no series" as Alerting (a down daemon has no
-                # /metrics, hence no pg_router_liveness series at all).
+                # is value-based and host-awake-gated with noDataState: OK
+                # (pg2-787q92, operator ruling 2026-10-29 on pg2-qhmtvg: a
+                # sleeping host is not a down service); a dead daemon with the
+                # host awake still returns a sample via pg_router_liveness < 1
+                # or up{job="pg-router"} == 0.
                 assert
                   let
                     alertsText = builtins.readFile ./packages/pg-router/grafana/alerting/alerts.yaml;
@@ -8680,8 +8683,9 @@
                   in
                   livenessRule != null
                   && lib.hasInfix "for: 5m" livenessRule
-                  && lib.hasInfix "noDataState: Alerting" livenessRule
-                  && lib.hasInfix "expr: pg_router_liveness" livenessRule;
+                  && lib.hasInfix "noDataState: OK" livenessRule
+                  && !(lib.hasInfix "noDataState: Alerting" livenessRule)
+                  && lib.hasInfix "expr: '(pg_router_liveness < 1 or up{job=\"pg-router\"} == 0)" livenessRule;
                 # profiling endpoint: pprof.enable (default on) points the daemon at a
                 # 0600 unix socket under its own state dir (an absolute path, never a
                 # TCP address), merged beside the existing EnvironmentVariables; off
