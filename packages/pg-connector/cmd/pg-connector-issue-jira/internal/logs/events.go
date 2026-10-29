@@ -3,6 +3,7 @@ package logs
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
@@ -50,11 +51,35 @@ func failureClassOf(e *scriptout.Error) string {
 	return eventlog.ClassifyFailure(e.Message)
 }
 
+// notApplicable reports whether e is the soft answer to a request the umbrella
+// fan-out offered to a backend that cannot own it: a query this backend does not
+// define (query_not_recognized), or an id that is not a Jira key (not_found
+// carrying eventlog.NotJiraKeyText). Neither is a fault of the daemon or of Jira.
+func notApplicable(e *scriptout.Error) bool {
+	if e == nil {
+		return false
+	}
+	switch e.Code {
+	case codeQueryNotRecognized:
+		return true
+	case codeNotFound:
+		return strings.Contains(e.Message, eventlog.NotJiraKeyText)
+	}
+	return false
+}
+
 // newRequestRow builds the row for one finished request. A nil e is success.
 func newRequestRow(service, version, op, instance string, start, end time.Time, e *scriptout.Error) RequestRow {
 	b := evlog.NewBase(service, op, version, start, end, nil)
 	row := RequestRow{Base: b, Kind: KindRequest, Instance: instance, Outcome: OutcomeOK}
-	if e != nil {
+	switch {
+	case notApplicable(e):
+		row.Outcome = OutcomeNotApplicable
+		row.ErrorCode = e.Code
+		row.Level = evlog.LevelInfo
+		row.Error = evlog.TruncateHeadTail(e.Message, evlog.MaxErrorBytes, evlog.ErrorHeadBytes)
+		row.Msg = fmt.Sprintf("%s not applicable: %s", op, e.Code)
+	case e != nil:
 		row.Outcome = OutcomeError
 		row.ErrorCode = e.Code
 		row.Level = evlog.LevelForCode(e.Code)

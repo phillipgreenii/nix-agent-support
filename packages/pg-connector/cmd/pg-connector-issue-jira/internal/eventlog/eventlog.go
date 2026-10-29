@@ -51,6 +51,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
+// NotJiraKeyText is the phrase every answer carries when an id is not shaped
+// like a Jira issue key (typically another backend's id, e.g. a bead id, that
+// the umbrella's try-each fan-out offered here). The answer is the wire
+// not_found so the fan-out falls through to the next backend, and the daemon's
+// request log classifies it as not_applicable rather than as an error.
+const NotJiraKeyText = "not a Jira issue key"
+
 // ServiceName is this backend's Loki service_name (the logSources attribute
 // name in darwin/modules/pg-connector-issue-jira, whose default glob is
 // ${XDG_STATE_HOME}/<name>/*.jsonl) and the directory under the state home

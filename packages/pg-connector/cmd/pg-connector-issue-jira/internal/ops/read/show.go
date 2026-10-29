@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
@@ -50,7 +51,7 @@ func (h *handlers) show(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	case !internal.IsJiraKey(key):
 		// The shape is judged here so that no origin call is made for it.
-		return nil, scriptout.WrapError(scriptout.ErrNotFound, fmt.Sprintf("issue %q not found: not a Jira issue key", key))
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, fmt.Sprintf("issue %q not found: %s", key, eventlog.NotJiraKeyText))
 	case h.deps.Summary == nil || h.deps.Detail == nil:
 		return nil, unavailable("the group services are not available")
 	}

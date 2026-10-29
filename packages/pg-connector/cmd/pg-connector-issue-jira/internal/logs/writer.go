@@ -36,6 +36,9 @@ const (
 // Outcomes of a row. A request row carries OutcomeOK on success and
 // OutcomeError on a failure whose wire code is in error_code; the client log's
 // row carries OutcomeDaemonUnreachable. An origin row carries the word the
+// OutcomeNotApplicable on a request the umbrella fan-out offered to a backend
+// that cannot own it (query_not_recognized, or not_found for an id that is not a
+// Jira key); it is an answer, not a failure. An origin row carries the word the
 // origin runner set on the spend: OutcomeOK, OutcomeError, OutcomeRateLimited
 // or OutcomeUnauthenticated.
 const (
@@ -43,11 +46,19 @@ const (
 	OutcomeError             = "error"
 	OutcomeRateLimited       = "rate_limited"
 	OutcomeUnauthenticated   = "unauthenticated"
+	OutcomeNotApplicable     = "not_applicable"
 	OutcomeDaemonUnreachable = "daemon_unreachable"
 )
 
 // codeUnauthenticated is the wire error code of a rejected credential.
 const codeUnauthenticated = "unauthenticated"
+
+// codeQueryNotRecognized and codeNotFound are the wire codes of the two soft
+// answers (see notApplicable).
+const (
+	codeQueryNotRecognized = "query_not_recognized"
+	codeNotFound           = "not_found"
+)
 
 // timeLayout is the JSONL standard's timestamp layout, the one pkg/eventlog's
 // Base uses.

@@ -678,6 +678,15 @@ func TestBackend_Deps_UnknownID_NotFound(t *testing.T) {
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
+	// pg2-1sjuxf: the shape alone rules the id out, so pjira (a passthrough
+	// origin call that spends the rate budget and books an origin error) is
+	// never asked.
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for a bead-shaped id, got %v", fr.calls)
+	}
+	if !strings.Contains(err.Error(), "not a Jira issue key") {
+		t.Fatalf("err = %q, want the not-a-Jira-key marker", err)
+	}
 }
 
 func TestBackend_Deps_EmptyID(t *testing.T) {

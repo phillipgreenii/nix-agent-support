@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -267,5 +268,43 @@ func TestOnSpendIsTheGovernorsObserver(t *testing.T) {
 	rows := readRows(t, EventLogPath(dir))
 	if len(rows) != 1 || rows[0]["cost"] != float64(7) || rows[0]["group"] != "summary" || rows[0]["failure_class"] != "rate_limited" {
 		t.Fatalf("rows: %v", rows)
+	}
+}
+
+// TestMiddlewareSoftAnswersAreNotApplicableNotErrors is pg2-1sjuxf's regression
+// guard: the umbrella fan-out offers every issue backend the beads-only queries
+// and bead ids, and Jira's query_not_recognized / "not a Jira issue key"
+// not_found answers are not failures, so they MUST NOT be outcome=error.
+func TestMiddlewareSoftAnswersAreNotApplicableNotErrors(t *testing.T) {
+	dir := t.TempDir()
+	el := NewEventLog(dir, "v1")
+	el.Now = fixedClock(t0)
+	r := router.New(router.Options{Instances: []string{"jira"}})
+	r.Use(el.Middleware())
+	reg := func(op string, err error) {
+		r.Register("jira", op, scriptout.OpHandler{SchemaVersion: 1, Handle: func(context.Context, json.RawMessage) (any, error) { return nil, err }})
+	}
+	reg("noquery", scriptout.WrapError(scriptout.ErrQueryNotRecognized, "query \"work-beads\" is not configured"))
+	reg("beadid", scriptout.WrapError(scriptout.ErrNotFound, "issue \"zr-ikepk\" not found: "+eventlog.NotJiraKeyText))
+	reg("realmiss", scriptout.WrapError(scriptout.ErrNotFound, "pjira: issue ABC-9 not found"))
+	for _, op := range []string{"noquery", "beadid", "realmiss"} {
+		dispatch(r, op)
+	}
+	by := map[string]map[string]any{}
+	for _, row := range readRows(t, EventLogPath(dir)) {
+		by[row["op"].(string)] = row
+	}
+	for _, op := range []string{"noquery", "beadid"} {
+		row := by[op]
+		if row["outcome"] != "not_applicable" || row["level"] != "info" {
+			t.Errorf("%s row = %v, want outcome=not_applicable level=info", op, row)
+		}
+	}
+	if by["noquery"]["error_code"] != "query_not_recognized" || by["beadid"]["error_code"] != "not_found" {
+		t.Errorf("error_code kept on the soft rows: %v %v", by["noquery"], by["beadid"])
+	}
+	// A real Jira not_found stays an error.
+	if by["realmiss"]["outcome"] != "error" || by["realmiss"]["level"] != "warn" {
+		t.Errorf("realmiss row = %v, want outcome=error level=warn", by["realmiss"])
 	}
 }

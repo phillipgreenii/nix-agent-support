@@ -930,6 +930,11 @@ func (b *Backend) Deps(ctx context.Context, id string, full bool) (*schema.Issue
 	if id == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
+	if !jiraKeyRE.MatchString(id) {
+		// Another backend's id (a bead id): answer not_found without the
+		// pjira round trip Show would spend (pg2-1sjuxf).
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, "issue "+id+" not found: "+eventlog.NotJiraKeyText)
+	}
 	if _, err := b.Show(ctx, id); err != nil {
 		return nil, err
 	}
@@ -971,7 +976,7 @@ func (b *Backend) Children(ctx context.Context, id string) (*schema.IssueChildre
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
 	if !jiraKeyRE.MatchString(id) {
-		return nil, scriptout.WrapError(scriptout.ErrNotFound, "issue "+id+" not found: not a Jira issue key")
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, "issue "+id+" not found: "+eventlog.NotJiraKeyText)
 	}
 	out, err := b.runner.Run(ctx, "issue", "--", id)
 	if err != nil {
