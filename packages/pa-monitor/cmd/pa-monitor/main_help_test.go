@@ -10,7 +10,7 @@ import (
 // the help output. Kept local to the test so a drift between help text and
 // this list is caught here.
 var allSubcommandNames = []string{
-	"daemon", "status", "agents-busy-check", "wait-until-agents-finished",
+	"daemon", "status", "agents-busy-check",
 	"config", "caffeinate", "nudge", "info", "cmux-bridge", "auto-resume", "search", "sessions", "tui",
 }
 

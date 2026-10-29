@@ -101,7 +101,6 @@
           "pg-keep-awake"
           "pw-agent-activity"
           "pw-reset-agents"
-          "wait-for-agents"
           "agent-activity"
           "agentsview"
         ];

@@ -538,18 +538,6 @@
                 ln -s agent-activity-api $out/bin/agent-activity
               '';
             };
-          wait-for-agents =
-            let
-              result = import ./packages/wait-for-agents {
-                pkgs = final;
-                inherit bashBuilders;
-                inherit (final) pa-monitor;
-              };
-            in
-            final.symlinkJoin {
-              name = "wait-for-agents-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
-              paths = result.packages;
-            };
           git-tools =
             let
               result = import ./packages/git-tools {
@@ -17415,18 +17403,8 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
-            # test-wait-for-agents (bead pg2-3fv9l). The overlay's `wait-for-agents`
-            # attr consumes only `result.packages`, so this package's bats suite --
-            # including the real-binary argument contract that catches a
-            # pa-monitor option drifting away from the wrapper -- ran in NO gate at
-            # all. Same one-line idiom as integrate-branch-support above.
-            // (import ./packages/wait-for-agents {
-              inherit pkgs;
-              bashBuilders = pkgs._agentSupportBashBuilders;
-              inherit (pkgs) pa-monitor;
-            }).checks
             # test-pw-agent-activity / test-pw-reset-agents (bead pg2-05lkx).
-            # Same one-line idiom as wait-for-agents above: the overlay attrs
+            # Same one-line idiom as integrate-branch-support above: the overlay attrs
             # take only the script derivation, so without these the two suites
             # -- including the real-binary argument contract that catches an
             # agent-activity-api subcommand drifting away from the wrapper --

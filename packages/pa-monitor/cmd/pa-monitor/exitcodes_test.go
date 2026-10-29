@@ -42,11 +42,9 @@ func TestExitCodeContract(t *testing.T) {
 		want int
 	}{
 		{"info without selector is usage", []string{"info"}, filepath.Join(home, ".config"), exitUsage},
-		{"wait with a bad flag is usage", []string{"wait-until-agents-finished", "--no-such-flag"}, filepath.Join(home, ".config"), exitUsage},
 		{"agents-busy-check without a daemon is daemon-unavailable", []string{"agents-busy-check"}, filepath.Join(home, ".config"), exitDaemonUnavailable},
 		{"agents-busy-check treating a down daemon as busy exits 0", []string{"agents-busy-check", "--consider-daemon-down-as-busy"}, filepath.Join(home, ".config"), 0},
 		{"info without a daemon is daemon-unavailable", []string{"info", "session:abc"}, filepath.Join(home, ".config"), exitDaemonUnavailable},
-		{"wait without a daemon is daemon-unavailable", []string{"wait-until-agents-finished", "--maximum-wait", "30"}, filepath.Join(home, ".config"), exitDaemonUnavailable},
 		{"an unplanned internal error (unreadable config) is generic exit 1", []string{"sessions"}, badCfg, exitGeneric},
 	}
 	for _, tc := range cases {
@@ -78,7 +76,7 @@ func TestExitCodeConstantsAreDistinct(t *testing.T) {
 	}
 	seen := map[int]string{}
 	for name, c := range map[string]int{
-		"exitNotBusy": exitNotBusy, "exitTimeout": exitTimeout,
+		"exitNotBusy": exitNotBusy,
 		"exitNoMatch": exitNoMatch, "exitDaemonUnavailable": exitDaemonUnavailable,
 	} {
 		if c < 3 {

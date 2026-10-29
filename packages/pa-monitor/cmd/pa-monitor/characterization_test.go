@@ -5,9 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"google.golang.org/grpc"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
@@ -99,7 +104,7 @@ func captureStdout(t *testing.T, fn func()) string {
 // the real output) and must keep passing unchanged after the refactor
 // (proving the refactor changed no observable behavior).
 func TestRunStatusTextOutputCharacterization(t *testing.T) {
-	sock := waitTestSocket(t)
+	sock := daemonTestSocket(t)
 	serveFakeDaemon(t, sock, &fakeStatusDaemon{state: characterizationState()})
 
 	out := captureStdout(t, func() { runStatus(nil) })
@@ -135,7 +140,7 @@ func TestRunStatusTextOutputCharacterization(t *testing.T) {
 // passed on the old buggy output too, since the JSON object itself was
 // always well-formed; only what preceded it on the same stream was wrong.
 func TestRunStatusJSONOutputIsCleanJSON(t *testing.T) {
-	sock := waitTestSocket(t)
+	sock := daemonTestSocket(t)
 	serveFakeDaemon(t, sock, &fakeStatusDaemon{state: characterizationState()})
 
 	out := captureStdout(t, func() { runStatus([]string{"--json"}) })
@@ -160,4 +165,56 @@ func TestRunStatusJSONOutputIsCleanJSON(t *testing.T) {
 			t.Errorf("status --json stdout still contains a text-mode summary line %q: %q", text, out)
 		}
 	}
+}
+
+// daemonTestSocket points every path rpcclient.Dial consults at a fresh temp dir
+// and returns the socket path it will resolve to. /tmp rather than t.TempDir()
+// because macOS caps unix socket paths at 104 bytes and the Go temp root is well
+// past that (the same reason internal/daemon's tests use shortTempDir).
+//
+// Setting all three of XDG_STATE_HOME / XDG_RUNTIME_DIR / HOME is load-bearing:
+// ResolvePaths reads XDG_STATE_HOME on darwin, XDG_RUNTIME_DIR first on linux,
+// and falls back to HOME, so leaving any of them alone would let these tests see
+// a pa-monitor daemon running on the developer's machine.
+func daemonTestSocket(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "pamtest-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("XDG_RUNTIME_DIR", dir)
+	t.Setenv("HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "pa-monitor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "pa-monitor", "daemon.sock")
+}
+
+// serveFakeDaemon serves srv on sock until the returned stop func runs (also
+// registered as cleanup).
+func serveFakeDaemon(t *testing.T, sock string, srv pb.PaMonitorServer, opts ...grpc.ServerOption) (stop func()) {
+	t.Helper()
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := grpc.NewServer(opts...)
+	pb.RegisterPaMonitorServer(gs, srv)
+	served := make(chan struct{})
+	go func() { defer close(served); _ = gs.Serve(ln) }()
+
+	var stopped atomic.Bool
+	stop = func() {
+		if stopped.Swap(true) {
+			return
+		}
+		gs.Stop()
+		<-served
+		_ = os.Remove(sock)
+	}
+	t.Cleanup(stop)
+	return stop
 }

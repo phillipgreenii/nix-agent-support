@@ -342,9 +342,8 @@ var readsPaMonitor = ImplicitEffect{Role: Remote("read"), Target: "pa-monitor"}
 // control.go runInfo (GetPathInfo / GetSessionInfo). The selector
 // (`session:<id>`, `path:<p>`, `cmux:<ws>`) is a daemon lookup key, not a
 // filesystem operand: the daemon only matches it against known sessions. The
-// other subcommands are absent: daemon, caffeinate, nudge, auto-resume,
-// cmux-bridge and wait-until-agents-finished change daemon or session state,
-// and bare `pa-monitor` launches the TUI.
+// other subcommands are absent: daemon, caffeinate, nudge, auto-resume and
+// cmux-bridge change daemon or session state, and bare `pa-monitor` launches the TUI.
 var paMonitorSchema = CommandSchema{
 	Name:         "pa-monitor",
 	Provenance:   "pa-monitor --help, packages/pa-monitor/cmd/pa-monitor/main.go usageText, this repo 2026-10-05",

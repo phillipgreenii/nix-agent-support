@@ -198,12 +198,12 @@ flowchart LR
   exit `2` for "daemon unreachable" and exit `1` for "not busy" and "timeout" rather than that mapping.
   _Resolved_ (operator ruling 2026-10-28 on pg2-9jk3g5, implemented by pg2-xrmfng): pa-monitor
   conforms. Exit `1` is the generic/unplanned error and MUST NOT be branched on, `2` is usage, and
-  the specific outcomes have their own codes: `3` not busy ("all idle"), `4` timeout, `5` `info`
+  the specific outcomes have their own codes: `3` not busy ("all idle"), `4` retired (the removed `wait-until-agents-finished` timeout), `5` `info`
   matched nothing, `6` daemon unreachable. _Owner_: pa-monitor. _Blocks_: nothing.
 - **`OQ-GATE-BLOCKED`** <!-- uuid: 0c8ecd40-3752-4e5d-acd5-c59239f9386d --> — whether a session
   **blocked on a usage limit** (`blocker = usage_limit`) SHOULD hold the **busy/idle gates** open.
   Today it does not: `busy` is `status == working` only (ADR 0024 R3), so `agents-busy-check`
-  reports "all idle" (exit 3) and `wait-until-agents-finished` reports "idle reached" (exit 0)
+  reports "all idle" (exit 3)
   while blocked work is still pending and auto-resume will resume it at the window reset. _Gap_:
   the gates answer "is anything actively progressing?", but their names — and most callers'
   intent — is "is all work finished?"; which question they SHOULD answer, and whether callers
@@ -213,4 +213,4 @@ flowchart LR
   decision (an ADR), never ad hoc. _Blocks_: the exit-code contract on the busy/idle gates
   (`INTF-STATE`) and any journey whose "when the agents are finished" step keys off them.
   Cross-refs: ADR 0024 R3 (the decision) and R5 (the keepAwake consequence of the same model);
-  `packages/pa-monitor/README.md` § "Busy/idle gates".
+  `packages/pa-monitor/README.md` § "Busy/idle gate".

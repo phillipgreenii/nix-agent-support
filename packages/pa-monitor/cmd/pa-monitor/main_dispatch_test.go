@@ -20,8 +20,7 @@ func TestPickSubcommand(t *testing.T) {
 		// tui because no TUI flag collides with a subcommand name. The example
 		// MUST stay a flag runTUI actually defines -- it was `--wait-until-idle`
 		// until bead pg2-3fv9l, which read as blessing a route for a flag ADR
-		// 0011 had already REMOVED in favour of the `wait-until-agents-finished`
-		// subcommand (and which runTUI's flag set rejects with exit 2).
+		// 0011 had already REMOVED (and which runTUI's flag set rejects with exit 2).
 		{"flag-first preserves tui", []string{"pa-monitor", "--version"}, "tui", []string{"--version"}},
 	}
 	for _, c := range cases {

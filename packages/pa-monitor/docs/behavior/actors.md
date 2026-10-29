@@ -15,7 +15,7 @@ actors.
   script or another program that blocks on a busy/idle gate before proceeding (`INTF-STATE`,
   `INV-GATE-1`). A specialization of a driving-port consumer, named separately because its
   obligations on reading the gate result are distinct from an interactive operator's
-  (`packages/pa-monitor/README.md` "Busy/idle gates").
+  (`packages/pa-monitor/README.md` "Busy/idle gate").
 
 ## System actors (participants behind interfaces)
 

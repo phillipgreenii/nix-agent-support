@@ -19,7 +19,6 @@ var subcommandNames = []string{
 	"daemon",
 	"status",
 	"agents-busy-check",
-	"wait-until-agents-finished",
 	"config",
 	"caffeinate",
 	"nudge",
@@ -66,8 +65,7 @@ func usageText() string {
 //   - A leading flag other than -h/--help (e.g. --version) routes to tui,
 //     since no current TUI flag collides with a subcommand name. Note this
 //     routes UNKNOWN leading flags there too, where runTUI's flag set rejects
-//     them with exit 2 — including the removed `--wait-until-idle` (ADR 0011
-//     replaced it with the `wait-until-agents-finished` subcommand).
+//     them with exit 2 — including the removed `--wait-until-idle`.
 //   - Any other first arg is unrecognized: it is returned as the command
 //     itself so main can emit an "unknown subcommand" error (it MUST NOT fall
 //     through to the TUI).
@@ -107,8 +105,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		runStatus(rest)
 	case "agents-busy-check":
 		runAgentsBusyCheck(rest)
-	case "wait-until-agents-finished":
-		runWaitUntilAgentsFinished(rest)
 	case "config":
 		runConfigSubcommand(rest)
 	case "caffeinate":

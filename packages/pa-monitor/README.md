@@ -22,13 +22,9 @@ pa-monitor tui
 pa-monitor status
 
 # Block-style "is any agent actively running a turn right now?"
-# (NOT "is any work pending" — see Busy/idle gates below)
+# (NOT "is any work pending" — see Busy/idle gate below)
 # (exit 0 = busy, 3 = all idle, 6 = daemon unreachable; 1 is a generic error)
 if pa-monitor agents-busy-check; then echo "busy"; fi
-
-# Block-style "wait until nothing is actively running"
-# (exit 0 = "idle reached", NOT "work finished" — see Busy/idle gates below)
-pa-monitor wait-until-agents-finished
 
 # Toggle caffeinate (persists across daemon restarts)
 pa-monitor caffeinate on
@@ -60,7 +56,6 @@ pa-monitor config show
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
 | `info <selector>`                                    | Print session or directory details.                          |
 | `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff busy; 3 all idle; 6 daemon down (see caveat).     |
-| `wait-until-agents-finished`                         | Block until nothing is working (see caveat).                 |
 | `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
 | `config show`                                        | Print loaded config (read-only).                             |
 
@@ -187,65 +182,42 @@ module also renders `keep_awake_bin` (the absolute path of `pg-keep-awake`, from
 package when that module is imported). Config is read at daemon start (ADR 0028), so a change applies
 when the daemon restarts.
 
-### Busy/idle gates: a blocked session counts as idle
+### Busy/idle gate: a blocked session counts as idle
 
-`agents-busy-check` and `wait-until-agents-finished` both answer **"is any session actively
-progressing right now?"** — not "is all work finished?". Per
-`docs/adr/0024-pa-monitor-session-status-blocker-model.md` R3, the daemon's `IsAnyBusy` sums only
-sessions with `status == working`. A **`blocked`** session — including `blocker = usage_limit`, i.e.
-a session that still has work but is waiting out the 5h/weekly usage window — is **not** counted as
-busy and is indistinguishable from `idle` at these two gates.
+`agents-busy-check` answers **"is any session actively progressing right now?"** — not "is all work
+finished?". Per `docs/adr/0024-pa-monitor-session-status-blocker-model.md` R3, the daemon's
+`IsAnyBusy` sums only sessions with `status == working`. A **`blocked`** session — including
+`blocker = usage_limit`, i.e. a session that still has work but is waiting out the 5h/weekly usage
+window — is **not** counted as busy and is indistinguishable from `idle` at this gate.
 
 The exit-code contract follows the workspace Exit Codes rule: **1 is the generic/unplanned error
 and carries no branchable meaning**, 2 is a usage error, and each specific condition has its own
-distinct code >= 3. Callers MUST NOT branch on exit 1.
+distinct code >= 3. Callers MUST NOT branch on exit 1. Exit 4 is retired (it was the timeout of the
+removed `wait-until-agents-finished` subcommand) and MUST NOT be reused.
 
-| Exit | `agents-busy-check`                                          | `wait-until-agents-finished`                                                                                                                      |
-| ---- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | daemon up and ≥1 session `working`                           | **idle reached** — no session `working` for N ticks                                                                                               |
-| 1    | generic/unplanned error (do not branch on it)                | generic/unplanned error (do not branch on it)                                                                                                     |
-| 2    | usage error                                                  | usage error: an unparseable flag (bad name, non-integer value), or a value that fails semantic validation (e.g. `--consecutive-idle-checks <= 0`) |
-| 3    | daemon up and no session `working` (prints `all idle`)       | —                                                                                                                                                 |
-| 4    | —                                                            | timeout (`--maximum-wait` elapsed)                                                                                                                |
-| 6    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) | daemon unavailable past `--reconnect-grace`                                                                                                       |
+| Exit | `agents-busy-check`                                          |
+| ---- | ------------------------------------------------------------ |
+| 0    | daemon up and ≥1 session `working`                           |
+| 1    | generic/unplanned error (do not branch on it)                |
+| 2    | usage error                                                  |
+| 3    | daemon up and no session `working` (prints `all idle`)       |
+| 6    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) |
 
 The other daemon-bound subcommands share the same codes: exit 6 when the daemon is unreachable or an
-RPC fails, exit 2 for a usage error, and (for `info`) exit 5 when the selector matches nothing. Exit
-4 and 3 are specific to the two gates above.
+RPC fails, exit 2 for a usage error, and (for `info`) exit 5 when the selector matches nothing.
 
 Callers MUST read these codes as statements about **activity**, not about **completion**:
 
 - `agents-busy-check` exit 3 (`all idle`) MUST NOT be read as "no work is pending". It is reported
   while sessions are blocked on a usage window with work still queued.
-- `wait-until-agents-finished` exit 0 means "idle reached" and MUST NOT be read as "work finished".
-  It is returned after `--consecutive-idle-checks` ticks with zero `working` sessions, even when
-  every session is blocked on a usage window and will resume on its own at the window reset
-  (auto-resume).
-- A caller that MUST NOT proceed until pending work is genuinely done MUST NOT rely on these gates
+- A caller that MUST NOT proceed until pending work is genuinely done MUST NOT rely on this gate
   alone. It SHOULD additionally check for `blocked` sessions — `pa-monitor status` prints a
   `sessions: N working, N blocked, N idle` line — and re-wait after the window resets.
-- The same caveat applies to the packaged `wait-for-agents-to-finish` wrapper, which delegates here.
 
 This is declared intent, not a defect: ADR 0024 R3 deliberately defines `busy` as `status == working`
 only, because a `blocked` session is not "actively progressing". It stands until a superseding
-decision; whether a `usage_limit`-blocked session SHOULD hold these gates open is an open question
+decision; whether a `usage_limit`-blocked session SHOULD hold this gate open is an open question
 for pa-monitor's behavior docs, not something to change here.
-
-### `--consecutive-idle-checks` counts observations that are consecutive in time
-
-The flag debounces a **transient** idle reading, so the N observations MUST be consecutive in time,
-not merely in sequence. `wait-until-agents-finished` therefore requires each observation to land
-within **2s** (the same budget its watchdog uses to call a silent stream hung) of the previous one; a
-longer gap restarts the count at 1 and prints `wait: <gap> unobserved, idle streak restarted`. Losing
-the stream and regaining it does not by itself discard progress — the redial is paced at 500ms and
-the daemon pushes immediately on stream open, so a prompt reconnect stays inside the budget — but a
-missed push, a sustained refusal, or a daemon that went away does, because a session may have been
-`working` for the whole unobserved gap.
-
-Consequence for callers: under a daemon whose stream breaks for longer than 2s more often than every
-N pushes, the gate cannot be satisfied and the wait ends at `--maximum-wait` (exit 4). That is the
-truthful answer — there was never N ticks' worth of continuous observation — and the restart lines on
-stderr are how to tell it from a wait that is simply still gathering observations.
 
 ## Nudge delivery
 
