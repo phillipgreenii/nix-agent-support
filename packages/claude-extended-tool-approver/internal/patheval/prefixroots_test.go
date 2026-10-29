@@ -188,8 +188,12 @@ func TestPrefixRoots_TmpdirResolvedAtRuntime(t *testing.T) {
 
 // TestParsePrefixRoot_ShapeRule is the table for the entry shape rule.
 func TestParsePrefixRoot_ShapeRule(t *testing.T) {
-	t.Setenv("TMPDIR", "/private/var/folders/zz/user/T/")
+	// Build the temp dir BEFORE pointing TMPDIR at a fabricated path: t.TempDir
+	// stats and creates under the current TMPDIR, and the fabricated
+	// /private/var/folders/... does not exist (and is not writable in the nix
+	// build sandbox), which failed the test there (bead pg2-veu8ad).
 	home := resolveRefPath(t.TempDir())
+	t.Setenv("TMPDIR", "/private/var/folders/zz/user/T/")
 	under := filepath.Join(home, ".cache")
 	mustMkdir(t, under)
 	accept := map[string]PrefixRoot{
