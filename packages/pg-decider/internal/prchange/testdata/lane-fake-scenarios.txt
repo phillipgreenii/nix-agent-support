@@ -1,0 +1,28 @@
+# The scenarios of TestLaneFake (lane_fake_test.go), one per line: every lane
+# scenario but the one that tests the real bd's own query semantics. The test
+# fails when its own scenarios differ from this list, and the nix check
+# pg-decider-lane-fake asserts a PASS line for each.
+n-keyless-anchors-are-adopted-from-the-trackers-own-listing-with-no-creates
+the-second-apply-writes-nothing
+plan-and-apply-agree-per-kind-and-operation
+an-unhydrated-view-is-refused-and-nothing-is-written
+a-listing-above-the-ceiling-fails-the-run-and-writes-nothing
+a-listing-of-exactly-the-ceiling-is-accepted
+a-listing-that-reports-itself-truncated-fails-the-run-and-writes-nothing
+pg-desks-zero-filled-decision-labels-equal-the-deciders-rules-and-reasons
+the-drift-check-fails-on-a-decider-value-pg-desk-lacks-and-on-the-reverse
+a-burst-of-pushes-yields-one-review-item-for-the-head-the-burst-ended-on
+a-claimed-review-item-at-the-current-head-blocks-a-second
+an-item-created-at-one-head-updated-to-another-and-closed-blocks-a-re-create
+legacy-suffix-less-open-and-closed-review-items-are-recognized
+force-review-with-only-a-claimed-or-closed-same-head-item-creates-one-new-item-and-consumes-the-flag-only-on-success
+a-claim-that-lands-between-the-listing-and-the-update-leaves-the-item-unchanged
+a-reopened-pr-with-several-closed-review-items-reopens-none-and-creates-none-for-a-reviewed-head
+a-deferred-review-item-is-left-alone-and-does-not-block-a-create
+two-concurrent-composed-runs-for-one-pr-yield-exactly-one-anchor
+the-same-race-against-a-double-that-skips-the-lock-yields-two-anchors
+a-duplicate-pr-changed-writes-nothing
+a-kill-between-a-tracker-create-and-its-audit-comment-then-a-rerun-creates-no-duplicate
+a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-bd
+the-scenario-list-is-the-list-the-gate-asserts
+a-rollback-drill-lists-every-write-since-the-flip-marker-by-timestamp-and-reverts-each

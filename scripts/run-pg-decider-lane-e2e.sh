@@ -1,31 +1,40 @@
 #!/usr/bin/env bash
-# The real-tracker end-to-end gate of the PR lane (docket pg2-6mo45.3, packet
-# P4c-1). Body of the nix check `checks.<system>.pg-decider-lane-e2e` (with
-# --prebuilt: nix built the binaries) and of the by-hand run (no flag: the
-# binaries are built from source here). It is NOT a commit or pre-land hook: the
-# suite spans processes and takes tens of minutes, so operator standard V-4 keeps
-# it out of every commit and land gate (bead pg2-by94zu).
+# The end-to-end suite of the PR lane (docket pg2-6mo45.3, packet P4c-1; bead
+# pg2-s4xeju split it into a fast run and a soak). One set of scenarios in
+# packages/pg-decider/internal/prchange runs two ways:
 #
-# What it runs: TestLaneE2E in packages/pg-decider/internal/prchange: the real
-# pg-desk, pg-decider, pg-pr-change, pg-connector and pg-connector-issue-beads
-# over a real bd in a throwaway embedded store, with the tracker's own listing as
-# the ground truth (adoption, the second apply, plan and apply agreeing, an
-# unhydrated view refused, the lookup ceiling and a truncated listing failing the
-# run closed, the review-item query, and the drift check of pg-desk's decision
-# labels against the decider's lists, then the review rule against the real
-# tracker, two concurrent composed runs with and without the lock, a duplicate
-# delivery, a kill between a create and its audit comment, and a decider run that
-# exits 2 through a failing passthrough over bd), and the rollback drill of the first
-# apply (the real backfill driver lists every write since the flip marker by
-# timestamp, from the audit comments in the real tracker, and reverts each).
+#   --suite fake  TestLaneFake: over the fake bd of internal/fakebd, the
+#                 independent scenarios in parallel. It takes seconds to a couple
+#                 of minutes; it is the body of the nix check
+#                 `checks.<system>.pg-decider-lane-fake` (with --prebuilt).
+#   --suite soak  TestLaneE2E (build tag laneE2E, the default suite): over a REAL
+#                 bd in a throwaway embedded store, one scenario after another,
+#                 plus the scenario that tests bd's own query semantics. Every bd
+#                 call is a cold start of an embedded dolt engine, so it takes tens
+#                 of minutes (84 on a loaded host). It is NOT a flake check and NOT
+#                 a commit or pre-land hook (operator standard V-4; operator ruling
+#                 2026-10-28, bead pg2-s4xeju): run it by hand, here or with
+#                 `nix run .#pg-decider-lane-e2e-soak`.
+#
+# What both run for real: pg-desk, pg-decider, pg-pr-change, pg-pr-backfill,
+# pg-connector and pg-connector-issue-beads, with the tracker's own listing as the
+# ground truth (adoption, the second apply, plan and apply agreeing, an unhydrated
+# view refused, the lookup ceiling and a truncated listing failing the run closed,
+# the drift check of pg-desk's decision labels against the decider's lists, the
+# review rule, two concurrent composed runs with and without the lock, a duplicate
+# delivery, a kill between a create and its audit comment, a decider run that exits
+# 2 through a failing passthrough over bd, and the rollback drill of the first
+# apply).
 #
 # What it asserts about the run (a real-binary gate that could pass by running
 # nothing guards nothing): the test's own PASS line, NO SKIP line, a PASS line for
-# every scenario NAMED in internal/prchange/testdata/lane-e2e-scenarios.txt, and
-# at least MIN_SCENARIOS of them (a count of zero never passes).
+# every scenario NAMED in the suite's list (internal/prchange/testdata/
+# lane-fake-scenarios.txt or lane-e2e-scenarios.txt), and at least the suite's
+# minimum of them (a count of zero never passes).
 #
-# Usage: run-pg-decider-lane-e2e.sh [--root <repo-root>] [--module-dir <dir>] [--prebuilt]
+# Usage: run-pg-decider-lane-e2e.sh [--suite fake|soak] [--root <repo-root>] [--module-dir <dir>] [--prebuilt]
 #
+#   --suite       fake (TestLaneFake) or soak (TestLaneE2E, the default)
 #   --root        the repository root (default: git toplevel)
 #   --module-dir  the pg-decider module directory (default: <root>/packages/pg-decider)
 #   --prebuilt    use the binaries named by the environment instead of building them:
@@ -40,15 +49,21 @@
 # missing tool is a LOUD failure, never a skip.
 set -euo pipefail
 
-# Keep equal to minLaneE2EScenarios in internal/prchange/lane_e2e_test.go and to
-# minScenarios of the nix check.
-MIN_SCENARIOS=25
+# Keep equal to minLaneFakeScenarios in internal/prchange/lane_fake_test.go.
+MIN_SCENARIOS_FAKE=24
+# Keep equal to minLaneE2EScenarios in internal/prchange/lane_e2e_test.go.
+MIN_SCENARIOS_SOAK=25
 
+suite="soak"
 root=""
 module_dir=""
 prebuilt=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+  --suite)
+    suite="${2:?--suite needs fake or soak}"
+    shift 2
+    ;;
   --root)
     root="${2:?--root needs a directory}"
     shift 2
@@ -72,6 +87,29 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+case "${suite}" in
+fake)
+  test_name="TestLaneFake"
+  tags=()
+  list="lane-fake-scenarios.txt"
+  min_scenarios="${MIN_SCENARIOS_FAKE}"
+  timeout="10m"
+  tools=(go)
+  ;;
+soak)
+  test_name="TestLaneE2E"
+  tags=(-tags laneE2E)
+  list="lane-e2e-scenarios.txt"
+  min_scenarios="${MIN_SCENARIOS_SOAK}"
+  timeout="90m"
+  tools=(go bd git)
+  ;;
+*)
+  echo "run-pg-decider-lane-e2e: --suite must be fake or soak, got: ${suite}" >&2
+  exit 2
+  ;;
+esac
+
 if [ -z "${module_dir}" ]; then
   if [ -z "${root}" ]; then
     root="$(git rev-parse --show-toplevel)"
@@ -79,19 +117,18 @@ if [ -z "${module_dir}" ]; then
   module_dir="${root}/packages/pg-decider"
 fi
 
-tools=(go bd git)
 for tool in "${tools[@]}"; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
-    echo "run-pg-decider-lane-e2e: ${tool} not found on PATH -- the real-tracker gate needs it. Enter the devShell or install it." >&2
+    echo "run-pg-decider-lane-e2e: ${tool} not found on PATH -- the ${suite} suite needs it. Enter the devShell or install it." >&2
     exit 2
   fi
 done
 if [ -z "${PG_PR_CHANGE_SQLITE3_BIN:-}" ] && ! command -v sqlite3 >/dev/null 2>&1; then
-  echo "run-pg-decider-lane-e2e: sqlite3 not found on PATH and PG_PR_CHANGE_SQLITE3_BIN is unset -- the gate reads the pg-desk store with it." >&2
+  echo "run-pg-decider-lane-e2e: sqlite3 not found on PATH and PG_PR_CHANGE_SQLITE3_BIN is unset -- the suite reads the pg-desk store with it." >&2
   exit 2
 fi
 
-scenarios_file="${module_dir}/internal/prchange/testdata/lane-e2e-scenarios.txt"
+scenarios_file="${module_dir}/internal/prchange/testdata/${list}"
 if [ ! -f "${scenarios_file}" ]; then
   echo "run-pg-decider-lane-e2e: ${scenarios_file} not found" >&2
   exit 2
@@ -122,17 +159,17 @@ fi
 # An unset binary FAILS the run instead of skipping it.
 export PG_PR_CHANGE_REQUIRE_BINARIES=1
 
-log="${scratch}/lane-e2e.log"
+log="${scratch}/lane-${suite}.log"
 status=0
-(cd "${module_dir}" && nice -n 10 go test -p 4 -count=1 -v -timeout 90m -run '^TestLaneE2E$' ./internal/prchange/) >"${log}" 2>&1 || status=$?
+(cd "${module_dir}" && nice -n 10 go test -p 4 -count=1 -v ${tags[@]+"${tags[@]}"} -timeout "${timeout}" -run "^${test_name}\$" ./internal/prchange/) >"${log}" 2>&1 || status=$?
 cat "${log}"
 if [ "${status}" -ne 0 ]; then
-  echo "run-pg-decider-lane-e2e: the end-to-end gate FAILED (go test exit ${status})" >&2
+  echo "run-pg-decider-lane-e2e: the ${suite} suite FAILED (go test exit ${status})" >&2
   exit "${status}"
 fi
 
-if ! grep -q -- '^--- PASS: TestLaneE2E ' "${log}"; then
-  echo "run-pg-decider-lane-e2e: TestLaneE2E did not report PASS (skipped or not run)" >&2
+if ! grep -q -- "^--- PASS: ${test_name} " "${log}"; then
+  echo "run-pg-decider-lane-e2e: ${test_name} did not report PASS (skipped or not run)" >&2
   exit 1
 fi
 if grep -q -- '--- SKIP' "${log}"; then
@@ -143,14 +180,14 @@ fi
 found=0
 while IFS= read -r name; do
   case "${name}" in '' | '#'*) continue ;; esac
-  if ! grep -qF -- "    --- PASS: TestLaneE2E/${name} " "${log}"; then
+  if ! grep -qF -- "    --- PASS: ${test_name}/${name} " "${log}"; then
     echo "run-pg-decider-lane-e2e: scenario ${name} has no PASS line" >&2
     exit 1
   fi
   found=$((found + 1))
 done <"${scenarios_file}"
-if [ "${MIN_SCENARIOS}" -lt 1 ] || [ "${found}" -lt "${MIN_SCENARIOS}" ]; then
-  echo "run-pg-decider-lane-e2e: only ${found} scenarios named and passed, at least ${MIN_SCENARIOS} are required" >&2
+if [ "${min_scenarios}" -lt 1 ] || [ "${found}" -lt "${min_scenarios}" ]; then
+  echo "run-pg-decider-lane-e2e: only ${found} scenarios named and passed, at least ${min_scenarios} are required" >&2
   exit 1
 fi
-echo "run-pg-decider-lane-e2e: ${found} scenarios, each with a PASS line, none skipped"
+echo "run-pg-decider-lane-e2e: ${suite} suite: ${found} scenarios, each with a PASS line, none skipped"

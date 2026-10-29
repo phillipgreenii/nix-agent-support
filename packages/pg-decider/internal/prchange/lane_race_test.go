@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// The concurrency and failure-injection scenarios of the real-tracker
-// end-to-end gate (docket pg2-6mo45.3, packet P4c-2), against the same real
-// tools and real tracker as the review scenarios (lane_e2e_review_test.go).
+// The concurrency and failure-injection scenarios of the lane suite (docket
+// pg2-6mo45.3, packet P4c-2), against the same tools and tracker as the review
+// scenarios (lane_review_test.go; the runs are described in lane_world_test.go).
 
 // bgRun is the composed command started in its own process group, so a test can
 // let it run on while it does something else, or end the whole group.
@@ -144,7 +144,8 @@ func anchorsAfterRace(t *testing.T, tools e2eTools, withLock bool) int {
 
 // failureScenarios are the concurrency and failure-injection scenarios of the
 // gate (design section 10, "Concurrency and failure injection").
-func failureScenarios(tools e2eTools, run func(string, func(*testing.T))) {
+func failureScenarios(l *laneRun) {
+	tools, run := l.tools, l.run
 	run("two-concurrent-composed-runs-for-one-pr-yield-exactly-one-anchor", func(t *testing.T) {
 		if n := anchorsAfterRace(t, tools, true); n != 1 {
 			t.Fatalf("two concurrent runs yielded %d anchors, want exactly one", n)
@@ -213,7 +214,7 @@ func failureScenarios(tools e2eTools, run func(string, func(*testing.T))) {
 		}
 	})
 
-	run("a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-real-bd", func(t *testing.T) {
+	run("a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-bd", func(t *testing.T) {
 		w, id := freshWorld(t, tools, sha('a'), true)
 		// The first apply writes the anchor (create, audit comment) and then the
 		// review item (create, audit comment): the third write is the review

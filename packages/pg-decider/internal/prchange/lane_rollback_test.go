@@ -17,8 +17,9 @@ import (
 )
 
 // The rollback drill of the first apply (docket pg2-6mo45.3, packet P6-a; design
-// 6.5, step 8 and risk R11). It runs the REAL backfill driver against the real
-// tracker the rest of the gate uses: the tracker's before-image is taken, the flip
+// 6.5, step 8 and risk R11). It runs the REAL backfill driver against the
+// tracker the rest of the suite uses (the fake bd in TestLaneFake, a real bd in
+// TestLaneE2E): the tracker's before-image is taken, the flip
 // marker is written, the real composed command makes every kind of write (an
 // update that adopts keyless items, a head refresh, a create, a close and a
 // reopen), and then `pg-pr-backfill rollback` lists every write since the marker by
@@ -87,7 +88,8 @@ func itemFields(it map[string]any) string {
 
 var listingLine = regexp.MustCompile(`^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (\S+) (create|update|close|reopen) rule=(\S+)$`)
 
-func rollbackScenarios(tools e2eTools, run func(string, func(*testing.T))) {
+func rollbackScenarios(l *laneRun) {
+	tools, run := l.tools, l.run
 	run("a-rollback-drill-lists-every-write-since-the-flip-marker-by-timestamp-and-reverts-each", func(t *testing.T) {
 		// One PR with the keyless anchor and review item the old sync left, hydrated.
 		w := newE2EWorldWith(t, tools, e2eOpts{n: 1, seed: true})
@@ -109,21 +111,22 @@ func rollbackScenarios(tools e2eTools, run func(string, func(*testing.T))) {
 		}
 
 		// The first apply makes every kind of write. Between the runs the clock
-		// moves on, so the by-timestamp order is visible.
+		// moves on (w.tick: a real bd needs it, the fake orders by comment id),
+		// so the by-timestamp order is visible.
 		w.apply(id) // adoption: the keyless items get their keys (updates)
-		time.Sleep(1100 * time.Millisecond)
+		w.tick()
 		w.setHead(id, sha('b'))
 		w.apply(id) // the review item follows the new head (an update)
 		review := w.onlyReview()
 		w.claim(review.id) // a person takes the review item and finishes it
 		w.closeItem(review.id)
-		time.Sleep(1100 * time.Millisecond)
+		w.tick()
 		w.setHead(id, sha('c'))
 		w.apply(id) // a new head with no open review item: a create
-		time.Sleep(1100 * time.Millisecond)
+		w.tick()
 		w.setPR(id, func(p *parity.PRFixture) { p.State = "closed" })
 		w.apply(id) // the PR closed: the anchor and the open review item close
-		time.Sleep(1100 * time.Millisecond)
+		w.tick()
 		w.setPR(id, func(p *parity.PRFixture) { p.State = "open" })
 		w.apply(id) // the PR reopened: the anchor reopens
 		afterApply := w.tr.snapshot()

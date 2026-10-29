@@ -81,14 +81,18 @@ is a concern after the review, the operator MAY keep the role in `plan` mode lon
 
 ### 4. Run the end-to-end gate and check the alerts
 
-Run the end-to-end decider gate against real binaries, in the background through the wrapper:
+Run the end-to-end decider suite against real binaries, in the background through the wrapper. The
+fast run (over the fake `bd`) is the check; the soak runs the same scenarios over a real `bd` and takes
+tens of minutes, so it is run by hand, from the repository root, and only here, before the first apply:
 
 ```bash
-bgrun lane-e2e -- pg-nix-log-wrapped nix build .#checks.<system>.pg-decider-lane-e2e -L
-bgwait lane-e2e --timeout 540        # with a Bash timeout of 600000; call it again on exit 2
+bgrun lane-fake -- pg-nix-log-wrapped nix build .#checks.<system>.pg-decider-lane-fake -L
+bgwait lane-fake --timeout 540       # with a Bash timeout of 600000; call it again on exit 2
+bgrun lane-soak -- pg-nix-log-wrapped nix run .#pg-decider-lane-e2e-soak
+bgwait lane-soak --timeout 540       # call it again on exit 2 until it is done
 ```
 
-It MUST end `DONE exit=0` with `scenarios, each with a PASS line, none skipped`; that includes the
+Each MUST end `DONE exit=0` with `scenarios, each with a PASS line, none skipped`; that includes the
 rollback drill of step 8.
 
 Register the lane's new alert uids with the router probe (the deployment's probe uid lists, together

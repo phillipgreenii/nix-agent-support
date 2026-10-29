@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
 # bats file_tags=type:unit
-# Regression guard for the script that is the body of the nix check
-# `pg-decider-lane-e2e` and of the by-hand run (docket pg2-6mo45.3, packet P4c-1;
-# bead pg2-by94zu removed the commit/pre-land hook and its path regex, because the
-# suite is a multi-process end-to-end test and so MUST NOT gate a commit or a land):
-# what the script demands of the run.
+# Regression guard for the script that runs the PR lane's end-to-end suite
+# (docket pg2-6mo45.3, packet P4c-1): the body of the nix check
+# `pg-decider-lane-fake` (--suite fake: TestLaneFake over the fake bd) and of the
+# by-hand real-bd soak (--suite soak, the default: TestLaneE2E behind the laneE2E
+# build tag). Bead pg2-by94zu removed the soak's commit/pre-land hook, and bead
+# pg2-s4xeju took it out of the flake checks (operator ruling 2026-10-28: a test
+# must not run for 1.5 hours), leaving the fast run as the automatic one.
 #
 # Deterministic logic (global rule V-3). The script is run for real against PATH
 # shims for `go`, `bd`, `git` and `sqlite3`: they stand in for the tools, and the
@@ -15,7 +17,9 @@
 bats_require_minimum_version 1.5.0
 
 SCRIPT="$BATS_TEST_DIRNAME/../scripts/run-pg-decider-lane-e2e.sh"
-SCENARIOS="$BATS_TEST_DIRNAME/../packages/pg-decider/internal/prchange/testdata/lane-e2e-scenarios.txt"
+TESTDATA="$BATS_TEST_DIRNAME/../packages/pg-decider/internal/prchange/testdata"
+SOAK_LIST="$TESTDATA/lane-e2e-scenarios.txt"
+FAKE_LIST="$TESTDATA/lane-fake-scenarios.txt"
 
 setup() {
   SHIM="$BATS_TEST_TMPDIR/shim"
@@ -25,7 +29,7 @@ setup() {
   for t in mktemp mkdir rm grep cat sed nice dirname; do
     ln -s "$(command -v "$t")" "$SHIM/$t"
   done
-  cp "$SCENARIOS" "$MODULE/internal/prchange/testdata/lane-e2e-scenarios.txt"
+  cp "$SOAK_LIST" "$FAKE_LIST" "$MODULE/internal/prchange/testdata/"
 }
 
 shim() { # shim <tool> [body]: an executable PATH shim
@@ -33,7 +37,7 @@ shim() { # shim <tool> [body]: an executable PATH shim
   chmod +x "$SHIM/$1"
 }
 
-shim_tools() { # every tool present; go prints a passing run of every named scenario
+shim_tools() { # every tool present; go prints the prepared run output
   shim bd
   shim git
   shim sqlite3
@@ -44,30 +48,43 @@ printf "%s\n" "$PG_PR_CHANGE_REQUIRE_BINARIES" >"'"$BATS_TEST_TMPDIR"'/go-requir
 cat "'"$BATS_TEST_TMPDIR"'/go-output"'
 }
 
-passing_output() { # passing_output [skip-name] : the verbose output of a green run
+passing_output() { # passing_output <test> <list> [skip-name] : the verbose output of a green run
   {
-    echo "=== RUN   TestLaneE2E"
+    echo "=== RUN   $1"
     while IFS= read -r n; do
       case "$n" in '' | '#'*) continue ;; esac
-      [ "$n" = "${1:-}" ] && continue
-      echo "    --- PASS: TestLaneE2E/$n (1.00s)"
-    done <"$SCENARIOS"
-    echo "--- PASS: TestLaneE2E (9.00s)"
+      [ "$n" = "${3:-}" ] && continue
+      echo "    --- PASS: $1/$n (1.00s)"
+    done <"$2"
+    echo "--- PASS: $1 (9.00s)"
     echo "PASS"
   } >"$BATS_TEST_TMPDIR/go-output"
 }
 
-run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt --module-dir "$MODULE"; }
+soak_passing() { passing_output TestLaneE2E "$SOAK_LIST" "${1:-}"; }
+fake_passing() { passing_output TestLaneFake "$FAKE_LIST" "${1:-}"; }
 
-@test "the scenario list is not empty and the script's minimum is the list's size" {
-  n="$(grep -vcE '^(#|$)' "$SCENARIOS")"
-  [ "$n" -gt 0 ]
-  min="$(sed -n 's/^MIN_SCENARIOS=\([0-9][0-9]*\)$/\1/p' "$SCRIPT")"
-  [ "$min" -gt 0 ]
-  [ "$min" -eq "$n" ]
+run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt --module-dir "$MODULE" "$@"; }
+
+@test "each scenario list is not empty and the script's minimum is the list's size" {
+  for pair in "FAKE:$FAKE_LIST" "SOAK:$SOAK_LIST"; do
+    n="$(grep -vcE '^(#|$)' "${pair#*:}")"
+    [ "$n" -gt 0 ]
+    min="$(sed -n "s/^MIN_SCENARIOS_${pair%%:*}=\([0-9][0-9]*\)$/\1/p" "$SCRIPT")"
+    [ "$min" -gt 0 ]
+    [ "$min" -eq "$n" ]
+  done
 }
 
-@test "each missing tool fails loudly with exit 2 and names the tool" {
+@test "the fast list is the soak list without the scenarios that need the real bd" {
+  only_soak="$(grep -vE '^(#|$)' "$SOAK_LIST" | grep -vxF -f <(grep -vE '^(#|$)' "$FAKE_LIST"))"
+  [ "$only_soak" = "the-bd-list-query-of-a-prs-review-items-returns-every-state" ]
+  # nothing in the fast list that the soak does not run
+  run grep -vxF -f <(grep -vE '^(#|$)' "$SOAK_LIST") <(grep -vE '^(#|$)' "$FAKE_LIST")
+  [ "$status" -eq 1 ]
+}
+
+@test "each missing tool of the soak fails loudly with exit 2 and names the tool" {
   for missing in go bd git; do
     rm -f "$SHIM/go" "$SHIM/bd" "$SHIM/git" "$SHIM/sqlite3"
     shim_tools
@@ -75,13 +92,25 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
     run_gate
     [ "$status" -eq 2 ]
     [[ $stderr == *"$missing not found on PATH"* ]]
-    done
+  done
+}
+
+@test "the fast suite needs go but neither bd nor git" {
+  shim_tools
+  rm -f "$SHIM/bd" "$SHIM/git"
+  fake_passing
+  run_gate --suite fake
+  [ "$status" -eq 0 ]
+  rm -f "$SHIM/go"
+  run_gate --suite fake
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"go not found on PATH"* ]]
 }
 
 @test "a missing sqlite3 fails loudly unless the environment names one" {
   shim_tools
   rm -f "$SHIM/sqlite3"
-  passing_output
+  soak_passing
   run_gate
   [ "$status" -eq 2 ]
   [[ $stderr == *"sqlite3 not found on PATH"* ]]
@@ -89,23 +118,37 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
   [ "$status" -eq 0 ]
 }
 
-@test "with every tool it runs only TestLaneE2E in the module, with a missing binary made fatal" {
+@test "the soak runs only TestLaneE2E with the laneE2E tag in the module, with a missing binary made fatal" {
   shim_tools
-  passing_output
+  soak_passing
   run_gate
   [ "$status" -eq 0 ]
   args="$(cat "$BATS_TEST_TMPDIR/go-args")"
   [[ $args == *"test "* ]]
+  [[ $args == *"-tags laneE2E"* ]]
   [[ $args == *'-run ^TestLaneE2E$'* ]]
   [[ $args == *"./internal/prchange/"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/go-pwd")" = "$(cd "$MODULE" && pwd -P)" ]
   [ "$(cat "$BATS_TEST_TMPDIR/go-require")" = 1 ]
-  [[ $output == *"25 scenarios, each with a PASS line, none skipped"* ]]
+  [[ $output == *"soak suite: 25 scenarios, each with a PASS line, none skipped"* ]]
+}
+
+@test "the fast suite runs only TestLaneFake, untagged, with a missing binary made fatal" {
+  shim_tools
+  fake_passing
+  run_gate --suite fake
+  [ "$status" -eq 0 ]
+  args="$(cat "$BATS_TEST_TMPDIR/go-args")"
+  [[ $args == *'-run ^TestLaneFake$'* ]]
+  [[ $args == *"./internal/prchange/"* ]]
+  [[ $args != *"-tags"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/go-require")" = 1 ]
+  [[ $output == *"fake suite: 24 scenarios, each with a PASS line, none skipped"* ]]
 }
 
 @test "without --prebuilt it builds the six binaries before the run" {
   shim_tools
-  passing_output
+  soak_passing
   # a go that logs every build
   shim go 'if [ "$1" = build ]; then printf "%s %s\n" "$(pwd -P | sed "s|.*/||")" "$*" >>"'"$BATS_TEST_TMPDIR"'/builds"; : > "$3"; exit 0; fi
 cat "'"$BATS_TEST_TMPDIR"'/go-output"'
@@ -119,18 +162,30 @@ cat "'"$BATS_TEST_TMPDIR"'/go-output"'
   grep -q '^pg-connector build .* ./cmd/pg-connector-issue-beads$' "$BATS_TEST_TMPDIR/builds"
 }
 
-@test "a scenario without a PASS line fails the gate and is named" {
+@test "a scenario without a PASS line fails the gate and is named, in either suite" {
   shim_tools
-  name="$(grep -vE '^(#|$)' "$SCENARIOS" | sed -n 3p)"
-  passing_output "$name"
+  name="$(grep -vE '^(#|$)' "$SOAK_LIST" | sed -n 3p)"
+  soak_passing "$name"
   run_gate
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"scenario $name has no PASS line"* ]]
+  fake_passing "$name"
+  run_gate --suite fake
   [ "$status" -eq 1 ]
   [[ $stderr == *"scenario $name has no PASS line"* ]]
 }
 
+@test "a soak scenario's PASS line does not stand for the fast suite's" {
+  shim_tools
+  soak_passing
+  run_gate --suite fake
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"TestLaneFake did not report PASS"* ]]
+}
+
 @test "a SKIP line fails the gate" {
   shim_tools
-  passing_output
+  soak_passing
   echo "    --- SKIP: TestLaneE2E/some-scenario (0.00s)" >>"$BATS_TEST_TMPDIR/go-output"
   run_gate
   [ "$status" -eq 1 ]
@@ -139,7 +194,7 @@ cat "'"$BATS_TEST_TMPDIR"'/go-output"'
 
 @test "a run that never reports the test's own PASS line fails the gate" {
   shim_tools
-  passing_output
+  soak_passing
   grep -v '^--- PASS: TestLaneE2E ' "$BATS_TEST_TMPDIR/go-output" >"$BATS_TEST_TMPDIR/go-output.2"
   mv "$BATS_TEST_TMPDIR/go-output.2" "$BATS_TEST_TMPDIR/go-output"
   run_gate
@@ -149,15 +204,16 @@ cat "'"$BATS_TEST_TMPDIR"'/go-output"'
 
 @test "a list with fewer scenarios than the minimum fails the gate, and an empty list never passes" {
   shim_tools
-  grep -vE '^(#|$)' "$SCENARIOS" | head -2 >"$MODULE/internal/prchange/testdata/lane-e2e-scenarios.txt"
+  list="$MODULE/internal/prchange/testdata/lane-e2e-scenarios.txt"
+  grep -vE '^(#|$)' "$SOAK_LIST" | head -2 >"$list"
   {
     echo "--- PASS: TestLaneE2E (1.00s)"
-    while IFS= read -r n; do echo "    --- PASS: TestLaneE2E/$n (1.00s)"; done <"$MODULE/internal/prchange/testdata/lane-e2e-scenarios.txt"
+    while IFS= read -r n; do echo "    --- PASS: TestLaneE2E/$n (1.00s)"; done <"$list"
   } >"$BATS_TEST_TMPDIR/go-output"
   run_gate
   [ "$status" -eq 1 ]
   [[ $stderr == *"only 2 scenarios"* ]]
-  : >"$MODULE/internal/prchange/testdata/lane-e2e-scenarios.txt"
+  : >"$list"
   run_gate
   [ "$status" -eq 1 ]
   [[ $stderr == *"only 0 scenarios"* ]]
@@ -170,23 +226,38 @@ cat "'"$BATS_TEST_TMPDIR"'/go-output"'
   [ "$status" -eq 7 ]
 }
 
-@test "an unknown argument is a usage error" {
+@test "an unknown argument or suite is a usage error" {
   run --separate-stderr bash "$SCRIPT" --nope
   [ "$status" -eq 2 ]
+  run --separate-stderr bash "$SCRIPT" --suite bogus
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"--suite must be fake or soak"* ]]
 }
 
-# Operator standard V-4 (bead pg2-by94zu): a multi-process end-to-end suite MUST NOT
-# gate a commit or a land, but MUST keep its own check so it can still fail (ADR 0024
-# of phillipg-nix-repo-base). Reads the flake source, so it skips off the repo.
-@test "the suite is a nix check running the real test, and is not a pre-commit hook" {
+# Operator standard V-4 (bead pg2-by94zu) and the operator ruling of 2026-10-28
+# (bead pg2-s4xeju): the real-bd soak MUST NOT gate a commit or a land and is not
+# a flake check; the fast run is the check that keeps the suite able to fail (ADR
+# 0024 of phillipg-nix-repo-base). Reads the flake and the test sources, so it
+# skips off the repo.
+@test "the fast run is the nix check, the soak is tagged and only an opt-in package" {
   flake="$BATS_TEST_DIRNAME/../flake.nix"
+  prchange="$BATS_TEST_DIRNAME/../packages/pg-decider/internal/prchange"
   [ -f "$flake" ] || skip "flake.nix is not next to the tests"
-  # no hook of that name, no hook wrapper, no path regex
-  run grep -En '^ *name = "pg-decider-lane-e2e"|pg-decider-lane-e2e-hook|pg-decider-lane-e2e-files' "$flake"
+  # no hook of either name, no hook wrapper, no path regex
+  run grep -En '^ *name = "pg-decider-lane-(e2e|fake)"|pg-decider-lane-e2e-hook|pg-decider-lane-e2e-files' "$flake"
   [ "$status" -eq 1 ]
   [ ! -e "$BATS_TEST_DIRNAME/../scripts/pg-decider-lane-e2e-files.regex" ]
-  # the check exists and runs the script that runs only TestLaneE2E
-  grep -Eq '^ *pg-decider-lane-e2e =$' "$flake"
-  grep -q 'run-pg-decider-lane-e2e.sh} --prebuilt' "$flake"
-  grep -q "go test .*-run '\^TestLaneE2E\\$'" "$SCRIPT"
+  # the soak is no longer a check; it is the opt-in package that runs the script
+  run grep -Eq '^ *pg-decider-lane-e2e =$' "$flake"
+  [ "$status" -eq 1 ]
+  grep -Eq '^ *pg-decider-lane-e2e-soak = pkgs.writeShellApplication \{$' "$flake"
+  # the fast check runs the script's fast suite over the prebuilt binaries
+  grep -Eq '^ *pg-decider-lane-fake =$' "$flake"
+  grep -q 'run-pg-decider-lane-e2e.sh} --suite fake --prebuilt' "$flake"
+  # the soak's driver carries the tag; the fast run and the shared scenarios do not
+  [ "$(head -1 "$prchange/lane_e2e_test.go")" = "//go:build laneE2E" ]
+  for f in lane_fake_test.go lane_world_test.go lane_scenarios_test.go lane_review_test.go lane_race_test.go lane_rollback_test.go; do
+    run grep -q '^//go:build' "$prchange/$f"
+    [ "$status" -eq 1 ]
+  done
 }

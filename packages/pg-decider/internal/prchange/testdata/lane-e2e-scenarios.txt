@@ -1,6 +1,6 @@
-# The scenarios of TestLaneE2E (lane_e2e_test.go), one per line. The test fails
-# when its own scenarios differ from this list, and the nix check
-# pg-decider-lane-e2e and the script it runs assert a PASS line for each.
+# The scenarios of TestLaneE2E (lane_e2e_test.go, build tag laneE2E: the real-bd
+# soak), one per line. The test fails when its own scenarios differ from this
+# list, and scripts/run-pg-decider-lane-e2e.sh asserts a PASS line for each.
 n-keyless-anchors-are-adopted-from-the-trackers-own-listing-with-no-creates
 the-second-apply-writes-nothing
 plan-and-apply-agree-per-kind-and-operation
@@ -23,6 +23,6 @@ two-concurrent-composed-runs-for-one-pr-yield-exactly-one-anchor
 the-same-race-against-a-double-that-skips-the-lock-yields-two-anchors
 a-duplicate-pr-changed-writes-nothing
 a-kill-between-a-tracker-create-and-its-audit-comment-then-a-rerun-creates-no-duplicate
-a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-real-bd
+a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-bd
 the-scenario-list-is-the-list-the-gate-asserts
 a-rollback-drill-lists-every-write-since-the-flip-marker-by-timestamp-and-reverts-each

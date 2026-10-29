@@ -6237,45 +6237,44 @@
                     '';
                   });
 
-              # Real-tracker end-to-end gate of the PR lane (docket pg2-6mo45.3, packet
-              # P4c-1; design 10 "Test strategy"). TestLaneE2E runs the BUILT pg-desk,
-              # pg-decider and pg-pr-change against the BUILT pg-connector and
-              # pg-connector-issue-beads over a REAL bd in a throwaway embedded store, so
-              # the tracker's own listing is the ground truth: N keyless anchors adopted
-              # with no creates, the second apply writing nothing, plan and apply agreeing
-              # per kind and operation, an unhydrated view refused, a listing above the
-              # ceiling or reporting itself truncated failing the run closed, the review
-              # item query, and pg-desk's zero-filled decision labels against the
-              # decider's own rule and reason lists. SPIKE (recorded on the bead): real bd
-              # runs in this sandbox, but needs git on PATH (bd init initializes a
-              # repository) and a git identity, which the test's environment supplies.
-              # It runs scripts/run-pg-decider-lane-e2e.sh, which asserts the test's PASS
-              # line, a PASS line for every scenario NAMED in
-              # testdata/lane-e2e-scenarios.txt, NO SKIP line and at least minScenarios
-              # scenarios (keep equal to MIN_SCENARIOS in the script and
-              # minLaneE2EScenarios in internal/prchange/lane_e2e_test.go). One scenario
-              # scrapes the real `pg-desk serve` on a loopback port.
+              # Fast end-to-end run of the PR lane (docket pg2-6mo45.3, packet P4c-1;
+              # bead pg2-s4xeju; design 10 "Test strategy"). TestLaneFake runs the BUILT
+              # pg-desk, pg-decider, pg-pr-change and pg-pr-backfill against the BUILT
+              # pg-connector and pg-connector-issue-beads over the fake bd of
+              # internal/fakebd (built by the test; a JSON-file store answering bd's own
+              # command line), so the tracker's own listing is the ground truth: N
+              # keyless anchors adopted with no creates and every item keyed, the second
+              # apply writing nothing, plan and apply agreeing per kind and operation, an
+              # unhydrated view refused, a listing above the ceiling or reporting itself
+              # truncated failing the run closed, the review rule's dedup, the lock race
+              # and its negative control, a duplicate delivery writing nothing, a kill
+              # between a create and its audit comment, a decider exit 2 converging, the
+              # rollback drill of the first apply, and pg-desk's zero-filled decision
+              # labels against the decider's own rule and reason lists (one scenario
+              # scrapes the real `pg-desk serve` on a loopback port). The independent
+              # scenarios run in parallel; the run takes seconds to a couple of minutes.
+              # It runs scripts/run-pg-decider-lane-e2e.sh --suite fake, which asserts
+              # the test's PASS line, a PASS line for every scenario NAMED in
+              # testdata/lane-fake-scenarios.txt, NO SKIP line and at least
+              # MIN_SCENARIOS_FAKE of them (keep equal to minLaneFakeScenarios in
+              # internal/prchange/lane_fake_test.go).
               #
-              # This check is the ONLY automatic run of the suite, by operator standard
-              # V-4 (code-file-standards, "Speed And Scope", bead pg2-by94zu): it spans
-              # processes (a fresh pg-pr-change per case, a real bd, a real pg-desk
-              # serve) and took 17 to 26+ minutes as a commit hook, so it is NOT a
-              # commit or pre-land hook and MUST NOT become one. The OPT-IN switch is the
-              # environment: TestLaneE2E skips unless the PG_PR_CHANGE_* and
-              # PG_LANE_E2E_* binaries are exported (this check and the script do), so a
-              # plain `go test ./...` and the run-unit-tests gate skip it. To run it by
-              # hand from source: `bash scripts/run-pg-decider-lane-e2e.sh`.
-              pg-decider-lane-e2e =
+              # It is the suite's automatic run, and it is NOT a commit or pre-land hook
+              # (operator standard V-4, bead pg2-by94zu: it spans processes). The REAL-bd
+              # soak of the same scenarios (TestLaneE2E, build tag laneE2E) is NOT a
+              # check (operator ruling 2026-10-28, bead pg2-s4xeju: it ran 84 minutes):
+              # run it by hand with `nix run .#pg-decider-lane-e2e-soak` or
+              # `bash scripts/run-pg-decider-lane-e2e.sh`. TestLaneFake skips unless the
+              # PG_PR_CHANGE_* and PG_LANE_E2E_* binaries are exported (this check and
+              # the script do), so a plain `go test ./...` and the run-unit-tests gate
+              # skip it.
+              pg-decider-lane-fake =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-decider-lane-e2e";
+                  pname = "pg-decider-lane-fake";
                   src = lib.cleanSource ./packages/pg-decider; # matches default.nix
                   gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
                 }).overrideAttrs
-                  (old: {
-                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
-                      (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
-                      pkgs.git
-                    ];
+                  (_: {
                     PG_PR_CHANGE_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
                     PG_PR_CHANGE_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
                     PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
@@ -6288,7 +6287,7 @@
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      bash ${./scripts/run-pg-decider-lane-e2e.sh} --prebuilt --module-dir "$PWD"
+                      bash ${./scripts/run-pg-decider-lane-e2e.sh} --suite fake --prebuilt --module-dir "$PWD"
                       runHook postBuild
                     '';
                   });
@@ -17593,6 +17592,29 @@
               text = ''
                 cd "''${1:-packages/pb}"
                 go test -tags contract -timeout=0 -p 1 ./...
+              '';
+            };
+            # pg-decider-lane-e2e-soak runs the PR lane's REAL-bd soak by hand (bead
+            # pg2-s4xeju): TestLaneE2E, behind the laneE2E build tag, every lane
+            # scenario over a real bd in a throwaway embedded store, one after
+            # another. Every bd call starts an embedded dolt engine, so it takes tens
+            # of minutes (84 on a loaded host); by operator ruling 2026-10-28 it is
+            # deliberately NOT a flake check and NOT a hook. The automatic run is the
+            # fast one over the fake bd, checks.<system>.pg-decider-lane-fake. Run it
+            # from the repository root when a change to bd, the beads backend or the
+            # lane's tracker calls warrants it: it builds the six binaries from the
+            # working tree, then asserts a PASS line for every scenario named in
+            # testdata/lane-e2e-scenarios.txt (scripts/run-pg-decider-lane-e2e.sh).
+            pg-decider-lane-e2e-soak = pkgs.writeShellApplication {
+              name = "pg-decider-lane-e2e-soak";
+              runtimeInputs = [
+                pkgs.go
+                pkgs.git
+                pkgs.sqlite
+                (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+              ];
+              text = ''
+                exec bash ${./scripts/run-pg-decider-lane-e2e.sh} --suite soak "$@"
               '';
             };
             # pg-connector-contract runs pg-connector's on-demand, build-tagged

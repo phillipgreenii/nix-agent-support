@@ -13,9 +13,10 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
-// The review-rule scenarios of the real-tracker end-to-end gate (docket
-// pg2-6mo45.3, packet P4c-2). Each one runs the real composed command over the
-// real pg-desk, pg-decider and pg-connector against a real bd, with a PR whose
+// The review-rule scenarios of the lane suite (docket pg2-6mo45.3, packet
+// P4c-2; the runs are described in lane_world_test.go). Each one runs the real
+// composed command over the real pg-desk, pg-decider and pg-connector against
+// the tracker (the fake bd, or a real one), with a PR whose
 // head the test moves (the fake forge answers from the world's fixture, which
 // the test rewrites between runs), and reads the answer from the tracker's own
 // listing: the review items of the PR, in every state, as bd lists them.
@@ -35,7 +36,7 @@ const (
 // update, close, comment, reopen) is counted and logged to <ctl>/bd-writes.log as
 // "<n> <verb>"; when <ctl>/fail.nth holds n, write number n is NOT run: the shim
 // prints a diagnostic and exits 1, the way a bd that failed its write would. Every
-// other call, and every other write, is delegated to the real bd unchanged.
+// other call, and every other write, is delegated to the bd under it (real or fake) unchanged.
 func writeBDShim(t *testing.T, tools e2eTools, ctl string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -334,7 +335,8 @@ func freshWorld(t *testing.T, tools e2eTools, head string, shim bool) (*e2eWorld
 
 // reviewScenarios are the review-rule scenarios of the gate (design section 10,
 // "Review rule (real tracker)").
-func reviewScenarios(tools e2eTools, run func(string, func(*testing.T))) {
+func reviewScenarios(l *laneRun) {
+	tools, run := l.tools, l.run
 	run("a-burst-of-pushes-yields-one-review-item-for-the-head-the-burst-ended-on", func(t *testing.T) {
 		w, id := freshWorld(t, tools, sha('a'), false)
 		w.apply(id)
