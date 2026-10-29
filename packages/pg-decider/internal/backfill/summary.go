@@ -47,6 +47,9 @@ type Summary struct {
 	Stale       bool
 	// Residuals is, in apply mode, each PR's persisted residual (-1: unknown).
 	Residuals map[string]int
+	// OutsideSet is, in apply mode, each PR outside the persisted set whose latest
+	// apply-mode record in the run record carries a residual above zero.
+	OutsideSet []string
 	// Problems are the failed checks, in words; empty means every check holds.
 	Problems []string
 }
@@ -121,6 +124,21 @@ func Summarize(lg *Log, set *Set, mode string, maxAge time.Duration, now time.Ti
 			s.Oldest, s.OldestPR = r.Time, e.PR
 		}
 	}
+	if mode == ModeApply {
+		inSet := map[string]bool{}
+		for _, e := range set.Entries {
+			inSet[e.PR] = true
+		}
+		for _, pr := range sortedKeys(latest) {
+			r := latest[pr]
+			if inSet[pr] || r.Residual == nil || *r.Residual <= 0 {
+				continue
+			}
+			s.OutsideSet = append(s.OutsideSet, pr)
+			s.Residuals[pr] = *r.Residual
+			s.Problems = append(s.Problems, fmt.Sprintf("%s: residual %d after the apply, and the PR is outside the persisted set (tracked after enumeration)", pr, *r.Residual))
+		}
+	}
 	if len(s.Missing) > 0 {
 		if mode == ModePlan {
 			s.Problems = append(s.Problems, fmt.Sprintf("coverage: %d of %d enumerated PRs have no usable plan-mode record", len(s.Missing), s.Enumerated))
@@ -177,6 +195,12 @@ func (s *Summary) Print(w io.Writer) {
 				v = "unknown"
 			}
 			fmt.Fprintf(w, "  %s: %s\n", pr, v)
+		}
+		if len(s.OutsideSet) > 0 {
+			fmt.Fprintf(w, "PRs outside the persisted set with a residual above zero: %d\n", len(s.OutsideSet))
+			for _, pr := range s.OutsideSet {
+				fmt.Fprintf(w, "  %s: residual %d (outside the persisted set)\n", pr, s.Residuals[pr])
+			}
 		}
 	} else {
 		fmt.Fprintf(w, "planned actions per kind (%s):\n", strings.Join(summaryOps, " "))

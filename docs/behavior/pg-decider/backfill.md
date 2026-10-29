@@ -150,7 +150,10 @@ PRs that would get a second anchor; and the age of the oldest plan record. A pla
 the bound (`--max-plan-age`, 48 hours by default) is flagged, and MUST be re-planned before the flip.
 
 In `apply` mode it prints each enumerated PR's persisted residual, and fails when any is not zero,
-when it is unknown, or when an enumerated PR has no usable apply-mode record.
+when it is unknown, or when an enumerated PR has no usable apply-mode record. It also reads the
+latest apply-mode record of every other PR in the run record (a PR the router follows after
+enumeration, which is not in the persisted set), fails when any has a residual above zero, and names
+each such PR as outside the persisted set.
 
 ## The flip marker and the listing of writes
 
@@ -239,7 +242,9 @@ its name and the tracker directory are the configuration keys `bd` and `beads_di
 - **INV-BACKFILL-12.** <!-- uuid: 9f6fa7e3-c6d9-44f8-bc78-84c3d1851e62 --> The plan summary MUST print the fixed fields from the latest record per PR and mode, MUST name every
   enumerated PR without a usable plan-mode record, and MUST flag a plan older than its bound.
 - **INV-BACKFILL-13.** <!-- uuid: 0be88afd-8459-422b-a59c-6b95bfea570c --> The apply summary MUST print each enumerated PR's persisted residual and MUST fail when any is not
-  zero or when an enumerated PR has no usable apply-mode record.
+  zero or when an enumerated PR has no usable apply-mode record. It MUST also fail when a PR
+  outside the persisted set has a latest apply-mode record with a residual above zero, and MUST name it
+  as outside the set.
 - **INV-BACKFILL-14.** <!-- uuid: 095acc61-4ef3-4a0c-8e6c-a4e5c79f5700 --> The driver MUST NOT keep a clock of its own: it MUST NOT retry inside one run, and its only wait
   MUST be the pace between two PRs.
 - **INV-BACKFILL-15.** <!-- uuid: 5c1e8a3d-7b94-4f2a-9d60-e3a17c4b52f8 --> `mark-watched` MUST read every PR that has an open anchor and whose PR is not merged or closed

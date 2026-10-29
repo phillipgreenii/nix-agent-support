@@ -144,14 +144,16 @@ signal). Do not run it again.
 ### 7. Verify
 
 ```bash
-pg-pr-backfill summary --mode apply                          # a residual of zero for every enumerated PR
+pg-pr-backfill summary --mode apply                          # a residual of zero for every enumerated PR AND every other PR in the run record
 pg-pr-backfill run --mode apply --new-pass --max-creates anchor=0   # the second pass writes nothing (router creates do not count)
 pg-pr-backfill writes                                        # no write after the first pass's
 pg-pr-change apply <one real open anchor's PR id>            # re-run by hand: it wrote nothing
 ```
 
 Also confirm the primary alert (`pg-desk-pr-never-hydrated`) and the residual alert
-(`pg-desk-pr-residual-after-apply`) are green. The first apply is verified when all of this holds.
+(`pg-desk-pr-residual-after-apply`) are green. The summary reads the latest apply record of every tracked PR, not only the persisted set: a PR outside
+the set with a residual above zero (one the router followed after enumeration) fails it and is named
+as outside the persisted set. The first apply is verified when all of this holds.
 
 ### 8. Rollback
 

@@ -197,3 +197,53 @@ func TestMarkersAreIgnoredWhenTakingTheLatestRecordPerPRAndMode(t *testing.T) {
 		t.Fatalf("latest %v", got)
 	}
 }
+
+func TestTheApplySummaryFailsOnATrackedPRAbsentFromTheSetWithAResidual(t *testing.T) {
+	t0 := baseTime
+	lg := readGolden(
+		t,
+		recLine{at: t0, pr: "o/r#1", mode: ModeApply, residual: intp(0)},
+		// Followed by the router after enumeration: not in the set.
+		recLine{at: t0, pr: "o/r#7", mode: ModeApply, residual: intp(1), eventID: "o/r#7@0123456789ab"},
+		// An older residual of #8 was cleared by a later apply.
+		recLine{at: t0, pr: "o/r#8", mode: ModeApply, residual: intp(3)},
+		recLine{at: t0.Add(time.Hour), pr: "o/r#8", mode: ModeApply, residual: intp(0)},
+		// A plan-mode record is not an apply residual.
+		recLine{at: t0, pr: "o/r#9", mode: ModePlan},
+	)
+	s := Summarize(lg, testSet("o/r#1"), ModeApply, 0, t0)
+	if s.OK() {
+		t.Fatal("the apply summary passed with a residual outside the set")
+	}
+	if len(s.OutsideSet) != 1 || s.OutsideSet[0] != "o/r#7" {
+		t.Fatalf("outside the set: %v", s.OutsideSet)
+	}
+	var out bytes.Buffer
+	s.Print(&out)
+	for _, w := range []string{"o/r#7: residual 1", "outside the persisted set", "checks: FAIL"} {
+		if !strings.Contains(out.String(), w) {
+			t.Errorf("output lacks %q:\n%s", w, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "o/r#8") || strings.Contains(out.String(), "o/r#9") {
+		t.Errorf("output names a PR with no live residual:\n%s", out.String())
+	}
+}
+
+func TestTheApplySummaryPassesWhenATrackedPRAbsentFromTheSetHasNoResidual(t *testing.T) {
+	t0 := baseTime
+	lg := readGolden(
+		t,
+		recLine{at: t0, pr: "o/r#1", mode: ModeApply, residual: intp(0)},
+		recLine{at: t0, pr: "o/r#7", mode: ModeApply, residual: intp(0)},
+	)
+	s := Summarize(lg, testSet("o/r#1"), ModeApply, 0, t0)
+	if !s.OK() || len(s.OutsideSet) != 0 {
+		t.Fatalf("problems %v outside %v", s.Problems, s.OutsideSet)
+	}
+	var out bytes.Buffer
+	s.Print(&out)
+	if !strings.Contains(out.String(), "checks: PASS") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
