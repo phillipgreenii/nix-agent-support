@@ -72,10 +72,15 @@ var alwaysSafe = map[string]bool{
 	// dragging the whole compound command to abstain and on to an auto-mode
 	// classifier denial for an otherwise-safe `bd ready --claim` call.
 	"set": true,
-	// macOS system tools (read-only inspection)
-	"sfltool": true, "plutil": true, "system_profiler": true, "launchctl": true,
+	// macOS system tools. launchctl and sfltool are DELIBERATELY left blanket-approved
+	// pending an operator ruling (pg2-usuewr, R4 ruling pg2-ul2nt5): `launchctl
+	// bootstrap|load|submit` loads a launchd job definition whose Program/
+	// ProgramArguments then RUN, so those are program-execution verbs; the operator
+	// asked what bootstrap does and did not rule. plutil and colima are NOT here: they
+	// are argument-checked in colima_plutil.go (pg2-ul2nt5).
+	"sfltool": true, "system_profiler": true, "launchctl": true,
 	"claude-extended-tool-approver": true, "claude-pretool-hook": true,
-	"shellcheck": true, "colima": true, "contained-claude": true,
+	"shellcheck": true, "contained-claude": true,
 	"my-code-review-support-cli": true,
 	// integrate-branch-support (tc-v666, per tc-18vu's analysis): a repo-local
 	// read-only reporting CLI, the same class as the other support-CLI entries
@@ -435,6 +440,22 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if basename == "test" || basename == "[" {
 			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
+			}
+			continue
+		}
+		if basename == "colima" {
+			result, err := r.evaluateColima(pc, input, pe, cwd)
+			if err != nil {
+				return result, err
+			}
+			if result.Decision != hookio.Approve {
+				return result, nil
+			}
+			continue
+		}
+		if basename == "plutil" {
+			if issue := plutilIssue(pc.Args, pe); issue != "" {
+				return r.refuse("safe-commands: " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
