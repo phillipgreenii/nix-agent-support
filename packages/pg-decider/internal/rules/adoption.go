@@ -36,7 +36,7 @@ func (anchorAdoptionRule) Evaluate(in decide.Input) decide.Result {
 			unadoptable = append(unadoptable, ad.Item.ID)
 			continue
 		}
-		key := workitem.DedupKey(e, ad.Kind, ctx)
+		key := workitem.CreateKey(e, ad.Kind, ctx)
 		acts = append(acts, action.Action{
 			Op: action.OpUpdate, Kind: string(ad.Kind), Target: anchorTarget(ad.Item.ID),
 			Fields: action.Fields{Metadata: map[string]string{"dedup_key": key}},

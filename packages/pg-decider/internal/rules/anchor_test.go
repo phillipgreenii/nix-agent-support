@@ -229,7 +229,7 @@ func TestAnchorLazyCreatesAnchorBeforeTheFirstChild(t *testing.T) {
 	wantMD := map[string]string{
 		"repo": "acme/widgets", "pr_number": "42", "state": "open", "branch": "feature/retry", "base": "main",
 		"author": "teammate", "url": "https://example.test/acme/widgets/pull/42", "draft": "false",
-		"dedup_key": "pr:acme/widgets#42:anchor",
+		"dedup_key": "pr:PR_node_42:anchor",
 	}
 	if !reflect.DeepEqual(f.Metadata, wantMD) {
 		t.Fatalf("metadata = %v\nwant       %v", f.Metadata, wantMD)

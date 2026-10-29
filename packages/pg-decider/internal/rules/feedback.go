@@ -136,7 +136,7 @@ func feedbackCreate(in decide.Input, digest string, unaddressed, uncovered []str
 				"pr_number":        strconv.Itoa(v.Snapshot.Number),
 				"branch":           v.Snapshot.Branch,
 				"covered_comments": strings.Join(unaddressed, ","),
-				"dedup_key":        workitem.DedupKey(ref, workitem.KindProcessFeedback, workitem.Context{Digest: digest}),
+				"dedup_key":        workitem.CreateKey(ref, workitem.KindProcessFeedback, workitem.Context{Digest: digest}),
 			},
 		},
 		Facts: map[string]any{"digest": digest, "unaddressed": unaddressed, "uncovered": uncovered},

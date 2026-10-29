@@ -171,7 +171,7 @@ func reviewCreate(in decide.Input, items []workitem.Item, head string, forced bo
 		parent = a.ID
 	}
 	md := reviewItemMetadata(v, head)
-	md["dedup_key"] = workitem.DedupKey(workitem.EntityRefFrom(v), workitem.KindReviewPR, reviewContext(items, "", head))
+	md["dedup_key"] = workitem.CreateKey(workitem.EntityRefFrom(v), workitem.KindReviewPR, reviewContext(items, "", head))
 	return action.Action{
 		Op:   action.OpCreate,
 		Kind: string(workitem.KindReviewPR),
@@ -198,10 +198,15 @@ func reviewRefresh(it workitem.Item, items []workitem.Item, v *view.View, head s
 	case ok && it.Metadata["head_sha"] == head:
 		md["dedup_key"] = it.DedupKey
 	case ok:
+		// A refresh names the PR by its node_id when it has one, so it never
+		// writes back the id form adoption.node-id rewrites in the same plan.
+		if ref.NodeID != "" {
+			ident = ref.NodeID
+		}
 		md["dedup_key"] = typ + ":" + ident + ":" + string(workitem.KindReviewPR) +
 			workitem.ContextSuffix(workitem.KindReviewPR, reviewContext(items, it.ID, head))
 	default:
-		md["dedup_key"] = workitem.DedupKey(ref, workitem.KindReviewPR, reviewContext(items, it.ID, head))
+		md["dedup_key"] = workitem.CreateKey(ref, workitem.KindReviewPR, reviewContext(items, it.ID, head))
 	}
 	return action.Action{
 		Op:     action.OpUpdate,

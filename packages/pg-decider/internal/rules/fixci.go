@@ -114,7 +114,7 @@ func fixciCreate(in decide.Input, head string, failing []ciRun, builds, checks [
 	if a, ok := in.Items.Anchor(); ok {
 		parent = a.ID
 	}
-	key := workitem.DedupKey(workitem.EntityRefFrom(v), workitem.KindFixCI, workitem.Context{HeadSHA: head})
+	key := workitem.CreateKey(workitem.EntityRefFrom(v), workitem.KindFixCI, workitem.Context{HeadSHA: head})
 	return decide.Result{Actions: []action.Action{{
 		Op:   action.OpCreate,
 		Kind: string(workitem.KindFixCI),

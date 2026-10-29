@@ -96,7 +96,7 @@ func TestFixCICreate(t *testing.T) {
 			want := map[string]string{
 				"repo": "acme/widgets", "pr_number": "42", "branch": "feature/retry",
 				"head_sha": "9f3c1e2", "failing_builds": tc.builds, "failing_checks": tc.checks,
-				"dedup_key": "pr:acme/widgets#42:fix-ci:9f3c1e2",
+				"dedup_key": "pr:PR_node_42:fix-ci:9f3c1e2",
 			}
 			if !reflect.DeepEqual(f.Metadata, want) {
 				t.Fatalf("metadata = %v\nwant       %v", f.Metadata, want)

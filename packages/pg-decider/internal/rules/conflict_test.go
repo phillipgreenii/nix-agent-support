@@ -97,7 +97,7 @@ func TestConflictCreate(t *testing.T) {
 			want := map[string]string{
 				"repo": "acme/widgets", "pr_number": "42", "branch": tc.branch,
 				"head_sha": tc.head, "base": tc.base, "base_sha": tc.baseSHA,
-				"dedup_key": "pr:acme/widgets#42:resolve-conflict:" + tc.branch + ":" + tc.head + ":" + tc.base + ":" + tc.baseSHA,
+				"dedup_key": "pr:PR_node_42:resolve-conflict:" + tc.branch + ":" + tc.head + ":" + tc.base + ":" + tc.baseSHA,
 			}
 			if !reflect.DeepEqual(f.Metadata, want) {
 				t.Fatalf("metadata = %v\nwant       %v", f.Metadata, want)

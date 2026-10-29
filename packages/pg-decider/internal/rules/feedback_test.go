@@ -98,7 +98,7 @@ func TestFeedbackCreateForMineAndCoOwned(t *testing.T) {
 			wantMD := map[string]string{
 				"repo": "acme/widgets", "pr_number": "42", "branch": "feature/retry",
 				"covered_comments": "c-101,c-102",
-				"dedup_key":        "pr:acme/widgets#42:process-feedback:" + feedbackD12,
+				"dedup_key":        "pr:PR_node_42:process-feedback:" + feedbackD12,
 			}
 			if !reflect.DeepEqual(f.Metadata, wantMD) {
 				t.Errorf("metadata: %v", f.Metadata)
@@ -152,7 +152,7 @@ func TestFeedbackExtraCommentAfterClosedCycleCreatesNewCycle(t *testing.T) {
 	if !reflect.DeepEqual(a.Fields.Labels, []string{"mine", "fbsum:" + feedbackD123}) {
 		t.Errorf("labels: %v", a.Fields.Labels)
 	}
-	if got := a.Fields.Metadata["dedup_key"]; got != "pr:acme/widgets#42:process-feedback:"+feedbackD123 {
+	if got := a.Fields.Metadata["dedup_key"]; got != "pr:PR_node_42:process-feedback:"+feedbackD123 {
 		t.Errorf("dedup_key: %q", got)
 	}
 	if got := a.Fields.Metadata["covered_comments"]; got != "c-101,c-102,c-103" {

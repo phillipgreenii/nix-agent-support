@@ -42,12 +42,12 @@
       "target": "bd-2",
       "fields": {
         "metadata": {
-          "dedup_key": "pr:acme/widgets#42:review-pr:9f3c1e2"
+          "dedup_key": "pr:PR_node_42:review-pr:9f3c1e2"
         }
       },
       "rule": "adoption",
       "facts": {
-        "dedup_key": "pr:acme/widgets#42:review-pr:9f3c1e2",
+        "dedup_key": "pr:PR_node_42:review-pr:9f3c1e2",
         "matched_by": "title"
       }
     },

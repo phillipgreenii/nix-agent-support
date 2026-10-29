@@ -274,7 +274,7 @@ func anchorCreate(v *view.View, neededBy []string) action.Action {
 		IssueType: c.IssueType,
 		Metadata:  anchorMirror(s),
 	}
-	f.Metadata["dedup_key"] = workitem.DedupKey(workitem.EntityRefFrom(v), workitem.KindAnchor, workitem.Context{})
+	f.Metadata["dedup_key"] = workitem.CreateKey(workitem.EntityRefFrom(v), workitem.KindAnchor, workitem.Context{})
 	if mine, ok := anchorActsAsMine(v.Decorations.Relationship); ok && anchorHasConflict(v) {
 		add, _, pri, set := anchorPriorityDelta(anchorDefaultPriority, nil, mine, true)
 		labels = append(labels, add...)

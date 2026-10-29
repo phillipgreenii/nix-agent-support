@@ -89,7 +89,7 @@ func reviewWantCreateKey(t *testing.T, a action.Action, parent, ownership, keySu
 	}
 	want := reviewMetadata(reviewHead)
 	want["ownership"] = ownership
-	want["dedup_key"] = "pr:acme/widgets#42:review-pr:" + reviewHead + keySuffix
+	want["dedup_key"] = "pr:PR_node_42:review-pr:" + reviewHead + keySuffix
 	if !reflect.DeepEqual(f.Metadata, want) {
 		t.Errorf("metadata: %v", f.Metadata)
 	}
@@ -100,7 +100,7 @@ func reviewWantCreateKey(t *testing.T, a action.Action, parent, ownership, keySu
 // step re-checks live. The key keeps the identity segment of the old key.
 func reviewWantUpdate(t *testing.T, a action.Action, head string) {
 	t.Helper()
-	reviewWantUpdateKey(t, a, "bd-2", head, "pr:acme/widgets#42:review-pr:"+head)
+	reviewWantUpdateKey(t, a, "bd-2", head, "pr:PR_node_42:review-pr:"+head)
 }
 
 func reviewWantUpdateKey(t *testing.T, a action.Action, id, head, key string) {

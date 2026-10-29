@@ -13,7 +13,7 @@
           "author": "teammate",
           "base": "main",
           "branch": "feature/retry",
-          "dedup_key": "pr:acme/widgets#42:anchor",
+          "dedup_key": "pr:PR_node_42:anchor",
           "draft": "false",
           "pr_number": "42",
           "repo": "acme/widgets",
@@ -40,7 +40,7 @@
         "parent": "$anchor",
         "metadata": {
           "branch": "feature/retry",
-          "dedup_key": "pr:acme/widgets#42:review-pr:9f3c1e2",
+          "dedup_key": "pr:PR_node_42:review-pr:9f3c1e2",
           "head_sha": "9f3c1e2",
           "ownership": "mine",
           "pr_number": "42",
@@ -66,7 +66,7 @@
         "metadata": {
           "branch": "feature/retry",
           "covered_comments": "c-101,c-102",
-          "dedup_key": "pr:acme/widgets#42:process-feedback:5ff7c41ebe23",
+          "dedup_key": "pr:PR_node_42:process-feedback:5ff7c41ebe23",
           "pr_number": "42",
           "repo": "acme/widgets"
         }
@@ -90,7 +90,7 @@
         "labels": ["mine", "worker-ready"],
         "metadata": {
           "branch": "feature/retry",
-          "dedup_key": "pr:acme/widgets#42:fix-ci:9f3c1e2",
+          "dedup_key": "pr:PR_node_42:fix-ci:9f3c1e2",
           "failing_builds": "900:1",
           "failing_checks": "unit",
           "head_sha": "9f3c1e2",
@@ -119,7 +119,7 @@
           "base": "main",
           "base_sha": "b45e000",
           "branch": "feature/retry",
-          "dedup_key": "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000",
+          "dedup_key": "pr:PR_node_42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000",
           "head_sha": "9f3c1e2",
           "pr_number": "42",
           "repo": "acme/widgets"

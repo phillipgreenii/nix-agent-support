@@ -32,6 +32,9 @@ const (
 
 func rKey(head string) string { return "pr:acme/widgets#42:review-pr:" + head }
 
+// rNodeKey is the node_id form a refresh writes for the same item.
+func rNodeKey(head string) string { return "pr:PR_node_42:review-pr:" + head }
+
 // reviewBuild is the mine_create view with the given review items linked, the
 // PR head at head, and the force-review flag as asked.
 func reviewBuild(t *testing.T, force bool, items ...rItem) *view.View {
@@ -109,7 +112,7 @@ func TestReviewBurstOfPushesYieldsOneItem(t *testing.T) {
 	if got := reviewOps(res); !reflect.DeepEqual(got, []string{"update review-pr"}) {
 		t.Fatalf("ops = %v", got)
 	}
-	reviewWantUpdateKey(t, res.Actions[0], "bd-2", rNewHead, rKey(rNewHead))
+	reviewWantUpdateKey(t, res.Actions[0], "bd-2", rNewHead, rNodeKey(rNewHead))
 
 	// the state after the refresh is quiet
 	v = reviewBuild(t, false, rItem{id: "bd-2", state: "open", head: rNewHead, key: rKey(rNewHead)})
@@ -151,7 +154,7 @@ func TestReviewLegacySuffixlessItems(t *testing.T) {
 	nodeLegacy := "pr:PR_node_42:review-pr"
 
 	res := reviewEval(reviewBuild(t, false, rItem{id: "bd-2", state: "open", head: rOldHead, key: legacy, title: "review-pr: acme/widgets#42"}))
-	reviewWantUpdateKey(t, res.Actions[0], "bd-2", rNewHead, rKey(rNewHead))
+	reviewWantUpdateKey(t, res.Actions[0], "bd-2", rNewHead, rNodeKey(rNewHead))
 
 	res = reviewEval(reviewBuild(t, false, rItem{id: "bd-2", state: "open", head: rOldHead, key: nodeLegacy, title: "review-pr: acme/widgets#42"}))
 	reviewWantUpdateKey(t, res.Actions[0], "bd-2", rNewHead, "pr:PR_node_42:review-pr:"+rNewHead)
@@ -206,7 +209,7 @@ func TestReviewForceWithAnUnclaimedItemRefreshesIt(t *testing.T) {
 		t.Fatalf("ops = %v", got)
 	}
 	// the refreshed key cannot be the key of the closed item at the same head
-	reviewWantUpdateKey(t, res.Actions[0], "bd-3", rNewHead, rKey(rNewHead)+":r1")
+	reviewWantUpdateKey(t, res.Actions[0], "bd-3", rNewHead, rNodeKey(rNewHead)+":r1")
 }
 
 // A deferred or blocked item is not unclaimed: it is left alone and does not
@@ -374,7 +377,7 @@ func reviewReadFixture(t *testing.T, name string) []byte {
 func TestAdoptionOfKeylessReviewItemsUsesTheirHead(t *testing.T) {
 	v := reviewBuild(t, false, rItem{id: "bd-2", state: "closed", head: rOldHead, title: "review-pr: acme/widgets#42"})
 	res := anchorRule(t, "adoption").Evaluate(anchorInput(v))
-	if len(res.Actions) != 1 || res.Actions[0].Fields.Metadata["dedup_key"] != rKey(rOldHead) {
+	if len(res.Actions) != 1 || res.Actions[0].Fields.Metadata["dedup_key"] != strings.Replace(rKey(rOldHead), "acme/widgets#42", "PR_node_42", 1) {
 		t.Fatalf("adoption = %+v", res)
 	}
 

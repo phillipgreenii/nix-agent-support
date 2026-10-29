@@ -77,7 +77,7 @@ func conflictPresent(in decide.Input) decide.Result {
 	if a, ok := in.Items.Anchor(); ok {
 		parent = a.ID
 	}
-	key := workitem.DedupKey(workitem.EntityRefFrom(v), workitem.KindResolveConflict, ctx)
+	key := workitem.CreateKey(workitem.EntityRefFrom(v), workitem.KindResolveConflict, ctx)
 	return decide.Result{Actions: []action.Action{{
 		Op:   action.OpCreate,
 		Kind: string(workitem.KindResolveConflict),

@@ -339,18 +339,6 @@ func TestPropertyReplanAfterApplyIsEmptyOverGeneratedViews(t *testing.T) {
 		next := 0
 		modelApply(t, p, first, &next)
 		second := suiteDecide(p.parse(t))
-		if hasNodeID(p) {
-			// A created item carries the id form of its dedup key, and the next run
-			// rewrites it to the node_id form (adoption.node-id, a deliberate
-			// one-step backfill): that rewrite, and nothing else, is what may remain.
-			for _, a := range second.Actions {
-				if a.Rule != nodeIDRuleAdoption {
-					t.Fatalf("the first plan [%s] left a view whose plan holds more than the node_id key rewrite: [%s]\n%s", summarize(first), summarize(second), dump(p))
-				}
-			}
-			modelApply(t, p, second, &next)
-			second = suiteDecide(p.parse(t))
-		}
 		if len(second.Actions) != 0 {
 			t.Fatalf("the first plan [%s] left a view whose plan is [%s]\nview after the apply:\n%s", summarize(first), summarize(second), dump(p))
 		}
@@ -361,6 +349,39 @@ func TestPropertyReplanAfterApplyIsEmptyOverGeneratedViews(t *testing.T) {
 	// A property over views whose first plan is always empty would prove nothing.
 	if planned == 0 {
 		t.Fatal("no generated view made a plan with an action: the property was vacuous")
+	}
+}
+
+// Create then plan is empty (pg2-vxlzo2): a PR with a node_id whose first plan
+// CREATES work items must, once that plan is applied, plan nothing at all in one
+// pass: no adoption.node-id rewrite is left for a later event, so a PR that gets
+// no further event holds no residual.
+func TestCreateThenPlanIsEmptyForNodeIDViews(t *testing.T) {
+	created := 0
+	rapid.Check(t, func(t *rapid.T) {
+		p := propViewGen().Draw(t, "view")
+		if id, _ := p.obj("snapshot")["node_id"].(string); id == "" {
+			t.Skip("no node_id")
+		}
+		first := suiteDecide(p.parse(t))
+		hasCreate := false
+		for _, a := range first.Actions {
+			if a.Op == action.OpCreate {
+				hasCreate = true
+			}
+		}
+		if !hasCreate {
+			t.Skip("no create planned")
+		}
+		next := 0
+		modelApply(t, p, first, &next)
+		if second := suiteDecide(p.parse(t)); len(second.Actions) != 0 {
+			t.Fatalf("create then plan is not empty: first [%s], then [%s]\n%s", summarize(first), summarize(second), dump(p))
+		}
+		created++
+	})
+	if created == 0 {
+		t.Fatal("no generated node_id view planned a create: the test was vacuous")
 	}
 }
 
@@ -379,11 +400,6 @@ func TestPropertyNegativeAnUnappliedPlanIsPlannedAgain(t *testing.T) {
 			t.Fatalf("an unapplied plan changed: [%s] then [%s]", summarize(first), summarize(again))
 		}
 	})
-}
-
-func hasNodeID(p propView) bool {
-	id, _ := p.obj("snapshot")["node_id"].(string)
-	return id != ""
 }
 
 func dump(p propView) string {

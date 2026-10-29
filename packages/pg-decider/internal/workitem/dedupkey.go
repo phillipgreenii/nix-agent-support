@@ -91,6 +91,17 @@ func DedupKeyNodeID(e EntityRef, k Kind, c Context) (string, bool) {
 	return e.Type + ":" + e.NodeID + ":" + string(k) + ContextSuffix(k, c), true
 }
 
+// CreateKey is the dedup key a PR-lane rule writes: the node_id form when the
+// entity carries a node_id, else the id form. Writing the node_id form at
+// creation leaves adoption.node-id nothing to rewrite, so a create is
+// idempotent in one pass (a PR with no later event keeps no residual).
+func CreateKey(e EntityRef, k Kind, c Context) string {
+	if key, ok := DedupKeyNodeID(e, k, c); ok {
+		return key
+	}
+	return DedupKey(e, k, c)
+}
+
 // ParseKey splits <type>:<ident>:<kind>[:suffix]. suffix keeps its leading
 // colon (the exact ContextSuffix output) and is "" when absent. ok is false
 // for anything that is not that shape with a known kind. Ids and node_ids
