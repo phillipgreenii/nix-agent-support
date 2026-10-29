@@ -8021,6 +8021,9 @@
                     fileset = lib.fileset.unions [
                       ./packages/pg-desk
                       ./packages/pg-connector
+                      # internal/alertrules tests read pg-router-probe's
+                      # cmd/pg-router-probe/run.go by relative path.
+                      ./packages/pg-router-probe
                     ];
                   };
                   modRoot = "pg-desk";
