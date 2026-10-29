@@ -5027,6 +5027,7 @@
                   pluginProgram = pkgs.writeText "plugin-program-map" ''
                     claude-activity claude-activity
                     claude-extended-tool-approver claude-extended-tool-approver
+                    claude-tool-tracker claude-tool-tracker
                     pb session-mode
                   '';
                   # Modules that default `enable = false` today; consumers carry

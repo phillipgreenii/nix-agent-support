@@ -18,6 +18,7 @@
     ./programs/cmux-claude
     ./programs/agent-activity
     ./programs/claude-activity
+    ./programs/claude-tool-tracker
     ./programs/pa-monitor
     ./programs/ccpool
     ./programs/pg-router

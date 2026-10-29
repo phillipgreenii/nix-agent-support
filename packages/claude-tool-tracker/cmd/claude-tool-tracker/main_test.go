@@ -242,3 +242,35 @@ func TestOversizedAppendIsOneShortenedLine(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// TestHookModeEachFixtureOneLineOfItsKind feeds each real-shaped hook input to
+// the real binary: exactly one event line of the matching kind, empty stdout
+// and stderr, exit 0.
+func TestHookModeEachFixtureOneLineOfItsKind(t *testing.T) {
+	for file, kind := range map[string]string{
+		"pre_tool_use.json":          "tracker.pre_tool",
+		"post_tool_use.json":         "tracker.post_tool",
+		"post_tool_use_failure.json": "tracker.post_tool",
+		"permission_request.json":    "tracker.permission_offer",
+		"permission_denied.json":     "tracker.denied",
+	} {
+		in, err := os.ReadFile(filepath.Join("..", "..", "testdata", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state := t.TempDir()
+		out, errOut, code := run(t, state, string(in), "hook")
+		if code != 0 || out != "" || errOut != "" {
+			t.Errorf("%s: code %d stdout %q stderr %q", file, code, out, errOut)
+		}
+		b, err := os.ReadFile(eventsFile(state, "sess-1", "tracker"))
+		if err != nil {
+			t.Errorf("%s: %v", file, err)
+			continue
+		}
+		lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+		if len(lines) != 1 || !strings.Contains(lines[0], `"kind":"`+kind+`"`) {
+			t.Errorf("%s: want one %s line, got %q", file, kind, b)
+		}
+	}
+}

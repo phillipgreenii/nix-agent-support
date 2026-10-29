@@ -1,0 +1,6 @@
+{
+  "name": "claude-tool-tracker",
+  "description": "Records tool-call facts only Claude Code command hooks carry (permission mode, agent type, duration, permission suggestions, denial reasons)",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
