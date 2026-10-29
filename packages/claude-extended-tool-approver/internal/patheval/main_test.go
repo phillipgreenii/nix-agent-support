@@ -71,7 +71,8 @@ func redirectTempDirAwayFromLiteralTmp() (restore func(), err error) {
 	if effective == "" {
 		effective = filepath.Clean(os.TempDir())
 	}
-	if !underTmpRoot(effective) {
+	underNix := effective == "/nix" || strings.HasPrefix(effective, "/nix/")
+	if !underTmpRoot(effective) && !underNix {
 		return func() {}, nil
 	}
 
@@ -83,6 +84,20 @@ func redirectTempDirAwayFromLiteralTmp() (restore func(), err error) {
 	// synthetic HOME/XDG_DATA_HOME/etc. before constructing an evaluator, so
 	// this ambient value is never itself read as a zone by the code under
 	// test.
+	//
+	// Inside a nix build sandbox (bead pg2-veu8ad) $TMPDIR is NIX_BUILD_TOP and
+	// HOME is the same directory, both under /nix/var/nix/builds/<id>, which
+	// classify() answers with its coarse read-only "/nix/**" zone before any zone
+	// a fixture is meant to exercise. There the replacement is /var/tmp (the
+	// darwin build sandbox allows writes to /private/var/tmp; it is neither
+	// /tmp nor /nix, and classify() has no zone for it).
+	if underNix {
+		dir, err := os.MkdirTemp("/var/tmp", "ceta-patheval-test-tmp-")
+		if err != nil {
+			return nil, fmt.Errorf("effective temp dir %q is under /nix and /var/tmp is unusable: %w", effective, err)
+		}
+		return setTmpdir(dir)
+	}
 	homeDir, homeErr := os.UserHomeDir()
 	if homeErr != nil || homeDir == "" {
 		return nil, fmt.Errorf("no usable $HOME to place a non-/tmp scratch directory outside literal /tmp (effective temp dir %q collides with the tool's own tmpRoot zone): %w", effective, homeErr)
@@ -96,6 +111,12 @@ func redirectTempDirAwayFromLiteralTmp() (restore func(), err error) {
 		return nil, fmt.Errorf("create non-/tmp scratch dir under %s: %w", cacheParent, err)
 	}
 
+	return setTmpdir(dir)
+}
+
+// setTmpdir points $TMPDIR at dir and returns the restore func that removes dir
+// and puts $TMPDIR back exactly as found.
+func setTmpdir(dir string) (restore func(), err error) {
 	original, hadOriginal := os.LookupEnv("TMPDIR")
 	if err := os.Setenv("TMPDIR", dir); err != nil {
 		_ = os.RemoveAll(dir)
