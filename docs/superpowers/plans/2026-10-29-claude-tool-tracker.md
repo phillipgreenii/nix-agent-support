@@ -23,25 +23,34 @@ landable tasks; every decided-how stays in the design and is cited, never restat
      of the comparison.
   3. No other task may delete or disable any CETA recording path.
 
+## Work packets
+
+Docket `pg2-aj5iq8`. Task Tn is bead `pg2-aj5iq8.n` for n = 1 to 15, and the blocked-by edges in the table
+below are wired as real `bd` dependencies. Contracts the design leaves to the builder are fixed by the
+predecessor task in a named file, and the consuming tasks read that file: `packages/claude-tool-tracker/README.md`
+(heading "Event format"), `docs/event-kinds.md` (T1, the `data` fields of every tracker and CETA kind),
+`docs/views.md` (T2 and T3, the published views and columns, including the earliest and latest event times,
+per-file skipped counts and per-session sources), and the adapter package documentation of T8.
+
 ## Task map
 
-| Task | Design chunk | Title                                                                                   | Size | Blocked by                                   |
-| ---- | ------------ | --------------------------------------------------------------------------------------- | ---- | -------------------------------------------- |
-| T1   | 1            | Package skeleton, envelope spec and the `append` command                                | S-M  | none                                         |
-| T2   | 1            | `ingest` into SQLite, published views, stable `call_id`, skipped-line counts            | M    | T1                                           |
-| T3   | 1            | Settlement derivation (`settled_by`, `settlement`, `converted_ask`, `unresolved`)       | S-M  | T2                                           |
-| T4   | 2            | Plugin command hooks and the home-manager module (default-enable parity)                | S-M  | T1                                           |
-| T5   | 2            | The tracker mod (core kinds)                                                            | M    | T1                                           |
-| T6   | 2            | Live checks 1 to 4, shadow mode starts, tracker observed recording on this laptop       | S    | T4, T5, T2                                   |
-| T7   | 3            | CETA writes `ceta.*` events (still also writing its own database)                       | S-M  | T1                                           |
-| T8   | 4            | CETA read-only adapter over the published views, `--source`, labels join                | S-M  | T3, T7                                       |
-| T9   | 4            | `compare-tracker` command                                                               | S-M  | T8                                           |
-| T10  | 4            | Run the comparison after the shadow days and record the result in the design            | S    | T6, T9                                       |
-| T11  | 5            | Miss analysis on the tracker source (`evaluate`, `report`, `show`, hook-misses skill)   | M    | T8, T10                                      |
-| T12  | 6            | `claude-tool-tracker timing`                                                            | M    | T3, T6 (T7 for classes: optional enrichment) |
-| T13  | 6            | `identify-slow-tools` skill                                                             | S    | T12                                          |
-| T14  | 7            | Per-machine cut-over switch (CETA side OFF by default, nothing removed)                 | S-M  | T10, T11                                     |
-| T15  | 7            | Cut-over on this laptop (flip the switch here, after observed recording and acceptance) | S    | T14, T6, T10                                 |
+| Task | Design chunk | Title                                                                                   | Size | Blocked by                          |
+| ---- | ------------ | --------------------------------------------------------------------------------------- | ---- | ----------------------------------- |
+| T1   | 1            | Package skeleton, envelope spec and the `append` command                                | S-M  | none                                |
+| T2   | 1            | `ingest` into SQLite, published views, stable `call_id`, skipped-line counts            | M    | T1                                  |
+| T3   | 1            | Settlement derivation (`settled_by`, `settlement`, `converted_ask`, `unresolved`)       | S-M  | T2                                  |
+| T4   | 2            | Plugin command hooks and the home-manager module (default-enable parity)                | S-M  | T1                                  |
+| T5   | 2            | The tracker mod (core kinds)                                                            | M    | T1, T4                              |
+| T6   | 2            | Live checks 1 to 4, shadow mode starts, tracker observed recording on this laptop       | S    | T2, T4, T5                          |
+| T7   | 3            | CETA writes `ceta.*` events (still also writing its own database)                       | S-M  | T1                                  |
+| T8   | 4            | CETA read-only adapter over the published views, `--source`, labels join                | S-M  | T2, T3, T7                          |
+| T9   | 4            | `compare-tracker` command                                                               | S-M  | T8                                  |
+| T10  | 4            | Run the comparison after the shadow days and record the result in the design            | S    | T6, T9                              |
+| T11  | 5            | Miss analysis on the tracker source (`evaluate`, `report`, `show`, hook-misses skill)   | M    | T8, T10                             |
+| T12  | 6            | `claude-tool-tracker timing`                                                            | M    | T2, T3, T6 (T7 optional enrichment) |
+| T13  | 6            | `identify-slow-tools` skill                                                             | S    | T12                                 |
+| T14  | 7            | Per-machine cut-over switch (CETA side OFF by default, nothing removed)                 | S-M  | T10, T11                            |
+| T15  | 7            | Cut-over on this laptop (flip the switch here, after observed recording and acceptance) | S    | T14, T6, T10                        |
 
 Chunk 1 is split in three (envelope/append, ingest, settlement) because ingest and settlement derivation
 are separately reviewable halves; chunk 2 is split four ways (hooks plus module, mod, live checks) for the
