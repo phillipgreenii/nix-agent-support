@@ -58,7 +58,7 @@ func viewsSQL() string {
 
 	var b strings.Builder
 	b.WriteString("DROP VIEW IF EXISTS tool_calls;\n")
-	b.WriteString("CREATE VIEW tool_calls AS SELECT t.*, r.repo AS repo, s.settled_by AS settled_by, s.settlement AS settlement, s.converted_ask AS converted_ask FROM (SELECT\n  ")
+	b.WriteString("CREATE VIEW tool_calls AS SELECT t.*, r.repo AS repo, s.settled_by AS settled_by, s.settlement AS settlement, s.converted_ask AS converted_ask, s.failed_timing AS failed_timing FROM (SELECT\n  ")
 	b.WriteString(strings.Join(cols, ",\n  "))
 	b.WriteString("\nFROM calls c) t LEFT JOIN cwd_repo r ON r.cwd = t.cwd LEFT JOIN call_settlement s ON s.call_id = t.call_id;\n")
 

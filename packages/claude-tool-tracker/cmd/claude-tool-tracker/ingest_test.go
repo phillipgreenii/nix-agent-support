@@ -132,7 +132,7 @@ func TestIngestBuildsViewsAndCountsSkips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []any{"Bash", "ask", "PreToolUse", "needs a look", "auto", "worker", "error", "boom", int64(37), int64(1), nil, int64(1), "ask", "reject", int64(1700000000003), int64(1700000000041), nil}
+	want := []any{"Bash", "ask", "PreToolUse", "needs a look", "auto", "worker", "error", "boom", int64(37), int64(1), nil, int64(1), "ask", "reject", int64(1700000000003), int64(1700000000041), "ceta"}
 	got := []any{tool, verdict, hook, reason, mode, agentType, result, errText, dur, isErr, denial, sandbox, engine, delivered, runningTS, endTS, settledBy}
 	for i := range want {
 		if got[i] != want[i] {

@@ -68,17 +68,21 @@ func Run(db *sql.DB, dir string, now time.Time) (*Result, error) {
 	runID, _ := res.LastInsertId()
 	out := &Result{RunID: runID}
 	repoCache := map[string]bool{}
+	touched := map[int64]bool{}
 	for _, name := range names {
-		fr, err := ingestFile(db, runID, dir, name, repoCache)
+		fr, err := ingestFile(db, runID, dir, name, repoCache, touched)
 		if err != nil {
 			return out, fmt.Errorf("%s: %w", name, err)
 		}
 		out.Files = append(out.Files, fr)
 	}
+	if err := settleCalls(db, touched, now); err != nil {
+		return out, fmt.Errorf("settlement: %w", err)
+	}
 	return out, nil
 }
 
-func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]bool) (FileResult, error) {
+func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]bool, touched map[int64]bool) (FileResult, error) {
 	fr := FileResult{File: name}
 	session, source, _ := events.ParseFileName(name)
 
@@ -143,8 +147,15 @@ func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]
 		fr.EventsNew++
 		if env.ToolUseID == "" {
 			fr.EventsWithoutCall++
-		} else if _, err := tx.Exec("INSERT OR IGNORE INTO calls(session_id, tool_use_id) VALUES (?,?)", env.SessionID, env.ToolUseID); err != nil {
-			return fr, err
+		} else {
+			if _, err := tx.Exec("INSERT OR IGNORE INTO calls(session_id, tool_use_id) VALUES (?,?)", env.SessionID, env.ToolUseID); err != nil {
+				return fr, err
+			}
+			var id int64
+			if err := tx.QueryRow("SELECT call_id FROM calls WHERE session_id=? AND tool_use_id=?", env.SessionID, env.ToolUseID).Scan(&id); err != nil {
+				return fr, err
+			}
+			touched[id] = true
 		}
 		if err := mapRepo(tx, env, repoCache); err != nil {
 			return fr, err

@@ -83,6 +83,7 @@ var migrations = []string{
 		events_without_call   INTEGER NOT NULL,
 		PRIMARY KEY (run_id, file)
 	);`,
+	`ALTER TABLE call_settlement ADD COLUMN failed_timing INTEGER;`,
 }
 
 // Open opens (creating and migrating as needed) the database at path for
