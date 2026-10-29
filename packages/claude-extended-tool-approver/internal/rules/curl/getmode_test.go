@@ -120,21 +120,15 @@ func TestGetMode_StaysDenied(t *testing.T) {
 	}
 }
 
-// legacyApprovesRegardless lists get-mode refusals that the pre-existing legacy
-// scan still approves, because they carry no body flag and the legacy scan only
-// judges the host and method of a plain GET. They are NOT widened by W1 (get mode
-// refuses them); they are the findings recorded in the bead pg2-b1lir report:
-// redirecting or writing options the legacy scan never inspected. -K and -o
+// legacyApprovesRegardless lists get-mode refusals that the legacy scan still
+// approves, because they carry no body flag and the legacy scan only judges the
+// host and method of a plain GET. (The redirecting and file-writing options the
+// legacy scan once approved, the pg2-b1lir findings, are refused since pg2-ra5o5s:
+// see TestLegacyScan_RefusesWhatGetModeRefuses.) -K and -o
 // outside the write roots are NOT in this list: Evaluate refuses those rule-wide.
 var legacyApprovesRegardless = map[string]bool{
-	`curl -sG --resolve 127.0.0.1:9090:6.6.6.6 http://127.0.0.1:9090/x`:            true,
-	`curl -sG --connect-to ::evil.example: http://127.0.0.1:9090/x`:                true,
-	`curl -sG -c /etc/jar http://127.0.0.1:9090/x`:                                 true,
-	`curl -sG -D /etc/hdr http://127.0.0.1:9090/x`:                                 true,
-	`curl -sG --trace /etc/tr http://127.0.0.1:9090/x`:                             true,
-	`curl -sG --unix-socket /var/run/docker.sock http://localhost/containers/json`: true,
-	`curl -sG --not-a-curl-flag http://127.0.0.1:9090/x`:                           true,
-	`curl -sG -H @/etc/passwd http://127.0.0.1:9090/x`:                             true,
+	`curl -sG --not-a-curl-flag http://127.0.0.1:9090/x`: true,
+	`curl -sG -H @/etc/passwd http://127.0.0.1:9090/x`:   true,
 }
 
 // leafArgs returns the argv (after `curl`) of the first leaf of cmd.
@@ -192,7 +186,7 @@ func TestCurl_ConfigAndOutputAreRefusedRuleWide(t *testing.T) {
 func TestGetMode_IsAdditive(t *testing.T) {
 	want := map[string]hookio.Decision{
 		`curl https://api.github.com/repos/foo/bar`:              hookio.Approve,
-		`curl -sL https://api.github.com/repos/foo/bar`:          hookio.Approve,
+		`curl -s https://api.github.com/repos/foo/bar`:           hookio.Approve,
 		`curl -d x http://127.0.0.1:9090/x`:                      hookio.NoOpinion,
 		`curl --data-urlencode q=up http://127.0.0.1:9090/x`:     hookio.NoOpinion,
 		`curl -X POST http://127.0.0.1:9090/x`:                   hookio.NoOpinion,
@@ -219,6 +213,61 @@ func TestCurlFlagTables_Disjoint(t *testing.T) {
 			if c == b {
 				t.Errorf("-%c is in both the short value and boolean tables", c)
 			}
+		}
+	}
+}
+
+// TestLegacyScan_RefusesWhatGetModeRefuses pins pg2-ra5o5s (operator ruling
+// 2026-10-29 on pg2-rh805n item 1): the legacy scan no longer approves the shapes
+// the -G path refuses, even without -G and even to a host it would otherwise allow.
+func TestLegacyScan_RefusesWhatGetModeRefuses(t *testing.T) {
+	refused := map[string]string{
+		`curl http://127.0.0.1/x evil.example`:                                     "second scheme-less URL",
+		`curl http://127.0.0.1/x 169.254.169.254/latest`:                           "second scheme-less URL with a port-less IP",
+		`curl --url http://127.0.0.1/x evil.example`:                               "scheme-less positional next to --url",
+		`curl http://127.0.0.1/x --url evil.example`:                               "scheme-less --url operand",
+		`curl --unix-socket /var/run/docker.sock http://localhost/containers/json`: "--unix-socket",
+		`curl --abstract-unix-socket x http://localhost/`:                          "--abstract-unix-socket",
+		`curl --unix-socket=/var/run/docker.sock http://localhost/containers/json`: "--unix-socket=",
+		`curl --resolve 127.0.0.1:9090:6.6.6.6 http://127.0.0.1:9090/x`:            "--resolve",
+		`curl --connect-to ::evil.example: http://127.0.0.1:9090/x`:                "--connect-to",
+		`curl -c /etc/jar http://127.0.0.1:9090/x`:                                 "-c cookie jar",
+		`curl -sc/etc/jar http://127.0.0.1:9090/x`:                                 "glued -c in a cluster",
+		`curl --cookie-jar /etc/jar http://127.0.0.1:9090/x`:                       "--cookie-jar",
+		`curl --cookie-jar=/etc/jar http://127.0.0.1:9090/x`:                       "--cookie-jar=",
+		`curl -D /etc/hdr http://127.0.0.1:9090/x`:                                 "-D header dump",
+		`curl --dump-header /etc/hdr http://127.0.0.1:9090/x`:                      "--dump-header",
+		`curl --trace /etc/tr http://127.0.0.1:9090/x`:                             "--trace",
+		`curl --trace-ascii /etc/tr http://127.0.0.1:9090/x`:                       "--trace-ascii",
+		`curl --stderr /etc/err http://127.0.0.1:9090/x`:                           "--stderr",
+		`curl --libcurl /etc/lc.c http://127.0.0.1:9090/x`:                         "--libcurl",
+		`curl --etag-save /etc/e http://127.0.0.1:9090/x`:                          "--etag-save",
+		`curl --hsts /etc/h http://127.0.0.1:9090/x`:                               "--hsts",
+		`curl --alt-svc /etc/a http://127.0.0.1:9090/x`:                            "--alt-svc",
+		`curl -L http://127.0.0.1:9090/x`:                                          "-L",
+		`curl -sL https://api.github.com/repos/foo/bar`:                            "-L in a cluster",
+		`curl --location https://api.github.com/repos/foo/bar`:                     "--location",
+		`curl --location-trusted https://api.github.com/repos/foo/bar`:             "--location-trusted",
+	}
+	for cmd, why := range refused {
+		if got := decide(t, cmd); got == hookio.Approve {
+			t.Errorf("%q: still approved, want not approved (%s)", cmd, why)
+		}
+	}
+
+	// A plain, ordinary curl is still approved.
+	approved := []string{
+		`curl http://127.0.0.1:9090/x`,
+		`curl -s -m 10 http://localhost:9100/metrics`,
+		`curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9090/-/healthy`,
+		`curl -s https://api.github.com/repos/foo/bar`,
+		`curl -s --url https://api.github.com/repos/foo/bar`,
+		`curl -s -H 'Accept: application/json' https://raw.githubusercontent.com/o/r/main/f`,
+		`curl -sG --data-urlencode 'query=up' http://127.0.0.1:9090/api/v1/query`,
+	}
+	for _, cmd := range approved {
+		if got := decide(t, cmd); got != hookio.Approve {
+			t.Errorf("%q: got %s, want approve (ordinary curl)", cmd, got)
 		}
 	}
 }

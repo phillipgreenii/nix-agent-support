@@ -1540,7 +1540,7 @@ func judgeRead(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	if reason, secret := secretRead(e.Path, ctx); secret {
 		return Finding{Verdict: Forbidden, Reason: reason}, true
 	}
-	access := ctx.PathEval.Evaluate(e.Path)
+	access := ctx.PathEval.EvaluateBashRead(e.Path)
 	switch {
 	case access.CanRead():
 		return Finding{Verdict: Permitted, Reason: "zone " + access.String()}, true

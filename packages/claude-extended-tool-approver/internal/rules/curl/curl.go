@@ -148,6 +148,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if r.getModeApproves(inv, input.CWD) && r.getModeOutputsOK(inv, input.CWD) {
 				continue
 			}
+			// Legacy scan (pg2-ra5o5s): refuse what get mode refuses for where the
+			// request goes, what it writes and a scheme-less extra URL.
+			if legacyRefusal(inv) != "" {
+				return hookio.NotApplicable()
+			}
 		}
 		if !r.allURLsAllowed(pc.Args) {
 			return hookio.NotApplicable()

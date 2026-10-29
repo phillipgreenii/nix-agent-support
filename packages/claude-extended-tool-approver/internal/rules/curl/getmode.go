@@ -41,6 +41,9 @@ type getInvocation struct {
 	// fileData is true when a data operand names a local file (@file, or the
 	// --data-urlencode name@file form), which get mode refuses to send.
 	fileData bool
+	// seen records every long option name the walk noted, so the legacy refusal can
+	// ask which disqualifying options were present, not just the first.
+	seen map[string]bool
 }
 
 // getModeDisqualifiers are options that disqualify an invocation from the get-mode
@@ -82,6 +85,10 @@ var shortToLong = map[byte]string{
 // fall back to the legacy scan.
 func parseInvocation(args []string) (inv getInvocation, ok bool) {
 	note := func(long, value string) {
+		if inv.seen == nil {
+			inv.seen = map[string]bool{}
+		}
+		inv.seen[long] = true
 		switch long {
 		case "--config":
 			inv.config = true
@@ -171,6 +178,41 @@ func parseInvocation(args []string) (inv getInvocation, ok bool) {
 		}
 	}
 	return inv, true
+}
+
+// legacyRefusedOptions are the getModeDisqualifiers the legacy scan ALSO refuses
+// (pg2-ra5o5s, operator ruling 2026-10-29 on pg2-rh805n item 1): follow-redirects,
+// the options that change where the request goes (unix socket, --resolve,
+// --connect-to) and the options that write a file other than through -o (cookie
+// jar, header dump, trace, --stderr, --libcurl, etag/hsts/alt-svc caches). The
+// reasons come from getModeDisqualifiers, so the two paths cannot drift apart.
+// Body options (-F, -T, --json) are NOT here: the legacy method logic already
+// treats them as a POST, which only a configured DomainMethods grant approves.
+var legacyRefusedOptions = []string{
+	"--location", "--location-trusted",
+	"--unix-socket", "--abstract-unix-socket", "--connect-to", "--resolve",
+	"--cookie-jar", "--dump-header", "--trace", "--trace-ascii", "--stderr",
+	"--libcurl", "--etag-save", "--hsts", "--alt-svc",
+}
+
+// legacyRefusal reports why the legacy scan must refuse an invocation the strict
+// walk understood, or "" when it has no objection. It refuses (1) any option in
+// legacyRefusedOptions and (2) any URL operand (positional or --url) that does not
+// start with http:// or https://: the legacy scan only looks at scheme-prefixed
+// arguments, so a second scheme-less URL (`curl http://127.0.0.1/x evil.example`)
+// slipped past its host check, and curl would request it over its default scheme.
+func legacyRefusal(inv getInvocation) string {
+	for _, name := range legacyRefusedOptions {
+		if inv.seen[name] {
+			return getModeDisqualifiers[name]
+		}
+	}
+	for _, raw := range inv.urls {
+		if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+			return "scheme-less URL " + raw
+		}
+	}
+	return ""
 }
 
 // urlencodeNamesFile reports whether a --data-urlencode / --url-query operand reads

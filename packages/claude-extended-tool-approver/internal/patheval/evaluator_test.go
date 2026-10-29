@@ -104,6 +104,38 @@ func TestPathEvaluator_ClaudeProjects_ReadWrite(t *testing.T) {
 	}
 }
 
+// TestPathEvaluator_ClaudeProjects_NotABashReadZone pins pg2-ra5o5s (operator
+// ruling 2026-10-29, pg2-rh805n item 3): ~/.claude/projects stays read-write for
+// the file tools (Evaluate, above) but is no Bash read zone (EvaluateBashRead), and
+// no other ~/.claude or home zone moves.
+func TestPathEvaluator_ClaudeProjects_NotABashReadZone(t *testing.T) {
+	home := withPinnedHome(t)
+	pe := NewWithCWD("/project", "/project")
+	for _, p := range []string{
+		filepath.Join(home, ".claude/projects"),
+		filepath.Join(home, ".claude/projects/-some-proj/abc.jsonl"),
+		filepath.Join(home, ".claude/projects/-some-proj/memory/MEMORY.md"),
+		filepath.Join(home, ".claude/projects/../projects/x.jsonl"),
+	} {
+		if got := pe.EvaluateBashRead(p); got.CanRead() {
+			t.Errorf("EvaluateBashRead(%s) = %v, want not readable", p, got)
+		}
+		if got := pe.Evaluate(p); got != PathReadWrite {
+			t.Errorf("Evaluate(%s) = %v, want PathReadWrite (file tools unchanged)", p, got)
+		}
+	}
+	for p, want := range map[string]PathAccess{
+		filepath.Join(home, ".claude/settings.json"):    PathReadOnly,
+		filepath.Join(home, ".claude/plans/p.md"):       PathReadWrite,
+		filepath.Join(home, ".claude/projects-other/x"): PathReadOnly,
+		"/project/foo.go": PathReadWrite,
+	} {
+		if got := pe.EvaluateBashRead(p); got != want {
+			t.Errorf("EvaluateBashRead(%s) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 func TestPathEvaluator_ClaudeSettings_ReadOnly(t *testing.T) {
 	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")

@@ -857,3 +857,26 @@ func TestEngine_EvaluateExpression_RedirectionPaths(t *testing.T) {
 		})
 	}
 }
+
+// TestEngine_EvaluateExpression_ClaudeProjectsStdinIsNotApproved pins pg2-ra5o5s
+// (operator ruling 2026-10-29, pg2-rh805n item 3) for the redirection path: a
+// `< ~/.claude/projects/...` stdin read is no longer approved, while a write
+// redirection into the same tree keeps its verdict and another ~/.claude read
+// still passes.
+func TestEngine_EvaluateExpression_ClaudeProjectsStdinIsNotApproved(t *testing.T) {
+	t.Setenv("HOME", "/home/testuser")
+	t.Setenv("XDG_DATA_HOME", "")
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	e.SetPathEvaluator(patheval.New("/tmp/project"))
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+	for expr, want := range map[string]hookio.Decision{
+		"cmd < /home/testuser/.claude/projects/-p/abc.jsonl":   hookio.NoOpinion,
+		"cmd < /home/testuser/.claude/settings.json":           hookio.Approve,
+		"cmd > /home/testuser/.claude/projects/-p/memory/n.md": hookio.Approve,
+	} {
+		if got := e.EvaluateExpression(expr, nil, origin); got.Decision != want {
+			t.Errorf("%q: Decision = %v, want %v (%s)", expr, got.Decision, want, got.Reason)
+		}
+	}
+}

@@ -1242,7 +1242,7 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 			return "has malformed glued quoting " + cand
 		}
 		if looksLikePath(cand) {
-			if !pe.Evaluate(cand).CanRead() && !isProcSafeReadPath(cand) {
+			if !pe.EvaluateBashRead(cand).CanRead() && !isProcSafeReadPath(cand) {
 				return "references unknown path " + cand
 			}
 		}
@@ -1424,7 +1424,7 @@ func findPathIssue(args []string, pe *patheval.PathEvaluator) string {
 		if !looksLikePath(cand) {
 			continue
 		}
-		if pe.Evaluate(cand).CanRead() {
+		if pe.EvaluateBashRead(cand).CanRead() {
 			continue
 		}
 		if projectRoot != "" {
@@ -1622,7 +1622,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 				// one candidate here, so this is behaviour-preserving for it.
 				for _, resolved := range resolvedList {
 					if looksLikePath(resolved) {
-						if !pe.Evaluate(resolved).CanRead() {
+						if !pe.EvaluateBashRead(resolved).CanRead() {
 							return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
 						}
 					}
@@ -1642,7 +1642,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 				// (patheval.PathEvaluator.ResolvePath's contract), so it is judged
 				// by the same zone check a resolved literal gets above, minus the
 				// looksLikePath gate that text does not need.
-				if !pe.Evaluate(resolved).CanRead() {
+				if !pe.EvaluateBashRead(resolved).CanRead() {
 					return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
 				}
 				continue
@@ -1650,7 +1650,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 			return "has a dynamically-expanded path arg " + cand, hookio.RefusalCategoryDynamicPathRead
 		}
 		if looksLikePath(cand) {
-			if !pe.Evaluate(cand).CanRead() && !isProcSafeReadPath(cand) {
+			if !pe.EvaluateBashRead(cand).CanRead() && !isProcSafeReadPath(cand) {
 				return "references unknown path " + cand, hookio.RefusalCategoryUnspecified
 			}
 		}
@@ -2075,7 +2075,7 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 			if cand == targetDir {
 				continue
 			}
-			if looksLikePath(cand) && !pe.Evaluate(cand).CanRead() {
+			if looksLikePath(cand) && !pe.EvaluateBashRead(cand).CanRead() {
 				return hookio.Refused(module, "safe-commands: cp source references non-readable path "+cand+" (deferred to claude-code)")
 			}
 		}
@@ -2116,7 +2116,7 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 	}
 
 	for _, src := range pathArgs[:len(pathArgs)-1] {
-		if !pe.Evaluate(src).CanRead() {
+		if !pe.EvaluateBashRead(src).CanRead() {
 			return hookio.Refused(module, "safe-commands: cp source references non-readable path "+src+" (deferred to claude-code)")
 		}
 	}
@@ -2437,7 +2437,7 @@ func evaluateUnzip(args []string, pe *patheval.PathEvaluator, cwd string, module
 
 	// Validate archive path is readable
 	if archivePath != "" && looksLikePath(archivePath) {
-		if !pe.Evaluate(archivePath).CanRead() {
+		if !pe.EvaluateBashRead(archivePath).CanRead() {
 			return hookio.Refused(module, "safe-commands: unzip archive references unknown path "+archivePath+" (deferred to claude-code)")
 		}
 	}

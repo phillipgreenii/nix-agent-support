@@ -407,6 +407,36 @@ func (pe *PathEvaluator) Evaluate(path string) PathAccess {
 	return pe.classify(path)
 }
 
+// EvaluateBashRead is Evaluate for a path a BASH command would READ (cat, ls, rg,
+// a `<` redirection, ...). It differs from Evaluate in exactly one zone: the
+// session transcripts and memory under ~/.claude/projects stay read-write for the
+// file tools (Read/Write/Edit/Grep/Glob, pathsafety) but are NOT a Bash read zone
+// — they can hold secrets from earlier sessions (operator ruling 2026-10-29 on
+// pg2-rh805n item 3, bead pg2-ra5o5s). Such a path reports PathUnknown, so a Bash
+// read of it is deferred rather than auto-approved, in every session. Writes are
+// untouched: callers that gate a WRITE keep using Evaluate.
+func (pe *PathEvaluator) EvaluateBashRead(path string) PathAccess {
+	access := pe.Evaluate(path)
+	if access.CanRead() && pe.inClaudeProjects(path) {
+		return PathUnknown
+	}
+	return access
+}
+
+// inClaudeProjects reports whether path (as written, or after symlink
+// resolution) is ~/.claude/projects or anything under it.
+func (pe *PathEvaluator) inClaudeProjects(path string) bool {
+	if pe.home == "" || pe.inContainer {
+		return false
+	}
+	cleaned := pe.cleanPath(path)
+	if cleaned == "" {
+		return false
+	}
+	projects := filepath.Join(pe.home, ".claude", "projects")
+	return pathContains(projects, cleaned) || pathContains(projects, evalSymlinksWithFallback(cleaned))
+}
+
 // classify runs the zone-classification ladder on an already-resolved (symlinks
 // followed) path. It is the SINGLE implementation shared by both of Evaluate's call
 // sites — its normal fall-through and its symlink-escape branch above.
