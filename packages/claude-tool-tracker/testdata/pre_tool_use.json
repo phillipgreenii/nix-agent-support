@@ -1,0 +1,12 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-1",
+  "transcript_path": "/t/x.jsonl",
+  "cwd": "/work/repo",
+  "permission_mode": "auto",
+  "agent_id": "agent-9",
+  "agent_type": "code-reviewer",
+  "tool_name": "Bash",
+  "tool_input": { "command": "ls" },
+  "tool_use_id": "toolu_1"
+}

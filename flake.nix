@@ -446,6 +446,12 @@
           pg-probe = final.callPackage ./packages/pg-probe {
             inherit (goBuilders) mkGoApp;
           };
+          # claude-tool-tracker (docket pg2-aj5iq8): Pattern A (ADR 0008), stdlib only.
+          # The tool-event log producer: `append` for the mod and CETA, `hook` for
+          # Claude Code command hooks.
+          claude-tool-tracker = final.callPackage ./packages/claude-tool-tracker {
+            inherit (goBuilders) mkGoApp;
+          };
           # ccpool-probe: Pattern A (ADR 0008), same shape as
           # pg-router-probe above — a standalone deterministic health
           # probe over ccpool's own operational health from pg-router's
@@ -1998,6 +2004,7 @@
                 "pg-task-focus"
                 "pg-keep-awake"
                 "pg-probe"
+                "claude-tool-tracker"
                 "pg-wrap"
                 # pg2-rpo30t: Pattern A since its claude-transcript replace went.
                 "beads-exporter"
@@ -6170,6 +6177,15 @@
                 pname = "pg-probe-go-tests";
                 src = lib.cleanSource ./packages/pg-probe; # matches default.nix
                 gomod2nixToml = ./packages/pg-probe/gomod2nix.toml;
+              };
+
+              # claude-tool-tracker (docket pg2-aj5iq8) - whole-module Go test gate.
+              # Pattern A, stdlib only. The cmd tests build and run the real binary
+              # (go build, no network needed).
+              claude-tool-tracker-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "claude-tool-tracker-go-tests";
+                src = lib.cleanSource ./packages/claude-tool-tracker; # matches default.nix
+                gomod2nixToml = ./packages/claude-tool-tracker/gomod2nix.toml;
               };
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
@@ -17626,6 +17642,7 @@
               pg-task-focus
               pg-keep-awake
               pg-probe
+              claude-tool-tracker
               integrate-branch-support
               pg-desk
               pg-desk-attention

@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PermissionDenied",
+  "session_id": "sess-1",
+  "transcript_path": "/t/x.jsonl",
+  "cwd": "/work/repo",
+  "permission_mode": "auto",
+  "tool_name": "Bash",
+  "tool_input": { "command": "rm -rf /" },
+  "tool_use_id": "toolu_3",
+  "reason": "classifier says no"
+}

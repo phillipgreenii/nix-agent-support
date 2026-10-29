@@ -1,0 +1,12 @@
+{
+  "hook_event_name": "PostToolUseFailure",
+  "session_id": "sess-1",
+  "transcript_path": "/t/x.jsonl",
+  "cwd": "/work/repo",
+  "tool_name": "Bash",
+  "tool_input": { "command": "false" },
+  "tool_use_id": "toolu_2",
+  "error": "boom",
+  "is_interrupt": true,
+  "duration_ms": 7
+}
