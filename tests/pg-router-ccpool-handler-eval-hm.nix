@@ -68,10 +68,13 @@ let
   # field along the way -- an unstubbed option here would
   # throw "attribute missing" the first time that happens,
   # not merely stay unforced.
+  # `extraModules` (bead pg2-1peo5k) joins further modules to the evaluation, e.g.
+  # the real CETA module plus its stubs, for a check about how the two compose.
   evalHMWith =
     {
       handler ? { },
       pgRouter ? { },
+      extraModules ? [ ],
     }:
     (lib.evalModules {
       specialArgs = {
@@ -193,7 +196,8 @@ let
           phillipgreenii.programs.pg-router-ccpool-handler = handler;
           phillipgreenii.programs.pg-router = pgRouter;
         }
-      ];
+      ]
+      ++ extraModules;
     }).config;
   evalHM =
     handler:

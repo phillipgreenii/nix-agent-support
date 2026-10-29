@@ -5168,6 +5168,106 @@
                   touch $out
                 '';
 
+              # test-claude-baseline-ceta-wrapper (bead pg2-1peo5k): the bare
+              # `claude-extended-tool-approver` a pool session's hooks run MUST be the CETA
+              # module's wrapper (`finalPackage`), never the bare package. The spec PATH
+              # replaces the inherited one, so a bare package there silently drops every
+              # CETA_* setting from pool sessions (found live: Grep/Glob of ~/.cache/pd-*
+              # abstained in pool sessions, approved through the wrapper). Evaluates the
+              # real handler and CETA modules together, with `package` forced to a stub
+              # that prints the variables, then RUNS the command resolved along the
+              # baseline's own PATH under `env -i`, so the wrapper is observed, not
+              # assumed. Eval-time negative controls: with CETA not enabled, or not
+              # imported, the baseline falls back to the bare package (the shape the bug
+              # had), and the enabled baseline (and `extend`) must not list that.
+              test-claude-baseline-ceta-wrapper =
+                let
+                  inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
+                    evalHMWith
+                    ;
+                  stubPkg = pkgs.runCommand "ceta-stub-0" { } ''
+                    mkdir -p $out/bin
+                    {
+                      echo '#!${pkgs.runtimeShell}'
+                      echo 'echo "PREFIX=$CETA_EXTRA_READONLY_PREFIX_ROOTS"'
+                      echo 'echo "READONLY=$CETA_EXTRA_READONLY_ROOTS"'
+                      echo 'echo "UNATTENDED=$CETA_UNATTENDED_EXTRA_READONLY_ROOTS"'
+                      echo 'echo "DENIED=$CETA_DENIED_ROOTS"'
+                    } > $out/bin/claude-extended-tool-approver
+                    chmod +x $out/bin/claude-extended-tool-approver
+                  '';
+                  cetaModules = cetaEnable: [
+                    ./home/programs/claude-extended-tool-approver/default.nix
+                    (
+                      { lib, ... }:
+                      {
+                        options.phillipgreenii.programs.claude-code = {
+                          enable = lib.mkEnableOption "claude (stub)";
+                          knownAbsentRoots = lib.mkOption {
+                            type = lib.types.listOf lib.types.str;
+                            default = [ ];
+                          };
+                        };
+                      }
+                    )
+                    {
+                      phillipgreenii.programs.claude-code = {
+                        enable = true;
+                        knownAbsentRoots = [ "/k-absent" ];
+                      };
+                      phillipgreenii.programs.claude-extended-tool-approver = {
+                        enable = cetaEnable;
+                        package = stubPkg;
+                        extraReadOnlyRoots = [ "/home/tester/.cache/k-exact" ];
+                        extraReadOnlyPrefixRoots = [
+                          "/home/tester/.cache/pd-*"
+                          "$TMPDIR/pd-*"
+                        ];
+                        unattendedExtraReadOnlyRoots = [ "/var/log" ];
+                      };
+                    }
+                  ];
+                  enabledCfg = evalHMWith { extraModules = cetaModules true; };
+                  disabledCfg = evalHMWith { extraModules = cetaModules false; };
+                  absentCfg = evalHMWith { };
+                  baselineOf = c: c.phillipgreenii.programs.pg-router-ccpool-handler.claudeBaseline;
+                  enabled = baselineOf enabledCfg;
+                  wrapperDir = "${enabledCfg.phillipgreenii.programs.claude-extended-tool-approver.finalPackage}/bin";
+                  bareDir = "${lib.getBin pkgs.claude-extended-tool-approver}/bin";
+                  failedAssertions = lib.filter (a: !a.assertion) enabledCfg.assertions;
+                  # The PATH the spec's `env` sets, read back out of the rendered wrap entry.
+                  specPath = lib.removePrefix "PATH=" (
+                    lib.findFirst (a: lib.hasPrefix "PATH=" a) "" (lib.head enabled.wrap)
+                  );
+                in
+                assert failedAssertions == [ ];
+                assert lib.elem wrapperDir enabled.pathDirs;
+                assert !(lib.elem bareDir enabled.pathDirs);
+                assert !(lib.elem bareDir (enabled.extend { }).pathDirs);
+                assert lib.elem wrapperDir (enabled.extend { }).pathDirs;
+                # Negative controls: no wrapper to use, so the bare package (the bug's shape).
+                assert lib.elem bareDir (baselineOf disabledCfg).pathDirs;
+                assert lib.elem bareDir (baselineOf absentCfg).pathDirs;
+                assert specPath != "";
+                pkgs.runCommand "test-claude-baseline-ceta-wrapper" { } ''
+                  fail() { echo "FAIL: $*" >&2; exit 1; }
+                  # Resolve the bare command exactly as the pool session does: along the
+                  # spec PATH, nothing inherited.
+                  out_text="$(env -i PATH=${lib.escapeShellArg specPath} claude-extended-tool-approver)" \
+                    || fail "claude-extended-tool-approver did not run from the baseline PATH"
+                  printf '%s\n' "$out_text" >&2
+                  want_line() {
+                    printf '%s\n' "$out_text" | grep -qxF -- "$1" || fail "the baseline's CETA did not export '$1'"
+                  }
+                  want_line 'PREFIX=/home/tester/.cache/pd-*:$TMPDIR/pd-*'
+                  want_line 'UNATTENDED=/var/log'
+                  want_line 'DENIED=/k-absent'
+                  printf '%s\n' "$out_text" | grep -q '^READONLY=.*/home/tester/.cache/k-exact' \
+                    || fail "the baseline's CETA did not export the extra read-only roots"
+                  echo "ok: the baseline PATH resolves claude-extended-tool-approver to the CETA wrapper"
+                  touch $out
+                '';
+
               # test-claude-baseline-role-tool-commands (bead pg2-hou7i): the role
               # half of the hook-command scan above. Every `Bash(<cmd> ...)` grant in
               # a role's EFFECTIVE allowed tools (the handler-wide `allowedTools` +

@@ -52,3 +52,8 @@ exactly the widenings the ruling withheld.
   `~/.cache/{p2-decomp-,pdec-,pd-}*` and `$TMPDIR/pd-*`.
 - Pinned by `internal/patheval/prefixroots_test.go`, `TestSessionKind_ExtraReadOnlyPrefixRoots` and
   `checks.<system>.test-ceta-prefix-roots`.
+- The variable lives only in the home-manager wrapper (`finalPackage`), so a session whose PATH is
+  built separately (a pool session's `claudeBaseline`) MUST resolve that wrapper; with the bare
+  package there, every entry was silently absent from pool sessions (bead `pg2-1peo5k`). Pinned by
+  `checks.<system>.test-claude-baseline-ceta-wrapper` and
+  `internal/patheval/prefixroots_search_test.go`.

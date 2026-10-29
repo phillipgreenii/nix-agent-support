@@ -48,6 +48,13 @@ direct children of the parent named `<prefix>` plus a safe suffix (`pd-*` matche
 `pdx-foo`, the parent, a `..` or symlink escape), so a generated-suffix scratch directory can be read
 without granting the whole parent.
 
+Every `CETA_*` setting above reaches the binary only through the home-manager wrapper, the module's
+read-only `finalPackage` option. A PATH built for a claude session (the pg-router ccpool handler's
+`claudeBaseline`, which pool sessions run on) MUST list `finalPackage`, never the bare package: the
+plugins' hooks run a bare `claude-extended-tool-approver`, and the unwrapped binary has no extra,
+named-prefix, unattended-only or denied roots at all (bead `pg2-1peo5k`; guarded by
+`checks.<system>.test-claude-baseline-ceta-wrapper`).
+
 ## Decision Database
 
 Stored at `~/.local/share/claude-extended-tool-approver/asks.db` (or `$XDG_DATA_HOME/claude-extended-tool-approver/asks.db`).

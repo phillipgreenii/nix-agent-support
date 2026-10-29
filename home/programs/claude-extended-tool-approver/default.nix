@@ -203,6 +203,24 @@ in
   options.phillipgreenii.programs.claude-extended-tool-approver = {
     enable = lib.mkEnableOption "claude-extended-tool-approver permission evaluator";
     package = lib.mkPackageOption pkgs "claude-extended-tool-approver" { };
+    finalPackage = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = hookPkg;
+      defaultText = lib.literalMD "`package`, wrapped to export the `CETA_*` settings of this module when any is set";
+      description = ''
+        Read-only output: the binary a hook MUST run, namely `package` wrapped to
+        export every `CETA_*` setting of this module (the extra, named-prefix, temp
+        and unattended-only roots, the input processors, and the denied roots), or
+        `package` itself when none is set. This module installs it on the user's
+        PATH. Anything that builds a PATH of its own for a claude session (the
+        pg-router ccpool handler's `claudeBaseline`) MUST list THIS package, not
+        `package` or `pkgs.claude-extended-tool-approver`: the plugins' hooks run a
+        bare `claude-extended-tool-approver`, and the unwrapped binary carries none
+        of the settings, so every configured root silently disappears in that
+        session (bead pg2-1peo5k).
+      '';
+    };
     inputProcessors = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -519,8 +537,9 @@ in
       # marketplace package. The marketplace's hooks.json uses a BARE
       # `claude-extended-tool-approver` command; installing hookPkg here puts the
       # (possibly rtk/inputProcessor-wrapped) binary on PATH so that bare command
-      # resolves to THIS binary.
-      packages = [ hookPkg ];
+      # resolves to THIS binary. A session with a PATH of its own (a pool session)
+      # gets the same binary through `finalPackage` (bead pg2-1peo5k).
+      packages = [ cfg.finalPackage ];
     };
   };
 }

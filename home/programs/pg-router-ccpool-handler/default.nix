@@ -124,6 +124,22 @@ let
     "/usr/sbin"
     "/sbin"
   ];
+  # The CETA on the baseline PATH (bead pg2-1peo5k). The plugins' hooks run a BARE
+  # `claude-extended-tool-approver` and the spec PATH REPLACES the inherited one, so
+  # this directory is where every pool-session hook verdict comes from. It MUST be
+  # the CETA module's `finalPackage`, the same wrapper the user's own PATH carries,
+  # which exports the machine's CETA_* settings; the bare package exports none, and
+  # with it every extra root (exact, named-prefix, unattended-only) and the denied
+  # roots were silently missing from pool sessions (measured: Grep/Glob of
+  # ~/.cache/pd-* abstained there while the same call through the wrapper was
+  # approved). The bare package is used only where the CETA module is not imported
+  # (an isolated eval) or not enabled, i.e. where there is no wrapper to use.
+  cetaHm = config.phillipgreenii.programs.claude-extended-tool-approver;
+  claudeBaselineCeta =
+    if options.phillipgreenii.programs ? claude-extended-tool-approver && cetaHm.enable then
+      cetaHm.finalPackage
+    else
+      pkgs.claude-extended-tool-approver;
   # mkClaudeBaseline: the baseline for a given `bd` and extra PATH packages.
   # `claudeBaseline` is `mkClaudeBaseline { }`; `claudeBaseline.extend` is this
   # function, so a consumer swaps the bd or adds its role's own tools:
@@ -137,7 +153,7 @@ let
       pathPkgs = [
         pkgs.llm-agentsPkgs.claude-code
         pkgs.ccpool
-        pkgs.claude-extended-tool-approver
+        claudeBaselineCeta
         pkgs.session-mode
         pkgs.claude-activity
         pkgs.pg-connector
@@ -2001,8 +2017,10 @@ in
       description = ''
         Read-only INTERIM helper (design ruling 20): `{ wrap; keep; pathDirs;
         systemDirs; extend; }` covering everything claude needs to run in a pool
-        session (claude, the enabled plugins' bare hook commands, the prompts'
-        tools including git and nix, the system directories, the OTel endpoint
+        session (claude, the enabled plugins' bare hook commands, with
+        claude-extended-tool-approver as the CETA module's `finalPackage` wrapper
+        when that module is enabled, so its CETA_* settings reach the session's
+        hooks; the prompts' tools including git and nix, the system directories, the OTel endpoint
         and protocol without OTEL_SERVICE_NAME). Use as `roles.<name>.spec = {
         inherit (cfg.claudeBaseline) wrap keep; strictEnv = ...; }`. `wrap` is a
         single env PATH=... entry (store directories, then the system directories
