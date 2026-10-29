@@ -280,13 +280,13 @@ func TestRegistryNames(t *testing.T) {
 	// carries the ZR auth/extension/stack subcommands.
 	want = append(
 		want,
-		"cut", "df", "df-jira-refs", "df-resolve-focus", "df-split-blockers", "df-survey", "lat-survey",
+		"cut", "df", "df-jira-refs", "lat-survey",
 		"pg-connector", "pg-desk", "pjira", "rc-branch", "rc-preflight", "rc-probe", "rc-sentinel",
 	)
 	// pg2-maars: the bd-writing class D scripts of the same plugins.
 	want = append(
 		want,
-		"df-close-focus", "df-deferred", "df-pull", "df-wire", "lat-wire", "rc-claim", "rc-fp", "rc-park",
+		"lat-wire", "rc-claim", "rc-fp", "rc-park",
 	)
 	// pg2-19hdz: the class D publish script that needed a new policy judgment.
 	want = append(want, "rc-publish")

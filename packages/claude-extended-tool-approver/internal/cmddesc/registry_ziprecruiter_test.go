@@ -105,7 +105,7 @@ func TestZiprecruiterClassDLandedForms(t *testing.T) {
 		}
 		return false
 	}
-	for _, name := range []string{"df-close-focus", "df-wire", "df-pull", "lat-wire", "rc-claim", "rc-park", "rc-fp"} {
+	for _, name := range []string{"lat-wire", "rc-claim", "rc-park", "rc-fp"} {
 		s, ok := reg.Lookup(name)
 		if !ok {
 			t.Errorf("%s: not registered", name)
@@ -115,12 +115,10 @@ func TestZiprecruiterClassDLandedForms(t *testing.T) {
 			t.Errorf("%s: no tracker-write effect on beads", name)
 		}
 	}
-	deferred, _ := reg.Lookup("df-deferred")
-	if !hasEffect(deferred.Subcommands["write"], "tracker-write", "beads") {
-		t.Error("df-deferred write: no tracker-write effect on beads")
-	}
-	if hasEffect(deferred.Subcommands["read"], "tracker-write", "beads") || !hasEffect(deferred.Subcommands["read"], "read", "beads") {
-		t.Error("df-deferred read must be a beads READ only")
+	for _, name := range retiredDfScripts {
+		if _, ok := reg.Lookup(name); ok {
+			t.Errorf("%s: retired script is still registered", name)
+		}
 	}
 	gh, _ := reg.Lookup("gh")
 	stack := gh.Subcommands["stack"]
@@ -313,4 +311,11 @@ func TestPgConnectorPrShowListsFreshAsNoValueBool(t *testing.T) {
 	if show.UnknownFlag != UnknownFlagInsufficient {
 		t.Error("pg-connector pr show must stay fail-closed for unlisted flags")
 	}
+}
+
+// retiredDfScripts are the daily-focus scripts retired from the ZR deployment
+// (pg2-2j5ac.44.38); the registry MUST no longer model them (pg2-lujsrg).
+var retiredDfScripts = []string{
+	"df-survey", "df-deferred", "df-wire", "df-verify-wiring", "df-pull",
+	"df-resolve-focus", "df-find-pr-bead", "df-split-blockers", "df-close-focus",
 }

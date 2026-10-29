@@ -226,7 +226,7 @@ func TestIsExemptByPlatform(t *testing.T) {
 		// are exempt on every platform; the one this flake does ship (gh,
 		// via nixpkgs) is not.
 		{"linux", "rc-probe", true},
-		{"darwin", "df-survey", true},
+		{"darwin", "lat-survey", true},
 		{"linux", "pjira", true},
 		{"linux", "gh", false},
 		{"darwin", "cut", false},

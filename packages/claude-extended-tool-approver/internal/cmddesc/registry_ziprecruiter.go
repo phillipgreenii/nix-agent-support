@@ -24,7 +24,7 @@ package cmddesc
 // class D forms that reach APPROVE with the EXISTING effectpolicy operations
 // (push-lease, pr-create-draft, tracker-write on beads): `gh stack push`,
 // `gh stack submit --auto`, `gh stack sync`, `gh stack unstack --local`,
-// df-close-focus, df-wire, df-deferred write|read, df-pull, lat-wire,
+// lat-wire,
 // rc-claim, rc-park and rc-fp. The tooling landed (tc-o14i5.3.10, commit
 // 171eaa4f7: internal/effectpolicy/p15report.go) and pg2-19hdz landed the held
 // forms that needed a NEW effectpolicy judgment, each with a P15 report
@@ -97,7 +97,7 @@ package cmddesc
 //     push-lease on the plain remote "origin", a draft PR creation and the
 //     PR assignee edit, plus the reads that find an existing PR.
 //   - A first-party script that writes only its OWN state (rc-sentinel's
-//     $RC_STATE_DIR sentinels, df-survey's manifest under $TMPDIR, pg-desk's
+//     $RC_STATE_DIR sentinels, lat-survey's manifest under $TMPDIR, pg-desk's
 //     triage-board annotation) declares no path effect for it, the same
 //     precedent as session-mode and bgcheck in pg2-cjfpy.2; an explicit
 //     --out/--manifest operand IS modeled as a path effect.
@@ -181,10 +181,10 @@ func zrFlags(tables ...map[string]FlagSpec) map[string]FlagSpec {
 func ziprecruiterToolSchemas() []CommandSchema {
 	return []CommandSchema{
 		zrPjiraSchema, zrPgConnectorSchema, zrPgDeskSchema,
-		zrDfResolveFocusSchema, zrDfSplitBlockersSchema, zrDfJiraRefsSchema, zrDfSurveySchema,
+		zrDfJiraRefsSchema,
 		zrLatSurveySchema,
 		zrRcProbeSchema, zrRcSentinelSchema, zrRcPreflightSchema, zrRcBranchSchema,
-		zrDfCloseFocusSchema, zrDfWireSchema, zrDfDeferredSchema, zrDfPullSchema, zrLatWireSchema,
+		zrLatWireSchema,
 		zrRcClaimSchema, zrRcParkSchema, zrRcFpSchema, zrRcPublishSchema,
 		zrDfSchema, zrCutSchema,
 	}
@@ -422,7 +422,7 @@ func zrPjiraWriteLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec
 
 // zrPjiraSchema: the READ verbs -- `issue <KEY>`, `search --jql ...`,
 // `auth-status` (zr-refactor status.md: "look it up with the pjira CLI";
-// df-survey's Jira survey) -- and, since pg2-19hdz, the three WRITE verbs
+// the daily-focus Jira survey) -- and, since pg2-19hdz, the three WRITE verbs
 // `comment <KEY> <BODY>`, `create --project P --type T --summary S
 // [--description D]` and `transition <KEY> <TO>` (pjira --help: "Add a
 // plain-text comment to an issue", "Create a new issue", "Transition an issue
@@ -567,125 +567,16 @@ func zrScript(name, help string, flags map[string]FlagSpec, pos PositionalSpec, 
 	}
 }
 
-// df-resolve-focus [<date>] [--status open|all] | --any [--status ...]: a
-// `bd list` over the daily-focus label; prints a bead's JSON. Read-only.
-var zrDfResolveFocusSchema = zrScript("df-resolve-focus",
-	"Resolve the Focus bead for a date via its df_date metadata",
-	map[string]FlagSpec{"--any": inert, "--status": literal1},
-	PositionalSpec{Rest: Literal}, StdinNever, StdoutContent, zrReadsBeads)
-
-// df-split-blockers <focus-id>: partitions `bd dep list <id> --json` by
-// status. Read-only.
-var zrDfSplitBlockersSchema = zrScript("df-split-blockers",
-	"Partition a focus bead's blockers by status",
-	nil, PositionalSpec{Rest: Literal}, StdinNever, StdoutContent, zrReadsBeads)
-
 // df-jira-refs <bead-id>...: prints each bead's jira-<KEY> external-ref via
 // `bd show <id> --json`. Read-only.
 var zrDfJiraRefsSchema = zrScript("df-jira-refs",
 	"Print the bare Jira key for every given bead's jira-<KEY> external-ref",
 	nil, PositionalSpec{Rest: Literal}, StdinNever, StdoutContent, zrReadsBeads)
 
-// df-survey, all four modes (shallow, --allow-existing, --apply-gate, --deep):
-// "Surveys PRs (gh), Jira (pjira), and epics (bd) directly" (reads of GitHub,
-// Jira and beads) and writes ONE manifest JSON file -- at --out, else under
-// ${DF_OUT_DIR:-${TMPDIR:-/tmp}} (its own output dir), else beside --manifest
-// as <manifest>.gated.json / <manifest>.deep.json. It "never touches bd
-// state". --manifest is a path read (the gate reply and --records - arrive on
-// stdin, hence StdinAlways); an explicit --out is a path truncate. The
-// manifest-adjacent default outputs are the tool's own, fixed-suffix files and
-// declare no effect (stated, not hidden).
-var zrDfSurveySchema = zrScript("df-survey",
-	"daily-focus survey (shallow), gate-reply application and deep enrichment",
-	map[string]FlagSpec{
-		"--date": literal1, "--cap": literal1, "--jql": literal1,
-		"--allow-existing": inert,
-		"--apply-gate":     inert,
-		"--deep":           inert, "--in-plan": inert,
-		"--items": literal1, "--records": literal1,
-		"--manifest": {Arity: ArityOne, Operand: PathRead},
-		"--out":      {Arity: ArityOne, Operand: PathTruncate},
-	},
-	PositionalSpec{}, StdinAlways, StdoutContent,
-	zrReadsGitHub, zrReadsJira, zrReadsBeads)
-
-// ---- bd-writing daily-focus / local-alert-triage scripts (pg2-maars) --------
-
-// df-close-focus <focus-id> <date> --notes-file P --summary-file P --reason T
-// [--actor ID]: per touched bead `bd update --append-notes`, then `bd close
-// <focus-id> --force --reason T`. Beads bookkeeping writes; the two files are
-// path reads.
-var zrDfCloseFocusSchema = zrScript("df-close-focus",
-	"Sequence a focus bead's mechanical close-out",
-	map[string]FlagSpec{
-		"--notes-file":   {Arity: ArityOne, Operand: PathRead},
-		"--summary-file": {Arity: ArityOne, Operand: PathRead},
-		"--reason":       {Arity: ArityOne, Operand: Message},
-		"--actor":        literal1,
-	},
-	PositionalSpec{Leading: []OperandRole{Literal, Literal}}, StdinNever, StdoutMetadata,
-	zrWritesBeads)
-
-// df-wire <focus-id> (--records - | --manifest F) [--drop H,..] [--merge K=A,..]
-// [--dry-run] [--actor ID]: "Mint + duplicate-free bulk wiring + verify" --
-// only `bd create`, `bd dep add`, `bd list`, `bd config get` and the
-// df-verify-wiring read-back. --records - arrives on stdin.
-var zrDfWireSchema = zrScript("df-wire",
-	"Mint + duplicate-free bulk wiring + verify, for one focus bead",
-	map[string]FlagSpec{
-		"--records":  literal1,
-		"--manifest": {Arity: ArityOne, Operand: PathRead},
-		"--drop":     literal1, "--merge": literal1,
-		"--dry-run": inert,
-		"--actor":   literal1,
-	},
-	PositionalSpec{Leading: []OperandRole{Literal}}, StdinAlways, StdoutContent,
-	zrWritesBeads)
-
-// df-deferred write <focus-id> (--manifest F | --records F|-) [--dry-run]
-// [--actor ID] splices the "Deferred today" section into the focus bead's
-// description (one `bd update`); df-deferred read <focus-id> parses it back
-// (`bd show`). Only the verbs the daily-focus commands run are modeled.
-var zrDfDeferredSchema = CommandSchema{
-	Name:         "df-deferred",
-	Provenance:   "df-deferred --help (Read/write the focus bead's \"Deferred today\" description section, this host 2026-10-05)",
-	Flags:        map[string]FlagSpec{"-h": inert, "--help": inert},
-	UnknownFlag:  UnknownFlagInsufficient,
-	EndOfOptions: true,
-	Subcommands: map[string]CommandSchema{
-		"write": zrScript("write",
-			"df-deferred write: replace the Deferred today section",
-			map[string]FlagSpec{
-				"--manifest": {Arity: ArityOne, Operand: PathRead},
-				"--records":  literal1,
-				"--dry-run":  inert,
-				"--actor":    literal1,
-			},
-			PositionalSpec{Leading: []OperandRole{Literal}}, StdinAlways, StdoutMetadata,
-			zrWritesBeads),
-		"read": zrScript("read",
-			"df-deferred read: print the Deferred today records",
-			nil,
-			PositionalSpec{Leading: []OperandRole{Literal}}, StdinNever, StdoutContent,
-			zrReadsBeads),
-	},
-}
-
-// df-pull [--dry-run] [--actor ID] [<k> | <handle>...]: tops up today's focus
-// bead from its deferred section by running df-resolve-focus, df-deferred
-// read, df-survey --deep (reads of GitHub, Jira and beads), df-wire and
-// df-deferred write (beads bookkeeping writes). The deep survey's records
-// arrive on its internal pipe, not df-pull's own stdin.
-var zrDfPullSchema = zrScript("df-pull",
-	"Top up today's focus bead from its Deferred today section",
-	map[string]FlagSpec{"--dry-run": inert, "--actor": literal1},
-	PositionalSpec{Rest: Literal}, StdinNever, StdoutContent,
-	zrWritesBeads, zrReadsGitHub, zrReadsJira)
-
 // lat-wire --decisions <file|-> [--actor ID]: "local-alert-triage's mutating
 // bd-wiring step" -- bd create / update / comment / reopen / close / dep add
 // (all beads bookkeeping). The decision-list JSON is read from the file, or
-// from stdin for "-" (hence StdinAlways, as df-survey --records -).
+// from stdin for "-" (hence StdinAlways, as the stdin-reading class D scripts).
 var zrLatWireSchema = zrScript("lat-wire",
 	"local-alert-triage's mutating bd-wiring step",
 	map[string]FlagSpec{

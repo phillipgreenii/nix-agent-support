@@ -93,25 +93,18 @@ var ExemptOn = map[string]map[string]bool{
 // names (a documented loss, not a tolerance for any other missing binary) for
 // a check that stays runnable.
 var ExternalFlake = map[string]bool{
-	"pjira":             true,
-	"df-jira-refs":      true,
-	"df-resolve-focus":  true,
-	"df-split-blockers": true,
-	"df-survey":         true,
-	"lat-survey":        true,
-	"rc-branch":         true,
-	"rc-preflight":      true,
-	"rc-probe":          true,
-	"rc-sentinel":       true,
+	"pjira":        true,
+	"df-jira-refs": true,
+	"lat-survey":   true,
+	"rc-branch":    true,
+	"rc-preflight": true,
+	"rc-probe":     true,
+	"rc-sentinel":  true,
 	// pg2-maars: the bd-writing class D scripts of the same three plugins.
-	"df-close-focus": true,
-	"df-deferred":    true,
-	"df-pull":        true,
-	"df-wire":        true,
-	"lat-wire":       true,
-	"rc-claim":       true,
-	"rc-fp":          true,
-	"rc-park":        true,
+	"lat-wire": true,
+	"rc-claim": true,
+	"rc-fp":    true,
+	"rc-park":  true,
 	// pg2-19hdz: the zr-refactor publish script, a class D form of the same plugin.
 	"rc-publish": true,
 }
