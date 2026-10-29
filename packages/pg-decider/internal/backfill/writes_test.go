@@ -151,3 +151,31 @@ func TestACreateLimitCountsOnlyTheWritesSinceTheFlipOfTheSet(t *testing.T) {
 		t.Fatal("meeting the limit is not exceeding it")
 	}
 }
+
+func TestCreatesInPassCountsOnlyTheDriversOwnRecordsAfterThePassStart(t *testing.T) {
+	p := tmpRecord(t)
+	mk := func(at time.Time, pr, event string) []byte {
+		l := createRec("anchor")(ModeApply)
+		l.at, l.pr, l.mode, l.eventID = at, pr, ModeApply, event
+		return l.json(t)
+	}
+	start, _ := json.Marshal(Marker{Contract: PassStartContract, Kind: "pass-start", At: baseTime.Format(time.RFC3339), Mode: ModeApply})
+	writeLog(
+		t, p,
+		mk(baseTime, "o/r#1", "o/r#1"),              // an earlier pass of the driver
+		mk(baseTime, "o/r#2", "o/r#2@0123456789ab"), // a router run before the pass
+		start,
+		mk(baseTime, "o/r#3", "o/r#3"), // the pass's own create
+		mk(baseTime, "o/r#4", "o/r#4@0123456789ab"), // a router run during the pass
+		mk(baseTime, "o/r#9", "o/r#9"),              // a PR outside the set
+	)
+	lg, err := ReadLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	since, _ := lg.PassStart(ModeApply, "")
+	c := CreatesInPass(lg, map[string]bool{"o/r#1": true, "o/r#2": true, "o/r#3": true, "o/r#4": true}, since)
+	if c["anchor"] != 1 || len(c) != 1 {
+		t.Fatalf("creates %v", c)
+	}
+}

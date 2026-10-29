@@ -2,6 +2,7 @@ package backfill
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -404,5 +405,78 @@ func TestASetFilePassDoesNotMoveTheResumePointerOfAnotherSet(t *testing.T) {
 	// A new pass of the real set still redoes all of it.
 	if res := run(set, real, true); res.Counts.Done != 3 {
 		t.Fatalf("%s", res.Line)
+	}
+}
+
+// routerCreate is a create a live router run made for pr (its item id carries the
+// `@<12 hex>` suffix; the driver's own runs are given the bare id).
+func routerCreate(t *testing.T, at time.Time, pr, kind string) []byte {
+	t.Helper()
+	l := createRec(kind)(ModeApply)
+	l.at, l.pr, l.mode, l.eventID = at, pr, ModeApply, pr+"@0123456789ab"
+	return l.json(t)
+}
+
+func TestRouterCreatesBeforeThePassDoNotCountAgainstTheCreateLimit(t *testing.T) {
+	rec := tmpRecord(t)
+	f := newFake(t, rec)
+	writeLog(
+		t, rec,
+		routerCreate(t, baseTime.Add(-time.Hour), "o/r#1", "fix-ci"),
+		routerCreate(t, baseTime.Add(-time.Hour), "o/r#2", "fix-ci"),
+	)
+	o := newRun(t, ModeApply, testSet("o/r#1", "o/r#2"), rec, f, &fakeRate{vals: []int{9000}})
+	o.NewPass = true
+	o.Limits = map[string]int{"anchor": 0}
+	res, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeDone || res.Code != ExitDone || len(f.calls) != 2 {
+		t.Fatalf("calls %v: %s", f.calls, res.Line)
+	}
+}
+
+func TestThePassOwnCreatesCountAgainstTheLimitDespiteEarlierRouterCreates(t *testing.T) {
+	rec := tmpRecord(t)
+	f := newFake(t, rec)
+	f.script["o/r#2"] = createRec("fix-ci")
+	writeLog(t, rec, routerCreate(t, baseTime.Add(-time.Hour), "o/r#1", "fix-ci"))
+	o := newRun(t, ModeApply, testSet("o/r#1", "o/r#2", "o/r#3"), rec, f, &fakeRate{vals: []int{9000}})
+	o.NewPass = true
+	o.Limits = map[string]int{"fix-ci": 0}
+	res, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != ExitStopped || !strings.Contains(res.Stop, "kind fix-ci has 1 creates, the expected number is 0") || len(f.calls) != 2 {
+		t.Fatalf("calls %v code %d stop %q", f.calls, res.Code, res.Stop)
+	}
+}
+
+func TestRouterCreatesDuringThePassDoNotChangeTheCount(t *testing.T) {
+	rec := tmpRecord(t)
+	f := newFake(t, rec)
+	// The router writes a create for a set PR in the middle of the pass.
+	inner := f.run
+	var o RunOptions
+	o = newRun(t, ModeApply, testSet("o/r#1", "o/r#2"), rec, f, &fakeRate{vals: []int{9000}})
+	o.Runner = func(ctx context.Context, c Call) Result {
+		r := inner(ctx, c)
+		if c.Args[len(c.Args)-1] == "o/r#1" {
+			if err := AppendLine(rec, json.RawMessage(routerCreate(t, baseTime.Add(time.Hour), "o/r#2", "fix-ci"))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return r
+	}
+	o.NewPass = true
+	o.Limits = map[string]int{"anchor": 0}
+	res, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeDone || len(f.calls) != 2 {
+		t.Fatalf("calls %v: %s", f.calls, res.Line)
 	}
 }

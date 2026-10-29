@@ -15,8 +15,11 @@ type Write struct {
 	At    time.Time
 	PR    string
 	RunID string
-	Rule  string
-	Kind  string
+	// EventID is the item id the run was given: the bare `<repo>#<n>` the driver
+	// passes, or the router's `<entity>@<12 hex>`.
+	EventID string
+	Rule    string
+	Kind    string
 	// Op is create, update, reopen, close or annotate.
 	Op string
 }
@@ -45,7 +48,7 @@ func WritesOf(r Record) []Write {
 			if a.Rule != ro.Rule {
 				continue
 			}
-			out = append(out, Write{At: r.Time, PR: r.Entity, RunID: r.RunID, Rule: a.Rule, Kind: a.Kind, Op: a.Op})
+			out = append(out, Write{At: r.Time, PR: r.Entity, RunID: r.RunID, EventID: r.EventID, Rule: a.Rule, Kind: a.Kind, Op: a.Op})
 			n--
 		}
 	}
@@ -108,6 +111,26 @@ func CreatesSinceFlip(lg *Log, ids map[string]bool) map[string]int {
 	for _, w := range ws {
 		if w.Op == "create" && ids[w.PR] {
 			out[w.Kind]++
+		}
+	}
+	return out
+}
+
+// CreatesInPass counts, per kind, the creates the driver's own pass has made for
+// the PRs in ids: those in run records after file position since (the pass-start
+// marker) whose event id is the bare PR id the driver passes. A live router run
+// carries the `<entity>@<12 hex>` item id, so router creates, before or during the
+// pass, are not counted. since is 0 when the file has no pass-start marker.
+func CreatesInPass(lg *Log, ids map[string]bool, since int) map[string]int {
+	out := map[string]int{}
+	for _, r := range lg.Records {
+		if r.Seq <= since || r.EventID != r.Entity {
+			continue
+		}
+		for _, w := range WritesOf(r) {
+			if w.Op == "create" && ids[w.PR] {
+				out[w.Kind]++
+			}
 		}
 	}
 	return out

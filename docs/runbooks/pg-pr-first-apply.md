@@ -133,7 +133,7 @@ pg-pr-backfill run --mode apply --max-creates <kind>=<n>,<kind>=<n>
 ```
 
 with the numbers recorded in step 3 (for example `anchor=12,review-pr=9`; a kind not named has the
-limit 0). Run it again after `FLOOR` or after `FAILED` with exit `11` until `DONE`; a run that ends
+limit 0). The limits count only the creates this pass makes, not those of live router runs. Run it again after `FLOOR` or after `FAILED` with exit `11` until `DONE`; a run that ends
 `transient` or `degraded` is not a stop. A PR that is merged or closed is handled by the normal closure
 rules in this pass.
 
@@ -145,7 +145,7 @@ signal). Do not run it again.
 
 ```bash
 pg-pr-backfill summary --mode apply                          # a residual of zero for every enumerated PR
-pg-pr-backfill run --mode apply --new-pass --max-creates anchor=0   # the second pass writes nothing
+pg-pr-backfill run --mode apply --new-pass --max-creates anchor=0   # the second pass writes nothing (router creates do not count)
 pg-pr-backfill writes                                        # no write after the first pass's
 pg-pr-change apply <one real open anchor's PR id>            # re-run by hand: it wrote nothing
 ```

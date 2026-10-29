@@ -22,13 +22,23 @@ type recLine struct {
 	adoption *AdoptionRecord
 	residual *int
 	planErr  string
+	// eventID overrides the event id (default: the PR id, as the driver passes it);
+	// a router run carries `<entity>@<12 hex>`.
+	eventID string
+}
+
+func (r recLine) event() string {
+	if r.eventID != "" {
+		return r.eventID
+	}
+	return r.pr
 }
 
 func (r recLine) json(t *testing.T) []byte {
 	t.Helper()
 	m := map[string]any{
 		"contract": RunRecordContract, "run_id": "r-" + r.pr, "at": r.at.UTC().Format(time.RFC3339),
-		"finished_at": r.at.UTC().Format(time.RFC3339), "entity": r.pr, "event_id": r.pr, "mode": r.mode,
+		"finished_at": r.at.UTC().Format(time.RFC3339), "entity": r.pr, "event_id": r.event(), "mode": r.mode,
 		"hydrate": map[string]any{"result": "ok"}, "exit_code": r.exit,
 	}
 	if r.class != "" {

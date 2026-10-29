@@ -81,7 +81,8 @@ type RunOptions struct {
 	Floor int
 	Rate  RateSource
 	// Limits are the operator's expected creates per kind, a STOP criterion:
-	// after each PR of an apply pass the creates the pass has made since the flip
+	// after each PR of an apply pass the creates the pass itself has made (not
+	// the router's, before or during it)
 	// are compared with them, and the run stops at once when any kind is over
 	// (a kind with no entry has limit 0). They are not a cap: nothing prevents a
 	// create; the run stops after the PR that exceeded them. An apply run
@@ -370,7 +371,7 @@ func Run(ctx context.Context, o RunOptions) (*RunResult, error) {
 			if err != nil {
 				return nil, err
 			}
-			if kind, n, limit, over := OverLimit(CreatesSinceFlip(lg2, ids), o.Limits); over {
+			if kind, n, limit, over := OverLimit(CreatesInPass(lg2, ids, since), o.Limits); over {
 				res.Counts.Remaining = len(o.Set.Entries) - i - 1
 				stop(fmt.Sprintf("create-limit: kind %s has %d creates, the expected number is %d", kind, n, limit))
 				break

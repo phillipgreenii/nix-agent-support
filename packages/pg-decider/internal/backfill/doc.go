@@ -15,7 +15,8 @@
 //     (MarkWatched).
 //   - run --mode plan|apply: run the composed command over the set, paced,
 //     under a floor on the GitHub GraphQL budget, resuming after an
-//     interruption (Run).
+//     interruption (Run). The create limits count only the creates the pass
+//     itself makes (CreatesInPass), never a live router run's.
 //   - summary: read the run record and print the plan summary, or, in apply
 //     mode, the residual check (Summarize).
 //   - flip-marker: write the flip marker into the run record and as a comment

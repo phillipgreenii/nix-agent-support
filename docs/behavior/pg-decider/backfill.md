@@ -133,7 +133,8 @@ A run that ends `transient` or `degraded` is not a stop. A run that ends `unauth
 `decide_failed`, a command that cannot be started, an unreadable rate signal and a create limit that
 is exceeded stop the run at once. The create limits are the operator's expected number of creates
 per kind, taken from the plan summary. They are a stop criterion, checked after every PR of an apply
-pass against the creates made since the flip, and not a cap: nothing prevents a create, and the run
+pass against the creates the pass itself has made (the driver's own runs after the pass start; a
+create by a live router run, before or during the pass, is not counted), and not a cap: nothing prevents a create, and the run
 stops after the PR that exceeded the number. A kind with no limit has the limit 0. An apply pass
 refuses to start without limits unless `--no-create-limits` says so.
 
@@ -227,7 +228,7 @@ its name and the tracker directory are the configuration keys `bd` and `beads_di
 - **INV-BACKFILL-8.** <!-- uuid: 20664298-0aa6-4fee-8993-53f151c1dcc6 --> `run` MUST record a `transient` or `degraded` run and go on, and MUST stop at once, with an exit code
   of its own, when a run ends `unauthenticated` or `decide_failed`, when the command cannot be started
   and when the rate signal cannot be read.
-- **INV-BACKFILL-9.** <!-- uuid: 2726ed12-3f1e-4fee-923d-7a3614df3df1 --> An apply pass MUST compare, after every PR, the creates made since the flip with the operator's
+- **INV-BACKFILL-9.** <!-- uuid: 2726ed12-3f1e-4fee-923d-7a3614df3df1 --> An apply pass MUST compare, after every PR, the creates the pass itself has made (not the router's) with the operator's
   limits per kind and MUST stop when any kind exceeds its limit; it MUST NOT prevent a create, and MUST
   NOT start without limits unless told to run without them.
 - **INV-BACKFILL-10.** <!-- uuid: 2b48b585-8e6c-4639-97c1-3af641a7c865 --> The flip marker MUST be a run-record row of its own kind that every reader of the latest record per
