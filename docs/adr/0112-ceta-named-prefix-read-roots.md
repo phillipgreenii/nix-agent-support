@@ -5,8 +5,9 @@
 **Deciders**: the operator (Phillip), ruling 2026-10-27 on `pg2-ibih79`: allow the agent scratch
 directories under `~/.cache` (`hoist-decompose`, `prlane-decompose`, `prlane-fix`, `p2-decomp-*`,
 `pdec-*`, `pd-*`), `~/Library/Logs` and the `$TMPDIR` `pd-*` directories; NOT `~/.claude/projects`
-or the other small groups; widening to `~/.cache/*` as a whole or to all of `$TMPDIR` needs a fresh
-ruling.
+or the other small groups; widening to `~/.cache/*` as a whole or to all of `$TMPDIR` by the
+named-prefix list needs a fresh ruling. (An unattended session's own `$TMPDIR` is a separate, already
+ruled grant: ADR 0110.)
 
 ## Context
 
@@ -15,7 +16,8 @@ each entry; a `*` is a literal character; matching is "equal to or under"). The 
 of the ruling landed through it. The generated-suffix groups (`p2-decomp-*`, `pdec-*`, `pd-*` under
 `~/.cache`, and `pd-*` under the per-user, per-boot `$TMPDIR`, a `/var/folders/.../T/` that no nix
 build can know) cannot be named, and the only exact roots that cover them (`~/.cache`, `$TMPDIR`) are
-exactly the widenings the ruling withheld.
+exactly the widenings the ruling withheld from the named-prefix list. (ADR 0110 separately grants an
+unattended session its own `$TMPDIR`; that grant is outside this list.)
 
 ## Decision
 
@@ -47,7 +49,13 @@ exactly the widenings the ruling withheld.
 
 - The exact-path variables behave exactly as before; a prefix entry is never merged into them.
 - No entry of the ruled shape grants the whole `~/.cache` or the whole `$TMPDIR`; a test pins that the
-  bare parents, lookalikes, `..` and symlink escapes are not matched.
+  bare parents, lookalikes, `..` and symlink escapes are not matched. This is a property of the
+  named-prefix list only: an UNATTENDED session (permission mode `dontAsk`, or an autonomous ccpool
+  worker) also reads and writes its own `$TMPDIR` and everything under it, including `$TMPDIR` itself
+  and `$TMPDIR/pdx-foo`, through the separate grant of ADR 0110
+  (`internal/patheval/unattended.go`, `ExtendForUnattended`). An ATTENDED session still abstains on
+  `$TMPDIR` and on `$TMPDIR/<non-prefixed child>`, and approves `$TMPDIR/pd-*` through the prefix root.
+  Pinned by `TestPrefixRoots_SearchToolsThroughPathSafety` (`internal/patheval/prefixroots_search_test.go`).
 - Setting the ruled groups is the consuming machine flake's job:
   `~/.cache/{p2-decomp-,pdec-,pd-}*` and `$TMPDIR/pd-*`.
 - Pinned by `internal/patheval/prefixroots_test.go`, `TestSessionKind_ExtraReadOnlyPrefixRoots` and
@@ -57,3 +65,13 @@ exactly the widenings the ruling withheld.
   package there, every entry was silently absent from pool sessions (bead `pg2-1peo5k`). Pinned by
   `checks.<system>.test-claude-baseline-ceta-wrapper` and
   `internal/patheval/prefixroots_search_test.go`.
+
+## Note (2026-10-29)
+
+Found while verifying `pg2-y37ggj` (bead `pg2-izvyqt`): Grep and Glob on `$TMPDIR` and
+`$TMPDIR/pdx-foo` were approved by an unattended session, which looked like a breach of the ruling
+above. It is not: the approval comes from the session's own `$TMPDIR` read-write root added for
+unattended sessions (ADR 0110, operator ruling `pg2-r9kv7` W3/W6, work item `pg2-b1lir`). A probe of the
+installed hook with permission mode `default` abstained on `$TMPDIR`; with `dontAsk` it approved. This
+note only clarifies the wording above; the Decision, the status and the roots are unchanged, and
+widening the named-prefix list to all of `$TMPDIR` still needs a fresh ruling.
