@@ -6180,12 +6180,13 @@
               };
 
               # claude-tool-tracker (docket pg2-aj5iq8) - whole-module Go test gate.
-              # Pattern A, stdlib only. The cmd tests build and run the real binary
-              # (go build, no network needed).
+              # Pattern A, pure-Go SQLite driver (no cgo). The cmd tests build and run the real
+              # binary (go build, no network needed); the repo-mapping tests run real git.
               claude-tool-tracker-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "claude-tool-tracker-go-tests";
                 src = lib.cleanSource ./packages/claude-tool-tracker; # matches default.nix
                 gomod2nixToml = ./packages/claude-tool-tracker/gomod2nix.toml;
+                testDeps = [ pkgs.git ];
               };
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
