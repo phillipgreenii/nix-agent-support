@@ -934,6 +934,9 @@ func TestAgreement(t *testing.T) {
 	rows := make([]row, 0, len(cases))
 	counts := map[string]int{}
 	var looserRows []row
+	// liveApproveSpikeNot collects the cases where live Approves and the spike does
+	// not (class spike-stricter): the over-approval direction knownLiveLooser tracks.
+	var liveApproveSpikeNot []string
 
 	for _, tc := range cases {
 		spikeResp := Evaluate(evalcontract.Request{
@@ -957,6 +960,9 @@ func TestAgreement(t *testing.T) {
 		}
 		class := classify(liveResult.Decision, spikeResp.Decision)
 		counts[class]++
+		if class == "spike-stricter" && liveResult.Decision == hookio.Approve {
+			liveApproveSpikeNot = append(liveApproveSpikeNot, tc.name)
+		}
 
 		r := row{
 			name:        tc.name,
@@ -997,6 +1003,12 @@ func TestAgreement(t *testing.T) {
 	compareGolden(t, filepath.Join("testdata", "agreement.txt"), table)
 
 	t.Logf("agreement class counts: %v (total %d)", counts, len(rows))
+
+	// The other direction (live approves, spike does not) is ratcheted by the
+	// register in live_looser_register_test.go: a new row or a fixed row fails.
+	for _, p := range checkLiveLooserRegister(knownLiveLooser, liveApproveSpikeNot) {
+		t.Error(p)
+	}
 
 	for _, r := range looserRows {
 		t.Errorf("SAFETY VIOLATION (%s): case %s: command %q: live=%s spike=%s reason=%q — the spike silently approved something the live engine would not",
