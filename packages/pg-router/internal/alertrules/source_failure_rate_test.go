@@ -38,8 +38,18 @@ func TestSourceFailureRateRule(t *testing.T) {
 
 func TestLivenessRuleCoversDeadDaemon(t *testing.T) {
 	r := ruleBlock(t, "pg-router-liveness-down")
-	if !strings.Contains(r, "noDataState: Alerting") {
-		t.Error("pg-router-liveness-down must keep noDataState: Alerting; it is the liveness backstop that lets pg-router-source-failure-rate keep noDataState: OK")
+	// pg2-787q92 (operator ruling 2026-10-29): a sleeping host is not a down service, so the
+	// rule is noDataState: OK and value-based. A dead daemon still alerts through the
+	// `liveness < 1 or up == 0` clause while the host is awake; the PromQL cases live in
+	// grafana/alerting/rule-tests/pg-router-liveness-down.test.yaml. pg-router-source-failure-rate
+	// keeps noDataState: OK on the strength of that value-based coverage plus launchd-health.
+	if !strings.Contains(r, "noDataState: OK") || strings.Contains(r, "noDataState: Alerting") {
+		t.Error("pg-router-liveness-down must be noDataState: OK (a sleeping host must not page)")
+	}
+	for _, need := range []string{`pg_router_liveness < 1`, `up{job="pg-router"} == 0`, `host_power_last_wake_timestamp_seconds{kind="full"}`, `host_power_last_sleep_timestamp_seconds`} {
+		if !strings.Contains(r, need) {
+			t.Errorf("pg-router-liveness-down lost %q from its value-based, host-awake-gated query", need)
+		}
 	}
 }
 

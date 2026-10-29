@@ -24,7 +24,7 @@ tests_dir="$2"
 
 # Every rule uid this check wraps and tests. A rule added here extends the cases under
 # rule-tests/.
-rule_uids='["pg-router-pool-full-idle", "pg-router-ccpool-dead-needs-input", "pg-router-gate-held", "pg-router-queue-stalled", "pg-router-queue-depth-growing", "pg-router-queue-slow-growth", "pg-router-event-dispatch-failed", "pg-router-failure-rate", "pg-router-role-stalled", "pg-router-role-busy-long", "pg-router-worktree-growth"]'
+rule_uids='["pg-router-pool-full-idle", "pg-router-ccpool-dead-needs-input", "pg-router-gate-held", "pg-router-queue-stalled", "pg-router-queue-depth-growing", "pg-router-queue-slow-growth", "pg-router-event-dispatch-failed", "pg-router-failure-rate", "pg-router-role-stalled", "pg-router-role-busy-long", "pg-router-worktree-growth", "pg-router-liveness-down"]'
 
 fail() {
   echo "FAIL: $*" >&2
@@ -42,8 +42,10 @@ for uid in $(printf '%s' "$rule_uids" | jq -r '.[]'); do
     | .condition == "C"
       and ((.data | map(.refId)) == ["A", "B", "C"])
       and ((.data[] | select(.refId == "C") | .model.conditions[0].evaluator)
-           == { type: "gt", params: [0] })' >/dev/null ||
-    fail "$uid: condition C must be a single gt 0 threshold over refIds A, B, C"
+           == (if $uid == "pg-router-liveness-down"
+               then { type: "lt", params: [1] }
+               else { type: "gt", params: [0] } end))' >/dev/null ||
+    fail "$uid: condition C must be a single gt 0 threshold (lt 1 for pg-router-liveness-down) over refIds A, B, C"
 done
 
 work="$(mktemp -d)"

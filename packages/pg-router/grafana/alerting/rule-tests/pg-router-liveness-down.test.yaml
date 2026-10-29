@@ -1,0 +1,177 @@
+# promtool unit tests for the pg-router-liveness-down alert (pg2-787q92). Run by the flake check
+# test-pg-router-alert-rules, which generates rules.yml next to this file: the Grafana rule's
+# refId A wrapped as `alert: <uid>` with `expr: (<A>) < 1` (refId C is lt 1), the rule's `for: 5m`
+# and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Ruling (Phillip, 2026-10-29): a sleeping host MUST NOT read as the service being down. The
+# expression is `(pg_router_liveness < 1 or up{job="pg-router"} == 0) and on() <awake>`, where
+# <awake> is host-activity's full-wake timestamp being newer than its last-sleep timestamp (or no
+# sleep recorded). host-activity pushes those gauges, so while the host sleeps they age out of the
+# 5m lookback and the expression returns nothing (Grafana NoData, which the rule maps to OK); a
+# dark wake leaves last-sleep newer than the last full wake. A real down daemon with the host
+# awake MUST still fire.
+#
+# Time model: 1m series steps, promtool clock from 0. Wake/sleep timestamps are plain constants
+# (only their order matters). `_` models a series that is absent (asleep, or a dead target).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Negative control (real outage): daemon stalled (liveness 0), host awake -> fires after 5m.
+  - name: stalled daemon with the host awake fires after for 5m
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x30"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x40"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x40"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-liveness-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: pg-router
+              instance: 127.0.0.1:9820
+
+  # Negative control (dead endpoint): the scrape target is down (no liveness series at all,
+  # up == 0), host awake -> fires.
+  - name: unreachable endpoint (up 0, no liveness series) with the host awake fires
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 _x30"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x30"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x40"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-liveness-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: pg-router
+              instance: 127.0.0.1:9820
+
+  # Host never recorded a sleep: awake by the `unless` branch, so a stalled daemon still fires.
+  - name: stalled daemon on a host with no recorded sleep fires
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "0x30"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x30"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-liveness-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: pg-router
+              instance: 127.0.0.1:9820
+
+  # The pg2-ph0ut9 shape: the host sleeps, the daemon's liveness reads 0 at the next scrape and
+  # the host-activity gauges are gone (asleep). Nothing may fire, however long it lasts.
+  - name: host asleep (host-activity gauges absent), liveness 0 and up 0, does not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x50"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x50"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x10 _x50"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x10 _x50"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_liveness_down)
+        eval_time: 40m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+
+  # Dark wakes: the gauges are pushed for a minute at a time, but last-sleep (300) is newer than
+  # the last full wake (200), so the host is not awake and the rule stays quiet.
+  - name: dark wake (last sleep newer than last full wake), liveness 0, does not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "0x40"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x40"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "300x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+
+  # Sleep in the middle of a pending condition: liveness reads 0 from 12m, the host-activity
+  # gauges' last sample is at 12m (host goes to sleep), so the gate holds until the 5m lookback
+  # runs out at 17m: 4m of bad time, under `for: 5m`. They return at 33m (full wake) with
+  # liveness still 0. `for` MUST restart at the wake, so the alert is not firing 4m later (37m)
+  # even though 4m + 4m of bad time has accumulated across the gap, and fires once 5m has elapsed
+  # since the wake (40m).
+  - name: pending condition resets across a sleep, firing only 5m after the wake
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x12 0x40"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x52"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x13 _x20 400x20"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x13 _x20 300x20"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+      - eval_time: 37m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-router-liveness-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: pg-router
+              instance: 127.0.0.1:9820
+
+  # A healthy daemon with the host awake never fires.
+  - name: healthy daemon, host awake, does not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x40"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-liveness-down
+        exp_alerts: []

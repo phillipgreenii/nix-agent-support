@@ -61,28 +61,38 @@ groups:
       # Liveness: pg_router_liveness reports 1 while the daemon's last tick
       # is within its liveness window, else 0 (daemon-mode only --
       # internal/metrics/metrics.go's WithLiveness/MetricLiveness).
-      # noDataState is Alerting, not OK: unlike a per-label registry rule
-      # where a label simply leaving the watch list is benign (see
-      # launchd-health's own per-label rules), this is pg-router's OWN
-      # single fixed liveness series. Once the daemon LaunchAgent is
-      # configured to run, an absent series means the metrics endpoint
-      # itself is unreachable (the daemon crashed or never started), which
-      # is exactly the failure this rule exists to catch -- the same
-      # reasoning mysql-probe/alerting-template.nix's per-target rule uses,
-      # not pa-monitor's daemon-connection.yaml (whose OK polarity fits a
-      # client-side "maybe nobody has a pane open right now" absence, which
-      # does not apply here).
+      # pg2-787q92 (operator ruling, Phillip, 2026-10-29, on pg2-qhmtvg: "the
+      # computer being asleep should not be considered as a service is down"):
+      # noDataState is OK and the query is VALUE-BASED, gated on the host being
+      # awake. Grafana state history for 2026-10-15..10-29 (152 annotations) showed
+      # every Pending and Alerting transition of this rule was "(NoData)" -- no
+      # real 0 sample ever fired it -- so the old noDataState: Alerting turned
+      # every host sleep (and scrape gap) into a critical page. The expression is
+      #   (pg_router_liveness < 1 or up{job="pg-router"} == 0) and on() <awake>
+      # where <awake> is host-activity's full-wake timestamp being newer than its
+      # last-sleep timestamp (or no sleep ever recorded). Those gauges are pushed by
+      # host-activity, so while the host sleeps they age out of Prometheus and the
+      # whole expression returns nothing (NoData -> OK, Pending resets); a dark
+      # wake leaves last-sleep newer than last-full-wake, so it stays quiet too. A
+      # real stalled daemon (liveness 0) or unreachable endpoint (up 0) with the
+      # host awake still returns a 0 sample for the full `for`, so it still pages.
+      # Coverage for a dead daemon on a host with no host-activity is the
+      # launchd-health "daemon not running" per-label rule for
+      # com.phillipg.pg-router-daemon (severity critical in launchd-health.nix's
+      # notRunningSeverityOverrides). Same gating idea as pg2-jlp1m (load gate on
+      # the stack liveness rules) and pg2-bij5y (up{job="prometheus"} gate on
+      # host-activity-stale). PromQL cases: rule-tests/pg-router-liveness-down.test.yaml.
       - uid: pg-router-liveness-down
         title: pg-router liveness is down
         condition: C
         for: 5m
-        noDataState: Alerting
+        noDataState: OK
         execErrState: Error
         labels:
           severity: critical
         annotations:
           summary: "pg-router daemon liveness has been down for over 5 minutes"
-          description: "pg_router_liveness has reported 0, or gone missing from Prometheus entirely, for over 5 minutes -- the daemon's last tick has fallen outside its liveness window, or its /metrics endpoint is unreachable. This is exactly the condition observed live in pg2-5sirm that no alert previously covered. Check `pg-router status` and the com.phillipg.pg-router-daemon LaunchAgent."
+          description: "pg_router_liveness has reported 0, or the pg-router scrape target has been down, for over 5 minutes while the host was awake -- the daemon's last tick has fallen outside its liveness window, or its /metrics endpoint is unreachable. A sleeping host is deliberately not counted (pg2-787q92). This is exactly the condition observed live in pg2-5sirm that no alert previously covered. Check `pg-router status` and the com.phillipg.pg-router-daemon LaunchAgent."
         data:
           - refId: A
             relativeTimeRange:
@@ -93,7 +103,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_router_liveness
+              expr: '(pg_router_liveness < 1 or up{job="pg-router"} == 0) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds))'
           - refId: B
             datasourceUid: __expr__
             model:
