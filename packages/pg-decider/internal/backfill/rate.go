@@ -151,7 +151,7 @@ func readTail(path string, max int64) ([]byte, error) {
 }
 
 // MetricsSource reads the daemon's gauge through a Prometheus-compatible HTTP API
-// (an instant query against the local metrics store the daemon exports to). With
+// (an instant query, wrapped in last_over_time over MaxAge, against the local metrics store the daemon exports to). With
 // several series (one per window) the smallest value decides, as the lowest bucket
 // is the one that runs out first.
 type MetricsSource struct {
@@ -190,7 +190,11 @@ func (s MetricsSource) Newest(ctx context.Context) (Reading, error) {
 	}
 	u = u.JoinPath("api", "v1", "query")
 	vals := u.Query()
-	vals.Set("query", q)
+	// The daemon emits the gauge only when it spends budget, so an instant query
+	// finds no sample once the newest is past Prometheus' 5m lookback. Looking back
+	// over maxAge instead makes the window the freshness bound; the answer is stamped
+	// with the evaluation time, so the age check below holds by construction.
+	vals.Set("query", fmt.Sprintf("last_over_time((%s)[%ds:])", q, int64(maxAge.Seconds())))
 	u.RawQuery = vals.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {

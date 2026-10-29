@@ -45,6 +45,9 @@ decide). A flag of the same name overrides a key.
 The daemon cutover changes ONE key: `rate_source` from `old-backend-log` to `daemon-metrics`. Until it
 is changed, the driver reads a log that stops being written once the old backend is gone, and a log
 whose newest reading is older than `rate_max_age` makes a run stop (`rate-signal-unavailable`), so the mistake cannot go unseen.
+The metrics source queries `last_over_time((<metrics_query>)[<rate_max_age>:])`, so a quiet daemon (it emits
+the gauge only when it spends budget) does not hide its last reading: a run stops with
+`rate-signal-unavailable` only when no sample exists within `rate_max_age`.
 
 ## Commands
 

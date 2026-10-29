@@ -186,3 +186,31 @@ func TestLoadConfigReadsAFileAndRefusesABadKey(t *testing.T) {
 		t.Errorf("the absent default file: %+v %v", c, err)
 	}
 }
+
+// A quiet daemon leaves the gauge's newest sample older than Prometheus' 5m instant
+// lookback. The fixture models a store that answers only a lookback query: a bare
+// instant query finds nothing (the bug), the last_over_time wrapper finds the sample.
+func TestTheDaemonMetricsSourceReadsAGaugeStaleBeyondTheInstantLookback(t *testing.T) {
+	now := time.Date(2026, 10, 24, 10, 10, 0, 0, time.UTC)
+	var seen string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		seen = r.URL.Query().Get("query")
+		body := `{"status":"success","data":{"resultType":"vector","result":[]}}`
+		if strings.HasPrefix(seen, "last_over_time(") && strings.Contains(seen, "[900s:]") {
+			body = fmt.Sprintf(`{"status":"success","data":{"result":[{"metric":{"bucket":"graphql"},"value":[%d,"4200"]}]}}`, now.Unix())
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
+	})}
+	r, err := MetricsSource{BaseURL: "http://metrics.invalid", Client: client, Now: func() time.Time { return now }}.Newest(context.Background())
+	if err != nil || r.Remaining != 4200 {
+		t.Fatalf("a gauge stale past the instant lookback was not read: %+v %v (query %q)", r, err, seen)
+	}
+	if !strings.Contains(seen, DefaultMetricsQuery) {
+		t.Fatalf("the gauge query was lost: %q", seen)
+	}
+	// The window follows MaxAge.
+	_, _ = MetricsSource{BaseURL: "http://metrics.invalid", MaxAge: 30 * time.Minute, Client: client, Now: func() time.Time { return now }}.Newest(context.Background())
+	if !strings.Contains(seen, "[1800s:]") {
+		t.Fatalf("the window ignores MaxAge: %q", seen)
+	}
+}
