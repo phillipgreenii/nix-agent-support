@@ -1265,7 +1265,14 @@ groups:
       # (the decider itself failed) fire on any increase with NO `for`. The second
       # branch covers a series that first appears already above 0 (a store that
       # started counting after the window began): it fires for the ten minutes
-      # during which the series has no sample ten minutes earlier.
+      # during which the series has no sample in the 24 hours that end ten minutes
+      # earlier (max_over_time over [24h] offset 10m). The long look-back makes it
+      # robust to scrape gaps: a series that was briefly unscraped (pg-desk down or
+      # slow under host load) and reappears at the same value is NOT new, so an old
+      # decide_failed count no longer re-fires after every gap of ten minutes or
+      # more. Trade-off: a series must be absent for over 24 hours before it counts
+      # as new again, so a first event on a series that vanished for more than a
+      # day and reappears above 0 fires once; a gap shorter than that stays quiet.
       - uid: pg-desk-pr-lane-hard-failure
         title: pg-desk PR lane run failed hard (unauthenticated or decide failed)
         condition: C
@@ -1287,7 +1294,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '((sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[10m])) > 0) or (sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}) > 0 unless sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"} offset 10m))) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '((sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[10m])) > 0) or (sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}) > 0 unless sum by (stage, class) (max_over_time(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[24h] offset 10m)))) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

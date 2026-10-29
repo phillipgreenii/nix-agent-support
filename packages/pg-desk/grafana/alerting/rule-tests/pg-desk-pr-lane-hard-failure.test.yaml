@@ -7,7 +7,8 @@
 # composed command and exported zero-filled for every stage and class pair. The rule fires on
 # any increase of class unauthenticated or decide_failed over 10m, with NO `for` hold, and also for a
 # series that first appears already above 0 (no sample ten minutes earlier), so a first event is never
-# lost to increase(). Other classes do not fire it.
+# lost to increase(). The "no sample ten minutes earlier" test looks back 24h (max_over_time), so a
+# scrape gap of any length under a day does not make an old series look new. Other classes do not fire it.
 rule_files:
   - rules.yml
 
@@ -71,6 +72,24 @@ tests:
               class: unauthenticated
               severity: warning
       - eval_time: 25m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  # Regression (pg2-0q93a4): an old decide_failed count flat at 3 whose scrape target is down for 25
+  # minutes reappears at 3 with no sample ten minutes earlier; it is not new and must not fire.
+  - name: a decide_failed series flat at 3 that reappears after a 25 minute scrape gap does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="decide",class="decide_failed",job="pg-desk"}
+        values: "3x30 _x25 3x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+      - eval_time: 56m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+      - eval_time: 60m
         alertname: pg-desk-pr-lane-hard-failure
         exp_alerts: []
 
