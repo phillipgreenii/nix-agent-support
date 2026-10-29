@@ -55,6 +55,7 @@
 //	tool_calls.reason             -> Row.Reason (show's hook reason)
 //	tool_calls.result             -> Row.Result
 //	tool_calls.call_start_ts      -> Row.StartMs (first_event_ts when NULL)
+//	                                 and Row.TrackerSeen (call_start_ts is not NULL)
 //	tool_calls.settled_by         -> Row.SettledBy
 //	tool_calls.settlement         -> Row.Settlement
 //	tool_calls.converted_ask      -> Row.ConvertedAsk
@@ -173,6 +174,9 @@ type Row struct {
 	FailedTiming     *bool
 	DenialReason     string
 	StartMs          int64
+	// TrackerSeen is true when a tracker event (tracker.call_start) recorded the
+	// call, false for a call only another source (ceta) reported.
+	TrackerSeen bool
 	// Label is the operator label joined in for this call (zero when none).
 	Label asklog.TrackerLabel
 }
@@ -296,6 +300,7 @@ func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.T
 			b := failedTiming.Int64 != 0
 			r.FailedTiming = &b
 		}
+		r.TrackerSeen = startTs.Valid
 		r.StartMs = startTs.Int64
 		if !startTs.Valid {
 			r.StartMs = firstTs.Int64

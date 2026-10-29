@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 
@@ -56,6 +57,7 @@ var knownSubcommands = map[string]bool{
 	"spec-drift-check":     true,
 	"specs":                true,
 	"version":              true,
+	"compare-tracker":      true,
 	"completion":           true, // cobra builtin
 	"help":                 true, // cobra builtin
 	"-h":                   true,
@@ -81,6 +83,7 @@ and analyzing the decision log.`,
 	root.AddCommand(newArchiveCmd())
 	root.AddCommand(newBaselineCmd())
 	root.AddCommand(newCompareCmd())
+	root.AddCommand(newCompareTrackerCmd())
 	root.AddCommand(newEvaluateCmd())
 	root.AddCommand(newLintCmd())
 	root.AddCommand(newMarkExcludedCmd())
@@ -113,6 +116,10 @@ func main() {
 	if len(os.Args) > 1 {
 		if knownSubcommands[os.Args[1]] {
 			if err := newRootCmd().Execute(); err != nil {
+				var ee exitCodeError
+				if errors.As(err, &ee) {
+					os.Exit(ee.code)
+				}
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}

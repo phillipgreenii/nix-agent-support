@@ -332,3 +332,17 @@ func TestKey_ResolvesCallIDs(t *testing.T) {
 		t.Errorf("unknown call_id: %v %v", ok, err)
 	}
 }
+
+func TestRows_TrackerSeenIsFalseForACallOnlyCetaReported(t *testing.T) {
+	a := openFixture(t, "tracker.db")
+	rows, err := a.Rows("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !byTool(t, rows, "tu-a1").TrackerSeen {
+		t.Error("a1 has tracker events")
+	}
+	if byTool(t, rows, "tu-c1").TrackerSeen {
+		t.Error("c1 carries only ceta events")
+	}
+}
