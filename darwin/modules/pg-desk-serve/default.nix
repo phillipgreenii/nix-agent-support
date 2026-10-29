@@ -250,13 +250,16 @@ in
       };
 
       observability = {
-        # pg2-02n5o: liveness/stale-snapshot/sync-failure-rate alert rules for
+        # pg2-02n5o: liveness/stale-snapshot/outcome alert rules for
         # the pg_desk_* metric catalog (see the file's own header for the
         # incident context and the folder-convergence mechanism). Gated on this
         # module's own `cfg.enable`, mirroring pg-router's darwin module's
         # `obs.enable`-only gate for its own alertRuleFiles entry.
         alertRuleFiles = [
           ../../../packages/pg-desk/grafana/alerting/alerts.yaml
+          # PR lane refactor P9b: deleteRules-only file for the four retired sync_error rules
+          # (Grafana keeps a file-provisioned rule live after its file drops it).
+          ../../../packages/pg-desk/grafana/alerting/alerts-delete.yaml
         ];
 
         # pg2-fdtvv: `path` MUST be set explicitly -- serve.log is a plain-text

@@ -74,16 +74,6 @@ func namedMetrics(t *testing.T) map[string][]string {
 	return out
 }
 
-// legacyRules are the four rules P9 deletes with the sync-error columns they
-// read: the metrics they name are dropped-column gauges and a counter with no
-// live call site, so they are not required to be emitted (the design says so).
-var legacyRules = map[string]bool{
-	"pg-desk-sync-errors":             true,
-	"pg-desk-sync-error-rows":         true,
-	"pg-desk-sync-error-retrying":     true,
-	"pg-desk-unreconciled-anchor-age": true,
-}
-
 func scrapeWith(t *testing.T, s *store.Store, opts ...Option) string {
 	t.Helper()
 	handler, err := NewHandler(s, focusConfig(), opts...)
@@ -110,7 +100,7 @@ func emitted(body, name string) bool {
 // TestEveryMetricNamedByAnAlertIsEmittedByARealScrape scrapes the real serve
 // handler over a schema-2 store seeded with the focus data and a supplied router
 // poll interval (the two inputs that gate the conditional families), and
-// requires every name an alert rule reads, bar the four legacy rules, to appear.
+// requires every name an alert rule reads to appear.
 func TestEveryMetricNamedByAnAlertIsEmittedByARealScrape(t *testing.T) {
 	s := seedFocusStore(t)
 	// A consumer's lag is emitted per registered consumer (the focus role's
@@ -121,9 +111,6 @@ func TestEveryMetricNamedByAnAlertIsEmittedByARealScrape(t *testing.T) {
 	body := scrapeWith(t, s, WithPollInterval(func(string) (time.Duration, bool) { return time.Minute, true }))
 	var missing []string
 	for uid, names := range namedMetrics(t) {
-		if legacyRules[uid] {
-			continue
-		}
 		for _, n := range names {
 			if !emitted(body, n) {
 				missing = append(missing, uid+" reads "+n)

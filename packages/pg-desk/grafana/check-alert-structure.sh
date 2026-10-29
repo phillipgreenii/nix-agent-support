@@ -2,8 +2,8 @@
 # Structure check for the pg-desk PR lane outcome alert rules in grafana/alerting/alerts.yaml,
 # with plain negative cases proving the check can fail.
 #
-#   check-alert-structure.sh <alerts.yaml>
-#   check-alert-structure.sh --self-test <alerts.yaml>
+#   check-alert-structure.sh <alerts.yaml> [<alerts-delete.yaml>]
+#   check-alert-structure.sh --self-test <alerts.yaml> [<alerts-delete.yaml>]
 #
 # Needs yq (mikefarah) and jq. Every failure line starts with RULE-Tn so a negative case can
 # assert the exact rule that fired. The rules checked are the OUTCOME_UIDS below: the primary
@@ -29,6 +29,10 @@
 #       while pg-desk is down (so liveness-down speaks alone and NoData alerts only with pg-desk
 #       up), and the rule has the T5 shape. It is NOT an outcome rule: noDataState is Alerting and
 #       there is no SYSTEM_PAUSE guard (an empty result would alert).
+#   T10 (only when the delete-only file is given; PR lane refactor P9b) the deleteRules file is
+#       apiVersion 1 with no groups key, each entry has orgId 1, the uids are exactly the four
+#       retired sync_error rules (each once), none of them is still a rule of alerts.yaml, and the
+#       kept pg-desk-sync-stale is neither in the delete file nor missing from alerts.yaml
 #
 # The negative cases of --self-test: for EVERY outcome rule a rule file whose guard has been
 # removed MUST fail T3 and one whose noDataState differs MUST fail T2; the never-hydrated rule
@@ -42,7 +46,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: check-alert-structure.sh [--self-test] <alerts.yaml>" >&2
+  echo "usage: check-alert-structure.sh [--self-test] <alerts.yaml> [<alerts-delete.yaml>]" >&2
   exit 2
 }
 
@@ -51,8 +55,13 @@ if [ "${1:-}" = "--self-test" ]; then
   selftest=1
   shift
 fi
-[ "$#" -eq 1 ] || usage
+[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || usage
 alerts="$1"
+deletes="${2:-}"
+if [ -n "$deletes" ] && { [ ! -r "$deletes" ] || [ ! -f "$deletes" ]; }; then
+  echo "check-alert-structure.sh: cannot read $deletes" >&2
+  exit 2
+fi
 if [ ! -r "$alerts" ] || [ ! -f "$alerts" ]; then
   echo "check-alert-structure.sh: cannot read $alerts" >&2
   exit 2
@@ -99,6 +108,14 @@ liveness_guarded_uids=("pg-desk-ingest-failed-old" "pg-desk-watched-source-not-o
 ingest_guard=' or (vector(0) and on() absent(pg_desk_liveness == 1))'
 
 guard_uid="pg-desk-sync-stale"
+
+# The four retired sync_error rules the delete-only file must name (T10); the kept rule is guard_uid.
+retired_uids=(
+  "pg-desk-sync-error-retrying"
+  "pg-desk-sync-error-rows"
+  "pg-desk-sync-errors"
+  "pg-desk-unreconciled-anchor-age"
+)
 absence='pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated'
 
 # expr_of <json> <uid>: refId A's expression of one rule ("" when absent).
@@ -254,9 +271,50 @@ lint() {
   return "$status"
 }
 
+# lint_delete <alerts.yaml> <alerts-delete.yaml>: T10 over the delete-only file.
+lint_delete() {
+  local file="$1" del="$2" status=0 djson ajson got want bad uid
+  djson="$(yq -o=json '.' "$del")"
+  ajson="$(yq -o=json '.' "$file")"
+  if [ "$(jq -r '.apiVersion' <<<"$djson")" != "1" ] || jq -e 'has("groups")' <<<"$djson" >/dev/null; then
+    echo "RULE-T10: the deleteRules file must be apiVersion 1 with no groups key" >&2
+    status=1
+  fi
+  got="$(jq -r '[.deleteRules[]?.uid] | sort | join(",")' <<<"$djson")"
+  want="$(printf '%s\n' "${retired_uids[@]}" | sort | paste -sd, -)"
+  if [ "$got" != "$want" ]; then
+    echo "RULE-T10: the deleteRules uids are not exactly the four retired uids, each once: got [$got], want [$want]" >&2
+    status=1
+  fi
+  bad="$(jq -r '.deleteRules[]? | select(.orgId != 1) | .uid' <<<"$djson")"
+  if [ -n "$bad" ]; then
+    echo "RULE-T10: deleteRules entry without orgId 1: $(printf '%s' "$bad" | tr '\n' ' ')" >&2
+    status=1
+  fi
+  for uid in "${retired_uids[@]}"; do
+    if jq -e --arg uid "$uid" '[.groups[]?.rules[]? | select(.uid == $uid)] | length > 0' <<<"$ajson" >/dev/null; then
+      echo "RULE-T10: the retired rule $uid is still defined in alerts.yaml" >&2
+      status=1
+    fi
+  done
+  if jq -e --arg uid "$guard_uid" '[.deleteRules[]? | select(.uid == $uid)] | length > 0' <<<"$djson" >/dev/null; then
+    echo "RULE-T10: the kept rule $guard_uid is in the deleteRules file" >&2
+    status=1
+  fi
+  if ! jq -e --arg uid "$guard_uid" '[.groups[]?.rules[]? | select(.uid == $uid)] | length == 1' <<<"$ajson" >/dev/null; then
+    echo "RULE-T10: the kept rule $guard_uid is not exactly once in alerts.yaml" >&2
+    status=1
+  fi
+  return "$status"
+}
+
 if [ "$selftest" -eq 0 ]; then
-  lint "$alerts"
-  exit $?
+  rc=0
+  lint "$alerts" || rc=1
+  if [ -n "$deletes" ]; then
+    lint_delete "$alerts" "$deletes" || rc=1
+  fi
+  exit "$rc"
 fi
 
 work="$(mktemp -d)"
@@ -265,6 +323,12 @@ trap 'rm -rf "$work"' EXIT
 # The real input must pass, silently.
 if ! out="$(lint "$alerts" 2>&1)"; then
   echo "self-test: the real input fails:" >&2
+  echo "$out" >&2
+  exit 1
+fi
+
+if [ -n "$deletes" ] && ! out="$(lint_delete "$alerts" "$deletes" 2>&1)"; then
+  echo "self-test: the real delete-only file fails:" >&2
   echo "$out" >&2
   exit 1
 fi
@@ -322,5 +386,39 @@ for ingest_uid in "${liveness_guarded_uids[@]}"; do
   negative T9 "$ingest_uid: the pg-desk liveness guard removed from the expression" \
     "$(expr_path "$ingest_uid") |= sub(\" or [(]vector[(]0[)] and on[(][)] absent.*\$\"; \"\")"
 done
+
+# negative_delete <description> <yq-expression over the delete file> [<yq-expression over alerts.yaml>]:
+# the changed files MUST fail with exactly T10.
+negative_delete() {
+  local desc="$1" dexpr="$2" aexpr="${3:-.}" dir ids
+  dir="$(mktemp -d "$work/d.XXXXXX")"
+  yq "$dexpr" "$deletes" >"$dir/delete.yaml"
+  yq "$aexpr" "$alerts" >"$dir/alerts.yaml"
+  if cmp -s "$deletes" "$dir/delete.yaml" && cmp -s "$alerts" "$dir/alerts.yaml"; then
+    echo "self-test: negative case T10 ($desc) did not change the files" >&2
+    fail=1
+    return
+  fi
+  if ids="$(lint_delete "$dir/alerts.yaml" "$dir/delete.yaml" 2>&1 >/dev/null)"; then
+    echo "self-test: negative case T10 ($desc) passed" >&2
+    fail=1
+    return
+  fi
+  ids="$(printf '%s\n' "$ids" | grep -o '^RULE-T[0-9]*' | sort -u | tr '\n' ' ')"
+  if [ "$ids" != "RULE-T10 " ]; then
+    echo "self-test: negative case T10 ($desc) fired '${ids}' instead of only RULE-T10" >&2
+    fail=1
+  fi
+}
+
+if [ -n "$deletes" ]; then
+  negative_delete "a deleteRules uid dropped" 'del(.deleteRules[] | select(.uid == "pg-desk-sync-errors"))'
+  negative_delete "an extra deleteRules uid" '.deleteRules += [{"orgId": 1, "uid": "pg-desk-liveness-down"}]'
+  negative_delete "the kept rule in the delete file" '.deleteRules += [{"orgId": 1, "uid": "pg-desk-sync-stale"}]'
+  negative_delete "a deleteRules entry for the wrong org" '(.deleteRules[0].orgId) = 2'
+  negative_delete "a groups key in the delete file" '.groups = []'
+  negative_delete "a retired rule still defined in alerts.yaml" '.' \
+    '.groups[0].rules += [{"uid": "pg-desk-sync-error-rows"}]'
+fi
 
 [ "$fail" -eq 0 ]

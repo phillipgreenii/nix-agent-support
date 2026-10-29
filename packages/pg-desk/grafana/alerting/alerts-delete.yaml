@@ -1,0 +1,34 @@
+# Explicit deletion of the four retired pg-desk sync_error alert rules (PR lane
+# refactor, packet P9b).
+#
+# Grafana's file provisioner only adds/updates rules present in the provisioned
+# YAML: dropping a rule from alerts.yaml leaves the already-provisioned rule live
+# (provenance=file) and still evaluating. A rule is removed only by a
+# `deleteRules:` entry for its uid, applied on a provisioning reload/restart
+# (same mechanism as pg-connector-github-alerts-delete.yaml and
+# packages/pg-router/grafana/alerting/alerts.yaml).
+#
+# darwin/modules/pg-desk-serve registers THIS file next to alerts.yaml. The uids
+# are the four rules that read the legacy sync_error metrics, which the
+# schema-2 cutover left without a source column: the sync-failure-rate rule, the
+# exhausted-rows rule, the retrying-rows rule and the oldest-unreconciled-anchor
+# age rule. The kept pg-desk-sync-stale rule (its uid contains "sync" but it is
+# the dashboard-snapshot staleness keeper) MUST NOT appear here.
+#
+# The uids MUST equal the retired rules' uids and none may be a rule uid of
+# alerts.yaml: rule T10 of check-alert-structure.sh (flake check
+# test-pg-desk-alert-structure) and internal/alertrules/alerts_delete_test.go pin
+# that. The probe lists of the deployment never name these uids; the probe check
+# scans only the rules: groups of the alert files and ignores deleteRules. Keep
+# the entries for as long as any Grafana database may still hold the rules; they
+# are harmless once the rules are gone.
+apiVersion: 1
+deleteRules:
+  - orgId: 1
+    uid: pg-desk-sync-error-retrying
+  - orgId: 1
+    uid: pg-desk-sync-error-rows
+  - orgId: 1
+    uid: pg-desk-sync-errors
+  - orgId: 1
+    uid: pg-desk-unreconciled-anchor-age

@@ -73,15 +73,14 @@ is non-transient; these need an operator). The fifth, `pg_desk_oldest_anchor_che
 (bead `pg2-u4c1s`), is the age in seconds of the stalest applied anchor check: the oldest ledger
 `last_synced_at` among `anchor` rows that have a bead and are not closed, `0` when there are none
 (and on a store that has been cut over, which has no ledger). An unchanged check writes only that
-ledger time, never the bead, so this gauge is how a stalled sync stays detectable. The Grafana alert rules follow that split (bead
-`pg2-qki4v`): `pg_desk_sync_error_exhausted_rows > 0` pages critical, while
-`pg_desk_sync_error_retrying_rows > 0` is only a warning, and only once it outlives 30 minutes — a
-row a restart left mid-dispatch heals on its own. The age rule (`pg-desk-unreconciled-anchor-age`,
-bead `pg2-h7grf`) follows the same policy: `pg_desk_oldest_sync_error_age_seconds` has no per-state
-variant, so a healthily retrying row ages too, and the rule stays critical but only above 21600
-seconds (6 hours), which is past every automatic retry (the default 10 retries back off 1m, 2m, 4m,
-8m, 16m, then 30m five times, 181 minutes in total, and run only on the 30m `reconcile` cadence, so
-at most about 5 hours) — a row that old is exhausted or stuck, not retrying. `serve`'s WARN/ERROR-level operational
+ledger time, never the bead, so this gauge is how a stalled sync stays detectable. No Grafana alert reads these gauges any more: the four rules that did
+(`pg-desk-sync-errors`, `pg-desk-sync-error-rows`, `pg-desk-sync-error-retrying` and
+`pg-desk-unreconciled-anchor-age`) were retired with the schema-2 cutover, which dropped the
+`sync_error` column they read. Their uids are listed in the delete-only file
+`packages/pg-desk/grafana/alerting/alerts-delete.yaml` (Grafana keeps a file-provisioned rule live
+after its file drops it, so each is removed by a `deleteRules` entry), and `pg-desk-sync-stale`, the
+dashboard-snapshot staleness rule, stays. `grafana/check-alert-structure.sh` (rule T10) and the
+`internal/alertrules` tests pin that the delete file names exactly the four retired uids. `serve`'s WARN/ERROR-level operational
 log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 (`internal/telemetry`'s `Init`, wired at `serve` startup only — `run`/`run issue` are untouched);
 `serve` still logs to the path its launchd module configures, defaulting to

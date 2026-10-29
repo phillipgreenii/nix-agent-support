@@ -1373,8 +1373,8 @@
                 fi
                 top="$(git rev-parse --show-toplevel)"
                 g="$top/packages/pg-desk/grafana"
-                bash "$g/check-alert-structure.sh" "$g/alerting/alerts.yaml"
-                bash "$g/check-alert-structure.sh" --self-test "$g/alerting/alerts.yaml"
+                bash "$g/check-alert-structure.sh" "$g/alerting/alerts.yaml" "$g/alerting/alerts-delete.yaml"
+                bash "$g/check-alert-structure.sh" --self-test "$g/alerting/alerts.yaml" "$g/alerting/alerts-delete.yaml"
                 bash "$g/check-alert-rules.sh" "$g/alerting/alerts.yaml" "$g/alerting/rule-tests"
                 bash "$g/check-alert-rules.sh" --self-test "$g/alerting/alerts.yaml" "$g/alerting/rule-tests"
               '';
@@ -6896,8 +6896,9 @@
                   ''
                     script=${./packages/pg-desk/grafana/check-alert-structure.sh}
                     alerts=${./packages/pg-desk/grafana/alerting/alerts.yaml}
-                    bash "$script" "$alerts"
-                    bash "$script" --self-test "$alerts"
+                    deletes=${./packages/pg-desk/grafana/alerting/alerts-delete.yaml}
+                    bash "$script" "$alerts" "$deletes"
+                    bash "$script" --self-test "$alerts" "$deletes"
                     touch "$out"
                   '';
 
@@ -11862,6 +11863,11 @@
                 # ../../../packages/... spelling (relative to ITS location).
                 assert darwinDisabled.phillipgreenii.observability.alertRuleFiles == [ ];
                 assert lib.elem ./packages/pg-desk/grafana/alerting/alerts.yaml
+                  darwinEnabledNoSoak.phillipgreenii.observability.alertRuleFiles;
+                # PR lane refactor P9b: the delete-only file for the four retired sync_error rules is
+                # registered next to alerts.yaml (Grafana keeps a file-provisioned rule live after
+                # its file drops it), and only while the module is enabled.
+                assert lib.elem ./packages/pg-desk/grafana/alerting/alerts-delete.yaml
                   darwinEnabledNoSoak.phillipgreenii.observability.alertRuleFiles;
                 # logSources.pg-desk-serve (pg2-fdtvv): absent when disabled, present once
                 # enabled, pointed at the real Go default (serve.go's defaultServeLogPathSuffix)
