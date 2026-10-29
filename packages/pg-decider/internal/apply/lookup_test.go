@@ -296,3 +296,43 @@ func TestApplyDedupsAgainstTheRunListingWithoutAnotherListCall(t *testing.T) {
 		}
 	}
 }
+
+// A PR-lane create writes the node_id key form; an item an older binary wrote
+// carries the id form. Both directions must read as one identity, so a create
+// planned by the current code against a listed item of the other form is
+// deduped, not duplicated.
+func TestMixedKeyFormsAreOneIdentityForAugmentAndDedupe(t *testing.T) {
+	ref := workitem.EntityRef{Type: "pr", ID: "acme/api#7", NodeID: "PR_node7"}
+	ctx := workitem.Context{HeadSHA: "aaa"}
+	idKey := workitem.DedupKey(ref, workitem.KindFixCI, ctx)
+	nodeKey := workitem.CreateKey(ref, workitem.KindFixCI, ctx)
+	if idKey == nodeKey {
+		t.Fatalf("test setup: id and node_id forms are equal: %q", idKey)
+	}
+	for _, tc := range []struct {
+		name, listed, create string
+	}{
+		{"old id-form item, current node_id create", idKey, nodeKey},
+		{"node_id-form item, id-form create", nodeKey, idKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lk := NewLookup([]ListedItem{
+				{ID: "ci-1", Title: "fix-ci: acme/api#7 @ aaa", State: "open", Metadata: map[string]string{"dedup_key": tc.listed}},
+			}, 10)
+			// Owns: the listed item belongs to the PR, so the rules can see it.
+			if got := linkIDs(lk.Augment(lookupView())); strings.Join(got, ",") != "ci-1" {
+				t.Fatalf("the item keyed %q was not linked: %v", tc.listed, got)
+			}
+			// sameKey: the create of the other form is deduped, not duplicated.
+			out := lk.DedupePlan(ref, action.PlanResult{Actions: []action.Action{
+				createAction("fixci.failing-on-head", "fix-ci", tc.create, action.AnchorParent),
+			}})
+			if len(out.Actions) != 0 {
+				t.Fatalf("a duplicate create survived: %+v", out.Actions)
+			}
+			if len(out.Skipped) != 1 || out.Skipped[0].Reason != action.ReasonAlreadyHandled || out.Skipped[0].Facts["work_item"] != "ci-1" {
+				t.Fatalf("skipped = %+v", out.Skipped)
+			}
+		})
+	}
+}

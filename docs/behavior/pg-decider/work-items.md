@@ -145,6 +145,11 @@ but not the `node_id`, so matching on either form stops a rename from orphaning 
 items. The two forms name the SAME identity: a lookup for one form MUST find an item keyed in the
 other, and an entity with no `node_id` has only the first form.
 
+A create MUST write the `node_id` form when the entity carries a `node_id`, and the id form only
+when it has none (no `node_id` at create time). The `adoption.node-id` rule therefore remains only
+for items written by an older binary under the id form, and for PRs that had no `node_id` when the
+item was created; a fresh create leaves it nothing to rewrite.
+
 ## Same-context rule
 
 A work item that exists for the CURRENT context, open or closed, is never recreated. The context
@@ -200,17 +205,17 @@ view plus the work items of the PR that the run's all-status listing adds (see "
 lookup" in [`plan-and-apply.md`](plan-and-apply.md)); none reads who closed an item. The rule ids, in
 evaluation order, and the work-item kind each governs:
 
-| Rule id                   | Kind               | Summary                                                          |
-| ------------------------- | ------------------ | ---------------------------------------------------------------- |
-| `all.closed`              | any (the anchor)   | A merged or closed PR closes its anchor and every open work item |
-| `all.reopened`            | `anchor`           | A reopened PR reopens its closed anchor, and nothing else        |
-| `adoption`                | any                | Keyless items of the PR are given their `dedup_key`              |
-| `adoption.node-id`        | any                | A key naming the PR by id is rewritten to the `node_id` form     |
-| `review.head-advanced`    | `review-pr`        | Several review items over time, one per head                     |
-| `feedback.digest-changed` | `process-feedback` | A cycle for review comments no earlier cycle covers              |
-| `fixci.failing-on-head`   | `fix-ci`           | One item per head commit with failing CI                         |
-| `conflict.present`        | `resolve-conflict` | One item per conflict context                                    |
-| `focus.item`              | `focus-item`       | Mint, hold and release focus beads (the section below)           |
+| Rule id                   | Kind               | Summary                                                                                     |
+| ------------------------- | ------------------ | ------------------------------------------------------------------------------------------- |
+| `all.closed`              | any (the anchor)   | A merged or closed PR closes its anchor and every open work item                            |
+| `all.reopened`            | `anchor`           | A reopened PR reopens its closed anchor, and nothing else                                   |
+| `adoption`                | any                | Keyless items of the PR are given their `dedup_key`                                         |
+| `adoption.node-id`        | any                | An id-form key (older binary, or no `node_id` at create) is rewritten to the `node_id` form |
+| `review.head-advanced`    | `review-pr`        | Several review items over time, one per head                                                |
+| `feedback.digest-changed` | `process-feedback` | A cycle for review comments no earlier cycle covers                                         |
+| `fixci.failing-on-head`   | `fix-ci`           | One item per head commit with failing CI                                                    |
+| `conflict.present`        | `resolve-conflict` | One item per conflict context                                                               |
+| `focus.item`              | `focus-item`       | Mint, hold and release focus beads (the section below)                                      |
 
 A merged or closed PR is dead: only `all.closed`, `all.reopened`, `adoption` and `adoption.node-id`
 act on it (`INV-DECIDER-25` in [`plan-and-apply.md`](plan-and-apply.md)); every work-creating rule
