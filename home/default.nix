@@ -10,7 +10,6 @@
     ./programs/claude-marketplaces
     ./programs/agent-rules
     ./programs/agentsview
-    ./programs/ccusage
     ./programs/codeburn
     ./programs/ollama
     ./programs/opencode

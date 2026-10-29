@@ -60,7 +60,6 @@ let
   results = {
     cc_binary_on = (p cCC).claude-code.enable == true;
     cc_ceta_default_on = (p cCC).claude-extended-tool-approver.enable == true;
-    cc_ccusage_stays_off = ((p cCC).ccusage.enable or false) == false;
     bundle_enables_beads = (p cBundleHuman).beads.enable == true;
     bundle_enables_wtnew = (p cBundleHuman).wtnew.enable == true;
     bundle_enables_wtdone = (p cBundleHuman).wtdone.enable == true;

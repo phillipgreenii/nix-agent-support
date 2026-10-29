@@ -14,8 +14,7 @@
     (map mkCapability [
       # claude-code turns on the binary/suite AND ceta (the PreToolUse approver),
       # which is default-ON wherever claude-code is; a consumer (monorepod) vetoes
-      # ceta until the hook-support->ceta gate migration (tc-jizbz). ccusage is a
-      # SEPARATE opt-in leaf (below), deliberately not enabled here.
+      # ceta until the hook-support->ceta gate migration (tc-jizbz).
       {
         name = "claude-code";
         features = [
@@ -23,11 +22,7 @@
           "claude-extended-tool-approver"
         ];
       }
-      {
-        name = "ccusage";
-        features = [ "ccusage" ];
-      }
-      # codeburn is a SEPARATE opt-in token/cost tracker leaf (like ccusage), not in any bundle.
+      # codeburn is a SEPARATE opt-in token/cost tracker leaf, not in any bundle.
       # Inert on darwin (the capabilities/isHuman layer is NixOS-only); the darwin machine enables
       # it via a plain `phillipgreenii.programs.codeburn.enable = true`.
       {

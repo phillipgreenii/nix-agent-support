@@ -15129,7 +15129,7 @@
                 pkgs.runCommand "claude-settings-extra-settings-ok" { } "touch $out";
 
               # Plan 5: agent-tooling capability/bundle -> feature-flag wiring
-              # (claude-code binary+ceta default-on, ccusage off, perles human-only,
+              # (claude-code binary+ceta default-on, perles human-only,
               # bundle enable + child veto). Pure eval; supplies the framework +
               # mkCapability/mkBundle from nix-repo-base (override nix-base locally
               # to exercise the unmerged framework).
