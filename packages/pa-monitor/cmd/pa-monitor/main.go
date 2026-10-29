@@ -142,7 +142,7 @@ func runConfigSubcommand(args []string) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "config: unknown action %q (only 'show' supported)\n", args[0])
-	os.Exit(2)
+	os.Exit(exitUsage)
 }
 
 func runTUI(args []string) {
@@ -150,7 +150,7 @@ func runTUI(args []string) {
 	showVersion := fs.Bool("version", false, "print version")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		os.Exit(exitUsage)
 	}
 
 	if *showVersion {

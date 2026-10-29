@@ -337,7 +337,7 @@ func runCmuxBridge(args []string) {
 	ws := os.Getenv("CMUX_WORKSPACE_ID")
 	if ws == "" {
 		fmt.Fprintln(os.Stderr, "CMUX_WORKSPACE_ID not set; nothing to bridge")
-		os.Exit(2)
+		os.Exit(exitUsage)
 	}
 	_ = args
 

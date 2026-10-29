@@ -193,7 +193,7 @@ func writeSessions(w io.Writer, projectsDir string, since, before time.Time, pri
 
 // runSessions implements the `sessions` subcommand: `pa-monitor sessions
 // [--json] [--since <bound>] [--before <bound>] [--stats]`. Exit codes follow
-// search: 3 for an argument error, 2 for a runtime error, 0 otherwise. The
+// search: 2 for an argument error, 1 for a runtime error, 0 otherwise. The
 // per-file summary cache lives in sessionsCacheDir; a cache problem never
 // fails the listing.
 func runSessions(args []string) {
@@ -201,17 +201,17 @@ func runSessions(args []string) {
 	since, before, wantStats, err := parseSessionsArgs(args, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 	cfg, err := configLoad()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 	projectsDir := filepath.Join(home, ".claude", "projects")
 	prices := account.LoadAccount(cfg).PriceTable()
@@ -219,7 +219,7 @@ func runSessions(args []string) {
 	opts := claudetranscript.SessionsOptions{CacheDir: sessionsCacheDir(os.Getenv, home), Stats: &st}
 	if err := writeSessions(os.Stdout, projectsDir, since, before, prices, cfg.FirstPromptMaxChars, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 	if wantStats {
 		fmt.Fprintf(os.Stderr, "sessions: files=%d parsed=%d reused=%d cache_writes=%d cache_bytes=%d elapsed_ms=%d\n",

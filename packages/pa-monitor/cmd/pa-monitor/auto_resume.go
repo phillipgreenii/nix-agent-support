@@ -30,7 +30,7 @@ func runAutoResume(args []string) {
 	action, err := parseAutoResumeArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -39,7 +39,7 @@ func runAutoResume(args []string) {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
 
@@ -48,7 +48,7 @@ func runAutoResume(args []string) {
 		state, err := client.C.GetState(ctx, &pb.GetStateRequest{})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "auto-resume: %v\n", err)
-			os.Exit(2)
+			os.Exit(exitDaemonUnavailable)
 		}
 		enabled = !state.GetAutoResumeEnabled()
 	} else {
@@ -58,7 +58,7 @@ func runAutoResume(args []string) {
 	resp, err := client.C.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: enabled})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "auto-resume: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 
 	state := "off"

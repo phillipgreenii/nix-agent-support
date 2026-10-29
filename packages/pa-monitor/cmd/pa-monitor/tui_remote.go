@@ -36,13 +36,13 @@ func runTUIRemote() {
 	cfg, err := config.Load(config.DefaultPath())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 
 	rp, err := rpcclient.NewStreamingPoller(cfg.RefreshInterval)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "remote poller: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 	defer func() { _ = rp.Close() }()
 
@@ -179,7 +179,7 @@ func runTUIRemote() {
 		finalModel, err := prog.Run()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+			os.Exit(exitGeneric)
 		}
 		fm, ok := finalModel.(*tui.Model)
 		if !ok || !fm.ReexecRequested() {

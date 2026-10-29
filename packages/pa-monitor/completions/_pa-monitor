@@ -8,8 +8,8 @@ _pa_monitor() {
     'caffeinate:toggle the caffeinate manager (on|off|toggle)'
     'nudge:send a nudge to one or more sessions'
     'info:print session or path details'
-    'agents-busy-check:exit 0 iff any agent is busy'
-    'wait-until-agents-finished:block until all agents idle'
+    'agents-busy-check:exit 0 busy, 3 all idle, 6 daemon unreachable'
+    'wait-until-agents-finished:block until idle (exit 0; 4 timeout, 6 daemon unreachable)'
     'config:show loaded config'
     'cmux-bridge:run inside a cmux pane to drive the sidebar'
   )

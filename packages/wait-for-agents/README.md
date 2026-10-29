@@ -49,12 +49,13 @@ forward. Tune the idle gate with `--consecutive-idle-checks` instead.
 
 ## Exit Codes
 
-| Code | Meaning                                                                                                                        |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 0    | Idle reached (no agent actively running a turn)                                                                                |
-| 1    | Timeout reached (agents still working)                                                                                         |
-| 2    | Daemon unavailable (also this wrapper's own arg checks: missing value, unknown option)                                         |
-| 3    | A forwarded flag value rejected by `pa-monitor` itself (e.g. a non-numeric `--maximum-wait`/`--consecutive-idle-checks` value) |
+| Code | Meaning                                                                                                                                                                     |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Idle reached (no agent actively running a turn)                                                                                                                             |
+| 1    | Generic/unplanned error. Carries no branchable meaning: callers MUST NOT branch on it                                                                                       |
+| 2    | Usage error: this wrapper's own arg checks (missing value, unknown option), or a forwarded flag value rejected by `pa-monitor` itself (e.g. a non-numeric `--maximum-wait`) |
+| 4    | Timeout reached (agents still working)                                                                                                                                      |
+| 6    | Daemon unavailable                                                                                                                                                          |
 
 ### Exit 0 means "idle reached", not "work finished"
 
@@ -72,7 +73,7 @@ window resets. This is declared intent (ADR 0024 R3), not a defect in this wrapp
 ## Dependencies
 
 Requires the `pa-monitor` package, and a running `pa-monitor` daemon to answer the wait. With no
-daemon reachable the wrapper exits 2 (`daemon unreachable`).
+daemon reachable the wrapper exits 6 (`daemon unreachable`).
 
 ## Integration Examples
 
@@ -93,8 +94,9 @@ if wait-for-agents-to-finish --maximum-wait 1800; then
     echo "All agents finished, proceeding with shutdown"
     sudo shutdown -h now
 else
-    echo "Timeout: agents still working"
-    exit 1
+    rc=$?
+    echo "Wait did not complete (exit $rc; 4 = timeout, 6 = daemon unavailable)"
+    exit "$rc"
 fi
 ```
 

@@ -305,7 +305,7 @@ func TestParseSessionsArgs(t *testing.T) {
 	}
 }
 
-// TestSessionsExitCodeAndHelp exercises the real binary: a bad bound exits 3
+// TestSessionsExitCodeAndHelp exercises the real binary: a bad bound exits 2
 // naming --since on stderr, and --help lists the subcommand. HOME is a temp dir
 // with no daemon socket, proving the daemon is not required.
 func TestSessionsExitCodeAndHelp(t *testing.T) {
@@ -323,8 +323,8 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	ee, ok := err.(*exec.ExitError)
-	if !ok || ee.ExitCode() != 3 {
-		t.Fatalf("bad --since: err = %v, want exit 3", err)
+	if !ok || ee.ExitCode() != exitUsage {
+		t.Fatalf("bad --since: err = %v, want exit 2", err)
 	}
 	if !strings.Contains(stderr.String(), "--since") {
 		t.Errorf("stderr %q should name --since", stderr.String())

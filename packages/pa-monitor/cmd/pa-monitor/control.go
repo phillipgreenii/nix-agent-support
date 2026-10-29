@@ -51,7 +51,7 @@ func runCaffeinate(args []string) {
 	case "on", "off", "toggle":
 	default:
 		fmt.Fprintf(os.Stderr, "caffeinate: action must be on|off|toggle, got %q\n", action)
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -60,14 +60,14 @@ func runCaffeinate(args []string) {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
 
 	resp, err := client.C.Caffeinate(ctx, &pb.CaffeinateRequest{Action: action})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "caffeinate: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	// Show BOTH indicators: MODE (the toggle just set) and PROCESS (what the
 	// subprocess is doing). GetMode falls back to GetActive for daemons that
@@ -127,7 +127,7 @@ func runNudge(args []string) {
 	f, err := parseNudgeFlags(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nudge: %v\n", err)
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 	selRaw := f.selector
 	text := f.text
@@ -139,7 +139,7 @@ func runNudge(args []string) {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
 
@@ -147,7 +147,7 @@ func runNudge(args []string) {
 		resp, err := client.C.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: selRaw})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "nudge: %v\n", err)
-			os.Exit(2)
+			os.Exit(exitDaemonUnavailable)
 		}
 		if len(resp.GetCancelledSessionIds()) == 0 {
 			fmt.Println("nudge cancel: nothing queued")
@@ -160,7 +160,7 @@ func runNudge(args []string) {
 	resp, err := client.C.NudgeQueue(ctx, &pb.NudgeQueueRequest{Selector: selRaw, Text: text})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nudge: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	if len(resp.GetQueuedSessionIds()) == 0 && len(resp.GetAlreadyQueuedSessionIds()) == 0 {
 		fmt.Println("nudge: no sessions matched")
@@ -242,12 +242,12 @@ func runInfo(args []string) {
 	args, jsonMode := stripJSONFlag(args)
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "info: missing selector")
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 	sel, err := parseSelector(args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "info: %v\n", err)
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -256,7 +256,7 @@ func runInfo(args []string) {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
 
@@ -264,12 +264,12 @@ func runInfo(args []string) {
 		resp, err := client.C.GetPathInfo(ctx, &pb.GetPathInfoRequest{Path: path})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "info: %v\n", err)
-			os.Exit(2)
+			os.Exit(exitDaemonUnavailable)
 		}
 		d := resp.GetDirectory()
 		if d == nil {
 			fmt.Fprintln(os.Stderr, "info: no directory matched")
-			os.Exit(1)
+			os.Exit(exitNoMatch)
 		}
 		fmt.Print(formatPathRollup(d))
 		return
@@ -278,17 +278,17 @@ func runInfo(args []string) {
 	resp, err := client.C.GetSessionInfo(ctx, &pb.GetSessionInfoRequest{Selector: sel})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "info: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	v := resp.GetView()
 	if v == nil {
 		fmt.Fprintln(os.Stderr, "info: no session matched")
-		os.Exit(1)
+		os.Exit(exitNoMatch)
 	}
 	if jsonMode {
 		if err := writeSessionInfoJSON(os.Stdout, v, time.Now().UTC()); err != nil {
 			fmt.Fprintf(os.Stderr, "info: %v\n", err)
-			os.Exit(2)
+			os.Exit(exitGeneric)
 		}
 		return
 	}

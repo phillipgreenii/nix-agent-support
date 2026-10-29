@@ -23,6 +23,7 @@ pa-monitor status
 
 # Block-style "is any agent actively running a turn right now?"
 # (NOT "is any work pending" — see Busy/idle gates below)
+# (exit 0 = busy, 3 = all idle, 6 = daemon unreachable; 1 is a generic error)
 if pa-monitor agents-busy-check; then echo "busy"; fi
 
 # Block-style "wait until nothing is actively running"
@@ -58,7 +59,7 @@ pa-monitor config show
 | `auto-resume on\|off\|toggle`                        | Drive the auto-resume setting (the TUI's `[R]` key).         |
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
 | `info <selector>`                                    | Print session or directory details.                          |
-| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy (see caveat).                   |
+| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff busy; 3 all idle; 6 daemon down (see caveat).     |
 | `wait-until-agents-finished`                         | Block until nothing is working (see caveat).                 |
 | `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
 | `config show`                                        | Print loaded config (read-only).                             |
@@ -195,18 +196,26 @@ sessions with `status == working`. A **`blocked`** session — including `blocke
 a session that still has work but is waiting out the 5h/weekly usage window — is **not** counted as
 busy and is indistinguishable from `idle` at these two gates.
 
-The exit-code contract is therefore:
+The exit-code contract follows the workspace Exit Codes rule: **1 is the generic/unplanned error
+and carries no branchable meaning**, 2 is a usage error, and each specific condition has its own
+distinct code >= 3. Callers MUST NOT branch on exit 1.
 
-| Exit | `agents-busy-check`                                          | `wait-until-agents-finished`                                                                                                                       |
-| ---- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | daemon up and ≥1 session `working`                           | **idle reached** — no session `working` for N ticks                                                                                                |
-| 1    | daemon up and no session `working` (prints `all idle`)       | timeout (`--maximum-wait` elapsed)                                                                                                                 |
-| 2    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) | daemon unavailable past `--reconnect-grace`                                                                                                        |
-| 3    | —                                                            | invalid args: an unparseable flag (bad name, non-integer value), or a value that fails semantic validation (e.g. `--consecutive-idle-checks <= 0`) |
+| Exit | `agents-busy-check`                                          | `wait-until-agents-finished`                                                                                                                      |
+| ---- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | daemon up and ≥1 session `working`                           | **idle reached** — no session `working` for N ticks                                                                                               |
+| 1    | generic/unplanned error (do not branch on it)                | generic/unplanned error (do not branch on it)                                                                                                     |
+| 2    | usage error                                                  | usage error: an unparseable flag (bad name, non-integer value), or a value that fails semantic validation (e.g. `--consecutive-idle-checks <= 0`) |
+| 3    | daemon up and no session `working` (prints `all idle`)       | —                                                                                                                                                 |
+| 4    | —                                                            | timeout (`--maximum-wait` elapsed)                                                                                                                |
+| 6    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) | daemon unavailable past `--reconnect-grace`                                                                                                       |
+
+The other daemon-bound subcommands share the same codes: exit 6 when the daemon is unreachable or an
+RPC fails, exit 2 for a usage error, and (for `info`) exit 5 when the selector matches nothing. Exit
+4 and 3 are specific to the two gates above.
 
 Callers MUST read these codes as statements about **activity**, not about **completion**:
 
-- `agents-busy-check` exit 1 (`all idle`) MUST NOT be read as "no work is pending". It is reported
+- `agents-busy-check` exit 3 (`all idle`) MUST NOT be read as "no work is pending". It is reported
   while sessions are blocked on a usage window with work still queued.
 - `wait-until-agents-finished` exit 0 means "idle reached" and MUST NOT be read as "work finished".
   It is returned after `--consecutive-idle-checks` ticks with zero `working` sessions, even when
@@ -234,7 +243,7 @@ missed push, a sustained refusal, or a daemon that went away does, because a ses
 `working` for the whole unobserved gap.
 
 Consequence for callers: under a daemon whose stream breaks for longer than 2s more often than every
-N pushes, the gate cannot be satisfied and the wait ends at `--maximum-wait` (exit 1). That is the
+N pushes, the gate cannot be satisfied and the wait ends at `--maximum-wait` (exit 4). That is the
 truthful answer — there was never N ticks' worth of continuous observation — and the restart lines on
 stderr are how to tell it from a wait that is simply still gathering observations.
 

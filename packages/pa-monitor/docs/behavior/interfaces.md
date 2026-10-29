@@ -49,8 +49,8 @@ flowchart LR
   unreachable" and "the daemon has nothing known to report" are different facts.
 - **The TUI is one client of this interface** (`actors.md`), rendering what it reads; its
   presentation is out of this set's extent.
-- **Open questions** (tracked in [journeys](journeys.md)): `OQ-PAM-EXITCODE` (whether the
-  busy/idle gate exit codes should conform to the repo's general exit-code convention) and
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-PAM-EXITCODE` (resolved: the
+  busy/idle gate exit codes now conform to the repo's general exit-code convention) and
   `OQ-GATE-BLOCKED` (whether a `blocker = usage_limit` session should hold the busy/idle gates
   open, rather than the gates reading only `status == working`).
 

@@ -54,7 +54,7 @@ func dialOrExit(ctx context.Context) (*rpcclient.Client, error) {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, rpcclient.DaemonUnavailableMessage("<unknown>"))
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	return client, nil
 }
@@ -65,7 +65,7 @@ func getStateOrExit(ctx context.Context, client *rpcclient.Client) (*pb.DaemonSt
 	state, err := client.C.GetState(ctx, &pb.GetStateRequest{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status: GetState: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	return state, nil
 }

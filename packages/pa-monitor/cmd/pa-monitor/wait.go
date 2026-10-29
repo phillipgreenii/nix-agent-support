@@ -37,16 +37,19 @@ import (
 // Exit codes:
 //
 //	0 = idle reached (no session `working` for N ticks; blocked counts as idle)
-//	1 = timeout
-//	2 = daemon unavailable past reconnect-grace
-//	3 = invalid args: an unparseable flag (bad name, non-integer value) or a
+//	4 = timeout
+//	6 = daemon unavailable past reconnect-grace
+//	2 = invalid args (usage): an unparseable flag (bad name, non-integer value) or a
 //	    value that parses but fails semantic validation (currently just
 //	    --consecutive-idle-checks <= 0; see validateConsecutiveIdleChecks).
 //	    Both routes through parseWaitArgs below, which is why its flag set
 //	    uses flag.ContinueOnError rather than flag.ExitOnError: ExitOnError
 //	    would have fs.Parse call os.Exit(2) itself on a parse error, before
-//	    ever returning one for parseWaitArgs to turn into this exit 3 — the
+//	    ever returning one for parseWaitArgs to turn into this exit 2 — the
 //	    dead code bead pg2-3rlwm fixed.
+//
+// Exit 1 is NOT part of this contract: it is the generic/unplanned error and
+// MUST NOT be branched on (see exitcodes.go).
 func runWaitUntilAgentsFinished(args []string) {
 	params, code, ok := parseWaitArgs(args, os.Stderr)
 	if !ok {
@@ -70,7 +73,7 @@ func parseWaitArgs(args []string, stderr io.Writer) (p waitParams, code int, ok 
 	fs := flag.NewFlagSet("wait-until-agents-finished", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	// --maximum-wait <= 0 is intentionally ACCEPTED, not rejected: it makes
-	// the deadline already-expired at start, so the wait exits 1 (timeout) on
+	// the deadline already-expired at start, so the wait exits 4 (timeout) on
 	// its very first pass through the loop below — before ever dialing the
 	// daemon — which is a defensible, if literal, reading of "maximum total
 	// wait ... 0 seconds": do not wait at all. That is unlike
@@ -81,7 +84,7 @@ func parseWaitArgs(args []string, stderr io.Writer) (p waitParams, code int, ok 
 	consecutive := fs.Int("consecutive-idle-checks", 3, "Consecutive idle observations required (a gap in observation restarts the count); must be >= 1")
 	// --reconnect-grace <= 0 is intentionally ACCEPTED, not rejected: it
 	// skips the retry loop in waitForDaemon entirely, so a daemon that
-	// disappears mid-wait fails at once (exit 2) with no retry — again a
+	// disappears mid-wait fails at once (exit 6) with no retry — again a
 	// literal, defensible reading of "seconds to wait for daemon return ...
 	// 0 seconds". See
 	// TestWaitUntilAgentsFinishedReconnectGraceZeroOrNegativeFailsWithoutRetry.
@@ -90,12 +93,12 @@ func parseWaitArgs(args []string, stderr io.Writer) (p waitParams, code int, ok 
 	case errors.Is(err, flag.ErrHelp):
 		return waitParams{}, 0, false
 	case err != nil:
-		return waitParams{}, 3, false
+		return waitParams{}, exitUsage, false
 	}
 
 	if err := validateConsecutiveIdleChecks(*consecutive); err != nil {
 		fmt.Fprintf(stderr, "wait-until-agents-finished: %v\n", err)
-		return waitParams{}, 3, false
+		return waitParams{}, exitUsage, false
 	}
 
 	return waitParams{
@@ -148,7 +151,7 @@ type waitParams struct {
 // waitTimeout emits the documented timeout line and returns its exit code.
 func waitTimeout(stderr io.Writer) int {
 	fmt.Fprintln(stderr, "wait-until-agents-finished: timeout")
-	return 1
+	return exitTimeout
 }
 
 // reconnectPause is the single pace shared by EVERY way this wait can lose its
@@ -195,7 +198,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 	// long as the daemon keeps pushing, so a deadline consulted only in this
 	// outer loop is never re-tested while the daemon is healthy AND some
 	// session is `working` — the exact case a caller sets --maximum-wait for,
-	// which made the documented exit 1 unreachable. A deadline-carrying parent
+	// which made the documented exit 4 unreachable. A deadline-carrying parent
 	// makes `<-ctx.Done()` fire inside streamLoop, landing on the timeout exit.
 	waitCtx, waitCancel := context.WithDeadline(context.Background(), time.Now().Add(p.maxWait))
 	defer waitCancel()
@@ -226,7 +229,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 	// shutdown ends the stream with a clean EOF by design — internal/daemon
 	// server.go's WatchState), so discarding the streak there would make N
 	// unreachable under any daemon that drops its stream more often than every N
-	// pushes, turning a satisfiable wait into a guaranteed exit 1. The real daemon
+	// pushes, turning a satisfiable wait into a guaranteed exit 4. The real daemon
 	// Sends immediately on stream open and the redial is paced at reconnectPause,
 	// so a prompt drop resumes ~0.5s later — inside the budget by construction.
 	//
@@ -246,7 +249,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 		// (rpcclient.DialPath bounds it at 2s) instead of inheriting waitCtx.
 		// With a --maximum-wait shorter than that budget, a deadline-derived
 		// dial ctx would make a MISSING daemon look like a timeout and lose the
-		// specific `daemon unreachable` diagnosis the exit-2 contract promises —
+		// specific `daemon unreachable` diagnosis the exit-6 contract promises —
 		// which is what test-wait-for-agents-real-pa-monitor.bats reads to tell
 		// "args accepted" from "args rejected". Only the STREAM below needs the
 		// deadline; the conn's own lifetime is owned by Close, not by this ctx.
@@ -256,7 +259,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 			// observed at least one tick; otherwise fail immediately.
 			if streak == 0 {
 				fmt.Fprintln(stderr, "daemon unreachable")
-				return 2
+				return exitDaemonUnavailable
 			}
 			if err := waitForDaemon(waitCtx, p.grace); err != nil {
 				// waitForDaemon honours waitCtx, so a grace window that would
@@ -266,7 +269,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 					return waitTimeout(stderr)
 				}
 				fmt.Fprintf(stderr, "wait-until-agents-finished: %v\n", err)
-				return 2
+				return exitDaemonUnavailable
 			}
 			// STRICTER than the pushBudget consecutiveness rule above, and
 			// deliberately so (the difference the DECISION there requires be
@@ -338,7 +341,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 			case <-ctx.Done():
 				// The only cancel reaching here is waitCtx's --maximum-wait
 				// deadline (the success path below returns without re-entering
-				// this select), which the post-loop check turns into exit 1.
+				// this select), which the post-loop check turns into exit 4.
 				break streamLoop
 			case <-time.After(pushBudget):
 				fmt.Fprintln(stderr, "wait: push missed, reconnecting")

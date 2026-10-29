@@ -182,8 +182,8 @@ func TestWaitUntilAgentsFinishedTimesOutWhileBusy(t *testing.T) {
 	}, &stderr)
 	elapsed := time.Since(start)
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (timeout); stderr: %q", code, stderr.String())
+	if code != exitTimeout {
+		t.Fatalf("exit code = %d, want 4 (timeout); stderr: %q", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "wait-until-agents-finished: timeout") {
 		t.Errorf("stderr = %q, want the documented timeout line", stderr.String())
@@ -228,14 +228,14 @@ func TestWaitUntilAgentsFinishedIdleStreakExitsPromptly(t *testing.T) {
 
 // TestWaitUntilAgentsFinishedDaemonNeverUpFails covers the no-tick-observed
 // path: without a streak there is no reconnect grace to apply, so a missing
-// daemon is exit 2, not a timeout.
+// daemon is exit 6, not a timeout.
 //
 // The short --maximum-wait case is the precedence guard. The dial has its own
 // 2s handshake budget, so a --maximum-wait UNDER that budget expires while the
 // first dial is still in flight. "Never reached the daemon" MUST still win over
-// "time ran out" there: the exit-2 message is what
+// "time ran out" there: the exit-6 message is what
 // test-wait-for-agents-real-pa-monitor.bats reads to tell "args accepted, wait
-// loop reached" apart from "args rejected in flag parsing", which both exit 2.
+// loop reached" apart from "args rejected in flag parsing", which exit 6 and 2 respectively.
 func TestWaitUntilAgentsFinishedDaemonNeverUpFails(t *testing.T) {
 	for _, maxWait := range []time.Duration{60 * time.Second, 1 * time.Second} {
 		t.Run(maxWait.String(), func(t *testing.T) {
@@ -248,8 +248,8 @@ func TestWaitUntilAgentsFinishedDaemonNeverUpFails(t *testing.T) {
 				grace:       30 * time.Second,
 			}, &stderr)
 
-			if code != 2 {
-				t.Fatalf("exit code = %d, want 2 (daemon unavailable); stderr: %q", code, stderr.String())
+			if code != exitDaemonUnavailable {
+				t.Fatalf("exit code = %d, want 6 (daemon unavailable); stderr: %q", code, stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "daemon unreachable") {
 				t.Errorf("stderr = %q, want %q", stderr.String(), "daemon unreachable")
@@ -342,10 +342,10 @@ func TestWaitUntilAgentsFinishedPacesRefusedStreamOpens(t *testing.T) {
 		grace:       30 * time.Second,
 	}, &stderr)
 
-	// Exit 1 (not 2): every dial SUCCEEDS here, so the daemon-unavailable branch
+	// Exit 4 (not 6): every dial SUCCEEDS here, so the daemon-unavailable branch
 	// is never reached and the deadline is what ends the wait.
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (timeout); stderr: %q", code, stderr.String())
+	if code != exitTimeout {
+		t.Fatalf("exit code = %d, want 4 (timeout); stderr: %q", code, stderr.String())
 	}
 	retries := conns.n.Load()
 	if retries == 0 {
@@ -393,8 +393,8 @@ func TestWaitUntilAgentsFinishedIdleStreakRestartsAfterAStalledStream(t *testing
 		grace:       30 * time.Second,
 	}, &stderr)
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (timeout): three idle observations separated by stream breaks are not consecutive; stderr: %q", code, stderr.String())
+	if code != exitTimeout {
+		t.Fatalf("exit code = %d, want 4 (timeout): three idle observations separated by stream breaks are not consecutive; stderr: %q", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "wait-until-agents-finished: timeout") {
 		t.Errorf("stderr = %q, want the documented timeout line", stderr.String())
@@ -483,8 +483,8 @@ func TestWaitUntilAgentsFinishedGraceCannotOutlastDeadline(t *testing.T) {
 	}, &stderr)
 	elapsed := time.Since(start)
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (timeout); stderr: %q", code, stderr.String())
+	if code != exitTimeout {
+		t.Fatalf("exit code = %d, want 4 (timeout); stderr: %q", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "wait-until-agents-finished: timeout") {
 		t.Errorf("stderr = %q, want the documented timeout line", stderr.String())
@@ -559,8 +559,8 @@ func TestWaitUntilAgentsFinishedReportsGenuineStreamError(t *testing.T) {
 		grace:       30 * time.Second,
 	}, &stderr)
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (timeout while redialing past the failure); stderr: %q", code, stderr.String())
+	if code != exitTimeout {
+		t.Fatalf("exit code = %d, want 4 (timeout while redialing past the failure); stderr: %q", code, stderr.String())
 	}
 	if n := d.streams.Load(); n < 2 {
 		t.Fatalf("daemon served %d streams: the fake never failed and reconnected, so nothing was tested", n)
@@ -641,10 +641,10 @@ func TestWaitUntilAgentsFinishedConsecutiveIdleChecksOneExitsOnFirstIdleObservat
 // TestWaitUntilAgentsFinishedMaximumWaitZeroOrNegativeExitsImmediately
 // documents --maximum-wait's zero/negative behavior (see its declaration in
 // runWaitUntilAgentsFinished): the deadline is already expired at start, so
-// the wait must exit 1 (timeout) on its very first pass through the loop —
+// the wait must exit 4 (timeout) on its very first pass through the loop —
 // before ever dialing the daemon. No daemon is served on the socket at all,
 // which is the proof: if the loop dialed first, it would find nothing
-// listening and exit 2 (daemon unreachable) instead of 1.
+// listening and exit 6 (daemon unreachable) instead of 4.
 func TestWaitUntilAgentsFinishedMaximumWaitZeroOrNegativeExitsImmediately(t *testing.T) {
 	for _, maxWait := range []time.Duration{0, -1 * time.Second, -1 * time.Hour} {
 		t.Run(maxWait.String(), func(t *testing.T) {
@@ -659,8 +659,8 @@ func TestWaitUntilAgentsFinishedMaximumWaitZeroOrNegativeExitsImmediately(t *tes
 			}, &stderr)
 			elapsed := time.Since(start)
 
-			if code != 1 {
-				t.Fatalf("exit code = %d, want 1 (timeout: --maximum-wait %s is already expired); stderr: %q", code, maxWait, stderr.String())
+			if code != exitTimeout {
+				t.Fatalf("exit code = %d, want 4 (timeout: --maximum-wait %s is already expired); stderr: %q", code, maxWait, stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "wait-until-agents-finished: timeout") {
 				t.Errorf("stderr = %q, want the documented timeout line", stderr.String())
@@ -716,8 +716,8 @@ func TestWaitUntilAgentsFinishedReconnectGraceZeroOrNegativeFailsWithoutRetry(t 
 
 			select {
 			case got := <-done:
-				if got.code != 2 {
-					t.Fatalf("exit code = %d, want 2 (daemon unavailable, no retry within a %s grace); stderr: %q", got.code, grace, got.stderr)
+				if got.code != exitDaemonUnavailable {
+					t.Fatalf("exit code = %d, want 6 (daemon unavailable, no retry within a %s grace); stderr: %q", got.code, grace, got.stderr)
 				}
 				if !strings.Contains(got.stderr, "daemon did not return within grace") {
 					t.Errorf("stderr = %q, want the grace-exhausted message", got.stderr)
@@ -754,8 +754,8 @@ func TestWaitUntilAgentsFinishedCleanEOFStaysQuiet(t *testing.T) {
 		grace:       30 * time.Second,
 	}, &stderr)
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (timeout); stderr: %q", code, stderr.String())
+	if code != exitTimeout {
+		t.Fatalf("exit code = %d, want 4 (timeout); stderr: %q", code, stderr.String())
 	}
 	if n := d.streams.Load(); n < 2 {
 		t.Fatalf("daemon served %d streams: the clean-EOF redial path was never exercised", n)
@@ -767,7 +767,7 @@ func TestWaitUntilAgentsFinishedCleanEOFStaysQuiet(t *testing.T) {
 
 // TestParseWaitArgsUnknownFlagExitsWithDocumentedInvalidArgsCode pins the fix
 // for bead pg2-3rlwm: an unparseable flag (bad name here) must produce
-// exit 3, the "invalid args" code the doc comment on runWaitUntilAgentsFinished
+// exit 2, the "invalid args" code the doc comment on runWaitUntilAgentsFinished
 // documents. Before the fix, the flag set used flag.ExitOnError, so fs.Parse
 // called os.Exit(2) on its own before the code below could ever run --
 // `pa-monitor wait-until-agents-finished --bogus` exited 2, never 3. This
@@ -780,8 +780,8 @@ func TestParseWaitArgsUnknownFlagExitsWithDocumentedInvalidArgsCode(t *testing.T
 	if ok {
 		t.Fatal("ok = true, want false for an unrecognized flag")
 	}
-	if code != 3 {
-		t.Errorf("code = %d, want 3 (invalid args); stderr: %q", code, stderr.String())
+	if code != exitUsage {
+		t.Errorf("code = %d, want 2 (invalid args); stderr: %q", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "flag provided but not defined") {
 		t.Errorf("stderr = %q, want it to contain the flag package's own parse diagnostic", stderr.String())
@@ -799,8 +799,8 @@ func TestParseWaitArgsMalformedValueExitsWithDocumentedInvalidArgsCode(t *testin
 	if ok {
 		t.Fatal("ok = true, want false for a non-integer flag value")
 	}
-	if code != 3 {
-		t.Errorf("code = %d, want 3 (invalid args); stderr: %q", code, stderr.String())
+	if code != exitUsage {
+		t.Errorf("code = %d, want 2 (invalid args); stderr: %q", code, stderr.String())
 	}
 }
 
@@ -815,8 +815,8 @@ func TestParseWaitArgsRejectsConsecutiveIdleChecksZero(t *testing.T) {
 	if ok {
 		t.Fatal("ok = true, want false for --consecutive-idle-checks 0")
 	}
-	if code != 3 {
-		t.Errorf("code = %d, want 3 (invalid args); stderr: %q", code, stderr.String())
+	if code != exitUsage {
+		t.Errorf("code = %d, want 2 (invalid args); stderr: %q", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "must be >= 1") {
 		t.Errorf("stderr = %q, want validateConsecutiveIdleChecks's diagnostic", stderr.String())
@@ -829,7 +829,7 @@ func TestParseWaitArgsRejectsConsecutiveIdleChecksZero(t *testing.T) {
 // for -h/--help instead of exiting the process itself, and that return must
 // still be read as "exit 0, print nothing further" -- not folded into the
 // same code path as a genuine parse error (which would wrongly turn
-// `--help` into exit 3).
+// `--help` into exit 2).
 func TestParseWaitArgsHelpFlagExitsZeroWithoutError(t *testing.T) {
 	for _, flag := range []string{"-h", "--help"} {
 		t.Run(flag, func(t *testing.T) {

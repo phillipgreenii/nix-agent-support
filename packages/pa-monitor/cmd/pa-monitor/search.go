@@ -181,7 +181,7 @@ func runSearch(args []string) {
 	query, sessionID, since, before, err := parseSearchArgs(args, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(3)
+		os.Exit(exitUsage)
 	}
 
 	ctx, cancel := contextWithTimeout()
@@ -212,11 +212,11 @@ func runSearch(args []string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "search: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 	claudeHome := home + "/.claude"
 	if err := searchSessions(os.Stdout, claudeHome, sessions, query, sessionID, since, before); err != nil {
 		fmt.Fprintf(os.Stderr, "search: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 }

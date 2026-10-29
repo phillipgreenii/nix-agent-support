@@ -66,10 +66,22 @@ refute_forwarded() {
   [ "$status" -eq 0 ]
 }
 
-@test "exits 1 when pa-monitor exits 1" {
+@test "passes pa-monitor's generic error exit 1 through unchanged" {
   create_stub_tui 1
   run_wait_for_agents --maximum-wait 5
   [ "$status" -eq 1 ]
+}
+
+@test "passes pa-monitor's timeout exit 4 through unchanged" {
+  create_stub_tui 4
+  run_wait_for_agents --maximum-wait 5
+  [ "$status" -eq 4 ]
+}
+
+@test "passes pa-monitor's daemon-unavailable exit 6 through unchanged" {
+  create_stub_tui 6
+  run_wait_for_agents --maximum-wait 5
+  [ "$status" -eq 6 ]
 }
 
 @test "rejects unknown options with exit code 2" {

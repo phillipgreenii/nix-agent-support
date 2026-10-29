@@ -194,15 +194,16 @@ flowchart LR
 
 - **`OQ-PAM-EXITCODE`** <!-- uuid: 2516682e-229d-4a11-97e0-65c2c7e3bf9e --> — whether pa-monitor's
   CLI gate exit codes SHOULD conform to this repository's general coarse exit-code convention (`0`
-  ok, `1` unexpected error, `2` usage error, `>= 3` app-specific, `9` busy), given the gates today
-  use exit `2` for "daemon unreachable" and exit `1` for "not busy" rather than that mapping.
-  _Gap_: undecided whether pa-monitor is within that convention's scope or a deliberate exception.
-  _Owner_: pa-monitor. _Path_: settle by a superseding decision when the convention is next
-  revisited pool-wide. _Blocks_: nothing today — the current codes are stable and documented.
+  ok, `1` unexpected error, `2` usage error, `>= 3` app-specific, `9` busy), the gates used
+  exit `2` for "daemon unreachable" and exit `1` for "not busy" and "timeout" rather than that mapping.
+  _Resolved_ (operator ruling 2026-10-28 on pg2-9jk3g5, implemented by pg2-xrmfng): pa-monitor
+  conforms. Exit `1` is the generic/unplanned error and MUST NOT be branched on, `2` is usage, and
+  the specific outcomes have their own codes: `3` not busy ("all idle"), `4` timeout, `5` `info`
+  matched nothing, `6` daemon unreachable. _Owner_: pa-monitor. _Blocks_: nothing.
 - **`OQ-GATE-BLOCKED`** <!-- uuid: 0c8ecd40-3752-4e5d-acd5-c59239f9386d --> — whether a session
   **blocked on a usage limit** (`blocker = usage_limit`) SHOULD hold the **busy/idle gates** open.
   Today it does not: `busy` is `status == working` only (ADR 0024 R3), so `agents-busy-check`
-  reports "all idle" (exit 1) and `wait-until-agents-finished` reports "idle reached" (exit 0)
+  reports "all idle" (exit 3) and `wait-until-agents-finished` reports "idle reached" (exit 0)
   while blocked work is still pending and auto-resume will resume it at the window reset. _Gap_:
   the gates answer "is anything actively progressing?", but their names — and most callers'
   intent — is "is all work finished?"; which question they SHOULD answer, and whether callers

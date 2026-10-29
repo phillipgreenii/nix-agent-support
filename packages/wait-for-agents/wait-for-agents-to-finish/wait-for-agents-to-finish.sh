@@ -65,11 +65,13 @@ Thin wrapper around \`pa-monitor wait-until-agents-finished\`. Options:
 
 Exit codes:
   0  idle reached (no agent is actively running a turn)
-  1  timeout (--maximum-wait elapsed)
-  2  daemon unavailable (also this wrapper's own arg checks: missing
-     value, unknown option)
-  3  a forwarded flag value rejected by pa-monitor itself (e.g. a
-     non-numeric --maximum-wait/--consecutive-idle-checks value)
+  1  generic/unplanned error (carries no branchable meaning; do not
+     branch on it)
+  2  usage error: this wrapper's own arg checks (missing value, unknown
+     option) or a forwarded flag value rejected by pa-monitor itself
+     (e.g. a non-numeric --maximum-wait/--consecutive-idle-checks value)
+  4  timeout (--maximum-wait elapsed)
+  6  daemon unavailable
 
 NOTE: exit 0 means "idle reached", NOT "work finished". Only a 'working'
 session counts as busy (pa-monitor ADR 0024 R3), so a session BLOCKED on a

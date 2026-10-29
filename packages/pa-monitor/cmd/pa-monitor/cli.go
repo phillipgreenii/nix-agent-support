@@ -22,14 +22,14 @@ func runStatus(args []string) {
 	client, err := dialOrExit(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, rpcclient.DaemonUnavailableMessage("<unknown>"))
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
 
 	state, err := getStateOrExit(ctx, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status: GetState: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 
 	// ADR 0024 {working, blocked, idle} counts. dirSessionCounts folds the
@@ -65,7 +65,7 @@ func runStatus(args []string) {
 	if jsonMode {
 		if err := writeStatusJSON(os.Stdout, state, details); err != nil {
 			fmt.Fprintf(os.Stderr, "status: %v\n", err)
-			os.Exit(2)
+			os.Exit(exitGeneric)
 		}
 		return
 	}
@@ -116,9 +116,9 @@ func formatUsageLine(label, id string, costUSD, capUSD float64, authPct *float64
 // "Busy" is the ADR 0024 R3 notion: the daemon's IsAnyBusy sums WorkingN only
 // (`server.go`), so a `blocked` session — notably `blocker = usage_limit`, i.e. a
 // session that still has work but is waiting out the 5h/weekly usage window — is
-// NOT busy and is reported here as `all idle` with exit 1.
+// NOT busy and is reported here as `all idle` with exit 3.
 //
-// Callers MUST therefore read exit 1 as "no session is running a turn right now",
+// Callers MUST therefore read exit 3 as "no session is running a turn right now",
 // NOT as "no work is pending". A caller that must not proceed until pending work
 // is genuinely done MUST additionally check for blocked sessions (e.g. the
 // `sessions: N working, N blocked, N idle` line from `pa-monitor status`). This is
@@ -128,9 +128,12 @@ func formatUsageLine(label, id string, costUSD, capUSD float64, authPct *float64
 // Exit codes:
 //
 //	0 = daemon up AND ≥1 agent busy (status == working)
-//	1 = daemon up AND no agents busy (blocked sessions count as not-busy)
-//	2 = daemon unreachable (without --consider-daemon-down-as-busy)
+//	3 = daemon up AND no agents busy (blocked sessions count as not-busy)
+//	6 = daemon unreachable (without --consider-daemon-down-as-busy)
 //	0 = daemon unreachable (with --consider-daemon-down-as-busy)
+//
+// Exit 1 is NOT part of this contract: it is the generic/unplanned error and
+// MUST NOT be branched on (see exitcodes.go).
 func runAgentsBusyCheck(args []string) {
 	considerDownBusy := false
 	for _, a := range args {
@@ -149,7 +152,7 @@ func runAgentsBusyCheck(args []string) {
 			os.Exit(0)
 		}
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
 
@@ -160,7 +163,7 @@ func runAgentsBusyCheck(args []string) {
 			os.Exit(0)
 		}
 		fmt.Fprintf(os.Stderr, "IsAnyBusy: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitDaemonUnavailable)
 	}
 
 	if resp.GetAnyBusy() {
@@ -168,5 +171,5 @@ func runAgentsBusyCheck(args []string) {
 		os.Exit(0)
 	}
 	fmt.Fprintln(os.Stderr, "all idle")
-	os.Exit(1)
+	os.Exit(exitNotBusy)
 }

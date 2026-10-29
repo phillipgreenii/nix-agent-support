@@ -43,7 +43,7 @@ func runDaemon(args []string) {
 	disablePoller := fs.Bool("no-poller", false, "Disable poller (state RPCs return empty)")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		os.Exit(exitUsage)
 	}
 
 	paths, err := daemon.ResolvePaths(daemon.PathOverrides{
@@ -58,7 +58,7 @@ func runDaemon(args []string) {
 	cfg, err := config.Load(config.DefaultPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: config: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitGeneric)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
