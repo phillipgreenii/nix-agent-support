@@ -336,3 +336,31 @@ func TestMixedKeyFormsAreOneIdentityForAugmentAndDedupe(t *testing.T) {
 		})
 	}
 }
+
+// A pr run carries the run's listing (Lookup), and a focus-item dedup HIT found
+// through it still repairs the store row: the case order in create() keeps the
+// Lookup source and the refresh independent. A view that already shows a linked
+// focus bead needs no refresh.
+func TestApplyFocusHitThroughTheRunListingStillRefreshesTheHit(t *testing.T) {
+	const key = "pr:acme/api#7:focus-item"
+	lk := NewLookup([]ListedItem{{ID: "f-1", Title: "focus: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": key}}}, 10)
+	d := newDouble(t)
+	res := Run(context.Background(), Input{
+		Type: "pr", ID: "acme/api#7", View: lookupView(), Lookup: lk, Env: testEnv(d, lookupCfg(10)),
+		Actions: []action.Action{createAction("focus.open", "focus-item", key, "")},
+	})
+	if len(res.Events) != 1 || res.Events[0].Outcome != OutcomeDeduped || res.Events[0].WorkItemID != "f-1" {
+		t.Fatalf("events = %+v", res.Events)
+	}
+	var refreshed, listed bool
+	for _, l := range d.lines() {
+		refreshed = refreshed || (strings.Contains(l, "issue refresh") && strings.Contains(l, "f-1"))
+		listed = listed || strings.Contains(l, "issue list")
+	}
+	if !refreshed {
+		t.Errorf("a focus hit through the run listing did not refresh f-1: %q", d.lines())
+	}
+	if listed {
+		t.Errorf("a per-create list call was made: %q", d.lines())
+	}
+}
