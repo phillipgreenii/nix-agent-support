@@ -1,9 +1,9 @@
 // Package config loads and validates the exporter's configuration file.
 //
 // Validation is schema-only on purpose: it never touches the filesystem beyond
-// reading the file itself (no stat of any beads directory, bd binary or Claude
-// directory) and never spawns a process, because the check runs inside the nix
-// build sandbox where none of those paths exist.
+// reading the file itself (no stat of any beads directory or the bd binary) and
+// never spawns a process, because the check runs inside the nix build sandbox
+// where none of those paths exist.
 package config
 
 import (
@@ -33,8 +33,6 @@ type File struct {
 	BDPath                       string            `json:"bdPath"`
 	ChildPath                    string            `json:"childPath"`
 	BeadsDirs                    map[string]string `json:"beadsDirs"`
-	ClaudeDir                    string            `json:"claudeDir"`
-	OperatorNames                []string          `json:"operatorNames"`
 	Port                         int               `json:"port"`
 	PollIntervalSeconds          int               `json:"pollIntervalSeconds"`
 	StrandedIntervalSeconds      int               `json:"strandedIntervalSeconds"`
@@ -64,9 +62,9 @@ func (c *Config) StrandedInterval() time.Duration {
 	return time.Duration(c.StrandedIntervalSeconds) * time.Second
 }
 
-// StaleClaimWindow is how recent a transcript write must be for a claim to have
-// a live owner.
-func (c *Config) StaleClaimWindow() time.Duration {
+// StaleClaimAge is how long a claim may go without an update (bd's updated_at)
+// before the stranded pass counts it as stranded.
+func (c *Config) StaleClaimAge() time.Duration {
 	return time.Duration(c.StaleClaimHours) * time.Hour
 }
 
@@ -125,7 +123,6 @@ func Validate(f File) (*Config, error) {
 	}
 
 	requireAbs("bdPath", f.BDPath)
-	requireAbs("claudeDir", f.ClaudeDir)
 
 	if f.ChildPath == "" {
 		add("childPath is required")
@@ -149,20 +146,6 @@ func Validate(f File) (*Config, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-
-	if f.OperatorNames == nil {
-		add("operatorNames is required (it may be an empty list)")
-	}
-	seenOp := map[string]bool{}
-	for _, n := range f.OperatorNames {
-		if strings.TrimSpace(n) == "" {
-			add("operatorNames entries must be non-empty")
-		}
-		if seenOp[n] {
-			add("operatorNames entry %q is duplicated", n)
-		}
-		seenOp[n] = true
-	}
 
 	if f.Port < 1 || f.Port > 65535 {
 		add("port must be between 1 and 65535, got %d", f.Port)

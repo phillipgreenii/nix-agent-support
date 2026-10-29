@@ -2,8 +2,9 @@
 # test-beads-exporter-alert-rules, which generates rules.yml next to this file (see
 # beads-collect-failing.test.yaml for how the Grafana rule is wrapped).
 #
-# Time model: promtool's clock starts at 0 and every series has a 1m interval. A claim
-# with no live owner is reported from the first sample (t=0). The expression is true
+# Time model: promtool's clock starts at 0 and every series has a 1m interval. A stranded
+# claim (not updated within staleClaimHours) is reported from the first sample (t=0); the
+# age itself is judged by the exporter, not by this rule. The expression is true
 # from then on and `for: 30m` has to elapse before the alert fires: not at 29m
 # (t=1740s), yes at 31m (t=1860s).
 #

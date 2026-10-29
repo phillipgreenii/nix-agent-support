@@ -23,21 +23,13 @@
 # the real exporter's childPath carries (git deliberately absent), so a bd that
 # is a shell wrapper can be pointed at with --bd.
 let
-  # Pattern B: the module's local `replace ../claude-transcript` needs both
-  # package dirs in one rooted store tree (see default.nix).
-  rooted = lib.fileset.toSource {
-    root = ./..;
-    fileset = lib.fileset.unions [
-      ./.
-      ../claude-transcript
-    ];
-  };
+  # Pattern A: the module has no local `replace`, so its own directory is the
+  # whole source (see default.nix).
   testBinary = buildGoApplication {
     pname = "beads-exporter-contract-test";
     version = "0.0.0";
-    src = rooted;
-    modRoot = "beads-exporter";
-    pwd = rooted + "/beads-exporter";
+    src = lib.cleanSource ./.;
+    pwd = ./.;
     modules = ./gomod2nix.toml;
     inherit go;
     disableGoCache = true;

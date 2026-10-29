@@ -9,20 +9,19 @@ import "errors"
 // Reason is a member of the closed failure-reason enumeration.
 type Reason string
 
-// The full reason enumeration. TranscriptError is first emitted by the
-// stranded-claim pass, which is not part of the main and throughput passes.
+// The full reason enumeration. Every pass (main, throughput and stranded) is
+// bd-driven, so every pass can produce every reason.
 const (
 	StaleIssuesJSONL Reason = "stale_issues_jsonl"
 	Timeout          Reason = "timeout"
 	BDError          Reason = "bd_error"
 	SchemaSkew       Reason = "schema_skew"
 	ParseError       Reason = "parse_error"
-	TranscriptError  Reason = "transcript_error"
 )
 
 // All returns every reason in declaration order.
 func All() []Reason {
-	return []Reason{StaleIssuesJSONL, Timeout, BDError, SchemaSkew, ParseError, TranscriptError}
+	return []Reason{StaleIssuesJSONL, Timeout, BDError, SchemaSkew, ParseError}
 }
 
 // Valid reports whether r is a member of the enumeration.

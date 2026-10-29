@@ -38,8 +38,6 @@ let
       inherit childPath;
       beadsDirs = lib.mapAttrs (_: db: db.beadsDir) cfg.dbs;
       inherit (cfg)
-        claudeDir
-        operatorNames
         port
         pollIntervalSeconds
         strandedIntervalSeconds
@@ -98,21 +96,6 @@ in
       '';
     };
 
-    claudeDir = lib.mkOption {
-      type = lib.types.strMatching "^/.*";
-      description = ''
-        The Claude state directory (absolute). There is no default: it is
-        required whenever the module is active, and the machine layer sets it
-        to the operator's own Claude directory.
-      '';
-    };
-
-    operatorNames = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      description = "Assignee values that mean a bead was claimed in the operator's own name.";
-    };
-
     port = lib.mkOption {
       type = lib.types.port;
       default = 9146;
@@ -137,8 +120,13 @@ in
 
     staleClaimHours = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 6;
-      description = "Age after which a claim with no live owner counts as stale.";
+      default = 12;
+      description = ''
+        Age after which a claim counts as stranded: a claimed bead (open,
+        in_progress or hooked, with an assignee) whose bd `updated_at` is
+        older than this many hours, whoever the assignee is. A `bd comment`
+        does not move `updated_at`, so comments do not count as updates.
+      '';
     };
 
     commandTimeoutSeconds = lib.mkOption {

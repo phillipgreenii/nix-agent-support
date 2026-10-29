@@ -25,8 +25,6 @@ func writeConfig(t *testing.T, mutate func(m map[string]any)) string {
 		"bdPath":                       "/nonexistent/bd",
 		"childPath":                    "/nonexistent/bash/bin:/nonexistent/coreutils/bin",
 		"beadsDirs":                    map[string]string{"alpha": "/nonexistent/alpha/.beads"},
-		"claudeDir":                    "/nonexistent/claude",
-		"operatorNames":                []string{"operator"},
 		"port":                         9100,
 		"pollIntervalSeconds":          60,
 		"strandedIntervalSeconds":      300,

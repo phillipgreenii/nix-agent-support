@@ -22,7 +22,7 @@ const (
 	OtherLabelValue    = "__other__"
 	stateHelpList      = "in_progress, deferred, blocked, ready, tracking or other"
 	passHelpList       = "main, throughput or stranded"
-	reasonHelpList     = "stale_issues_jsonl, timeout, bd_error, schema_skew, parse_error or transcript_error"
+	reasonHelpList     = "stale_issues_jsonl, timeout, bd_error, schema_skew or parse_error"
 )
 
 // Families returns the families of the main, throughput and stranded passes plus the
@@ -82,12 +82,12 @@ func Families() []Family {
 		},
 		{
 			FamStrandedClaims, Gauge,
-			"Claimed beads whose claim has no live owner, by stored status (open, in_progress or hooked): no transcript written within the stale-claim window by, or naming as a claim value, the claimant. Counted by the stranded pass; zero-filled over every status.",
+			"Stranded claims by stored status (open, in_progress or hooked): claimed beads (with an assignee) whose updated_at is older than the stale-claim age (staleClaimHours), whoever the assignee is. A bd comment does not move updated_at. Counted by the stranded pass; zero-filled over every status.",
 			[]string{"db", "status"},
 		},
 		{
 			FamOldestStranded, Gauge,
-			"Claim time (started_at, else updated_at) of the oldest claim with no live owner, in Unix seconds. Omitted when there are none.",
+			"Last update (updated_at) of the oldest stranded claim, in Unix seconds. Omitted when there are none.",
 			[]string{"db"},
 		},
 		{

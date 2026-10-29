@@ -1,6 +1,5 @@
 schema = 3
 cachePackages = [
-  'github.com/phillipgreenii/claude-transcript',
   'github.com/phillipgreenii/x/pprofserver'
 ]
 

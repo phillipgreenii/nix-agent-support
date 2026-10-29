@@ -102,16 +102,16 @@ check_dashboard_link "$uid"
 uid=beads-claims-no-live-owner
 assert "$uid: fixed uid, readable title, condition C" \
   '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
-   | .title == "Bead claims with no live owner" and .condition == "C"'
+   | .title == "Bead claims not updated for the stale-claim age" and .condition == "C"'
 assert "$uid: for 30m, noDataState OK, execErrState Error, severity warning" \
   '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
    | .for == "30m" and .noDataState == "OK" and .execErrState == "Error"
      and .labels == { severity: "warning" }'
 assert "$uid: summary and description text" \
   '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner") | .annotations
-   | .summary == "{{ $values.A }} bead claim(s) in {{ $labels.db }} with no live session for 6h+"
+   | .summary == "{{ $values.A }} bead claim(s) in {{ $labels.db }} not updated for staleClaimHours (12h by default)"
      and .description == $desc' \
-  --arg desc 'Which beads: Beads → Claims and age → Which beads. An escalation consumer may already have filed a bead — check bd list --label escalated before acting. To release one: bd update <id> --status open --assignee "" --append-notes "dormant since <t>, may resume". Nothing auto-releases. Clears when the claim is released or its owner resumes.'
+  --arg desc 'Claimed beads (open, in progress or hooked, with an assignee) whose updated_at is older than staleClaimHours; a bd comment does not count as an update. Which beads: Beads → Claims and age → Which beads. An escalation consumer may already have filed a bead — check bd list --label escalated before acting. To release one: bd update <id> --status open --assignee "" --append-notes "dormant since <t>, may resume". Nothing auto-releases. Clears when the claim is released or the bead is updated.'
 assert "$uid: refId A is the plain PromQL expression" \
   '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
    | (.data[] | select(.refId == "A") | .model.expr) == "sum by (db) (beads_stranded_claims)"'

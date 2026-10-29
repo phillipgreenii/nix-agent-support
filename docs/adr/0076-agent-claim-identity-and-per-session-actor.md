@@ -66,6 +66,9 @@ shows up in practice.
 
 ## Addendum 2026-10-08: stranded-claim liveness rules (bead `pg2-oob3u`)
 
+**Superseded** by the addendum of 2026-10-29 below: the transcript-based liveness rules in this
+section no longer apply. It is kept as the record of what was built first.
+
 Decision 4 left stranded-claim detection as follow-up work. It is now the `stranded` pass of
 `packages/beads-exporter`. This addendum records the liveness rules; the exporter's README holds
 the mechanics.
@@ -98,3 +101,22 @@ alert/report only.
 **Rejected.** A process or session-registry check (an actor id is not a session id), and a
 bare-string match of the assignee against transcript text (any mention, including the alert's own
 release command, would make a claim look live).
+
+## Addendum 2026-10-29: stranded claims judged by bd's own fields (bead `pg2-rpo30t`)
+
+Operator rulings (Phillip, 2026-10-28), verbatim and in order:
+
+1. "i think we need to focus beads-exporeter to only fields it owns. we will probably recreate the
+   "active beads" concept in pg-desk which will have a better view of everything. that isn't
+   happening now, we will just drop the cross reference fro bead-exporter to simplify things."
+2. "stranded could be kept if claimed for longer than X hours with no updates. default to 12. not
+   as good, but good enough."
+
+**Stranded.** A claim (as defined above) is stranded exactly when its bd `updated_at` is older than
+`staleClaimHours` (default 12). The rule is the same for every assignee, so the operator-name
+special case and its `operatorNames` setting are gone, and so are the Claude transcript scan and
+the `claudeDir` setting. A `bd comment` does not move `updated_at`, so comments do not count as
+updates; the exporter's bd contract suite pins that.
+
+**Unchanged.** Report only: the same two metrics, the same log event and the same Grafana alert
+uid, with its title and description restating the age rule.

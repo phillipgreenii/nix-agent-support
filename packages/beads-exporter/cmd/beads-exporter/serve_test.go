@@ -22,13 +22,13 @@ import (
 
 // fakeBD writes a bd stand-in that answers every subcommand the exporter uses
 // with a canned envelope, using only shell builtins so the child PATH needs
-// nothing. The one claimed bead is assigned to an actor no transcript names.
+// nothing. The one claimed bead was last updated long before the stale-claim age.
 func fakeBD(t *testing.T) string {
 	t.Helper()
 	script := `#!/bin/sh
 case "$1" in
 list)
-  printf '%s\n' '{"data":[{"id":"alpha-1","status":"in_progress","issue_type":"task","priority":2,"assignee":"worker-gamma","created_at":"2026-01-02T03:04:05Z","started_at":"2026-01-02T03:04:05Z"}],"schema_version":1}' ;;
+  printf '%s\n' '{"data":[{"id":"alpha-1","status":"in_progress","issue_type":"task","priority":2,"assignee":"worker-gamma","created_at":"2026-01-02T03:04:05Z","started_at":"2026-01-02T03:04:05Z","updated_at":"2026-01-02T03:04:05Z"}],"schema_version":1}' ;;
 ready|blocked)
   printf '%s\n' '{"data":[],"schema_version":1}' ;;
 count)
@@ -76,20 +76,14 @@ func freePort(t *testing.T) int {
 
 // TestServeRunsTheStrandedPassOnItsInterval proves the stranded pass is wired
 // into the running exporter: it is scheduled, it reaches /metrics and it logs
-// one line per claim with no live owner.
+// one line per stranded claim.
 func TestServeRunsTheStrandedPassOnItsInterval(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	claude := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(claude, "projects", "-synthetic-slug"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	port := freePort(t)
 	cfgPath := writeConfig(t, func(m map[string]any) {
 		m["bdPath"] = fakeBD(t)
 		m["childPath"] = "/nonexistent/bin"
 		m["beadsDirs"] = map[string]string{"alpha": t.TempDir()}
-		m["claudeDir"] = claude
-		m["operatorNames"] = []string{}
 		m["port"] = port
 		m["pollIntervalSeconds"] = 3600
 		m["strandedIntervalSeconds"] = 3600

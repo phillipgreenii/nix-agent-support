@@ -3,7 +3,6 @@ package collect
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/phillipgreenii/beads-exporter/internal/bd"
@@ -16,63 +15,37 @@ import (
 const PassStranded = "stranded"
 
 // StrandedEvent is the value of the event attribute on the one log line the
-// pass writes per claim with no live owner.
+// pass writes per stranded claim.
 const StrandedEvent = "stranded_claim"
 
 // StrandedConfig configures the stranded pass.
 type StrandedConfig struct {
-	// ClaudeDir is the Claude data directory holding the session transcripts.
-	ClaudeDir string
-	// Window is the staleClaimHours window.
-	Window time.Duration
-	// OperatorNames are assignees judged by claim age rather than transcript.
-	OperatorNames []string
-	// Open overrides the transcript opener; nil means os.Open (tests only).
-	Open stranded.Opener
+	// MaxAge is the staleClaimHours age: a claim whose updated_at is older is
+	// stranded.
+	MaxAge time.Duration
 }
 
 // StrandedPass decides, for every claimed not-closed bead, whether its claim
-// still has a live owner. It spawns its own guarded bd list per database (so
-// the stale-JSONL guard and the timeout apply exactly as for the main pass and
-// a failing main pass never lets it classify a stale list) and keeps one
-// incremental transcript cache per database. It reports counts and timestamps
-// as metrics and one log line per claim with no live owner; it never releases
-// or changes a claim.
+// is stranded, judged by the bead's own updated_at. It spawns its own guarded
+// bd list per database (so the stale-JSONL guard and the timeout apply exactly
+// as for the main pass and a failing main pass never lets it classify a stale
+// list). It reports counts and timestamps as metrics and one log line per
+// stranded claim; it never releases or changes a claim.
 type StrandedPass struct {
 	cfg StrandedConfig
 	log *slog.Logger
-
-	mu          sync.Mutex
-	classifiers map[string]*stranded.Classifier
 }
 
 // NewStrandedPass builds the stranded pass.
 func NewStrandedPass(cfg StrandedConfig, log *slog.Logger) *StrandedPass {
-	return &StrandedPass{cfg: cfg, log: log, classifiers: map[string]*stranded.Classifier{}}
+	return &StrandedPass{cfg: cfg, log: log}
 }
 
 // Name implements Pass.
 func (*StrandedPass) Name() string { return PassStranded }
 
-// Reasons implements Pass: the bd-driven reasons plus transcript_error.
-func (*StrandedPass) Reasons() []failure.Reason {
-	return append(baseReasons(), failure.TranscriptError)
-}
-
-func (p *StrandedPass) classifier(db string) *stranded.Classifier {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	c := p.classifiers[db]
-	if c == nil {
-		c = stranded.NewClassifier(stranded.Config{
-			ClaudeDir:     p.cfg.ClaudeDir,
-			Window:        p.cfg.Window,
-			OperatorNames: p.cfg.OperatorNames,
-		}, p.cfg.Open)
-		p.classifiers[db] = c
-	}
-	return c
-}
+// Reasons implements Pass: the bd-driven reasons, nothing else.
+func (*StrandedPass) Reasons() []failure.Reason { return baseReasons() }
 
 // Collect implements Pass.
 func (p *StrandedPass) Collect(ctx context.Context, env PassEnv) (metrics.Emitter, error) {
@@ -80,10 +53,7 @@ func (p *StrandedPass) Collect(ctx context.Context, env PassEnv) (metrics.Emitte
 	if err != nil {
 		return nil, err
 	}
-	res, err := p.classifier(env.DB.Name).Classify(ctx, beads, env.Now)
-	if err != nil {
-		return nil, err
-	}
+	res := stranded.Classify(beads, env.Now, p.cfg.MaxAge)
 	for _, c := range res.Claims {
 		attrs := []any{
 			"event", StrandedEvent,
@@ -95,7 +65,10 @@ func (p *StrandedPass) Collect(ctx context.Context, env PassEnv) (metrics.Emitte
 		if !c.ClaimTime.IsZero() {
 			attrs = append(attrs, "claim_time", c.ClaimTime.UTC().Format(time.RFC3339))
 		}
-		p.log.Info("claim has no live owner", attrs...)
+		if !c.LastUpdate.IsZero() {
+			attrs = append(attrs, "last_update", c.LastUpdate.UTC().Format(time.RFC3339))
+		}
+		p.log.Info("claim not updated within the stale-claim age", attrs...)
 	}
 	return res, nil
 }

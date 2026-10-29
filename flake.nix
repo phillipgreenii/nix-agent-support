@@ -407,10 +407,10 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
-          # beads-exporter: Pattern B (ADR 0008), a module that execs a pinned,
-          # read-only bd (by the absolute path its config file names), discovers
-          # session transcripts through the local `replace ../claude-transcript`
-          # and serves hand-rolled Prometheus text. beads-exporter-contract is the
+          # beads-exporter: Pattern A (ADR 0008), a self-contained module (no
+          # local `replace`) that execs a pinned, read-only bd (by the absolute
+          # path its config file names) and serves hand-rolled Prometheus text.
+          # beads-exporter-contract is the
           # bd contract suite compiled as a runnable (`--bd <path>`), because the
           # machine-wiring verification runs it against the machine's own bd package.
           beads-exporter = final.callPackage ./packages/beads-exporter {
@@ -1410,8 +1410,9 @@
         # 2026-10-01: no full flake check at land), while this runs at commit
         # and under `pg-hooks run pre-land` over the branch diff, the only
         # automatic gates in this CI-less repo. It needs no nix build: it only
-        # runs `go build ./...` (about 50 s for all seven dependents of
-        # pg-connector/claude-transcript, from a warm cache) and only when a
+        # runs `go build ./...` (about 50 s for the dependents of
+        # pg-connector/claude-transcript, measured when there were seven, from
+        # a warm cache) and only when a
         # module's go.mod or go.sum is in the diff (`pass_filenames` hands the
         # script the changed paths; any other diff starts no go process).
         # The logic lives in scripts/check-go-local-replace-build.sh and its
@@ -2010,6 +2011,8 @@
                 "pg-keep-awake"
                 "pg-probe"
                 "pg-wrap"
+                # pg2-rpo30t: Pattern A since its claude-transcript replace went.
+                "beads-exporter"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -2019,6 +2022,8 @@
                 "claude-extended-tool-approver"
                 # pg2-04jgw: internal/integration is `integration`-tagged.
                 "pg-rescue"
+                # internal/contract is `contract`-tagged.
+                "beads-exporter"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -2061,23 +2066,12 @@
                     ];
                   };
                 })
-                (goLint {
-                  module = "beads-exporter";
-                  modRoot = "beads-exporter";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/beads-exporter
-                      ./packages/claude-transcript
-                    ];
-                  };
-                })
               ];
 
               # `-tagged` companions for every Pattern-B module — every one of
               # them carries build-tagged test files today (ccpool:
               # contract/integration; pa-monitor: hostile/integration;
-              # pg-router: integration/smoke; beads-exporter: contract). Same
+              # pg-router: integration/smoke). Same
               # src/modRoot as patternBGoLints
               # above so the tagged check lints the identical module tree.
               patternBTaggedGoLints = [
@@ -2111,17 +2105,6 @@
                     fileset = lib.fileset.unions [
                       (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
-                      ./packages/claude-transcript
-                    ];
-                  };
-                })
-                (goLintTagged {
-                  module = "beads-exporter";
-                  modRoot = "beads-exporter";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/beads-exporter
                       ./packages/claude-transcript
                     ];
                   };
@@ -6549,9 +6532,9 @@
               # label cap, stale guard, collector, stranded-claim classifier, renderer
               # goldens, scheduler) with -race. The queue tests read the REAL
               # claude-marketplace/pb/queues.json, so the source is the repo root
-              # narrowed to this package, its local `replace` sibling claude-transcript
-              # and that one file (Pattern-B shaped: modRoot below the fileset root).
-              # The stranded suite builds synthetic transcript trees in temp dirs. No testDeps:
+              # narrowed to this package and that one file (modRoot below the
+              # fileset root). The stranded suite judges claims with an injected
+              # clock. No testDeps:
               # the suite execs only `sh`/`env`/`sleep` from the build environment and
               # never a real bd; the build-tagged contract suite is NOT part of it.
               beads-exporter-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
@@ -6560,7 +6543,6 @@
                   root = ./.;
                   fileset = lib.fileset.unions [
                     ./packages/beads-exporter
-                    ./packages/claude-transcript
                     ./claude-marketplace/pb/queues.json
                   ];
                 };
@@ -7104,8 +7086,6 @@
 
                   machineValues = {
                     bdPackage = fakeBd;
-                    claudeDir = "/srv/claude";
-                    operatorNames = [ "operator" ];
                     dbs = {
                       alpha.beadsDir = "/srv/alpha/.beads";
                       beta.beadsDir = "/srv/beta/.beads";
@@ -7113,9 +7093,9 @@
                   };
 
                   enabled = evalModule true ({ enable = true; } // machineValues);
-                  # Gate: each of the three conditions off on its own. The machine values
-                  # that have no default (bdPackage, claudeDir) are deliberately left out
-                  # of these, because an inert module must not read them.
+                  # Gate: each of the three conditions off on its own. The machine value
+                  # that has no default (bdPackage) is deliberately left out of these,
+                  # because an inert module must not read it.
                   obsOff = evalModule false {
                     enable = true;
                     inherit (machineValues) dbs;
@@ -7216,7 +7196,9 @@
                 assert defaulted.port == 9146;
                 assert defaulted.pollIntervalSeconds == 120;
                 assert defaulted.strandedIntervalSeconds == 600;
-                assert defaulted.staleClaimHours == 6;
+                assert defaulted.staleClaimHours == 12;
+                # The transcript-based options are gone (pg2-rpo30t).
+                assert !(bx ? claudeDir) && !(bx ? operatorNames);
                 assert defaulted.commandTimeoutSeconds == 90;
                 assert defaulted.downAfterConsecutiveFailures == 2;
                 assert defaulted.labelCap == 500;
@@ -7243,9 +7225,10 @@
                     jq -e '.childPath | split(":") | length == 2 and all(test("/bin$"))' "$configFile" >/dev/null \
                       || fail "childPath must hold exactly the bash and coreutils bin directories"
                     jq -e '.beadsDirs == { alpha: "/srv/alpha/.beads", beta: "/srv/beta/.beads" }
-                           and .claudeDir == "/srv/claude" and .operatorNames == ["operator"]
                            and .port == 9146
-                           and .downAfterConsecutiveFailures == 2' "$configFile" >/dev/null \
+                           and .staleClaimHours == 12
+                           and .downAfterConsecutiveFailures == 2
+                           and (has("claudeDir") | not) and (has("operatorNames") | not)' "$configFile" >/dev/null \
                       || fail "rendered machine values are wrong"
 
                     # The exporter accepts the rendered file and a fixture of the same shape.
@@ -7255,8 +7238,6 @@
                       "bdPath": "/opt/example/bd/bin/bd",
                       "childPath": "/opt/example/bash/bin:/opt/example/coreutils/bin",
                       "beadsDirs": { "alpha": "/srv/alpha/.beads", "beta": "/srv/beta/.beads" },
-                      "claudeDir": "/srv/claude",
-                      "operatorNames": ["operator"],
                       "port": 9100,
                       "pollIntervalSeconds": 60,
                       "strandedIntervalSeconds": 300,
@@ -7274,6 +7255,15 @@
                     status=0
                     beads-exporter -check-config bad.json || status=$?
                     [ "$status" = 3 ] || fail "unknown field: want exit 3, got $status"
+
+                    # The retired transcript keys are unknown fields now: a stale file that
+                    # still carries one is rejected, not half-honoured.
+                    for retired in '{ claudeDir: "/srv/claude" }' '{ operatorNames: ["operator"] }'; do
+                      jq ". + $retired" fixture.json > retired.json
+                      status=0
+                      beads-exporter -check-config retired.json || status=$?
+                      [ "$status" = 3 ] || fail "retired key $retired: want exit 3, got $status"
+                    done
 
                     touch "$out"
                   '';

@@ -3,8 +3,8 @@
 A Prometheus exporter for the content of bead trackers: how many beads are in each state, how
 many each work queue offers, how old the oldest one is, and how much was created and closed in
 the last day. It reads each configured database through a pinned, read-only `bd` and serves the
-result as hand-rolled Prometheus text. Beyond the standard library and the sibling `claude-transcript`
-module, its only dependency is the shared profiling package `github.com/phillipgreenii/x/pprofserver`.
+result as hand-rolled Prometheus text. Beyond the standard library, its only dependency is the shared
+profiling package `github.com/phillipgreenii/x/pprofserver`.
 
 Design rationale and rejected alternatives: `docs/adr/0078-beads-content-exporter-ownership.md`
 and `docs/adr/0079-queue-definitions-mirror-contract.md`.
@@ -79,9 +79,8 @@ stdout (`time` in UTC RFC 3339, lowercase `level`, `msg`, `service`).
 
 Exit codes: `0` success, `1` unexpected error, `2` usage, `3` configuration invalid.
 
-`-check-config` validates the schema only. It never stats a beads directory, the bd binary or the
-Claude directory and never spawns a process, because it runs in the nix build sandbox where none
-of those exist.
+`-check-config` validates the schema only. It never stats a beads directory or the bd binary and
+never spawns a process, because it runs in the nix build sandbox where neither exists.
 
 ## Configuration file
 
@@ -93,12 +92,10 @@ the module that renders it and the machine wiring that validates the rendered fi
 | `bdPath`                       | absolute path          | The bd binary. Always run by this path, never by `PATH` lookup.                                                                                            |
 | `childPath`                    | colon-separated paths  | The `PATH` of every bd child: the store paths of bash and coreutils. Every entry MUST be absolute. `git` is deliberately not on it.                        |
 | `beadsDirs`                    | object: name -> path   | One entry per database. The key is the database name (the `db` label value); the value is the absolute `.beads` directory, passed to bd as `BEADS_DIR`.    |
-| `claudeDir`                    | absolute path          | The Claude state directory. Accepted and validated here; used only by the stranded-claim pass.                                                             |
-| `operatorNames`                | array of strings       | Actor names that identify the operator. May be empty. Used only by the stranded-claim pass.                                                                |
 | `port`                         | integer, 1 to 65535    | The listen port on the loopback interface.                                                                                                                 |
 | `pollIntervalSeconds`          | positive integer       | Period of the main pass.                                                                                                                                   |
 | `strandedIntervalSeconds`      | positive integer       | Period of the throughput pass (and of the stranded-claim pass).                                                                                            |
-| `staleClaimHours`              | positive integer       | Accepted and validated here; used only by the stranded-claim pass.                                                                                         |
+| `staleClaimHours`              | positive integer       | How long a claim may go without an update (bd's `updated_at`) before the stranded-claim pass counts it as stranded. The module default is 12.              |
 | `commandTimeoutSeconds`        | positive integer       | Bound on each bd try. A timed-out call is tried once more, so one failed call takes up to twice this.                                                      |
 | `downAfterConsecutiveFailures` | positive integer       | How many consecutive failed main passes (per database) it takes before `beads_exporter_up` goes to 0. 1 means any failed pass; the module default is 2.    |
 | `labelCap`                     | positive integer       | How many bead labels get their own series (see `beads_not_closed_by_bead_label`).                                                                          |
@@ -116,8 +113,6 @@ An example (synthetic values):
     "alpha": "/srv/alpha/.beads",
     "beta": "/srv/beta/.beads"
   },
-  "claudeDir": "/srv/claude",
-  "operatorNames": ["operator"],
   "port": 9100,
   "pollIntervalSeconds": 60,
   "strandedIntervalSeconds": 300,
@@ -167,8 +162,8 @@ dropped, not served stale. There is no `*_build_info` series.
 | `beads_oldest_timestamp_seconds`                     | gauge   | `db`, `state`          | main       | Creation time of the oldest not-closed bead per state (start time for `in_progress`). Omitted when the state is empty.                                  |
 | `beads_created_last_24h`                             | gauge   | `db`                   | throughput | Beads created in the last 24 hours.                                                                                                                     |
 | `beads_closed_last_24h`                              | gauge   | `db`                   | throughput | Beads closed in the last 24 hours.                                                                                                                      |
-| `beads_stranded_claims`                              | gauge   | `db`, `status`         | stranded   | Claims with no live owner by stored status (`open`, `in_progress`, `hooked`). Zero-filled every successful pass.                                        |
-| `beads_oldest_stranded_claim_timestamp_seconds`      | gauge   | `db`                   | stranded   | Claim time (`started_at`, else `updated_at`) of the oldest claim with no live owner. Omitted when there are none.                                       |
+| `beads_stranded_claims`                              | gauge   | `db`, `status`         | stranded   | Stranded claims (not updated within `staleClaimHours`) by stored status (`open`, `in_progress`, `hooked`). Zero-filled every successful pass.           |
+| `beads_oldest_stranded_claim_timestamp_seconds`      | gauge   | `db`                   | stranded   | Last update (`updated_at`) of the oldest stranded claim. Omitted when there are none.                                                                   |
 | `beads_exporter_up`                                  | gauge   | `db`                   | main       | 1 while the main cycle is healthy, 0 once it has failed `downAfterConsecutiveFailures` consecutive times. Present once a main cycle has been attempted. |
 | `beads_exporter_pass_last_success_timestamp_seconds` | gauge   | `db`, `pass`           | all        | Time of the last success of each pass. Omitted until the pass has succeeded once; frozen while it fails.                                                |
 | `beads_exporter_collect_errors_total`                | counter | `db`, `pass`, `reason` | all        | Failures by pass and closed-enum reason. Never carries error text.                                                                                      |
@@ -176,9 +171,9 @@ dropped, not served stale. There is no `*_build_info` series.
 
 ### Failure reasons
 
-`stale_issues_jsonl`, `timeout`, `bd_error`, `schema_skew`, `parse_error`, `transcript_error`
-(the last is only produced by the stranded-claim pass: a transcript tree that cannot be listed or
-a transcript that cannot be read). The counter is zero-filled over the reasons a pass can produce.
+`stale_issues_jsonl`, `timeout`, `bd_error`, `schema_skew`, `parse_error`. Every pass is bd-driven,
+so every pass can produce every reason. The counter is zero-filled over the reasons a pass can
+produce.
 
 ### States
 
@@ -250,42 +245,33 @@ result contains a status not in the cached set.
 
 ## Stranded claims
 
-The `stranded` pass decides, for every not-closed bead that has an assignee and a stored status of
-`open`, `in_progress` or `hooked`, whether the claim still has a live owner. It reports; it never
-releases or changes a claim. A claim is **live** when any of these holds:
+The `stranded` pass judges every claim from the bead's own fields, nothing else. A **claim** is a
+not-closed bead that has an assignee and a stored status of `open`, `in_progress` or `hooked`. A
+claim is **stranded** exactly when its last update, bd's `updated_at`, is older than
+`staleClaimHours` (12 in the module default). The rule is the same for every assignee: an
+operator's name, an agent's actor id and anything else are judged alike. A claim updated exactly
+`staleClaimHours` ago is not yet stranded; a claim bd reports without `updated_at` is stranded,
+because nothing shows it was touched recently. The pass reports; it never releases or changes a
+claim.
 
-1. **Transcript by id.** A lower-case UUID inside the assignee (`<uuid>-drain`, `drain-<uuid>`,
-   a plain `<uuid>`) names a transcript `<claudeDir>/projects/<slug>/<uuid>.jsonl` written within
-   `staleClaimHours`.
-2. **Claim context.** A transcript (a session's own, or a subagent's under
-   `<session>/subagents/`; never a `*.status.jsonl` statusline sidecar) written within
-   `staleClaimHours` uses the assignee as a claim value: the argument of `--actor`, the value after
-   `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or JSON-escaped form, on a line the
-   session itself wrote (a command, a tool input, a prompt). A bare mention does not count, and
-   neither does anything a tool printed: a transcript line that is a tool result (it carries
-   `"type":"tool_result"` or a `"toolUseResult":` key) is skipped whole, so a session that ran
-   `bd list --json` does not revive every claim in the output. A value is recognised only when it
-   is made of letters, digits and `._-:@/+`.
-3. **Operator names.** An assignee listed in `operatorNames` skips rule 2, because the name appears
-   in nearly every transcript. Such a claim is live only while its claim time (`started_at`, else
-   `updated_at`) is within `staleClaimHours`.
+What counts as an update is whatever bd itself records in `updated_at`: claiming, a status or
+field change, `bd update --append-notes`, and so on. **A comment is not an update:** `bd comment`
+leaves `updated_at` where it was (checked against bd 1.3.1 in a throwaway embedded database), so a
+claimant that only comments still looks idle. The exporter does not read comment times instead:
+`bd list` carries a `comment_count` but no comment timestamps, so reading them would cost one more
+bd spawn per claim. The bd contract suite pins this (`TestCommentDoesNotBumpUpdatedAt`, which also
+checks that `--append-notes` does move `updated_at`); a bd that starts bumping `updated_at` on a
+comment fails it, and this paragraph then needs updating.
 
-Anything else has **no live owner**. Activity is file modification time, so an idle session whose
-transcript was written within the window is live. A process check by session id is not used: an
-actor id is not a session id.
+The rule is deliberately simple (operator ruling, 2026-10-28: "not as good, but good enough"). It
+does not look at Claude session activity: an active session that has not touched its bead for
+`staleClaimHours` counts as stranded, and a session that died a minute after an update is not
+flagged until the age passes.
 
-Transcript reading is incremental. Discovery is `claude-transcript`'s `DiscoverTranscripts`; files
-whose modification time is outside the window are never opened. One pass over each in-window file
-extracts every claim value at once, and an append-only cache keyed by (device, inode) reads only
-the bytes appended since the last pass, so the cost of a pass tracks the new transcript output, not
-the size of the tree. Only complete lines are consumed: a line still being written is read again,
-whole, on the next pass, and within a pass the last `maxNeedleLen-1` bytes are carried between
-chunks so a value cut by a chunk boundary is still seen. A transcript that cannot be listed or read fails the
-pass with `transcript_error` rather than guessing.
-
-Each pass writes one JSON log line per claim with no live owner, with `event` set to
-`stranded_claim` and the bead id, database, assignee, stored status and claim time (the bead's own
-fields; never transcript text). The "Which beads" panel reads those lines from Loki.
+Each pass writes one JSON log line per stranded claim, with `event` set to `stranded_claim` and the
+bead id, database, assignee, stored status, `claim_time` (`started_at`; omitted when bd has none)
+and `last_update` (`updated_at`; omitted when bd has none). The "Which beads" panel reads those
+lines from Loki.
 
 ## `metrics.txt`
 
@@ -350,18 +336,16 @@ exporter as a launchd user agent and registers its scrape target, log source, da
 rule file with the observability stack. It is active only when `enable` is set, the observability
 stack is enabled and `dbs` is not empty; otherwise it defines nothing.
 
-| Option                                                                                                                                   | Default                             |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `enable`                                                                                                                                 | `false`                             |
-| `package`                                                                                                                                | `pkgs.beads-exporter`               |
-| `bdPackage`                                                                                                                              | none: the machine's `bd`            |
-| `dbs` (`<name>.beadsDir`, an absolute path)                                                                                              | `{}`                                |
-| `claudeDir`                                                                                                                              | none: required                      |
-| `operatorNames`                                                                                                                          | `[]`                                |
-| `port`                                                                                                                                   | `9146`                              |
-| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `downAfterConsecutiveFailures`, `labelCap` | `120`, `600`, `6`, `90`, `2`, `500` |
-| `pprof.enable`                                                                                                                           | `true`                              |
-| `internal.configFile` (read-only)                                                                                                        | the rendered config file            |
+| Option                                                                                                                                   | Default                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `enable`                                                                                                                                 | `false`                              |
+| `package`                                                                                                                                | `pkgs.beads-exporter`                |
+| `bdPackage`                                                                                                                              | none: the machine's `bd`             |
+| `dbs` (`<name>.beadsDir`, an absolute path)                                                                                              | `{}`                                 |
+| `port`                                                                                                                                   | `9146`                               |
+| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `downAfterConsecutiveFailures`, `labelCap` | `120`, `600`, `12`, `90`, `2`, `500` |
+| `pprof.enable`                                                                                                                           | `true`                               |
+| `internal.configFile` (read-only)                                                                                                        | the rendered config file             |
 
 The configuration file is rendered with the queue list read at evaluation time from
 `claude-marketplace/pb/queues.json` and a `childPath` of the bash and coreutils store paths (no
@@ -404,12 +388,16 @@ running.
   Agents"). Queue tiles are per database and never summed across databases.
   The Now row carries the red-from-1 "Claims with no live owner" tile, the By-db table a "No live
   owner" column, and the Claims and age row the "Oldest no-live-owner claim" tile and the Loki
-  "Which beads" panel.
+  "Which beads" panel. On the dashboard, "no live owner" means stranded: not updated within
+  `staleClaimHours` (see [Stranded claims](#stranded-claims)).
 - `grafana/alerting/alerts.yaml`: the `beads-collect-failing` rule, which fires about 15 minutes
   after a database's last successful collection and is suppressed while the database probe reports
-  the server, or that database, down; and the `beads-claims-no-live-owner` rule, which fires after
-  `beads_stranded_claims` has been above zero for 30 minutes (so about 30 minutes after the first
-  pass that sees the claim).
+  the server, or that database, down; and the `beads-claims-no-live-owner` rule ("Bead claims not
+  updated for the stale-claim age"), which fires after `beads_stranded_claims` has been above zero
+  for 30 minutes, so about 30 minutes after the first pass that sees a claim whose `updated_at` is
+  older than `staleClaimHours`. Its uid is unchanged from the transcript-based rule it replaces:
+  Grafana keeps a file-provisioned rule live after its file stops declaring it, so a rename would
+  need a `deleteRules` entry.
 - Alert-rule `uid` limit: Grafana rejects a rule or contact-point receiver `uid` longer than 40
   characters and then refuses to start, so a `uid` in this file MUST stay at most 40 characters and
   unique. The shared `check-grafana-alert-uids` pre-commit hook rejects a violation at commit time

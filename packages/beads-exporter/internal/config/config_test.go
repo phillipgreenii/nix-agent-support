@@ -29,8 +29,6 @@ func validFile(t *testing.T) File {
 		BDPath:                       "/nonexistent/store/bd/bin/bd",
 		ChildPath:                    "/nonexistent/store/bash/bin:/nonexistent/store/coreutils/bin",
 		BeadsDirs:                    map[string]string{"alpha": "/nonexistent/alpha/.beads", "beta": "/nonexistent/beta/.beads"},
-		ClaudeDir:                    "/nonexistent/claude",
-		OperatorNames:                []string{"operator"},
 		Port:                         9100,
 		PollIntervalSeconds:          60,
 		StrandedIntervalSeconds:      300,
@@ -67,8 +65,8 @@ func TestValidConfigWithRealQueues(t *testing.T) {
 			t.Fatalf("queue %s class = %s", q.Name, q.Class)
 		}
 	}
-	if cfg.PollInterval() != 60*time.Second || cfg.StrandedInterval() != 300*time.Second || cfg.CommandTimeout() != 30*time.Second {
-		t.Fatalf("durations: %v %v %v", cfg.PollInterval(), cfg.StrandedInterval(), cfg.CommandTimeout())
+	if cfg.PollInterval() != 60*time.Second || cfg.StrandedInterval() != 300*time.Second || cfg.CommandTimeout() != 30*time.Second || cfg.StaleClaimAge() != 4*time.Hour {
+		t.Fatalf("durations: %v %v %v %v", cfg.PollInterval(), cfg.StrandedInterval(), cfg.CommandTimeout(), cfg.StaleClaimAge())
 	}
 }
 
@@ -105,14 +103,9 @@ func TestEachFieldIsRequiredOrChecked(t *testing.T) {
 		{"childPath empty", func(f *File) { f.ChildPath = "" }, "childPath is required"},
 		{"childPath relative entry", func(f *File) { f.ChildPath = "/a/bin:bin" }, "childPath entries must be absolute"},
 		{"childPath empty entry", func(f *File) { f.ChildPath = "/a/bin::/b/bin" }, "childPath entries must be absolute"},
-		{"claudeDir empty", func(f *File) { f.ClaudeDir = "" }, "claudeDir is required"},
-		{"claudeDir relative", func(f *File) { f.ClaudeDir = "claude" }, "claudeDir must be an absolute path"},
 		{"no databases", func(f *File) { f.BeadsDirs = map[string]string{} }, "beadsDirs must name at least one"},
 		{"bad db name", func(f *File) { f.BeadsDirs = map[string]string{"bad name": "/x/.beads"} }, "not a valid database name"},
 		{"relative beadsDir", func(f *File) { f.BeadsDirs = map[string]string{"alpha": ".beads"} }, "must be an absolute path"},
-		{"operatorNames absent", func(f *File) { f.OperatorNames = nil }, "operatorNames is required"},
-		{"operatorNames blank", func(f *File) { f.OperatorNames = []string{" "} }, "non-empty"},
-		{"operatorNames duplicate", func(f *File) { f.OperatorNames = []string{"a", "a"} }, "duplicated"},
 		{"port zero", func(f *File) { f.Port = 0 }, "port must be between"},
 		{"port high", func(f *File) { f.Port = 65536 }, "port must be between"},
 		{"pollInterval", func(f *File) { f.PollIntervalSeconds = 0 }, "pollIntervalSeconds must be a positive"},
@@ -167,11 +160,19 @@ func TestParseRejectsUnknownAndTrailing(t *testing.T) {
 	}
 }
 
-func TestEmptyOperatorNamesListIsAccepted(t *testing.T) {
-	f := validFile(t)
-	f.OperatorNames = []string{}
-	if _, err := Parse(mustJSON(t, f)); err != nil {
-		t.Fatalf("empty operatorNames list: %v", err)
+// TestRetiredKeysAreRejected: claudeDir and operatorNames belonged to the
+// transcript-based stranded pass. They are unknown fields now, so a file still
+// carrying either fails validation instead of being silently half-honoured.
+func TestRetiredKeysAreRejected(t *testing.T) {
+	good := string(mustJSON(t, validFile(t)))
+	for _, extra := range []string{`"claudeDir":"/nonexistent/claude"`, `"operatorNames":["operator"]`} {
+		t.Run(extra, func(t *testing.T) {
+			body := strings.Replace(good, `"port":9100`, `"port":9100,`+extra, 1)
+			_, err := Parse([]byte(body))
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("err = %v, want an unknown-field rejection", err)
+			}
+		})
 	}
 }
 
@@ -192,7 +193,7 @@ func TestLoadReadsAFile(t *testing.T) {
 // every path in the config is nonexistent and validation still succeeds.
 func TestValidationNeverTouchesTheFilesystem(t *testing.T) {
 	f := validFile(t)
-	for _, p := range []string{f.BDPath, f.ClaudeDir, f.BeadsDirs["alpha"]} {
+	for _, p := range []string{f.BDPath, f.BeadsDirs["alpha"]} {
 		if _, err := os.Lstat(p); err == nil {
 			t.Fatalf("test premise broken: %s exists", p)
 		}

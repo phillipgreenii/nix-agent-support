@@ -560,6 +560,71 @@ func TestEnvelopeShapes(t *testing.T) {
 	}
 }
 
+// listedClaim is the part of one default bd list row the comment case reads.
+type listedClaim struct {
+	ID           string    `json:"id"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	CommentCount int       `json:"comment_count"`
+}
+
+// listedClaimOf reads one bead's row through the production list argv.
+func (e *env) listedClaimOf(id string) listedClaim {
+	e.t.Helper()
+	out, code := e.raw(bd.ListArgv(bd.ListOpts{}))
+	if code != 0 {
+		e.t.Fatalf("bd list exited %d: %s", code, out)
+	}
+	var env struct {
+		Data []listedClaim `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		e.t.Fatalf("bd list: %v\n%s", err, out)
+	}
+	for _, r := range env.Data {
+		if r.ID == id {
+			return r
+		}
+	}
+	e.t.Fatalf("bd list has no row for %s:\n%s", id, out)
+	return listedClaim{}
+}
+
+// TestCommentDoesNotBumpUpdatedAt pins what the stranded pass's age rule documents:
+// the pass judges a claim by bd's updated_at, and a bd comment does NOT move it,
+// so a claimant that only comments still looks idle. An edit of the bead itself
+// (here --append-notes) does move it, which proves the read path would see a bump.
+func TestCommentDoesNotBumpUpdatedAt(t *testing.T) {
+	e := newEnv(t)
+	id := e.id("claim")
+	old := "2026-01-02T03:04:05Z"
+	e.mustImport(issue(id, "task", "in_progress", nil, map[string]any{
+		"assignee": fixtureActor, "started_at": old, "updated_at": old,
+	}))
+	want, err := time.Parse(time.RFC3339, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.listedClaimOf(id); !got.UpdatedAt.Equal(want) || got.CommentCount != 0 {
+		t.Fatalf("imported row = %+v, want updated_at %s and no comments", got, old)
+	}
+
+	e.mustBD("comment", id, "still working on it")
+	got := e.listedClaimOf(id)
+	if got.CommentCount != 1 {
+		t.Fatalf("comment_count = %d after bd comment, want 1 (the comment did not land)", got.CommentCount)
+	}
+	if !got.UpdatedAt.Equal(want) {
+		t.Fatalf("bd comment moved updated_at from %s to %s: the README's stranded-claims section says comments do not count, update it",
+			old, got.UpdatedAt.UTC().Format(time.RFC3339))
+	}
+
+	e.mustBD("update", id, "--append-notes", "progress note")
+	if got := e.listedClaimOf(id); !got.UpdatedAt.After(want) {
+		t.Fatalf("bd update --append-notes left updated_at at %s: the bump this case relies on to tell the two apart is gone",
+			got.UpdatedAt.UTC().Format(time.RFC3339))
+	}
+}
+
 // TestRecordFixtures records the testdata/bd fixtures from a deterministic
 // database. It only runs with -update.
 func TestRecordFixtures(t *testing.T) {

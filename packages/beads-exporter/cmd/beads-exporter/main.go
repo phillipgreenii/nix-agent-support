@@ -47,7 +47,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("beads-exporter", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path of the JSON configuration file to run with")
-	checkPath := fs.String("check-config", "", "validate the configuration file's schema and exit; touches no database, bd binary or Claude directory")
+	checkPath := fs.String("check-config", "", "validate the configuration file's schema and exit; touches no database or bd binary")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -113,11 +113,7 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 
 	mainPass := collect.NewMainPass(cfg.ClassifiedQueues, cfg.LabelCap)
-	strandedPass := collect.NewStrandedPass(collect.StrandedConfig{
-		ClaudeDir:     cfg.ClaudeDir,
-		Window:        cfg.StaleClaimWindow(),
-		OperatorNames: cfg.OperatorNames,
-	}, log)
+	strandedPass := collect.NewStrandedPass(collect.StrandedConfig{MaxAge: cfg.StaleClaimAge()}, log)
 	collector := collect.New(sched.RealClock{}, dbs, []collect.Pass{mainPass, collect.ThroughputPass{}, strandedPass}, log,
 		collect.WithDownAfter(cfg.DownAfterConsecutiveFailures))
 	mainPass.Init(ctx, dbs)

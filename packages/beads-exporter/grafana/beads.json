@@ -867,7 +867,7 @@
       "id": 15,
       "type": "table",
       "title": "By db",
-      "description": "One row per database. Data age is the age of the last successful main collection. The state columns add up to Not closed; Merge-request holds merge-request beads and molecules, which bd ready never returns. No live owner counts claims whose claimant has shown no session activity within the stale-claim window. The last four columns are what each command's queue offers.",
+      "description": "One row per database. Data age is the age of the last successful main collection. The state columns add up to Not closed; Merge-request holds merge-request beads and molecules, which bd ready never returns. No live owner counts stranded claims: claimed beads not updated (bd updated_at) within staleClaimHours, 12 hours by default. The last four columns are what each command's queue offers.",
       "gridPos": {
         "x": 0,
         "y": 25,
@@ -2253,7 +2253,7 @@
       "id": 32,
       "type": "stat",
       "title": "Claims with no live owner",
-      "description": "Claimed beads (open, in progress or hooked with an assignee) whose claimant has shown no session activity within the stale-claim window. Red from 1. Which beads and how old: Claims and age below. Nothing releases these automatically.",
+      "description": "Stranded claims: claimed beads (open, in progress or hooked with an assignee) whose last update (bd updated_at) is older than staleClaimHours, 12 hours by default, whoever the assignee is. A bd comment does not count as an update. Red from 1. Which beads and how old: Claims and age below. Nothing releases these automatically.",
       "gridPos": {
         "x": 21,
         "y": 1,
@@ -2310,7 +2310,7 @@
       "id": 33,
       "type": "stat",
       "title": "Oldest no-live-owner claim",
-      "description": "Age of the oldest claim that has no live owner, counted from when it was claimed. Empty when there are none.",
+      "description": "Age of the oldest stranded claim, counted from its last update (bd updated_at). Empty when there are none.",
       "gridPos": {
         "x": 12,
         "y": 42,
@@ -2365,7 +2365,7 @@
       "id": 34,
       "type": "logs",
       "title": "Which beads",
-      "description": "One line per claim with no live owner, written by each stranded pass: database, bead, stored status, assignee and when it was claimed. Release one with the command in the alert description.",
+      "description": "One line per stranded claim, written by each stranded pass: database, bead, stored status, assignee, when it was claimed and when it was last updated. Release one with the command in the alert description.",
       "gridPos": {
         "x": 0,
         "y": 50,
@@ -2383,7 +2383,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service_name=\"beads-exporter\"} | json | event=\"stranded_claim\" | db=~\"$db\" | line_format \"{{.db}} {{.bead}} {{.status}} {{.assignee}} claimed {{.claim_time}}\""
+          "expr": "{service_name=\"beads-exporter\"} | json | event=\"stranded_claim\" | db=~\"$db\" | line_format \"{{.db}} {{.bead}} {{.status}} {{.assignee}} claimed {{.claim_time}} last update {{.last_update}}\""
         }
       ],
       "options": {
