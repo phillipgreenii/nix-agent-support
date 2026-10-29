@@ -10989,6 +10989,41 @@
                     touch $out
                   '';
 
+              # test-code-review: lib/code-review, the common (agent-, repo- and tool-agnostic)
+              # code-review principles and their composer, exposed as flake `lib.codeReview`
+              # (docs/guides/code-review-principles.md). tests/code-review.nix runs the eval cases
+              # (fragment inventory, composition layout, a Go-template opener fails evaluation);
+              # the shell part checks the fragment files are plain markdown (no template opener,
+              # no tab), with a negative control. Keeping the fragments free of scenario or
+              # organisation vocabulary is each consumer's check (this repo carries no word list).
+              test-code-review =
+                let
+                  r = import ./tests/code-review.nix { inherit lib; };
+                  fragmentsDir = ./lib/code-review/fragments;
+                in
+                pkgs.runCommand "test-code-review"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "code-review eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''}
+                    echo "ok: ${toString r.caseCount} eval cases"
+                    # Fragments are plain markdown: no Go-template opener, no tab characters.
+                    tab=$(printf '\t')
+                    if ! printf 'x {{ y\n' | grep -q -e '{{' -e "$tab"; then echo "the opener scan cannot see an opener" >&2; exit 1; fi
+                    if grep -rn -e '{{' -e "$(printf '\t')" ${fragmentsDir}; then
+                      echo "a fragment contains a Go-template opener or a tab" >&2
+                      exit 1
+                    fi
+                    touch $out
+                  '';
+
               # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
               # launchd sweep agent of home/programs/tmp-sweep. Eval cases
               # (tests/tmp-sweep.nix) run the REAL tmp-sweep, build-tmp, claude-code-tmp and
@@ -17856,6 +17891,11 @@
         };
 
       flake = {
+        # The common code-review principles and their build-time composer
+        # (lib/code-review, docs/guides/code-review-principles.md). Pure data and string
+        # functions over nixpkgs lib, so a consumer reads it at evaluation time
+        # with no system argument: `inputs.<agent-support>.lib.codeReview`.
+        lib.codeReview = import ./lib/code-review { inherit (inputs.nixpkgs) lib; };
         # Reusable builders for downstream flakes. mkBeadsExporterBdFlagsCheck
         # checks ANY bd package against the beads-exporter's recorded bd version
         # pin and flag list (the machine wiring runs it over its own bdPackage).
