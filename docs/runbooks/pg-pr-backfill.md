@@ -13,6 +13,12 @@ these commands in its own runbook.
   `PG_DECIDER_CONFIG` set as for the `pr-change` role: the driver takes the
   tracker backend and directory (`agent_tracker_backend`, `beads_dir`) from it unless its own
   configuration names them.
+  Without it the decider has no `work_items_query` and `run` fails every PR with "work_items_query is
+  not configured" (the driver prints a warning at the start of `run` when it is unset). The file is
+  the one the deployment renders for the `pr-change` role: read the path from that role's environment
+  (the `PG_DECIDER_CONFIG` entry of its deployed spec, the same value the role's own runs use) and
+  export it in the shell that runs the driver. The path is deployment-specific and is not recorded
+  in this repository.
 - The deployment's query-name file and the driver configuration file (below).
 - The newest GraphQL reading is readable (see `rate_source`), and above the floor.
 - The machine awake for the whole pass. A run that is interrupted resumes.
@@ -56,6 +62,9 @@ the gauge only when it spends budget) does not hide its last reading: a run stop
 pg-pr-backfill enumerate
 
 # 2. The plan pass. Resumes by itself; --new-pass starts a new pass (for example a re-plan).
+#    A PR whose plan record carries a plan_error (the tracker lookup timed out) is retried by
+#    the resume. A --new-pass over a copy of the set (--set FILE) does not move the resume
+#    pointer of the persisted set.
 pg-pr-backfill run --mode plan
 pg-pr-backfill summary                      # the plan summary; exit 20 when a check does not hold
 

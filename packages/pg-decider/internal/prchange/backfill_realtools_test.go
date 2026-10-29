@@ -27,7 +27,7 @@ import (
 // minBackfillScenarios is the number of subtests TestBackfillRealTools has; the nix
 // check requires at least this many PASS lines (keep it equal to the number of run
 // calls and to the nix check's minScenarios).
-const minBackfillScenarios = 10
+const minBackfillScenarios = 11
 
 // The four PRs: #7 an open PR of mine whose anchor is open (nothing to do: the
 // anchor carries every key the decider mirrors from the PR, url and dedup_key
@@ -513,6 +513,38 @@ func TestBackfillRealTools(t *testing.T) {
 		bad := mark()
 		if bad.Code != backfill.ExitMarkCheckFailed || bad.Watched != 1 || bad.Expected != 2 {
 			t.Fatalf("a PR that was not watched passed the check: %s (code %d)", bad.Line, bad.Code)
+		}
+	})
+
+	run("a-plan-result-that-carries-a-plan_error-is-not-final-and-a-resume-runs-the-PR-again", func(t *testing.T) {
+		b := newBFRig(t, "acme/api#11")
+		// The decider's own lookup answers, the read-only plan's lookup after it
+		// times out: the run exits 0 with a plan_error and no usable plan.
+		b.ctlWrite("work-items.fail-after", "1\n")
+		res := b.drive(backfill.ModePlan)
+		if res.Outcome != backfill.OutcomeDone || res.Counts.Done != 1 {
+			t.Fatalf("%s", res.Line)
+		}
+		recs := b.log().Records
+		if len(recs) != 1 || recs[0].ExitCode != 0 || recs[0].Decide == nil || recs[0].Decide.PlanError == "" {
+			t.Fatalf("non-vacuity: want one exit-0 record with a plan_error, got %+v", recs)
+		}
+		if s := backfill.Summarize(b.log(), b.set, backfill.ModePlan, 0, time.Now()); s.OK() {
+			t.Fatal("the summary vouches for a PR whose plan could not be read")
+		}
+		// The tracker recovers: the plain resume plans the PR again instead of
+		// skipping it.
+		b.ctlRemove("work-items.fail-after")
+		again := b.drive(backfill.ModePlan)
+		if again.Counts.Skipped != 0 || again.Counts.Done != 1 {
+			t.Fatalf("the resume did not retry the PR: %s", again.Line)
+		}
+		if s := backfill.Summarize(b.log(), b.set, backfill.ModePlan, 0, time.Now()); !s.OK() {
+			t.Fatalf("summary after the retry: %v", s.Problems)
+		}
+		// Now final: a third run skips it.
+		if third := b.drive(backfill.ModePlan); third.Counts.Skipped != 1 {
+			t.Fatalf("%s", third.Line)
 		}
 	})
 

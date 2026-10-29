@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -63,6 +64,10 @@ const DefaultPace = 2 * time.Second
 type RunOptions struct {
 	Mode string
 	Set  *Set
+	// SetFile is the file Set was read from. A new pass is recorded against it,
+	// and a resume reads only the pass starts of this file, so a pass over a
+	// copy of the set (--set) leaves the default set's resume pointer alone.
+	SetFile string
 	// RunRecord is the file the composed command appends its records to; the
 	// driver reads it to resume and to count creates, and passes it on.
 	RunRecord string
@@ -237,12 +242,28 @@ func FailureReason(stderr string) string {
 	return pick
 }
 
+// setKey is the identity of the set file for pass-start markers ("" when none).
+func (o *RunOptions) setKey() string {
+	if o.SetFile == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(o.SetFile); err == nil {
+		return abs
+	}
+	return filepath.Clean(o.SetFile)
+}
+
 // finished reports whether the log holds a final result of mode for pr after
 // the start of the current pass (file position since): a success, or a not-found
-// (which a re-run cannot change).
+// (which a re-run cannot change). A plan-mode success that carries a plan_error
+// (the decider could not read its work-items lookup) is NOT final: it records no
+// usable plan, so a resume runs the PR again.
 func finished(lg *Log, mode, pr string, since int) bool {
 	for _, r := range lg.Records {
 		if r.Mode != mode || r.Entity != pr || r.Seq <= since {
+			continue
+		}
+		if r.ExitCode == 0 && mode == ModePlan && decidePlanError(r) != "" {
 			continue
 		}
 		if r.ExitCode == 0 || ExitClasses[r.ExitCode].Final {
@@ -260,7 +281,7 @@ func Run(ctx context.Context, o RunOptions) (*RunResult, error) {
 		return nil, err
 	}
 	if o.NewPass {
-		m := Marker{Contract: PassStartContract, Kind: "pass-start", At: o.Now().UTC().Format(time.RFC3339), Mode: o.Mode}
+		m := Marker{Contract: PassStartContract, Kind: "pass-start", At: o.Now().UTC().Format(time.RFC3339), Mode: o.Mode, Set: o.setKey()}
 		if err := AppendLine(o.RunRecord, m); err != nil {
 			return nil, err
 		}
@@ -269,7 +290,7 @@ func Run(ctx context.Context, o RunOptions) (*RunResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	since, _ := lg.PassStart(o.Mode)
+	since, _ := lg.PassStart(o.Mode, o.setKey())
 
 	res := &RunResult{Outcome: OutcomeDone}
 	res.Counts.Total = len(o.Set.Entries)

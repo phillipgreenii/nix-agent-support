@@ -2,6 +2,7 @@ package backfill
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -340,5 +341,68 @@ func TestFailureReasonIsBoundedAndRedactsCredentials(t *testing.T) {
 	}
 	if !strings.Contains(got, "failed:") {
 		t.Errorf("redaction ate the surrounding text: %s", got)
+	}
+}
+
+func TestAPlanResultCarryingAPlanErrorIsNotFinalAndAResumeRunsThePRAgain(t *testing.T) {
+	rec := tmpRecord(t)
+	f := newFake(t, rec)
+	f.script["o/r#1"] = func(string) recLine { return recLine{planErr: "work-items lookup timed out"} }
+	set := testSet("o/r#1", "o/r#2")
+	rate := &fakeRate{vals: []int{9000}}
+	if _, err := Run(context.Background(), newRun(t, ModePlan, set, rec, f, rate)); err != nil {
+		t.Fatal(err)
+	}
+	// The lookup recovers.
+	delete(f.script, "o/r#1")
+	f.calls = nil
+	res, err := Run(context.Background(), newRun(t, ModePlan, set, rec, f, rate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Counts.Skipped != 1 || res.Counts.Done != 1 || f.countOf("plan") != 1 {
+		t.Fatalf("the resume should skip #2 and retry #1: %s %v", res.Line, f.calls)
+	}
+	// An apply-mode record is untouched by the rule: only a plan result is retried.
+	lg, _ := ReadLog(rec)
+	if !finished(lg, ModePlan, "o/r#1", 0) {
+		t.Fatal("the retried plan is not final")
+	}
+}
+
+func TestASetFilePassDoesNotMoveTheResumePointerOfAnotherSet(t *testing.T) {
+	rec := tmpRecord(t)
+	dir := t.TempDir()
+	real, small := filepath.Join(dir, "set.json"), filepath.Join(dir, "copy.json")
+	f := newFake(t, rec)
+	set := testSet("o/r#1", "o/r#2", "o/r#3")
+	rate := &fakeRate{vals: []int{9000}}
+	run := func(s *Set, file string, newPass bool) *RunResult {
+		o := newRun(t, ModePlan, s, rec, f, rate)
+		o.SetFile, o.NewPass = file, newPass
+		res, err := Run(context.Background(), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	run(set, real, false)
+	// A new pass over a one-PR copy, as the operator does to retry a few PRs.
+	if res := run(testSet("o/r#2"), small, true); res.Counts.Done != 1 {
+		t.Fatalf("%s", res.Line)
+	}
+	// A plain resume over the real set must resume: everything has a result.
+	f.calls = nil
+	res := run(set, real, false)
+	if res.Counts.Skipped != 3 || f.countOf("plan") != 0 {
+		t.Fatalf("the copy's pass moved the real set's resume pointer: %s", res.Line)
+	}
+	// The copy's own pointer is its own: a plain run over it skips its PR.
+	if res := run(testSet("o/r#2"), small, false); res.Counts.Skipped != 1 {
+		t.Fatalf("%s", res.Line)
+	}
+	// A new pass of the real set still redoes all of it.
+	if res := run(set, real, true); res.Counts.Done != 3 {
+		t.Fatalf("%s", res.Line)
 	}
 }

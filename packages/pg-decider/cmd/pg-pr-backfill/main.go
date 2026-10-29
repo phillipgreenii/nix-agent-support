@@ -292,6 +292,11 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return usageErr(stderr, "run", err)
 	}
+	if os.Getenv(config.EnvVar) == "" {
+		// Not a refusal: a decider with no configuration runs on its defaults, but
+		// it then has no work_items_query and fails every PR's plan.
+		fmt.Fprintf(stderr, "pg-pr-backfill run: warning: %s is not set, so the decider has no work_items_query and every PR will fail; set it to the deployed decider configuration of the pr-change role (docs/runbooks/pg-pr-backfill.md, Prerequisites)\n", config.EnvVar)
+	}
 	var changeArgs []string
 	if *lockDir != "" {
 		changeArgs = append(changeArgs, "--lock-dir", *lockDir)
@@ -300,7 +305,7 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		changeArgs = append(changeArgs, "--lock-wait", *lockWait)
 	}
 	res, err := backfill.Run(ctx, backfill.RunOptions{
-		Mode: *mode, Set: set, RunRecord: cfg.RunRecord,
+		Mode: *mode, Set: set, SetFile: cfg.SetFile, RunRecord: cfg.RunRecord,
 		ChangeCmd: cfg.ChangeCmd, ChangeArgs: changeArgs,
 		Pace: p, Floor: cfg.Floor, Rate: rate,
 		Limits: limits, NoLimits: *noLimits, NewPass: *newPass,

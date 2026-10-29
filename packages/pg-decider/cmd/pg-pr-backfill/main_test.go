@@ -159,3 +159,23 @@ func TestParseLimits(t *testing.T) {
 		t.Error("a limits file that is no object accepted")
 	}
 }
+
+func TestRunWarnsWhenTheDeciderConfigurationIsNotSet(t *testing.T) {
+	c := newCLI(t, map[string]any{})
+	set := &backfill.Set{Contract: backfill.SetContract, Entries: []backfill.Entry{{PR: "o/r#1"}}}
+	if err := set.Save(filepath.Join(c.dir, "set.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.dir, "events.jsonl"), []byte(`{"time":"2026-10-24T10:00:00Z","graphql_remaining":9000}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"run", "--mode", "plan", "--change-cmd", filepath.Join(c.dir, "absent-command"), "--pace", "0s"}
+	_, _, errb := c.run(args...)
+	if !strings.Contains(errb, "PG_DECIDER_CONFIG is not set") || !strings.Contains(errb, "work_items_query") {
+		t.Fatalf("no warning with PG_DECIDER_CONFIG unset: %q", errb)
+	}
+	t.Setenv("PG_DECIDER_CONFIG", filepath.Join(c.dir, "decider.json"))
+	if _, _, errb := c.run(args...); strings.Contains(errb, "is not set") {
+		t.Fatalf("warned although PG_DECIDER_CONFIG is set: %q", errb)
+	}
+}

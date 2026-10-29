@@ -108,9 +108,13 @@ cannot be read is a stop, never a reason to run blind against a shared token.
 
 A PR that already has a final result of the SAME mode in the current pass is skipped, so a restart
 redoes no finished PR: a result is final when the run succeeded or the forge reported the PR gone
-(`not_found`), and a plan-mode result never satisfies an apply-mode resume. `--new-pass` starts a new
+(`not_found`), and a plan-mode result never satisfies an apply-mode resume. A plan-mode run that
+succeeded but carries a `plan_error` (the decider could not read its work-items lookup, so the record
+holds no usable plan) is NOT final: a resume runs that PR again. `--new-pass` starts a new
 pass of the mode, so the records of the earlier passes no longer satisfy a resume (the second apply
-pass of the verification, a re-plan after the plan went stale).
+pass of the verification, a re-plan after the plan went stale). A pass belongs to the set file it
+was started over (`--set`, else `set_file`): a `--new-pass` over a copy of the set does not move the
+resume pointer of any other set file, so a plain `run` over the persisted set still resumes.
 
 The last line is one of `DONE`, `FLOOR` or `FAILED`, with the counts, and the exit code says which:
 
@@ -153,7 +157,7 @@ when it is unknown, or when an enumerated PR has no usable apply-mode record.
 The time MAY be given (`--time`), so the marker can be written just before the deployment apply that
 changes the role's mode, and not after. The run record is the authoritative source of the marker; a
 comment with the same text on the epic bead (`--epic-bead`) is a copy. The marker row, and the
-pass-start row of `--new-pass`, have their own `contract` strings and are ignored by everything that
+pass-start row of `--new-pass` (which names the set file of its pass), have their own `contract` strings and are ignored by everything that
 takes the latest run record per PR and mode: the summary, the resume and the log source.
 
 `writes` lists every write since the flip, by timestamp: creates, closes, reopens and head updates
@@ -215,6 +219,8 @@ its name and the tracker directory are the configuration keys `bd` and `beads_di
   stop when the signal cannot be read.
 - **INV-BACKFILL-6.** <!-- uuid: df5dbeb7-dc70-4a62-a8ad-e1ed0c6c4631 --> `run` MUST skip a PR that has a final result of the SAME mode in the current pass, and a result of
   another mode MUST NOT satisfy it; a new pass MUST NOT be satisfied by the records of an earlier one.
+  A plan-mode result that carries a `plan_error` MUST NOT be final, and a new pass over one set file
+  MUST NOT change which records satisfy a resume over another set file.
 - **INV-BACKFILL-7.** <!-- uuid: aae7605b-ec3c-43ce-825f-0c09e82abade --> The last line of `run` MUST be one of `DONE`, `FLOOR` or `FAILED` with the counts, each ending MUST
   have its own exit code, and none MUST be `1` or `9`. A `FAILED` MUST name the PRs that ended
   `transient` or `degraded`.

@@ -270,6 +270,8 @@ func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 // work-items.out and work-items.code (the answer and exit code of the decider's
 // all-status lookup `issue list --query work-items-all`; the fixture's beads
 // answer it when absent),
+// work-items.fail-after (a number n: the lookup calls after the n-th answer
+// "unavailable", the way a tracker that times out does),
 // fail.create (the wire code `issue create` answers with); with tracker.accepts, a
 // work item the double created (bd-esc-<n>) can be shown and commented on. Every call is
 // appended to calls.log; every `issue create` (its whole argv, a multi-line description included) to created.log.
@@ -381,6 +383,13 @@ case "$*" in
   printf '{"sources":[{"source":"pg-connector-issue-beads","status":"succeeded","count":0}],"groups":[]}\n'
   exit 0;;
 'issue list --query ` + parity.WorkItemsQuery + `'*)
+  if [ -f "$CTL/work-items.fail-after" ]; then
+    k=0
+    if [ -f "$CTL/work-items.n" ]; then read -r k < "$CTL/work-items.n"; fi
+    k=$((k + 1))
+    printf '%s\n' "$k" > "$CTL/work-items.n"
+    if [ "$k" -gt "$(cat "$CTL/work-items.fail-after")" ]; then code_answer unavailable "work-items lookup timed out"; fi
+  fi
   if [ -f "$CTL/work-items.out" ]; then
     cat "$CTL/work-items.out"
     exit "$(cat "$CTL/work-items.code" 2>/dev/null || echo 0)"

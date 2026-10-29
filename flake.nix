@@ -6206,7 +6206,7 @@
                     PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
                     PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
                     PG_PR_CHANGE_REQUIRE_BINARIES = "1";
-                    minScenarios = "10";
+                    minScenarios = "11";
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"

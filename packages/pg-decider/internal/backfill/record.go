@@ -113,7 +113,12 @@ type Marker struct {
 	At       string `json:"at"`
 	Time     string `json:"time,omitempty"`
 	Mode     string `json:"mode"`
-	Note     string `json:"note,omitempty"`
+	// Set is the set file a pass-start marker belongs to (absolute path): a pass
+	// of another set file does not move this set's resume pointer. Empty on a
+	// marker written before the field existed or by a caller with no set file;
+	// such a marker belongs to every set.
+	Set  string `json:"set,omitempty"`
+	Note string `json:"note,omitempty"`
 
 	// T is the effective time: Time when set, else At. Seq is the line's position.
 	T   time.Time `json:"-"`
@@ -217,13 +222,14 @@ func (lg *Log) Latest(mode string, keep func(Record) bool) map[string]Record {
 	return out
 }
 
-// PassStart is the file position of the latest pass-start marker of mode, and
-// false when there is none. A pass-start marker begins a new pass: only the
-// records after it satisfy a resume.
-func (lg *Log) PassStart(mode string) (int, bool) {
+// PassStart is the file position of the latest pass-start marker of mode that
+// belongs to set (a marker with no set belongs to every set), and false when
+// there is none. A pass-start marker begins a new pass: only the records after
+// it satisfy a resume.
+func (lg *Log) PassStart(mode, set string) (int, bool) {
 	best, found := 0, false
 	for _, m := range lg.PassStarts {
-		if m.Mode == mode && (!found || m.Seq > best) {
+		if m.Mode == mode && (m.Set == "" || set == "" || m.Set == set) && (!found || m.Seq > best) {
 			best, found = m.Seq, true
 		}
 	}
