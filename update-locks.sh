@@ -68,18 +68,16 @@ case "${1:-}" in
 esac
 
 # Resolve which update-locks-lib.bash to source via the canonical flake resolver.
-# Pin nix-repo-base to the locked rev (closes the unpinned-HEAD code-execution
-# hole that GH_TOKEN-bearing CI would otherwise expose). Fall back to unpinned
-# HEAD when the lock itself is the broken artifact, preserving the self-repair
-# property (see update-locks-lib.bash ANCHOR ul_reexec-self-repair-nrb-rev-fallback).
-NRB_REV=$(nix flake metadata --json 2>/dev/null |
-  jq -r '.locks.nodes."phillipgreenii-nix-base".locked.rev // empty')
-if [ -n "$NRB_REV" ]; then
-  NRB_REF="github:phillipgreenii/nix-repo-base/${NRB_REV}"
-else
-  echo "WARN: could not resolve nix-repo-base from flake.lock; using unpinned HEAD" >&2
-  NRB_REF="github:phillipgreenii/nix-repo-base"
-fi
+# Pin nix-repo-base to the locked rev via the shared resolve-nrb-ref helper
+# (pg2-pwfqqn ruling a+c). FAIL CLOSED: there is no unpinned fallback. The helper
+# cannot be run without a rev, so the bootstrap reads the rev straight from
+# flake.lock and aborts when the node is missing (run `nix flake lock`).
+NRB_BOOT_REV=$(jq -er '.nodes."phillipgreenii-nix-base".locked.rev' "${SCRIPT_DIR}/flake.lock") ||
+  {
+    echo "update-locks.sh: flake.lock has no phillipgreenii-nix-base rev; run 'nix flake lock'" >&2
+    exit 1
+  }
+NRB_REF=$(nix run "github:phillipgreenii/nix-repo-base/${NRB_BOOT_REV}#resolve-nrb-ref" -- --lock "${SCRIPT_DIR}/flake.lock") || exit 1
 # Pass WORKSPACE_ROOT so the resolver can prefer the on-disk sibling when present.
 export WORKSPACE_ROOT
 UL_LIB_DIR="${UL_LIB_DIR:-$(nix run "${NRB_REF}#determine-ul-lib-dir")}"
