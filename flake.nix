@@ -5107,6 +5107,63 @@
                   touch $out
                 '';
 
+              # test-claude-tool-tracker-mod (docket pg2-aj5iq8, packet T5): runs the
+              # tracker mod's pure logic tests (hooks/tracker.test.ts) under node with a
+              # tiny shim for the engine's 'claude-code/testing' kit, and checks that
+              # hooks.json names the module and the module files exist. The engine-side
+              # checks need the claude binary and the declarations it writes when the
+              # plugin-authoring skill loads, neither of which exists in a sandbox; run
+              # those by hand: `claude plugin test <plugin dir>`, `claude plugin validate
+              # <plugin dir>` and tsc against the build's claude-code.d.ts.
+              test-claude-tool-tracker-mod =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/claude-tool-tracker;
+                  };
+                  shim = pkgs.writeText "claude-code-testing-shim.mjs" ''
+                    import assert from "node:assert/strict";
+                    import { test as nodeTest } from "node:test";
+                    export const test = (name, fn) => nodeTest(name, () => fn());
+                    const matchers = (a, neg) => {
+                      const ok = (c, m) => assert.ok(neg ? !c : c, m);
+                      return {
+                        toBe: (b) => ok(Object.is(a, b), "toBe"),
+                        toEqual: (b) => { if (neg) assert.notDeepEqual(a, b); else assert.deepEqual(a, b); },
+                        toHaveLength: (n) => ok(a.length === n, "length " + a.length),
+                        toContain: (x) => ok(a.includes(x), "contain " + x),
+                        toBeUndefined: () => ok(a === undefined, "undefined"),
+                      };
+                    };
+                    export const expect = (a) => ({
+                      ...matchers(a, false),
+                      not: matchers(a, true),
+                      resolves: new Proxy({}, { get: (_, k) => async (...args) => matchers(await a, false)[k](...args) }),
+                    });
+                  '';
+                in
+                pkgs.runCommand "test-claude-tool-tracker-mod"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.nodejs
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    set -euo pipefail
+                    plugin=${src}/claude-marketplace/claude-tool-tracker
+                    jq -e '.modules == ["./register.ts"]' "$plugin/hooks/hooks.json" >/dev/null
+                    for f in register.ts tracker.ts tracker.test.ts; do test -f "$plugin/hooks/$f"; done
+                    mkdir work
+                    cp ${shim} work/shim.mjs
+                    cp "$plugin/hooks/tracker.ts" work/tracker.ts
+                    sed -e "s#'claude-code/testing'#'./shim.mjs'#" -e "s#'./tracker'#'./tracker.ts'#" \
+                      "$plugin/hooks/tracker.test.ts" > work/tracker.test.ts
+                    cd work
+                    node --experimental-strip-types --test tracker.test.ts
+                    touch $out
+                  '';
+
               # test-claude-baseline-hook-commands (bead pg2-12gr4.8.31, design ruling
               # 30): the "hook-command scan". The ccpool handler module's
               # `claudeBaseline` (an INTERIM helper until flox environments exist for

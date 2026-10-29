@@ -1,5 +1,6 @@
 {
   "description": "Observer-only command hooks for the claude-tool-tracker event log; emit no decision",
+  "modules": ["./register.ts"],
   "hooks": {
     "PreToolUse": [
       {
