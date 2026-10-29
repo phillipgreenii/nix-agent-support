@@ -88,6 +88,23 @@ func (r *rig) ctlExists(name string) bool {
 	return err == nil
 }
 
+// quiet waits, for at most limit, until the forge has logged no new call for
+// span.
+func (r *rig) quiet(span, limit time.Duration) {
+	r.t.Helper()
+	deadline := time.Now().Add(limit)
+	last, since := r.ctlRead("calls.log"), time.Now()
+	for time.Since(since) < span {
+		if time.Now().After(deadline) {
+			r.t.Fatalf("the forge calls did not go quiet for %s within %s:\n%s", span, limit, last)
+		}
+		time.Sleep(50 * time.Millisecond)
+		if cur := r.ctlRead("calls.log"); cur != last {
+			last, since = cur, time.Now()
+		}
+	}
+}
+
 const raceLimit = 5 * time.Minute
 
 // anchorsAfterRace runs two composed runs for one PR whose interleaving the
@@ -116,9 +133,12 @@ func anchorsAfterRace(t *testing.T, tools e2eTools, withLock bool) int {
 	r.ctlWrite("block", "")
 	a := r.startChange(args("a")...)
 	until(t, "the first run to reach the forge", raceLimit, func() bool { return len(r.calls("pr show")) >= 1 })
-	// Let the first run settle at the block: it may make more than one forge
-	// call before it waits, so the second run is measured against that count.
-	time.Sleep(time.Second)
+	// Let the first run settle at the block: it makes more than one forge call
+	// before it waits (its hydration reads the forge in parallel, `pr show`
+	// among them), so the second run is measured against the count once the
+	// first has gone quiet. A fixed pause was not enough on a loaded host with
+	// the fast run's scenarios running alongside.
+	r.quiet(3*time.Second, raceLimit)
 	held := len(r.calls("pr show"))
 	b := r.startChange(args("b")...)
 	if withLock {

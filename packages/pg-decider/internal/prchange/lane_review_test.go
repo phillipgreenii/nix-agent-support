@@ -467,6 +467,9 @@ func reviewScenarios(l *laneRun) {
 	run("force-review-with-only-a-claimed-or-closed-same-head-item-creates-one-new-item-and-consumes-the-flag-only-on-success", func(t *testing.T) {
 		for _, state := range []string{"claimed", "closed"} {
 			t.Run(state, func(t *testing.T) {
+				if l.parallel {
+					t.Parallel() // each case builds a world of its own
+				}
 				w, id := freshWorld(t, tools, sha('a'), true)
 				w.apply(id)
 				item := w.onlyReview()
