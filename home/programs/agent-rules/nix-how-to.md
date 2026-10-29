@@ -134,7 +134,7 @@ Why not the whole thing: many `flake.nix` repos wire `pre-commit-hooks.nix`'s ho
 `checks.pre-commit` derivation, so a full `nix flake check` re-runs the hooks the commit already
 ran, and several concurrent sessions each running one saturated the machine.
 
-Repos with cloud CI (`phillipgreenii-nix-support-apps`, `phillipgreenii-nix-personal`) keep CI as
+Repos with cloud CI (`phillipg-nix-repo-base`, `phillipgreenii-nix-support-apps`, `phillipgreenii-nix-personal`, `nix-overlay`) keep CI as
 the whole-repo gate. Accepted interim risk: `phillipgreenii-nix-agent-support` and
 `phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners are the commit-time
 `run-unit-tests` hook plus FF-1b's `pg-hooks run pre-land` over the branch diff (and FF-1c's eval-only check where a clone opted in) — the whole-repo `checks.*`
