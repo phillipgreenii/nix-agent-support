@@ -194,7 +194,7 @@ func TestSend_fallbackFiresNotifier(t *testing.T) {
 	s := New(Deps{
 		Tmux: &sendTmux{live: true}, Trust: &fakeTrust{}, Store: st, Wait: w,
 		Transcript: fakeTranscript{awaiting: true},
-		Notify:     rn, NotifyOn: []string{"needs_input", "failed"},
+		Notify:     rn, NotifyOn: []string{"needs_input", "errored"},
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
 		NewUUID: func() string { return "x" }, Now: func() time.Time { return time.Unix(1, 0) },
 	})

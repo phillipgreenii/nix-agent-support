@@ -43,7 +43,7 @@ func TestFromConfig_selectsAdapter(t *testing.T) {
 }
 
 func TestShouldNotify_edgeAndMembership(t *testing.T) {
-	on := []string{"needs_input", "failed"}
+	on := []string{"needs_input", "errored"}
 	if !ShouldNotify(on, "working", "needs_input") {
 		t.Error("working→needs_input should notify")
 	}

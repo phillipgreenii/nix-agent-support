@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
@@ -82,5 +84,30 @@ func TestHook_notify_noEdgeNoFire(t *testing.T) {
 	}
 	if len(rn.events) != 0 {
 		t.Errorf("no edge (needs_input→needs_input) must not fire; got %+v", rn.events)
+	}
+}
+
+// TestHook_fail_notifiesUnderDefaultConfig pins pg2-ix0txf: with the DEFAULT
+// notify.on (loaded from an empty config home), a StopFailure hook that moves
+// a session into errored posts exactly one notification. The default used to
+// name a "failed" state the store never produces, so this never fired.
+func TestHook_fail_notifiesUnderDefaultConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Working})
+	rn := &recordNotifier{}
+	const p = `{"session_id":"csid-x","hook_event_name":"StopFailure","error":"server_error"}`
+	if err := handleHookN("fail", strings.NewReader(p), st, "", rn, cfg.Notify.On, nil, false, io.Discard); err != nil {
+		t.Fatalf("handleHookN: %v", err)
+	}
+	if len(rn.events) != 1 || rn.events[0].State != "errored" || rn.events[0].Name != "a" {
+		t.Errorf("expected one errored event under default config, got %+v", rn.events)
 	}
 }

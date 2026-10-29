@@ -297,8 +297,8 @@ func TestLoad_notifyDefaults(t *testing.T) {
 	if c.Notify.Adapter != "desktop" {
 		t.Errorf("Notify.Adapter = %q, want desktop", c.Notify.Adapter)
 	}
-	if len(c.Notify.On) != 2 || c.Notify.On[0] != "needs_input" || c.Notify.On[1] != "failed" {
-		t.Errorf("Notify.On = %v, want [needs_input failed]", c.Notify.On)
+	if len(c.Notify.On) != 2 || c.Notify.On[0] != "needs_input" || c.Notify.On[1] != "errored" {
+		t.Errorf("Notify.On = %v, want [needs_input errored]", c.Notify.On)
 	}
 }
 

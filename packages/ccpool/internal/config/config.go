@@ -175,7 +175,7 @@ func defaults() Config {
 		Claude: Claude{Bin: "claude"},
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},
 		Wait:   Wait{Timeout: Duration(10 * time.Minute)},
-		Notify: Notify{Adapter: "desktop", On: []string{"needs_input", "failed"}},
+		Notify: Notify{Adapter: "desktop", On: []string{"needs_input", "errored"}},
 		Retry: Retry{
 			Enabled:     true,
 			MaxAttempts: 3,
