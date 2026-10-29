@@ -527,9 +527,6 @@ func TestDoctorFocusLagLineReadsTheRouterConsumer(t *testing.T) {
 func TestStatusPrintsTheFocusBlock(t *testing.T) {
 	w := newDoctorFocusWorld(t)
 	w.selected(t, w.openPR(t, 1)) // unminted past the gate: status prints it, never fails on it
-	orig := statusRunPgConnectorLedgerShow
-	t.Cleanup(func() { statusRunPgConnectorLedgerShow = orig })
-	statusRunPgConnectorLedgerShow = func(_ context.Context) (string, error) { return "", nil }
 	stdout, err := runStatusCmd(t)
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -545,9 +542,6 @@ func TestStatusPrintsTheFocusBlock(t *testing.T) {
 
 func TestStatusFocusBlockOnAnUnmigratedStore(t *testing.T) {
 	withDoctorStore(t, "o/r")
-	orig := statusRunPgConnectorLedgerShow
-	t.Cleanup(func() { statusRunPgConnectorLedgerShow = orig })
-	statusRunPgConnectorLedgerShow = func(_ context.Context) (string, error) { return "", nil }
 	stdout, err := runStatusCmd(t)
 	if err != nil {
 		t.Fatalf("status: %v", err)

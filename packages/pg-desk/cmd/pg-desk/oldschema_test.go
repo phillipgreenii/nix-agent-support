@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -87,10 +86,6 @@ func TestStatusAndDoctorDoNotCrashOnOldSchemaStore(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			withRawStoreAt(t, storeAtVersion(t, tc.kind))
 
-			origLedger := statusRunPgConnectorLedgerShow
-			t.Cleanup(func() { statusRunPgConnectorLedgerShow = origLedger })
-			statusRunPgConnectorLedgerShow = func(ctx context.Context) (string, error) { return "(empty)\n", nil }
-
 			stdout, err := runStatusCmd(t)
 			if err != nil {
 				t.Fatalf("status on a %s store: %v", tc.kind, err)
@@ -107,7 +102,7 @@ func TestStatusAndDoctorDoNotCrashOnOldSchemaStore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("doctor on a %s store: %v\n%s", tc.kind, err, out)
 			}
-			for _, want := range []string{"sync_error rows: 0", "stranded cycles: 0"} {
+			for _, want := range []string{"stranded cycles: 0"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("doctor output missing %q:\n%s", want, out)
 				}

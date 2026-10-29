@@ -240,68 +240,6 @@ func doctorPRLaneLine(cfg *config.Config) string {
 	return prLaneLine(cfg, st, changesNow())
 }
 
-// doctorSyncErrors lists every interpretation row with a non-empty
-// sync_error as "entity: error [retry indicator]" (pg2-kftf9.5; the
-// indicator is bead pg2-xb6fs's, see describeSyncRetry).
-func doctorSyncErrors(st *store.Store, version int, laneMode string) ([]string, error) {
-	interps, err := st.ListInterpretations()
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, i := range interps {
-		if i.SyncError == "" {
-			continue
-		}
-		r, found, err := st.GetSyncRetry(i.EntityID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, fmt.Sprintf("%s: %s [%s]", i.EntityID, i.SyncError, describeSyncRetry(r, found, syncErrorRemedy(version, laneMode, i.EntityID))))
-	}
-	return out, nil
-}
-
-// syncErrorRemedy is the repair step doctor names for a sync_error row, aware
-// of the phase the deployment is in (PR lane refactor, P3b3): `pg-desk
-// reconcile --retry-all` reads the ledger, which the schema-2 cutover drops, so
-// it only works on a store below schema 2. On a schema-2 store the row is a
-// legacy leftover that no command of the lane retries (the lane's composed
-// command is run per PR, and the row's PR is named in the line), and with the
-// lane off nothing runs it at all; the remedy says which of those holds rather
-// than naming a command that fails.
-func syncErrorRemedy(version int, laneMode, entityID string) string {
-	switch {
-	case version < store.NewSchemaVersion:
-		return "fix the cause, then pg-desk reconcile --retry-all"
-	case laneMode == config.PRLaneModePlan || laneMode == config.PRLaneModeApply:
-		return fmt.Sprintf("the ledger is dropped, so pg-desk reconcile --retry-all no longer works; the pr lane replaces it: fix the cause, then run %s %s %s", composedCommandName, laneMode, entityID)
-	default:
-		return fmt.Sprintf("the ledger is dropped, so pg-desk reconcile --retry-all no longer works, and the pr lane is off (pr_lane.mode): nothing retries this row until the lane runs %s plan %s", composedCommandName, entityID)
-	}
-}
-
-// describeSyncRetry renders a sync_error row's retry indicator so an
-// operator can tell a row that is still being retried from one that no
-// longer will be (bead pg2-xb6fs). remedy is the phase-aware repair step.
-func describeSyncRetry(r store.SyncRetry, found bool, remedy string) string {
-	if !found {
-		return "retrying: awaiting its first automatic retry"
-	}
-	switch r.EffectiveState() {
-	case store.SyncRetryExhausted:
-		return fmt.Sprintf("exhausted: %d/%d retries failed, no further automatic retry; %s", r.Retries(), r.MaxRetries, remedy)
-	case store.SyncRetryNonTransient:
-		return "non-transient: not retried automatically; " + remedy
-	default:
-		next := r.NextRetryAt
-		if next == "" {
-			next = "the next reconcile"
-		}
-		return fmt.Sprintf("retrying: %d/%d retries used, next retry at %s", r.Retries(), r.MaxRetries, next)
-	}
-}
-
 // doctorCmd implements `pg-desk doctor`
 // [docs/behavior/pg-desk/operator-commands.md]. Exit codes: 0 when every
 // check passes; 1 when any check fails (naming which one). The
@@ -391,31 +329,13 @@ func runDoctor(cmd *cobra.Command) error {
 		failures = append(failures, "stranded cycles")
 	} else if version == 0 {
 		// No schema at all (a store that has never been written): there are
-		// no interpretation rows to be stranded or carry a sync_error, and
+		// no interpretation rows to be stranded, and
 		// querying would fail on the missing tables.
 		_ = st.Close()
-		fmt.Fprintln(w, "sync_error rows: 0")
 		fmt.Fprintln(w, "stranded cycles: 0")
 	} else {
 		stranded, err := doctorStrandedCycles(ctx, cfg, st)
-		// sync_error check (pg2-kftf9.5): a row with a recorded sync_error
-		// is a PR whose bead sync failed and may have leaked open beads;
-		// unlike stranded cycles this IS a gate (exit 1) so an alert can
-		// hang off the doctor exit code.
-		syncErrs, syncErrCheck := doctorSyncErrors(st, version, cfg.PRLaneMode())
 		_ = st.Close()
-		if syncErrCheck != nil {
-			fmt.Fprintf(w, "sync_error rows: FAIL (%v)\n", syncErrCheck)
-			failures = append(failures, "sync_error rows")
-		} else if len(syncErrs) > 0 {
-			fmt.Fprintf(w, "sync_error rows: FAIL (%d non-empty)\n", len(syncErrs))
-			for _, s := range syncErrs {
-				fmt.Fprintf(w, "  - %s\n", s)
-			}
-			failures = append(failures, "sync_error rows")
-		} else {
-			fmt.Fprintln(w, "sync_error rows: 0")
-		}
 		if err != nil {
 			fmt.Fprintf(w, "stranded cycles: FAIL (%v)\n", err)
 			failures = append(failures, "stranded cycles")

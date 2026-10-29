@@ -11,11 +11,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-// harness wires a ManualReader-backed meter provider to an Emitter, mirroring
+// harness wires a ManualReader-backed meter provider to the catalog, mirroring
 // pg-router's own internal/metrics test harness (metrics_test.go).
 type harness struct {
 	reader  *sdkmetric.ManualReader
-	emitter *Emitter
 	snap    Snapshot
 	snapErr error
 }
@@ -25,11 +24,10 @@ func newHarness(t *testing.T) *harness {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	h := &harness{reader: reader}
-	emitter, err := New(mp, func() (Snapshot, error) { return h.snap, h.snapErr })
+	err := New(mp, func() (Snapshot, error) { return h.snap, h.snapErr })
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	h.emitter = emitter
 	return h
 }
 
@@ -115,36 +113,6 @@ func TestDropped(t *testing.T) {
 	}
 }
 
-// TestRecordSyncError proves the counter accumulates per repo and is
-// registered as a genuine monotonic Sum, even though no production call
-// site is wired (MetricSyncErrors' own doc).
-func TestRecordSyncError(t *testing.T) {
-	h := newHarness(t)
-	h.emitter.RecordSyncError("acme/widgets")
-	h.emitter.RecordSyncError("acme/widgets")
-	h.emitter.RecordSyncError("other/repo")
-	rm := h.collect(t)
-	m := findMetric(t, rm, MetricSyncErrors)
-	s, ok := m.Data.(metricdata.Sum[int64])
-	if !ok {
-		t.Fatalf("MetricSyncErrors: want Sum[int64], got %#v", m.Data)
-	}
-	if !s.IsMonotonic {
-		t.Fatalf("MetricSyncErrors: want a monotonic counter")
-	}
-	got := map[string]int64{}
-	for _, dp := range s.DataPoints {
-		repo, _ := dp.Attributes.Value(attribute.Key("repo"))
-		got[repo.AsString()] = dp.Value
-	}
-	if got["acme/widgets"] != 2 {
-		t.Fatalf("MetricSyncErrors[acme/widgets] = %d, want 2", got["acme/widgets"])
-	}
-	if got["other/repo"] != 1 {
-		t.Fatalf("MetricSyncErrors[other/repo] = %d, want 1", got["other/repo"])
-	}
-}
-
 // TestSnapshotFuncErrorPropagates confirms a store-read failure surfaces
 // through Collect rather than being silently swallowed.
 func TestSnapshotFuncErrorPropagates(t *testing.T) {
@@ -153,41 +121,6 @@ func TestSnapshotFuncErrorPropagates(t *testing.T) {
 	var rm metricdata.ResourceMetrics
 	if err := h.reader.Collect(context.Background(), &rm); err == nil {
 		t.Fatal("Collect: want an error when snapshotFn fails")
-	}
-}
-
-func TestSyncErrorGauges(t *testing.T) {
-	h := newHarness(t)
-	h.snap = Snapshot{SyncErrorRows: 3, OldestSyncErrorAgeSeconds: 7200, SyncErrorRetryingRows: 2, SyncErrorExhaustedRows: 1}
-	rm := h.collect(t)
-	if got := gaugeValue(t, findMetric(t, rm, MetricSyncErrorRows)); got != 3 {
-		t.Fatalf("MetricSyncErrorRows = %d, want 3", got)
-	}
-	if got := gaugeValue(t, findMetric(t, rm, MetricSyncErrorRetryingRows)); got != 2 {
-		t.Fatalf("MetricSyncErrorRetryingRows = %d, want 2", got)
-	}
-	if got := gaugeValue(t, findMetric(t, rm, MetricSyncErrorExhaustedRows)); got != 1 {
-		t.Fatalf("MetricSyncErrorExhaustedRows = %d, want 1", got)
-	}
-	if got := gaugeValue(t, findMetric(t, rm, MetricOldestSyncErrorAge)); got != 7200 {
-		t.Fatalf("MetricOldestSyncErrorAge = %d, want 7200", got)
-	}
-}
-
-// TestOldestAnchorCheckAgeGauge covers bead pg2-u4c1s: the snapshot field is
-// exported under pg_desk_oldest_anchor_check_age_seconds.
-func TestOldestAnchorCheckAgeGauge(t *testing.T) {
-	if MetricOldestAnchorCheckAge != "pg_desk_oldest_anchor_check_age_seconds" {
-		t.Fatalf("metric name = %q", MetricOldestAnchorCheckAge)
-	}
-	h := newHarness(t)
-	h.snap = Snapshot{OldestAnchorCheckAgeSeconds: 5400}
-	if got := gaugeValue(t, findMetric(t, h.collect(t), MetricOldestAnchorCheckAge)); got != 5400 {
-		t.Fatalf("MetricOldestAnchorCheckAge = %d, want 5400", got)
-	}
-	h.snap = Snapshot{}
-	if got := gaugeValue(t, findMetric(t, h.collect(t), MetricOldestAnchorCheckAge)); got != 0 {
-		t.Fatalf("MetricOldestAnchorCheckAge (empty) = %d, want 0", got)
 	}
 }
 
@@ -223,71 +156,6 @@ func TestSourceAgeIsPerSourceAndOmitsUnknown(t *testing.T) {
 	}
 }
 
-// TestReconcileGauges pins the pg_desk_reconcile_* catalog (bead pg2-q89ng):
-// every gauge carries the last run's value, the two open-set gauges drop out
-// (no series, not 0) when the run did not read the open set, and with no
-// recorded run nothing is exported.
-func TestReconcileGauges(t *testing.T) {
-	want := map[string]string{
-		MetricReconcileOpenSetIDs:  "pg_desk_reconcile_open_set_ids",
-		MetricReconcileSkippedOpen: "pg_desk_reconcile_skipped_open",
-		MetricReconcileCandidates:  "pg_desk_reconcile_candidates",
-		MetricReconcileDeferred:    "pg_desk_reconcile_deferred",
-		MetricReconcileLastRunAge:  "pg_desk_reconcile_last_run_age_seconds",
-	}
-	for got, name := range want {
-		if got != name {
-			t.Fatalf("metric name = %q, want %q", got, name)
-		}
-	}
-	series := func(h *harness) map[string]int64 {
-		out := map[string]int64{}
-		for _, sm := range h.collect(t).ScopeMetrics {
-			for _, m := range sm.Metrics {
-				if g, ok := m.Data.(metricdata.Gauge[int64]); ok && strings.HasPrefix(m.Name, "pg_desk_reconcile_") {
-					for _, dp := range g.DataPoints {
-						out[m.Name] = dp.Value
-					}
-				}
-			}
-		}
-		return out
-	}
-
-	h := newHarness(t)
-	h.snap = Snapshot{Reconcile: &ReconcileSnapshot{HaveOpenSet: true, OpenIDs: 40, SkippedOpen: 38, Candidates: 2, Deferred: 1, AgeSeconds: 900}}
-	got := series(h)
-	exp := map[string]int64{
-		MetricReconcileOpenSetIDs: 40, MetricReconcileSkippedOpen: 38, MetricReconcileCandidates: 2,
-		MetricReconcileDeferred: 1, MetricReconcileLastRunAge: 900,
-	}
-	if len(got) != len(exp) {
-		t.Fatalf("series = %v, want %v", got, exp)
-	}
-	for k, v := range exp {
-		if got[k] != v {
-			t.Fatalf("%s = %d, want %d (all: %v)", k, got[k], v, got)
-		}
-	}
-
-	h.snap = Snapshot{Reconcile: &ReconcileSnapshot{Candidates: 3, AgeSeconds: 5}}
-	got = series(h)
-	if _, ok := got[MetricReconcileOpenSetIDs]; ok {
-		t.Fatalf("open-set gauge exported without an open set: %v", got)
-	}
-	if _, ok := got[MetricReconcileSkippedOpen]; ok {
-		t.Fatalf("skipped_open gauge exported without an open set: %v", got)
-	}
-	if got[MetricReconcileCandidates] != 3 || got[MetricReconcileDeferred] != 0 || got[MetricReconcileLastRunAge] != 5 {
-		t.Fatalf("no-open-set run series = %v", got)
-	}
-
-	h.snap = Snapshot{}
-	if got = series(h); len(got) != 0 {
-		t.Fatalf("no recorded run must export no reconcile series, got %v", got)
-	}
-}
-
 // TestSnapshotComputedOncePerCollection guards bead pg2-jj0ym: the snapshot
 // behind the gauges (a full BuildPayload plus store reads) MUST run once per
 // scrape, not once per gauge. Nine redundant runs on a single-connection store
@@ -296,7 +164,7 @@ func TestSnapshotComputedOncePerCollection(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	calls := 0
-	if _, err := New(mp, func() (Snapshot, error) {
+	if err := New(mp, func() (Snapshot, error) {
 		calls++
 		return Snapshot{AgeSeconds: 3, SourceAges: []SourceAge{{Source: "s", Seconds: 9}}}, nil
 	}); err != nil {
@@ -313,5 +181,30 @@ func TestSnapshotComputedOncePerCollection(t *testing.T) {
 	}
 	if got := gaugeValue(t, findMetric(t, rm, MetricDashboardAge)); got != 3 {
 		t.Fatalf("MetricDashboardAge = %d, want 3", got)
+	}
+}
+
+// TestRemovedSyncEraMetricsNotEmitted is the plain negative case for the
+// sync-era retirement: even when a collection runs, none of the retired
+// pg_desk_sync_error*, anchor-check or reconcile series exists.
+func TestRemovedSyncEraMetricsNotEmitted(t *testing.T) {
+	h := newHarness(t)
+	h.snap = Snapshot{AgeSeconds: 1, SourceAges: []SourceAge{{Source: "s", Seconds: 2}}}
+	removed := []string{
+		"pg_desk_sync_error_rows", "pg_desk_oldest_sync_error_age_seconds",
+		"pg_desk_sync_error_retrying_rows", "pg_desk_sync_error_exhausted_rows",
+		"pg_desk_sync_errors", "pg_desk_oldest_anchor_check_age_seconds",
+	}
+	for _, sm := range h.collect(t).ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if strings.HasPrefix(m.Name, "pg_desk_reconcile_") {
+				t.Fatalf("retired metric %s still emitted", m.Name)
+			}
+			for _, r := range removed {
+				if m.Name == r {
+					t.Fatalf("retired metric %s still emitted", m.Name)
+				}
+			}
+		}
 	}
 }

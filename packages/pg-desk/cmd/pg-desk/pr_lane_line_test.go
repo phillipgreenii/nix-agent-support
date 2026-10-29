@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -159,9 +158,6 @@ func TestStatusAndDoctorPrintTheLiveLaneLine(t *testing.T) {
 	open := func() (*store.Store, error) { return store.Open(path) }
 	withOpenSeams(t, cfg, open)
 	stubDoctorSeams(t, nil, nil, nil)
-	origLedger := statusRunPgConnectorLedgerShow
-	t.Cleanup(func() { statusRunPgConnectorLedgerShow = origLedger })
-	statusRunPgConnectorLedgerShow = func(context.Context) (string, error) { return "(empty)\n", nil }
 
 	const want = "pr lane: legacy sync off, lane apply, flipped 2026-10-02T09:00:00Z, never-hydrated 1 (oldest 394h0m0s), residual 1 (oldest 1h0m0s), last run 2026-10-02T09:00:00Z"
 	statusOut, err := runStatusCmd(t)

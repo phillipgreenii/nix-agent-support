@@ -95,9 +95,8 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   OpenTelemetry.
 - **Prometheus:** only `serve` exposes anything, now a real catalog on the same `/metrics` route
   (`pg_desk_liveness`, `pg_desk_dashboard_age_seconds`, `pg_desk_dashboard_stale`,
-  `pg_desk_dropped`, `pg_desk_sync_errors_total`, and `pg_desk_source_age_seconds{source}`, the
-  per-source data age, see [`freshness.md`](freshness.md), plus the `pg_desk_reconcile_*` gauges for
-  the last `reconcile` run), replacing the earlier minimal
+  `pg_desk_dropped`, and `pg_desk_source_age_seconds{source}`, the
+  per-source data age, see [`freshness.md`](freshness.md)), replacing the earlier minimal
   scrape-keeps-green stub — see [`serve.md`](serve.md)'s "Telemetry and logs".
 - **Focus verbs:** the `pg-desk focus` group emits nothing over OpenTelemetry and writes no Prometheus
   series of its own; every non-dry-run `select`, `pull`, `close` and `select --repair` leaves one run

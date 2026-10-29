@@ -18,12 +18,9 @@ omitting the planned-sync-writes section rather than failing `show` outright.
 ## status
 
 `pg-desk status` prints the store path and schema version, entity and interpretation counts, the
-last heartbeat/run/sweep times, degraded rows, sync errors (with how many are retrying, exhausted,
-and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), the age of the stalest applied anchor check
-(`oldest_anchor_check_age_seconds`, the same value as `serve`'s
-`pg_desk_oldest_anchor_check_age_seconds`, `0` when none), and — when `sync.mode` is
-`plan` — planned sync rows by kind (anchor / feedback-cycle / review-request; see
-[`sync.md`](sync.md)). It also prints `pg-connector ledger show` for the configured consumer.
+last heartbeat/run/sweep times and degraded rows. It prints no `sync_error` count or retry split,
+no stalest-anchor-check age, no planned sync rows and no `pg-connector ledger show` section: the
+sync-era lines were removed with the sync lane (P9a-1).
 
 It prints one live `pr lane` line (the static line of the guards phase, replaced once the composed
 command exists). Its first part names the legacy sync's mode (`sync.mode`, `off` when unset) and the
@@ -54,7 +51,7 @@ apply run recorded yet)`, because a `plan` run's action list is not a backlog.
 
 The line MUST NOT carry a "time since the last decider apply": that is legitimately large in a quiet
 window and pg-desk has no source for it. It exists so that a store on which the lane is off or has
-not run is not mistaken for a healthy one: `sync_errors: 0` alone cannot tell "nothing failed" from
+not run is not mistaken for a healthy one: a quiet `status` alone cannot tell "nothing failed" from
 "nothing ran".
 
 It prints a `change_flow` section, human-readable, per entity type and per consumer, matching the
@@ -159,12 +156,10 @@ re-read as before; it never skips a closure. It logs
 `{"event":"reconcile_open_set","open_ids":N,"skipped_open":S,"candidates":C}` once per run when
 the open set was read.
 
-Because `reconcile` runs as a short-lived scheduled process whose stderr the scheduler keeps only
-for a failed run, the same counts are also recorded in the store at the end of every run
-(`meta.reconcile.last_run`: the open-set size and `skipped_open` when the open set was read, the
-candidate count, how many candidates the run deferred, and when it finished) and exported by
-`serve` as the `pg_desk_reconcile_*` gauges (see [`serve.md`](serve.md)), so a healthy run's counts
-stay readable after it exits.
+The same counts are also recorded in the store at the end of every run (`meta.reconcile.last_run`:
+the open-set size and `skipped_open` when the open set was read, the candidate count, how many
+candidates the run deferred, and when it finished). `serve` no longer exports them: the
+`pg_desk_reconcile_*` gauges were removed with the sync lane (P9a-1).
 
 `reconcile` MUST be idempotent: once an anchor is closed and `sync_error` is empty, the entity is
 no longer re-driven. Every candidate is attempted even after one fails; failures are joined into
@@ -314,20 +309,14 @@ moves a store aside MUST run it for every backend whose feed pg-desk consumes.
 ## doctor
 
 `pg-desk doctor` checks: the config resolves; `pg-connector` is on `PATH` and its `config
-validate` passes; `serve` is reachable; that no row carries a recorded `sync_error` (a gate: any
-such row fails `doctor`, and each is listed with its error and its retry indicator — still
-retrying, with retries used out of the bound and the next retry time; exhausted; or
-non-transient — see [`sync.md`](sync.md)'s "Automatic retry"); and the stranded-cycle report
+validate` passes; `serve` is reachable; and the stranded-cycle report
 formerly produced by `pr-pool reconcile`.
 `doctor` also prints the same live `pr lane` line as `status` right after the `config` check, read
 through a raw store handle of its own. It is information, never a check: it adds no failure.
 
-The retry indicator of a `sync_error` row names a remedy that fits the phase. On a store below
-schema 2 the remedy is `fix the cause, then pg-desk reconcile --retry-all`. On a schema-2 store the
-ledger that command reads is dropped, so the indicator says so instead of naming a command that
-fails: with the lane in `plan` or `apply` it names the lane's composed command for the row's PR
-(`fix the cause, then run pg-pr-change <mode> <id>`), and with the lane off it says nothing retries
-the row until the lane runs.
+`doctor` no longer checks for a recorded `sync_error` and prints no retry indicator or remedy for
+one: the `sync_error rows` gate and its remedy text were removed with the sync lane (P9a-1), so a row
+that still carries a `sync_error` neither fails `doctor` nor appears in its output.
 `serve` reachability fails `doctor` only when `serve` is unreachable (a refused connection, or none made before the deadline); a `serve` that accepted the connection but answered slowly, or not before the generous probe deadline, is reported as `slow` and never fails `doctor`, since a loaded host can take several seconds to answer one scrape (`pg2-903lz`). The ledger-based `work-beads reach` line (`pg2-6w396`) was removed with the ledger, which the cutover drops: it guarded sync's adoption and closure cascade, which are removed too, and on a version-2 store it could only be skipped. `pg-connector config validate`'s own
 query-name-coverage check (a config-authoring signal comparing a backend's declared query names
 against its peers of the same type, bead `pg2-2j5ac.28.1`) is informational-only as of
@@ -479,7 +468,7 @@ or parsed fails `doctor` as a `router config` check; the checks that need no rou
 
 On a store that has NOT been cut over (old schema, or none at all), `doctor` does not refuse and does
 not crash: it reports that the store is unmigrated, points at `pg-desk migrate --cutover`, skips the
-change-flow checks above, and still prints the `sync_error rows` and `stranded cycles` lines it
+change-flow checks above, and still prints the `stranded cycles` line it
 always prints.
 
 "The config resolves" includes every configured `repos[].beads_dir`: config load MUST fail —
@@ -577,8 +566,7 @@ can drift.
   vocabulary without writing anything, and `pr mark-inactive` MUST work from a run in either lane mode and
   count a PR once.
 
-- **INV-OPERATOR-11.** <!-- uuid: b0994b23-e3bf-4c10-a9fd-1194d541b6b7 --> `doctor`'s remedy for a `sync_error` row MUST NOT name `pg-desk reconcile --retry-all` on a store at
-  schema 2, and a line of the `focus:` block that is red for a known reason until the lane flips to `apply`
+- **INV-OPERATOR-11.** <!-- uuid: b0994b23-e3bf-4c10-a9fd-1194d541b6b7 --> `doctor` MUST NOT check, list or give a remedy for a `sync_error` row, and a line of the `focus:` block that is red for a known reason until the lane flips to `apply`
   (unminted PR selections) MUST carry an `expected until P6` tag without ceasing to be a gate.
 
 ## Telemetry and logs

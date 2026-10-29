@@ -12,7 +12,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
-	pgsync "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 func scrape(t *testing.T, s *store.Store) string {
@@ -97,74 +96,6 @@ func TestMetricsDegradeOnAnOldSchemaStore(t *testing.T) {
 	} {
 		if strings.Contains(body, absent+"{") || strings.Contains(body, absent+"_total{") {
 			t.Errorf("%s has a series on an old-schema store:\n%s", absent, body)
-		}
-	}
-}
-
-// TestMetricsExposeOldestAnchorCheckAge covers bead pg2-u4c1s end to end:
-// on an old-schema store the gauge is the stalest open applied anchor's
-// ledger age (closed and planned rows excluded), and on a cut-over store
-// (no ledger table) the scrape still succeeds and reports 0.
-func TestMetricsExposeOldestAnchorCheckAge(t *testing.T) {
-	setClock(t, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
-
-	s := store.OpenForTest(t)
-	mustUpsertInterpretation(t, s, store.Interpretation{
-		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
-		Panel: PanelMineAwaitingMe, AsOf: "2026-10-05T11:59:00Z",
-	})
-	for _, l := range []store.LedgerEntry{
-		{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Kind: "anchor", BeadID: "bd-1", LastSyncedContentHash: "h", LastSyncedAt: "2026-10-05T10:00:00Z"},
-		{Repo: "o/r", EntityType: "pr", EntityID: "o/r#2", Kind: "anchor", BeadID: "bd-2", LastSyncedContentHash: "closed", LastSyncedAt: "2026-10-01T00:00:00Z"},
-		{Repo: "o/r", EntityType: "pr", EntityID: "o/r#3", Kind: "anchor", BeadID: "", LastSyncedContentHash: "h", LastSyncedAt: "2026-10-01T00:00:00Z"},
-	} {
-		if err := s.UpsertLedger(l); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if body := scrape(t, s); !strings.Contains(body, "pg_desk_oldest_anchor_check_age_seconds 7200") {
-		t.Errorf("old-schema scrape missing the 7200s anchor-check gauge:\n%s", body)
-	}
-
-	n := store.OpenNewSchemaForTest(t)
-	mustUpsertInterpretation(t, n, store.Interpretation{
-		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-05T11:59:00Z",
-	})
-	if body := scrape(t, n); !strings.Contains(body, "pg_desk_oldest_anchor_check_age_seconds 0") {
-		t.Errorf("new-schema scrape missing the zero anchor-check gauge:\n%s", body)
-	}
-}
-
-// TestMetricsExposeLastReconcileRun covers bead pg2-q89ng end to end: the
-// summary a separate `pg-desk reconcile` process left in the store is exported
-// by the scrape, and a store with no recorded run has no reconcile series.
-func TestMetricsExposeLastReconcileRun(t *testing.T) {
-	setClock(t, time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
-	s := store.OpenForTest(t)
-	mustUpsertInterpretation(t, s, store.Interpretation{
-		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
-		Panel: PanelMineAwaitingMe, AsOf: "2026-10-09T11:59:00Z",
-	})
-	if body := scrape(t, s); strings.Contains(body, "pg_desk_reconcile_") {
-		t.Errorf("scrape of a store with no reconcile run exposes reconcile series:\n%s", body)
-	}
-
-	open, skipped := 40, 38
-	if err := pgsync.WriteReconcileLastRun(s, pgsync.ReconcileLastRun{
-		At: "2026-10-09T11:30:00Z", OpenIDs: &open, SkippedOpen: &skipped, Candidates: 2, Deferred: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	body := scrape(t, s)
-	for _, line := range []string{
-		"pg_desk_reconcile_open_set_ids 40",
-		"pg_desk_reconcile_skipped_open 38",
-		"pg_desk_reconcile_candidates 2",
-		"pg_desk_reconcile_deferred 1",
-		"pg_desk_reconcile_last_run_age_seconds 1800",
-	} {
-		if !strings.Contains(body, line) {
-			t.Errorf("scrape missing %q:\n%s", line, body)
 		}
 	}
 }
@@ -378,5 +309,36 @@ func TestMetricsExposeTheWatchedEntityAndOrphanSeriesFromTheStore(t *testing.T) 
 	})
 	if body := scrape(t, old); strings.Contains(body, "pg_desk_watched_entities") || strings.Contains(body, "pg_desk_oldest_orphan_read_age_seconds") {
 		t.Errorf("an old-schema store has watched or orphan series:\n%s", body)
+	}
+}
+
+// TestMetricsScrapeOnASchema2StoreWithNoLedgerServesTheStaleGaugeAndNoRetiredName
+// is the P9a-1 guard: the metrics callback has no sync reads, so a migrated
+// schema-2 store with no ledger still serves the kept stale-snapshot gauge
+// (fresh, then stale as the heartbeat ages), and none of the retired
+// sync-era metric names appears.
+func TestMetricsScrapeOnASchema2StoreWithNoLedgerServesTheStaleGaugeAndNoRetiredName(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	n := store.OpenNewSchemaForTest(t)
+	mustUpsertInterpretation(t, n, store.Interpretation{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-05T11:59:00Z",
+	})
+	mustSetMeta(t, n, store.MetaKeyLastHeartbeat, "2026-10-05T11:59:30Z")
+	body := scrape(t, n)
+	if !strings.Contains(body, "pg_desk_dashboard_stale 0") {
+		t.Errorf("fresh heartbeat: want pg_desk_dashboard_stale 0:\n%s", body)
+	}
+	mustSetMeta(t, n, store.MetaKeyLastHeartbeat, "2026-10-05T09:00:00Z")
+	if body = scrape(t, n); !strings.Contains(body, "pg_desk_dashboard_stale 1") {
+		t.Errorf("old heartbeat: want pg_desk_dashboard_stale 1:\n%s", body)
+	}
+	for _, retired := range []string{
+		"pg_desk_sync_error_rows", "pg_desk_oldest_sync_error_age_seconds",
+		"pg_desk_sync_error_retrying_rows", "pg_desk_sync_error_exhausted_rows",
+		"pg_desk_sync_errors", "pg_desk_oldest_anchor_check_age_seconds", "pg_desk_reconcile_",
+	} {
+		if strings.Contains(body, retired) {
+			t.Errorf("retired metric %s is still emitted:\n%s", retired, body)
+		}
 	}
 }

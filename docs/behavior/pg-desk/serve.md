@@ -59,21 +59,16 @@ dashboard payload's own `age_seconds`/`stale` fields — pipeline LIVENESS, the 
 `meta.last_heartbeat`, not the age of the data; `stale` is `0 = fresh`, `1 = stale`, the
 opposite polarity from a presence-style gauge, and a stale source does not flip it), `pg_desk_dropped` (promoted from
 `dropped_count`, a point-in-time gauge, matching this payload's own field), and
-`pg_desk_sync_errors_total` (a counter, by repo — registered and exposed but with no live call
-site wired here, since `serve` never itself runs sync). `pg_desk_source_age_seconds{source}` is the
+`pg_desk_source_age_seconds{source}`, which is the
 DATA age: the seconds since each source's last successful origin fetch, one series per source with
 a recorded success and none for a source without one (never exported as `0`; see
-[`freshness.md`](freshness.md)). Five further gauges are read from the shared
-store at scrape time, so they do reflect failures `run` recorded: `pg_desk_sync_error_rows` (rows
-with a recorded `sync_error`), `pg_desk_oldest_sync_error_age_seconds`, and — splitting those rows
-by their automatic-retry state (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s "Automatic retry")
-— `pg_desk_sync_error_retrying_rows` (still being retried, so they may heal on their own) and
-`pg_desk_sync_error_exhausted_rows` (no automatic retry left: the bound was reached, or the failure
-is non-transient; these need an operator). The fifth, `pg_desk_oldest_anchor_check_age_seconds`
-(bead `pg2-u4c1s`), is the age in seconds of the stalest applied anchor check: the oldest ledger
-`last_synced_at` among `anchor` rows that have a bead and are not closed, `0` when there are none
-(and on a store that has been cut over, which has no ledger). An unchanged check writes only that
-ledger time, never the bead, so this gauge is how a stalled sync stays detectable. No Grafana alert reads these gauges any more: the four rules that did
+[`freshness.md`](freshness.md)). The sync-era gauges are gone (P9a-1): `pg_desk_sync_errors`,
+`pg_desk_sync_error_rows`, `pg_desk_oldest_sync_error_age_seconds`, `pg_desk_sync_error_retrying_rows`,
+`pg_desk_sync_error_exhausted_rows`, `pg_desk_oldest_anchor_check_age_seconds` and the
+`pg_desk_reconcile_*` gauges are no longer emitted, and the metrics callback makes no sync read, so one
+failing sync read can no longer fail the kept liveness, dashboard-age, stale and source-age gauges, and
+`pg_desk_dashboard_stale` still serves on a schema-2 store that has no ledger. No Grafana alert reads
+the retired gauges: the four rules that did
 (`pg-desk-sync-errors`, `pg-desk-sync-error-rows`, `pg-desk-sync-error-retrying` and
 `pg-desk-unreconciled-anchor-age`) were retired with the schema-2 cutover, which dropped the
 `sync_error` column they read. Their uids are listed in the delete-only file
@@ -86,25 +81,6 @@ log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 `serve` still logs to the path its launchd module configures, defaulting to
 `~/Library/Logs/pg-desk-serve.log`. This resolves the observability review's (`pg2-7kizi`) `serve`
 half.
-
-### Reconcile metrics
-
-`pg-desk reconcile` runs as a separate process, and its `reconcile_open_set` / `reconcile_deferred`
-log lines are discarded by the scheduler on a successful run (bead `pg2-q89ng`). It therefore
-records a summary of each run in the store (`meta.reconcile.last_run`, see
-[`operator-commands.md`](operator-commands.md)), and `/metrics` exposes the LAST run's summary at
-scrape time as gauges:
-
-- `pg_desk_reconcile_open_set_ids` and `pg_desk_reconcile_skipped_open` — the open-set size and the
-  number of open anchors not re-read because a watched query still listed their PR. A run that did
-  not read the open set has NO series for these two (never `0`).
-- `pg_desk_reconcile_candidates` — re-drive candidates the run considered.
-- `pg_desk_reconcile_deferred` — candidates the run deferred on a transient read failure.
-- `pg_desk_reconcile_last_run_age_seconds` — seconds since the run finished, so a stopped schedule
-  is visible and the gauges above can be read as current or stale.
-
-Until a run has recorded a summary (and on a store whose value is unreadable) none of these has a
-series.
 
 ### Change-flow metrics
 

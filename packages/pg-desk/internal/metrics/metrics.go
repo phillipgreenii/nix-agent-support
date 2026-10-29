@@ -2,8 +2,8 @@
 // (design doc section 8), replacing the earlier hand-written `pg_desk_up 1`
 // stub that internal/httpapi's /metrics route used to serve: liveness, and
 // three gauges promoted from the /api/v1/dashboard payload's own
-// freshness/counter fields (age_seconds, stale, dropped_count), plus a
-// sync-errors-by-repo counter. Built the same way pg-router's own catalog
+// freshness/counter fields (age_seconds, stale, dropped_count), plus the
+// per-source fetch age. Built the same way pg-router's own catalog
 // is: the OTel metrics API (go.opentelemetry.io/otel/metric) plus
 // go.opentelemetry.io/otel/exporters/prometheus, so /metrics stays a
 // directly-scraped Prometheus exposition endpoint — no OTLP push involved
@@ -54,73 +54,11 @@ const (
 	// count, hence a gauge, not a counter (matches the My Work dashboard's
 	// collapsed "Dropped PR Count" panel's lastNotNull semantics).
 	MetricDropped = "pg_desk_dropped"
-	// MetricSyncErrors counts sync failures for a PR, by repo (Phase 10),
-	// mirroring the retired PR tool's ops dashboard "Sync errors" panel. Registered and exposed
-	// here (see RecordSyncError) but — like pg-router's own throughput and
-	// dispatch_latency catalog members — with no live production call
-	// site wired from this package: serve never itself runs sync (that
-	// happens in a separate `pg-desk run` process against the shared
-	// store), so there is nowhere in serve's own request path to observe
-	// a sync failure the moment it happens. A future task that threads an
-	// Emitter (or an equivalent cross-process path) into the sync stage
-	// is left to wire the live call site, exactly as pg-router's own
-	// RecordThroughput/RecordDispatchLatency are built and exposed
-	// without one yet.
-	MetricSyncErrors = "pg_desk_sync_errors"
-	// MetricSyncErrorRows is the point-in-time count of interpretation rows
-	// with a non-empty sync_error (pg2-kftf9.5). Unlike MetricSyncErrors it
-	// is derived from the shared store at scrape time, so it reflects
-	// failures recorded by the separate `pg-desk run` process.
-	MetricSyncErrorRows = "pg_desk_sync_error_rows"
-	// MetricOldestSyncErrorAge is the age in seconds of the oldest row with
-	// a non-empty sync_error (0 when none): the oldest unreconciled anchor.
-	MetricOldestSyncErrorAge = "pg_desk_oldest_sync_error_age_seconds"
-	// MetricSyncErrorRetryingRows is the point-in-time count of sync_error
-	// rows still being retried automatically (bead pg2-xb6fs): a transient
-	// failure within the retry bound, or a row not yet retried at all. These
-	// may heal on their own.
-	MetricSyncErrorRetryingRows = "pg_desk_sync_error_retrying_rows"
-	// MetricSyncErrorExhaustedRows is the point-in-time count of sync_error
-	// rows that will get no further automatic retry (bead pg2-xb6fs): the
-	// retry bound was reached, or the failure was classified non-transient
-	// and was never retried. These need an operator.
-	MetricSyncErrorExhaustedRows = "pg_desk_sync_error_exhausted_rows"
-	// MetricOldestAnchorCheckAge is the age in seconds of the stalest applied
-	// anchor check (bead pg2-u4c1s): the oldest ledger last_synced_at among
-	// kind=anchor rows that have a bead and are not closed, 0 when none. An
-	// unchanged check no longer touches the anchor bead, so this is how a
-	// stalled sync stays detectable.
-	MetricOldestAnchorCheckAge = "pg_desk_oldest_anchor_check_age_seconds"
 	// MetricSourceAge is the age in seconds of each source's last SUCCESSFUL
 	// origin fetch, per source (the connector backend). A source with no
 	// recorded success exports NO series: it is never exported as 0, which
 	// would read as freshly fetched.
 	MetricSourceAge = "pg_desk_source_age_seconds"
-
-	// The pg_desk_reconcile_* gauges (bead pg2-q89ng) report the most recent
-	// `pg-desk reconcile` run, persisted by that separate process into the
-	// shared store and read here at scrape time. They exist because a
-	// successful run's stderr (the reconcile_open_set and reconcile_deferred
-	// log lines) is discarded by pg-router. With no recorded run they export no
-	// series, never 0.
-
-	// MetricReconcileOpenSetIDs is the last run's open-set size (the
-	// reconcile_open_set line's open_ids). No series when that run did not read
-	// the open set.
-	MetricReconcileOpenSetIDs = "pg_desk_reconcile_open_set_ids"
-	// MetricReconcileSkippedOpen is the last run's count of open anchors not
-	// re-read because a watched query still listed their PR (skipped_open).
-	// No series when that run did not read the open set.
-	MetricReconcileSkippedOpen = "pg_desk_reconcile_skipped_open"
-	// MetricReconcileCandidates is the last run's number of re-drive candidates.
-	MetricReconcileCandidates = "pg_desk_reconcile_candidates"
-	// MetricReconcileDeferred is the number of candidates the last run deferred
-	// on a transient read failure (its reconcile_deferred lines).
-	MetricReconcileDeferred = "pg_desk_reconcile_deferred"
-	// MetricReconcileLastRunAge is the seconds since the last run finished, so a
-	// stopped reconcile schedule is visible and the gauges above can be read as
-	// current or stale.
-	MetricReconcileLastRunAge = "pg_desk_reconcile_last_run_age_seconds"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -132,31 +70,9 @@ type Snapshot struct {
 	AgeSeconds   int
 	Stale        bool
 	DroppedCount int
-	// SyncErrorRows and OldestSyncErrorAgeSeconds are pg2-kftf9.5's
-	// leaked-anchor signals.
-	SyncErrorRows             int
-	OldestSyncErrorAgeSeconds int
-	// SyncErrorRetryingRows and SyncErrorExhaustedRows split SyncErrorRows by
-	// automatic-retry state (bead pg2-xb6fs); they sum to SyncErrorRows.
-	SyncErrorRetryingRows  int
-	SyncErrorExhaustedRows int
-	// OldestAnchorCheckAgeSeconds backs MetricOldestAnchorCheckAge.
-	OldestAnchorCheckAgeSeconds int
 	// SourceAges backs MetricSourceAge: one entry per source with a known
 	// age; sources with an unknown age are omitted.
 	SourceAges []SourceAge
-	// Reconcile backs the pg_desk_reconcile_* gauges; nil when no reconcile
-	// run has recorded a summary, which exports no series.
-	Reconcile *ReconcileSnapshot
-}
-
-// ReconcileSnapshot is the last `pg-desk reconcile` run's summary. OpenIDs and
-// SkippedOpen are meaningful only when HaveOpenSet (the run read the open set).
-type ReconcileSnapshot struct {
-	OpenIDs, SkippedOpen int
-	HaveOpenSet          bool
-	Candidates, Deferred int
-	AgeSeconds           int
 }
 
 // SourceAge is one source's age for MetricSourceAge.
@@ -168,16 +84,11 @@ type SourceAge struct {
 // SnapshotFunc supplies the current dashboard snapshot at collect time.
 type SnapshotFunc func() (Snapshot, error)
 
-// Emitter emits the catalog over an OTel meter.
-type Emitter struct {
-	syncErrors metric.Int64Counter
-}
-
-// New registers the instruments above on a meter from mp and returns an
-// Emitter. snapshotFn supplies the three dashboard-derived gauges, read
+// New registers the instruments above on a meter from mp.
+// snapshotFn supplies the three dashboard-derived gauges, read
 // fresh on every collect (never cached), matching httpapi.BuildPayload's
 // own read-at-request-time contract.
-func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
+func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) error {
 	m := mp.Meter("github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk")
 
 	if _, err := m.Int64ObservableGauge(
@@ -188,7 +99,7 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 			return nil
 		}),
 	); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Every snapshot-derived gauge is observed from ONE callback, so snapshotFn
@@ -220,32 +131,12 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 			name: MetricDropped, desc: "point-in-time dropped_count from the /api/v1/dashboard payload (matches the My Work dashboard's collapsed Dropped PR Count panel's lastNotNull semantics)",
 			val: func(s Snapshot) int64 { return int64(s.DroppedCount) },
 		},
-		{
-			name: MetricSyncErrorRows, desc: "count of interpretation rows with a non-empty sync_error (leaked/unreconciled anchors)",
-			val: func(s Snapshot) int64 { return int64(s.SyncErrorRows) },
-		},
-		{
-			name: MetricOldestSyncErrorAge, desc: "age in seconds of the oldest row with a non-empty sync_error, 0 when none",
-			val: func(s Snapshot) int64 { return int64(s.OldestSyncErrorAgeSeconds) },
-		},
-		{
-			name: MetricSyncErrorRetryingRows, desc: "count of sync_error rows still being retried automatically (transient, within the retry bound)",
-			val: func(s Snapshot) int64 { return int64(s.SyncErrorRetryingRows) },
-		},
-		{
-			name: MetricSyncErrorExhaustedRows, desc: "count of sync_error rows with no automatic retry left (retry bound reached, or non-transient); these need an operator",
-			val: func(s Snapshot) int64 { return int64(s.SyncErrorExhaustedRows) },
-		},
-		{
-			name: MetricOldestAnchorCheckAge, desc: "age in seconds of the oldest applied, non-closed anchor's last check (ledger last_synced_at), 0 when none",
-			val: func(s Snapshot) int64 { return int64(s.OldestAnchorCheckAgeSeconds) },
-		},
 	}
 	instruments := make([]metric.Observable, 0, len(gauges)+1)
 	for _, g := range gauges {
 		inst, err := m.Int64ObservableGauge(g.name, metric.WithDescription(g.desc))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		g.inst = inst
 		instruments = append(instruments, inst)
@@ -255,30 +146,9 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		metric.WithDescription("age, in seconds, of each source's last successful origin fetch (the connector ledger's refreshed_at), per source; a source with no recorded success exports no series"),
 	)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	instruments = append(instruments, sourceAge)
-	reconcileGauges := []struct {
-		name, desc string
-		val        func(ReconcileSnapshot) int64
-		needsOpen  bool
-		inst       metric.Int64ObservableGauge
-	}{
-		{name: MetricReconcileOpenSetIDs, desc: "open-set size (PR ids the watched queries list) read by the last pg-desk reconcile run; no series when it did not read the open set", val: func(r ReconcileSnapshot) int64 { return int64(r.OpenIDs) }, needsOpen: true},
-		{name: MetricReconcileSkippedOpen, desc: "open anchors the last pg-desk reconcile run did not re-read because a watched query still listed their PR; no series when it did not read the open set", val: func(r ReconcileSnapshot) int64 { return int64(r.SkippedOpen) }, needsOpen: true},
-		{name: MetricReconcileCandidates, desc: "re-drive candidates of the last pg-desk reconcile run", val: func(r ReconcileSnapshot) int64 { return int64(r.Candidates) }},
-		{name: MetricReconcileDeferred, desc: "candidates the last pg-desk reconcile run deferred on a transient read failure", val: func(r ReconcileSnapshot) int64 { return int64(r.Deferred) }},
-		{name: MetricReconcileLastRunAge, desc: "age in seconds of the last pg-desk reconcile run; no series when none has recorded a summary", val: func(r ReconcileSnapshot) int64 { return int64(r.AgeSeconds) }},
-	}
-	for i := range reconcileGauges {
-		g := &reconcileGauges[i]
-		inst, err := m.Int64ObservableGauge(g.name, metric.WithDescription(g.desc))
-		if err != nil {
-			return nil, err
-		}
-		g.inst = inst
-		instruments = append(instruments, inst)
-	}
 	if _, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		snap, err := snapshotFn()
 		if err != nil {
@@ -290,33 +160,10 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		for _, s := range snap.SourceAges {
 			o.ObserveInt64(sourceAge, int64(s.Seconds), metric.WithAttributes(attribute.String("source", s.Source)))
 		}
-		if r := snap.Reconcile; r != nil {
-			for _, g := range reconcileGauges {
-				if g.needsOpen && !r.HaveOpenSet {
-					continue
-				}
-				o.ObserveInt64(g.inst, g.val(*r))
-			}
-		}
 		return nil
 	}, instruments...); err != nil {
-		return nil, err
+		return err
 	}
 
-	syncErrors, err := m.Int64Counter(
-		MetricSyncErrors,
-		metric.WithDescription("sync failures for a PR, by repo (Phase 10); registered and exposed here with no live call site wired from serve — see MetricSyncErrors' doc"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Emitter{syncErrors: syncErrors}, nil
-}
-
-// RecordSyncError increments the sync-errors-by-repo counter. Exported for
-// direct/test use; see MetricSyncErrors' doc for why no production call
-// site is wired from this package.
-func (e *Emitter) RecordSyncError(repo string) {
-	e.syncErrors.Add(context.Background(), 1, metric.WithAttributes(attribute.String("repo", repo)))
+	return nil
 }

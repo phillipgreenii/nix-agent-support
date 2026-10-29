@@ -17,13 +17,12 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/lanestate"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // newMetricsHandler replaces the earlier `pg_desk_up 1` stub (design D5)
 // with a real catalog (design section 8): pg_desk_liveness,
 // pg_desk_dashboard_age_seconds, pg_desk_dashboard_stale, pg_desk_dropped,
-// and pg_desk_sync_errors_total, served as directly-scraped Prometheus
+// and pg_desk_source_age_seconds, served as directly-scraped Prometheus
 // exposition text — the same OTel-metrics-API + prometheus.Exporter
 // approach pg-router's own catalog uses (no OTLP push involved for
 // metrics), on serve's EXISTING /metrics route (no new port).
@@ -59,39 +58,15 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		if err != nil {
 			return metrics.Snapshot{}, err
 		}
-		interps, err := st.ListInterpretations()
-		if err != nil {
-			return metrics.Snapshot{}, err
-		}
-		syncRows, oldestAge := syncErrorStats(interps, nowUTC())
-		retrying, exhausted, err := syncRetryStats(st, interps)
-		if err != nil {
-			return metrics.Snapshot{}, err
-		}
-		anchorCheckAge, err := sync.OldestAnchorCheckAge(st, nowUTC())
-		if err != nil {
-			return metrics.Snapshot{}, err
-		}
-		reconcileRun, reconcileAge, haveReconcile, err := sync.ReadReconcileLastRun(st, nowUTC())
-		if err != nil {
-			return metrics.Snapshot{}, err
-		}
 		return metrics.Snapshot{
-			AgeSeconds:                payload.AgeSeconds,
-			Stale:                     payload.Stale,
-			DroppedCount:              payload.DroppedCount,
-			SyncErrorRows:             syncRows,
-			OldestSyncErrorAgeSeconds: oldestAge,
-			SyncErrorRetryingRows:     retrying,
-			SyncErrorExhaustedRows:    exhausted,
-
-			OldestAnchorCheckAgeSeconds: anchorCheckAge,
-			SourceAges:                  sourceAges(payload.Sources),
-			Reconcile:                   reconcileSnapshot(reconcileRun, reconcileAge, haveReconcile),
+			AgeSeconds:   payload.AgeSeconds,
+			Stale:        payload.Stale,
+			DroppedCount: payload.DroppedCount,
+			SourceAges:   sourceAges(payload.Sources),
 		}, nil
 	}
 
-	if _, err := metrics.New(mp, snapshotFn); err != nil {
+	if err := metrics.New(mp, snapshotFn); err != nil {
 		return nil, fmt.Errorf("httpapi: new metrics emitter: %w", err)
 	}
 
@@ -215,19 +190,6 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	return scrapeHandler(registry, scrapeTimeout), nil
 }
 
-// reconcileSnapshot projects the persisted last reconcile run to the gauges'
-// input; nil (no series) when no run has recorded a summary (bead pg2-q89ng).
-func reconcileSnapshot(r sync.ReconcileLastRun, ageSeconds int, found bool) *metrics.ReconcileSnapshot {
-	if !found {
-		return nil
-	}
-	out := &metrics.ReconcileSnapshot{Candidates: r.Candidates, Deferred: r.Deferred, AgeSeconds: ageSeconds}
-	if r.OpenIDs != nil && r.SkippedOpen != nil {
-		out.HaveOpenSet, out.OpenIDs, out.SkippedOpen = true, *r.OpenIDs, *r.SkippedOpen
-	}
-	return out
-}
-
 // sourceAges projects the payload's sources[] to the gauge's input: a
 // source with no recorded success (null age) is omitted, so it exports no
 // series rather than a misleading 0.
@@ -239,46 +201,6 @@ func sourceAges(rows []freshness.Row) []metrics.SourceAge {
 		}
 	}
 	return out
-}
-
-// syncErrorStats counts interpretation rows with a non-empty sync_error and
-// returns the age in seconds of the oldest (by as_of); 0 when none or when
-// as_of is unparseable (pg2-kftf9.5).
-func syncErrorStats(interps []store.Interpretation, now time.Time) (rows, oldestAgeSeconds int) {
-	for _, i := range interps {
-		if i.SyncError == "" {
-			continue
-		}
-		rows++
-		if t := parseAsOf(i.AsOf); !t.IsZero() {
-			if age := int(now.Sub(t).Seconds()); age > oldestAgeSeconds {
-				oldestAgeSeconds = age
-			}
-		}
-	}
-	return rows, oldestAgeSeconds
-}
-
-// syncRetryStats splits the sync_error rows by automatic-retry state (bead
-// pg2-xb6fs): retrying (including a row with no recorded state yet, which is
-// due for its first retry) versus exhausted (retry bound reached, or
-// non-transient — no automatic retry left).
-func syncRetryStats(st *store.Store, interps []store.Interpretation) (retrying, exhausted int, err error) {
-	for _, i := range interps {
-		if i.SyncError == "" {
-			continue
-		}
-		r, _, err := st.GetSyncRetry(i.EntityID)
-		if err != nil {
-			return 0, 0, err
-		}
-		if r.EffectiveState() == store.SyncRetryRetrying {
-			retrying++
-		} else {
-			exhausted++
-		}
-	}
-	return retrying, exhausted, nil
 }
 
 // focusHealthTTL is how old the cached focus health may get before a scrape
