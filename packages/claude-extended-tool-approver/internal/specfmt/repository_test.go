@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 )
 
 // minimalCommand builds a well-formed (passes Validate) command Spec with
@@ -216,5 +218,94 @@ func TestRepository_InvalidSpecExcludedNotSilentlyMerged(t *testing.T) {
 	}
 	if len(merged.Invalid) != 1 || merged.Invalid[0].Path != "bad.json" {
 		t.Fatalf("Invalid = %#v, want exactly one entry for bad.json", merged.Invalid)
+	}
+}
+
+// pg2-7ekzoi: AssembleRegistry / LoadLiveRegistry rules.
+
+// convertibleCommand is minimalCommand plus the positional roles ToSchema
+// requires, so the spec survives conversion into a cmddesc schema.
+func convertibleCommand(name, provenance string, overrides bool) Spec {
+	s := minimalCommand(name, provenance, overrides)
+	s.Command.Positionals.Rest = OperandRoleV1{Kind: "literal"}
+	s.Command.Positionals.RestOverride.Role = OperandRoleV1{Kind: "literal"}
+	return s
+}
+
+func TestAssembleRegistryAddsUserSpec(t *testing.T) {
+	user := t.TempDir()
+	writeSpecFile(t, user, "mine.json", convertibleCommand("example-mine", "p", false))
+	reg, set, skipped, err := LoadLiveRegistry(cmddesc.DefaultRegistry(), user, "")
+	if err != nil || len(skipped) != 0 || len(set.Invalid) != 0 {
+		t.Fatalf("err=%v skipped=%v invalid=%v", err, skipped, set.Invalid)
+	}
+	if _, ok := reg.Lookup("example-mine"); !ok {
+		t.Fatal("user spec not added")
+	}
+	if _, ok := reg.Lookup("git"); !ok {
+		t.Fatal("builtin lost")
+	}
+}
+
+func TestAssembleRegistryNeverReplacesBuiltinEvenWithOverrides(t *testing.T) {
+	user := t.TempDir()
+	writeSpecFile(t, user, "git.json", convertibleCommand("git", "attacker", true))
+	builtin := cmddesc.DefaultRegistry()
+	want, _ := builtin.Lookup("git")
+	reg, _, skipped, err := LoadLiveRegistry(builtin, user, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skipped) != 1 || skipped[0].Reason != SkipBuiltinName || skipped[0].Name != "git" {
+		t.Fatalf("skipped = %+v", skipped)
+	}
+	got, _ := reg.Lookup("git")
+	if got.Provenance != want.Provenance {
+		t.Fatalf("builtin git replaced: provenance %q", got.Provenance)
+	}
+}
+
+func TestAssembleRegistryExcludesInvalidAndConflicted(t *testing.T) {
+	user, repo := t.TempDir(), t.TempDir()
+	bad := convertibleCommand("example-bad", "p", false)
+	bad.Command.Citations = nil // fails Validate
+	writeSpecFile(t, user, "bad.json", bad)
+	writeSpecFile(t, user, "dup.json", convertibleCommand("example-dup", "user", false))
+	writeSpecFile(t, repo, "dup.json", convertibleCommand("example-dup", "repo", false)) // undeclared override
+	writeSpecFile(t, user, "ok.json", convertibleCommand("example-ok", "user", false))
+	writeSpecFile(t, repo, "ok.json", convertibleCommand("example-ok", "repo", true)) // declared override: repo wins
+	reg, set, skipped, err := LoadLiveRegistry(cmddesc.DefaultRegistry(), user, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Invalid) != 1 {
+		t.Fatalf("invalid = %+v", set.Invalid)
+	}
+	if _, ok := reg.Lookup("example-bad"); ok {
+		t.Error("invalid spec reached the registry")
+	}
+	if _, ok := reg.Lookup("example-dup"); ok {
+		t.Error("conflicted spec reached the registry")
+	}
+	if len(skipped) != 1 || skipped[0].Reason != SkipConflict {
+		t.Errorf("skipped = %+v", skipped)
+	}
+	if s, ok := reg.Lookup("example-ok"); !ok || s.Provenance != "repo" {
+		t.Errorf("declared override: %+v ok=%v", s, ok)
+	}
+}
+
+func TestLoadLiveRegistryFailsClosedOnMalformedJSON(t *testing.T) {
+	user := t.TempDir()
+	if err := os.WriteFile(filepath.Join(user, "x.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builtin := cmddesc.DefaultRegistry()
+	reg, _, _, err := LoadLiveRegistry(builtin, user, "")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if len(reg.Names()) != len(builtin.Names()) {
+		t.Fatal("registry must be builtin-only on load error")
 	}
 }

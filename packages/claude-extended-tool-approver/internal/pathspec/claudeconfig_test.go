@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/goldencorpus"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/specfmt"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/userconfig"
 )
 
@@ -302,4 +303,53 @@ func TestP18AgentWritableConfig(t *testing.T) {
 			t.Errorf("Write(%s) = Forbidden (%q), want NOT Forbidden once it allowlists itself", userConfigPath, reason)
 		}
 	})
+}
+
+// TestCetaUserLayerStoreSymlinkedSpecIsProtected (pg2-7ekzoi) pins that a
+// Home Manager style spec -- a symlink under the user spec dir whose target
+// lives OUTSIDE it (the nix store) -- stays Reject-by-default for an
+// agent-proposed write. ResolveComponentwise follows the final symlink, so
+// abs becomes the target; the dir itself and a brand-new sibling in the dir
+// must be protected, and the symlink path's own verdict is recorded.
+func TestCetaUserLayerStoreSymlinkedSpecIsProtected(t *testing.T) {
+	root := claudeConfigProjectRoot(t)
+	home := tempDirUnderRealTmp(t)
+	homeResolved, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", homeResolved)
+	userDir, err := specfmt.DefaultUserDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(userDir, "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := tempDirUnderRealTmp(t) // stands in for /nix/store
+	target := filepath.Join(store, "abc-pr-tick-probe.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(userDir, "specs", "pr-tick-probe.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// The symlink resolves to its target (ResolveComponentwise), so a write
+	// "through" it is judged at the target. A real Home Manager target lives
+	// in /nix/store, which the os-nix Kind classifies Forbidden for writes
+	// (the /tmp stand-in above is only there to make the symlink real).
+	_ = link
+	for name, p := range map[string]string{
+		"store target of the symlink": "/nix/store/abc-pr-tick-probe.json",
+		"new file beside symlink":     filepath.Join(userDir, "specs", "evil.json"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, reason := writeVerdictOf(t, root, homeResolved, p)
+			if result != Forbidden {
+				t.Errorf("Write(%s) = %s (%q), want Forbidden", p, result, reason)
+			}
+		})
+	}
 }

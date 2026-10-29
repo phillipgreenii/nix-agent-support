@@ -268,6 +268,41 @@ Go source.
   and dependency injection wiring in `RuleChain` — `kubectl`/`buildtools` are the reference
   pattern cited by ADR 0033 for any future block of the same shape.
 
+## Effect engine: user-layer and repo-layer command specs (pg2-7ekzoi)
+
+The effect engine's command registry is `cmddesc.DefaultRegistry()` plus the
+user layer (`specfmt.DefaultUserDir()`, HOME-resolved, never `$XDG_CONFIG_HOME`:
+ADR 0075 P7) and the repo layer (`.ceta/`), composed by
+`specfmt.LoadLiveRegistry` / `specfmt.AssembleRegistry`
+(`internal/specfmt/liveregistry.go`). The live PreToolUse hook still runs the
+RuleChain; this assembler is what the R1 cutover (ADR 0075) MUST call to build
+the registry it hands to `effectpolicy.Evaluate`. Decisions, all fail closed:
+
+- **Add-only.** A user or repo spec whose name is a built-in schema is skipped
+  even when it declares `Overrides`. `Overrides` keeps its meaning between the
+  user and repo layers (the repo spec wins), but cannot loosen a built-in: a
+  repo's `.ceta/` is agent-writable by default, so replacing `git` or `rm`
+  would hand an agent the policy. Replacing a built-in needs a code change.
+- **Invalid specs are excluded** (`MergedSet.Invalid`); an undeclared
+  cross-layer override (`MergedSet.Conflicts`) excludes the name entirely; a
+  spec `ToSchema` rejects is skipped. Each skip is returned as a
+  `SkippedSpec` for the caller to log.
+- **A load error** (unreadable dir, malformed JSON) returns the built-in
+  registry unchanged plus the error.
+- **Store-symlinked specs.** Home Manager deploys spec files as symlinks into
+  `/nix/store`; the loader reads through file symlinks (a symlinked
+  DIRECTORY is not walked). Path-trust: `pathspec.isCetaConfigFile` matches the
+  user dir by path, but `ResolveComponentwise` resolves a write target through
+  its symlink first, so a write to a store-symlinked spec is judged at its
+  `/nix/store` target, which the `os-nix` kind forbids; a new file beside it is
+  Forbidden by `isCetaConfigFile` (test:
+  `TestCetaUserLayerStoreSymlinkedSpecIsProtected`). Not verified here: deleting or
+  re-pointing the symlink itself (the delete facet).
+
+Tests: `internal/specfmt/repository_test.go` (assembly rules) and
+`internal/effectpolicy/liveregistry_test.go` (pinned approve/abstain rows
+through the real engine, hermetic HOME, store-style symlink).
+
 ## File map
 
 | Path                                 | Role                                                                                        |
