@@ -26,26 +26,8 @@ import (
 // as incomplete, never as complete.
 const StatusUnknown = "unknown"
 
-// StatusNotWatched is the Listing status of a configured watch query of a
-// daemonOwnedTypes type while no change flow is wired for that type (no
-// consumer of the type is registered, so nothing has ever listed it). It is
-// explicit rather than unknown, and it does not make coverage incomplete: the
-// query is simply not watched yet. Once a flow is wired a query that still
-// has no recorded status is StatusUnknown and incomplete again.
-const StatusNotWatched = "not-watched"
-
-// notWatchedReason is the Reason of a StatusNotWatched listing.
-const notWatchedReason = "no change flow wired for this type"
-
 // unknownReason is the Reason of a StatusUnknown listing.
 const unknownReason = "no listing status recorded"
-
-// daemonOwnedTypes are the entity types whose change flow is owned by the
-// daemon cutover (the pr feed) rather than a role that runs
-// `pg-desk <type> changes` today. For these, no registered consumer means
-// "not yet watched", not "watched but unrecorded". issue is absent on
-// purpose: its flow is wired, so a missing status there is a real gap.
-var daemonOwnedTypes = map[string]bool{entityTypePR: true}
 
 // The listing statuses the persisted keys carry (the changes package's
 // StatusOK, StatusDegraded and StatusFailed).
@@ -56,7 +38,7 @@ const (
 )
 
 // CoverageTypes are the entity types whose coverage focus reports, in order.
-var CoverageTypes = []string{entityTypePR, entityTypeIssue}
+var CoverageTypes = []string{entityTypeIssue}
 
 // CoverageReport is the coverage of one run. State is what a stored draft
 // carries; Notices are the routine conditions (a small hydration backlog)
@@ -108,8 +90,6 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 		for _, l := range listings {
 			cov.Listings = append(cov.Listings, l)
 			switch l.Status {
-			case StatusNotWatched:
-				continue
 			case StatusUnknown:
 				rep.State.Reasons = append(rep.State.Reasons, fmt.Sprintf("%s %s listing status unknown", t, l.Query))
 				continue
@@ -150,10 +130,8 @@ func listingReason(t string, ls Listing) string {
 // entityType, in configured order, read from the persisted statuses only.
 // It is the one resolution behind both `focus show` coverage and `doctor`, so
 // the two agree on the same query. A query with no persisted status is
-// StatusNotWatched when entityType is daemon-owned and no change flow is
-// wired for it (changes.FlowWired), otherwise StatusUnknown. An unreadable
-// consumer table counts as wired: a source that may be missing is shown as
-// incomplete, never as quietly not watched.
+// StatusUnknown: a source that may be missing is shown as incomplete, never as
+// quietly not watched.
 func QueryListings(st *store.Store, cfg *config.Config, entityType string) ([]Listing, error) {
 	if cfg == nil {
 		cfg = &config.Config{}
@@ -166,18 +144,10 @@ func QueryListings(st *store.Store, cfg *config.Config, entityType string) ([]Li
 	for _, ls := range persisted {
 		byQuery[ls.Query] = ls
 	}
-	wired := true
-	if daemonOwnedTypes[entityType] {
-		if w, werr := changes.FlowWired(st, entityType); werr == nil {
-			wired = w
-		}
-	}
 	var out []Listing
 	for _, q := range cfg.WatchQueries(entityType) {
 		if ls, ok := byQuery[q]; ok {
 			out = append(out, Listing{Query: q, Status: ls.Status, Reason: ls.Reason})
-		} else if !wired {
-			out = append(out, Listing{Query: q, Status: StatusNotWatched, Reason: notWatchedReason})
 		} else {
 			out = append(out, Listing{Query: q, Status: StatusUnknown, Reason: unknownReason})
 		}

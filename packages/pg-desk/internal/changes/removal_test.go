@@ -17,7 +17,7 @@ import (
 
 // These tests pin the removal confirmation read: an entity that left every
 // watched query is read once (`show`, change kind removed, nil list_fp)
-// before it is deactivated, so a merged or closed PR is classified instead of
+// before it is deactivated, so a closed issue is classified instead of
 // being logged only as removed.
 //
 // Freedom boundary [design RULED D11]: the confirmation reads do NOT count
@@ -82,9 +82,8 @@ func (h *confirmHydrator) RunEntityChange(_ context.Context, entityType, id stri
 }
 
 const (
-	prOpenFacts   = `{"pr_show":{"state":"open","head_sha":"a1"}}`
-	prMergedFacts = `{"pr_show":{"state":"merged","merged":true,"head_sha":"a1"}}`
-	prClosedFacts = `{"pr_show":{"state":"closed","head_sha":"a1"}}`
+	prOpenFacts   = `{"issue_show":{"state":"open"}}`
+	prClosedFacts = `{"issue_show":{"state":"closed"}}`
 )
 
 func newPREngine(t *testing.T, queries ...string) (*Engine, *store.Store, *confirmHydrator) {
@@ -92,7 +91,12 @@ func newPREngine(t *testing.T, queries ...string) (*Engine, *store.Store, *confi
 	st := store.OpenNewSchemaForTest(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
-	cfg.Watch.PR.Queries = queries
+	cfg.Watch.Issue.Queries = queries
+	for _, q := range queries {
+		if err := st.SetMeta(MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h := newConfirmHydrator(st)
 	return &Engine{
 		Cfg: cfg, Store: st, Hydrator: h,
@@ -107,13 +111,20 @@ func seedWatchedPR(t *testing.T, st *store.Store, ids ...string) {
 	set := map[string]bool{}
 	for _, id := range ids {
 		fp := "F1"
-		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: prOpenFacts, AsOf: "x"},
+		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: prOpenFacts, AsOf: "x"},
 			0, "2026-10-01T11:00:00Z", true, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+		// An explicitly UNWATCHED issue (column 0, not NULL): a watched one that
+		// left its queries is an orphan, not a removal candidate, and a NULL
+		// one listed by a baselined query is a late watch.
+		watched := false
+		if err := st.SetEntityColumns("o/r", "issue", id, nil, &watched); err != nil {
 			t.Fatal(err)
 		}
 		set[id] = true
 	}
-	if err := saveWatchSet(st, "pr", "open", set); err != nil {
+	if err := saveWatchSet(st, "issue", "open", set); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -121,7 +132,7 @@ func seedWatchedPR(t *testing.T, st *store.Store, ids ...string) {
 func runPRTick(t *testing.T, e *Engine) (Envelope, Outcome, error) {
 	t.Helper()
 	var env Envelope
-	out, err := e.Run(context.Background(), Options{EntityType: "pr", Consumer: "router"}, func(v Envelope) error { env = v; return nil })
+	out, err := e.Run(context.Background(), Options{EntityType: "issue", Consumer: "router"}, func(v Envelope) error { env = v; return nil })
 	return env, out, err
 }
 
@@ -149,14 +160,14 @@ func kindsLogged(t *testing.T, st *store.Store, entityType, id string) []string 
 
 func prInactive(t *testing.T, st *store.Store, id string) bool {
 	t.Helper()
-	row, found, err := st.GetEntity("o/r", "pr", id)
+	row, found, err := st.GetEntity("o/r", "issue", id)
 	if err != nil || !found {
 		t.Fatalf("pr %s: found=%v err=%v", id, found, err)
 	}
 	return row.Inactive
 }
 
-// The removal outcomes: terminal reads classify as merged/closed, an open read
+// The removal outcomes: terminal reads classify as closed, an open read
 // and a not_found read log removed; every one deactivates, drops the id from
 // the persisted set, and costs exactly one show per candidate.
 func TestRemovalConfirmationClassifiesWhatTheReadShows(t *testing.T) {
@@ -165,8 +176,7 @@ func TestRemovalConfirmationClassifiesWhatTheReadShows(t *testing.T) {
 		show showOutcome
 		want []string
 	}{
-		{"merged", showOutcome{facts: prMergedFacts}, []string{"merged"}},
-		{"closed", showOutcome{facts: prClosedFacts}, []string{"closed"}},
+		{"closed", showOutcome{facts: prClosedFacts}, []string{"closed", "status_changed"}},
 		{"still open", showOutcome{facts: prOpenFacts}, []string{"removed"}},
 		{"not found", showOutcome{notFound: true}, []string{"removed"}},
 	}
@@ -181,13 +191,13 @@ func TestRemovalConfirmationClassifiesWhatTheReadShows(t *testing.T) {
 			if err != nil || out.Partial {
 				t.Fatalf("tick = %+v, %v", out, err)
 			}
-			if got := kindsLogged(t, st, "pr", "pr-1"); !reflect.DeepEqual(got, tc.want) {
+			if got := kindsLogged(t, st, "issue", "pr-1"); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("logged %v, want %v", got, tc.want)
 			}
 			if !prInactive(t, st, "pr-1") {
 				t.Error("the entity must be deactivated")
 			}
-			if got := loadWatchSet(st, "pr", "open"); len(got) != 0 {
+			if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
 				t.Errorf("persisted = %v, want the id dropped", got)
 			}
 			if !reflect.DeepEqual(h.calls, []string{"pr-1"}) {
@@ -257,24 +267,24 @@ func TestRemovalConfirmationFailedReadLeavesEverythingAndRetriesNextTick(t *test
 			if prInactive(t, st, "pr-1") {
 				t.Fatal("a failed read must leave the entity active")
 			}
-			if got := loadWatchSet(st, "pr", "open"); !got["pr-1"] || len(got) != 1 {
+			if got := loadWatchSet(st, "issue", "open"); !got["pr-1"] || len(got) != 1 {
 				t.Fatalf("persisted = %v, want pr-1 kept so it is found again", got)
 			}
-			if got := kindsLogged(t, st, "pr", "pr-1"); len(got) != 0 {
+			if got := kindsLogged(t, st, "issue", "pr-1"); len(got) != 0 {
 				t.Errorf("a failed read logged %v", got)
 			}
 
-			h.shows["pr-1"] = showOutcome{facts: prMergedFacts}
+			h.shows["pr-1"] = showOutcome{facts: prClosedFacts}
 			if _, _, err := runPRTick(t, e); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(h.calls, []string{"pr-1", "pr-1"}) {
 				t.Errorf("show calls = %v, want one per tick", h.calls)
 			}
-			if got := kindsLogged(t, st, "pr", "pr-1"); !reflect.DeepEqual(got, []string{"merged"}) || !prInactive(t, st, "pr-1") {
+			if got := kindsLogged(t, st, "issue", "pr-1"); !reflect.DeepEqual(got, []string{"closed", "status_changed"}) || !prInactive(t, st, "pr-1") {
 				t.Errorf("after the retry logged %v inactive=%v", got, prInactive(t, st, "pr-1"))
 			}
-			if got := loadWatchSet(st, "pr", "open"); len(got) != 0 {
+			if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
 				t.Errorf("persisted = %v after the removal succeeded", got)
 			}
 		})
@@ -312,10 +322,10 @@ func TestRemovalConfirmationNeverHappensForADegradedOrTruncatedSource(t *testing
 func TestRemovalConfirmationSkipsAnIdAnotherQueryStillHolds(t *testing.T) {
 	e, st, h := newPREngine(t, "a", "b")
 	seedWatchedPR(t, st, "pr-1")
-	if err := saveWatchSet(st, "pr", "a", map[string]bool{"pr-1": true}); err != nil {
+	if err := saveWatchSet(st, "issue", "a", map[string]bool{"pr-1": true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "pr", "b", map[string]bool{"pr-1": true}); err != nil {
+	if err := saveWatchSet(st, "issue", "b", map[string]bool{"pr-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = queryLister{"a": {res: listing()}, "b": {res: listing("pr-1=F1")}}
@@ -332,7 +342,7 @@ func TestRemovalConfirmationSkipsAnIdAnotherQueryStillHolds(t *testing.T) {
 func TestRemovalConfirmationReadsEachCandidateOnceInSortedOrder(t *testing.T) {
 	e, st, h := newPREngine(t, "open")
 	seedWatchedPR(t, st, "pr-3", "pr-1", "pr-2")
-	h.shows["pr-1"] = showOutcome{facts: prMergedFacts}
+	h.shows["pr-1"] = showOutcome{facts: prClosedFacts}
 	h.shows["pr-2"] = showOutcome{err: errors.New("boom")}
 	h.shows["pr-3"] = showOutcome{facts: prClosedFacts}
 	e.Lister = fakeLister{res: listing()}
@@ -343,7 +353,7 @@ func TestRemovalConfirmationReadsEachCandidateOnceInSortedOrder(t *testing.T) {
 	if !reflect.DeepEqual(h.calls, []string{"pr-1", "pr-2", "pr-3"}) {
 		t.Errorf("show calls = %v", h.calls)
 	}
-	if got := loadWatchSet(st, "pr", "open"); !got["pr-2"] || len(got) != 1 {
+	if got := loadWatchSet(st, "issue", "open"); !got["pr-2"] || len(got) != 1 {
 		t.Errorf("persisted = %v, want only the failed pr-2 kept", got)
 	}
 	if !prInactive(t, st, "pr-1") || prInactive(t, st, "pr-2") || !prInactive(t, st, "pr-3") {
@@ -368,7 +378,7 @@ func TestRemovalConfirmationStopsAfterADegradedStreak(t *testing.T) {
 	if len(h.calls) != backendDownStreak {
 		t.Errorf("show calls = %v, want %d", h.calls, backendDownStreak)
 	}
-	if got := loadWatchSet(st, "pr", "open"); len(got) != len(ids) {
+	if got := loadWatchSet(st, "issue", "open"); len(got) != len(ids) {
 		t.Errorf("persisted = %v, want every id kept", got)
 	}
 }
@@ -378,11 +388,11 @@ func TestRemovalConfirmationStopsAfterADegradedStreak(t *testing.T) {
 func TestRemovalConfirmationSkipsAbsentAndInactiveRows(t *testing.T) {
 	e, st, h := newPREngine(t, "open")
 	seedWatchedPR(t, st, "pr-1")
-	if _, err := st.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "pr-1", Facts: prOpenFacts, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pr-1", Facts: prOpenFacts, AsOf: "x"},
 		1, "2026-10-01T11:00:00Z", false, nil, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "pr", "open", map[string]bool{"pr-1": true, "pr-ghost": true}); err != nil {
+	if err := saveWatchSet(st, "issue", "open", map[string]bool{"pr-1": true, "pr-ghost": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing()}
@@ -392,10 +402,10 @@ func TestRemovalConfirmationSkipsAbsentAndInactiveRows(t *testing.T) {
 	if len(h.calls) != 0 {
 		t.Errorf("show calls = %v, want none", h.calls)
 	}
-	if got := loadWatchSet(st, "pr", "open"); len(got) != 0 {
+	if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
 		t.Errorf("persisted = %v", got)
 	}
-	if _, found, _ := st.GetEntity("o/r", "pr", "pr-ghost"); found {
+	if _, found, _ := st.GetEntity("o/r", "issue", "pr-ghost"); found {
 		t.Error("a ghost id must not be created by the confirmation")
 	}
 }
@@ -406,7 +416,7 @@ func TestRemovalConfirmationFailureIsSurfacedByName(t *testing.T) {
 	seedWatchedPR(t, st, "pr-1")
 	h.shows["pr-1"] = showOutcome{err: errors.New("connector exploded\nstack")}
 	e.Lister = fakeLister{res: listing()}
-	got := e.applyMembership("pr", []queryRun{{query: "open", res: listing()}})
+	got := e.applyMembership("issue", []queryRun{{query: "open", res: listing()}})
 	if len(got) != 1 || !strings.Contains(got[0], "remove pr-1") || !strings.Contains(got[0], "confirmation read") || strings.Contains(got[0], "stack") {
 		t.Errorf("failures = %q", got)
 	}

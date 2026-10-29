@@ -108,7 +108,6 @@ let
       lib.unique cfg.watch.issue.queries;
 
   renderedWatch = lib.filterAttrs (_: v: v != { }) {
-    pr = lib.optionalAttrs (cfg.watch.pr.queries != [ ]) { queries = cfg.watch.pr.queries; };
     issue =
       lib.optionalAttrs (watchIssueQueries != [ ]) { queries = watchIssueQueries; }
       // lib.optionalAttrs (derivedWatchBackends != { }) { backends = derivedWatchBackends; };
@@ -585,9 +584,10 @@ in
         type = lib.types.listOf lib.types.str;
         default = [ ];
         description = ''
-          config.yaml's watch.pr.queries: the named pg-connector queries whose
-          results form the watched set of pull requests. Empty (the default)
-          renders no watch.pr block.
+          RETIRED (PR lane refactor, packet P9a-3): pg-desk no longer reads
+          watch.pr.queries (the daemon is the PR feed), so this option renders
+          nothing. It stays only so a consuming flake that still sets it
+          evaluates; remove the entry from the consuming flake.
         '';
       };
       issue.queries = lib.mkOption {
@@ -986,14 +986,17 @@ in
       package = lib.mkPackageOption pkgs "pg-router-source-pg-desk" { };
     };
 
-    # shadow (bead pg2-wmv6p): the `pg-desk-shadow` one-off measurement tool
-    # (docs/runbooks/pg-desk-shadow-compare.md), which every runbook command
-    # invokes by bare name. Default off because it is a time-boxed
-    # measurement instrument, not standing tooling: the consuming flake flips
-    # `shadow.enable` for the duration of the comparison and removes it after.
-    shadow = {
-      enable = lib.mkEnableOption "the pg-desk-shadow measurement tool (one-off shadow comparison of pg-desk's fingerprint change detection; see docs/runbooks/pg-desk-shadow-compare.md)";
-      package = lib.mkPackageOption pkgs "pg-desk-shadow" { };
+    # shadow: RETIRED (PR lane refactor, packet P9a-3). The `pg-desk-shadow`
+    # one-off measurement tool ran `pg-desk pr changes`, which the daemon
+    # design retires with the PR half of the change flow, so the package, its
+    # runbook and its behavior doc are deleted. The option stays only so a
+    # consuming flake that still sets `shadow.enable` evaluates (with a
+    # warning) until it drops the flag; it installs nothing.
+    shadow.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      visible = false;
+      description = "Retired: pg-desk-shadow no longer exists. Setting this only produces a warning; remove it.";
     };
 
     links = {
@@ -1018,8 +1021,9 @@ in
       cfg.package
     ]
     ++ lib.optional cfg.attentionPlugin.enable cfg.attentionPlugin.package
-    ++ lib.optional cfg.routerSource.enable cfg.routerSource.package
-    ++ lib.optional cfg.shadow.enable cfg.shadow.package;
+    ++ lib.optional cfg.routerSource.enable cfg.routerSource.package;
+
+    warnings = lib.optional cfg.shadow.enable "programs.pg-desk.shadow.enable is retired (pg-desk-shadow was deleted with the PR half of pg-desk's change flow); it installs nothing. Remove it.";
 
     # Registered LAST in config order: `pg-connector attention list` breaks a
     # dedup tie at equal severity in favor of the earliest source, so the

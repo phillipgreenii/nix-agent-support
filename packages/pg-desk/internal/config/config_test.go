@@ -93,7 +93,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"AttentionConfig", reflect.TypeOf(AttentionConfig{}), []string{"rules", "ordering"}},
 		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days", "due_soon_days"}},
 		{"AttentionOrderingConfig", reflect.TypeOf(AttentionOrderingConfig{}), []string{"ties"}},
-		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
+		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"issue", "thread"}},
 		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"backends", "queries"}},
 		{"WatchBackend", reflect.TypeOf(WatchBackend{}), []string{"instance", "owns_changes"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
@@ -277,8 +277,8 @@ func TestLoadFile_FullExample(t *testing.T) {
 	}
 
 	// Entity-change-flow keys (design 9.10).
-	if got := cfg.WatchQueries("pr"); !reflect.DeepEqual(got, []string{"mine", "team"}) {
-		t.Errorf("watch.pr.queries: got %v", got)
+	if got := cfg.WatchQueries("pr"); got != nil {
+		t.Errorf("WatchQueries(pr) = %v, want nil: pg-desk has no PR watch key", got)
 	}
 	if got := cfg.WatchQueries("issue"); !reflect.DeepEqual(got, []string{"assigned-to-me", "work-items", "demo-watched"}) {
 		t.Errorf("watch.issue.queries: got %v", got)
@@ -651,8 +651,6 @@ func TestChangeFlowKeys_Defaults(t *testing.T) {
 func TestChangeFlowKeys_Explicit(t *testing.T) {
 	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
 watch:
-  pr:
-    queries: [mine, team]
   issue:
     queries: [assigned-to-me, work-items]
   thread:
@@ -672,9 +670,6 @@ consumer_stale_after: 36h
 `))
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
-	}
-	if got := cfg.WatchQueries("pr"); !reflect.DeepEqual(got, []string{"mine", "team"}) {
-		t.Errorf("pr queries = %v", got)
 	}
 	if got := cfg.WatchQueries("issue"); !reflect.DeepEqual(got, []string{"assigned-to-me", "work-items"}) {
 		t.Errorf("issue queries = %v", got)
@@ -764,10 +759,8 @@ func TestLoadFile_ChangeFlowInvalidValuesFail(t *testing.T) {
 		"negative hydration cap":  {"hydration:\n  max_per_poll: -1", "hydration.max_per_poll"},
 		"zero orphan cap":         {"hydration:\n  orphan_max_per_poll: 0", "hydration.orphan_max_per_poll"},
 		"negative orphan cap":     {"hydration:\n  orphan_max_per_poll: -2", "hydration.orphan_max_per_poll"},
-		"empty pr query":          {"watch:\n  pr:\n    queries: [mine, \"\"]", "watch.pr.queries"},
 		"empty issue query":       {"watch:\n  issue:\n    queries: [\" \"]", "watch.issue.queries"},
 		"duplicate thread query":  {"watch:\n  thread:\n    queries: [mentions, mentions]", "watch.thread.queries"},
-		"duplicate pr query":      {"watch:\n  pr:\n    queries: [a, b, a]", "watch.pr.queries"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+tc.block+"\n"))
@@ -775,6 +768,28 @@ func TestLoadFile_ChangeFlowInvalidValuesFail(t *testing.T) {
 				t.Fatalf("LoadFile: err = %v, want an error naming %q", err, tc.key)
 			}
 		})
+	}
+}
+
+// TestLoadFile_LegacyWatchPRKeyIsIgnored: pg-desk has no PR watch key (the
+// daemon is the PR feed, PR lane refactor packet P9a-3), but a config file that
+// still carries watch.pr.queries MUST load, and the key MUST NOT be read, not
+// even to be validated: a deployment keeps the key until its own change drops
+// it, and an invalid legacy value (an empty or duplicate name) cannot fail the
+// load.
+func TestLoadFile_LegacyWatchPRKeyIsIgnored(t *testing.T) {
+	for _, block := range []string{
+		"watch:\n  pr:\n    queries: [mine, team]",
+		"watch:\n  pr:\n    queries: [mine, \"\"]",
+		"watch:\n  pr:\n    queries: [a, b, a]",
+	} {
+		cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+block+"\n"))
+		if err != nil {
+			t.Fatalf("LoadFile(%q): %v, want the legacy key ignored", block, err)
+		}
+		if got := cfg.WatchQueries("pr"); got != nil {
+			t.Errorf("WatchQueries(pr) = %v after %q, want nil", got, block)
+		}
 	}
 }
 

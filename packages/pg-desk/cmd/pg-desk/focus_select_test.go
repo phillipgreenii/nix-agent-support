@@ -699,9 +699,9 @@ func TestRunRecordCarriesDraftAgeAndDrift(t *testing.T) {
 func TestLockOverDegradedSourceRecordsCoverage(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
-	f.cfg.Watch.PR.Queries = []string{"mine"}
+	f.cfg.Watch.Issue.Queries = []string{"mine"}
 	v, _ := json.Marshal(map[string]string{"status": "degraded", "reason": "timeout", "at": showAt})
-	if err := f.st.SetMeta("change_flow.listing.pr.mine", string(v)); err != nil {
+	if err := f.st.SetMeta("change_flow.listing.issue.mine", string(v)); err != nil {
 		t.Fatal(err)
 	}
 	_, _, _ = show(t) // exit 8: coverage incomplete, the draft is still stored

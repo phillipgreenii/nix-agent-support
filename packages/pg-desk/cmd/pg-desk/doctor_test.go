@@ -338,7 +338,7 @@ func runDoctorWithRouter(t *testing.T, path string) (string, error) {
 
 func watchCfg(queries ...string) *config.Config {
 	cfg := openTestConfig("o/r")
-	cfg.Watch.PR.Queries = queries
+	cfg.Watch.Issue.Queries = queries
 	return cfg
 }
 
@@ -387,7 +387,7 @@ echo '{"entities":[]}'`, rec))
 	if err == nil || !strings.Contains(err.Error(), "watched queries") {
 		t.Fatalf("doctor err = %v, want a failure naming watched queries\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, `pr "mine": ok`) || !strings.Contains(stdout, `pr "nope": FAIL`) {
+	if !strings.Contains(stdout, `issue "mine": ok`) || !strings.Contains(stdout, `issue "nope": FAIL`) {
 		t.Errorf("stdout does not separate the resolvable from the unknown query:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "query_not_recognized") {
@@ -395,7 +395,7 @@ echo '{"entities":[]}'`, rec))
 	}
 	calls, _ := os.ReadFile(rec)
 	for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
-		if !strings.HasPrefix(line, "pr list --query ") || strings.Contains(line, "changes") {
+		if !strings.HasPrefix(line, "issue list --query ") || strings.Contains(line, "changes") {
 			t.Errorf("probe exec %q is not the read-only list verb", line)
 		}
 	}
@@ -408,7 +408,7 @@ func TestDoctorWatchedQueriesAllResolveAndNoneConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, `pr "mine": ok`) {
+	if !strings.Contains(stdout, `issue "mine": ok`) {
 		t.Errorf("stdout:\n%s", stdout)
 	}
 
@@ -476,7 +476,7 @@ func TestDoctorStalledConsumerWithoutRouterConfigUsesConsumerStaleAfter(t *testi
 func seedActive(t *testing.T, st *store.Store, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		e := store.Entity{Repo: "o/r", EntityType: entityTypePR, EntityID: fmt.Sprintf("o/r#%d", i+1), Facts: `{}`, AsOf: "x"}
+		e := store.Entity{Repo: "o/r", EntityType: entityTypeThread, EntityID: fmt.Sprintf("t-%d", i+1), Facts: `{}`, AsOf: "x"}
 		if _, err := st.WriteEntityStateWithLog(e, 0, doctorNow.Format(time.RFC3339), true, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
@@ -491,24 +491,25 @@ func sweepCfg(maxAge string, maxPerPoll int) *config.Config {
 }
 
 func TestDoctorSweepBoundViolation(t *testing.T) {
-	// 7 active / N=1 x the fixture's smallest pr period (30s) = 210s > D=3m.
-	seed := newSchemaDoctor(t, sweepCfg("3m", 1))
+	// 7 active threads / N=1 x the fixture's thread period (10m) = 4200s > D=1h.
+	// (pr has no sweep bound: the daemon is the PR feed, so it is not a flow type.)
+	seed := newSchemaDoctor(t, sweepCfg("1h", 1))
 	seedActive(t, seed, 7)
 
 	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
 	if err == nil || !strings.Contains(err.Error(), "sweep bound") {
 		t.Fatalf("doctor err = %v, want a failure naming the sweep bound\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "active_count=7 max_per_poll=1 max_age=3m0s poll_interval=30s: VIOLATED") {
+	if !strings.Contains(stdout, "active_count=7 max_per_poll=1 max_age=1h0m0s poll_interval=10m0s: VIOLATED") {
 		t.Errorf("stdout:\n%s", stdout)
 	}
 }
 
 func TestDoctorSweepBoundIsCheckedPerTier(t *testing.T) {
-	// 7 active / 1 x 30s = 210s: the remote tier (1h) holds, the local tier (3m)
-	// is violated.
-	cfg := sweepCfg("1h", 1)
-	cfg.Sweep.ReconcileAge = "3m"
+	// 7 active threads / 1 x 10m = 4200s: the remote tier (3h) holds, the local
+	// tier (30m) is violated.
+	cfg := sweepCfg("3h", 1)
+	cfg.Sweep.ReconcileAge = "30m"
 	seed := newSchemaDoctor(t, cfg)
 	seedActive(t, seed, 7)
 
@@ -516,37 +517,39 @@ func TestDoctorSweepBoundIsCheckedPerTier(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sweep bound") {
 		t.Fatalf("doctor err = %v, want a failure naming the sweep bound\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "pr remote: active_count=7 max_per_poll=1 max_age=1h0m0s poll_interval=30s: holds") {
+	if !strings.Contains(stdout, "thread remote: active_count=7 max_per_poll=1 max_age=3h0m0s poll_interval=10m0s: holds") {
 		t.Errorf("remote tier should hold:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "pr local: active_count=7 max_per_poll=1 max_age=3m0s poll_interval=30s: VIOLATED") {
+	if !strings.Contains(stdout, "thread local: active_count=7 max_per_poll=1 max_age=30m0s poll_interval=10m0s: VIOLATED") {
 		t.Errorf("local tier should be violated:\n%s", stdout)
 	}
 }
 
 func TestDoctorSweepBoundHoldsAtTheBoundary(t *testing.T) {
-	// 6 active / 1 x 30s = 180s == D=3m: holds (<=).
-	seed := newSchemaDoctor(t, sweepCfg("3m", 1))
+	// 6 active threads / 1 x 10m = 3600s == D=1h: holds (<=), in both tiers.
+	cfg := sweepCfg("1h", 1)
+	cfg.Sweep.ReconcileAge = "1h"
+	seed := newSchemaDoctor(t, cfg)
 	seedActive(t, seed, 6)
 
 	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "poll_interval=30s: holds") {
+	if !strings.Contains(stdout, "poll_interval=10m0s: holds") {
 		t.Errorf("stdout:\n%s", stdout)
 	}
 }
 
 func TestDoctorSweepBoundNeedsRouterConfigForAVerdict(t *testing.T) {
-	seed := newSchemaDoctor(t, sweepCfg("3m", 1))
+	seed := newSchemaDoctor(t, sweepCfg("1h", 1))
 	seedActive(t, seed, 7) // would violate IF a poll interval were known
 
 	stdout, err := runDoctorCmd(t)
 	if err != nil {
 		t.Fatalf("no router config means no verdict, so no failure: %v\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "active_count=7 max_per_poll=1 max_age=3m0s poll_interval: unknown (no verdict)") {
+	if !strings.Contains(stdout, "thread remote: active_count=7 max_per_poll=1 max_age=1h0m0s poll_interval: unknown (no verdict)") {
 		t.Errorf("stdout does not report the inputs with poll_interval unknown:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "VIOLATED") || strings.Contains(stdout, "holds") {
@@ -561,10 +564,14 @@ func TestDoctorRouterConfigListsRolesBoundPerType(t *testing.T) {
 		t.Fatalf("doctor: %v\n%s", err, stdout)
 	}
 	section := stdout[strings.Index(stdout, "router roles:"):]
-	for _, want := range []string{"pr: pr-decider", "issue: none", "thread: none"} {
+	for _, want := range []string{"issue: none", "thread: none"} {
 		if !strings.Contains(section, want) {
 			t.Errorf("router roles section lacks %q:\n%s", want, section)
 		}
+	}
+	// pr is not a change-flow type (the daemon is the PR feed): no per-type line.
+	if strings.Contains(section, "    pr:") {
+		t.Errorf("router roles section lists the pr type:\n%s", section)
 	}
 	if strings.Contains(section, "note-reader") {
 		t.Errorf("a role bound to no desk type must not be listed:\n%s", section)
@@ -595,14 +602,14 @@ func TestDoctorFailsOnUnreadableRouterConfig(t *testing.T) {
 
 func TestDoctorReportsRepeatedDegradedHydrations(t *testing.T) {
 	seed := newSchemaDoctor(t, openTestConfig("o/r"))
-	if err := seed.SetMeta("change_flow.degraded.pr", `{"o/r#7":{"count":3,"since":"2026-10-01T09:00:00Z"},"o/r#8":{"count":1,"since":"2026-10-01T10:00:00Z"}}`); err != nil {
+	if err := seed.SetMeta("change_flow.degraded.issue", `{"o/r#7":{"count":3,"since":"2026-10-01T09:00:00Z"},"o/r#8":{"count":1,"since":"2026-10-01T10:00:00Z"}}`); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err := runDoctorCmd(t)
 	if err != nil {
 		t.Fatalf("a report, not a gate: %v\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "pr o/r#7: count=3 since=2026-10-01T09:00:00Z") {
+	if !strings.Contains(stdout, "issue o/r#7: count=3 since=2026-10-01T09:00:00Z") {
 		t.Errorf("stdout lacks the repeated entity:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "o/r#8") {

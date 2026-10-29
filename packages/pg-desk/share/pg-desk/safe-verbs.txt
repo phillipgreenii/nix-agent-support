@@ -34,7 +34,6 @@ issue unsuppress
 issue wip
 links
 pr annotate
-pr changes
 pr consumer forget
 pr consumer list
 pr feedback list

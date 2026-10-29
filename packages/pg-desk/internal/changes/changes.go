@@ -38,7 +38,7 @@ type Lister interface {
 // list cannot be fingerprinted) has no list-and-diff changes flow.
 func FingerprintSupported(entityType string) bool {
 	switch entityType {
-	case "pr", "issue":
+	case "issue":
 		return true
 	}
 	return false
@@ -190,8 +190,10 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 			}
 		}
 
-		// Phase C: hydrate what the list diff found added or changed, then (pr and
-		// thread only) the rolling remote sweep, all within hydration.max_per_poll with changed/added
+		// Phase C: hydrate what the list diff found added or changed, then (for a
+		// type with an age sweep; none is reachable today, because only issue is
+		// fingerprinted) the rolling remote sweep, all within hydration.max_per_poll
+		// with changed/added
 		// served first [design 8.4, 8.5]. Nothing is queued: what the cap or a
 		// failure leaves is found again by the next tick's diff.
 		bud := &budget{left: e.Cfg.HydrationMaxPerPoll()}
@@ -216,7 +218,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		if err := e.rehydrateDependants(ctx, opts, st, bud, st.closedIDs()); err != nil {
 			return Outcome{}, err
 		}
-		// The age sweep's two tiers run for pr and thread only. An issue is
+		// The age sweep's two tiers run for thread only. An issue is
 		// never re-emitted by age: it is emitted when it changes, so there is
 		// no reconcile kind, sweep origin or local-reconcile origin for it
 		// (INV-ICD-15, INV-CHANGES-12).

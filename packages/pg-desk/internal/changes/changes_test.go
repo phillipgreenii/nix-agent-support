@@ -113,18 +113,18 @@ func TestRunQuietListingHydratesNothing(t *testing.T) {
 
 func TestSelectQueries(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Watch.PR.Queries = []string{"mine", "team"}
-	if got, err := SelectQueries(cfg, "pr", ""); err != nil || len(got) != 2 {
-		t.Errorf("all = %v, %v", got, err)
-	}
-	if got, err := SelectQueries(cfg, "pr", "team"); err != nil || len(got) != 1 || got[0] != "team" {
-		t.Errorf("one = %v, %v", got, err)
-	}
-	if _, err := SelectQueries(cfg, "pr", "nope"); err == nil {
-		t.Error("an unknown query was accepted")
-	}
 	if _, err := SelectQueries(cfg, "issue", ""); err == nil || !strings.Contains(err.Error(), "watch.issue.queries") {
 		t.Errorf("no queries: %v", err)
+	}
+	cfg.Watch.Issue.Queries = []string{"mine", "team"}
+	if got, err := SelectQueries(cfg, "issue", ""); err != nil || len(got) != 2 {
+		t.Errorf("all = %v, %v", got, err)
+	}
+	if got, err := SelectQueries(cfg, "issue", "team"); err != nil || len(got) != 1 || got[0] != "team" {
+		t.Errorf("one = %v, %v", got, err)
+	}
+	if _, err := SelectQueries(cfg, "issue", "nope"); err == nil {
+		t.Error("an unknown query was accepted")
 	}
 }
 
@@ -235,36 +235,25 @@ func TestRunIssueRunsNeitherAgeTier(t *testing.T) {
 	}
 }
 
-// For a pr both tiers still run inside Engine.Run: a pr hydrated long ago is
-// re-hydrated at origin sweep, and a pr whose newest log row is old but whose
-// hydration is recent gets one local-reconcile record without a hydration.
-func TestRunPRStillRunsBothAgeTiers(t *testing.T) {
+// pg-desk runs no change flow for a PR (the daemon is the PR feed): a pr call
+// is refused before anything is listed, hydrated or written, even with a legacy
+// watch.pr.queries key in the config (the loader ignores it, so no query is
+// configured for the type either).
+func TestRunRefusesAPRChangeFlow(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
-	e.Cfg.Watch.PR.Queries = []string{"mine"}
 	e.Lister = fakeLister{res: okListing()}
-	seedPR := func(id, hydratedAt, logAt string) {
-		fp := "F"
-		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"},
-			0, hydratedAt, true, &fp, []string{"reconcile"}, "sweep", logAt); err != nil {
-			t.Fatal(err)
-		}
+	if FingerprintSupported("pr") {
+		t.Fatal("FingerprintSupported(pr) = true, want false")
 	}
-	seedPR("remote-due", "2026-10-01T00:00:00Z", "2026-10-01T11:59:00Z") // hydrated 12h ago, log fresh
-	seedPR("local-due", "2026-10-01T11:59:00Z", "2026-10-01T09:00:00Z")  // hydrated fresh, log 3h old
-
-	o := Options{EntityType: "pr", Consumer: "router"}
-	if _, _, err := runTick(t, e, o); err != nil {
-		t.Fatal(err)
+	_, _, err := runTick(t, e, Options{EntityType: "pr", Consumer: "router"})
+	if !errors.Is(err, ErrUnsupportedType) {
+		t.Fatalf("pr call error = %v, want ErrUnsupportedType", err)
 	}
-	if !reflect.DeepEqual(h.calls, []string{"remote-due"}) || h.origins["remote-due"] != OriginSweep {
-		t.Errorf("remote tier hydrated %v (origin %q), want [remote-due] at sweep", h.calls, h.origins["remote-due"])
+	if len(h.calls) != 0 {
+		t.Errorf("a refused pr call hydrated %v", h.calls)
 	}
-	hist, err := st.ListEntityHistory("o/r", "pr", "local-due", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hist) != 2 || hist[0].Origin != OriginLocalReconcile {
-		t.Errorf("local-due history = %+v, want the seed then one local-reconcile", hist)
+	if cur, err := st.ListConsumers(); err != nil || len(cur) != 0 {
+		t.Errorf("a refused pr call registered consumers %v (%v)", cur, err)
 	}
 }
 

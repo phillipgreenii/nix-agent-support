@@ -25,8 +25,13 @@ var changesNow = func() time.Time { return time.Now().UTC() }
 // about the check pays for it.
 var changesCapabilityReader = func(g *gather.Gatherer) changes.Capabilityer { return g }
 
+// init registers `changes` on the issue and thread groups. The pr group has
+// none: the daemon is the PR change feed (PR lane refactor, packet P9a-3).
 func init() {
 	for _, t := range typedEntityTypes {
+		if t == entityTypePR {
+			continue
+		}
 		typeGroup(t).AddCommand(newChangesCmd(t))
 	}
 }

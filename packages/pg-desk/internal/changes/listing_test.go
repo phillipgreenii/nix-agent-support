@@ -181,24 +181,6 @@ func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
 	}
 }
 
-// FlowWired is true for a type only once a consumer of that type is
-// registered; a consumer of another type does not count.
-func TestFlowWiredIsTrueOnlyForATypeWithARegisteredConsumer(t *testing.T) {
-	st := store.OpenNewSchemaForTest(t)
-	if wired, err := FlowWired(st, "pr"); err != nil || wired {
-		t.Fatalf("empty store: wired %v err %v, want false", wired, err)
-	}
-	if err := st.RegisterConsumer("pg-router", "issue", time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatal(err)
-	}
-	if wired, err := FlowWired(st, "pr"); err != nil || wired {
-		t.Fatalf("only an issue consumer: pr wired %v err %v, want false", wired, err)
-	}
-	if wired, err := FlowWired(st, "issue"); err != nil || !wired {
-		t.Fatalf("issue wired %v err %v, want true", wired, err)
-	}
-}
-
 func listingOKOf(t *testing.T, st *store.Store, query string) (string, bool) {
 	t.Helper()
 	v, found, err := st.GetMeta(MetaListingOKPrefix + query)
@@ -253,9 +235,8 @@ func TestRunStampsListingOKOnlyForACompleteListing(t *testing.T) {
 	}
 }
 
-// A --cached call lists nothing, so it stamps nothing; only the issue type has
-// the key.
-func TestCachedCallAndOtherTypesStampNoListingOK(t *testing.T) {
+// A --cached call lists nothing, so it stamps nothing.
+func TestCachedCallStampsNoListingOK(t *testing.T) {
 	e, st, _ := newListEngine(t, "okq")
 	e.Lister = queryLister{"okq": {res: okListing()}}
 	if _, _, err := runTick(t, e, Options{EntityType: "issue", Consumer: "router", Cached: true}); err != nil {
@@ -263,14 +244,5 @@ func TestCachedCallAndOtherTypesStampNoListingOK(t *testing.T) {
 	}
 	if v, found := listingOKOf(t, st, "okq"); found {
 		t.Errorf("a cached call stamped listing_ok = %q", v)
-	}
-	pe, pst, h := newPREngine(t, "open")
-	h.shows["7"] = showOutcome{facts: prOpenFacts}
-	pe.Lister = fakeLister{res: listing("7=F1")}
-	if _, _, err := runPRTick(t, pe); err != nil {
-		t.Fatal(err)
-	}
-	if v, found := listingOKOf(t, pst, "open"); found {
-		t.Errorf("a pr call stamped listing_ok = %q", v)
 	}
 }

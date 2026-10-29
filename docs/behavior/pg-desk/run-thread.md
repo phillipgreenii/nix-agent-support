@@ -7,6 +7,14 @@ re-runs stage 2 (interpret) for every PR currently linked, without a fresh gathe
 re-running sync. This is the Slack-side counterpart of [`run-issue.md`](run-issue.md)'s Jira half,
 independently checkpointable from it — a rework of the Slack transport does not hold the Jira half.
 
+**Kept after the legacy sync stage is retired (PR lane refactor, packet P9a-3).** This verb and the
+interpret-only path it uses stay: the path does no sync, no hydration beyond the one named above and
+no link derivation, and reads no PR watch key. `run issue` and `run thread` MUST still run on a
+cut-over (schema-2) store whose configuration has no `watch.pr.queries`, and MUST NOT depend on
+`run pr`. The legacy `desk-thread` role and `run thread` stay until a thread consumer is designed.
+Tests `TestRunIssueRunsOnASchema2StoreWithoutRunPR` and `TestRunThreadRunsOnASchema2StoreWithoutRunPR`
+(`packages/pg-desk/cmd/pg-desk/run_schema2_test.go`) pin it.
+
 ## What triggers it
 
 A Slack thread the configured identity is mentioned in, or otherwise surfaced by the Slack MCP,

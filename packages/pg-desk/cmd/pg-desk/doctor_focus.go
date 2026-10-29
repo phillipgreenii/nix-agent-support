@@ -192,7 +192,7 @@ func focusLagLine(rc *routerConfig, flow changes.Flow) focusLine {
 		return line
 	}
 	var parts []string
-	for _, t := range []string{entityTypeIssue, entityTypePR} {
+	for _, t := range []string{entityTypeIssue} {
 		name := "desk-" + t + "-changes"
 		for _, q := range rc.Queries {
 			if q.Name != name {

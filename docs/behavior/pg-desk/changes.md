@@ -16,7 +16,9 @@ produces no change row and so no event, and nothing ever re-emits an issue that 
 
 For the `pr` and `ci` types pg-desk does NOT run this flow. The daemon-backed GitHub backend owns
 change detection, the baseline, the age sweep and the per-PR hydration for them, so pg-desk's own PR
-change flow is retired (see "Who owns change detection"). Everything below the next section describes
+change flow is retired (see "Who owns change detection"): there is no `pg-desk pr changes` verb, no
+`watch.pr.queries` key (a legacy one in a config file is ignored) and no PR input to `status`, `doctor`
+or the focus coverage header. Everything below the next section describes
 the flow for the types pg-desk still serves itself, unless a passage says otherwise.
 
 ```mermaid
@@ -587,8 +589,8 @@ poll holds, and the count is taken from the store alone.
 It MUST NOT count entities past an age, because with no sweep `hydrated_at` no longer advances for an
 unchanged entity, and coverage would otherwise read incomplete for ever.
 
-For `pr` the due backlog is NOT counted at all: it is always 0, in the series, `status`, `doctor` and the
-focus coverage header. The router sweeps that re-listed every open pull request are gone, so a quiet PR
+For `pr` the due backlog is NOT counted at all: it is always 0, in the series, `status` and `doctor`; the
+focus coverage header does not report the `pr` type. The router sweeps that re-listed every open pull request are gone, so a quiet PR
 is never re-hydrated on a clock; counting it as due once it is older than the sweep max age would mark
 every daily focus draft incomplete for a backlog nothing works off. A PR the store lists that was never
 hydrated is reported by its own series (`pg_desk_pr_unhydrated`), not by this one.
@@ -807,8 +809,9 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   whose source has not been observed for more than a day; a member of a watched query that has no
   watched mark across two consecutive polls (members of a baseline that has been open less than one
   day excluded); and a failed decider run with no later change.
-- **INV-CHANGES-32.** <!-- uuid: a2d449c6-a4a5-478e-8e70-9f99cdea8283 --> For `pr`, the due backlog (the series, `status`, `doctor` and the coverage header) MUST be 0 whatever
-  the age or hydration state of the active PRs, so no quiet PR can make the focus coverage incomplete.
+- **INV-CHANGES-32.** <!-- uuid: a2d449c6-a4a5-478e-8e70-9f99cdea8283 --> For `pr`, the due backlog (the series, `status` and `doctor`) MUST be 0 whatever
+  the age or hydration state of the active PRs, and the focus coverage MUST NOT report the `pr` type at all, so no quiet
+  PR can make the focus coverage incomplete.
 
 ## Telemetry and logs
 

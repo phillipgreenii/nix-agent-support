@@ -187,7 +187,7 @@ func doctorStalledConsumers(w io.Writer, cfg *config.Config, rc *routerConfig, f
 }
 
 // doctorSweepBound evaluates active_count / N x poll_interval <= max_age per
-// type that has an age sweep (pr and thread; the issue type has none, so it
+// type that has an age sweep (thread; the issue type has none, so it
 // has no line and no verdict) AND per capped age tier (remote
 // re-hydration against sweep.max_age, local reconcile against
 // sweep.reconcile_age) when the router config supplies
@@ -305,7 +305,7 @@ func countActiveJiraIssuesWithoutCategory(entities []store.Entity, patterns []st
 }
 
 // doctorRouterRoles lists which decider roles bind to each type, then names
-// the focus decider role: the role binding issue.changed and pr.changed. A
+// the focus decider role: the role binding issue.changed and pr.changed (the daemon feeds pr.changed). A
 // type no role binds prints none (still true for thread; for issue it means
 // the focus decider is not wired, so selected items get no bead). Report-only.
 func doctorRouterRoles(w io.Writer, rc *routerConfig) {

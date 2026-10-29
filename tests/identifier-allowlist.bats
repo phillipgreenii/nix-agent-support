@@ -3,11 +3,12 @@
 # Regression guard for scripts/check-identifier-allowlist.sh, the body of the
 # `identifier-allowlist` hook (bead pg2-34s486), which replaced six drifting per-module Go
 # copies of the identifier allowlist guard (pg-connector, pg-decider, pg-desk,
-# pg-desk-shadow, pg-router-source-pg-desk and work-report).
+# pg-router-source-pg-desk and work-report; pg-desk-shadow was a sixth until it was
+# deleted, PR lane refactor packet P9a-3).
 #
 # Deterministic logic against the REAL script, the REAL ripgrep (rg -P) and a REAL git, in
 # a hermetic fixture from the shared git fixture harness (global rule V-3). The fixture
-# mirrors the six guarded modules with just enough files to satisfy the script's liveness
+# mirrors the five guarded modules with just enough files to satisfy the script's liveness
 # canaries and carries a copy of the REAL scripts/identifier-allowlists/, so the shipped
 # allowlist entries (including each module's own extras) are under test, not a stand-in.
 # Every identifier planted here is an obviously fake placeholder.
@@ -60,8 +61,6 @@ setup() {
   printf 'self_login: phillipgreenii\n' >"$ROOT/packages/pg-desk/internal/config/testdata/config.example.yaml"
   fill packages/pg-desk/internal/focus/testdata 30 g json
   fill packages/pg-desk/cmd/pg-desk/testdata 45 f json
-  # pg-desk-shadow.
-  fill packages/pg-desk-shadow/internal/collector/testdata 4 f json
   # pg-router-source-pg-desk.
   mkdir -p "$ROOT/packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata"
   fill packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata 6 f json
@@ -103,7 +102,7 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
 @test "clean fixture passes and reports what it scanned" {
   run_guard
   [ "$status" -eq 0 ]
-  [[ $output == *"OK:"*"6 module(s)"* ]]
+  [[ $output == *"OK:"*"5 module(s)"* ]]
 }
 
 @test "json shape: each identity key with a non-allowlisted value is flagged with file:line" {
@@ -195,16 +194,6 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
   [[ $output == *"pg-decider: packages/pg-decider/cmd/pg-decider/testdata/bad.json:1: json: \"alice-dev\""* ]]
 }
 
-@test "allowlists are per module: tester passes only in pg-desk-shadow" {
-  plant packages/pg-desk-shadow/internal/collector/testdata/ok.json '{"login": "tester"}'
-  run_guard
-  [ "$status" -eq 0 ]
-  plant "$CONN/bad.json" '{"login": "tester"}'
-  run_guard
-  [ "$status" -eq 1 ]
-  [[ $output == *"pg-connector: "*"bad.json:1: json: \"tester\""* ]]
-}
-
 @test "allowlists are per module: work-report's bots and names pass only there" {
   local who
   for who in dependabot policy-bot alice bob; do
@@ -265,13 +254,12 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
   plant packages/pg-connector/pkg/scriptout/conformance/testdata/golden/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-decider/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-desk/internal/config/testdata/p.json '{"login": "zzfakehandle"}'
-  plant packages/pg-desk-shadow/internal/collector/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/work-report/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
   run_guard
   [ "$status" -eq 1 ]
   local m
-  for m in pg-connector pg-decider pg-desk pg-desk-shadow pg-router-source-pg-desk work-report; do
+  for m in pg-connector pg-decider pg-desk pg-router-source-pg-desk work-report; do
     [[ $output == *"check-identifier-allowlist: $m: packages/$m/"* ]]
   done
 }
@@ -330,11 +318,11 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
 }
 
 @test "canary: a module scanned below its minimum file count fails" {
-  git -C "$ROOT" rm -q packages/pg-desk-shadow/internal/collector/testdata/f1.json
-  git -C "$ROOT" rm -q packages/pg-desk-shadow/internal/collector/testdata/f2.json
+  local d=packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata
+  git -C "$ROOT" rm -q "$d/f1.json" "$d/f2.json" "$d/f3.json"
   run_guard
   [ "$status" -eq 1 ]
-  [[ $output == *"canary: pg-desk-shadow: scanned only 2 file(s), expected at least 3"* ]]
+  [[ $output == *"canary: pg-router-source-pg-desk: scanned only 4 file(s), expected at least 5"* ]]
 }
 
 @test "canary: pg-desk losing its focus testdata fails" {

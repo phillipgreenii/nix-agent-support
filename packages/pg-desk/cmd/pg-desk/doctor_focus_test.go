@@ -45,7 +45,7 @@ func newDoctorFocusWorld(t *testing.T) *doctorFocusWorld {
 	t.Helper()
 	f := newShowFixture(t)
 	f.cfg.BeadIDPattern = `^bd-`
-	f.cfg.Watch.PR.Queries = []string{"mine"}
+	f.cfg.Watch.Issue.Queries = []string{"mine"}
 	stubDoctorSeams(t, nil, nil, nil)
 	// The watch query probe execs pg-connector by default: stub it so no test
 	// depends on the binary or reaches a backend.
@@ -552,11 +552,11 @@ func TestStatusFocusBlockOnAnUnmigratedStore(t *testing.T) {
 }
 
 // Doctor and `focus show` read the same persisted listing status of a watched
-// query through focus.QueryListings, so they agree on it at every step: not
-// watched while no pr change flow is wired (show exits 0 with the query
-// listed as not-watched), unknown once a flow is wired but nothing was
-// recorded (show exits 2), ok after a listing is recorded. Runs against a real
-// schema-2 store; only the pg-connector probe is stubbed.
+// query through focus.QueryListings, so they agree on it at every step: unknown
+// while nothing was recorded (show exits 8, incomplete), ok after a listing is
+// recorded (show exits 0). There is no PR input (the daemon is the PR feed): a
+// stale watch.pr.queries key is not read, so no pr line appears in either.
+// Runs against a real schema-2 store; only the pg-connector probe is stubbed.
 func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
 	w := newDoctorFocusWorld(t)
 	w.pr(t, 1, "t", showAt)
@@ -575,19 +575,13 @@ func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
 		mustContain(t, dout, doctorWant)
 	}
 
-	step("no flow wired", `mine not-watched (no change flow wired for this type)`,
-		`pr "mine": ok (probe), listing not-watched (no change flow wired for this type)`, 0)
+	step("nothing recorded", `mine unknown (no listing status recorded)`,
+		`issue "mine": ok (probe), listing unknown (no listing status recorded)`, 8)
 
-	if err := w.st.RegisterConsumer("pg-router", "pr", changesNow()); err != nil {
+	if err := w.st.SetMeta("change_flow.listing.issue.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
 		t.Fatal(err)
 	}
-	step("flow wired, nothing recorded", `mine unknown (no listing status recorded)`,
-		`pr "mine": ok (probe), listing unknown (no listing status recorded)`, 8)
-
-	if err := w.st.SetMeta("change_flow.listing.pr.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
-		t.Fatal(err)
-	}
-	step("listing recorded", "coverage: complete", `pr "mine": ok`+"\n", 0)
+	step("listing recorded", "coverage: complete", `issue "mine": ok`+"\n", 0)
 }
 
 // TestUnmintedPRSelectionsCarryTheExpectedUntilP6Tag: until the lane flips to

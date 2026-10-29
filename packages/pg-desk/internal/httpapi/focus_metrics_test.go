@@ -22,7 +22,7 @@ func focusConfig() *config.Config {
 	cfg.Repos = []config.RepoConfig{{Remote: focusScrapeRepo}}
 	cfg.BeadIDPattern = `^bd-`
 	cfg.Focus.TimeZone = "UTC"
-	cfg.Watch.PR.Queries = []string{"mine"}
+	cfg.Watch.Issue.Queries = []string{"mine"}
 	return cfg
 }
 
@@ -73,7 +73,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: focusScrapeRepo, EntityType: "pr", EntityID: "1", Panel: PanelMineAwaitingMe, AsOf: focusAt,
 	})
-	if err := s.SetMeta("change_flow.listing.pr.mine", `{"status":"degraded","reason":"truncated","at":"`+focusAt+`"}`); err != nil {
+	if err := s.SetMeta("change_flow.listing.issue.mine", `{"status":"degraded","reason":"truncated","at":"`+focusAt+`"}`); err != nil {
 		t.Fatal(err)
 	}
 	err := s.FocusLockTx(func(tx *store.FocusTx) error {
@@ -170,9 +170,9 @@ func TestFocusMetricsFamilies(t *testing.T) {
 		`pg_desk_focus_rank_degraded_inputs{input="age_fallback"} `,
 		`pg_desk_focus_rank_degraded_inputs{input="unblocks_unavailable"} `,
 		`pg_desk_focus_rank_degraded_inputs{input="status_category_absent"} 0`,
-		`pg_desk_watch_listing_status{status="degraded",type="pr"} 1`,
-		`pg_desk_watch_listing_status{status="ok",type="pr"} 0`,
-		`pg_desk_watch_listing_status{status="failed",type="pr"} 0`,
+		`pg_desk_watch_listing_status{status="degraded",type="issue"} 1`,
+		`pg_desk_watch_listing_status{status="ok",type="issue"} 0`,
+		`pg_desk_watch_listing_status{status="failed",type="issue"} 0`,
 		`pg_desk_focus_candidates{source="pr"} `,
 		`pg_desk_focus_candidates{source="jira"} 0`,
 		`pg_desk_focus_candidates{source="bead"} 0`,

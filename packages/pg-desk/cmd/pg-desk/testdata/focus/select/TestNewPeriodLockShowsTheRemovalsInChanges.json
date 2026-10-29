@@ -60,11 +60,6 @@
         "issue": {
           "active": 0,
           "due_backlog": 0
-        },
-        "pr": {
-          "active": 2,
-          "due_backlog": 0,
-          "oldest_hydrated_at": "2026-10-10T11:00:00Z"
         }
       },
       "reasons": []

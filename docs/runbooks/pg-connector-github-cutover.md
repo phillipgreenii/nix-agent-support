@@ -147,7 +147,7 @@ The cutover went ahead with one unmet shadow criterion (daemon uptime, 36.4 perc
 host reboot downtime with the daemon healthy on every sampled tick). The operator ruled the
 criterion waived (2026-10-23), so no follow-up bead exists for it; the decision is recorded on the
 daemon program's cutover bead. Every other criterion of the shadow report was met
-(`docs/runbooks/pg-desk-shadow-compare.md`). The ruling also supersedes the earlier plan for a
+(the shadow runbook, deleted with the shadow tool in the PR lane refactor, packet P9a-3; the report is in the cutover bead). The ruling also supersedes the earlier plan for a
 follow-up bead on the uptime criterion: there is none. The post-apply checks are the verify beads
 named in step 6 of "Cutover order".
 

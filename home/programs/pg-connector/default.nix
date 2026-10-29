@@ -1268,7 +1268,7 @@ in
       # now the only writer and pg-connector the only reader. registry.go's
       # resolution order ($PG_PR_CONFIG -> $XDG_CONFIG_HOME/pg-pr/config.yaml ->
       # ~/.config/pg-pr/config.yaml) is a deployed contract that pg-desk, pg-decider,
-      # work-report and pg-desk-shadow also rely on, and the env var is exported by
+      # and work-report also rely on, and the env var is exported by
       # consumer-repo services; renaming the path/env var is a coordinated
       # multi-package change tracked separately, not part of the pg-pr removal.
       xdg.configFile."pg-pr/config.yaml".source =

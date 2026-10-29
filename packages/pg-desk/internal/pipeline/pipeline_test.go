@@ -1058,43 +1058,25 @@ func TestWithSyncLogger_ReplacesSyncer(t *testing.T) {
 	}
 }
 
-// --- Reconcile open set and transient failures: pg2-hpakl --------------------
+// --- Reconcile and transient failures: pg2-hpakl ----------------------------
 
-// openSetGatherer layers ListOpenIDs over gatherFunc, recording every call.
-type openSetGatherer struct {
+// recordingGatherer layers a re-read log over gatherFunc.
+type recordingGatherer struct {
 	gatherFunc
-	ids      map[string][]string // query -> listed ids
-	errs     map[string]error    // query -> listing failure
-	listed   []string            // queries listed, in order
-	gathered []string            // ids re-read, in order
+	gathered []string // ids re-read, in order
 }
 
-func (g *openSetGatherer) ListOpenIDs(ctx context.Context, entityType, query string) ([]string, error) {
-	g.listed = append(g.listed, query)
-	if err := g.errs[query]; err != nil {
-		return nil, err
-	}
-	return g.ids[query], nil
-}
-
-// newOpenSetPipeline builds a Pipeline whose PR queries are `queries`, whose
-// re-reads report merged (so a re-read anchor is closed), and whose gatherer
-// records what was re-read. failFor, when non-nil, injects a re-read failure.
-func newOpenSetPipeline(t *testing.T, out *bytes.Buffer, queries []string, g *openSetGatherer, failFor func(id string) error) *Pipeline {
+// newReconcilePipeline builds a Pipeline whose re-reads report merged (so a
+// re-read anchor is closed) and whose gatherer records what was re-read.
+func newReconcilePipeline(t *testing.T, out *bytes.Buffer, g *recordingGatherer) *Pipeline {
 	t.Helper()
 	g.gatherFunc = func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
 		g.gathered = append(g.gathered, entityID)
-		if failFor != nil {
-			if err := failFor(entityID); err != nil {
-				return gather.Facts{}, err
-			}
-		}
 		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets"})
 		facts.RemovedState = "merged"
 		return facts, nil
 	}
 	p := newTestPipeline(t, g, out)
-	p.cfg.Watch.PR.Queries = queries
 	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
 		return p.store.UpsertLedger(store.LedgerEntry{
 			Repo: repo, EntityType: "pr", EntityID: entityID, Kind: "anchor", BeadID: "bead-" + entityID, LastSyncedContentHash: "closed",
@@ -1119,54 +1101,33 @@ func eventLines(t *testing.T, out *bytes.Buffer, event string) []map[string]any 
 	return lines
 }
 
-// TestPipelineReconcile_RereadsOnlyAnchorsAbsentFromTheOpenSet: anchors whose
-// PR a watched query still lists are not re-read at all; only the one that
-// left the open set is, and it is closed.
-func TestPipelineReconcile_RereadsOnlyAnchorsAbsentFromTheOpenSet(t *testing.T) {
+// TestPipelineReconcile_RereadsEveryOpenAnchorAndRecordsTheSummary (bead
+// pg2-q89ng): there is no open-set filter any more (watch.pr.queries is gone,
+// PR lane refactor packet P9a-3), so every open anchor is re-read and counted
+// as a candidate, the open-set fields of the persisted summary stay unset, and
+// no reconcile_open_set line is logged.
+func TestPipelineReconcile_RereadsEveryOpenAnchorAndRecordsTheSummary(t *testing.T) {
 	var out bytes.Buffer
-	g := &openSetGatherer{ids: map[string][]string{"mine": {"1"}, "review-requested": {"2"}}}
-	p := newOpenSetPipeline(t, &out, []string{"mine", "review-requested"}, g, nil)
-	for _, id := range []string{"1", "2", "3"} {
-		seedReconcileEntity(t, p, id, "abc")
-	}
-
-	if err := p.Reconcile(context.Background()); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	if got := strings.Join(g.gathered, ","); got != "3,3" { // peek, then the closure Run's own gather
-		t.Fatalf("re-read %q, want only anchor 3 (peek + closure run)", got)
-	}
-	if strings.Join(g.listed, ",") != "mine,review-requested" {
-		t.Fatalf("listed queries %v, want one ids-only listing per watched query", g.listed)
-	}
-	if h, _, _ := p.store.GetLedger("acme/widgets", "pr", "3", "anchor"); h.LastSyncedContentHash != "closed" {
-		t.Fatalf("anchor 3 not closed: %+v", h)
-	}
-	ev := eventLines(t, &out, "reconcile_open_set")
-	if len(ev) != 1 || ev[0]["open_ids"] != float64(2) || ev[0]["skipped_open"] != float64(2) || ev[0]["candidates"] != float64(1) {
-		t.Fatalf("reconcile_open_set = %v, want open_ids=2 skipped_open=2 candidates=1", ev)
-	}
-}
-
-// TestPipelineReconcile_RecordsLastRunSummary (bead pg2-q89ng): the counts the
-// reconcile_open_set line logs are also persisted for the pg_desk_reconcile_*
-// gauges, since a successful run's stderr is discarded.
-func TestPipelineReconcile_RecordsLastRunSummary(t *testing.T) {
-	var out bytes.Buffer
-	g := &openSetGatherer{ids: map[string][]string{"mine": {"1"}, "review-requested": {"2"}}}
-	p := newOpenSetPipeline(t, &out, []string{"mine", "review-requested"}, g, nil)
+	g := &recordingGatherer{}
+	p := newReconcilePipeline(t, &out, g)
 	for _, id := range []string{"1", "2", "3"} {
 		seedReconcileEntity(t, p, id, "abc")
 	}
 	if err := p.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := strings.Join(g.gathered, ","); !strings.Contains(got, "1") || !strings.Contains(got, "2") || !strings.Contains(got, "3") {
+		t.Fatalf("re-read %q, want every open anchor re-read", got)
+	}
+	if n := len(eventLines(t, &out, "reconcile_open_set")); n != 0 {
+		t.Fatalf("a reconcile_open_set line was logged %d times", n)
 	}
 	s, _, found, err := sync.ReadReconcileLastRun(p.store, p.clock.Now())
 	if err != nil || !found {
 		t.Fatalf("last run not recorded: found=%v err=%v", found, err)
 	}
-	if s.OpenIDs == nil || *s.OpenIDs != 2 || s.SkippedOpen == nil || *s.SkippedOpen != 2 || s.Candidates != 1 || s.Deferred != 0 {
-		t.Fatalf("summary = %+v, want open_ids=2 skipped_open=2 candidates=1 deferred=0", s)
+	if s.OpenIDs != nil || s.SkippedOpen != nil || s.Candidates != 3 || s.Deferred != 0 {
+		t.Fatalf("summary = %+v, want no open set, candidates=3 deferred=0", s)
 	}
 }
 
@@ -1188,58 +1149,6 @@ func TestPipelineReconcile_LastRunSummaryWithoutOpenSetCountsDeferrals(t *testin
 	}
 	if s.OpenIDs != nil || s.SkippedOpen != nil || s.Candidates != 1 || s.Deferred != 1 {
 		t.Fatalf("summary = %+v, want no open set, candidates=1 deferred=1", s)
-	}
-}
-
-// TestPipelineReconcile_OpenSetUnreadableRereadsEverything: a failed listing
-// must never cost a closure; with no usable open set every open anchor is
-// re-read, and a query that still lists contributes its ids.
-func TestPipelineReconcile_OpenSetUnreadableRereadsEverything(t *testing.T) {
-	var out bytes.Buffer
-	g := &openSetGatherer{errs: map[string]error{"mine": errors.New("list: boom")}}
-	p := newOpenSetPipeline(t, &out, []string{"mine"}, g, nil)
-	for _, id := range []string{"1", "2"} {
-		seedReconcileEntity(t, p, id, "abc")
-	}
-	if err := p.Reconcile(context.Background()); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	if len(g.gathered) != 4 { // 2 peeks + 2 closure runs
-		t.Fatalf("re-read %v, want both anchors re-read", g.gathered)
-	}
-	if len(eventLines(t, &out, "reconcile_open_set_query_failed")) != 1 {
-		t.Fatalf("expected a reconcile_open_set_query_failed line: %s", out.String())
-	}
-
-	// One failing query among several keeps the ids the others listed.
-	out.Reset()
-	g2 := &openSetGatherer{
-		ids:  map[string][]string{"review-requested": {"1"}},
-		errs: map[string]error{"mine": errors.New("list: boom")},
-	}
-	p2 := newOpenSetPipeline(t, &out, []string{"mine", "review-requested"}, g2, nil)
-	for _, id := range []string{"1", "2"} {
-		seedReconcileEntity(t, p2, id, "abc")
-	}
-	if err := p2.Reconcile(context.Background()); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	if strings.Contains(strings.Join(g2.gathered, ","), "1") {
-		t.Fatalf("anchor 1 is listed by a healthy query and must not be re-read: %v", g2.gathered)
-	}
-}
-
-// TestPipelineReconcile_NoOpenSetWithoutQueriesOrLister: no watched query, or
-// a gatherer that cannot list, keeps the re-read-everything behavior.
-func TestPipelineReconcile_NoOpenSetWithoutQueriesOrLister(t *testing.T) {
-	g := &openSetGatherer{ids: map[string][]string{"mine": {"1"}}}
-	p := newOpenSetPipeline(t, nil, nil, g, nil) // no queries
-	seedReconcileEntity(t, p, "1", "abc")
-	if err := p.Reconcile(context.Background()); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	if len(g.listed) != 0 || len(g.gathered) == 0 {
-		t.Fatalf("listed=%v gathered=%v, want no listing and a re-read", g.listed, g.gathered)
 	}
 }
 

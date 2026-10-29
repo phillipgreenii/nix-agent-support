@@ -250,12 +250,11 @@ const (
 // WatchConfig is config.yaml's watch block: per entity type, the named
 // pg-connector queries whose results form the watched set.
 type WatchConfig struct {
-	PR     WatchTypeConfig   `yaml:"pr,omitempty" json:"pr,omitempty"`
 	Issue  WatchTypeConfig   `yaml:"issue,omitempty" json:"issue,omitempty"`
 	Thread WatchThreadConfig `yaml:"thread,omitempty" json:"thread,omitempty"`
 }
 
-// WatchTypeConfig is the watch.pr / watch.issue block.
+// WatchTypeConfig is the watch.issue block.
 type WatchTypeConfig struct {
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
 	// Backends maps a watched query name to the backend instance that serves
@@ -331,12 +330,10 @@ func (c *Config) InProgressStatuses() []string {
 }
 
 // WatchQueries returns the configured pg-connector query names for an entity
-// type ("pr", "issue" or "thread"); nil for a type with none or an unknown
+// type ("issue" or "thread"); nil for a type with none or an unknown
 // type.
 func (c *Config) WatchQueries(entityType string) []string {
 	switch entityType {
-	case "pr":
-		return c.Watch.PR.Queries
 	case "issue":
 		return c.Watch.Issue.Queries
 	case "thread":
@@ -637,7 +634,6 @@ func validateChangeFlow(cfg *Config) error {
 		key     string
 		queries []string
 	}{
-		{"watch.pr.queries", cfg.Watch.PR.Queries},
 		{"watch.issue.queries", cfg.Watch.Issue.Queries},
 		{"watch.thread.queries", cfg.Watch.Thread.Queries},
 	} {

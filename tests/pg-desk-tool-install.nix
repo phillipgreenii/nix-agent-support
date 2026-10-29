@@ -1,6 +1,6 @@
-# Eval-level test for home/programs/pg-desk's `routerSource` and `shadow`
-# install options (bead pg2-wmv6p). Both packages were overlay-only, so neither
-# reached the per-user PATH. Evaluates the pg-desk and pg-connector modules
+# Eval-level test for home/programs/pg-desk's `routerSource` install option and
+# the retired `shadow.enable` option (bead pg2-wmv6p). The adapter was
+# overlay-only, so it did not reach the per-user PATH. Evaluates the pg-desk and pg-connector modules
 # together (stubbing only home.packages and xdg.configFile, like
 # tests/pg-desk-attention-registration.nix) and returns, per scenario, which of
 # the tools landed in home.packages. Consumed by
@@ -63,25 +63,23 @@ let
     packages = c.home.packages;
     hasDesk = builtins.elem pkgs.pg-desk c.home.packages;
     hasRouterSource = builtins.elem pkgs.pg-router-source-pg-desk c.home.packages;
-    hasShadow = builtins.elem pkgs.pg-desk-shadow c.home.packages;
+    inherit (c) warnings;
   };
 in
 {
-  # pg-desk enabled with defaults: the adapter rides along, the one-off
-  # measurement tool does not.
+  # pg-desk enabled with defaults: the adapter rides along, no warning.
   defaults = summarize (evaluate {
     enable = true;
   });
-  # Both explicitly on.
-  both = summarize (evaluate {
+  # The retired shadow flag still evaluates, installs nothing, and warns once.
+  retiredShadow = summarize (evaluate {
     enable = true;
     shadow.enable = true;
   });
-  # Adapter opted out, shadow on.
-  shadowOnly = summarize (evaluate {
+  # Adapter opted out.
+  routerSourceOff = summarize (evaluate {
     enable = true;
     routerSource.enable = false;
-    shadow.enable = true;
   });
   # pg-desk itself disabled: nothing installs, whatever the sub-options say.
   disabled = summarize (evaluate {

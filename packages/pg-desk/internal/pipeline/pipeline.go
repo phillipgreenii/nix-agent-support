@@ -94,14 +94,6 @@ type gatherer interface {
 	Gather(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error)
 }
 
-// openLister is the optional capability Reconcile uses to read the current
-// open set (bead pg2-hpakl). It is a separate interface, asserted at use, so a
-// gatherer without it (a test double) just re-reads every open anchor.
-// *gather.Gatherer satisfies it.
-type openLister interface {
-	ListOpenIDs(ctx context.Context, entityType, query string) ([]string, error)
-}
-
 // syncer is the subset of *sync.Syncer's API this package depends on,
 // defined locally for the same reason gatherer is: tests inject a fake
 // implementation without needing a real pg-connector subprocess on $PATH.
@@ -617,13 +609,11 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 // one fails; failures are joined into the returned error (exit 1). Unlike
 // Sweep it does not touch meta.last_sweep.
 //
-// # Open set and transient failures (bead pg2-hpakl)
+// # Transient failures (bead pg2-hpakl)
 //
-// An open anchor is re-read only when its PR is absent from the current open
-// set: the ids the watched PR queries list right now (one ids-only listing per
-// query, reconcileOpenSet). A PR a query still lists cannot have left the open
-// set, so re-reading it (a ~4s `pr show --fresh`) bought nothing. When the
-// open set cannot be read every open anchor is re-read, as before.
+// Every open anchor is re-read: the open-set filter that skipped an anchor a
+// watched PR query still listed is gone with watch.pr.queries (PR lane
+// refactor, packet P9a-3; the daemon is the PR feed).
 //
 // A candidate whose READ of the PR (the peek, or the closed-anchor audit's
 // re-read) fails transiently (a killed or timed-out connector child, or
@@ -705,19 +695,6 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		needsPeek[id] = prev && peek
 	}
 	settleWindow := p.cfg.ReviewSettleWindow()
-	// Only an anchor whose PR is absent from the current open set can have
-	// left it, so the open set is read first (one ids-only listing per watched
-	// query) and a listed anchor is not re-read at all (bead pg2-hpakl). It is
-	// read only when some open anchor could use it.
-	var openSet map[string]bool
-	for _, l := range ledger {
-		if l.Repo == repo && l.EntityType == entityTypePR && l.Kind == sync.KindAnchor && l.BeadID != "" &&
-			l.LastSyncedContentHash != sync.ClosedSentinel && !held[l.EntityID] {
-			openSet = p.reconcileOpenSet(ctx)
-			break
-		}
-	}
-	skippedOpen := 0
 	for _, l := range ledger {
 		if l.Repo == repo && l.EntityType == entityTypePR && !held[l.EntityID] && sync.SettleDue(l, settleWindow, now) {
 			settle[l.EntityID] = true
@@ -728,10 +705,6 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		}
 		if l.LastSyncedContentHash != sync.ClosedSentinel {
 			if held[l.EntityID] {
-				continue
-			}
-			if openSet[l.EntityID] {
-				skippedOpen++
 				continue
 			}
 			add(l.EntityID, true)
@@ -775,19 +748,12 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 	}
 	sort.SliceStable(order, func(a, b int) bool { return checkedAt[order[a]] < checkedAt[order[b]] })
 
-	if openSet != nil {
-		line, _ := json.Marshal(map[string]any{
-			"event": "reconcile_open_set", "open_ids": len(openSet), "skipped_open": skippedOpen, "candidates": len(order),
-		})
-		_, _ = fmt.Fprintln(p.out, string(line))
-	}
-
 	start := p.clock.Now()
 	var errs []error
 	deferred := 0
 	// The run's summary is persisted however the loop ends (completion, budget
 	// stop, or failures), so serve can export it (bead pg2-q89ng).
-	defer func() { p.recordReconcileLastRun(openSet, skippedOpen, len(order), &deferred) }()
+	defer func() { p.recordReconcileLastRun(len(order), &deferred) }()
 	for idx, id := range order {
 		if p.reconcileBudget > 0 && idx > 0 && p.clock.Now().Sub(start) >= p.reconcileBudget {
 			line, _ := json.Marshal(map[string]any{
@@ -824,14 +790,10 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 
 // recordReconcileLastRun persists the run summary (sync.ReconcileLastRun) for
 // the pg_desk_reconcile_* gauges. Best-effort, like the other reconcile meta
-// stamps: an unwritable summary must not fail the pass. A nil openSet (it was
-// not read) leaves the open-set fields unset.
-func (p *Pipeline) recordReconcileLastRun(openSet map[string]bool, skippedOpen, candidates int, deferred *int) {
+// stamps: an unwritable summary must not fail the pass. The open-set fields
+// stay unset: no open set is read any more.
+func (p *Pipeline) recordReconcileLastRun(candidates int, deferred *int) {
 	s := sync.ReconcileLastRun{At: p.clock.Now().UTC().Format(time.RFC3339), Candidates: candidates, Deferred: *deferred}
-	if openSet != nil {
-		open := len(openSet)
-		s.OpenIDs, s.SkippedOpen = &open, &skippedOpen
-	}
 	_ = sync.WriteReconcileLastRun(p.store, s)
 }
 
@@ -857,41 +819,6 @@ func (p *Pipeline) reconcileCandidate(ctx context.Context, id string, needsPeek,
 		}
 	}
 	return nil
-}
-
-// reconcileOpenSet returns the ids the watched PR queries currently list (one
-// ids-only listing per query, bead pg2-hpakl), or nil when it cannot be
-// known: the gatherer cannot list, no PR query is configured, or every
-// listing failed. nil makes every open anchor a re-read candidate, the
-// pre-existing behavior, so a failed listing only costs time, never closure.
-// A query whose listing fails or is partial just contributes fewer ids.
-func (p *Pipeline) reconcileOpenSet(ctx context.Context) map[string]bool {
-	lister, ok := p.gatherer.(openLister)
-	if !ok || p.cfg == nil {
-		return nil
-	}
-	queries := p.cfg.WatchQueries(entityTypePR)
-	if len(queries) == 0 {
-		return nil
-	}
-	set := map[string]bool{}
-	listed := 0
-	for _, q := range queries {
-		ids, err := lister.ListOpenIDs(ctx, entityTypePR, q)
-		if err != nil {
-			line, _ := json.Marshal(map[string]any{"event": "reconcile_open_set_query_failed", "query": q, "error": err.Error()})
-			_, _ = fmt.Fprintln(p.out, string(line))
-			continue
-		}
-		listed++
-		for _, id := range ids {
-			set[id] = true
-		}
-	}
-	if listed == 0 {
-		return nil
-	}
-	return set
 }
 
 // reconcileMaxDeferrals is how many CONSECUTIVE passes may defer one

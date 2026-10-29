@@ -8,6 +8,14 @@ watched Jira issue also being held as an entity, is "Holding the issue itself" b
 beads-closing re-interpretation trigger, and its Jira half is the Jira-side
 counterpart of the same trigger.
 
+**Kept after the legacy sync stage is retired (PR lane refactor, packet P9a-3).** This verb and the
+interpret-only path it uses stay: the path does no sync, no hydration beyond the one named above and
+no link derivation, and reads no PR watch key. `run issue` and `run thread` MUST still run on a
+cut-over (schema-2) store whose configuration has no `watch.pr.queries`, and MUST NOT depend on
+`run pr`. The legacy `desk-thread` role and `run thread` stay until a thread consumer is designed.
+Tests `TestRunIssueRunsOnASchema2StoreWithoutRunPR` and `TestRunThreadRunsOnASchema2StoreWithoutRunPR`
+(`packages/pg-desk/cmd/pg-desk/run_schema2_test.go`) pin it.
+
 ## Which backend: dispatch by shape
 
 The incoming id's own SHAPE decides which resolution below applies — checked FIRST, and dispatch

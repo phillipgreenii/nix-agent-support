@@ -339,19 +339,6 @@ func TestBaselineFailedListingWritesNothing(t *testing.T) {
 	}
 }
 
-// Only the issue type has a baseline: pr keeps its first-run rows.
-func TestBaselineDoesNotApplyToOtherEntityTypes(t *testing.T) {
-	e, st, h := newPREngine(t, "open")
-	h.shows["7"] = showOutcome{facts: prOpenFacts}
-	e.Lister = fakeLister{res: listing("7=F1")}
-	if _, _, err := runTick(t, e, Options{EntityType: "pr", Consumer: "router"}); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := ReadBaseline(st, "open"); b.Done || b.HasOpenSince {
-		t.Errorf("pr query has baseline state %+v", b)
-	}
-}
-
 func TestReadBaselineAbsentAndUnparseable(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	b, err := ReadBaseline(st, "q")

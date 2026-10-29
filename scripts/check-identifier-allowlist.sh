@@ -2,7 +2,7 @@
 # Identifier allowlist guard (bead pg2-34s486). Body of the `identifier-allowlist`
 # pre-commit / pre-land hook; the single enforcement point that replaced six drifting
 # per-module Go copies (identifier_allowlist_test.go in pg-connector, pg-decider,
-# pg-desk, pg-desk-shadow and pg-router-source-pg-desk, and identifier_guard_test.go in
+# pg-desk and pg-router-source-pg-desk, and identifier_guard_test.go in
 # work-report; beads pg2-tphcc, pg2-h3db9).
 #
 # Rule (CLAUDE.md "Public Repository - No ZipRecruiter Disclosure" and its "Mechanical
@@ -57,7 +57,6 @@ MODULES=(
   "pg-connector|packages/pg-connector|testdata|60|pkg/scriptout/conformance/testdata/golden/response-success.json pkg/scriptout/conformance/testdata/golden/error.json|"
   "pg-decider|packages/pg-decider|testdata|200|testdata/pr_view_minimal.json|"
   "pg-desk|packages/pg-desk|testdata|70|internal/config/testdata/config.example.yaml|internal/focus/testdata/=25"
-  "pg-desk-shadow|packages/pg-desk-shadow|testdata|3||"
   "pg-router-source-pg-desk|packages/pg-router-source-pg-desk|testdata|5|cmd/pg-router-source-pg-desk/testdata/envelope_degraded.json|"
   "work-report|packages/work-report|wide|50||kind:go=40 kind:testdata=5 kind:docs=4 docs/behavior/=4"
 )

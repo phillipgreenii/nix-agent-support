@@ -383,14 +383,6 @@
           pg-decider = final.callPackage ./packages/pg-decider {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-desk-shadow: Pattern A (ADR 0008), a one-off measurement tool
-          # (bead pg2-nu7h0) that runs pg-desk's fingerprint change detection
-          # beside the live flow on a store copy. It execs the pg-* tools it
-          # finds on PATH (no compile-time dependency, no local `replace`), and
-          # its wrapper carries sqlite3 for the collector's store reads.
-          pg-desk-shadow = final.callPackage ./packages/pg-desk-shadow {
-            inherit (goBuilders) mkGoApp;
-          };
           # pg-router-probe: Pattern A (ADR 0008), same shape as
           # pg-router-source-pg-connector above — a standalone deterministic
           # health probe over pg-router's own operational health (docket
@@ -1666,8 +1658,8 @@
         # pg2-34s486: ONE enforcement point for the identifier allowlist guard
         # (CLAUDE.md "Public Repository - No ZipRecruiter Disclosure", "Mechanical
         # guard"). It replaced six drifting per-module Go copies
-        # (identifier_allowlist_test.go in pg-connector, pg-decider, pg-desk,
-        # pg-desk-shadow and pg-router-source-pg-desk; identifier_guard_test.go in
+        # (identifier_allowlist_test.go in pg-connector, pg-decider, pg-desk
+        # and pg-router-source-pg-desk; identifier_guard_test.go in
         # work-report). The per-module config (root, scope, liveness canaries) is
         # the MODULES table in scripts/check-identifier-allowlist.sh and each
         # module's allowlist is scripts/identifier-allowlists/<module>.txt; its
@@ -1929,8 +1921,6 @@
               # reentrant test-helper-process shape for its own pg-desk wire
               # double, verified via
               # `grep -rln '^//go:build' packages/pg-router-source-pg-desk`;
-              # `pg-desk-shadow` added bead pg2-nu7h0 - no build-tagged test files,
-              # verified via `grep -rln '^//go:build' packages/pg-desk-shadow`;
               # `ccpool-probe` added docket pg2-93e5s packet 2 — same
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
@@ -1996,7 +1986,6 @@
                 "pg-router-source-pg-connector"
                 "pg-router-source-pg-desk"
                 "pg-decider"
-                "pg-desk-shadow"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
                 "ccpool-probe"
@@ -6187,24 +6176,6 @@
                 src = lib.cleanSource ./packages/claude-tool-tracker; # matches default.nix
                 gomod2nixToml = ./packages/claude-tool-tracker/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
-              };
-
-              # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
-              # A: flat src at the module dir, no local replace. sqlite3 on PATH
-              # for the fake-store tests. Tests that need sandbox-exec or the
-              # sibling pg-desk source SKIP inside this isolated build (no nested
-              # sandbox, no sibling module); the commit-time run-unit-tests hook
-              # runs them in the checkout (PG_DESK_SHADOW_REQUIRE_TOOLS=1 makes
-              # them fail instead of skip).
-              pg-desk-shadow-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-desk-shadow-go-tests";
-                src = lib.cleanSource ./packages/pg-desk-shadow; # matches default.nix
-                gomod2nixToml = ./packages/pg-desk-shadow/gomod2nix.toml;
-                # jq: the collector tests' stand-in client script reads its request with it.
-                testDeps = [
-                  pkgs.sqlite
-                  pkgs.jq
-                ];
               };
 
               # pg-decider parity gate (bead pg2-v3cti, follow-up of pg2-pyh1i;
@@ -16922,19 +16893,22 @@
                   touch $out
                 '';
 
-              # home/programs/pg-desk's `routerSource` and `shadow` options
-              # (bead pg2-wmv6p): pg-router-source-pg-desk and pg-desk-shadow
-              # were overlay-only, so neither reached the per-user PATH. The
-              # adapter installs with pg-desk by default, the one-off shadow
-              # tool only when asked, and neither when pg-desk is disabled.
+              # home/programs/pg-desk's `routerSource` option (bead pg2-wmv6p):
+              # pg-router-source-pg-desk was overlay-only, so it did not reach
+              # the per-user PATH. The adapter installs with pg-desk by default
+              # and not when pg-desk is disabled; the retired `shadow.enable`
+              # option (PR lane refactor, P9a-3) installs nothing and warns.
               # Pure module eval, no package build.
               test-pg-desk-tool-install =
                 let
                   r = import ./tests/pg-desk-tool-install.nix { inherit lib pkgs; };
                 in
-                assert r.defaults.hasDesk && r.defaults.hasRouterSource && !r.defaults.hasShadow;
-                assert r.both.hasDesk && r.both.hasRouterSource && r.both.hasShadow;
-                assert r.shadowOnly.hasDesk && !r.shadowOnly.hasRouterSource && r.shadowOnly.hasShadow;
+                assert r.defaults.hasDesk && r.defaults.hasRouterSource && r.defaults.warnings == [ ];
+                assert
+                  r.retiredShadow.hasDesk
+                  && r.retiredShadow.hasRouterSource
+                  && builtins.length r.retiredShadow.warnings == 1;
+                assert r.routerSourceOff.hasDesk && !r.routerSourceOff.hasRouterSource;
                 assert r.disabled.packages == [ ];
                 pkgs.runCommand "pg-desk-tool-install-ok" { } "touch $out";
 
@@ -17633,7 +17607,6 @@
               pg-router-source-pg-connector
               pg-router-source-pg-desk
               pg-decider
-              pg-desk-shadow
               pg-router-probe
               pg-router-disk-watchdog
               beads-exporter

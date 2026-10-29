@@ -48,7 +48,7 @@ func newChangesFixture(t *testing.T, typ string, queries ...string) *changesFixt
 	cfg := openTestConfig("o/r")
 	switch typ {
 	case "pr":
-		cfg.Watch.PR.Queries = queries
+		cfg.Watch.Issue.Queries = queries
 	case "issue":
 		cfg.Watch.Issue.Queries = queries
 		// These fixtures exercise the rules AFTER a query's baseline, so each
@@ -202,12 +202,31 @@ func envKindsByID(env changes.Envelope) map[string][]string {
 	return out
 }
 
-func TestChangesIsRegisteredUnderEveryTypeGroup(t *testing.T) {
-	for _, typ := range []string{"pr", "issue", "thread"} {
+func TestChangesIsRegisteredUnderTheIssueAndThreadGroups(t *testing.T) {
+	for _, typ := range []string{"issue", "thread"} {
 		c, _, err := rootCmd.Find([]string{typ, "changes"})
 		if err != nil || c.Name() != "changes" || c.Parent() != typeGroup(typ) {
 			t.Errorf("%s changes not registered: %v, %v", typ, c, err)
 		}
+	}
+}
+
+// pg-desk runs no PR change flow (PR lane refactor, packet P9a-3): the daemon
+// is the PR feed. `pg-desk pr changes` is not a verb, so the one-off shadow
+// tool that exec'd it (pg-desk-shadow) was deleted with it.
+func TestChangesIsNotRegisteredUnderThePRGroup(t *testing.T) {
+	for _, c := range typeGroup("pr").Commands() {
+		if c.Name() == "changes" {
+			t.Fatalf("pr changes is registered: %v", c)
+		}
+	}
+	var out, errb bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&errb)
+	t.Cleanup(func() { rootCmd.SetOut(nil); rootCmd.SetErr(nil); rootCmd.SetArgs(nil) })
+	rootCmd.SetArgs([]string{"pr", "changes", "--consumer", "x", "--cached"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Errorf("pg-desk pr changes ran: out=%q err=%q", out.String(), errb.String())
 	}
 }
 

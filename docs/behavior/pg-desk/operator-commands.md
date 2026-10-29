@@ -147,7 +147,7 @@ transient failure heals on a later scheduled pass with no operator action, while
 stops after the retry bound. `--retry-all` lifts the hold for one run: every recorded `sync_error`
 is re-driven now, whatever its retry state — the operator's manual repair once the cause is fixed.
 
-The open set is the PR ids that the watched PR queries (`watch.pr.queries`) list right now, read
+The open set is the PR ids that the watched PR queries list right now (no `watch.pr.queries` key exists after the PR lane refactor, packet P9a-3, so the set is empty until `reconcile` itself is deleted), read
 with one cheap ids-only listing per query before any re-read. `reconcile` MUST NOT re-read an
 open anchor whose PR a watched query still lists: such a PR cannot have left the open set, and
 the re-read is the expensive call. A listing that fails, or a gatherer or configuration that

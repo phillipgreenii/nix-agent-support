@@ -782,9 +782,9 @@ func TestShowTruncatesAndFootnotesWithoutAll(t *testing.T) {
 func TestFocusExitCodesShowAndReplan(t *testing.T) {
 	setListing := func(t *testing.T, f *showFixture, query, status string) {
 		t.Helper()
-		f.cfg.Watch.PR.Queries = []string{query}
+		f.cfg.Watch.Issue.Queries = []string{query}
 		v, _ := json.Marshal(map[string]string{"status": status, "reason": "timeout", "at": showAt})
-		if err := f.st.SetMeta("change_flow.listing.pr."+query, string(v)); err != nil {
+		if err := f.st.SetMeta("change_flow.listing.issue."+query, string(v)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -800,17 +800,9 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 		{"failed listing with candidates", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "failed") }, 8, "coverage incomplete"},
 		{"unknown listing", func(t *testing.T, f *showFixture) {
 			f.pr(t, 1, "a", showAt)
-			f.cfg.Watch.PR.Queries = []string{"never-ran"}
-			// A pr change flow is wired (its consumer is registered), so a
-			// query with no recorded status is a real gap.
-			if err := f.st.RegisterConsumer("pg-router", "pr", time.Date(2026, 10, 10, 11, 0, 0, 0, time.UTC)); err != nil {
-				t.Fatal(err)
-			}
+			f.cfg.Watch.Issue.Queries = []string{"never-ran"}
+			// A query with no recorded status is a real gap.
 		}, 8, "never-ran"},
-		{"pr query with no status and no pr flow wired is not watched", func(t *testing.T, f *showFixture) {
-			f.pr(t, 1, "a", showAt)
-			f.cfg.Watch.PR.Queries = []string{"never-ran"}
-		}, 0, ""},
 		{"backlog above the bound", func(t *testing.T, f *showFixture) {
 			// The issues are watched and were never hydrated: two pending
 			// hydrations against a bound of 1. The PR is shown in the table; it
@@ -906,7 +898,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 		f.pr(t, 1, "a", showAt)
 		setListing(t, f, "mine", "failed")
 		out, _, _ := show(t, "--no-store")
-		mustContain(t, out, "NOTICE mine FAILED (timeout): candidates from this pr query are NOT all in this table")
+		mustContain(t, out, "NOTICE mine FAILED (timeout): candidates from this issue query are NOT all in this table")
 		if strings.Index(out, "NOTICE mine FAILED") > strings.Index(out, "\nPLAN\n") {
 			t.Errorf("the failed-source notice is not above the table")
 		}

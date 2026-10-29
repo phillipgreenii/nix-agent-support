@@ -95,9 +95,16 @@ func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 		t.Errorf("lag = %+v, want alpha 2 (3-1), beta 0 (3-3)", lag)
 	}
 
-	// The other known types are reported, empty.
-	if len(flow.Types) != len(FlowEntityTypes) {
-		t.Errorf("types = %d, want %d", len(flow.Types), len(FlowEntityTypes))
+	// The change-flow types are reported, empty when nothing is stored, plus
+	// the stored pr type: pr is no longer a flow type (the daemon is the PR
+	// feed), but its rows are still in the store and are reported as found.
+	if len(flow.Types) != len(FlowEntityTypes)+1 {
+		t.Errorf("types = %d, want %d (the flow types and the stored pr)", len(flow.Types), len(FlowEntityTypes)+1)
+	}
+	for _, ft := range FlowEntityTypes {
+		if ft == "pr" {
+			t.Errorf("FlowEntityTypes = %v, want no pr", FlowEntityTypes)
+		}
 	}
 }
 

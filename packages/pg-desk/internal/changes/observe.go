@@ -11,7 +11,7 @@ import (
 // FlowEntityTypes are the entity types the change flow knows (the keys of
 // config.WatchConfig). Observe always reports these, plus any other type it
 // finds in the store.
-var FlowEntityTypes = []string{"pr", "issue", "thread"}
+var FlowEntityTypes = []string{"issue", "thread"}
 
 // RecordCount is the number of change_log records of one (kind, origin)
 // pair. A record carrying several kinds counts once under each.

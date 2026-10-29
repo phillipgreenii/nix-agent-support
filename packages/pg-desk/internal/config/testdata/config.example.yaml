@@ -88,8 +88,6 @@ open:
   chrome_bin: /usr/bin/example-browser
 
 watch:
-  pr:
-    queries: [mine, team]
   issue:
     queries: [assigned-to-me, work-items, demo-watched]
     # backends pins a watched query to the backend instance that serves it

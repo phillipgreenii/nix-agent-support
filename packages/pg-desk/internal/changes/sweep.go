@@ -51,8 +51,9 @@ func ActiveCount(entities []store.Entity, entityType string) int {
 	return n
 }
 
-// EntityTypePR is the pr entity type, whose rows no sweep re-hydrates (see
-// DueBacklog).
+// EntityTypePR is the pr entity type: pg-desk runs no change flow for it (the
+// daemon is the PR feed, PR lane refactor packet P9a-3), so a stored PR row has
+// no backlog (see DueBacklog).
 const EntityTypePR = "pr"
 
 // DueBacklog is the number of hydrations of entityType still owed at now.
@@ -67,12 +68,9 @@ const EntityTypePR = "pr"
 // only compared against a listing the poll holds, which this count does not
 // have. maxAge is not used for issue.
 //
-// The pr type is always 0 (PR lane refactor, packet P3b2): the router sweeps
-// that re-listed every open pull request are gone, so a quiet PR is never
-// re-hydrated on a clock, and counting it as due would age every quiet PR past
-// maxAge and mark the daily focus draft incomplete for a backlog nothing is
-// going to work off. A PR that was never hydrated is reported by its own
-// gauge (the unhydrated count), not by this one.
+// The pr type is always 0 (PR lane refactor, packets P3b2 and P9a-3): no sweep
+// re-lists or re-hydrates a pull request, so counting a quiet PR as due would
+// age every stored PR past maxAge for a backlog nothing is going to work off.
 //
 // Every other type (thread) counts the active entities the sweep would
 // re-hydrate at now: never hydrated (empty or unparseable HydratedAt) or
@@ -131,14 +129,14 @@ const (
 )
 
 // SweepTiers lists the capped age tiers whose bound is checked: the local
-// reconcile tier and the remote re-hydration tier. They apply to pr and thread
-// only: the issue type has no age sweep, so its bound is never evaluated (see
+// reconcile tier and the remote re-hydration tier. They apply to the thread
+// type only: the issue type has no age sweep, so its bound is never evaluated (see
 // HasSweepBound).
 var SweepTiers = []string{TierLocal, TierRemote}
 
 // HasSweepBound reports whether the sizing bound is defined for entityType.
-// The issue type has no age sweep, so no bound and no sweep-bound series; pr and
-// thread keep theirs. Doctor and the /metrics gauge both ask this one question.
+// The issue type has no age sweep, so no bound and no sweep-bound series; thread
+// keeps its own. Doctor and the /metrics gauge both ask this one question.
 func HasSweepBound(entityType string) bool {
 	return entityType != EntityTypeIssue
 }

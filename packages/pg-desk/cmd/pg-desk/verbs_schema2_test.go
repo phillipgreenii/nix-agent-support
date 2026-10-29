@@ -146,6 +146,9 @@ func verbClasses() map[string]verbClass {
 	for k, v := range typedVerbs("pr", "1") {
 		m[k] = v
 	}
+	// There is no pr changes verb: the daemon is the PR feed (PR lane refactor,
+	// packet P9a-3), so pg-desk runs no PR change flow.
+	delete(m, "pr changes")
 	for k, v := range typedVerbs("issue", testIssue) {
 		m[k] = v
 	}

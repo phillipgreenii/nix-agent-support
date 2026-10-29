@@ -102,14 +102,15 @@ func TestMetricsDegradeOnAnOldSchemaStore(t *testing.T) {
 
 // TestMetricsSweepBoundViolatedPerTier scrapes the real handler: the poll
 // interval comes from WithPollInterval, the bound from the SAME evaluation as
-// doctor. 7 active PRs / cap 1 x 30s = 210s: over the local tier's 3m age
-// (violated) and under the remote tier's 6h (holds); issue has no known poll
-// interval, so it has no series at all.
+// doctor. 7 active threads / cap 1 x 30s = 210s: over the local tier's 3m age
+// (violated) and under the remote tier's 6h (holds). Only thread has an age
+// sweep: issue has none and pr is not a change-flow type (the daemon is the PR
+// feed), so neither has a series even where a poll interval is known.
 func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
 	s := store.OpenNewSchemaForTest(t)
 	setClock(t, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
-	for _, id := range []string{"o/r#1", "o/r#2", "o/r#3", "o/r#4", "o/r#5", "o/r#6", "o/r#7"} {
-		e := store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"}
+	for _, id := range []string{"t-1", "t-2", "t-3", "t-4", "t-5", "t-6", "t-7"} {
+		e := store.Entity{Repo: "o/r", EntityType: "thread", EntityID: id, Facts: `{}`, AsOf: "x"}
 		if _, err := s.WriteEntityStateWithLog(e, 0, "2026-10-01T11:59:00Z", true, []string{"created"}, "poll", "2026-10-01T11:59:00Z"); err != nil {
 			t.Fatal(err)
 		}
@@ -136,22 +137,21 @@ func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
 	}
 
 	body := scrapeWith(WithPollInterval(func(typ string) (time.Duration, bool) {
-		if typ == "pr" {
-			return 30 * time.Second, true
-		}
-		return 0, false
+		return 30 * time.Second, true // every type, so only the type filter decides
 	}))
 	for _, want := range []string{
-		`pg_desk_sweep_bound_violated{tier="local",type="pr"} 1`,
-		`pg_desk_sweep_bound_violated{tier="remote",type="pr"} 0`,
+		`pg_desk_sweep_bound_violated{tier="local",type="thread"} 1`,
+		`pg_desk_sweep_bound_violated{tier="remote",type="thread"} 0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, `pg_desk_sweep_bound_violated{tier="local",type="issue"}`) ||
-		strings.Contains(body, `pg_desk_sweep_bound_violated{tier="remote",type="issue"}`) {
-		t.Errorf("issue has no known poll interval, so no series is expected:\n%s", body)
+	for _, typ := range []string{"issue", "pr"} {
+		if strings.Contains(body, `pg_desk_sweep_bound_violated{tier="local",type="`+typ+`"}`) ||
+			strings.Contains(body, `pg_desk_sweep_bound_violated{tier="remote",type="`+typ+`"}`) {
+			t.Errorf("%s has no age sweep bound, so no series is expected:\n%s", typ, body)
+		}
 	}
 
 	// Without a supplier no family member is emitted: never a false violation.

@@ -272,14 +272,15 @@ func TestDivergenceReadsOnlyTheNewestRowOfAnItem(t *testing.T) {
 func TestPendingReasonsAndTheirAges(t *testing.T) {
 	w := newHealthWorld(t)
 	w.cfg.Focus.SuppressedKind = "kind-x"
-	w.cfg.Watch.PR.Queries = []string{"mine"}
-	// Every PR but "1" is listed by the watch query; the PR "1" is outside it.
-	if err := w.st.SetMeta("change_flow.watchset.pr.mine", `["2","3","4","5","8","9","10","11"]`); err != nil {
+	w.cfg.Watch.Issue.Queries = []string{"mine"}
+	// Every issue but "K-1" is listed by the watch query; the issue "K-1" is
+	// outside it. (A PR has no watch set in pg-desk: the daemon is the PR feed.)
+	if err := w.st.SetMeta("change_flow.watchset.issue.mine", `["bd-77"]`); err != nil {
 		t.Fatal(err)
 	}
 	unminted := w.pr("9", prSpec{ownership: "mine"})
 	unminted2 := w.pr("8", prSpec{ownership: "mine"})
-	unwatched := w.pr("1", prSpec{ownership: "mine"})
+	unwatched := w.issue("K-1", issueSpec{state: "open"})
 	hidden := w.pr("2", prSpec{ownership: "mine"})
 	w.hide(hidden)
 	suppressed := w.pr("3", prSpec{ownership: "mine"})
@@ -526,8 +527,8 @@ func TestDraftAgeIsAbsentWithoutADraft(t *testing.T) {
 
 func TestCandidatesRankInputsListingsAndJiraCategory(t *testing.T) {
 	w := newHealthWorld(t)
-	w.cfg.Watch.PR.Queries = []string{"mine"}
-	setListing(t, w.fixture, "pr", "mine", "degraded", "truncated")
+	w.cfg.Watch.Issue.Queries = []string{"mine"}
+	setListing(t, w.fixture, "issue", "mine", "degraded", "truncated")
 	w.pr("1", prSpec{ownership: "mine"})
 	// A Jira issue assigned to the operator without a status category, one
 	// with a category, a bead and a minted bead (never a Jira issue).
@@ -548,12 +549,12 @@ func TestCandidatesRankInputsListingsAndJiraCategory(t *testing.T) {
 	}
 	var found bool
 	for _, l := range h.Listings {
-		if l.Type == "pr" && l.Query == "mine" && l.Status == "degraded" {
+		if l.Type == "issue" && l.Query == "mine" && l.Status == "degraded" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("listings = %v, want the degraded pr listing", h.Listings)
+		t.Errorf("listings = %v, want the degraded issue listing", h.Listings)
 	}
 	if !h.Coverage.Incomplete {
 		t.Errorf("coverage = %+v, want incomplete", h.Coverage)

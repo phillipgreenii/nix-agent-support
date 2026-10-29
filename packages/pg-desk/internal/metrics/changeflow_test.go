@@ -150,14 +150,16 @@ func sweepFlow() changes.Flow {
 }
 
 func TestSweepBoundMetricReadsOneWhenViolatedAndZeroWhenHolding(t *testing.T) {
-	// pr: the local tier is violated, the remote tier holds. issue: the
+	// thread: the local tier is violated, the remote tier holds. issue: the
 	// evaluator would call both tiers violated, but the issue type has no age
-	// sweep, so no series is emitted for it at all.
+	// sweep, so no series is emitted for it. pr: the evaluator would call it
+	// violated too, but pr is not a change-flow type (the daemon is the PR
+	// feed), so no series is emitted for it either.
 	eval := func(tf changes.TypeFlow, tier string) changes.BoundVerdict {
-		if tf.Type == "issue" {
+		if tf.Type == "issue" || tf.Type == "pr" {
 			return changes.BoundViolated
 		}
-		if tf.Type == "pr" && tier == changes.TierLocal {
+		if tf.Type == "thread" && tier == changes.TierLocal {
 			return changes.BoundViolated
 		}
 		return changes.BoundHolds
@@ -171,11 +173,11 @@ func TestSweepBoundMetricReadsOneWhenViolatedAndZeroWhenHolding(t *testing.T) {
 	if err := reader.Collect(context.Background(), &rm); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int64{"pr/local": 1, "pr/remote": 0, "thread/local": 0, "thread/remote": 0}
+	want := map[string]int64{"thread/local": 1, "thread/remote": 0}
 	got := boundPoints(t, rm)
 	for k := range got {
-		if strings.HasPrefix(k, "issue/") {
-			t.Errorf("series %s emitted: the issue type has no sweep-bound series", k)
+		if strings.HasPrefix(k, "issue/") || strings.HasPrefix(k, "pr/") {
+			t.Errorf("series %s emitted: only thread has a sweep-bound series", k)
 		}
 	}
 	if len(got) != len(want) {
