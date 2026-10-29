@@ -280,8 +280,15 @@ func (e *Engine) recordRuleError(rule string, err error) {
 // passes is the one place that must never let an Ask out. Attended sessions are
 // untouched.
 func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
-	verdict := e.evaluateHookVerdict(input)
-	final := hookio.NeverAskWhenUnattended(input, verdict)
+	_, final := e.EvaluateHookBoth(input)
+	return final
+}
+
+// EvaluateHookBoth is EvaluateHook that also returns the engine's verdict before
+// the unattended delivery policy, so a recorder can show both.
+func (e *Engine) EvaluateHookBoth(input *hookio.HookInput) (verdict, final hookio.RuleResult) {
+	verdict = e.evaluateHookVerdict(input)
+	final = hookio.NeverAskWhenUnattended(input, verdict)
 	if final.Decision != verdict.Decision {
 		// The rule trace above still reads "<rule> -> ask"; say here why the hook's
 		// stdout is a deny, so a reader of the hook's stderr (Claude Code records it
@@ -289,7 +296,7 @@ func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: unattended session never asks: %s -> %s converted to %s\n",
 			verdict.Module, verdict.Decision, final.Decision)
 	}
-	return final
+	return verdict, final
 }
 
 // evaluateHookVerdict is EvaluateHook's decision work, before the delivery policy.

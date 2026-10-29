@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killshell"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/sandboxdetect"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/toolevents"
 	"github.com/spf13/cobra"
 )
 
@@ -186,11 +187,12 @@ func handlePreToolUse(input *hookio.HookInput) {
 	// Open the ask-log store first so it can double as the killshell rule's
 	// shell-ownership store. If it fails to open, fall back to a storeless engine
 	// (killshell then fails secure → Ask).
+	sandboxOn := sandboxdetect.Detect(projectDirForDetect(input))
 	var store *asklog.Store
 	if s, err := asklog.NewStore(asklog.DefaultDBPath()); err == nil {
 		store = s
 		defer func() { _ = store.Close() }()
-		store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
+		store.SetSandboxEnabled(sandboxOn)
 	} else {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
 	}
@@ -213,7 +215,7 @@ func handlePreToolUse(input *hookio.HookInput) {
 	} else {
 		eng = setup.NewEngineForCWDLive(input.CWD, shells)
 	}
-	result := eng.EvaluateHook(input)
+	engineVerdict, result := eng.EvaluateHookBoth(input)
 
 	// updatedInput rewrites the Bash command through ceta's ORDERED
 	// input-processor chain (internal/inputproc) — but ONLY on Approve/Ask,
@@ -256,6 +258,11 @@ func handlePreToolUse(input *hookio.HookInput) {
 	output := hookio.FormatOutput(result, updatedInput)
 	_, _ = os.Stdout.Write(output)
 	fmt.Fprintln(os.Stdout)
+
+	// ceta.* events for the tracker (shadow mode: CETA still writes its own
+	// database below). Best effort, after stdout: a failure here can neither
+	// change the verdict nor block the call.
+	recordToolEvents(input, engineVerdict, result, sandboxOn)
 
 	if store != nil {
 		if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
@@ -367,4 +374,18 @@ func handleSessionEnd(input *hookio.HookInput) {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
 	}
 	fmt.Println("{}")
+}
+
+// recordToolEvents appends this call's ceta.* events (see internal/toolevents).
+// It is best effort: any failure, even a panic, is reported on stderr and
+// otherwise ignored.
+func recordToolEvents(input *hookio.HookInput, verdict, delivered hookio.RuleResult, sandboxOn bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: tool events: panic: %v\n", r)
+		}
+	}()
+	if err := toolevents.RecordPreToolUse(input, verdict, delivered, sandboxOn, metrics.DefaultRuleErrors.Snapshot()); err != nil {
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: tool events: %v\n", err)
+	}
 }
