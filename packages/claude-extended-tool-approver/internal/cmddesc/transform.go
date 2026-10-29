@@ -85,6 +85,8 @@ func applyTransform(t EffectTransform, effects []Effect) ([]Effect, bool) {
 		return retarget(effects, AccessTruncate, AccessCreate), true
 	case TransformAppend:
 		return retarget(effects, AccessTruncate, AccessModify), true
+	case TransformPreview:
+		return retarget(effects, AccessModify, AccessRead), true
 	case TransformForce:
 		// A plain force dominates every other push shape, including a delete
 		// already seen (`--delete --force` must Reject like `--force --delete`).

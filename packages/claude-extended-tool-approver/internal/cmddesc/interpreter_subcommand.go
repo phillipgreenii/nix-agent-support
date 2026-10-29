@@ -30,6 +30,15 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 	// effect nor judged by its role. Resolving is safe here: scanGlobal stops
 	// at the first positional, so st.ops holds flag operands only.
 	st.resolve()
+	if subIdx < 0 && len(leaf.Args) > 0 && schema.DefaultSubcommand != "" && !helpOnlyInvocation(leaf, schema) {
+		// No positional at all (`ast-grep -p x`): when the parent and the
+		// default subcommand share ONE flag table the default subcommand owns
+		// the whole argv, exactly as in the first-positional case below.
+		if def, ok := schema.Subcommands[schema.DefaultSubcommand]; ok && reflect.DeepEqual(def.Flags, schema.Flags) {
+			subIdx = 0
+			st = &interpState{schema: schema, leaf: leaf, ctx: ctx, flagsSeen: map[string]bool{}, scanned: true}
+		}
+	}
 	if subIdx < 0 {
 		if helpOnlyInvocation(leaf, schema) {
 			// `pb gate --help`, `git --version`: the group prints its usage or

@@ -293,6 +293,8 @@ func TestRegistryNames(t *testing.T) {
 	// pg2-niyyq: the plugin support tools whose schema was missing
 	// (registry_plugin_support_tools.go).
 	want = append(want, "hand-to-human", "pg-router", "wtnew")
+	// pg2-ve5xen: the Rust CLI tools sd and ast-grep (registry_plugin_tools.go).
+	want = append(want, "ast-grep", "sd")
 	// pg2-dbrsg: the shell builtins skills' control-flow statements use.
 	want = append(want, "exit", "pwd", "read", "shift")
 	// pg2-slsc0: the read-only probes the pb plugin instructs

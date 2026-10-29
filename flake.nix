@@ -5792,6 +5792,8 @@
                       pkgs.bats
                       pkgs.ripgrep # rg
                       pkgs.fd
+                      pkgs.sd # pg2-ve5xen: data/sd.json
+                      pkgs.ast-grep # pg2-ve5xen: data/ast-grep.json (sg is deliberately not registered)
                       pkgs.lsof
                       pkgs.prek
                       # This repo's own CLIs (overlay attrs; bgcheck, bgwait and bgkill ship in bg-tools):

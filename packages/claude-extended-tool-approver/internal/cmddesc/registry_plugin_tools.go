@@ -959,6 +959,159 @@ var fdSchema = CommandSchema{
 	EndOfOptions:    true,
 }
 
+// sdSchema: `sd [OPTIONS] <FIND> <REPLACE_WITH> [FILES]...`. FILES are edited
+// IN PLACE by default (PathModify, the sed -i strictness), or read from stdin
+// when none are given. -p/--preview prints the change instead of writing, so
+// it downgrades the modify to a read (TransformPreview keeps the path effect,
+// a secret path stays a read). FIND/REPLACE_WITH are plain strings or regexes,
+// never a program (no dialect). Verified against the sd binary's --help
+// (nixpkgs sd 1.1.0, which prints "sd v1.0.0"); flag names differ across sd
+// versions (0.7 used -s for fixed strings), so the help-hash drift check
+// guards this table.
+var sdSchema = CommandSchema{
+	Name:       "sd",
+	Provenance: "sd v1.0.0 (nixpkgs sd 1.1.0), sd --help",
+	Flags: map[string]FlagSpec{
+		"-F": inert, "--fixed-strings": inert,
+		"-A": inert, "--across": inert,
+		"-h": inert, "--help": inert, "-V": inert, "--version": inert,
+		"-n": literal1, "--max-replacements": literal1,
+		"-f": literal1, "--flags": literal1,
+		"-p":        {Transform: EffectTransform{Kind: TransformPreview}},
+		"--preview": {Transform: EffectTransform{Kind: TransformPreview}},
+	},
+	Positionals: PositionalSpec{
+		Leading: []OperandRole{Literal, Literal},
+		Rest:    PathModify,
+	},
+	Stdin:        StdinWhenNoPathOperands,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// astGrepSearchFlags is the flag table shared by `ast-grep run` and the bare
+// `ast-grep ...` form (run is the default command, so the parent and the run
+// subcommand MUST share one table, like yq). Deliberately unmodeled (abstain):
+// -i/--interactive (an edit session), --stdin, lsp/new/completions. -U
+// rewrites every match in place: with a path operand it is TransformInPlace,
+// with none the implicit "." search root is modified (astGrepImplicit).
+func astGrepSearchFlags() map[string]FlagSpec {
+	return map[string]FlagSpec{
+		"-p": literal1, "--pattern": literal1, "--selector": literal1,
+		"-r": literal1, "--rewrite": literal1, "-l": literal1, "--lang": literal1,
+		"--strictness": literal1, "--no-ignore": literal1, "--globs": literal1,
+		"-j": literal1, "--threads": literal1, "--color": literal1, "--inspect": literal1,
+		"-A": literal1, "--after": literal1, "-B": literal1, "--before": literal1,
+		"-C": literal1, "--context": literal1, "--heading": literal1,
+		"--debug-query": literalOpt, "--json": literalOpt,
+		"--follow": inert, "--files-with-matches": inert,
+		"-h": inert, "--help": inert, "-V": inert, "--version": inert,
+		"-c": {Arity: ArityOne, Operand: PathRead}, "--config": {Arity: ArityOne, Operand: PathRead},
+		"-U": {Transform: EffectTransform{Kind: TransformInPlace}}, "--update-all": {Transform: EffectTransform{Kind: TransformInPlace}},
+	}
+}
+
+// astGrepImplicit: with no PATHS operand run/scan search "." (help: "[default:
+// .]"); -U/--update-all then rewrites it, which no positional carries.
+var astGrepImplicit = []ImplicitEffect{
+	{Role: PathRead, Target: ".", WhenNoRestPositionals: true},
+	{Role: PathModify, Target: ".", WhenNoRestPositionals: true, WhenFlags: []string{"-U", "--update-all"}},
+}
+
+var astGrepRunSchema = CommandSchema{
+	Name:            "run",
+	Provenance:      "ast-grep 0.42.1, ast-grep run --help",
+	Flags:           astGrepSearchFlags(),
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: astGrepImplicit,
+	Stdin:           StdinNever,
+	Stdout:          StdoutContent,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+var astGrepScanSchema = func() CommandSchema {
+	f := astGrepSearchFlags()
+	// scan's own table: -r is --rule (a file read), --pattern-family flags do
+	// not exist here.
+	for _, k := range []string{"-p", "--pattern", "--selector", "-r", "--rewrite", "-l", "--lang", "--strictness", "--debug-query", "--heading"} {
+		delete(f, k)
+	}
+	f["-r"], f["--rule"] = FlagSpec{Arity: ArityOne, Operand: PathRead}, FlagSpec{Arity: ArityOne, Operand: PathRead}
+	for _, k := range []string{"--inline-rules", "--format", "--report-style", "--filter", "--max-results"} {
+		f[k] = literal1
+	}
+	for _, k := range []string{"--error", "--warning", "--info", "--hint", "--off"} {
+		f[k] = literalOpt
+	}
+	f["--include-metadata"] = inert
+	return CommandSchema{
+		Name:            "scan",
+		Provenance:      "ast-grep 0.42.1, ast-grep scan --help",
+		Flags:           f,
+		Positionals:     PositionalSpec{Rest: PathRead},
+		ImplicitEffects: astGrepImplicit,
+		Stdin:           StdinNever,
+		Stdout:          StdoutContent,
+		UnknownFlag:     UnknownFlagInsufficient,
+		EndOfOptions:    true,
+	}
+}()
+
+// astGrepTestSchema: `ast-grep test` reads sgconfig.yml and the rule/test
+// directories under the working directory. Its -U/-i rewrite SNAPSHOT files
+// (not a path operand), so they are unmodeled and abstain.
+var astGrepTestSchema = CommandSchema{
+	Name:       "test",
+	Provenance: "ast-grep 0.42.1, ast-grep test --help",
+	Flags: map[string]FlagSpec{
+		"-t": {Arity: ArityOne, Operand: PathRead}, "--test-dir": {Arity: ArityOne, Operand: PathRead},
+		"-c": {Arity: ArityOne, Operand: PathRead}, "--config": {Arity: ArityOne, Operand: PathRead},
+		"--snapshot-dir": literal1, "-f": literal1, "--filter": literal1, "--color": literal1,
+		"--skip-snapshot-tests": inert, "--include-off": inert, "-h": inert, "--help": inert,
+	},
+	ImplicitEffects: []ImplicitEffect{{Role: PathRead, Target: "."}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutContent,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// astGrepUnmodeled stands for ast-grep's new, lsp, completions and help
+// subcommands, which `ast-grep --help` lists but this schema does not model
+// (new writes project files; lsp starts a server). Without an entry the word
+// would fall through to the default `run` subcommand as a PATH operand and
+// approve as a read. The single Unmodeled operand makes every form abstain.
+var astGrepUnmodeled = CommandSchema{
+	Name:         "unmodeled",
+	Provenance:   "ast-grep 0.42.1, ast-grep --help (Commands list)",
+	Positionals:  PositionalSpec{Leading: []OperandRole{Unmodeled}, Rest: Unmodeled},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// astGrepSchema: `ast-grep [run|scan|test] ...` with `run` implied when the
+// first positional is not a subcommand (DefaultSubcommand; the parent shares
+// run's flag table). Only `ast-grep` is registered, NOT `sg`: shadow-utils
+// ships an unrelated `sg` on Linux, so an unregistered sg prompts by design.
+// new, lsp, completions and help are unmodeled and abstain.
+var astGrepSchema = CommandSchema{
+	Name:              "ast-grep",
+	Provenance:        "ast-grep 0.42.1, ast-grep --help",
+	Flags:             astGrepSearchFlags(),
+	UnknownFlag:       UnknownFlagInsufficient,
+	EndOfOptions:      true,
+	DefaultSubcommand: "run",
+	Subcommands: map[string]CommandSchema{
+		"run": astGrepRunSchema, "scan": astGrepScanSchema, "test": astGrepTestSchema,
+		"new": renamed(astGrepUnmodeled, "new"), "lsp": renamed(astGrepUnmodeled, "lsp"),
+		"completions": renamed(astGrepUnmodeled, "completions"), "help": renamed(astGrepUnmodeled, "help"),
+	},
+}
+
 // duSchema: `du [-s] [-h] [-a] [-c] [-k|-m|-b] [-x] [-d N] [PATH...]` —
 // disk usage; a metadata read of each PATH ("." when none).
 var duSchema = CommandSchema{
@@ -1133,7 +1286,7 @@ func pluginToolSchemas() []CommandSchema {
 		bgcheckSchema, bgwaitSchema, integrateBranchSupportSchema, wtdoneSchema,
 		handoffCreateSchema, sessionModeSchema, pgGoMutateSchema, pgCcauditSchema,
 		pgWiFlowSchema, pgHooksSchema, prekSchema, batsSchema, ghSchema,
-		cetaSchema, rgSchema, fdSchema, duSchema, lsofSchema, launchctlSchema, manSchema,
+		cetaSchema, rgSchema, fdSchema, sdSchema, astGrepSchema, duSchema, lsofSchema, launchctlSchema, manSchema,
 		uuidgenSchema, trSchema,
 	}
 	out = append(out, pluginSupportToolSchemas()...)

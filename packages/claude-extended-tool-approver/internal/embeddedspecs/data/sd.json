@@ -1,0 +1,218 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "sd",
+  "command": {
+    "name": "sd",
+    "provenance": "sd v1.0.0 (nixpkgs sd 1.1.0), sd --help",
+    "citations": {
+      "provenance": {
+        "source": "sd --help: \"sd v1.0.0\" (binary built from nixpkgs sd 1.1.0, which still prints v1.0.0)"
+      },
+      "stdin": {
+        "source": "sd --help: \"[FILES]... The path to file(s). This is optional - sd can also read from STDIN.\""
+      },
+      "stdout": {
+        "source": "sd --help: \"-p, --preview Display changes in a human reviewable format\"; without -p a file operand is rewritten, with none the replaced text goes to stdout"
+      },
+      "unknownFlag": {
+        "source": "sd --help: full option listing reviewed; no behavior documented for an unrecognized flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--across": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-A, --across\""
+        }
+      },
+      "--fixed-strings": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-F, --fixed-strings\""
+        }
+      },
+      "--flags": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-f, --flags <FLAGS>\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-h, --help\""
+        }
+      },
+      "--max-replacements": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-n, --max-replacements <LIMIT>\""
+        }
+      },
+      "--preview": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "preview"
+        },
+        "citation": {
+          "source": "sd --help: \"-p, --preview\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-V, --version\""
+        }
+      },
+      "-A": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-A, --across\""
+        }
+      },
+      "-F": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-F, --fixed-strings\""
+        }
+      },
+      "-V": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-V, --version\""
+        }
+      },
+      "-f": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-f, --flags <FLAGS>\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-h, --help\""
+        }
+      },
+      "-n": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sd --help: \"-n, --max-replacements <LIMIT>\""
+        }
+      },
+      "-p": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "preview"
+        },
+        "citation": {
+          "source": "sd --help: \"-p, --preview\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "literal"
+        }
+      ],
+      "rest": {
+        "kind": "path-modify"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "sd --help: \"Usage: sd [OPTIONS] <FIND> <REPLACE_WITH> [FILES]...\" and \"Note: sd modifies files in-place by default.\""
+      }
+    },
+    "stdin": "when-no-path-operands",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

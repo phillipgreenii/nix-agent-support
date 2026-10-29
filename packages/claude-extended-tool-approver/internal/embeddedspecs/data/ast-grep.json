@@ -1,0 +1,1745 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "ast-grep",
+  "command": {
+    "name": "ast-grep",
+    "provenance": "ast-grep 0.42.1, ast-grep --help",
+    "citations": {
+      "provenance": {
+        "source": "ast-grep 0.42.1, ast-grep --help (the bare form is `run`: \"run  Run one time search or rewrite in command line. (default command)\")"
+      },
+      "stdin": {
+        "source": "ast-grep run --help: reviewed; stdin is read only under --stdin (\"Enable search code from StdIn.\"), which is not modeled, so classified never"
+      },
+      "stdout": {
+        "source": "ast-grep run --help: matches are printed (\"--json[=<STYLE>] Output matches in structured JSON\", \"--heading <WHEN>\"); classified content"
+      },
+      "unknownFlag": {
+        "source": "ast-grep run --help: full option listing reviewed; no behavior documented for an unrecognized flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--after": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-A, --after <NUM>\""
+        }
+      },
+      "--before": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-B, --before <NUM>\""
+        }
+      },
+      "--color": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--color <WHEN>\""
+        }
+      },
+      "--config": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-c, --config <CONFIG_FILE>\""
+        }
+      },
+      "--context": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-C, --context <NUM>\""
+        }
+      },
+      "--debug-query": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--debug-query[=<format>]\""
+        }
+      },
+      "--files-with-matches": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--files-with-matches\""
+        }
+      },
+      "--follow": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--follow\""
+        }
+      },
+      "--globs": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--globs <GLOBS>\""
+        }
+      },
+      "--heading": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--heading <WHEN>\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-h, --help\""
+        }
+      },
+      "--inspect": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--inspect <GRANULARITY>\""
+        }
+      },
+      "--json": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--json[=<STYLE>]\""
+        }
+      },
+      "--lang": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-l, --lang <LANG>\""
+        }
+      },
+      "--no-ignore": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--no-ignore <FILE_TYPE>\""
+        }
+      },
+      "--pattern": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-p, --pattern <PATTERN>\""
+        }
+      },
+      "--rewrite": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-r, --rewrite <FIX>\""
+        }
+      },
+      "--selector": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--selector <KIND>\""
+        }
+      },
+      "--strictness": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"--strictness <STRICTNESS>\""
+        }
+      },
+      "--threads": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-j, --threads <NUM>\""
+        }
+      },
+      "--update-all": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "in-place"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-U, --update-all\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep --help: \"-V, --version\""
+        }
+      },
+      "-A": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-A, --after <NUM>\""
+        }
+      },
+      "-B": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-B, --before <NUM>\""
+        }
+      },
+      "-C": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-C, --context <NUM>\""
+        }
+      },
+      "-U": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "in-place"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-U, --update-all\""
+        }
+      },
+      "-V": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep --help: \"-V, --version\""
+        }
+      },
+      "-c": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-c, --config <CONFIG_FILE>\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-h, --help\""
+        }
+      },
+      "-j": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-j, --threads <NUM>\""
+        }
+      },
+      "-l": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-l, --lang <LANG>\""
+        }
+      },
+      "-p": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-p, --pattern <PATTERN>\""
+        }
+      },
+      "-r": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ast-grep run --help: \"-r, --rewrite <FIX>\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "ast-grep run --help: \"[PATHS]... The paths to search. You can provide multiple paths separated by spaces [default: .]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "completions": {
+        "name": "completions",
+        "provenance": "ast-grep 0.42.1, ast-grep --help (Commands list)",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep --help: \"Commands: new, lsp, completions, help\" (not modeled)"
+          },
+          "stdin": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "stdout": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "unknownFlag": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "unmodeled"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep --help: \"new  Create new ast-grep project or items like rules/tests; lsp  Start language server; completions  Generate shell completion script\" - effects are not modeled, so every operand is unmodeled and the command abstains"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "flags": null
+      },
+      "help": {
+        "name": "help",
+        "provenance": "ast-grep 0.42.1, ast-grep --help (Commands list)",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep --help: \"Commands: new, lsp, completions, help\" (not modeled)"
+          },
+          "stdin": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "stdout": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "unknownFlag": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "unmodeled"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep --help: \"new  Create new ast-grep project or items like rules/tests; lsp  Start language server; completions  Generate shell completion script\" - effects are not modeled, so every operand is unmodeled and the command abstains"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "flags": null
+      },
+      "lsp": {
+        "name": "lsp",
+        "provenance": "ast-grep 0.42.1, ast-grep --help (Commands list)",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep --help: \"Commands: new, lsp, completions, help\" (not modeled)"
+          },
+          "stdin": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "stdout": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "unknownFlag": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "unmodeled"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep --help: \"new  Create new ast-grep project or items like rules/tests; lsp  Start language server; completions  Generate shell completion script\" - effects are not modeled, so every operand is unmodeled and the command abstains"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "flags": null
+      },
+      "new": {
+        "name": "new",
+        "provenance": "ast-grep 0.42.1, ast-grep --help (Commands list)",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep --help: \"Commands: new, lsp, completions, help\" (not modeled)"
+          },
+          "stdin": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "stdout": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          },
+          "unknownFlag": {
+            "source": "ast-grep --help: Commands list; subcommand not modeled, abstains"
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "unmodeled"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep --help: \"new  Create new ast-grep project or items like rules/tests; lsp  Start language server; completions  Generate shell completion script\" - effects are not modeled, so every operand is unmodeled and the command abstains"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "flags": null
+      },
+      "run": {
+        "name": "run",
+        "provenance": "ast-grep 0.42.1, ast-grep run --help",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep 0.42.1, ast-grep run --help"
+          },
+          "stdin": {
+            "source": "ast-grep run --help: reviewed; stdin is read only under --stdin (\"Enable search code from StdIn.\"), which is not modeled, so classified never"
+          },
+          "stdout": {
+            "source": "ast-grep run --help: matches are printed (\"--json[=<STYLE>] Output matches in structured JSON\", \"--heading <WHEN>\"); classified content"
+          },
+          "unknownFlag": {
+            "source": "ast-grep run --help: full option listing reviewed; no behavior documented for an unrecognized flag, so the fail-closed default (insufficient) applies"
+          }
+        },
+        "flags": {
+          "--after": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-A, --after <NUM>\""
+            }
+          },
+          "--before": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-B, --before <NUM>\""
+            }
+          },
+          "--color": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--color <WHEN>\""
+            }
+          },
+          "--config": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-c, --config <CONFIG_FILE>\""
+            }
+          },
+          "--context": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-C, --context <NUM>\""
+            }
+          },
+          "--debug-query": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--debug-query[=<format>]\""
+            }
+          },
+          "--files-with-matches": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--files-with-matches\""
+            }
+          },
+          "--follow": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--follow\""
+            }
+          },
+          "--globs": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--globs <GLOBS>\""
+            }
+          },
+          "--heading": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--heading <WHEN>\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-h, --help\""
+            }
+          },
+          "--inspect": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--inspect <GRANULARITY>\""
+            }
+          },
+          "--json": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--json[=<STYLE>]\""
+            }
+          },
+          "--lang": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-l, --lang <LANG>\""
+            }
+          },
+          "--no-ignore": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--no-ignore <FILE_TYPE>\""
+            }
+          },
+          "--pattern": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-p, --pattern <PATTERN>\""
+            }
+          },
+          "--rewrite": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-r, --rewrite <FIX>\""
+            }
+          },
+          "--selector": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--selector <KIND>\""
+            }
+          },
+          "--strictness": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"--strictness <STRICTNESS>\""
+            }
+          },
+          "--threads": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-j, --threads <NUM>\""
+            }
+          },
+          "--update-all": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "in-place"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-U, --update-all\""
+            }
+          },
+          "--version": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep --help: \"-V, --version\""
+            }
+          },
+          "-A": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-A, --after <NUM>\""
+            }
+          },
+          "-B": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-B, --before <NUM>\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-C, --context <NUM>\""
+            }
+          },
+          "-U": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "in-place"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-U, --update-all\""
+            }
+          },
+          "-V": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep --help: \"-V, --version\""
+            }
+          },
+          "-c": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-c, --config <CONFIG_FILE>\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-h, --help\""
+            }
+          },
+          "-j": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-j, --threads <NUM>\""
+            }
+          },
+          "-l": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-l, --lang <LANG>\""
+            }
+          },
+          "-p": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-p, --pattern <PATTERN>\""
+            }
+          },
+          "-r": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep run --help: \"-r, --rewrite <FIX>\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "path-read"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep run --help: \"[PATHS]... The paths to search. You can provide multiple paths separated by spaces [default: .]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "whenNoRestPositionals": true,
+            "citation": {
+              "source": "ast-grep run --help: \"[PATHS]... [default: .]\" (no path operand searches .); \"-U, --update-all Apply all rewrite without confirmation\" rewrites matches in the searched paths"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".",
+            "whenNoRestPositionals": true,
+            "whenFlags": ["-U", "--update-all"],
+            "citation": {
+              "source": "ast-grep run --help: \"[PATHS]... [default: .]\" (no path operand searches .); \"-U, --update-all Apply all rewrite without confirmation\" rewrites matches in the searched paths"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "scan": {
+        "name": "scan",
+        "provenance": "ast-grep 0.42.1, ast-grep scan --help",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep 0.42.1, ast-grep scan --help"
+          },
+          "stdin": {
+            "source": "ast-grep scan --help: reviewed; stdin is read only under --stdin (\"Enable search code from StdIn.\"), which is not modeled, so classified never"
+          },
+          "stdout": {
+            "source": "ast-grep scan --help: matches are printed (\"--json[=<STYLE>] Output matches in structured JSON\", \"--heading <WHEN>\"); classified content"
+          },
+          "unknownFlag": {
+            "source": "ast-grep scan --help: full option listing reviewed; no behavior documented for an unrecognized flag, so the fail-closed default (insufficient) applies"
+          }
+        },
+        "flags": {
+          "--after": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-A, --after <NUM>\""
+            }
+          },
+          "--before": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-B, --before <NUM>\""
+            }
+          },
+          "--color": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--color <WHEN>\""
+            }
+          },
+          "--config": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-c, --config <CONFIG_FILE>\""
+            }
+          },
+          "--context": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-C, --context <NUM>\""
+            }
+          },
+          "--error": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--error[=<RULE_ID>...]\""
+            }
+          },
+          "--files-with-matches": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--files-with-matches\""
+            }
+          },
+          "--filter": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--filter <REGEX>\""
+            }
+          },
+          "--follow": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--follow\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--format <FORMAT>\""
+            }
+          },
+          "--globs": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--globs <GLOBS>\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-h, --help\""
+            }
+          },
+          "--hint": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--hint[=<RULE_ID>...]\""
+            }
+          },
+          "--include-metadata": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--include-metadata\""
+            }
+          },
+          "--info": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--info[=<RULE_ID>...]\""
+            }
+          },
+          "--inline-rules": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--inline-rules <RULE_TEXT>\""
+            }
+          },
+          "--inspect": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--inspect <GRANULARITY>\""
+            }
+          },
+          "--json": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--json[=<STYLE>]\""
+            }
+          },
+          "--max-results": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--max-results <NUM>\""
+            }
+          },
+          "--no-ignore": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--no-ignore <FILE_TYPE>\""
+            }
+          },
+          "--off": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--off[=<RULE_ID>...]\""
+            }
+          },
+          "--report-style": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--report-style <REPORT_STYLE>\""
+            }
+          },
+          "--rule": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-r, --rule <RULE_FILE>\""
+            }
+          },
+          "--threads": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-j, --threads <NUM>\""
+            }
+          },
+          "--update-all": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "in-place"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-U, --update-all\""
+            }
+          },
+          "--version": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep --help: \"-V, --version\""
+            }
+          },
+          "--warning": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"--warning[=<RULE_ID>...]\""
+            }
+          },
+          "-A": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-A, --after <NUM>\""
+            }
+          },
+          "-B": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-B, --before <NUM>\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-C, --context <NUM>\""
+            }
+          },
+          "-U": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "in-place"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-U, --update-all\""
+            }
+          },
+          "-V": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep --help: \"-V, --version\""
+            }
+          },
+          "-c": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-c, --config <CONFIG_FILE>\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-h, --help\""
+            }
+          },
+          "-j": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-j, --threads <NUM>\""
+            }
+          },
+          "-r": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep scan --help: \"-r, --rule <RULE_FILE>\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "path-read"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep scan --help: \"[PATHS]... The paths to search. You can provide multiple paths separated by spaces [default: .]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "whenNoRestPositionals": true,
+            "citation": {
+              "source": "ast-grep scan --help: \"[PATHS]... [default: .]\" (no path operand searches .); \"-U, --update-all Apply all rewrite without confirmation\" rewrites matches in the searched paths"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".",
+            "whenNoRestPositionals": true,
+            "whenFlags": ["-U", "--update-all"],
+            "citation": {
+              "source": "ast-grep scan --help: \"[PATHS]... [default: .]\" (no path operand searches .); \"-U, --update-all Apply all rewrite without confirmation\" rewrites matches in the searched paths"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "test": {
+        "name": "test",
+        "provenance": "ast-grep 0.42.1, ast-grep test --help",
+        "citations": {
+          "provenance": {
+            "source": "ast-grep 0.42.1, ast-grep test --help"
+          },
+          "stdin": {
+            "source": "ast-grep test --help: reviewed; stdin is read only under --stdin (\"Enable search code from StdIn.\"), which is not modeled, so classified never"
+          },
+          "stdout": {
+            "source": "ast-grep test --help: matches are printed (\"--json[=<STYLE>] Output matches in structured JSON\", \"--heading <WHEN>\"); classified content"
+          },
+          "unknownFlag": {
+            "source": "ast-grep test --help: full option listing reviewed; no behavior documented for an unrecognized flag, so the fail-closed default (insufficient) applies"
+          }
+        },
+        "flags": {
+          "--color": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"--color <WHEN>\""
+            }
+          },
+          "--config": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-c, --config <CONFIG_FILE>\""
+            }
+          },
+          "--filter": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-f, --filter <REGEX>\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-h, --help\""
+            }
+          },
+          "--include-off": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"--include-off\""
+            }
+          },
+          "--skip-snapshot-tests": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"--skip-snapshot-tests\""
+            }
+          },
+          "--snapshot-dir": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"--snapshot-dir <SNAPSHOT_DIR>\""
+            }
+          },
+          "--test-dir": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-t, --test-dir <TEST_DIR>\""
+            }
+          },
+          "-c": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-c, --config <CONFIG_FILE>\""
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-f, --filter <REGEX>\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-h, --help\""
+            }
+          },
+          "-t": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "ast-grep test --help: \"-t, --test-dir <TEST_DIR>\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ast-grep test --help: \"Usage: ast-grep test [OPTIONS]\" (takes no positional operand)"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "citation": {
+              "source": "ast-grep test --help: \"-c, --config <CONFIG_FILE> Path to ast-grep root config, default is sgconfig.yml\" and \"-t, --test-dir\": reads sgconfig.yml and the rule/test directories under the working directory"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    },
+    "defaultSubcommand": "run"
+  }
+}

@@ -122,6 +122,19 @@ var extraAgreementCases = []agreementCase{
 	{"head_bytes_project", "head -c 10 README.md", nil},
 	{"cat_show_all_flags", "cat -A README.md", nil},
 	{"sed_line_length", "sed -l 80 -n '1p' README.md", nil},
+	// pg2-ve5xen: sd and ast-grep (the live engine has no rule for either, so
+	// every row is a spike-only verdict; sed -i is the parity reference).
+	{"sd_stdin", "sd a b", nil},
+	{"sd_inplace_readme", "sd a b README.md", nil},
+	{"sd_preview_readme", "sd -p a b README.md", nil},
+	{"sd_inplace_ssh_config", "sd a b ~/.ssh/config", nil},
+	{"sd_preview_ssh_key", "sd -p a b ~/.ssh/id_rsa", nil},
+	{"sd_dynamic_file", "sd a b $F", nil},
+	{"ast_grep_run_search", "ast-grep run -p x README.md", nil},
+	{"ast_grep_update_no_path", "ast-grep run -p x -r y -U", nil},
+	{"ast_grep_update_ssh", "ast-grep run -p x -r y -U ~/.ssh", nil},
+	{"ast_grep_new", "ast-grep new project", nil},
+	{"ast_grep_interactive", "ast-grep run -p x -r y -i", nil},
 }
 
 // liveCurlConfig is written into the fixture HOME's rules.json so the live
@@ -310,7 +323,21 @@ type spikeLooserEntry struct {
 // this branch alongside 3b's harnesses — see each entry's Cause for the
 // per-row root cause (read from both engines' source, no verdict changed on
 // either side to make these agree).
+// sdAstGrepLooserCause is the shared Cause of the sd and ast-grep register rows.
+const sdAstGrepLooserCause = "pg2-ve5xen: sd and ast-grep are classified only by the schema registry; " +
+	"the legacy rule chain has no rule for them (NoOpinion), by design (registry-only scope)."
+
 var knownSpikeLooser = map[string]spikeLooserEntry{
+	// pg2-ve5xen: sd and ast-grep exist only in the schema registry. The legacy
+	// per-command rule chain has no rule for either (deliberately not mirrored
+	// into safecmds.go, which would bypass the schema's -p/-U logic), so the live
+	// engine abstains where the schema approves a read-class or workspace-write
+	// shape. This is the intended direction of the new engine, not a regression.
+	"sd_stdin":                {Class: "looser-than-abstain", Cause: sdAstGrepLooserCause},
+	"sd_inplace_readme":       {Class: "looser-than-abstain", Cause: sdAstGrepLooserCause},
+	"sd_preview_readme":       {Class: "looser-than-abstain", Cause: sdAstGrepLooserCause},
+	"ast_grep_run_search":     {Class: "looser-than-abstain", Cause: sdAstGrepLooserCause},
+	"ast_grep_update_no_path": {Class: "looser-than-abstain", Cause: sdAstGrepLooserCause},
 	"bash_c_cat_readme": {
 		Class: "looser-than-abstain",
 		Cause: "spike recurses into a bare top-level `bash -c` and approves once the " +

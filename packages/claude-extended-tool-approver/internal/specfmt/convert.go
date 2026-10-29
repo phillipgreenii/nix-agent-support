@@ -27,10 +27,10 @@ func roleKindFromString(s string) (cmddesc.RoleKind, bool) {
 
 // transformKindByName is roleKindByName's TransformKind analogue — same
 // rationale, built from cmddesc.TransformKind.String().
-// TransformNone..TransformRetargetRemote are contiguous iota values in cmddesc.
+// TransformNone..TransformPreview are contiguous iota values in cmddesc.
 var transformKindByName = func() map[string]cmddesc.TransformKind {
 	m := make(map[string]cmddesc.TransformKind)
-	for k := cmddesc.TransformNone; k <= cmddesc.TransformRetargetRemote; k++ {
+	for k := cmddesc.TransformNone; k <= cmddesc.TransformPreview; k++ {
 		m[k.String()] = k
 	}
 	return m

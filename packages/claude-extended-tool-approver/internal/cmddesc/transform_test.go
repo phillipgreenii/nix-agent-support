@@ -102,3 +102,27 @@ func TestTransformsApplyInFlagOrder(t *testing.T) {
 		t.Errorf("-d then -i: read should be upgraded after the drop, got %v", got)
 	}
 }
+
+// TestTransformPreview: TransformPreview turns a modify path effect into a
+// read (sd -p prints instead of writing) and KEEPS it, unlike TransformDryRun
+// which would drop it and lose a secret-path read. Other access classes and
+// non-path effects pass through unchanged.
+func TestTransformPreview(t *testing.T) {
+	mod := Effect{Kind: EffectPath, Path: "f", Access: AccessModify, Source: "arg 2", FromPositional: true}
+	read := Effect{Kind: EffectPath, Path: "r", Access: AccessRead, Source: "arg 3", FromPositional: true}
+	del := Effect{Kind: EffectPath, Path: "x", Access: AccessDelete, Source: "arg 4", FromPositional: true}
+	out := Effect{Kind: EffectStdio, Stream: StreamStdout}
+	got, ok := applyTransform(EffectTransform{Kind: TransformPreview}, []Effect{mod, read, del, out})
+	if !ok {
+		t.Fatal("TransformPreview must be a known kind")
+	}
+	wantMod := mod
+	wantMod.Access = AccessRead
+	want := []Effect{wantMod, read, del, out}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %+v\nwant %+v", got, want)
+	}
+	if TransformPreview.String() != "preview" {
+		t.Errorf("String() = %q, want preview", TransformPreview.String())
+	}
+}

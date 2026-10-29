@@ -382,6 +382,11 @@ const (
 	// spellings to rewrite); an empty From or To makes the interpretation
 	// insufficient (fail closed).
 	TransformRetargetRemote
+	// TransformPreview downgrades every modify path effect to read (sd -p/
+	// --preview prints the would-be change instead of writing the file).
+	// Unlike TransformDryRun it KEEPS the effect as a read, so a secret path
+	// operand still carries its read effect.
+	TransformPreview
 )
 
 // String returns the deterministic kind name.
@@ -405,6 +410,8 @@ func (k TransformKind) String() string {
 		return "force-with-lease"
 	case TransformRetargetRemote:
 		return "retarget-remote"
+	case TransformPreview:
+		return "preview"
 	default:
 		return "transform-invalid"
 	}
