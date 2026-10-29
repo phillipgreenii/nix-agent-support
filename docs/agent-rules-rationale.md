@@ -217,17 +217,18 @@ the debt was back within a day). Unpushed commits are NOT in themselves a proble
 OBLIGATION IS TO LOOK WHEN IT MATTERS, not to narrate the count at every session end. The full
 derivation / never-standing-bead / read-only-probe / one-line-reporting contract (U-1..U-4, U-6)
 lives in `session-wrapup:wrap-up-session`'s `references/unpushed-landing-debt.md`. U-5 stays in the
-core: it is a bare prohibition against ANY push/apply/update at ANY moment, not only at session
-close-out, so it has no session-close-scoped trigger a skill could gate on (Design P1). Trimming
-the reporting duty (U-6) does NOT relax this restraint. U-5 carries ONE exception (ADR 0108,
-Accepted 2026-10-27 on `pg2-ukat2`): the push step of the operator-enabled `pg-repo-runner`, a
-daemon-started program that is not an agent session, so a reading of "on own initiative" alone would
-leave it unauthorized by omission. The rule therefore names the exception and its ADR, and forbids an
-agent from enabling the step, widening its scope, or running it by hand. A second ruling (Phillip,
-2026-10-28, `pg2-pn6l7b`, approved for the rule text on `pg2-kwbhc2` 2026-10-29) narrowed the
-prohibition itself: an agent session MAY push its own non-primary work branch, switch branches and
-manage its own worktrees; the primary branch and the `pn workspace push|update|apply` verbs stay
-reserved to the operator.
+core: it is a bare prohibition that applies at ANY moment, not only at session close-out, so it
+has no session-close-scoped trigger a skill could gate on (Design P1). Trimming the reporting duty
+(U-6) does NOT relax this restraint. History: ADR 0108 (Accepted 2026-10-27, `pg2-ukat2`) named the
+`pg-repo-runner` push step as an exception, because a daemon is not an agent session. A ruling of
+Phillip, 2026-10-28 (`pg2-pn6l7b`), let an agent session push, switch branches and manage its
+worktrees. A final ruling of 2026-10-29 (`pg2-kwbhc2`, verbatim "we should remove the line from the
+CLAUDE. pushing is ok." and "git push and pn workspace push, not pn workspace update or pn
+workspace apply") replaced U-5 with its current scope: an agent MUST NOT run `pn workspace update`
+or `pn workspace apply`, or invoke `/pn-workspace-update`, on its own initiative; `git push` and
+`pn workspace push` are allowed. `/pn-workspace-sync` was NOT ruled on, so its prior prohibition is
+kept unchanged. Whether the runner's own push gate in ADR 0108 stays is likewise undecided and
+needs its own ruling; U-5 still forbids an agent from enabling that step or widening its scope.
 
 ## Local Containers (C-1..C-4)
 

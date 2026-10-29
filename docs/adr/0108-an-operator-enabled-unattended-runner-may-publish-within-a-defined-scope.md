@@ -99,6 +99,15 @@ nix), and the workspace policy that `main` has no branch protection.
    prohibition to the primary branch and the `pn workspace` publishing verbs. This ADR's scope (the
    `pg-repo-runner` primary-branch push, decisions 1 to 7) is unchanged.
 
+   **Amendment, 2026-10-29 (`pg2-huopls`).** The text quoted above, and the Context's quotation of
+   the original U-5, are historical. A later ruling on `pg2-kwbhc2` (Phillip, 2026-10-29, verbatim:
+   "we should remove the line from the CLAUDE. pushing is ok." and "git push and pn workspace push,
+   not pn workspace update or pn workspace apply") replaced U-5: an agent MUST NOT run
+   `pn workspace update` or `pn workspace apply`, or invoke `/pn-workspace-update`, on its own
+   initiative, and `git push` and `pn workspace push` are allowed. Where this ADR says U-5 forbids
+   an agent push or `pn workspace push`, read it as that earlier wording. Whether the runner's own
+   push gate (decisions 1 to 7) stays is NOT decided by that ruling and needs its own ruling.
+
 9. **The 2026-10-22 PR-branch push ruling is unchanged.** It is cited as precedent for an
    operator-authorized unattended push and is neither widened nor narrowed by this ADR.
 

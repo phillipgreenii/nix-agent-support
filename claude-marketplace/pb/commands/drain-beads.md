@@ -120,10 +120,10 @@ EXPECTED — **REPORT NOTHING ABOUT IT** (no heading, no probe output, no counts
 no remediation sequence), with NO exception in a `pn` workspace: build/apply use
 local-clone overrides, so unpublished or un-relocked state never blocks a bead
 and MUST NOT be a reason to park, defer, `human`-label, or block one (U-6). A `pull-request` repo leaves no such debt (the push IS the
-landing). Never push to clear it — read-only probes only, never `--fix` (U-4,
-U-5). Full contract: the `session-wrapup:wrap-up-session` skill's
+landing). Do not push to clear it from the drain — read-only probes only, never `--fix` (U-4;
+an agent MAY push per U-5, but the drain's landing policy is local-only). Full contract: the `session-wrapup:wrap-up-session` skill's
 `references/unpushed-landing-debt.md` (**U-1..U-4, U-6**). **U-5** alone
-remains in the core agent rules, unconditionally.
+remains in the core agent rules (operator-run `pn workspace update`/`apply`).
 
 Do NOT `bd create` anything for this either way — there is deliberately NO
 standing push bead (provenance: `pg2-5subz`, `pg2-dawg2`); the debt regenerates

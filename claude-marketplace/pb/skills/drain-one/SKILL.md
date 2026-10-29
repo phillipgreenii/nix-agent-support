@@ -49,7 +49,7 @@ state takes the default, which is exactly what /drain-beads does.
   draft-PR authority. With none: isolate with `pb drain isolate`, `<work-branch>`
   is `drain/<id>`, the worktree is what ISOLATE produced, and push authority is
   the default policy stated at step 6. With one, push and draft-PR authority come
-  ONLY from it, and where it grants none you MUST NOT push (U-5).
+  ONLY from it, and where it grants none the drain does not push (a drain-policy default, not a U-5 prohibition).
 
 `<work-branch>` below is the work branch (default `drain/<id>`). Every
 `bd`/`git` command here that names a branch uses it.
@@ -200,8 +200,8 @@ and the container's own priority, then:
      re-dispatch at most once more. A genuine `stopped:` routes to STUCK.
    - PUSH AUTHORITY (default policy, no tracker section): under `pull-request` you
      MAY push `<work-branch>` and create or update its DRAFT PR without asking; you
-     MUST NOT merge it, enable automerge, or push a primary branch. Under
-     `ff-merge-to-main` landing is local only and you MUST NOT push. With a tracker
+     MUST NOT merge it, enable automerge, or push a primary branch (drain policy,
+     not U-5). Under `ff-merge-to-main` landing is local only and the drain does not push. With a tracker
      section, authority comes ONLY from it (see Inputs).
 
 7. **FINISH** — branch on the report status.

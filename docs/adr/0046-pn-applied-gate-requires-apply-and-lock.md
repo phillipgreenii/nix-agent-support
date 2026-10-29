@@ -162,8 +162,8 @@ evidence:
 
 So condition 2 as landed is **stricter than the build requires**. It stays fail-SAFE — a `blocked`
 verdict means "not provable from the lock", never "not in the running system" — but the cost lands
-on exactly one workflow: `/drain-beads` lands locally and deliberately does not push (always-on rule
-U-5), so every verification bead it gated sat blocked until someone pushed **and** relocked, and the
+on exactly one workflow: `/drain-beads` lands locally and deliberately does not push (a drain landing policy;
+see always-on rule U-5 for what agents may run), so every verification bead it gated sat blocked until someone pushed **and** relocked, and the
 stale handler then converted it into operator traffic.
 
 ### The ruling

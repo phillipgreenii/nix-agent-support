@@ -14,8 +14,9 @@ fetch, fast-forward a behind clone, verify the primary tip and surface problems;
 publishes.
 
 Enabling a repo for push needs an operator ruling recorded on a bead (who, when, verbatim), per
-decision 1 of ADR 0108. An agent MUST NOT enable it, widen the push scope, run the push by hand, or
-run `pn workspace push|update|apply` to make it take effect (rule U-5 as reworded by that ADR). The
+decision 1 of ADR 0108. An agent MUST NOT enable it, widen the push scope, or run
+`pn workspace update` or `pn workspace apply` to make it take effect (rule U-5 as ruled 2026-10-29
+on `pg2-kwbhc2`; whether the runner's own push gate stays is a separate, undecided ruling). The
 first enablement MUST run dry-run first (decision 6): the procedure is
 [First enablement](#first-enablement-dry-run-first) below.
 

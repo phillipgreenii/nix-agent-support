@@ -44,8 +44,9 @@ produce. It also updates the status of the ADRs this decision directly affects.
 - R6. Pushes: `git push` and `--force-with-lease` approvable; plain `--force` REJECT; `--mirror`
   and `--prune` REJECT; single-ref `--delete`/`:ref` ABSTAIN, except deleting the primary branch
   or a tag ⇒ REJECT. `pn workspace push|update` approvable. Server-side protection is the
-  backstop. **R6 removes the hook backstop behind agent rule U-5** (the operator-facing rule that
-  an agent MUST NOT push on its own initiative to discharge landing debt): once the hook itself
+  backstop. **R6 removes the hook backstop behind agent rule U-5** (as then worded, the rule that
+  an agent MUST NOT push on its own initiative to discharge landing debt; U-5 was later narrowed
+  on 2026-10-29, `pg2-kwbhc2`, so that `git push` is allowed): once the hook itself
   approves an ordinary push, U-5's enforcement is entirely behavioral going forward, not
   hook-backed.
 - R7. Agent-control files: writes to `.claude/settings*.json`, `.claude/hooks/**`, `.mcp.json`
@@ -208,8 +209,8 @@ non-primary branch).
 - `rules/primarypush` is retired (R6 note); pushes advancing the primary branch in auto mode no
   longer get a dedicated ask-based gate from that rule. Ordinary push safety now depends on R6's
   general push policy plus server-side protection as the backstop.
-- The hook-level backstop behind agent rule U-5 (an agent MUST NOT push on its own initiative to
-  discharge landing debt) is gone once R6 makes ordinary pushes approvable; U-5 is enforced purely
+- The hook-level backstop behind agent rule U-5 as then worded (an agent MUST NOT push on its own
+  initiative to discharge landing debt; since narrowed, 2026-10-29, `pg2-kwbhc2`) is gone once R6 makes ordinary pushes approvable; U-5 is enforced purely
   behaviorally from this ADR forward, not by CETA declining the call.
 - Golden-set validation plus decision-DB command replay is the acceptance bar for cutover (R4);
   Phase 0.2/0.3 build the corpus and legacy-extraction oracle this depends on.

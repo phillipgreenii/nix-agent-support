@@ -906,7 +906,7 @@ func TestApplyBuiltGatedCommit_schemaGuardIgnoresLockFields(t *testing.T) {
 // resolve. Condition 1 already proves the apply ran over a checkout holding it.
 //
 // Against the pre-change code (condition 2 unconditional) this BLOCKS, which is the
-// defect: /drain-beads lands locally and deliberately does not push (rule U-5), so
+// defect: /drain-beads lands locally and deliberately does not push (a drain landing policy), so
 // every verification bead it gates sat blocked until someone pushed and relocked.
 //
 // The probe assertion is the load-bearing half. Without it the test would still pass

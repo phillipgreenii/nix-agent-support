@@ -177,13 +177,13 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
    create/update its DRAFT PR WITHOUT per-bead confirmation, and MUST NOT stop
    to ask: that push IS the landing method the repo declared, and review +
    CODEOWNERS + CI still gate the merge. You MUST NOT merge the PR, enable
-   automerge, or push any PRIMARY branch. This is NOT **U-5** (self-initiated
-   pushes to discharge unpushed local-`main` debt) — here the push is
-   pre-authorized by the repo's declared strategy.
+   automerge, or push any PRIMARY branch. Agents MAY `git push` in general (U-5 as
+   ruled 2026-10-29, `pg2-kwbhc2`); the primary-branch limit here is drain landing policy, and
+   the push is pre-authorized by the repo's declared strategy.
 
    This is the DEFAULT policy. When the caller passed a tracker section, push and
-   draft-PR authority come ONLY from that section; where it grants none, you MUST NOT
-   push (U-5) — ESCALATE the bead through `pb:drain-stuck` instead of landing it.
+   draft-PR authority come ONLY from that section; where it grants none, the lander does
+   not push (drain policy, not U-5) — ESCALATE the bead through `pb:drain-stuck` instead of landing it.
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-dispatch the lander at most

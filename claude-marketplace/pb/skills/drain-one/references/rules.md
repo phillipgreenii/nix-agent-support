@@ -130,7 +130,7 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   done (the handler's PR-3), nor MAY any primary branch be pushed, and the worktree and
   branch MUST be KEPT rather than retired (PR-4). With a tracker section this
   permission is the DEFAULT policy only: push and draft-PR authority come ONLY from that
-  section, and where it grants none you MUST NOT push (U-5).
+  section, and where it grants none the drain does not push (a drain-policy default, not a U-5 prohibition).
 - Post-deploy `pn:applied` gating applies ONLY to a pn-workspace member repo landed via
   `ff-merge-to-main` WHOSE CHANGED FILES are actually applied by the terminal host's own
   `pn workspace apply` (nixos-rebuild) — repo/strategy alone is necessary but NOT
@@ -149,7 +149,7 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   never `--fix`), and never file or update a standing push bead to track it: the debt is
   DERIVED STATE and a bead describes one instant while it regenerates on every land. Full
   contract: the `session-wrapup:wrap-up-session` skill's `references/unpushed-landing-debt.md`
-  (U-1..U-4, U-6). U-5 alone remains in the core agent rules, unconditionally.
+  (U-1..U-4, U-6). U-5 alone remains in the core agent rules (operator-run `pn workspace update`/`apply`).
 
 ### Which agent receives a drain dispatch
 

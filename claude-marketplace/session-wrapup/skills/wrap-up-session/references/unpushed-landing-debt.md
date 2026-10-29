@@ -3,7 +3,7 @@
 U-1..U-4 and U-6 MOVED here in full out of the core rules file (tc-ql0o Stage D, 2026-08-26):
 session close-out is exactly the observable moment this debt is assessed and (selectively)
 reported, so this skill is a sufficient home for the full text. **U-5** — the bare prohibition
-against pushing/applying/updating on the agent's own initiative — has no session-close trigger of
+against running `pn workspace update` or `pn workspace apply` on the agent's own initiative — has no session-close trigger of
 its own (it applies the instant an agent considers ANY such command, not only at wrap-up).
 
 U-5 alone remains unconditionally in the core `pgii-agent-rules.md`.
@@ -50,13 +50,12 @@ U-5 alone remains unconditionally in the core `pgii-agent-rules.md`.
   `human`-label a bead for it, and MUST NOT file a bead to track it. The operator asks for the probe
   output or the remediation path if they want it.
 
-(**U-5**, unmoved: discharging the debt is OUTWARD-FACING and operator-authorized. An agent MUST
-NOT push a primary branch, `pn workspace push`, `pn workspace update`, or `pn workspace apply`, and MUST NOT
-invoke `/pn-workspace-sync` or `/pn-workspace-update`, on its own initiative to clear it. REPORTING
-is in scope; PUBLISHING the primary branch by an agent session is not. An agent session MAY push its
-own non-primary work branch, switch branches, and manage its own worktrees (operator ruling,
-Phillip, 2026-10-28, `pg2-pn6l7b`). The one exception for the primary branch is the push step of the
-operator-enabled `pg-repo-runner`, within the scope of ADR 0108 of the `nix-agent-support` repo; an
-agent MUST NOT enable that step, widen its scope, or run it by hand to clear the debt. Trimming the
-reporting duty above — U-6 — does NOT relax this restraint. See the core `pgii-agent-rules.md`'s Unpushed Landing Debt section for its authoritative
-text.)
+(**U-5**, unmoved: `pn workspace update` and `pn workspace apply` are operator-run. An agent MUST
+NOT run them, and MUST NOT invoke `/pn-workspace-update`, on its own initiative. `git push` and
+`pn workspace push` are ALLOWED, and an agent session MAY switch branches and manage its own
+worktrees (operator rulings, Phillip, 2026-10-28 `pg2-pn6l7b` and 2026-10-29 `pg2-kwbhc2`: "git push
+and pn workspace push, not pn workspace update or pn workspace apply"). `/pn-workspace-sync` was not
+ruled on; an agent MUST NOT invoke it on its own initiative until it is. An agent MUST NOT enable
+the push step of `pg-repo-runner` or widen its scope (ADR 0108 of the `nix-agent-support` repo).
+Trimming the reporting duty above — U-6 — does NOT relax this restraint. See the core
+`pgii-agent-rules.md`'s Unpushed Landing Debt section for its authoritative text.)

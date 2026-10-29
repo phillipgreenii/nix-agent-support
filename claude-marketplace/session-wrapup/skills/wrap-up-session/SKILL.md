@@ -378,8 +378,8 @@ STATE, and is NOT worth the operator's attention:
   accidental handle for a whole batch push — closing it would have orphaned 11 unrelated commits.
   Its replacement `pg2-dawg2` pushed all 12 and closed correctly, and the debt was back within a
   day. A bead describes one instant; the probe describes now. Full contract:
-  `references/unpushed-landing-debt.md` (U-1..U-4, U-6). U-5 alone remains in the core rules,
-  unconditionally.
+  `references/unpushed-landing-debt.md` (U-1..U-4, U-6). U-5 alone remains in the core rules
+  (operator-run `pn workspace update`/`apply`).
 
 (There's no separate beads "sync" step: in server mode `bd create`/`bd close` write straight
 to the shared remote, so the housekeeping in phase 2 is already persisted.)
