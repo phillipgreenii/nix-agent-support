@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/usagelimit"
@@ -38,6 +39,14 @@ func (c Capacity) WithUsageLimit(l *usagelimit.Limit) Capacity {
 // Capacity derives liveness from tmux exactly as Reap does and applies the one
 // capacity definition Reap's Pass 2 uses (countedSessions).
 func (s *Service) Capacity(ctx context.Context, maxSessions int) (Capacity, error) {
+	// Fact reads come from the recorder: when it cannot be reached, capacity cannot
+	// be checked, and ccpool refuses (an admission gate reading the error fails
+	// closed) rather than guess.
+	if s.d.Gate != nil {
+		if err := s.d.Gate.Ping(ctx); err != nil {
+			return Capacity{}, fmt.Errorf("check capacity: %w", err)
+		}
+	}
 	rows, err := s.d.Store.List(ctx)
 	if err != nil {
 		return Capacity{}, err

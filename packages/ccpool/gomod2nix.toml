@@ -14,6 +14,8 @@ cachePackages = [
   'github.com/mattn/go-isatty',
   'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/claude-transcript',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
@@ -60,6 +62,7 @@ cachePackages = [
   'golang.org/x/net/http2/hpack',
   'golang.org/x/net/idna',
   'golang.org/x/net/trace',
+  'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'golang.org/x/text/secure/bidirule',
   'golang.org/x/text/transform',
@@ -161,8 +164,8 @@ cachePackages = [
     hash = 'sha256-7hRlwSR+fos1kx4VZmJ/7snR7zHh8ZFKX+qqqqGcQpY='
 
   [mod.'github.com/dustin/go-humanize']
-    version = 'v1.0.1'
-    hash = 'sha256-yuvxYYngpfVkUg9yAmG99IUVmADTQA0tMbBXe0Fq0Mc='
+    version = 'v1.1.0'
+    hash = 'sha256-Qa7BSAXtgH7CB5STBiXTTOCgivWUiA65u3KxDOSZCkQ='
 
   [mod.'github.com/go-logr/logr']
     version = 'v1.4.4'
@@ -185,16 +188,16 @@ cachePackages = [
     hash = 'sha256-SKvojuMn48wxg9Dd8D0BcS4PZO3OHIFOJEMYlpvgLsk='
 
   [mod.'github.com/mattn/go-isatty']
-    version = 'v0.0.20'
-    hash = 'sha256-qhw9hWtU5wnyFyuMbKx+7RB8ckQaFQ8D+8GKPkN3HHQ='
+    version = 'v0.0.24'
+    hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
 
   [mod.'github.com/ncruces/go-strftime']
-    version = 'v1.0.0'
-    hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
+    version = 'v1.1.0'
+    hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260828055400-434334771eea'
-    hash = 'sha256-HlFyPQs0qle76h6Ia3Qi0HhFe+Y+HR26vzlheDUYTA4='
+    version = 'v0.0.0-20261015022436-7b4c351b3c34'
+    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -257,8 +260,8 @@ cachePackages = [
     hash = 'sha256-fDOkQJXURrbq2dBGa91bCUsXknCZlo3ru2JIofSOGRo='
 
   [mod.'golang.org/x/sys']
-    version = 'v0.47.0'
-    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
+    version = 'v0.49.0'
+    hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
 
   [mod.'golang.org/x/text']
     version = 'v0.41.0'
@@ -281,17 +284,17 @@ cachePackages = [
     hash = 'sha256-MKd0AdkWEe2A79mGPzOY5I76nMqTsGJKQNPJOKyOwkQ='
 
   [mod.'modernc.org/libc']
-    version = 'v1.72.3'
-    hash = 'sha256-eOCoqSnX/VzpG63nh1j3JpXRndnZZcn2cDTeutexXAI='
+    version = 'v1.79.0'
+    hash = 'sha256-f70OLLdDHzjlwu2PKdPDPS+427MhJKViGPdUj3a1arA='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
     hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
 
   [mod.'modernc.org/memory']
-    version = 'v1.11.0'
-    hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
+    version = 'v1.12.1'
+    hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.52.0'
-    hash = 'sha256-Y3TfO3AKxTIE2p00llUdXf8p9X5uw+EpSrwCAtO3Dyc='
+    version = 'v1.61.0'
+    hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='

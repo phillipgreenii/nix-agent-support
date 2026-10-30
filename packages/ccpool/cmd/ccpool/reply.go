@@ -7,28 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
-	ct "github.com/phillipgreenii/claude-transcript"
 )
-
-// transcriptAdapter satisfies session.Transcript using the shared module.
-type transcriptAdapter struct{}
-
-func (transcriptAdapter) LastAssistantText(p string) (string, error) { return ct.LastAssistantText(p) }
-
-func (transcriptAdapter) IsAwaitingInput(p string) (bool, error) { return ct.IsAwaitingInput(p) }
-
-func (transcriptAdapter) FirstMessageActivity(p string) (time.Time, bool) {
-	return ct.LastMessageActivity(p)
-}
-
-func (transcriptAdapter) OutputTokens(p string) (int64, error) { return ct.OutputTokens(p) }
 
 func runReply(args []string) int {
 	fs := flag.NewFlagSet("reply", flag.ExitOnError)

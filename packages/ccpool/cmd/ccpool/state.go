@@ -48,6 +48,11 @@ func runState(args []string) int {
 	}
 	defer func() { _ = st.Close() }()
 
+	// Awaiting input, the reply text and liveness are recorder facts: with the
+	// recorder down the command says so instead of guessing.
+	if code := requireFacts("state"); code != 0 {
+		return code
+	}
 	ctx := context.Background()
 	row, ok, _ := st.GetByExternalID(ctx, externalID)
 	if !ok {
@@ -78,7 +83,8 @@ func runState(args []string) int {
 	// PID-gates it, and returns ClassifyActivity's verdict. No live match -> false,
 	// and Gather/Classify then ignore it (pane+row fallback).
 	registry := func() (ct.ActivityVerdict, bool) {
-		return registryVerdict(defaultSessionsDir(), row.ClaudeSessionID, row.TranscriptPath, registryWaitingFreshWindow)
+		v, found, _ := registryVerdict(defaultSessionsDir(), row.ClaudeSessionID, row.TranscriptPath, registryWaitingFreshWindow)
+		return v, found // an outage was already refused up front by requireFacts
 	}
 	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, registry, tmuxName, externalID, row)
 	if err != nil {

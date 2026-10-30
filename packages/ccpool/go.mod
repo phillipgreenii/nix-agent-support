@@ -1,15 +1,16 @@
 module github.com/phillipgreenii/ccpool
 
-go 1.25.9
+go 1.26.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	modernc.org/sqlite v1.52.0
+	modernc.org/sqlite v1.61.0
 )
 
 require (
 	github.com/gofrs/flock v0.13.0
-	github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder v0.0.0-00010101000000-000000000000
+	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.22.0
@@ -40,16 +41,18 @@ require (
 )
 
 require (
-	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0
-	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/phillipgreenii/claude-transcript v0.0.0
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	modernc.org/libc v1.72.3 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )
 
 replace github.com/phillipgreenii/claude-transcript => ../claude-transcript
+
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder => ../pg-claude-code-recorder

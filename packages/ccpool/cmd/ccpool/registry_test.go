@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/ccpool/internal/facts"
 )
 
 // writeRegFile writes a minimal Claude session-registry JSON keyed by pid.
@@ -35,91 +38,84 @@ func itoa(n int) string {
 	return string(b)
 }
 
-func TestRegistryVerdict_noMatchingSessionIsNotFound(t *testing.T) {
-	dir := t.TempDir()
-	writeRegFile(t, dir, os.Getpid(), "OTHER-SESSION", "busy")
-	_, found := registryVerdict(dir, "MY-SESSION", "", registryWaitingFreshWindow)
-	if found {
-		t.Error("found = true, want false (no row matches the ClaudeSessionID)")
+func aliveFacts(alive bool, err error, gotPid *int64, gotStart *string) registryFacts {
+	return registryFacts{
+		alive: func(pid int64, procStart string) (bool, error) {
+			if gotPid != nil {
+				*gotPid, *gotStart = pid, procStart
+			}
+			return alive, err
+		},
+		awaiting:     func(string) (bool, error) { return false, nil },
+		lastActivity: func(string) (time.Time, bool, error) { return time.Time{}, false, nil },
 	}
 }
 
-func TestRegistryVerdict_deadPidIsNotFound(t *testing.T) {
+func TestRegistryVerdict_noMatchingSessionIsNotFound(t *testing.T) {
 	dir := t.TempDir()
-	// PID 1 is init; on a normal host the test process cannot signal it, but use
-	// an unused high pid to be deterministic-dead.
-	writeRegFile(t, dir, 2147480000, "MY-SESSION", "busy")
-	_, found := registryVerdict(dir, "MY-SESSION", "", registryWaitingFreshWindow)
-	if found {
-		t.Error("found = true, want false (matched row's pid is dead)")
+	writeRegFile(t, dir, 4242, "OTHER-SESSION", "busy")
+	_, found, err := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow, aliveFacts(true, nil, nil, nil))
+	if found || err != nil {
+		t.Errorf("found = %v, err = %v; want false, nil (no row matches the ClaudeSessionID)", found, err)
+	}
+}
+
+func TestRegistryVerdict_deadProcessIsNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeRegFile(t, dir, 4242, "MY-SESSION", "busy")
+	_, found, err := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow, aliveFacts(false, nil, nil, nil))
+	if found || err != nil {
+		t.Errorf("found = %v, err = %v; want false, nil (the recorder says the process is not alive)", found, err)
 	}
 }
 
 func TestRegistryVerdict_liveBusyRowIsActive(t *testing.T) {
 	dir := t.TempDir()
-	// Use this test process's own pid so PidAlive is true.
-	writeRegFile(t, dir, os.Getpid(), "MY-SESSION", "busy")
-	v, found := registryVerdict(dir, "MY-SESSION", "", registryWaitingFreshWindow)
-	if !found {
-		t.Fatal("found = false, want true (live matching row)")
+	writeRegFile(t, dir, 4242, "MY-SESSION", "busy")
+	var pid int64
+	var start string
+	v, found, err := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow, aliveFacts(true, nil, &pid, &start))
+	if !found || err != nil {
+		t.Fatalf("found = %v, err = %v; want true (live matching row)", found, err)
+	}
+	if pid != 4242 {
+		t.Errorf("liveness asked for pid %d, want 4242", pid)
 	}
 	if v.Activity.String() != "active" {
 		t.Errorf("Activity = %q, want active", v.Activity.String())
 	}
 }
 
+// TestRegistryVerdict_procStartIsPassedToTheRecorder pins the PID-reuse input:
+// the row's start time reaches the recorder in its ctime-style layout, and the
+// reuse decision itself is the recorder's.
+func TestRegistryVerdict_procStartIsPassedToTheRecorder(t *testing.T) {
+	dir := t.TempDir()
+	writeProcStartRow(t, dir, 4242, "Wed Oct 14 07:51:50 2026")
+	var pid int64
+	var start string
+	if _, _, err := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow, aliveFacts(true, nil, &pid, &start)); err != nil {
+		t.Fatal(err)
+	}
+	if start != "Wed Oct 14 07:51:50 2026" {
+		t.Errorf("procStart = %q", start)
+	}
+}
+
 func TestRegistryVerdict_missingDirIsNotFound(t *testing.T) {
-	_, found := registryVerdict(filepath.Join(t.TempDir(), "does-not-exist"), "MY-SESSION", "", registryWaitingFreshWindow)
-	if found {
-		t.Error("found = true, want false (missing sessions dir)")
+	_, found, err := registryVerdictWith(filepath.Join(t.TempDir(), "does-not-exist"), "MY-SESSION", "", registryWaitingFreshWindow, aliveFacts(true, nil, nil, nil))
+	if found || err != nil {
+		t.Errorf("found = %v, err = %v; want false, nil (missing sessions dir)", found, err)
 	}
 }
 
-// TestRegistryVerdict_reusedPidProcStartMismatchIsNotFound pins the PID-reuse
-// guard with an injected live-start-time reader. It used to call the real `ps`,
-// which is not on PATH in the nix build sandbox (ccpool-go-tests carries only
-// git), so the guard failed open there and the recycled-PID row stayed alive
-// (tc-lzxnm).
-func TestRegistryVerdict_reusedPidProcStartMismatchIsNotFound(t *testing.T) {
+// With the recorder down the verdict is an error, never a guess from files.
+func TestRegistryVerdict_daemonOfflineIsAnError(t *testing.T) {
 	dir := t.TempDir()
-	// The test process's own pid is alive, but the row claims it started in
-	// 2001 while the (injected) live start time is years later: a recycled pid,
-	// not the session that wrote the row.
-	pid := os.Getpid()
-	live := time.Date(2026, time.October, 14, 7, 51, 50, 0, time.UTC)
-	writeProcStartRow(t, dir, pid, "Mon Jan  1 00:00:00 2001")
-	_, found := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow,
-		func(p int) (time.Time, error) {
-			if p != pid {
-				t.Errorf("procStart reader called with pid %d, want %d", p, pid)
-			}
-			return live, nil
-		})
-	if found {
-		t.Error("found = true, want false (alive pid whose procStart does not match)")
-	}
-}
-
-func TestRegistryVerdict_procStartWithinToleranceIsFound(t *testing.T) {
-	dir := t.TempDir()
-	live := time.Date(2026, time.October, 14, 7, 51, 50, 0, time.UTC)
-	writeProcStartRow(t, dir, os.Getpid(), "Wed Oct 14 07:51:51 2026")
-	_, found := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow,
-		func(int) (time.Time, error) { return live, nil })
-	if !found {
-		t.Error("found = false, want true (procStart within tolerance of live start)")
-	}
-}
-
-// A reader that cannot determine the live start time fails open: the alive row
-// is still trusted rather than declared dead.
-func TestRegistryVerdict_procStartReaderErrorFailsOpen(t *testing.T) {
-	dir := t.TempDir()
-	writeProcStartRow(t, dir, os.Getpid(), "Mon Jan  1 00:00:00 2001")
-	_, found := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow,
-		func(int) (time.Time, error) { return time.Time{}, os.ErrNotExist })
-	if !found {
-		t.Error("found = false, want true (unreadable live start time must fail open)")
+	writeRegFile(t, dir, 4242, "MY-SESSION", "busy")
+	_, found, err := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow, aliveFacts(false, facts.ErrDaemonOffline, nil, nil))
+	if found || !errors.Is(err, facts.ErrDaemonOffline) {
+		t.Errorf("found = %v, err = %v; want false, daemon offline", found, err)
 	}
 }
 

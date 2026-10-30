@@ -48,9 +48,24 @@ func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string
 	var res Result
 	err := s.withLock(externalID, func() error {
 		var e error
+		// With a feed-backed Transcript, take the feed position BEFORE delivery so
+		// the confirmation waits for a record written after it (not a whole-file
+		// re-read every 250 ms, and not a message from an earlier turn).
+		var mark string
+		fw, feed := s.d.Transcript.(FeedWaiter)
+		if feed && window > 0 && (mode == ModeNoWait || mode == ModeQueue) {
+			if mark, e = fw.Mark(ctx); e != nil {
+				return fmt.Errorf("confirm ingest: %w", e)
+			}
+		} else {
+			feed = false
+		}
 		res, e = s.sendLocked(ctx, externalID, prompt, mode)
 		if e != nil {
 			return e
+		}
+		if feed {
+			return s.confirmIngestedFeed(ctx, fw, externalID, mark, window)
 		}
 		if window > 0 && (mode == ModeNoWait || mode == ModeQueue) {
 			return s.confirmIngested(ctx, externalID, window)
@@ -58,6 +73,37 @@ func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string
 		return nil
 	})
 	return res, err
+}
+
+// FeedWaiter is the optional Transcript extension backed by the recorder's change
+// feed: Mark returns the feed position now, and WaitMessage waits (long polling)
+// until window elapses for a real user or assistant message of the transcript
+// written after mark. The fact is "a record appeared"; ccpool decides what it
+// means.
+type FeedWaiter interface {
+	Mark(ctx context.Context) (string, error)
+	WaitMessage(ctx context.Context, transcriptPath, mark string, window time.Duration) (bool, error)
+}
+
+// confirmIngestedFeed is confirmIngested on the feed: one wait that returns on the
+// matching record, or ErrPromptNotIngested when the window passes without one.
+func (s *Service) confirmIngestedFeed(ctx context.Context, fw FeedWaiter, externalID, mark string, window time.Duration) error {
+	row, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
+	if err != nil {
+		return fmt.Errorf("confirm ingest: %w", err)
+	}
+	if !ok || row.TranscriptPath == "" {
+		// No transcript path stamped yet: no turn observed (the safe direction).
+		return ErrPromptNotIngested
+	}
+	started, err := fw.WaitMessage(ctx, row.TranscriptPath, mark, window)
+	if err != nil {
+		return fmt.Errorf("confirm ingest: %w", err)
+	}
+	if !started {
+		return ErrPromptNotIngested
+	}
+	return nil
 }
 
 // confirmIngested polls the session's transcript until a real message event
@@ -132,7 +178,7 @@ func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mod
 		return Result{}, err
 	}
 
-	if err := s.deliverPrompt(externalID, tmuxName, prompt); err != nil {
+	if err := s.deliverPrompt(ctx, externalID, tmuxName, row.ClaudeSessionID, prompt); err != nil {
 		return Result{}, fmt.Errorf("deliver prompt: %w", err)
 	}
 
@@ -152,8 +198,18 @@ func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mod
 // submits with Enter. Each step is recorded to the event log as an ordered input
 // action (nil-safe). The paste detail is a short note — NEVER the prompt body —
 // so prompt contents stay out of the log.
-func (s *Service) deliverPrompt(externalID, tmuxName, prompt string) error {
+func (s *Service) deliverPrompt(ctx context.Context, externalID, tmuxName, claudeSessionID, prompt string) error {
 	body := guardLeadingSlash(prompt)
+	if s.d.Control != nil && claudeSessionID != "" {
+		err := s.d.Control.Submit(ctx, claudeSessionID, body)
+		if err == nil {
+			_ = s.d.Events.Input(s.d.Now(), externalID, "control-submit", "prompt delivered")
+			return nil
+		}
+		if !errors.Is(err, ErrNoControl) {
+			return err
+		}
+	}
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}

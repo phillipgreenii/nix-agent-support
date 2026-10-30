@@ -59,10 +59,14 @@ func TestResolve_linkedWorktree(t *testing.T) {
 	}
 
 	wt := filepath.Join(t.TempDir(), "linked")
-	if err := repo.Client.CreateWorktree(t.Context(), wt, "feature", gitclient.CreateWorktreeOptions{}); err != nil {
+	h, err := repo.Client.CreateWorktree(t.Context(), wt, "feature", gitclient.CreateWorktreeOptions{})
+	if err == nil {
+		err = h.Wait()
+	}
+	if err != nil {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
-	wt, err := filepath.EvalSymlinks(wt)
+	wt, err = filepath.EvalSymlinks(wt)
 	if err != nil {
 		t.Fatalf("EvalSymlinks(%q): %v", wt, err)
 	}

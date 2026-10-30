@@ -28,6 +28,7 @@ mkGoApp {
       (lib.fileset.difference ./. ./docs)
       ../pg-router
       ../ccpool
+      ../pg-claude-code-recorder
       ../claude-transcript
     ];
   };

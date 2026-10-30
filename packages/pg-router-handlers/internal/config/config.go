@@ -70,6 +70,10 @@ type Config struct {
 	WorktreeQuietMax time.Duration
 	// PollInterval is how often waitDone re-checks ccpool's session list.
 	PollInterval time.Duration
+	// WatchdogPoll is how often the budget watchdog reads the recorder's usage
+	// facts. Zero means PollInterval (tests that drive a fast clock); Default sets
+	// 30 s, inside the 30 to 60 s range the recorder's design allows.
+	WatchdogPoll time.Duration
 	// LeaseTTL is the supervision-lease TTL (bead pg2-g2u9m, INV-CCH-18): the
 	// handler stamps pgrouter.lease_until = now + LeaseTTL on its session every
 	// PollInterval, and an expired lease means nobody is supervising the session
@@ -430,6 +434,7 @@ func Default() Config {
 		BeadsPrefix:         "zr",
 		MaxWait:             1800 * time.Second,
 		PollInterval:        10 * time.Second,
+		WatchdogPoll:        30 * time.Second,
 		LeaseTTL:            2 * time.Minute,
 		NeedsInputStall:     DefaultNeedsInputStall,
 		WorktreeQuietWindow: 2 * time.Minute,
@@ -529,4 +534,13 @@ func (c Config) validateLease() error {
 		return fmt.Errorf("invalid leaseTTL %v: must be >= %d x pollInterval (%v)", c.LeaseTTL, LeaseTTLMinPolls, min)
 	}
 	return nil
+}
+
+// WatchdogPollInterval is the watchdog's poll: WatchdogPoll when set, else
+// PollInterval.
+func (c Config) WatchdogPollInterval() time.Duration {
+	if c.WatchdogPoll > 0 {
+		return c.WatchdogPoll
+	}
+	return c.PollInterval
 }

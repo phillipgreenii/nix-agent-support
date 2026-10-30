@@ -89,18 +89,21 @@ func TestRenderState_human(t *testing.T) {
 }
 
 // TestStateAwaitingWiring pins the cmd-layer Awaiting closure over the real
-// transcriptAdapter + fixtures: a dangling AskUserQuestion reads true, a
-// completed turn reads false, and an empty path short-circuits to false without
-// a read (claude-transcript's IsAwaitingInput is already tested in its own
-// package — this only checks the ccpool-side wiring).
+// transcriptAdapter and a real in-process recorder: a dangling AskUserQuestion
+// reads true, a completed turn reads false, and an empty path short-circuits to
+// false without a read.
 func TestStateAwaitingWiring(t *testing.T) {
+	e := useRecorder(t)
+	rel := "projects/" + e.Project + "/" + testSess + ".jsonl"
+	e.Write(rel, tuserLine("2026-01-01T00:00:01Z", "go")+tAskLine("2026-01-01T00:00:02Z", "toolu_1"))
+	e.Settle()
+	path := e.Path("projects", e.Project, testSess+".jsonl")
 	cases := []struct {
 		name string
 		path string
 		want bool
 	}{
-		{"dangling_question_awaits", "testdata/awaiting_question.jsonl", true},
-		{"completed_turn_not_awaiting", "testdata/completed_idle.jsonl", false},
+		{"dangling_question_awaits", path, true},
 		{"empty_path_not_awaiting", "", false},
 	}
 	for _, tc := range cases {
@@ -119,6 +122,25 @@ func TestStateAwaitingWiring(t *testing.T) {
 				t.Errorf("awaiting(%q) = %v, want %v", tc.path, got, tc.want)
 			}
 		})
+	}
+	e.Append(rel, `{"type":"user","uuid":"r1","sessionId":"`+testSess+`","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}`+"\n"+tReplyLine("2026-01-01T00:00:04Z", "done"))
+	e.Settle()
+	if got, err := (transcriptAdapter{}).IsAwaitingInput(path); err != nil || got {
+		t.Errorf("completed turn: awaiting = %v, %v; want false", got, err)
+	}
+}
+
+// TestStateAndResultRefuseWhenDaemonOffline: the fact-reading commands say
+// "daemon offline" and fail instead of guessing from files.
+func TestRequireFactsDaemonOffline(t *testing.T) {
+	useDownRecorder(t)
+	out, code := captureStderr(t, func() int { return requireFacts("state") })
+	if code != 1 || !strings.Contains(out, "daemon offline") {
+		t.Fatalf("requireFacts with the recorder down = %d, %q; want 1 and daemon offline", code, out)
+	}
+	useRecorder(t)
+	if code := requireFacts("state"); code != 0 {
+		t.Fatalf("requireFacts with the recorder up = %d", code)
 	}
 }
 

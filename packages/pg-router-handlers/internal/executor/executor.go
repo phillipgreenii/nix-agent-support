@@ -10,6 +10,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
+
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
@@ -63,8 +65,11 @@ type Deps struct {
 	Cfg         config.Config
 	Now         func() time.Time                           // clock seam; nil ⇒ time.Now
 	Tick        func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
-	UsageReader usage.Reader                               // nil ⇒ usage.NewTranscriptReader()
-	ExternalID  string                                     // resolved once by the orchestrator
+	UsageReader usage.Reader                               // nil ⇒ usage.NewRecorderReader (the recorder's facts)
+	// FirstTurn reports whether the model has taken a turn in a transcript (the
+	// nudge gate); nil ⇒ the recorder's fact.
+	FirstTurn  func(transcriptPath string) bool
+	ExternalID string // resolved once by the orchestrator
 	// Git is the watchdog's own hard-stop reset/clean seam (nil ⇒
 	// watchdog.OSGit{}); the per-bead worktree it resets is the one the worker
 	// ran in. Unrelated to worktree creation below — that migrated onto
@@ -128,7 +133,17 @@ func (d Deps) reader() usage.Reader {
 	if d.UsageReader != nil {
 		return d.UsageReader
 	}
-	return usage.NewTranscriptReader()
+	return recorderUsage
+}
+
+// recorderUsage is the default fact source: the recorder, no fallback to files.
+var recorderUsage = usage.NewRecorderReader(client.Options{})
+
+func (d Deps) firstTurn(path string) bool {
+	if d.FirstTurn != nil {
+		return d.FirstTurn(path)
+	}
+	return recorderUsage.FirstTurnStarted(path)
 }
 
 func (d Deps) commander() query.Commander {

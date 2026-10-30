@@ -1,35 +1,56 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/facts"
 	"github.com/phillipgreenii/ccpool/internal/session"
 )
 
 // TestNewSessionDeps_wiresExister is the regression for CRITICAL #1: every
 // production session.Deps must carry a non-nil Exister, or claudeSessionResumable
-// is always false → resume never happens and `ccpool reap` prunes resumable rows
-// (ADR 0015). It also proves the wired Exister probes the hook-recorded transcript
-// path directly: Exists is true exactly when that path names an existing file.
+// is always false, resume never happens and `ccpool reap` prunes resumable rows
+// (ADR 0015). The wired Exister is the recorder's "originals present" fact, and
+// with the recorder down it fails (daemon offline) instead of answering false, so
+// an outage never reads as "the session is gone".
 func TestNewSessionDeps_wiresExister(t *testing.T) {
+	e := useRecorder(t)
 	deps := newSessionDeps(config.Config{}, nil, nil)
 	if deps.Exister == nil {
 		t.Fatal("production session.Deps must wire Exister (nil → reap prunes resumable rows)")
 	}
+	ce, ok := deps.Exister.(session.CheckedExister)
+	if !ok {
+		t.Fatalf("production Exister %T must be a session.CheckedExister", deps.Exister)
+	}
+	if deps.Gate == nil || deps.Control == nil {
+		t.Fatalf("production deps must wire Gate and Control, got %v and %v", deps.Gate, deps.Control)
+	}
 
-	transcript := filepath.Join(t.TempDir(), "session.jsonl")
-	if deps.Exister.Exists(transcript) {
-		t.Fatal("Exister must be false before the transcript file exists")
+	transcript := e.Path("projects", e.Project, testSess+".jsonl")
+	if got, err := ce.ExistsChecked(transcript); err != nil || got {
+		t.Fatalf("before the transcript exists: ExistsChecked = %v, %v; want false, nil", got, err)
 	}
-	if err := os.WriteFile(transcript, []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
+	e.Write("projects/"+e.Project+"/"+testSess+".jsonl", tuserLine("2026-01-01T00:00:01Z", "hi"))
+	start := time.Now().Add(-time.Hour)
+	e.Procs.Add(4242, start, nil)
+	e.Write("sessions/4242.json", fmt.Sprintf(`{"pid":4242,"sessionId":%q,"cwd":"/example/work","startedAt":%d,"procStart":%q,"kind":"interactive","status":"idle","updatedAt":%d}`,
+		testSess, start.UnixMilli(), start.UTC().Format(procStartLayout), start.UnixMilli()))
+	e.Settle()
+	if got, err := ce.ExistsChecked(transcript); err != nil || !got {
+		t.Errorf("wired Exister must find the recorded transcript: %v, %v", got, err)
 	}
-	if !deps.Exister.Exists(transcript) {
-		t.Errorf("wired production Exister must find the hook-recorded transcript at %q", transcript)
+
+	e.Stop()
+	if _, err := ce.ExistsChecked(transcript); !errors.Is(err, facts.ErrDaemonOffline) {
+		t.Errorf("recorder down: err = %v; want daemon offline", err)
 	}
 }
 

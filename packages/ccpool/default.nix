@@ -7,6 +7,9 @@
   # The co-resident usage monitor: ccpool's usage gate runs `pa-monitor status
   # --json` to learn whether the 5-hour block or weekly limit is hit (ADR 0080).
   pa-monitor,
+  # Sends, interrupts, slash commands and stops go through the control command
+  # (docket pg2-v77tsx, phase 9b); tmux stays the holder of the terminal.
+  pg-claude-control,
 }:
 
 mkGoApp {
@@ -21,6 +24,7 @@ mkGoApp {
     fileset = lib.fileset.unions [
       ./.
       ../claude-transcript
+      ../pg-claude-code-recorder
     ];
   };
   modRoot = "ccpool";
@@ -70,6 +74,7 @@ mkGoApp {
       lib.makeBinPath [
         tmux
         pa-monitor
+        pg-claude-control
       ]
     }
   '';

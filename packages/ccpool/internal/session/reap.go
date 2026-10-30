@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"time"
@@ -421,7 +422,11 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKi
 			return nil
 		}
 		fresh := s.isFreshStarting(r)
-		phantom := !s.claudeSessionResumable(r) && !fresh
+		resumable, rerr := s.resumable(r)
+		if rerr != nil {
+			return fmt.Errorf("check resumable: %w", rerr) // the probe is down: never prune on a guess
+		}
+		phantom := !resumable && !fresh
 		if phantom || !fresh {
 			if err := s.endOpenRun(ctx, externalID, "exited", store.RunEndReaper, r.LastActivityAt); err != nil {
 				return err

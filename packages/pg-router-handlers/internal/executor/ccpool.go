@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
@@ -1389,15 +1388,12 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 		// FirstTurnStarted gates the budget NUDGES on a real model turn so a worker
 		// that never ingested its task is never prompted (pg2-yukh #3b). The hard
 		// STOP is NOT gated — it unclaims, it does not nudge.
-		FirstTurnStarted: func(path string) bool {
-			if path == "" {
-				return false
-			}
-			_, ok := ct.LastMessageActivity(path)
-			return ok
-		},
-		Now:           r.deps.Now,
-		Poll:          r.deps.Cfg.PollInterval,
+		FirstTurnStarted: r.deps.firstTurn,
+		Now:              r.deps.Now,
+		// The watchdog polls the recorder's facts every WatchdogPoll (30 s by
+		// default), not every PollInterval: its readings are cheap queries, not
+		// whole-file re-reads, and the budget meter does not need 10 s freshness.
+		Poll:          r.deps.Cfg.WatchdogPollInterval(),
 		ClaimTerminal: claimTerminal,
 	}
 

@@ -76,6 +76,7 @@ type armedEnv struct {
 // tmux server it did start is killed on cleanup (and reported as a failure).
 func armedLaunchEnv(t *testing.T) armedEnv {
 	t.Helper()
+	useRecorder(t) // fact reads and the capacity gate need a recorder that answers
 	base := t.TempDir()
 	// Short, under /tmp: t.TempDir() is too long for a tmux socket path.
 	tmuxDir, err := shortTempDir("ccpool-armed-")

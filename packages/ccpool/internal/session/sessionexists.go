@@ -33,3 +33,11 @@ func (fsSessionExister) Exists(transcriptPath string) bool {
 // NewFSSessionExister builds the production SessionExister, which stats the
 // hook-recorded transcript path on the local filesystem.
 func NewFSSessionExister() SessionExister { return fsSessionExister{} }
+
+// CheckedExister is an optional SessionExister extension for a probe that can
+// fail (the recorder, when it is down): ExistsChecked reports the error instead
+// of folding it into "not resumable". A caller that sees an error MUST NOT treat
+// the session as gone: resume refuses, and reap leaves the row alone.
+type CheckedExister interface {
+	ExistsChecked(transcriptPath string) (bool, error)
+}

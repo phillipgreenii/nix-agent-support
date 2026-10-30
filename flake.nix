@@ -1898,6 +1898,7 @@
                     root = ./packages;
                     fileset = lib.fileset.unions [
                       ./packages/ccpool
+                      ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
                     ];
                   };
@@ -1943,6 +1944,7 @@
                     root = ./packages;
                     fileset = lib.fileset.unions [
                       ./packages/ccpool
+                      ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
                     ];
                   };
@@ -5656,6 +5658,7 @@
                   root = ./packages;
                   fileset = lib.fileset.unions [
                     ./packages/ccpool
+                    ./packages/pg-claude-code-recorder
                     ./packages/claude-transcript
                   ];
                 };
@@ -5718,6 +5721,7 @@
                       (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
                       ./packages/pg-router
                       ./packages/ccpool
+                      ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
                     ];
                   };

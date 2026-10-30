@@ -212,6 +212,26 @@ var claudeChildMarkers = []string{
 	"CLAUDE_CODE_EXECPATH",
 }
 
+// ErrNoControl is what a Control returns when the Claude cannot be reached by
+// control (no control mod, not a running Claude): the service then falls back to
+// the tmux terminal it holds. Any other error is a real failure.
+var ErrNoControl = errors.New("claude is not reachable by control")
+
+// Control sends requests to a running Claude through pg-claude-control (docket
+// pg2-v77tsx). Control does not depend on the recorder. tmux stays the holder of
+// a worker's terminal: launch, liveness, pane stability and the final kill.
+type Control interface {
+	Submit(ctx context.Context, claudeSessionID, text string) error
+	Interrupt(ctx context.Context, claudeSessionID string) error
+	Run(ctx context.Context, claudeSessionID, command string) error
+	Stop(ctx context.Context, claudeSessionID string) error
+}
+
+// Gate reports whether the fact source answers.
+type Gate interface {
+	Ping(ctx context.Context) error
+}
+
 type Deps struct {
 	Tmux       Tmux
 	Trust      Truster
@@ -225,7 +245,13 @@ type Deps struct {
 	// Exister probes whether a Claude session is resumable on disk by stat-ing the
 	// row's hook-recorded transcript path (ADR 0015). A nil Exister means "never
 	// resumable" (tests inject a fake; the cmd layer wires NewFSSessionExister).
-	Exister   SessionExister
+	Exister SessionExister
+	// Gate, when set, is probed before capacity is reported: a recorder that does
+	// not answer makes Capacity fail (the dispatch gate then refuses). nil = no gate.
+	Gate Gate
+	// Control, when set, carries sends, interrupts, slash commands and stops. nil
+	// (or ErrNoControl from it) falls back to tmux key delivery.
+	Control   Control
 	Socket    string
 	Prefix    string
 	PoolPath  string // canonical pool dir; injected as CCPOOL_POOL into sessions; "" = default mode; its basename is every metric record's pool attribute
@@ -410,7 +436,11 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 
 	if exists {
 		// 3. Resume IFF the Claude session still exists on disk (a fact, not a state).
-		if s.claudeSessionResumable(row) {
+		resumable, rerr := s.resumable(row)
+		if rerr != nil {
+			return Handle{}, fmt.Errorf("check resumable: %w", rerr)
+		}
+		if resumable {
 			// Flip to `starting` BEFORE launch so `list` doesn't show the stale prior
 			// outcome during the launch window, and snapshot THAT generation as the
 			// wait baseline.
@@ -525,7 +555,21 @@ func (s *Service) endOpenRun(ctx context.Context, externalID, reason, source str
 // no longer reconstructs the path from the cwd. Nil Exister or an empty recorded
 // path → false. Resume itself still launches `--resume <row.ClaudeSessionID>`.
 func (s *Service) claudeSessionResumable(row store.Session) bool {
-	return row.TranscriptPath != "" && s.d.Exister != nil && s.d.Exister.Exists(row.TranscriptPath)
+	ok, _ := s.resumable(row)
+	return ok
+}
+
+// resumable is claudeSessionResumable with the probe's error: an Exister that is
+// a CheckedExister (the recorder-backed one) fails with "daemon offline" instead
+// of answering false, so a recorder outage never reads as "the session is gone".
+func (s *Service) resumable(row store.Session) (bool, error) {
+	if row.TranscriptPath == "" || s.d.Exister == nil {
+		return false, nil
+	}
+	if ce, ok := s.d.Exister.(CheckedExister); ok {
+		return ce.ExistsChecked(row.TranscriptPath)
+	}
+	return s.d.Exister.Exists(row.TranscriptPath), nil
 }
 
 // isFreshStarting guards the fresh-session race: a row still in `starting`

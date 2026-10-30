@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/pane"
@@ -96,6 +97,18 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 		}
 		return err
 	}
+	if s.d.Control != nil {
+		if row, ok, _ := s.d.Store.GetByExternalID(ctx, externalID); ok && row.ClaudeSessionID != "" {
+			err := s.d.Control.Interrupt(ctx, row.ClaudeSessionID)
+			if err != nil && !errors.Is(err, ErrNoControl) {
+				return fmt.Errorf("interrupt: %w", err)
+			}
+			if err == nil {
+				_ = s.d.Events.Input(s.d.Now(), externalID, "control-interrupt", "")
+				return s.finishCancel(ctx, externalID, tmuxName)
+			}
+		}
+	}
 	// Brute-force a burst of Escapes spanning the thinking->streaming window; a
 	// single Escape missed 1/7 in live verification (2026-06-11, real Claude on an
 	// isolated socket; the miss landed in the thinking->streaming transition).
@@ -112,6 +125,11 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}
+	return s.finishCancel(ctx, externalID, tmuxName)
+}
+
+// finishCancel confirms the turn actually stopped and settles the row.
+func (s *Service) finishCancel(ctx context.Context, externalID, tmuxName string) error {
 	// Confirm the turn actually stopped by polling until the pane goes STATIC
 	// (pane-stability), instead of grepping for an "Interrupted" marker that the
 	// thinking-rewind path never prints and that stale scrollback false-matches.
@@ -182,7 +200,7 @@ func (s *Service) closeLocked(ctx context.Context, externalID, reason string, pu
 	tmuxName := TmuxName(s.d.Prefix, externalID)
 	if s.d.Tmux.HasSession(tmuxName) {
 		// deliverCommand clears the input line itself, so no separate clear here.
-		if err := s.deliverCommand(tmuxName, "/exit"); err != nil {
+		if err := s.deliverCommand(ctx, externalID, tmuxName, "/exit"); err != nil {
 			return err
 		}
 		if !s.waitGone(tmuxName, 3*time.Second) {
@@ -231,7 +249,23 @@ func (s *Service) CloseReason(ctx context.Context, externalID, reason string, pu
 
 // deliverCommand sends a raw slash-command (e.g. /exit) — NOT space-guarded,
 // unlike a message: clear input, paste the command, submit.
-func (s *Service) deliverCommand(tmuxName, cmd string) error {
+func (s *Service) deliverCommand(ctx context.Context, externalID, tmuxName, cmd string) error {
+	if s.d.Control != nil {
+		if row, ok, _ := s.d.Store.GetByExternalID(ctx, externalID); ok && row.ClaudeSessionID != "" {
+			var err error
+			if cmd == "/exit" {
+				err = s.d.Control.Stop(ctx, row.ClaudeSessionID)
+			} else {
+				err = s.d.Control.Run(ctx, row.ClaudeSessionID, strings.TrimPrefix(cmd, "/"))
+			}
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, ErrNoControl) {
+				return err
+			}
+		}
+	}
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}
