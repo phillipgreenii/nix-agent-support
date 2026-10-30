@@ -77,19 +77,19 @@ func Violations(st *store.Store, o Options) []string {
 			cp := st.CopyPath(f.ID, g.Gen)
 			fi, err := os.Stat(cp)
 			if err != nil {
-				if g.CopyOffset > 0 && f.State != "copy_mismatch" && g.Gen == f.CurGen {
+				if g.CopyOffset > 0 && f.State != "copy_mismatch" && g.Gen == f.CurGen && st.ArchivedTo(f.ID, g.Gen) < g.CopyOffset {
 					add("file %d gen %d: copy missing with committed offset %d", f.ID, g.Gen, g.CopyOffset)
 				}
 				continue
 			}
 			current := g.Gen == f.CurGen
-			if current && f.State != "copy_mismatch" && fi.Size() != g.CopyOffset {
+			if current && f.State != "copy_mismatch" && fi.Size() != g.CopyOffset && st.ArchivedTo(f.ID, g.Gen) == 0 {
 				add("file %d gen %d: copy length %d != committed offset %d", f.ID, g.Gen, fi.Size(), g.CopyOffset)
 			}
 			if !current && fi.Size() > g.CopyOffset {
 				add("file %d gen %d: frozen copy length %d > committed offset %d", f.ID, g.Gen, fi.Size(), g.CopyOffset)
 			}
-			if current && f.State != "copy_mismatch" {
+			if current && f.State != "copy_mismatch" && st.ArchivedTo(f.ID, g.Gen) == 0 {
 				if msg := originalPrefix(st, f, cp, g.CopyOffset); msg != "" {
 					add("file %d gen %d: %s", f.ID, g.Gen, msg)
 				}

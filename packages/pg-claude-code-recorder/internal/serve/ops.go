@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -118,6 +119,16 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 		cov.UnparsedKinds = append(cov.UnparsedKinds, wire.UnparsedKind{Kind: k, Files: n})
 	}
 	sort.Slice(cov.UnparsedKinds, func(i, j int) bool { return cov.UnparsedKinds[i].Kind < cov.UnparsedKinds[j].Kind })
+	if rows, err := d.st.Stages(); err == nil {
+		for _, r := range rows {
+			switch r.Stage {
+			case store.StageHeld:
+				cov.Held++
+			case store.StageSettled:
+				cov.Settled++
+			}
+		}
+	}
 	cov.CaughtUp = d.backfillDone.Load()
 	cov.Degraded = !cov.CaughtUp
 	cov.Backfill = d.backfillProgress()
@@ -160,12 +171,21 @@ func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
 	free, _ := FreeBytes(d.cfg.StateDir)
+	heldLong, counts := 0, map[string]int{}
+	if rows, err := d.st.Stages(); err == nil {
+		for _, r := range rows {
+			counts[r.Stage]++
+			if r.Stage == store.StageHeld && d.clock.Now().Sub(time.Unix(0, r.SinceNS)) > d.cfg.HeldMaxAge {
+				heldLong++
+			}
+		}
+	}
 	st := wire.Status{
 		CopyLagS:       cov.CopyLagSecondsMax,
 		ParseLagS:      cov.ParseLagSecondsMax,
-		Held:           cov.Held,
+		Held:           heldLong,
 		FreeBytes:      free,
-		StageCounts:    map[string]int{},
+		StageCounts:    counts,
 		ParserVersions: map[string]int{},
 		SchemaVersion:  d.st.SchemaVersion(),
 		ProtocolVer:    wire.ProtocolVersion,

@@ -86,4 +86,35 @@ CREATE TABLE IF NOT EXISTS resets(
   at_ns INTEGER NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS conv_stage(
+  session TEXT PRIMARY KEY,
+  stage TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  since_ns INTEGER NOT NULL,
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS settled(
+  session TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  at_ns INTEGER NOT NULL,
+  method TEXT NOT NULL DEFAULT '',
+  manifest TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ranges(
+  file_id INTEGER NOT NULL,
+  gen INTEGER NOT NULL,
+  from_off INTEGER NOT NULL,
+  to_off INTEGER NOT NULL,
+  session TEXT NOT NULL,
+  seg TEXT NOT NULL,
+  PRIMARY KEY(file_id, gen, from_off)
+);
+CREATE TABLE IF NOT EXISTS torn_tails(
+  file_id INTEGER NOT NULL,
+  gen INTEGER NOT NULL,
+  off INTEGER NOT NULL,
+  len INTEGER NOT NULL,
+  at_ns INTEGER NOT NULL,
+  PRIMARY KEY(file_id, gen)
+);
 `

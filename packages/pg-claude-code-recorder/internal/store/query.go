@@ -411,3 +411,37 @@ func (s *Store) SnapshotFileByPathHistory(path string) (File, error) {
 	}
 	return f, err
 }
+
+// AllPaths returns, for every file, its current paths and (when it has none)
+// every path it ever had, in one query pair; the settle stage groups files into
+// Conversations with it.
+func (s *Store) AllPaths() (map[int64][]string, error) {
+	out := map[int64][]string{}
+	rows, err := s.rdb.Query(`SELECT file_id, path, closed_ns IS NULL FROM paths ORDER BY file_id, first_seen_ns, path`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	cur := map[int64][]string{}
+	hist := map[int64][]string{}
+	for rows.Next() {
+		var id int64
+		var p string
+		var open bool
+		if err := rows.Scan(&id, &p, &open); err != nil {
+			return nil, err
+		}
+		if open {
+			cur[id] = append(cur[id], p)
+		}
+		hist[id] = append(hist[id], p)
+	}
+	for id, h := range hist {
+		if c := cur[id]; len(c) > 0 {
+			out[id] = c
+		} else {
+			out[id] = h
+		}
+	}
+	return out, rows.Err()
+}

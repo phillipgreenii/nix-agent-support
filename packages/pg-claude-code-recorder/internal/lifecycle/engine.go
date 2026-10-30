@@ -77,6 +77,8 @@ type model struct {
 	clears map[string][]int64
 	exits  map[string][]int64
 	ends   map[string]string
+	// stages is the persisted stage (settled or held) of a Conversation.
+	stages map[string]string
 }
 
 func ns(t int64) time.Time { return time.Unix(0, t).UTC() }
@@ -92,7 +94,7 @@ func tp(t int64) *time.Time {
 func (e *Engine) load() (*model, error) {
 	m := &model{
 		vers: map[pkey][]regRow{}, segs: map[string][]seg{}, deleted: map[pkey]int64{}, procs: map[pkey]store.Proc{},
-		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{},
+		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
 	}
 	db := e.St.Read()
 	rows, err := db.Query(`SELECT r.id, r.session, r.time_ns,
@@ -204,6 +206,13 @@ WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`)
 	if err := erows.Close(); err != nil {
 		return nil, err
 	}
+	srows, err := e.St.Stages()
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range srows {
+		m.stages[r.Session] = r.Stage
+	}
 	ps, err := e.St.Procs()
 	if err != nil {
 		return nil, err
@@ -212,6 +221,22 @@ WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`)
 		m.procs[pkey{p.Pid, p.ProcStart}] = p
 	}
 	return m, nil
+}
+
+// LiveSessions returns the sessions a live Process holds now (one load of the
+// registry for every session, so the settle stage asks once per pass).
+func (e *Engine) LiveSessions() (map[string]bool, error) {
+	m, err := e.load()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for session := range m.segs {
+		if c, ok := m.conversation(session); ok && c.State == StateOpen {
+			out[session] = true
+		}
+	}
+	return out, nil
 }
 
 func anyAfter(ts []int64, after int64) bool {
@@ -284,6 +309,9 @@ func (m *model) conversation(session string) (Conversation, bool) {
 		c.State, c.Stage = StateOpen, StageLive
 	default:
 		c.Ended = true
+		if st := m.stages[session]; st == StageSettled || st == StageHeld {
+			c.Stage = st
+		}
 		if tracked && prow.ExitNS > 0 {
 			c.ExitObserved = prow.ExitKind == store.ExitObserved
 			if c.ExitObserved {

@@ -28,6 +28,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/server"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/settle"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
@@ -68,6 +69,7 @@ type Daemon struct {
 	exp   *exporter.Server
 	eng   *lifecycle.Engine
 	tr    *lifecycle.Tracker
+	sett  *settle.Settler
 	clock clock.Clock
 
 	startedAt time.Time
@@ -134,6 +136,15 @@ func Open(opt Options) (*Daemon, error) {
 		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
 		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow,
 	})
+	d.sett = settle.New(settle.Config{
+		Store: st, Copier: d.cp, Parser: d.prs, Live: d.eng.LiveSessions, Clock: opt.Clock, Obs: o,
+		ClaudeDir: cfg.ClaudeDir, After: cfg.SettleAfter, Recheck: cfg.HeldRecheck, HeldAlertAfter: cfg.HeldMaxAge,
+		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
+	})
+	if err := d.sett.Recover(); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("recover settle: %w", err)
+	}
 	d.ckpt = newFileCheckpoint(cfg.StateDir)
 	d.w, err = watcher.New(watcher.Config{
 		Roots:         cfg.Roots(),
@@ -158,6 +169,9 @@ func (d *Daemon) Obs() *obs.Obs { return d.obs }
 
 // Tracker returns the Process tracker (tests drive its periodic work).
 func (d *Daemon) Tracker() *lifecycle.Tracker { return d.tr }
+
+// Settler returns the settle stage (tests drive its passes).
+func (d *Daemon) Settler() *settle.Settler { return d.sett }
 
 // Parser returns the parse stage (tests drain it).
 func (d *Daemon) Parser() *parser.Parser { return d.prs }
@@ -250,11 +264,19 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	sorted := append([]watcher.FileInfo(nil), files...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ModTime.After(sorted[j].ModTime) })
 	d.obs.Event("backfill_start", "files", fmt.Sprint(len(files)))
+	skipped := false
 	for _, f := range sorted {
 		select {
 		case <-d.stop:
 			return
 		default:
+		}
+		if d.sett.LowSpace() {
+			// Low-space mode stops backfilling Conversations not yet copied.
+			if fl, _ := d.st.FilesByCurrentPath(f.Path); len(fl) == 0 {
+				skipped = true
+				continue
+			}
 		}
 		res := d.ingest(f.Path)
 		d.filesCopied.Add(1)
@@ -262,6 +284,9 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 		if res.Bytes > 0 && d.cfg.CopyThrottle > 0 {
 			d.clock.Sleep(d.cfg.CopyThrottle)
 		}
+	}
+	if skipped {
+		return
 	}
 	d.backfillDone.Store(true)
 	d.tr.StartupDone()
@@ -304,7 +329,8 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("start watcher: %w", err)
 	}
 	d.tr.Startup()
-	d.refreshing.Add(3)
+	d.refreshing.Add(4)
+	go d.settleLoop()
 	go d.refreshLoop()
 	go d.parseLoop()
 	go d.trackLoop()
@@ -327,6 +353,23 @@ func (d *Daemon) parseLoop() {
 		case <-d.prs.Wake():
 			if err := d.prs.Drain(); err != nil {
 				d.obs.Log.Warn("parse_failed", "err", err.Error())
+			}
+		}
+	}
+}
+
+// settleLoop runs the settle pass once a minute, after the first parse.
+func (d *Daemon) settleLoop() {
+	defer d.refreshing.Done()
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-t.C:
+			if err := d.sett.Tick(); err != nil {
+				d.obs.Log.Warn("settle_pass_failed", "err", err.Error())
 			}
 		}
 	}

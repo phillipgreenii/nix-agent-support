@@ -94,14 +94,41 @@ func Suspected(ev Evidence) bool {
 	return false
 }
 
-// Conversation states and the stages this build owns (the settle packet owns the
-// rest of the stage machine).
+// Conversation states and stages. live and quiet are derived from the Processes
+// (an open Conversation is live, a closed one quiet); settled and held are
+// persisted by the settle stage, and removal_pending and removed belong to the
+// removal stage. The legal pairs: open is only live; closed is quiet, settled,
+// held, removal_pending or removed.
 const (
 	StateOpen   = "open"
 	StateClosed = "closed"
-	StageLive   = "live"
-	StageQuiet  = "quiet"
+
+	StageLive           = "live"
+	StageQuiet          = "quiet"
+	StageSettled        = "settled"
+	StageHeld           = "held"
+	StageRemovalPending = "removal_pending"
+	StageRemoved        = "removed"
 )
+
+// Stages lists every stage of the machine.
+var Stages = []string{StageLive, StageQuiet, StageHeld, StageSettled, StageRemovalPending, StageRemoved}
+
+// LegalPair reports whether a state and stage may appear together in
+// conversation.show.
+func LegalPair(state, stage string) bool {
+	switch state {
+	case StateOpen:
+		return stage == StageLive
+	case StateClosed:
+		for _, s := range Stages {
+			if s == stage && s != StageLive {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // Conversation is one row of conversation.show and conversation.list: the
 // Conversation's state and stage, its end evidence and the facts around it.

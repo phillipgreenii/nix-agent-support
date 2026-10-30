@@ -97,9 +97,21 @@ func (r *Recorder) SyncDir(dir string) error {
 	return r.Inner.SyncDir(dir)
 }
 
+// FullSyncDir records and performs a directory flush with F_FULLFSYNC.
+func (r *Recorder) FullSyncDir(dir string) error {
+	r.add("fullsyncdir", dir)
+	return FullSyncDir(r.Inner, dir)
+}
+
 type recFile struct {
 	File
 	r *Recorder
+}
+
+// FullSync records and performs a flush with F_FULLFSYNC.
+func (f *recFile) FullSync() error {
+	f.r.add("fullsync", f.Name())
+	return FullSync(f.File)
 }
 
 func (f *recFile) Write(p []byte) (int, error) {

@@ -15,6 +15,9 @@ const (
 	TState     = "state"     // the file's state changed (ok, copy_mismatch)
 	TRelease   = "release"   // pinned reset entries up to Version were released
 	TProc      = "proc"      // a Process observation (Kind: discover, seen or exit)
+	TStage     = "stage"     // a Conversation's stage changed (Session, State is the stage, Reason, Val the detail)
+	TSettle    = "settle"    // a Conversation was settled (Session, Method, Val is the SettleRec JSON)
+	TTorn      = "torn"      // a torn-tail fact (File, Gen, From the offset, To the end; Reset clears it)
 )
 
 // Rec is one journal record. Seq is assigned by the store when it is written.
@@ -53,6 +56,8 @@ type Rec struct {
 	// first discovery), seen (last seen alive at At) or exit (Reason is observed
 	// or unobserved; Val is present or absent: whether the registry file was
 	// still there at the instant of the exit).
+	Session string `json:"session,omitempty"`
+
 	Pid       int64  `json:"pid,omitempty"`
 	ProcStart string `json:"procStart,omitempty"`
 	Kind      string `json:"kind,omitempty"`

@@ -631,7 +631,12 @@ func (c *Copier) appendStep(f store.File, src *os.File, size int64, path string)
 	if err != nil {
 		return step{}, err
 	}
+	// A settled generation keeps its archived prefix in the archive, not in the
+	// copy file: a copy file that is gone while the archive covers every
+	// committed byte is the settled state, not a mismatch.
+	settled := !exists && g.CopyOffset > 0 && c.st.ArchivedTo(f.ID, g.Gen) >= g.CopyOffset
 	switch {
+	case settled:
 	case clen > g.CopyOffset:
 		// A crash between fsync and the offset commit (or an ENOSPC mid-copy).
 		if err := c.trimCopy(cp, g.CopyOffset); err != nil {
@@ -724,6 +729,9 @@ func (c *Copier) tailBytes(f store.File, g store.Generation) ([]byte, error) {
 	if b, err := os.ReadFile(c.st.TailPath(f.ID)); err == nil && len(b) == g.TailLen && xxhash.Sum64(b) == g.TailHash {
 		return b, nil
 	}
+	if c.st.ArchivedTo(f.ID, g.Gen) > 0 {
+		return c.readArchived(f.ID, g.Gen, g.CopyOffset-int64(g.TailLen), g.TailLen)
+	}
 	cf, err := c.fs.OpenFile(c.st.CopyPath(f.ID, g.Gen), os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
@@ -734,6 +742,34 @@ func (c *Copier) tailBytes(f store.File, g store.Generation) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// readArchived reads n bytes at off of a generation through the pointer, which
+// reads a settled prefix from its archive.
+func (c *Copier) readArchived(file int64, gen int, off int64, n int) ([]byte, error) {
+	p, err := c.st.OpenPointer(file, gen)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = p.Close() }()
+	b := make([]byte, n)
+	if _, err := p.ReadAt(b, off); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// readTailArchived reads the last min(TailSize, off) bytes of a generation
+// that has an archived prefix.
+func (c *Copier) readTailArchived(file int64, gen int, off int64) ([]byte, error) {
+	n := int64(TailSize)
+	if off < n {
+		n = off
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	return c.readArchived(file, gen, off-n, int(n))
 }
 
 func (c *Copier) writeTail(f store.File, tail []byte) error {
@@ -815,6 +851,11 @@ func (c *Copier) appendBytes(f store.File, g store.Generation, src *os.File, siz
 	var tail []byte
 	if len(data) >= TailSize {
 		tail = data[len(data)-TailSize:]
+	} else if c.st.ArchivedTo(f.ID, g.Gen) > 0 {
+		tail, err = c.readTailArchived(f.ID, g.Gen, newOff)
+		if err != nil {
+			return 0, err
+		}
 	} else {
 		tail, err = c.readTailOf(cp, newOff)
 		if err != nil {
@@ -1072,7 +1113,9 @@ func (c *Copier) recoverLocked(retry *[]string) error {
 			return err
 		}
 		orig := c.existingPath(f)
+		settled := !exists && g.CopyOffset > 0 && c.st.ArchivedTo(f.ID, g.Gen) >= g.CopyOffset
 		switch {
+		case settled:
 		case clen > g.CopyOffset:
 			if err := c.trimCopy(cp, g.CopyOffset); err != nil {
 				return err

@@ -10,7 +10,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -423,7 +422,7 @@ func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {
 // chunk parses lines from off, at most ChunkBytes of them, never past the last
 // newline within end. It returns the bytes consumed (0 when only a torn line is
 // left).
-func (p *Parser) chunk(tx *pstx, fh *os.File, f store.File, src source.Source, caps source.Captures,
+func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Source, caps source.Captures,
 	g store.Generation, commits []store.CopyCommit, off, end int64, count *int,
 ) (int64, error) {
 	size := int64(p.cfg.ChunkBytes)
@@ -482,7 +481,7 @@ func (p *Parser) chunk(tx *pstx, fh *os.File, f store.File, src source.Source, c
 	}
 }
 
-func (p *Parser) skipLong(tx *pstx, fh *os.File, f store.File, g store.Generation, off, end int64) (int64, error) {
+func (p *Parser) skipLong(tx *pstx, fh *store.Pointer, f store.File, g store.Generation, off, end int64) (int64, error) {
 	buf := make([]byte, 1<<20)
 	pos := off
 	for pos < end {

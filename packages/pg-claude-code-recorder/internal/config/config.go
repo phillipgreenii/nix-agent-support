@@ -49,6 +49,12 @@ type Config struct {
 	// CopyThrottle is the pause after each backfill file copy that moved bytes,
 	// so first-run backfill leaves the laptop usable.
 	CopyThrottle time.Duration
+	// SettleAfter is settle.after: how long every file of a Conversation must
+	// have been quiet before it settles (default 24 h).
+	SettleAfter time.Duration
+	// HeldRecheck is held.recheck: how often a held Conversation is checked
+	// again (default 1 h).
+	HeldRecheck time.Duration
 	// HeldMaxAge is how long a Conversation may be held before status calls the
 	// recorder unhealthy.
 	HeldMaxAge time.Duration
@@ -96,8 +102,13 @@ type file struct {
 		Throttle string `toml:"throttle"`
 	} `toml:"copy"`
 	Held struct {
-		MaxAge string `toml:"maxAge"`
+		MaxAge     string `toml:"maxAge"`
+		AlertAfter string `toml:"alertAfter"`
+		Recheck    string `toml:"recheck"`
 	} `toml:"held"`
+	Settle struct {
+		After string `toml:"after"`
+	} `toml:"settle"`
 	Parse struct {
 		MaxLineBytes *int `toml:"maxLineBytes"`
 	} `toml:"parse"`
@@ -168,12 +179,14 @@ func Defaults(getenv func(string) string) Config {
 		ClaudeDir:         claude,
 		StateDir:          state,
 		SweepInterval:     15 * time.Minute,
-		MinFreeBytes:      5 << 30,
+		MinFreeBytes:      20 << 30,
 		WaitMax:           60 * time.Second,
 		WaitMaxWaiter:     256,
 		FeedRetention:     14 * 24 * time.Hour,
 		RemoveAfter:       30 * 24 * time.Hour,
 		CopyThrottle:      2 * time.Millisecond,
+		SettleAfter:       24 * time.Hour,
+		HeldRecheck:       time.Hour,
 		HeldMaxAge:        3 * 24 * time.Hour,
 		ParseMaxLineBytes: 64 << 20,
 		Clients:           DefaultClients(),
@@ -252,6 +265,9 @@ func apply(c *Config, f file) error {
 		{"remove.after", f.Remove.After, &c.RemoveAfter},
 		{"copy.throttle", f.Copy.Throttle, &c.CopyThrottle},
 		{"held.maxAge", f.Held.MaxAge, &c.HeldMaxAge},
+		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},
+		{"held.recheck", f.Held.Recheck, &c.HeldRecheck},
+		{"settle.after", f.Settle.After, &c.SettleAfter},
 		{"process.graceWindow", f.Process.GraceWindow, &c.GraceWindow},
 		{"process.livenessInterval", f.Process.LivenessInterval, &c.LivenessInterval},
 	} {

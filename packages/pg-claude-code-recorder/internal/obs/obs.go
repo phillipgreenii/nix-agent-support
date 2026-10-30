@@ -63,6 +63,24 @@ const (
 	EvProcessExit      = "process_exit"
 )
 
+// Metric and event names of the settle stage.
+const (
+	MConversationsByStage = "conversations_by_stage"
+	MHeldConversations    = "held_conversations"
+	MOldestHeldAge        = "oldest_held_age_seconds"
+	MBytesPendingSettle   = "bytes_pending_settle"
+	MTornTailAge          = "torn_tail_age_seconds"
+	MLowSpace             = "state_dir_low_space"
+	MSettled              = "conversations_settled_total"
+	EvTornTailPending     = "torn_tail_pending"
+	EvStageChanged        = "stage_changed"
+	EvStateDirLow         = "state_dir_low"
+	EvArchiveWritten      = "archive_written"
+	EvSessionHeld         = "session_held"
+	EvSettleDiscarded     = "settle_clone_discarded"
+	EvSettleCrashRecovery = "settle_recovered_on_start"
+)
+
 // ControlVerbs, ControlOutcomes, InboxStates and EndFileOutcomes are the bounded
 // label values of the control metrics; anything else is bucketed as "other".
 var (
@@ -153,6 +171,13 @@ func (o *Obs) RegisterStandard() {
 		o.Reg.Set(MControlInbox, map[string]string{"state": st}, 0)
 	}
 	o.Reg.Set(MNoInbox, nil, 0)
+	for _, st := range []string{"live", "quiet", "held", "settled", "removal_pending", "removed"} {
+		o.Reg.Set(MConversationsByStage, map[string]string{"stage": st}, 0)
+	}
+	o.Reg.Set(MOldestHeldAge, nil, 0)
+	o.Reg.Set(MBytesPendingSettle, nil, 0)
+	o.Reg.Set(MLowSpace, nil, 0)
+	o.Reg.Add(MSettled, nil, 0)
 	for _, g := range []string{
 		MHeartbeat, MStateFreeBytes, MStateUsedBytes, MCopyLagBytes, MCopyLagSeconds,
 		MCopiedFiles, MBackfillFiles, MCaughtUp, MFeedWaiters,

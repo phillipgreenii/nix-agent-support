@@ -298,7 +298,15 @@ func (s *Store) TailPath(file int64) string {
 
 // Commit writes recs to the journal (sequence numbers assigned, fsynced) and
 // then applies them to the database in one transaction.
-func (s *Store) Commit(recs ...*Rec) error {
+func (s *Store) Commit(recs ...*Rec) error { return s.commit(false, recs) }
+
+// CommitFull is Commit with F_FULLFSYNC on the journal and PRAGMA fullfsync=ON
+// for the database commit, for the records a delete depends on ("settled",
+// "removal pending", "removed"). On darwin the plain fsync of Commit does not
+// flush the drive's cache.
+func (s *Store) CommitFull(recs ...*Rec) error { return s.commit(true, recs) }
+
+func (s *Store) commit(full bool, recs []*Rec) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var buf []byte
@@ -314,10 +322,20 @@ func (s *Store) Commit(recs ...*Rec) error {
 	if _, err := s.jf.Write(buf); err != nil {
 		return err
 	}
-	if err := s.jf.Sync(); err != nil {
+	if full {
+		if err := fsx.FullSync(s.jf); err != nil {
+			return err
+		}
+	} else if err := s.jf.Sync(); err != nil {
 		return err
 	}
 	faults.At("store.after-journal")
+	if full {
+		if _, err := s.wdb.Exec(`PRAGMA fullfsync=ON`); err != nil {
+			return err
+		}
+		defer func() { _, _ = s.wdb.Exec(`PRAGMA fullfsync=OFF`) }()
+	}
 	if err := s.applyAll(recs); err != nil {
 		return err
 	}
@@ -443,6 +461,8 @@ func apply(tx *sql.Tx, r *Rec) error {
 		_, err = tx.Exec(`UPDATE resets SET pinned=0 WHERE id<=?`, r.Version)
 	case TProc:
 		err = applyProc(tx, r)
+	case TStage, TSettle, TTorn:
+		err = applySettle(tx, r)
 	default:
 		err = fmt.Errorf("unknown record type %q", r.T)
 	}

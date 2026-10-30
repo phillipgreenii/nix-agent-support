@@ -1,0 +1,1294 @@
+// Package settle is the recorder's settle stage: it moves a Conversation whose
+// Processes are gone and whose files have been quiet for settle.after from
+// "quiet" to "settled" (or "held" when the check fails). A Conversation settles
+// only when the check passes for every one of its files; in clone mode settling
+// re-clones each file from the Claude original, which re-shares the blocks the
+// copy diverged on, and in byte mode it compresses the copies into the
+// Conversation's archive, in segments, and then deletes the bytes the archive
+// covers. Settling never writes into or removes anything from the Claude
+// directory.
+//
+// The order that makes a crash at any point lose nothing:
+//
+//  1. write the archive segment (or the clone) to a temporary file, flush it,
+//     read it back, flush the directory, rename it into place;
+//  2. commit "settled" with the archive's ranges (journal and database, with a
+//     full flush);
+//  3. delete the uncompressed copy bytes the archive covers.
+//
+// A restart (Recover) removes a segment that was renamed but never committed
+// and finishes a delete the crash cut short.
+package settle
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/cespare/xxhash/v2"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
+)
+
+// The stages as the settle stage names them (the lifecycle package carries the
+// same words for conversation.show).
+const (
+	StageLive    = "live"
+	StageQuiet   = "quiet"
+	StageSettled = store.StageSettled
+	StageHeld    = store.StageHeld
+)
+
+// Held reason codes: the enumerated list held_conversations{reason} and the
+// held command expose. Each check clause is its own reason.
+const (
+	// ReasonCopyOffset: the copy offset differs from the size of the file in the
+	// Claude directory.
+	ReasonCopyOffset = "copy_offset_mismatch"
+	// ReasonCopyTail: the tail hash of the copy differs from the original's.
+	ReasonCopyTail = "copy_tail_mismatch"
+	// ReasonParseBehind: the parse offset is not at the offset after the last
+	// newline of the copy.
+	ReasonParseBehind = "parse_behind"
+	// ReasonUnparsed: a file of a parsed kind has never been parsed.
+	ReasonUnparsed = "file_unparsed"
+	// ReasonTornTooLong: the torn tail is at least parse.maxLineBytes long.
+	ReasonTornTooLong = "torn_tail_too_long"
+)
+
+// Reasons lists every held reason code.
+var Reasons = []string{ReasonCopyOffset, ReasonCopyTail, ReasonParseBehind, ReasonUnparsed, ReasonTornTooLong}
+
+// Failure is one failing clause for one file.
+type Failure struct {
+	File   int64  `json:"file"`
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// Parser is the part of the parse stage the settle check needs.
+type Parser interface {
+	HasSource(name string) bool
+	// ParseTail parses a torn tail as a complete final line when it is valid JSON.
+	ParseTail(file int64, gen int) (bool, error)
+	// Drain parses every pending file.
+	Drain() error
+}
+
+// FreeSpace is the free-space seam (low-space mode reads it).
+type FreeSpace interface {
+	// Free returns the bytes available to the recorder on the volume holding path.
+	Free(path string) (int64, error)
+}
+
+// FreeFunc adapts a function to FreeSpace.
+type FreeFunc func(path string) (int64, error)
+
+// Free calls f.
+func (f FreeFunc) Free(path string) (int64, error) { return f(path) }
+
+// Hooks are the pause seams tests use: a write that lands between the check and
+// the clone, or between the check and the delete.
+type Hooks struct {
+	BeforeClone  func(file int64)
+	BeforeDelete func(session string)
+}
+
+// Config configures a Settler.
+type Config struct {
+	Store  *store.Store
+	Copier *copier.Copier
+	Parser Parser
+	// Live returns the sessions a live Process holds now.
+	Live  func() (map[string]bool, error)
+	Clock clock.Clock
+	Obs   *obs.Obs
+	// ClaudeDir is the Claude directory (file paths in manifests are relative to it).
+	ClaudeDir string
+	// After is settle.after, Recheck held.recheck, HeldAlertAfter held.alertAfter.
+	After, Recheck, HeldAlertAfter time.Duration
+	MinFreeBytes                   int64
+	MaxLineBytes                   int
+	Free                           FreeSpace
+	// Mtime reads a file's modification time (os.Lstat when nil).
+	Mtime func(path string) (time.Time, error)
+	Hooks Hooks
+}
+
+// Settler runs the settle stage.
+type Settler struct {
+	cfg Config
+	st  *store.Store
+	fs  fsx.FS
+
+	run sync.Mutex // one pass at a time
+
+	mu        sync.Mutex
+	last      map[string]string
+	reasons   map[string]string
+	checkedAt map[string]time.Time
+	low       bool
+}
+
+// New returns a Settler.
+func New(cfg Config) *Settler {
+	if cfg.Clock == nil {
+		cfg.Clock = clock.Real{}
+	}
+	if cfg.Obs == nil {
+		cfg.Obs = obs.New(nil)
+	}
+	if cfg.After <= 0 {
+		cfg.After = 24 * time.Hour
+	}
+	if cfg.Recheck <= 0 {
+		cfg.Recheck = time.Hour
+	}
+	if cfg.MaxLineBytes <= 0 {
+		cfg.MaxLineBytes = 64 << 20
+	}
+	if cfg.Mtime == nil {
+		cfg.Mtime = func(p string) (time.Time, error) {
+			fi, err := os.Lstat(p)
+			if err != nil {
+				return time.Time{}, err
+			}
+			return fi.ModTime(), nil
+		}
+	}
+	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}}
+	if rows, err := s.st.Stages(); err == nil {
+		for _, r := range rows {
+			s.last[r.Session] = r.Stage
+		}
+	}
+	return s
+}
+
+// LowSpace reports whether the last pass found the state directory below minFreeBytes.
+func (s *Settler) LowSpace() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.low
+}
+
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// SessionOf returns the Conversation a path relative to the Claude directory
+// belongs to, and false for the files that belong to no single Conversation
+// (history.jsonl, project-level files, memory/, the registry).
+func SessionOf(rel string) (string, bool) {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 3 || parts[0] != "projects" {
+		return "", false
+	}
+	cand := parts[2]
+	if len(parts) == 3 {
+		for _, suf := range []string{".status.jsonl", ".session-mode.json", ".compaction.json", ".jsonl"} {
+			if strings.HasSuffix(cand, suf) {
+				cand = strings.TrimSuffix(cand, suf)
+				break
+			}
+		}
+	}
+	if !uuidRe.MatchString(cand) {
+		return "", false
+	}
+	return cand, true
+}
+
+type conv struct {
+	session string
+	files   []store.File
+	rel     map[int64]string
+}
+
+func (s *Settler) groups() (map[string]*conv, error) {
+	files, err := s.st.AllFiles()
+	if err != nil {
+		return nil, err
+	}
+	paths, err := s.st.AllPaths()
+	if err != nil {
+		return nil, err
+	}
+	root := strings.TrimRight(s.cfg.ClaudeDir, "/") + "/"
+	out := map[string]*conv{}
+	for _, f := range files {
+		if f.Mode != "append" && f.Mode != "snapshot" {
+			continue
+		}
+		for _, p := range paths[f.ID] {
+			if !strings.HasPrefix(p, root) {
+				continue
+			}
+			rel := p[len(root):]
+			session, ok := SessionOf(rel)
+			if !ok {
+				continue
+			}
+			c := out[session]
+			if c == nil {
+				c = &conv{session: session, rel: map[int64]string{}}
+				out[session] = c
+			}
+			c.files = append(c.files, f)
+			c.rel[f.ID] = rel
+			break
+		}
+	}
+	return out, nil
+}
+
+// Outcome is what one evaluation of a Conversation did.
+type Outcome struct {
+	Session  string
+	Stage    string // the stage after the evaluation (quiet, held or settled)
+	Reason   string
+	Failures []Failure
+	Skipped  string // why nothing was evaluated, when nothing was
+}
+
+// Tick runs one pass: it evaluates every Conversation that is not live, moves
+// the ones whose Process came back to Live, and refreshes the gauges.
+func (s *Settler) Tick() error {
+	s.run.Lock()
+	defer s.run.Unlock()
+	now := s.cfg.Clock.Now()
+	s.checkLow()
+	live, err := s.cfg.Live()
+	if err != nil {
+		return err
+	}
+	groups, err := s.groups()
+	if err != nil {
+		return err
+	}
+	sessions := make([]string, 0, len(groups))
+	for k := range groups {
+		sessions = append(sessions, k)
+	}
+	sort.Strings(sessions)
+	var first error
+	for _, session := range sessions {
+		if _, err := s.evaluate(groups[session], live[session], now, false); err != nil && first == nil {
+			first = fmt.Errorf("settle %s: %w", session, err)
+		}
+	}
+	// A persisted stage whose Conversation has no files any more is dropped from view.
+	s.refresh(groups, live, now)
+	return first
+}
+
+// Recheck is the on-demand re-check entry point (held --retry): it evaluates
+// one Conversation now, without waiting for held.recheck.
+func (s *Settler) Recheck(session string) (Outcome, error) {
+	s.run.Lock()
+	defer s.run.Unlock()
+	now := s.cfg.Clock.Now()
+	s.checkLow()
+	live, err := s.cfg.Live()
+	if err != nil {
+		return Outcome{}, err
+	}
+	groups, err := s.groups()
+	if err != nil {
+		return Outcome{}, err
+	}
+	c := groups[session]
+	if c == nil {
+		return Outcome{}, store.ErrNotFound
+	}
+	out, err := s.evaluate(c, live[session], now, true)
+	s.refresh(groups, live, now)
+	return out, err
+}
+
+// RecheckHeld re-checks every held Conversation now.
+func (s *Settler) RecheckHeld() ([]Outcome, error) {
+	rows, err := s.st.Stages()
+	if err != nil {
+		return nil, err
+	}
+	var outs []Outcome
+	for _, r := range rows {
+		if r.Stage != StageHeld {
+			continue
+		}
+		o, err := s.Recheck(r.Session)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return outs, err
+		}
+		outs = append(outs, o)
+	}
+	return outs, nil
+}
+
+func (s *Settler) checkLow() {
+	if s.cfg.Free == nil || s.cfg.MinFreeBytes <= 0 {
+		return
+	}
+	free, err := s.cfg.Free.Free(s.st.Dir())
+	if err != nil {
+		return
+	}
+	low := free < s.cfg.MinFreeBytes
+	s.mu.Lock()
+	was := s.low
+	s.low = low
+	s.mu.Unlock()
+	if low {
+		s.cfg.Obs.Reg.Set(obs.MLowSpace, nil, 1)
+		if !was {
+			s.cfg.Obs.Event(obs.EvStateDirLow, "free_bytes", strconv.FormatInt(free, 10), "min_free_bytes", strconv.FormatInt(s.cfg.MinFreeBytes, 10))
+		}
+	} else {
+		s.cfg.Obs.Reg.Set(obs.MLowSpace, nil, 0)
+	}
+}
+
+func (s *Settler) setReason(session, reason string) {
+	s.mu.Lock()
+	s.reasons[session] = reason
+	s.mu.Unlock()
+}
+
+// newest is the newest modification time among the Conversation's files: the
+// original's when it exists, else the last time the recorder saw the file
+// change.
+func (s *Settler) newest(c *conv) time.Time {
+	var best time.Time
+	for _, f := range c.files {
+		var t time.Time
+		if p := s.cfg.Copier.ReadOriginalPath(f); p != "" {
+			if mt, err := s.cfg.Mtime(p); err == nil {
+				t = mt
+			}
+		}
+		if t.IsZero() {
+			t = s.lastSeen(f)
+		}
+		if t.After(best) {
+			best = t
+		}
+	}
+	return best
+}
+
+func (s *Settler) lastSeen(f store.File) time.Time {
+	ns := f.FirstSeen
+	if cc, err := s.st.CopyCommits(f.ID); err == nil {
+		for _, c := range cc {
+			if c.SeenNS > ns {
+				ns = c.SeenNS
+			}
+		}
+	}
+	if sn, err := s.st.Snapshots(f.ID); err == nil {
+		for _, x := range sn {
+			if x.SeenNS > ns {
+				ns = x.SeenNS
+			}
+		}
+	}
+	if ts, err := s.st.Tombstones(f.ID); err == nil {
+		for _, t := range ts {
+			if t > ns {
+				ns = t
+			}
+		}
+	}
+	return time.Unix(0, ns)
+}
+
+func (s *Settler) clearStage(session, reason string, now time.Time) error {
+	s.setReason(session, reason)
+	return s.st.Commit(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: "", Reason: reason})
+}
+
+// evaluate runs one Conversation through the stage machine. force skips the
+// held.recheck wait.
+func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outcome, error) {
+	out := Outcome{Session: c.session, Stage: StageQuiet}
+	row, hasRow, err := s.st.Stage(c.session)
+	if err != nil {
+		return out, err
+	}
+	if live {
+		// Settled to Live and Held to Live: a Process holds it again.
+		out.Stage, out.Skipped = StageLive, "live process"
+		if hasRow {
+			return out, s.clearStage(c.session, "process", now)
+		}
+		return out, nil
+	}
+	if hasRow && row.Stage == StageSettled {
+		if !s.changedSinceSettle(c) {
+			out.Stage, out.Skipped = StageSettled, "settled"
+			return out, nil
+		}
+		// Settled to Quiet: new writes.
+		if err := s.clearStage(c.session, "new_writes", now); err != nil {
+			return out, err
+		}
+		hasRow = false
+	}
+	newest := s.newest(c)
+	if hasRow && row.Stage == StageHeld {
+		if newest.After(time.Unix(0, row.SinceNS)) {
+			// Held to Quiet: a file was written after the hold.
+			if err := s.clearStage(c.session, "new_writes", now); err != nil {
+				return out, err
+			}
+			hasRow = false
+		} else {
+			s.mu.Lock()
+			at := s.checkedAt[c.session]
+			s.mu.Unlock()
+			if !force && !at.IsZero() && now.Sub(at) < s.cfg.Recheck {
+				out.Stage, out.Skipped, out.Reason = StageHeld, "held, recheck not due", row.Reason
+				return out, nil
+			}
+		}
+	}
+	gate := now.Sub(newest) >= s.cfg.After
+	if !gate && !s.LowSpace() {
+		out.Skipped = "quiet age below settle.after"
+		return out, nil
+	}
+	s.mu.Lock()
+	s.checkedAt[c.session] = now
+	s.mu.Unlock()
+	_ = s.cfg.Parser.Drain()
+	var res Outcome
+	err = s.cfg.Copier.WithLock(func() error {
+		var e error
+		res, e = s.settleLocked(c, now, hasRow && row.Stage == StageHeld)
+		return e
+	})
+	if res.Session == "" {
+		res.Session = c.session
+	}
+	return res, err
+}
+
+// changedSinceSettle reports whether any file of the Conversation has bytes the
+// settled manifest does not describe (a write after the settle, or a new file).
+func (s *Settler) changedSinceSettle(c *conv) bool {
+	st, ok, err := s.st.SettledOf(c.session)
+	if err != nil || !ok {
+		return false
+	}
+	var m store.Manifest
+	if json.Unmarshal(st.Manifest, &m) != nil {
+		return true
+	}
+	byID := map[int64]store.ManifestFile{}
+	for _, f := range m.Files {
+		byID[f.File] = f
+	}
+	gens, err := s.st.AllGenerations()
+	if err != nil {
+		return false
+	}
+	cur := map[[2]int64]int64{}
+	for _, g := range gens {
+		cur[[2]int64{g.File, int64(g.Gen)}] = g.CopyOffset
+	}
+	for _, f := range c.files {
+		mf, ok := byID[f.ID]
+		if !ok {
+			return true
+		}
+		if f.Mode == "snapshot" {
+			if f.CurGen != mf.Gen || f.LastSize != mf.Size {
+				return true
+			}
+			continue
+		}
+		if f.CurGen != mf.Gen || cur[[2]int64{f.ID, int64(f.CurGen)}] != mf.Size {
+			return true
+		}
+	}
+	return false
+}
+
+func hashReader(r io.ReaderAt, n int64) (uint64, error) {
+	h := xxhash.New()
+	buf := make([]byte, 1<<20)
+	for off := int64(0); off < n; {
+		m := int64(len(buf))
+		if n-off < m {
+			m = n - off
+		}
+		got, err := r.ReadAt(buf[:m], off)
+		if int64(got) != m {
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, err
+		}
+		_, _ = h.Write(buf[:m])
+		off += m
+	}
+	return h.Sum64(), nil
+}
+
+func hashFile(path string) (uint64, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, 0, err
+	}
+	h, err := hashReader(f, fi.Size())
+	return h, fi.Size(), err
+}
+
+// lastNewline returns the offset after the last newline in the first n bytes of
+// the pointer (0 when there is none).
+func lastNewline(p *store.Pointer, n int64) (int64, error) {
+	buf := make([]byte, 64<<10)
+	for end := n; end > 0; {
+		start := end - int64(len(buf))
+		if start < 0 {
+			start = 0
+		}
+		b := buf[:end-start]
+		if m, err := p.ReadAt(b, start); int64(m) != int64(len(b)) {
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, err
+		}
+		for i := len(b) - 1; i >= 0; i-- {
+			if b[i] == '\n' {
+				return start + int64(i) + 1, nil
+			}
+		}
+		end = start
+	}
+	return 0, nil
+}
+
+func (s *Settler) parsedState(file int64, gen int) bool {
+	var v int
+	return s.st.Read().QueryRow(`SELECT version FROM parse_state WHERE file_id=? AND gen=?`, file, gen).Scan(&v) == nil
+}
+
+// check runs the settle check over every file. Each clause is an independent
+// failing condition. It may parse a torn tail or record a torn-tail fact, and
+// it reports the files whose full hash differs from the original's in clone
+// mode (the caller starts a new generation for them).
+func (s *Settler) check(c *conv, quiet bool, now time.Time) (fails []Failure, regen []store.File, err error) {
+	for _, f := range c.files {
+		rel := c.rel[f.ID]
+		switch f.Mode {
+		case "snapshot":
+			fl, err := s.checkSnapshot(f, rel)
+			if err != nil {
+				return nil, nil, err
+			}
+			fails = append(fails, fl...)
+		default:
+			fl, rg, err := s.checkAppend(f, rel, quiet, now)
+			if err != nil {
+				return nil, nil, err
+			}
+			fails = append(fails, fl...)
+			if rg {
+				regen = append(regen, f)
+			}
+		}
+	}
+	return fails, regen, nil
+}
+
+func (s *Settler) checkSnapshot(f store.File, rel string) ([]Failure, error) {
+	sn, err := s.st.LatestSnapshot(f.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	orig := s.cfg.Copier.ReadOriginalPath(f)
+	if orig == "" {
+		return nil, nil
+	}
+	h, size, err := hashFile(orig)
+	if err != nil {
+		return nil, nil
+	}
+	switch {
+	case size != sn.Size:
+		return []Failure{{File: f.ID, Path: rel, Reason: ReasonCopyOffset, Detail: fmt.Sprintf("stored %d bytes, original %d", sn.Size, size)}}, nil
+	case h != sn.Hash:
+		return []Failure{{File: f.ID, Path: rel, Reason: ReasonCopyTail, Detail: "stored version differs from the original"}}, nil
+	}
+	return nil, nil
+}
+
+func (s *Settler) checkAppend(f store.File, rel string, quiet bool, now time.Time) (fails []Failure, regen bool, err error) {
+	if f.CurGen == 0 {
+		return nil, false, nil
+	}
+	g, err := s.st.Generation(f.ID, f.CurGen)
+	if err != nil {
+		return nil, false, err
+	}
+	add := func(reason, detail string) {
+		fails = append(fails, Failure{File: f.ID, Path: rel, Reason: reason, Detail: detail})
+	}
+	orig := s.cfg.Copier.ReadOriginalPath(f)
+	if orig != "" {
+		if fi, err := os.Stat(orig); err == nil {
+			switch {
+			case fi.Size() != g.CopyOffset:
+				add(ReasonCopyOffset, fmt.Sprintf("copy offset %d, original %d bytes", g.CopyOffset, fi.Size()))
+			case g.TailLen > 0:
+				if !tailMatches(orig, g) {
+					add(ReasonCopyTail, "tail hash differs from the original")
+				}
+			}
+		}
+	}
+	if s.cfg.Parser.HasSource(f.Source) && g.CopyOffset > 0 {
+		ptr, err := s.st.OpenPointer(f.ID, g.Gen)
+		if err != nil {
+			return nil, false, err
+		}
+		nl, err := lastNewline(ptr, g.CopyOffset)
+		_ = ptr.Close()
+		if err != nil {
+			return nil, false, err
+		}
+		if fact, ok := s.st.TornTailOf(f.ID, g.Gen); ok && (fact.Off != nl || fact.Off+fact.Len != g.CopyOffset) {
+			// Later growth invalidates the fact.
+			if err := s.st.Commit(&store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, Reset: true}); err != nil {
+				return nil, false, err
+			}
+		}
+		tornLen := g.CopyOffset - nl
+		if tornLen > 0 && g.ParseOffset < g.CopyOffset {
+			s.cfg.Obs.Event(obs.EvTornTailPending, "file", strconv.FormatInt(f.ID, 10), "source", f.Source, "offset", strconv.FormatInt(nl, 10), "length", strconv.FormatInt(tornLen, 10))
+			switch {
+			case tornLen >= int64(s.cfg.MaxLineBytes):
+				add(ReasonTornTooLong, fmt.Sprintf("torn tail of %d bytes at %d", tornLen, nl))
+			case quiet:
+				parsed, err := s.cfg.Parser.ParseTail(f.ID, g.Gen)
+				if err != nil {
+					return nil, false, err
+				}
+				if parsed {
+					if g, err = s.st.Generation(f.ID, g.Gen); err != nil {
+						return nil, false, err
+					}
+				} else if _, ok := s.st.TornTailOf(f.ID, g.Gen); !ok {
+					if err := s.st.Commit(&store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, From: nl, To: g.CopyOffset}); err != nil {
+						return nil, false, err
+					}
+				}
+			}
+		}
+		if tornLen < int64(s.cfg.MaxLineBytes) || g.ParseOffset >= g.CopyOffset {
+			if g.ParseOffset != nl && g.ParseOffset != g.CopyOffset {
+				add(ReasonParseBehind, fmt.Sprintf("parse offset %d, last newline at %d", g.ParseOffset, nl))
+			}
+		}
+		if !s.parsedState(f.ID, g.Gen) {
+			add(ReasonUnparsed, "no record of a parse of this generation")
+		}
+	}
+	if len(fails) == 0 && s.cfg.Copier.CloneMode() && orig != "" {
+		ptr, err := s.st.OpenPointer(f.ID, g.Gen)
+		if err != nil {
+			return nil, false, err
+		}
+		ch, cerr := hashReader(ptr, g.CopyOffset)
+		_ = ptr.Close()
+		oh, osize, oerr := hashFile(orig)
+		if cerr == nil && oerr == nil && (oh != ch || osize != g.CopyOffset) {
+			regen = true
+		}
+	}
+	return fails, regen, nil
+}
+
+func tailMatches(orig string, g store.Generation) bool {
+	f, err := os.Open(orig)
+	if err != nil {
+		return true
+	}
+	defer func() { _ = f.Close() }()
+	b := make([]byte, g.TailLen)
+	if m, err := f.ReadAt(b, g.CopyOffset-int64(g.TailLen)); m != len(b) && err != nil {
+		return false
+	}
+	return xxhash.Sum64(b) == g.TailHash
+}
+
+// settleLocked checks and settles one Conversation. The copier's lock is held.
+func (s *Settler) settleLocked(c *conv, now time.Time, wasHeld bool) (Outcome, error) {
+	out := Outcome{Session: c.session, Stage: StageQuiet}
+	newest := s.newest(c)
+	quiet := now.Sub(newest) >= s.cfg.After || s.LowSpace()
+	fails, regen, err := s.check(c, quiet, now)
+	if err != nil {
+		return out, err
+	}
+	if len(fails) > 0 {
+		return s.hold(c, fails, now, wasHeld)
+	}
+	if len(regen) > 0 {
+		// A full-hash mismatch at settle starts a new generation from byte 0 and
+		// keeps the old one (a reset entry follows); the Conversation stays Quiet.
+		for _, f := range regen {
+			orig := s.cfg.Copier.ReadOriginalPath(f)
+			if err := s.cfg.Copier.NewGenerationLocked(f, orig, "full_hash_mismatch"); err != nil {
+				return out, err
+			}
+		}
+		out.Skipped = "full hash mismatch: new generation started"
+		return out, nil
+	}
+	if wasHeld {
+		if err := s.clearStage(c.session, "check_passed", now); err != nil {
+			return out, err
+		}
+	}
+	var settled bool
+	if s.cfg.Copier.CloneMode() {
+		settled, err = s.settleClone(c, now)
+	} else {
+		settled, err = s.settleBytes(c, now)
+	}
+	if err != nil {
+		return out, err
+	}
+	if settled {
+		out.Stage = StageSettled
+		s.setReason(c.session, "quiet")
+		s.cfg.Obs.Reg.Add(obs.MSettled, nil, 1)
+	} else {
+		out.Skipped = "settle discarded"
+	}
+	return out, nil
+}
+
+func (s *Settler) hold(c *conv, fails []Failure, now time.Time, wasHeld bool) (Outcome, error) {
+	out := Outcome{Session: c.session, Stage: StageHeld, Reason: fails[0].Reason, Failures: fails}
+	detail, _ := json.Marshal(fails)
+	row, has, _ := s.st.Stage(c.session)
+	since := now.UnixNano()
+	if has && row.Stage == StageHeld {
+		since = row.SinceNS
+	}
+	if has && row.Stage == StageHeld && row.Reason == out.Reason && row.Detail == string(detail) {
+		return out, nil
+	}
+	if err := s.st.Commit(&store.Rec{T: store.TStage, At: since, Session: c.session, State: StageHeld, Reason: out.Reason, Val: string(detail)}); err != nil {
+		return out, err
+	}
+	s.setReason(c.session, out.Reason)
+	s.cfg.Obs.Event(obs.EvSessionHeld, "session", c.session, "reason", out.Reason, "files", strconv.Itoa(len(fails)))
+	return out, nil
+}
+
+func (s *Settler) manifest(c *conv, method string, now time.Time) (store.Manifest, error) {
+	m := store.Manifest{Session: c.session, SettledAt: now.UnixNano(), Method: method}
+	ids := map[string]bool{}
+	files := append([]store.File(nil), c.files...)
+	sort.Slice(files, func(i, j int) bool { return c.rel[files[i].ID] < c.rel[files[j].ID] })
+	for _, f := range files {
+		mf := store.ManifestFile{Path: c.rel[f.ID], File: f.ID, Mode: f.Mode, Gen: f.CurGen}
+		if s.cfg.Parser.HasSource(f.Source) {
+			mf.Parsed, mf.ParsedBy = true, f.Source
+		}
+		if sess, err := s.st.SessionsOfFile(f.ID); err == nil {
+			mf.SessionIDs = sess
+			for _, x := range sess {
+				ids[x] = true
+			}
+		}
+		switch f.Mode {
+		case "snapshot":
+			sns, err := s.st.Snapshots(f.ID)
+			if err != nil {
+				return m, err
+			}
+			for _, sn := range sns {
+				mf.Generations = append(mf.Generations, store.ManifestGen{Gen: sn.Version, Size: sn.Size})
+			}
+			if sn, err := s.st.LatestSnapshot(f.ID); err == nil {
+				mf.Size, mf.Gen = sn.Size, sn.Version
+				mf.Hash = strconv.FormatUint(sn.Hash, 16)
+			}
+			mf.Size = f.LastSize
+		default:
+			gens, err := s.st.Generations(f.ID)
+			if err != nil {
+				return m, err
+			}
+			for _, g := range gens {
+				mf.Generations = append(mf.Generations, store.ManifestGen{Gen: g.Gen, Size: g.CopyOffset})
+				if g.Gen == f.CurGen {
+					mf.Size = g.CopyOffset
+					ptr, err := s.st.OpenPointer(f.ID, g.Gen)
+					if err != nil {
+						if g.CopyOffset == 0 {
+							continue
+						}
+						return m, err
+					}
+					h, herr := hashReader(ptr, g.CopyOffset)
+					_ = ptr.Close()
+					if herr != nil {
+						return m, herr
+					}
+					mf.Hash = strconv.FormatUint(h, 16)
+				}
+			}
+		}
+		m.Files = append(m.Files, mf)
+	}
+	for k := range ids {
+		m.SessionID = append(m.SessionID, k)
+	}
+	sort.Strings(m.SessionID)
+	return m, nil
+}
+
+// writeManifestFile durably writes archives/<session>/manifest.json.
+func (s *Settler) writeManifestFile(session string, b []byte) error {
+	dir := s.st.SegDir(session)
+	if err := s.fs.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	final := filepath.Join(dir, "manifest.json")
+	tmp := final + ".tmp"
+	f, err := s.fs.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	if err == nil {
+		err = fsx.FullSync(f)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.fs.Rename(tmp, final); err != nil {
+		return err
+	}
+	return fsx.FullSyncDir(s.fs, dir)
+}
+
+// settleBytes compresses the Conversation's copies into a new archive segment,
+// commits "settled" and deletes the covered copy bytes.
+func (s *Settler) settleBytes(c *conv, now time.Time) (bool, error) {
+	m, err := s.manifest(c, "bytes", now)
+	if err != nil {
+		return false, err
+	}
+	mb, err := json.Marshal(m)
+	if err != nil {
+		return false, err
+	}
+	prev, _, err := s.st.SettledOf(c.session)
+	if err != nil {
+		return false, err
+	}
+	seg := store.SegName(prev.Seq + 1)
+	var items []store.SegItem
+	var ranges []store.RangeRec
+	var closers []*store.Pointer
+	defer func() {
+		for _, p := range closers {
+			_ = p.Close()
+		}
+	}()
+	add := func(f store.File, gen int, size int64) error {
+		from := s.st.ArchivedTo(f.ID, gen)
+		if size <= from {
+			return nil
+		}
+		p, err := s.st.OpenPointer(f.ID, gen)
+		if err != nil {
+			return err
+		}
+		closers = append(closers, p)
+		items = append(items, store.SegItem{File: f.ID, Gen: gen, From: from, To: size, Src: p})
+		ranges = append(ranges, store.RangeRec{File: f.ID, Gen: gen, From: from, To: size, Seg: seg})
+		return nil
+	}
+	for _, f := range c.files {
+		if f.Mode == "snapshot" {
+			sns, err := s.st.Snapshots(f.ID)
+			if err != nil {
+				return false, err
+			}
+			for _, sn := range sns {
+				if err := add(f, sn.Version, sn.Size); err != nil {
+					return false, err
+				}
+			}
+			continue
+		}
+		gens, err := s.st.Generations(f.ID)
+		if err != nil {
+			return false, err
+		}
+		for _, g := range gens {
+			if err := add(f, g.Gen, g.CopyOffset); err != nil {
+				return false, err
+			}
+		}
+	}
+	if err := s.writeManifestFile(c.session, mb); err != nil {
+		return false, err
+	}
+	if len(items) > 0 {
+		res, err := store.WriteSegmentFile(s.fs, s.st.SegDir(c.session), seg, mb, items)
+		if err != nil {
+			return false, err
+		}
+		s.cfg.Obs.Event(obs.EvArchiveWritten, "session", c.session, "segment", seg, "bytes", strconv.FormatInt(res.Size, 10), "ranges", strconv.Itoa(len(ranges)))
+	}
+	val, _ := json.Marshal(store.SettleRec{Manifest: mb, Ranges: ranges})
+	if err := s.st.CommitFull(&store.Rec{T: store.TSettle, At: now.UnixNano(), Session: c.session, Method: "bytes", Val: string(val)}); err != nil {
+		return false, err
+	}
+	faults.At("settle.after-commit")
+	if h := s.cfg.Hooks.BeforeDelete; h != nil {
+		h(c.session)
+	}
+	return true, s.reclaim(c, ranges)
+}
+
+func (s *Settler) reclaim(c *conv, ranges []store.RangeRec) error {
+	byID := map[int64]store.File{}
+	for _, f := range c.files {
+		byID[f.ID] = f
+	}
+	for i, r := range ranges {
+		f, ok := byID[r.File]
+		if !ok {
+			continue
+		}
+		if err := s.cfg.Copier.ReclaimLocked(f, r.Gen); err != nil {
+			return err
+		}
+		if i == 0 {
+			faults.At("settle.partial-delete")
+		}
+	}
+	return nil
+}
+
+// settleClone re-clones each append file from its Claude original after the
+// full-hash check, re-hashes the clone before it replaces the preserved copy,
+// and commits "settled". A write that lands between the check and the clone
+// (the clone is longer than the committed offset, or the original no longer
+// matches) discards the clones and leaves the Conversation Quiet.
+func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
+	type cl struct {
+		f   store.File
+		g   store.Generation
+		tmp string
+	}
+	var clones []cl
+	discard := func(why string, file int64) {
+		for _, x := range clones {
+			_ = s.fs.Remove(x.tmp)
+		}
+		s.cfg.Obs.Event(obs.EvSettleDiscarded, "session", c.session, "file", strconv.FormatInt(file, 10), "reason", why)
+	}
+	policy := s.cfg.Copier.ClonePolicy()
+	for _, f := range c.files {
+		if f.Mode != "append" || f.CurGen == 0 {
+			continue
+		}
+		orig := s.cfg.Copier.ReadOriginalPath(f)
+		if orig == "" {
+			continue
+		}
+		g, err := s.st.Generation(f.ID, f.CurGen)
+		if err != nil {
+			return false, err
+		}
+		if g.CopyOffset == 0 {
+			continue
+		}
+		if h := s.cfg.Hooks.BeforeClone; h != nil {
+			h(f.ID)
+		}
+		ptr, err := s.st.OpenPointer(f.ID, g.Gen)
+		if err != nil {
+			return false, err
+		}
+		want, herr := hashReader(ptr, g.CopyOffset)
+		_ = ptr.Close()
+		if herr != nil {
+			return false, herr
+		}
+		tmp := s.st.CopyPath(f.ID, g.Gen) + ".tmp"
+		_ = s.fs.Remove(tmp)
+		if err := policy.Clone(orig, tmp); err != nil {
+			discard("clone failed: "+err.Error(), f.ID)
+			return false, nil
+		}
+		clones = append(clones, cl{f, g, tmp})
+		fi, err := os.Stat(tmp)
+		if err != nil {
+			return false, err
+		}
+		if fi.Size() != g.CopyOffset {
+			discard(fmt.Sprintf("clone is %d bytes, committed offset %d", fi.Size(), g.CopyOffset), f.ID)
+			return false, nil
+		}
+		got, _, herr := hashFile(tmp)
+		if herr != nil {
+			return false, herr
+		}
+		if got != want {
+			discard("clone differs from the preserved copy", f.ID)
+			return false, nil
+		}
+		tf, err := s.fs.OpenFile(tmp, os.O_RDWR, 0)
+		if err != nil {
+			return false, err
+		}
+		err = fsx.FullSync(tf)
+		_ = tf.Close()
+		if err != nil {
+			return false, err
+		}
+		fsx.Mark(s.fs, "readback")
+		faults.At("settle.after-temp")
+	}
+	if len(clones) > 0 {
+		if err := fsx.FullSyncDir(s.fs, filepath.Dir(clones[0].tmp)); err != nil {
+			return false, err
+		}
+	}
+	for _, x := range clones {
+		if err := s.cfg.Copier.ReplaceCopyLocked(x.f, x.g.Gen, x.tmp); err != nil {
+			return false, err
+		}
+	}
+	faults.At("settle.after-rename")
+	m, err := s.manifest(c, "clone", now)
+	if err != nil {
+		return false, err
+	}
+	mb, err := json.Marshal(m)
+	if err != nil {
+		return false, err
+	}
+	if err := s.writeManifestFile(c.session, mb); err != nil {
+		return false, err
+	}
+	val, _ := json.Marshal(store.SettleRec{Manifest: mb})
+	if err := s.st.CommitFull(&store.Rec{T: store.TSettle, At: now.UnixNano(), Session: c.session, Method: "clone", Val: string(val)}); err != nil {
+		return false, err
+	}
+	faults.At("settle.after-commit")
+	return true, nil
+}
+
+// Recover runs on start, after the copier's own recovery. It removes archive
+// segments that were renamed into place but never committed, removes leftover
+// temporary files, and finishes the delete a crash after "settled" cut short.
+func (s *Settler) Recover() error {
+	s.run.Lock()
+	defer s.run.Unlock()
+	root := filepath.Join(s.st.Dir(), store.ArchivesDir)
+	ents, err := s.fs.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	removed := 0
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		session := e.Name()
+		row, ok, err := s.st.SettledOf(session)
+		if err != nil {
+			return err
+		}
+		dir := filepath.Join(root, session)
+		segs, err := s.fs.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		for _, sg := range segs {
+			name := sg.Name()
+			orphan := strings.HasSuffix(name, ".tmp")
+			if strings.HasSuffix(name, ".seg") {
+				n, perr := strconv.Atoi(strings.TrimSuffix(name, ".seg"))
+				orphan = perr != nil || !ok || n > row.Seq
+			}
+			if orphan {
+				if err := s.fs.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+				removed++
+			}
+		}
+	}
+	files, err := s.st.AllFiles()
+	if err != nil {
+		return err
+	}
+	byID := map[int64]store.File{}
+	for _, f := range files {
+		byID[f.ID] = f
+	}
+	ranges, err := s.st.AllRanges()
+	if err != nil {
+		return err
+	}
+	finished := 0
+	err = s.cfg.Copier.WithLock(func() error {
+		seen := map[[2]int64]bool{}
+		for _, r := range ranges {
+			k := [2]int64{r.File, int64(r.Gen)}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			f, ok := byID[r.File]
+			if !ok {
+				continue
+			}
+			if err := s.cfg.Copier.ReclaimLocked(f, r.Gen); err != nil {
+				return err
+			}
+			finished++
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if removed > 0 {
+		s.cfg.Obs.Event(obs.EvSettleCrashRecovery, "orphans_removed", strconv.Itoa(removed), "deletes_finished", strconv.Itoa(finished))
+	}
+	return nil
+}
+
+// refresh derives every Conversation's stage, emits the stage changes and sets
+// the gauges.
+func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now time.Time) {
+	reg := s.cfg.Obs.Reg
+	rows, _ := s.st.Stages()
+	persisted := map[string]store.StageRow{}
+	for _, r := range rows {
+		persisted[r.Session] = r
+	}
+	counts := map[string]int{}
+	held := map[string]int{}
+	var oldest float64
+	gens, _ := s.st.AllGenerations()
+	arch, _ := s.st.AllRanges()
+	archived := map[[2]int64]int64{}
+	for _, r := range arch {
+		k := [2]int64{r.File, int64(r.Gen)}
+		if r.From <= archived[k] && r.To > archived[k] {
+			archived[k] = r.To
+		}
+	}
+	pendingByFile := map[int64]int64{}
+	for _, g := range gens {
+		if p := g.CopyOffset - archived[[2]int64{g.File, int64(g.Gen)}]; p > 0 {
+			pendingByFile[g.File] += p
+		}
+	}
+	var pending int64
+	for session, c := range groups {
+		stage := StageQuiet
+		switch r, ok := persisted[session]; {
+		case live[session]:
+			stage = StageLive
+		case ok:
+			stage = r.Stage
+		}
+		counts[stage]++
+		if stage == StageHeld {
+			r := persisted[session]
+			held[r.Reason]++
+			if age := now.Sub(time.Unix(0, r.SinceNS)).Seconds(); age > oldest {
+				oldest = age
+			}
+		}
+		if stage == StageQuiet || stage == StageHeld {
+			for _, f := range c.files {
+				pending += pendingByFile[f.ID]
+			}
+		}
+		s.mu.Lock()
+		prev, seen := s.last[session]
+		if !seen {
+			prev = StageQuiet
+			if stage == StageLive {
+				prev = StageLive
+			}
+		}
+		s.last[session] = stage
+		reason := s.reasons[session]
+		delete(s.reasons, session)
+		s.mu.Unlock()
+		if prev != stage {
+			s.cfg.Obs.Event(obs.EvStageChanged, "session", session, "from", prev, "to", stage, "reason", reason)
+		}
+	}
+	for _, st := range []string{StageLive, StageQuiet, StageHeld, StageSettled, "removal_pending", "removed"} {
+		reg.Set(obs.MConversationsByStage, map[string]string{"stage": st}, float64(counts[st]))
+	}
+	for _, r := range Reasons {
+		reg.Set(obs.MHeldConversations, map[string]string{"reason": r}, float64(held[r]))
+	}
+	reg.Set(obs.MOldestHeldAge, nil, oldest)
+	reg.Set(obs.MBytesPendingSettle, nil, float64(pending))
+	if facts, err := s.st.TornTails(); err == nil {
+		bySource := map[string]float64{}
+		files, _ := s.st.AllFiles()
+		src := map[int64]string{}
+		for _, f := range files {
+			src[f.ID] = f.Source
+		}
+		for _, t := range facts {
+			age := now.Sub(time.Unix(0, t.AtNS)).Seconds()
+			if age > bySource[src[t.File]] {
+				bySource[src[t.File]] = age
+			}
+		}
+		for source, age := range bySource {
+			reg.Set(obs.MTornTailAge, map[string]string{"source": source}, age)
+		}
+	}
+}
