@@ -37,6 +37,15 @@ const (
 	// before any run reports them.
 	MetricPRLaneLookupItems   = "pg_desk_pr_lane_lookup_items"
 	MetricPRLaneLookupCeiling = "pg_desk_pr_lane_lookup_ceiling"
+	// MetricPRLaneStageDuration is the last recorded wall time in seconds of
+	// each pr-change stage (label stage in lanestate.TimingStages), 0 before a
+	// run reports it. MetricPRLaneStageSeconds and MetricPRLaneStageObservations
+	// are the cumulative seconds and run count per stage (exported with a
+	// _total suffix): rate(seconds)/rate(observations) is the mean duration.
+	// decide contains lookup, pre_plan, apply and residual, so stages do not add.
+	MetricPRLaneStageDuration     = "pg_desk_pr_lane_stage_duration_seconds"
+	MetricPRLaneStageSeconds      = "pg_desk_pr_lane_stage_seconds"
+	MetricPRLaneStageObservations = "pg_desk_pr_lane_stage_observations"
 )
 
 // PRLaneStateFunc supplies the persisted lane state at collect time. ok=false
@@ -81,6 +90,22 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 	}
 	ceiling, err := m.Int64ObservableGauge(MetricPRLaneLookupCeiling,
 		metric.WithDescription("the decider's configured work-item lookup ceiling (0 before a run reports it)"))
+	if err != nil {
+		return err
+	}
+
+	stageLast, err := m.Float64ObservableGauge(MetricPRLaneStageDuration,
+		metric.WithDescription("wall time in seconds of the last pr-change run's stage, by stage (decide contains lookup, pre_plan, apply and residual); 0 before a run reports it"))
+	if err != nil {
+		return err
+	}
+	stageSum, err := m.Float64ObservableCounter(MetricPRLaneStageSeconds,
+		metric.WithDescription("cumulative wall time in seconds spent in each pr-change stage across recorded runs"))
+	if err != nil {
+		return err
+	}
+	stageObs, err := m.Int64ObservableCounter(MetricPRLaneStageObservations,
+		metric.WithDescription("recorded pr-change runs that reported each stage's duration"))
 	if err != nil {
 		return err
 	}
@@ -130,7 +155,14 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 		}
 		o.ObserveInt64(items, snap.LookupItems)
 		o.ObserveInt64(ceiling, snap.LookupCeiling)
+		for _, stage := range lanestate.TimingStages {
+			t := snap.Timings[stage]
+			attr := metric.WithAttributes(attribute.String("stage", stage))
+			o.ObserveFloat64(stageLast, float64(t.LastMs)/1000, attr)
+			o.ObserveFloat64(stageSum, float64(t.SumMs)/1000, attr)
+			o.ObserveInt64(stageObs, t.Count, attr)
+		}
 		return nil
-	}, runs, decisions, marked, residual, oldest, items, ceiling)
+	}, runs, decisions, marked, residual, oldest, items, ceiling, stageLast, stageSum, stageObs)
 	return err
 }

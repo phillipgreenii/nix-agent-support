@@ -281,6 +281,19 @@ before any run, so the first event is not lost to `increase()`:
 - `pg_desk_pr_lane_lookup_items` and `pg_desk_pr_lane_lookup_ceiling` — the decider's last reported
   work-item lookup item count and configured ceiling (the decider emits no telemetry of its own); `0`
   until a run reports them.
+- `pg_desk_pr_lane_stage_duration_seconds{stage}`, `pg_desk_pr_lane_stage_seconds_total{stage}` and
+  `pg_desk_pr_lane_stage_observations_total{stage}` — where a recorded `pg-pr-change` run spends its time.
+  `stage` is `lock_wait` (the wait for the per-PR lock), `hydrate` (the refresh), `view_read` (the stored
+  view read after a successful refresh), `decide` (the whole decide stage), `lookup` (the work-item lookup),
+  `pre_plan` (the read-only plan a plan-mode record is built from), `apply` (the decider's own call) and
+  `residual` (the read-only plan after an apply): eight series each, always emitted. `decide` contains
+  `lookup`, `pre_plan`, `apply` and `residual`, so the stages are not additive. The first is the stage's
+  wall time in seconds in the last run that reported it (`0` before one does); the second is the cumulative
+  seconds and the third the number of runs that reported the stage, so the mean over a window is
+  `rate(pg_desk_pr_lane_stage_seconds_total[w]) / rate(pg_desk_pr_lane_stage_observations_total[w])`. A run
+  that did not reach or measure a stage adds nothing to it (a plan run has no `lookup`; an apply has no
+  `pre_plan`). A run that ended at the lock is not recorded in the lane state, so a lock wait that ran out
+  is in the run record only. It has no panel or alert in this change.
 
 On a store that is not at schema 2, or when the read of the lane state fails, these families have NO
 series, never `0`; every other family is unaffected.

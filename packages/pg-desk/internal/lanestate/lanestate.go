@@ -48,6 +48,44 @@ type RunInput struct {
 	// count and its configured ceiling; nil leaves the stored value alone.
 	LookupItems   *int64 `json:"lookup_items,omitempty"`
 	LookupCeiling *int64 `json:"lookup_ceiling,omitempty"`
+	// Timings is the wall time of each stage the run reached (whole
+	// milliseconds). A record without it (an older writer) decodes and records
+	// no timing.
+	Timings *StageTimings `json:"timings,omitempty"`
+}
+
+// StageTimings is the per-stage wall time of one run in whole milliseconds; a
+// nil member is a stage the run did not reach or measure. DecideMs is the whole
+// decide stage, which contains the lookup, pre-plan, apply and residual parts,
+// so the members are NOT additive. The member names are the closed stage
+// vocabulary TimingStages with a _ms suffix.
+type StageTimings struct {
+	LockWaitMs *int64 `json:"lock_wait_ms,omitempty"`
+	HydrateMs  *int64 `json:"hydrate_ms,omitempty"`
+	ViewReadMs *int64 `json:"view_read_ms,omitempty"`
+	DecideMs   *int64 `json:"decide_ms,omitempty"`
+	LookupMs   *int64 `json:"lookup_ms,omitempty"`
+	PrePlanMs  *int64 `json:"pre_plan_ms,omitempty"`
+	ApplyMs    *int64 `json:"apply_ms,omitempty"`
+	ResidualMs *int64 `json:"residual_ms,omitempty"`
+}
+
+// ByStage returns the measured members keyed by their TimingStages name.
+func (t *StageTimings) ByStage() map[string]int64 {
+	out := map[string]int64{}
+	if t == nil {
+		return out
+	}
+	for stage, p := range map[string]*int64{
+		TimingLockWait: t.LockWaitMs, TimingHydrate: t.HydrateMs, TimingViewRead: t.ViewReadMs,
+		TimingDecide: t.DecideMs, TimingLookup: t.LookupMs, TimingPrePlan: t.PrePlanMs,
+		TimingApply: t.ApplyMs, TimingResidual: t.ResidualMs,
+	} {
+		if p != nil {
+			out[stage] = *p
+		}
+	}
+	return out
 }
 
 // PRState is the persisted state of one PR, written only by the recorded run
@@ -93,6 +131,11 @@ func (in RunInput) Validate() error {
 			return fmt.Errorf("lanestate: decision count %d is negative", d.Count)
 		}
 	}
+	for stage, ms := range in.Timings.ByStage() {
+		if ms < 0 {
+			return fmt.Errorf("lanestate: timing %s %d is negative", stage, ms)
+		}
+	}
 	if in.Residual != nil && *in.Residual < 0 {
 		return fmt.Errorf("lanestate: residual %d is negative", *in.Residual)
 	}
@@ -102,6 +145,8 @@ func (in RunInput) Validate() error {
 func decisionKey(d Decision) string {
 	return KeyDecisionsPrefix + d.Rule + "|" + d.Action + "|" + d.Outcome + "|" + d.Reason
 }
+
+func timingKey(stage, field string) string { return KeyTimingsPrefix + stage + "." + field }
 
 func runKey(stage, class string) string { return KeyRunsPrefix + stage + "." + class }
 
@@ -130,6 +175,17 @@ func Record(st *store.Store, configuredMode string, now time.Time, in RunInput) 
 			n = 1
 		}
 		if err := st.IncrMeta(decisionKey(Decision{d.Rule, d.Action, d.Outcome, d.Reason}), n); err != nil {
+			return err
+		}
+	}
+	for stage, ms := range in.Timings.ByStage() {
+		if err := st.IncrMeta(timingKey(stage, timingSumMs), ms); err != nil {
+			return err
+		}
+		if err := st.IncrMeta(timingKey(stage, timingCount), 1); err != nil {
+			return err
+		}
+		if err := st.SetMeta(timingKey(stage, timingLastMs), strconv.FormatInt(ms, 10)); err != nil {
 			return err
 		}
 	}
@@ -227,8 +283,11 @@ type RunKey struct{ Stage, Class string }
 
 // Snapshot is the persisted lane state at one scrape.
 type Snapshot struct {
-	Runs           map[RunKey]int64
-	Decisions      map[Decision]int64
+	Runs      map[RunKey]int64
+	Decisions map[Decision]int64
+	// Timings is the per-stage duration aggregate, keyed by TimingStages name;
+	// a stage no run has reported is absent.
+	Timings        map[string]StageTiming
 	MarkedInactive int64
 	// LaneMode is the lane-level mode, off when none has been recorded.
 	LaneMode string
@@ -243,6 +302,12 @@ type Snapshot struct {
 	ResidualPRs, ResidualOldestAgeSeconds int
 }
 
+// StageTiming is the persisted duration aggregate of one stage: the run count,
+// the summed and the last duration, in milliseconds.
+type StageTiming struct {
+	Count, SumMs, LastMs int64
+}
+
 // Read reads the whole lane state with one prefix scan and aggregates it as of
 // now. A corrupt value reads as zero (or is skipped, for a PR record) rather
 // than failing the scrape.
@@ -254,6 +319,7 @@ func Read(st *store.Store, now time.Time) (Snapshot, error) {
 	snap := Snapshot{
 		Runs:      map[RunKey]int64{},
 		Decisions: map[Decision]int64{},
+		Timings:   map[string]StageTiming{},
 		LaneMode:  config.PRLaneModeOff,
 		FlipAt:    rows[KeyStateFlipAt],
 		LastRunAt: rows[KeyStateLastRunAt],
@@ -274,6 +340,23 @@ func Read(st *store.Store, now time.Time) (Snapshot, error) {
 			if ok {
 				snap.Runs[RunKey{stage, class}] = atoi(v)
 			}
+		case strings.HasPrefix(k, KeyTimingsPrefix):
+			stage, field, ok := strings.Cut(strings.TrimPrefix(k, KeyTimingsPrefix), ".")
+			if !ok || !contains(TimingStages, stage) {
+				continue
+			}
+			t := snap.Timings[stage]
+			switch field {
+			case timingCount:
+				t.Count = atoi(v)
+			case timingSumMs:
+				t.SumMs = atoi(v)
+			case timingLastMs:
+				t.LastMs = atoi(v)
+			default:
+				continue
+			}
+			snap.Timings[stage] = t
 		case strings.HasPrefix(k, KeyDecisionsPrefix):
 			parts := strings.Split(strings.TrimPrefix(k, KeyDecisionsPrefix), "|")
 			if len(parts) == 4 {

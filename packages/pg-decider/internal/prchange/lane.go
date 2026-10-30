@@ -34,6 +34,35 @@ type laneInput struct {
 	Decisions     []laneDecision `json:"decisions,omitempty"`
 	LookupItems   *int64         `json:"lookup_items,omitempty"`
 	LookupCeiling *int64         `json:"lookup_ceiling,omitempty"`
+	Timings       *laneTimings   `json:"timings,omitempty"`
+}
+
+// laneTimings is pg-desk's lanestate.StageTimings (a copy; same members, whole
+// milliseconds, the run record's timings and decide-stage timings).
+type laneTimings struct {
+	LockWaitMs *int64 `json:"lock_wait_ms,omitempty"`
+	HydrateMs  *int64 `json:"hydrate_ms,omitempty"`
+	ViewReadMs *int64 `json:"view_read_ms,omitempty"`
+	DecideMs   *int64 `json:"decide_ms,omitempty"`
+	LookupMs   *int64 `json:"lookup_ms,omitempty"`
+	PrePlanMs  *int64 `json:"pre_plan_ms,omitempty"`
+	ApplyMs    *int64 `json:"apply_ms,omitempty"`
+	ResidualMs *int64 `json:"residual_ms,omitempty"`
+}
+
+// laneTimingsOf copies the record's timings; nil when the run measured none.
+func laneTimingsOf(rec RunRecord) *laneTimings {
+	var lt laneTimings
+	if t := rec.Timings; t != nil {
+		lt.LockWaitMs, lt.HydrateMs, lt.ViewReadMs, lt.DecideMs = t.LockWaitMs, t.HydrateMs, t.ViewReadMs, t.DecideMs
+	}
+	if d := rec.Decide; d != nil {
+		lt.LookupMs, lt.PrePlanMs, lt.ApplyMs, lt.ResidualMs = d.LookupMs, d.PrePlanMs, d.ApplyMs, d.ResidualMs
+	}
+	if lt == (laneTimings{}) {
+		return nil
+	}
+	return &lt
 }
 
 type laneEvent struct {
@@ -74,6 +103,7 @@ func (r *run) laneInput(code int) laneInput {
 	in := laneInput{
 		PR: r.id, Mode: r.o.Mode, Residual: r.residual, LastOutcome: "ok",
 		LookupItems: r.lookupItems, LookupCeiling: r.lookupCeiling,
+		Timings: laneTimingsOf(r.rec),
 	}
 	if code != ExitOK && r.failStage != "" {
 		in.Events = []laneEvent{{Stage: r.failStage, Class: r.failClass}}
@@ -126,6 +156,16 @@ func (r *run) recordLane(code int) LaneRecord {
 		if ok2, detail2 := r.callLane(in); ok2 {
 			r.note("lane state recorded without the decisions (pg-desk refused them: " + detail + ")")
 			return LaneRecord{Result: laneRecorded, DroppedDecisions: true, Error: detail}
+		} else {
+			detail = detail2
+		}
+	}
+	// An older pg-desk refuses the timings member by name; the rest still lands.
+	if in.Timings != nil && strings.Contains(detail, "timings") {
+		in.Timings = nil
+		if ok2, detail2 := r.callLane(in); ok2 {
+			r.note("lane state recorded without the timings (pg-desk refused them: " + detail + ")")
+			return LaneRecord{Result: laneRecorded, Error: detail}
 		} else {
 			detail = detail2
 		}

@@ -410,6 +410,10 @@ configuration key `pr_lane.mode`, which keeps the rendered configuration as its 
   mode, the flip time (an RFC 3339 time) and the time of the last recorded run.
 - **`pr_lane.state.lookup_items`**, **`pr_lane.state.lookup_ceiling`** — the decider's last reported lookup
   figures.
+- **`pr_lane.timings.<stage>.<field>`** — the per-stage duration aggregate, `field` one of `count` (runs
+  that reported the stage), `sum_ms` (a counter of whole milliseconds) and `last_ms` (the last run's value);
+  `stage` is one of the eight of the stage-duration series in [`serve.md`](serve.md). A run without a
+  timing for a stage writes nothing for it.
 - **`pr_lane.pr.<normalized id>`** — one JSON value per PR (`mode`, `residual`, `residual_since`,
   `last_outcome`, `updated_at`).
 

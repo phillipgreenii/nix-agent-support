@@ -11,6 +11,7 @@
 //
 //	pr_lane.runs.<stage>.<class>                          counter
 //	pr_lane.decisions.<rule>|<action>|<outcome>|<reason>  counter
+//	pr_lane.timings.<stage>.<count|sum_ms|last_ms>        stage duration aggregate
 //	pr_lane.marked_inactive                               counter
 //	pr_lane.state.mode                                    lane-level mode
 //	pr_lane.state.flip_at                                 flip time (RFC 3339)
@@ -26,6 +27,7 @@ import "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-d
 const (
 	KeyRunsPrefix      = "pr_lane.runs."
 	KeyDecisionsPrefix = "pr_lane.decisions."
+	KeyTimingsPrefix   = "pr_lane.timings."
 	KeyMarkedInactive  = "pr_lane.marked_inactive"
 	KeyStateMode       = "pr_lane.state.mode"
 	KeyStateFlipAt     = "pr_lane.state.flip_at"
@@ -48,6 +50,31 @@ var (
 	// Modes are the lane modes, in the order the gauges list them.
 	Modes = []string{config.PRLaneModeOff, config.PRLaneModePlan, config.PRLaneModeApply}
 )
+
+// The stage-duration series' stage vocabulary (the pg-pr-change run record's
+// timings members without the _ms suffix), and the field names under a stage's
+// timing key. decide is the whole decide stage; lookup, pre_plan, apply and
+// residual are parts inside it.
+const (
+	TimingLockWait = "lock_wait"
+	TimingHydrate  = "hydrate"
+	TimingViewRead = "view_read"
+	TimingDecide   = "decide"
+	TimingLookup   = "lookup"
+	TimingPrePlan  = "pre_plan"
+	TimingApply    = "apply"
+	TimingResidual = "residual"
+
+	timingCount  = "count"
+	timingSumMs  = "sum_ms"
+	timingLastMs = "last_ms"
+)
+
+// TimingStages lists the stages in the order the series are exported.
+var TimingStages = []string{
+	TimingLockWait, TimingHydrate, TimingViewRead, TimingDecide,
+	TimingLookup, TimingPrePlan, TimingApply, TimingResidual,
+}
 
 // The decisions counter's vocabularies. Rules and Reasons are pg-desk's COPY of
 // the decider's own closed lists: Rules are the rule ids the decider registers

@@ -300,3 +300,63 @@ func TestRulesAndReasonsCopyAgreesWithTheDocumentedSkipReasonCount(t *testing.T)
 		seen[d] = true
 	}
 }
+
+func i64p(n int64) *int64 { return &n }
+
+func TestStageTimingsAccumulateKeepTheLastAndSkipUnmeasuredStages(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	mustRecord(t, st, "plan", t0, RunInput{PR: "o/r#1", Mode: "plan", Timings: &StageTimings{
+		LockWaitMs: i64p(5), HydrateMs: i64p(1200), ViewReadMs: i64p(80), DecideMs: i64p(4300),
+		LookupMs: i64p(250), ApplyMs: i64p(4000), ResidualMs: i64p(300),
+	}})
+	// A run without timings (an older writer) adds nothing; a second with some
+	// adds to those stages only.
+	mustRecord(t, st, "plan", t0, RunInput{PR: "o/r#1", Mode: "plan"})
+	mustRecord(t, st, "plan", t1, RunInput{PR: "o/r#1", Mode: "plan", Timings: &StageTimings{HydrateMs: i64p(800), DecideMs: i64p(0)}})
+	s := mustRead(t, st, t1)
+	want := map[string]StageTiming{
+		"lock_wait": {Count: 1, SumMs: 5, LastMs: 5},
+		"hydrate":   {Count: 2, SumMs: 2000, LastMs: 800},
+		"view_read": {Count: 1, SumMs: 80, LastMs: 80},
+		"decide":    {Count: 2, SumMs: 4300, LastMs: 0},
+		"lookup":    {Count: 1, SumMs: 250, LastMs: 250},
+		"apply":     {Count: 1, SumMs: 4000, LastMs: 4000},
+		"residual":  {Count: 1, SumMs: 300, LastMs: 300},
+	}
+	if len(s.Timings) != len(want) {
+		t.Fatalf("timings = %+v, want %+v", s.Timings, want)
+	}
+	for k, w := range want {
+		if s.Timings[k] != w {
+			t.Errorf("timings[%s] = %+v, want %+v", k, s.Timings[k], w)
+		}
+	}
+}
+
+func TestANegativeTimingRejectsTheRunAndWritesNothing(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	err := Record(st, "plan", t0, RunInput{PR: "o/r#1", Mode: "plan", Timings: &StageTimings{HydrateMs: i64p(-1)}})
+	if err == nil {
+		t.Fatal("a negative timing was accepted")
+	}
+	rows, _ := st.ListMetaPrefix("pr_lane")
+	if len(rows) != 0 {
+		t.Fatalf("a rejected run wrote %v", rows)
+	}
+}
+
+func TestEveryTimingStageHasAMemberAndTheMembersCoverTheVocabulary(t *testing.T) {
+	all := StageTimings{
+		LockWaitMs: i64p(1), HydrateMs: i64p(1), ViewReadMs: i64p(1), DecideMs: i64p(1),
+		LookupMs: i64p(1), PrePlanMs: i64p(1), ApplyMs: i64p(1), ResidualMs: i64p(1),
+	}
+	got := all.ByStage()
+	if len(got) != len(TimingStages) {
+		t.Fatalf("ByStage = %v, vocabulary %v", got, TimingStages)
+	}
+	for _, k := range TimingStages {
+		if _, ok := got[k]; !ok {
+			t.Errorf("stage %s has no member", k)
+		}
+	}
+}

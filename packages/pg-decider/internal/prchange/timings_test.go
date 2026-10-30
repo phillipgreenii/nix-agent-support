@@ -104,6 +104,43 @@ func TestAnApplyRunRecordsEveryStageTiming(t *testing.T) {
 	if d.LookupMs == nil || *d.LookupMs != 250 || d.LookupItems == nil || *d.LookupItems != 40 {
 		t.Errorf("lookup = %v ms, %v items; want 250 and 40", d.LookupMs, d.LookupItems)
 	}
+
+	// The same figures reach pg-desk's lane write path, under the member names
+	// of lanestate.StageTimings (the verb refuses unknown members, so a drift
+	// from pg-desk's list fails there).
+	in := laneCalls(t, s)[0]
+	got := mustJSON(in.Timings)
+	const want = `{"lock_wait_ms":0,"hydrate_ms":1200,"view_read_ms":80,"decide_ms":4300,"lookup_ms":250,"apply_ms":4000,"residual_ms":300}`
+	if got != want {
+		t.Errorf("lane timings = %s, want %s", got, want)
+	}
+}
+
+// A run record with no measured stage sends no timings member, and a pg-desk
+// that does not know the member (an older build) costs the run only the
+// timings: the rest of the document still lands.
+func TestATimingsRefusalByTheWritePathIsDroppedAndTheRunStillLands(t *testing.T) {
+	s := hydrated().
+		on("pg-decider plan pr", ok(planWithWork)).
+		onSeq("pg-desk pr lane-record", exit(1, "", `lane-record: decode run: json: unknown field "timings"`), ok("recorded\n"))
+	o, _, errb := opts(t, ModePlan, s)
+	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
+	if got := Run(context.Background(), o); got != ExitOK {
+		t.Fatalf("exit %d: %s", got, errb)
+	}
+	lanes := laneCalls(t, s)
+	if len(lanes) != 2 || lanes[0].Timings == nil || lanes[1].Timings != nil || lanes[1].Residual == nil {
+		t.Fatalf("lane inputs = %+v", lanes)
+	}
+	if r := readRecords(t, o.RunRecordPath)[0]; r.Lane.Result != laneRecorded {
+		t.Fatalf("lane = %+v", r.Lane)
+	}
+}
+
+func TestARunWithNoMeasuredStageSendsNoTimingsMember(t *testing.T) {
+	if laneTimingsOf(RunRecord{}) != nil {
+		t.Fatal("an empty record produced a timings member")
+	}
 }
 
 // A golden of the record's new members: names and shape, so a rename is a

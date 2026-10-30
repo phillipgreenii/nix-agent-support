@@ -41,7 +41,9 @@ The run is a JSON document on standard input (or --input FILE):
    "events": [{"stage": "hydrate|decide", "class": "<class>"}],
    "residual": 0, "last_outcome": "<label>",
    "decisions": [{"rule": "...", "action": "...", "outcome": "...", "reason": "...", "count": 1}],
-   "lookup_items": 0, "lookup_ceiling": 0}
+   "lookup_items": 0, "lookup_ceiling": 0,
+   "timings": {"lock_wait_ms": 0, "hydrate_ms": 0, "view_read_ms": 0, "decide_ms": 0, "lookup_ms": 0,
+               "pre_plan_ms": 0, "apply_ms": 0, "residual_ms": 0}}
 
 pr accepts any reference "pr show" accepts and is stored normalized. A value
 outside its closed vocabulary rejects the whole document and writes nothing.

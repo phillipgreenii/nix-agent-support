@@ -51,13 +51,19 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 		`pg_desk_pr_marked_inactive_total 0`,
 		`pg_desk_pr_lane_lookup_items 0`,
 		`pg_desk_pr_lane_lookup_ceiling 0`,
+		`pg_desk_pr_lane_stage_duration_seconds{stage="lock_wait"} 0`,
+		`pg_desk_pr_lane_stage_duration_seconds{stage="residual"} 0`,
+		`pg_desk_pr_lane_stage_seconds_total{stage="hydrate"} 0`,
+		`pg_desk_pr_lane_stage_observations_total{stage="decide"} 0`,
 	)
 
 	resid, items, ceil := 2, int64(40), int64(500)
+	hyd, dec, lk := int64(1200), int64(4300), int64(250)
 	if err := lanestate.Record(s, "apply", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), lanestate.RunInput{
 		PR: "o/r#1", Mode: "apply", Residual: &resid, LookupItems: &items, LookupCeiling: &ceil,
 		Events:    []lanestate.RunEvent{{Stage: "hydrate", Class: "transient"}},
 		Decisions: []lanestate.DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
+		Timings:   &lanestate.StageTimings{HydrateMs: &hyd, DecideMs: &dec, LookupMs: &lk},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +85,13 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 		`pg_desk_pr_marked_inactive_total 1`,
 		`pg_desk_pr_lane_lookup_items 40`,
 		`pg_desk_pr_lane_lookup_ceiling 500`,
+		`pg_desk_pr_lane_stage_duration_seconds{stage="hydrate"} 1.2`,
+		`pg_desk_pr_lane_stage_duration_seconds{stage="decide"} 4.3`,
+		`pg_desk_pr_lane_stage_duration_seconds{stage="lookup"} 0.25`,
+		`pg_desk_pr_lane_stage_duration_seconds{stage="view_read"} 0`,
+		`pg_desk_pr_lane_stage_seconds_total{stage="hydrate"} 1.2`,
+		`pg_desk_pr_lane_stage_observations_total{stage="hydrate"} 1`,
+		`pg_desk_pr_lane_stage_observations_total{stage="apply"} 0`,
 	)
 }
 
@@ -92,7 +105,7 @@ func TestMetricsOmitThePersistedLaneFamiliesOnAnOldSchemaStore(t *testing.T) {
 		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
 	})
 	body := scrapeWithConfig(t, s, &config.Config{SelfLogin: "me"})
-	for _, absent := range []string{"pg_desk_pr_lane_runs", "pg_desk_pr_lane_residual", "pg_decider_decisions", "pg_desk_pr_marked_inactive", "pg_desk_pr_lane_lookup"} {
+	for _, absent := range []string{"pg_desk_pr_lane_runs", "pg_desk_pr_lane_residual", "pg_decider_decisions", "pg_desk_pr_marked_inactive", "pg_desk_pr_lane_lookup", "pg_desk_pr_lane_stage"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("%s has a series on an old-schema store", absent)
 		}

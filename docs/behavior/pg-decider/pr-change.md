@@ -200,7 +200,11 @@ read-only `plan --json` it makes after the plan. A run that failed closed on the
 exits `4`) is the class `decide_failed`, or the retryable class `transient` (exit `32`) when the
 lookup was unavailable, and still forwards the figures, so the two gauges that
 export them keep following the lane at the moment it stops; a decider that reports none leaves them
-out and the store keeps what it has.
+out and the store keeps what it has. The run record's per-stage timings (lock wait, hydrate, view read,
+decide, and the decide stage's lookup, pre-plan, apply and residual parts) are forwarded as the lane
+document's `timings` member, so `pg-desk` exports them as the stage-duration series; a run that measured
+none sends no member, and a `pg-desk` that refuses the member by name (an older build) costs the run only the
+timings: the command retries once without them.
 
 The decisions counter's `action` comes from the plan read just before an `apply` (the operation of
 each action) and its `outcome` from the decider's apply counters, assigned to a rule's actions in plan

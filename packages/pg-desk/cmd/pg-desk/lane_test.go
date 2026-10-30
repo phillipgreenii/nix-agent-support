@@ -127,3 +127,35 @@ func TestMarkInactiveVerbWorksInPlanModeAndCountsOnce(t *testing.T) {
 		t.Errorf("marked-inactive counter %d (err %v), want 1", snap.MarkedInactive, err)
 	}
 }
+
+// The lockstep with pg-decider's pr-change writer (another module, so this is
+// the document it sends, as a literal): the verb decodes with unknown members
+// refused, so the writer's timings member names must be the reader's. A
+// document without timings (an older writer) still records.
+func TestLaneRecordTakesTheWritersTimingsMemberAndStillTakesADocumentWithoutOne(t *testing.T) {
+	open, seed := seedLinkStore(t)
+	cfg := openTestConfig("o/r")
+	cfg.PRLane.Mode = "apply"
+	withOpenSeams(t, cfg, open)
+	withLaneClock(t, time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC))
+
+	if _, err := execLaneRecord(t, `{"pr":"1","mode":"apply","last_outcome":"ok"}`); err != nil {
+		t.Fatalf("a document without timings: %v", err)
+	}
+	if _, err := execLaneRecord(t, `{"pr":"1","mode":"apply","last_outcome":"ok","timings":{"lock_wait_ms":0,"hydrate_ms":1200,"view_read_ms":80,"decide_ms":4300,"lookup_ms":250,"pre_plan_ms":300,"apply_ms":4000,"residual_ms":300}}`); err != nil {
+		t.Fatalf("a document with timings: %v", err)
+	}
+	if _, err := execLaneRecord(t, `{"pr":"1","mode":"apply","timings":{"bogus_ms":1}}`); err == nil {
+		t.Fatal("an unknown timings member was accepted")
+	}
+	snap, err := lanestate.Read(seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.Timings["hydrate"]; got.Count != 1 || got.SumMs != 1200 || got.LastMs != 1200 {
+		t.Errorf("hydrate timing = %+v", got)
+	}
+	if len(snap.Timings) != 8 {
+		t.Errorf("timings = %+v, want all 8 stages from the one run", snap.Timings)
+	}
+}
