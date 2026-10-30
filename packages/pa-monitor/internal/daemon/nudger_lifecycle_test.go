@@ -101,6 +101,7 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 			},
 			InitialAutoResumeEnabled: true,
 			NudgerSignalers:          []signal.Signaler{cap},
+			Deliverer:                capDeliverer{cap},
 			DisruptGrace:             0, // fire immediately after first sighting
 			EscalationAfter:          60 * time.Second,
 			AutoResumeMessage:        "continue",
@@ -265,6 +266,7 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 			},
 			InitialAutoResumeEnabled: true,
 			NudgerSignalers:          []signal.Signaler{cap},
+			Deliverer:                capDeliverer{cap},
 			// DisruptGrace=0: tick 1 primes firstSeen, tick 2 adds intent +
 			// annotation runs before dispatch, so TreeObserver sees PendingNudge.
 			DisruptGrace:      0,
@@ -523,4 +525,12 @@ func TestRunWith_RejectsConfigWithoutNudgerSignalers(t *testing.T) {
 	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true}); err == nil {
 		t.Error("SetAutoResume without NudgerSignalers should fail with FailedPrecondition, got nil error")
 	}
+}
+
+// capDeliverer routes the production deliverer's job (pg-claude-control submit)
+// to the capturing fake so lifecycle tests observe what would be sent.
+type capDeliverer struct{ sig *captureSignaler }
+
+func (d capDeliverer) Deliver(_ context.Context, pid int, text string) error {
+	return d.sig.Send(pid, text)
 }

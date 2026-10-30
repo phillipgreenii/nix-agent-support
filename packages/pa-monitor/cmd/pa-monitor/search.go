@@ -1,11 +1,10 @@
-// search.go: the `search` subcommand — resolves each in-scope session's
-// transcript via session.ResolveTranscript, then scans it with
-// claude-transcript's naive Search primitive, optionally bounded by
-// --since/--before. No index, no daemon RPC of its own beyond whatever
-// runSearch used to build the session list.
+// search.go: the `search` subcommand — asks the recorder's search for matches,
+// optionally for one session and bounded by --since/--before. It reads no
+// transcript file.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	claudetranscript "github.com/phillipgreenii/claude-transcript"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
 type searchMatchJSON struct {
@@ -138,84 +137,45 @@ func parseSearchArgs(args []string, now time.Time) (query, sessionID string, sin
 	return positional[0], sessionID, since, before, nil
 }
 
-// searchSessions scans every session in sessions (or only sessionID, when
-// non-empty) for query within [since, before] (either may be the zero
-// time.Time, meaning unbounded), writing the result as JSON to w. A
-// session whose transcript cannot be resolved (ResolveTranscript's ok ==
-// false) is silently skipped — not an error, mirroring how a dead/cold
-// session is silently skipped elsewhere in this CLI (e.g. runStatus's
-// per-session GetSessionInfo loop).
-func searchSessions(w io.Writer, claudeHome string, sessions []*session.Session, query, sessionID string, since, before time.Time) error {
-	doc := searchJSONDoc{Query: query}
-	for _, s := range sessions {
-		if sessionID != "" && s.SessionID != sessionID {
-			continue
-		}
-		path, _, ok := session.ResolveTranscript(claudeHome, s)
-		if !ok {
-			continue
-		}
-		matches, err := claudetranscript.Search(path, query, since, before)
-		if err != nil {
-			continue // unreadable transcript: skip, don't fail the whole search
-		}
-		for _, m := range matches {
-			mj := searchMatchJSON{SessionID: s.SessionID, Role: m.Role, Line: m.Line, Snippet: m.Snippet}
-			if !m.Timestamp.IsZero() {
-				mj.Timestamp = m.Timestamp.UTC().Format(time.RFC3339)
-			}
-			doc.Matches = append(doc.Matches, mj)
-		}
+// searcher is where matches come from: the recorder's search
+// (recorderfacts.Facts), never the transcript files.
+type searcher interface {
+	Search(ctx context.Context, query, sessionID string, since, before time.Time) ([]recorderfacts.SearchHit, error)
+}
+
+// searchSessions searches for query (in sessionID only, when non-empty) within
+// [since, before) (either may be the zero time, meaning unbounded) through
+// srch and writes the result as JSON to w.
+func searchSessions(w io.Writer, srch searcher, query, sessionID string, since, before time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	hits, err := srch.Search(ctx, query, sessionID, since, before)
+	if err != nil {
+		return err
 	}
-	enc := json.NewEncoder(w)
-	return enc.Encode(doc)
+	doc := searchJSONDoc{Query: query, Matches: []searchMatchJSON{}}
+	for _, h := range hits {
+		mj := searchMatchJSON{SessionID: h.SessionID, Role: h.Role, Snippet: h.Snippet}
+		if !h.Time.IsZero() {
+			mj.Timestamp = h.Time.UTC().Format(time.RFC3339)
+		}
+		doc.Matches = append(doc.Matches, mj)
+	}
+	return json.NewEncoder(w).Encode(doc)
 }
 
 // runSearch implements the `search` subcommand: `pa-monitor search
-// [--json] <query> [--session <id>] [--since <bound>] [--before <bound>]`.
-// It dials the daemon the same way runStatus does (via the status --json
-// packet's shared helpers), converts the returned SessionViews into
-// session.Session values (only the fields ResolveTranscript needs:
-// SessionID, Cwd, Name), and delegates to searchSessions.
+// [--json] <query> [--session <id>] [--since <bound>] [--before <bound>]`. It
+// asks the recorder; while the recorder is down it says "daemon offline" and
+// exits 1 (no fallback to the transcript files).
 func runSearch(args []string) {
 	query, sessionID, since, before, err := parseSearchArgs(args, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(exitUsage)
 	}
-
-	ctx, cancel := contextWithTimeout()
-	defer cancel()
-	client, err := dialOrExit(ctx)
-	if err != nil {
-		return
-	}
-	defer func() { _ = client.Close() }()
-
-	state, err := getStateOrExit(ctx, client)
-	if err != nil {
-		return
-	}
-
-	var sessions []*session.Session
-	for _, d := range state.GetDirs() {
-		for _, v := range d.GetSessions() {
-			if v.GetSessionId() == "" {
-				continue
-			}
-			sessions = append(sessions, &session.Session{
-				SessionID: v.GetSessionId(), Cwd: v.GetCwd(), Name: v.GetName(),
-			})
-		}
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "search: %v\n", err)
-		os.Exit(exitGeneric)
-	}
-	claudeHome := home + "/.claude"
-	if err := searchSessions(os.Stdout, claudeHome, sessions, query, sessionID, since, before); err != nil {
+	facts := recorderfacts.New(client.Options{Name: "pa-monitor-search"})
+	if err := searchSessions(os.Stdout, facts, query, sessionID, since, before); err != nil {
 		fmt.Fprintf(os.Stderr, "search: %v\n", err)
 		os.Exit(exitGeneric)
 	}

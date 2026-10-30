@@ -1,15 +1,9 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
 
 func TestParseSearchArgs(t *testing.T) {
@@ -143,75 +137,5 @@ func TestParseTimeBound_DaysAcrossDST(t *testing.T) {
 				t.Errorf("elapsed = %v, want exactly %v", elapsed, want)
 			}
 		})
-	}
-}
-
-func TestSearchSessions_FindsMatchInOneTranscript(t *testing.T) {
-	home := t.TempDir()
-	projDir := filepath.Join(home, "projects", "-repo")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	transcript := filepath.Join(projDir, "s1.jsonl")
-	line := `{"type":"assistant","timestamp":"2026-09-18T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"the payments test is flaky"}]}}` + "\n"
-	if err := os.WriteFile(transcript, []byte(line), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	sessions := []*session.Session{{SessionID: "s1", Cwd: "/repo"}}
-	var buf bytes.Buffer
-	if err := searchSessions(&buf, home, sessions, "flaky", "", time.Time{}, time.Time{}); err != nil {
-		t.Fatalf("searchSessions: %v", err)
-	}
-
-	var doc searchJSONDoc
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if doc.Query != "flaky" || len(doc.Matches) != 1 {
-		t.Fatalf("got %+v", doc)
-	}
-	if doc.Matches[0].SessionID != "s1" || doc.Matches[0].Role != "assistant" || doc.Matches[0].Timestamp == "" {
-		t.Errorf("match wrong: %+v", doc.Matches[0])
-	}
-}
-
-func TestSearchSessions_ScopedToOneSession(t *testing.T) {
-	home := t.TempDir()
-	sessions := []*session.Session{{SessionID: "s1", Cwd: "/repo"}, {SessionID: "s2", Cwd: "/repo"}}
-	var buf bytes.Buffer
-	// Neither session has a real transcript on disk; --session s2 must not
-	// error just because s1 (unresolvable) is in the broader session list.
-	if err := searchSessions(&buf, home, sessions, "x", "s2", time.Time{}, time.Time{}); err != nil {
-		t.Fatalf("searchSessions: %v", err)
-	}
-	var doc searchJSONDoc
-	_ = json.Unmarshal(buf.Bytes(), &doc)
-	if len(doc.Matches) != 0 {
-		t.Errorf("expected no matches for an unresolvable transcript, got %+v", doc.Matches)
-	}
-}
-
-func TestSearchSessions_SinceExcludesEarlierMatch(t *testing.T) {
-	home := t.TempDir()
-	projDir := filepath.Join(home, "projects", "-repo")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	transcript := filepath.Join(projDir, "s1.jsonl")
-	line := `{"type":"assistant","timestamp":"2026-09-18T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"the payments test is flaky"}]}}` + "\n"
-	if err := os.WriteFile(transcript, []byte(line), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessions := []*session.Session{{SessionID: "s1", Cwd: "/repo"}}
-	since := time.Date(2026, 9, 18, 11, 0, 0, 0, time.UTC)
-	var buf bytes.Buffer
-	if err := searchSessions(&buf, home, sessions, "flaky", "", since, time.Time{}); err != nil {
-		t.Fatalf("searchSessions: %v", err)
-	}
-	var doc searchJSONDoc
-	_ = json.Unmarshal(buf.Bytes(), &doc)
-	if len(doc.Matches) != 0 {
-		t.Errorf("expected the match to be excluded by --since, got %+v", doc.Matches)
 	}
 }

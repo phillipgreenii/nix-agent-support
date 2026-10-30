@@ -244,6 +244,8 @@ type RunOptions struct {
 	// adapter to resolve session string ids to surrogate row ids before
 	// persisting nudge events.
 	DB *sql.DB
+	// Deliverer replaces the pg-claude-control nudge deliverer (a test seam).
+	Deliverer nudger.Deliverer
 	// Registry is where the GC sweeper reads which sessions still exist (the
 	// recorder's Process facts). When non-nil alongside WriteService, an hourly GC
 	// sweeper goroutine is started to reconcile them with the DB and hard-delete
@@ -350,7 +352,6 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// tr.resolve/tr.failServer into the BridgeChannel handler's inbound
 	// hooks) and before bridgeDel (which blocks on it per delivery).
 	tr := newTracker()
-	bridgeDel := &bridgeDeliverer{reg: bridgeReg, ancestor: cmuxAncestorFn, tr: tr, timeout: 5 * time.Second}
 
 	version := opts.Version
 	if version == "" {
@@ -417,23 +418,15 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// runtime.json, which the SQLite migration deletes — so the toggle
 		// silently reset to false on every daemon restart.
 		watermarks.SetAutoResumeEnabled(opts.InitialAutoResumeEnabled)
-		// inDaemonDel wraps the existing synchronous in-daemon signal layer
-		// (tmux/ghostty/vscode) unchanged. cmux-hosted targets are routed to
-		// bridgeDel (built above, sharing bridgeReg/cmuxAncestorFn/tr with
-		// serve() and the reaper) instead.
-		//
-		// ADR 0022 (daemon MUST NOT execute cmux): the delivery slice is
-		// stripped of any CmuxSignaler via WithoutCmux, so the SignalerAdapter
-		// literally cannot resolve a cmux signaler for delivery. This is
-		// structural — it does not depend on CmuxSignaler.Detect returning
-		// false for in-daemon targets in the shipped config (emergent coupling
-		// that a nil-CmuxAncestor or split-instance wiring could reopen). The
-		// D5 keep-awake predicate below deliberately keeps the FULL
+		// Nudges go through pg-claude-control (the control mod's inbox), never by
+		// injecting keystrokes into a terminal: it works for any host and does not
+		// depend on the recorder. The D5 keep-awake predicate below keeps the FULL
 		// opts.NudgerSignalers (it only Detects, never Sends) so a cmux-hosted
 		// disrupt still holds the Mac awake.
-		deliverySignalers := signal.WithoutCmux(opts.NudgerSignalers)
-		inDaemonDel := &inDaemonDeliverer{sig: &SignalerAdapter{Signalers: deliverySignalers}}
-		deliverer := &compositeDeliverer{ancestor: cmuxAncestorFn, bridge: bridgeDel, inDaemon: inDaemonDel}
+		var deliverer nudger.Deliverer = newControlDeliverer()
+		if opts.Deliverer != nil {
+			deliverer = opts.Deliverer
+		}
 		var nr nudger.NudgeRecorder
 		if opts.WriteService != nil && opts.DB != nil {
 			nr = &nudgeRecorder{ws: opts.WriteService, db: opts.DB}

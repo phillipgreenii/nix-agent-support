@@ -5,6 +5,9 @@
   makeWrapper,
   gh,
   tmux,
+  # pg-claude-control is the one way pa-monitor sends a nudge to a running Claude
+  # (submit through the control mod's inbox); it never injects keystrokes itself.
+  pg-claude-control,
   # cmux is a macOS-only .app from phillipgreenii-nix-overlay (already a
   # declared input + applied overlay). Defaulted to null so the package still
   # evaluates on non-darwin, where it is omitted from PATH below.
@@ -66,6 +69,7 @@ mkGoApp {
           [
             gh
             tmux
+            pg-claude-control
           ]
           ++ lib.optionals (stdenv.hostPlatform.isDarwin && cmux != null) [ cmux ]
         )

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,17 +10,13 @@ import (
 	"testing"
 	"time"
 
-	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/account"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
-)
-
-var updateSessionsGolden = flag.Bool("update-sessions-golden", false, "rewrite testdata/sessions.golden")
-
-const (
-	sessionsFixtureProjects = "testdata/sessions/projects"
-	sessionsGoldenPath      = "testdata/sessions.golden"
+	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest"
 )
 
 // defaultPrices is the built-in price table (no config file).
@@ -34,221 +29,84 @@ func defaultPrices(t *testing.T) usage.PriceTable {
 	return account.LoadAccount(cfg).PriceTable()
 }
 
-func renderSessions(t *testing.T, since, before time.Time, maxChars int) []byte {
+const cliTranscript = `{"type":"user","uuid":"u1","sessionId":"example-s1","timestamp":"2026-10-29T10:00:00.000Z","cwd":"/example/work","gitBranch":"main","isSidechain":false,"message":{"role":"user","content":"please look at the flaky example test"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"example-s1","timestamp":"2026-10-29T10:00:05.000Z","cwd":"/example/work","gitBranch":"main","isSidechain":false,"message":{"id":"msg_1","role":"assistant","model":"example-model-a","content":[{"type":"text","text":"the payments example is flaky because of a clock"}],"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+`
+
+func cliFacts(t *testing.T) (*clienttest.Env, *recorderfacts.Facts) {
 	t.Helper()
-	return renderSessionsWith(t, since, before, maxChars, claudetranscript.SessionsOptions{})
+	e := clienttest.Start(t)
+	e.Write("projects/"+e.Project+"/example-s1.jsonl", cliTranscript)
+	e.Settle()
+	return e, recorderfacts.New(client.Options{Socket: e.Socket})
 }
 
-// renderSessionsWith is renderSessions with explicit claude-transcript options
-// (the cache location and stats sink).
-func renderSessionsWith(t *testing.T, since, before time.Time, maxChars int, opts claudetranscript.SessionsOptions) []byte {
-	t.Helper()
+// TestWriteSessionsFromTheRecorder is the move's fact read in the unit tier: the
+// real recorder client against an in-process recorder, no started daemon.
+func TestWriteSessionsFromTheRecorder(t *testing.T) {
+	_, f := cliFacts(t)
 	var buf bytes.Buffer
-	if err := writeSessions(&buf, sessionsFixtureProjects, since, before, defaultPrices(t), maxChars, opts); err != nil {
-		t.Fatalf("writeSessions: %v", err)
-	}
-	return buf.Bytes()
-}
-
-type decodedDoc struct {
-	Sessions []map[string]any `json:"sessions"`
-}
-
-func decodeSessions(t *testing.T, b []byte) decodedDoc {
-	t.Helper()
-	var d decodedDoc
-	if err := json.Unmarshal(b, &d); err != nil {
-		t.Fatalf("output is not the sessions document: %v\n%s", err, b)
-	}
-	return d
-}
-
-func sessionByID(t *testing.T, d decodedDoc, id string) map[string]any {
-	t.Helper()
-	for _, s := range d.Sessions {
-		if s["session_id"] == id {
-			return s
-		}
-	}
-	t.Fatalf("no session %q in %v", id, d.Sessions)
-	return nil
-}
-
-// TestSessionsCharacterization pins the record shape byte-for-byte against a
-// golden file. The fixture tree has no sessions/ directory (no PID files, no
-// daemon socket) and holds a resumed pair, a midnight-spanning session, an
-// unknown-model session and a session with no user turn.
-func TestSessionsCharacterization(t *testing.T) {
-	got := renderSessions(t, time.Time{}, time.Time{}, 200)
-	if *updateSessionsGolden {
-		if err := os.WriteFile(sessionsGoldenPath, got, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(sessionsGoldenPath)
-	if err != nil {
+	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("output differs from %s (rerun with -update-sessions-golden after reviewing):\n--- got ---\n%s\n--- want ---\n%s", sessionsGoldenPath, got, want)
+	var doc struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil || len(doc.Sessions) != 1 {
+		t.Fatalf("%v %s", err, buf.String())
+	}
+	r := doc.Sessions[0]
+	if r["session_id"] != "example-s1" || r["cwd"] != "/example/work" || r["branch"] != "main" || r["model"] != "example-model-a" {
+		t.Errorf("record = %v", r)
+	}
+	if r["first_prompt"] != "please lo…" {
+		t.Errorf("first_prompt = %q, want it truncated to 10 runes", r["first_prompt"])
+	}
+	if _, bad := r["dispatched"]; bad {
+		t.Error("there must be no dispatched key")
 	}
 }
 
-// The summary cache changes nothing in the output: a cold and a warm cached
-// render both match the golden file byte for byte, and the warm one reads no
-// transcript.
-func TestSessionsCachedRenderMatchesGolden(t *testing.T) {
-	want, err := os.ReadFile(sessionsGoldenPath)
-	if err != nil {
+func TestWriteSessionsEmptyWindowIsEmptyArrayNotNull(t *testing.T) {
+	_, f := cliFacts(t)
+	var buf bytes.Buffer
+	if err := writeSessions(&buf, f, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), time.Time{}, defaultPrices(t), 10); err != nil {
 		t.Fatal(err)
 	}
-	cache := t.TempDir()
-	for _, pass := range []string{"cold", "warm"} {
-		var st claudetranscript.SessionsStats
-		got := renderSessionsWith(t, time.Time{}, time.Time{}, 200, claudetranscript.SessionsOptions{CacheDir: cache, Stats: &st})
-		if !bytes.Equal(got, want) {
-			t.Errorf("%s cached output differs from %s:\n--- got ---\n%s\n--- want ---\n%s", pass, sessionsGoldenPath, got, want)
-		}
-		if pass == "cold" && (st.Parsed != st.Files || st.CacheWrites != 1) {
-			t.Errorf("cold stats = %+v, want every file parsed and one cache write", st)
-		}
-		if pass == "warm" && (st.Parsed != 0 || st.Reused != st.Files || st.CacheWrites != 0) {
-			t.Errorf("warm stats = %+v, want 0 parsed and no write", st)
-		}
+	if strings.TrimSpace(buf.String()) != `{"sessions":[]}` {
+		t.Errorf("output = %s", buf.String())
 	}
 }
 
-func TestSessionsCacheDir(t *testing.T) {
-	env := func(v string) func(string) string {
-		return func(k string) string {
-			if k == "XDG_CACHE_HOME" {
-				return v
-			}
-			return ""
-		}
+func TestSearchSessionsFromTheRecorder(t *testing.T) {
+	_, f := cliFacts(t)
+	var buf bytes.Buffer
+	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}); err != nil {
+		t.Fatal(err)
 	}
-	home := filepath.FromSlash("/h/me")
-	cases := []struct{ xdg, want string }{
-		{filepath.FromSlash("/var/cache-root"), filepath.FromSlash("/var/cache-root/pa-monitor")},
-		{"", filepath.FromSlash("/h/me/.cache/pa-monitor")},
-		{"relative/cache", filepath.FromSlash("/h/me/.cache/pa-monitor")},
+	var doc searchJSONDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil || len(doc.Matches) == 0 {
+		t.Fatalf("%v %s", err, buf.String())
 	}
-	for _, c := range cases {
-		if got := sessionsCacheDir(env(c.xdg), home); got != c.want {
-			t.Errorf("sessionsCacheDir(XDG_CACHE_HOME=%q) = %q, want %q", c.xdg, got, c.want)
-		}
+	if doc.Query != "flaky" || doc.Matches[0].SessionID != "example-s1" {
+		t.Errorf("doc = %+v", doc)
 	}
 }
 
-func TestSessionsResumedPairIsOneRecord(t *testing.T) {
-	d := decodeSessions(t, renderSessions(t, time.Time{}, time.Time{}, 200))
-	n := 0
-	for _, s := range d.Sessions {
-		if s["cwd"] == "/work/alpha" {
-			n++
-		}
+// TestSessionsAndSearchSayDaemonOffline: the recorder is stopped and the
+// transcript file is still on disk; neither command reads it.
+func TestSessionsAndSearchSayDaemonOffline(t *testing.T) {
+	e, f := cliFacts(t)
+	e.Stop()
+	var buf bytes.Buffer
+	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10); err != session.ErrDaemonOffline {
+		t.Errorf("sessions err = %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("resumed pair produced %d records, want 1: %v", n, d.Sessions)
+	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}); err != session.ErrDaemonOffline {
+		t.Errorf("search err = %v", err)
 	}
-	s := sessionByID(t, d, "orig")
-	if s["started_at"] != "2026-09-18T09:00:00Z" || s["ended_at"] != "2026-09-18T09:30:00Z" {
-		t.Errorf("started/ended = %v / %v, want transcript event times", s["started_at"], s["ended_at"])
-	}
-}
-
-func TestSessionsMidnightSpanIsOneRecordOnItsStartDay(t *testing.T) {
-	// A window covering only the start day includes it; the day after does not.
-	startDay := decodeSessions(t, renderSessions(t,
-		time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC), 200))
-	if len(startDay.Sessions) != 1 || startDay.Sessions[0]["session_id"] != "midnight" {
-		t.Fatalf("start-day window = %v, want exactly the midnight session", startDay.Sessions)
-	}
-	s := startDay.Sessions[0]
-	if s["started_at"] != "2026-09-20T23:50:00Z" || s["ended_at"] != "2026-09-21T00:10:00Z" {
-		t.Errorf("started/ended = %v / %v", s["started_at"], s["ended_at"])
-	}
-	nextDay := decodeSessions(t, renderSessions(t,
-		time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC), time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC), 200))
-	if len(nextDay.Sessions) != 0 {
-		t.Errorf("next-day window = %v, want none (reported once, on its start day)", nextDay.Sessions)
-	}
-}
-
-func TestSessionsEmptyWindowIsEmptyArrayNotNull(t *testing.T) {
-	out := renderSessions(t, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), time.Time{}, 200)
-	if strings.TrimSpace(string(out)) != `{"sessions":[]}` {
-		t.Errorf("empty window output = %s, want {\"sessions\":[]}", out)
-	}
-}
-
-func TestSessionsCostPresentForKnownModelAbsentForUnknown(t *testing.T) {
-	d := decodeSessions(t, renderSessions(t, time.Time{}, time.Time{}, 200))
-	known := sessionByID(t, d, "midnight") // claude-opus-4-7: 0.2*5 + 0.04*25 = 2.0
-	if got, ok := known["cost_usd"].(float64); !ok || got != 2.0 {
-		t.Errorf("known-model cost_usd = %v, want 2.0", known["cost_usd"])
-	}
-	unknown := sessionByID(t, d, "unknown")
-	if _, present := unknown["cost_usd"]; present {
-		t.Errorf("unknown-model session has cost_usd = %v, want key omitted", unknown["cost_usd"])
-	}
-}
-
-func TestSessionsNoUserTurnHasEmptyFirstPromptKey(t *testing.T) {
-	s := sessionByID(t, decodeSessions(t, renderSessions(t, time.Time{}, time.Time{}, 200)), "noprompt")
-	fp, present := s["first_prompt"]
-	if !present || fp != "" {
-		t.Errorf("first_prompt = %v (present=%v), want present and empty", fp, present)
-	}
-	if s["user_turns"] != float64(0) {
-		t.Errorf("user_turns = %v, want 0", s["user_turns"])
-	}
-}
-
-func TestSessionsRecordKeysAndNoDispatched(t *testing.T) {
-	d := decodeSessions(t, renderSessions(t, time.Time{}, time.Time{}, 200))
-	s := sessionByID(t, d, "midnight")
-	for _, k := range []string{
-		"session_id", "cwd", "branch", "model", "started_at", "ended_at",
-		"user_turns", "assistant_turns", "first_prompt", "tokens", "cost_usd",
-	} {
-		if _, ok := s[k]; !ok {
-			t.Errorf("record missing key %q: %v", k, s)
-		}
-	}
-	if _, ok := s["dispatched"]; ok {
-		t.Error("record must not carry a dispatched key in this phase")
-	}
-	tok, _ := s["tokens"].(map[string]any)
-	for _, k := range []string{"input", "output", "cache_read", "cache_write"} {
-		if _, ok := tok[k]; !ok {
-			t.Errorf("tokens missing %q: %v", k, tok)
-		}
-	}
-	// Ordered by started_at ascending.
-	var prev string
-	for _, r := range d.Sessions {
-		cur := r["started_at"].(string)
-		if cur < prev {
-			t.Errorf("records not ordered by started_at: %q after %q", cur, prev)
-		}
-		prev = cur
-	}
-}
-
-func TestSessionsFirstPromptTruncatedToConfiguredLength(t *testing.T) {
-	d := decodeSessions(t, renderSessions(t, time.Time{}, time.Time{}, 10))
-	fp := sessionByID(t, d, "orig")["first_prompt"].(string)
-	if n := len([]rune(fp)); n != 10 {
-		t.Errorf("first_prompt = %q (%d runes), want exactly 10", fp, n)
-	}
-	if !strings.HasSuffix(fp, "…") {
-		t.Errorf("truncated first_prompt %q should end with the … marker", fp)
-	}
-	// Short prompts and a larger limit are untouched.
-	full := decodeSessions(t, renderSessions(t, time.Time{}, time.Time{}, 200))
-	if got := sessionByID(t, full, "orig")["first_prompt"]; got != "Please summarize the repository layout." {
-		t.Errorf("untruncated first_prompt = %q", got)
+	if buf.Len() != 0 {
+		t.Errorf("output written while offline: %s", buf.String())
 	}
 }
 
@@ -306,8 +164,8 @@ func TestParseSessionsArgs(t *testing.T) {
 }
 
 // TestSessionsExitCodeAndHelp exercises the real binary: a bad bound exits 2
-// naming --since on stderr, and --help lists the subcommand. HOME is a temp dir
-// with no daemon socket, proving the daemon is not required.
+// naming --since on stderr, and with no recorder answering `sessions` says
+// "daemon offline" and exits 1 instead of reading the transcript files.
 func TestSessionsExitCodeAndHelp(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
@@ -315,7 +173,7 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 	}
 	home := t.TempDir()
 	env := append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
-		"XDG_CACHE_HOME="+filepath.Join(home, ".cache"))
+		"XDG_STATE_HOME="+filepath.Join(home, ".state"), "PG_CLAUDE_CODE_RECORDER_SOCKET="+filepath.Join(home, "absent.sock"))
 
 	cmd := exec.Command(bin, "sessions", "--since", "not-a-time")
 	cmd.Env = env
@@ -330,87 +188,16 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 		t.Errorf("stderr %q should name --since", stderr.String())
 	}
 
-	// Empty HOME: no projects dir, no daemon -> {"sessions":[]} and exit 0.
 	cmd = exec.Command(bin, "sessions", "--since", "1d", "--json")
 	cmd.Env = env
+	stderr.Reset()
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("sessions on an empty home: %v", err)
+	ee, ok = err.(*exec.ExitError)
+	if !ok || ee.ExitCode() != exitGeneric || len(out) != 0 {
+		t.Fatalf("no recorder: err = %v out = %q, want exit 1 and no output", err, out)
 	}
-	if strings.TrimSpace(string(out)) != `{"sessions":[]}` {
-		t.Errorf("empty home output = %s", out)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".cache")); !os.IsNotExist(err) {
-		t.Errorf("an empty home must not create a cache (%v)", err)
-	}
-
-	cmd = exec.Command(bin, "--help")
-	cmd.Env = env
-	help, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(help), "\n  sessions\n") {
-		t.Errorf("--help does not list sessions:\n%s", help)
-	}
-
-	// A home holding the fixture tree: the first --stats run reads every
-	// transcript and writes the cache under XDG_CACHE_HOME/pa-monitor (never
-	// under the Claude home); the second reads none and prints the same JSON.
-	copyTree(t, sessionsFixtureProjects, filepath.Join(home, ".claude", "projects"))
-	var outs [2][]byte
-	var errs [2]string
-	for i := range outs {
-		cmd = exec.Command(bin, "sessions", "--json", "--stats")
-		cmd.Env = env
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if outs[i], err = cmd.Output(); err != nil {
-			t.Fatalf("sessions --stats run %d: %v\n%s", i+1, err, stderr.String())
-		}
-		errs[i] = stderr.String()
-	}
-	if !bytes.Equal(outs[0], outs[1]) || len(decodeSessions(t, outs[0]).Sessions) == 0 {
-		t.Errorf("cold and warm output differ or are empty:\n%s\n%s", outs[0], outs[1])
-	}
-	if !strings.Contains(errs[0], " parsed=5 ") || !strings.Contains(errs[0], " cache_writes=1 ") {
-		t.Errorf("cold stats line %q, want parsed=5 and cache_writes=1", errs[0])
-	}
-	if !strings.Contains(errs[1], " parsed=0 ") || !strings.Contains(errs[1], " reused=5 ") || !strings.Contains(errs[1], " cache_writes=0 ") {
-		t.Errorf("warm stats line %q, want parsed=0 reused=5 cache_writes=0", errs[1])
-	}
-	caches, err := filepath.Glob(filepath.Join(home, ".cache", "pa-monitor", "sessions-*.cache"))
-	if err != nil || len(caches) != 1 {
-		t.Errorf("cache files under XDG_CACHE_HOME/pa-monitor = %v (%v), want exactly one", caches, err)
-	}
-	claudeEntries, err := os.ReadDir(filepath.Join(home, ".claude"))
-	if err != nil || len(claudeEntries) != 1 || claudeEntries[0].Name() != "projects" {
-		t.Errorf("the Claude home gained entries: %v (%v)", claudeEntries, err)
-	}
-}
-
-// copyTree copies the regular files under src into dst, creating directories.
-func copyTree(t *testing.T, src, dst string) {
-	t.Helper()
-	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, p)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		b, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, b, 0o644)
-	})
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(stderr.String(), "daemon offline") {
+		t.Errorf("stderr %q should say daemon offline", stderr.String())
 	}
 }

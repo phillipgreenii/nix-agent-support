@@ -11,19 +11,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
 	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/account"
-	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
+	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
 // sessionTokensJSON is the per-session token tally.
@@ -94,18 +95,6 @@ func parseSessionsArgs(args []string, now time.Time) (since, before time.Time, s
 	return since, before, stats, nil
 }
 
-// sessionsCacheDir is where `sessions` keeps claude-transcript's per-file
-// summary cache: $XDG_CACHE_HOME/pa-monitor, or <home>/.cache/pa-monitor when
-// XDG_CACHE_HOME is unset or not absolute (the PR cache's convention). Either
-// lies outside the Claude home, which claude-transcript also enforces.
-func sessionsCacheDir(getenv func(string) string, home string) string {
-	base := getenv("XDG_CACHE_HOME")
-	if !filepath.IsAbs(base) {
-		base = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(base, "pa-monitor")
-}
-
 // truncateRunes cuts s to at most max runes. When it cuts, the last rune of the
 // result is "…" so a reader can tell the prompt was shortened. max < 1 is
 // treated as 1 (callers pass a positive, defaulted value).
@@ -150,21 +139,31 @@ func sessionCost(prices usage.PriceTable, modelTokens map[string]claudetranscrip
 	return total, true
 }
 
-// writeSessions is the exit-free core of `sessions`: it walks projectsDir for
-// sessions whose first event is in [since, before) and writes the document to
-// w. opts carries the summary cache location (empty: uncached) and the stats
-// sink. An unreadable transcript's first prompt degrades to "" rather than
-// failing the whole listing.
-func writeSessions(w io.Writer, projectsDir string, since, before time.Time, prices usage.PriceTable, promptMaxChars int, opts claudetranscript.SessionsOptions) error {
-	recs, err := claudetranscript.SessionsWithOptions(projectsDir, since, before, opts)
+// sessionLister is where the listing comes from: the recorder's transcript
+// records (recorderfacts.Facts), never the transcript files.
+type sessionLister interface {
+	Sessions(ctx context.Context, since, before time.Time) ([]recorderfacts.SessionSummary, error)
+}
+
+// writeSessions is the exit-free core of `sessions`: it lists the sessions whose
+// first event is in [since, before) through lister and writes the document to w.
+func writeSessions(w io.Writer, lister sessionLister, since, before time.Time, prices usage.PriceTable, promptMaxChars int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	recs, err := lister.Sessions(ctx, since, before)
 	if err != nil {
 		return err
 	}
 	doc := sessionsJSONDoc{Sessions: make([]sessionRecordJSON, 0, len(recs))}
 	for _, r := range recs {
-		prompt, perr := transcript.FirstPrompt(r.TranscriptPath)
-		if perr != nil {
-			prompt = ""
+		var total sessionTokensJSON
+		modelTokens := make(map[string]claudetranscript.TokenTotals, len(r.ModelTokens))
+		for m, t := range r.ModelTokens {
+			total.Input += t.Input
+			total.Output += t.Output
+			total.CacheRead += t.CacheRead
+			total.CacheWrite += t.CacheWrite
+			modelTokens[m] = claudetranscript.TokenTotals{Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite}
 		}
 		sj := sessionRecordJSON{
 			SessionID:      r.SessionID,
@@ -175,15 +174,10 @@ func writeSessions(w io.Writer, projectsDir string, since, before time.Time, pri
 			EndedAt:        r.EndedAt.UTC().Format(time.RFC3339),
 			UserTurns:      r.UserTurns,
 			AssistantTurns: r.AssistantTurns,
-			FirstPrompt:    truncateRunes(prompt, promptMaxChars),
-			Tokens: sessionTokensJSON{
-				Input:      r.Tokens.Input,
-				Output:     r.Tokens.Output,
-				CacheRead:  r.Tokens.CacheRead,
-				CacheWrite: r.Tokens.CacheWrite,
-			},
+			FirstPrompt:    truncateRunes(r.FirstPrompt, promptMaxChars),
+			Tokens:         total,
 		}
-		if c, ok := sessionCost(prices, r.ModelTokens); ok {
+		if c, ok := sessionCost(prices, modelTokens); ok {
 			sj.CostUSD = &c
 		}
 		doc.Sessions = append(doc.Sessions, sj)
@@ -192,13 +186,13 @@ func writeSessions(w io.Writer, projectsDir string, since, before time.Time, pri
 }
 
 // runSessions implements the `sessions` subcommand: `pa-monitor sessions
-// [--json] [--since <bound>] [--before <bound>] [--stats]`. Exit codes follow
-// search: 2 for an argument error, 1 for a runtime error, 0 otherwise. The
-// per-file summary cache lives in sessionsCacheDir; a cache problem never
-// fails the listing.
+// [--json] [--since <bound>] [--before <bound>] [--stats]`. It reads the
+// recorder; while the recorder is down it says "daemon offline" and exits 1
+// (there is no fallback to the transcript files). Exit codes follow search: 2
+// for an argument error, 1 for a runtime error, 0 otherwise. --stats is
+// accepted and ignored (there is no scan to report).
 func runSessions(args []string) {
-	start := time.Now()
-	since, before, wantStats, err := parseSessionsArgs(args, time.Now().UTC())
+	since, before, _, err := parseSessionsArgs(args, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(exitUsage)
@@ -208,21 +202,10 @@ func runSessions(args []string) {
 		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
 		os.Exit(exitGeneric)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
-		os.Exit(exitGeneric)
-	}
-	projectsDir := filepath.Join(home, ".claude", "projects")
 	prices := account.LoadAccount(cfg).PriceTable()
-	var st claudetranscript.SessionsStats
-	opts := claudetranscript.SessionsOptions{CacheDir: sessionsCacheDir(os.Getenv, home), Stats: &st}
-	if err := writeSessions(os.Stdout, projectsDir, since, before, prices, cfg.FirstPromptMaxChars, opts); err != nil {
+	facts := recorderfacts.New(client.Options{Name: "pa-monitor-sessions"})
+	if err := writeSessions(os.Stdout, facts, since, before, prices, cfg.FirstPromptMaxChars); err != nil {
 		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
 		os.Exit(exitGeneric)
-	}
-	if wantStats {
-		fmt.Fprintf(os.Stderr, "sessions: files=%d parsed=%d reused=%d cache_writes=%d cache_bytes=%d elapsed_ms=%d\n",
-			st.Files, st.Parsed, st.Reused, st.CacheWrites, st.CacheBytes, time.Since(start).Milliseconds())
 	}
 }
