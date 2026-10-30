@@ -69,6 +69,21 @@ const EnvPath = "PG_CONNECTOR_ISSUE_BEADS_EVENTS_FILE"
 // maxArgvBytes caps the bd argv copied into an event.
 const maxArgvBytes = 256
 
+// EnvCaller names the tool that made the call (decider, poller, pg-desk,
+// probe). Unset or empty records CallerUnknown. It is a JSON field of the
+// final event, never a Loki label (cardinality) [bead pg2-eclw3j.2].
+const EnvCaller = "PG_CONNECTOR_CALLER"
+
+// CallerUnknown is the caller recorded when EnvCaller is unset.
+const CallerUnknown = "unknown"
+
+// maxTagBytes caps the caller tag and the query name copied into an event.
+const maxTagBytes = 64
+
+// maxDurations caps the per-bd-execution duration list; bd_calls still counts
+// every execution.
+const maxDurations = 16
+
 // Event is one line of events.jsonl: one backend call.
 //
 // The embedded evlog.Base carries time/level/msg (the JSONL standard's
@@ -86,6 +101,16 @@ type Event struct {
 	// command that was slow. Both are absent when the call ran no bd.
 	BDSlowestMS   *int64 `json:"bd_slowest_ms,omitempty"`
 	BDSlowestArgv string `json:"bd_slowest_argv,omitempty"`
+	// Query is the named query of a list call (the request's query field);
+	// absent for other ops. Group by this, not by bd_slowest_argv, which
+	// embeds per-PR values.
+	Query string `json:"query,omitempty"`
+	// Caller is the calling tool's tag (EnvCaller), "unknown" when unset.
+	Caller string `json:"caller"`
+	// BDDurationsMS is the duration of each bd execution of the call in run
+	// order, capped at maxDurations entries. For a list call each element is
+	// one query expression. Absent when the call ran no bd.
+	BDDurationsMS []int64 `json:"bd_durations_ms,omitempty"`
 	// BDTimeouts counts the bd executions of the call that the call's
 	// deadline killed (the context ended with context.DeadlineExceeded). A bd
 	// that merely exits non-zero does not count. Absent when 0.
@@ -118,6 +143,9 @@ type recorder struct {
 	calls       int
 	slowest     time.Duration
 	slowestArgv string
+	durations   []int64
+	query       string
+	caller      string
 	timeouts    int
 	waited      time.Duration
 	denied      bool
@@ -138,10 +166,34 @@ func RecordBDCall(ctx context.Context, argv []string, elapsed time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
+	if len(r.durations) < maxDurations {
+		r.durations = append(r.durations, elapsed.Milliseconds())
+	}
 	if r.calls == 1 || elapsed > r.slowest {
 		r.slowest = elapsed
 		r.slowestArgv = evlog.Truncate(strings.Join(argv, " "), maxArgvBytes)
 	}
+}
+
+// recordQuery notes the named query of a list call. No-op without a recorder.
+func recordQuery(ctx context.Context, name string) {
+	r, ok := ctx.Value(recorderKey{}).(*recorder)
+	if !ok || name == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.query = evlog.Truncate(name, maxTagBytes)
+}
+
+// CallerFromEnv is the caller tag from EnvCaller (CallerUnknown when unset or
+// blank), capped at maxTagBytes.
+func CallerFromEnv(getenv func(string) string) string {
+	c := strings.TrimSpace(getenv(EnvCaller))
+	if c == "" {
+		return CallerUnknown
+	}
+	return evlog.Truncate(c, maxTagBytes)
 }
 
 // RecordBudget notes the outcome of one bd budget acquisition on the in-flight
@@ -186,14 +238,41 @@ var heartbeatInterval = evlog.HeartbeatInterval
 // handler's result and error are passed through untouched. now is injectable
 // for tests.
 func Instrument(table scriptout.DispatchTable, sink Sink, version string, now func() time.Time) scriptout.DispatchTable {
+	return InstrumentCaller(table, sink, version, "", now)
+}
+
+// InstrumentCaller is Instrument plus the caller tag recorded on every event
+// ("" records CallerUnknown). The list op's handler is wrapped to note the
+// request's named query on the event.
+func InstrumentCaller(table scriptout.DispatchTable, sink Sink, version, caller string, now func() time.Time) scriptout.DispatchTable {
 	if sink == nil {
 		return table
 	}
+	if caller == "" {
+		caller = CallerUnknown
+	}
+	named := make(scriptout.DispatchTable, len(table))
+	for op, h := range table {
+		if op == "list" {
+			inner := h.Handle
+			h.Handle = func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					Query string `json:"query"`
+				}
+				if json.Unmarshal(args, &a) == nil {
+					recordQuery(ctx, a.Query)
+				}
+				return inner(ctx, args)
+			}
+		}
+		named[op] = h
+	}
+	table = named
 	progress := func(op string, args json.RawMessage, phase string, start, at time.Time) {
 		sink.WriteProgress(evlog.NewProgressEvent(ServiceName, op, version, phase, args, start, at))
 	}
 	return evlog.WrapProgress(table, now, func(ctx context.Context, op string) (context.Context, evlog.Finish) {
-		rec := &recorder{}
+		rec := &recorder{caller: caller}
 		ctx = context.WithValue(ctx, recorderKey{}, rec)
 		return ctx, func(start, end time.Time, err error) {
 			sink.Write(buildEvent(op, version, start, end, err, rec))
@@ -205,6 +284,12 @@ func buildEvent(op, version string, start, end time.Time, err error, rec *record
 	ev := Event{Base: evlog.NewBase(ServiceName, op, version, start, end, err)}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
+	ev.Query = rec.query
+	ev.Caller = rec.caller
+	if ev.Caller == "" {
+		ev.Caller = CallerUnknown
+	}
+	ev.BDDurationsMS = rec.durations
 	if rec.calls > 0 {
 		ms := rec.slowest.Milliseconds()
 		ev.BDCalls = rec.calls

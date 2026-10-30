@@ -292,3 +292,65 @@ func TestRecordBudgetAndTimeout_NoRecorderIsNoOp(t *testing.T) {
 	RecordBudget(context.Background(), time.Second, true, true)
 	RecordBDTimeout(context.Background())
 }
+
+func TestInstrumentCaller_RecordsQueryCallerAndDurations(t *testing.T) {
+	sink := &memSink{}
+	tb := InstrumentCaller(table(func(ctx context.Context, _ json.RawMessage) (any, error) {
+		RecordBDCall(ctx, []string{"bd", "list", "--label", "pr:o/r#7"}, 30*time.Millisecond)
+		RecordBDCall(ctx, []string{"bd", "list", "--status", "open"}, 70*time.Millisecond)
+		return nil, nil
+	}), sink, "", "decider", time.Now)
+	_, _ = tb["list"].Handle(context.Background(), json.RawMessage(`{"query":"work-items-all"}`))
+	ev := sink.events[0]
+	if ev.Query != "work-items-all" || ev.Caller != "decider" {
+		t.Errorf("query/caller = %q/%q", ev.Query, ev.Caller)
+	}
+	if len(ev.BDDurationsMS) != 2 || ev.BDDurationsMS[0] != 30 || ev.BDDurationsMS[1] != 70 {
+		t.Errorf("durations = %v", ev.BDDurationsMS)
+	}
+	line, _ := Line(ev)
+	for _, k := range []string{`"query":"work-items-all"`, `"caller":"decider"`, `"bd_durations_ms":[30,70]`} {
+		if !strings.Contains(string(line), k) {
+			t.Errorf("line lacks %s: %s", k, line)
+		}
+	}
+}
+
+func TestInstrument_UnsetCallerIsUnknownAndNonListHasNoQuery(t *testing.T) {
+	sink := &memSink{}
+	tb := Instrument(scriptout.DispatchTable{"search": {SchemaVersion: 1, Handle: func(context.Context, json.RawMessage) (any, error) { return nil, nil }}},
+		sink, "", time.Now)
+	_, _ = tb["search"].Handle(context.Background(), json.RawMessage(`{"query":"free text"}`))
+	ev := sink.events[0]
+	if ev.Caller != CallerUnknown || ev.Query != "" {
+		t.Errorf("caller/query = %q/%q", ev.Caller, ev.Query)
+	}
+}
+
+func TestCallerFromEnv(t *testing.T) {
+	env := func(v string) func(string) string { return func(string) string { return v } }
+	if got := CallerFromEnv(env("")); got != CallerUnknown {
+		t.Errorf("unset = %q", got)
+	}
+	if got := CallerFromEnv(env(" poller ")); got != "poller" {
+		t.Errorf("set = %q", got)
+	}
+	if got := CallerFromEnv(env(strings.Repeat("x", 500))); len(got) > maxTagBytes+3 {
+		t.Errorf("uncapped: %d bytes", len(got))
+	}
+}
+
+func TestInstrumentCaller_FieldsAreBounded(t *testing.T) {
+	sink := &memSink{}
+	tb := InstrumentCaller(table(func(ctx context.Context, _ json.RawMessage) (any, error) {
+		for i := 0; i < 100; i++ {
+			RecordBDCall(ctx, []string{"bd"}, time.Millisecond)
+		}
+		return nil, nil
+	}), sink, "", "c", time.Now)
+	_, _ = tb["list"].Handle(context.Background(), json.RawMessage(`{"query":"`+strings.Repeat("q", 500)+`"}`))
+	ev := sink.events[0]
+	if ev.BDCalls != 100 || len(ev.BDDurationsMS) != maxDurations || len(ev.Query) > maxTagBytes+3 {
+		t.Errorf("calls %d durations %d query %d bytes", ev.BDCalls, len(ev.BDDurationsMS), len(ev.Query))
+	}
+}

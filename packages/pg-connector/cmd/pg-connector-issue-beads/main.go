@@ -134,7 +134,7 @@ func budgetGroup(flagValue, workspace string) string {
 // newDispatchTable never write to the real state home. With the log disabled
 // or unresolvable it returns table unchanged.
 func instrument(table scriptout.DispatchTable, getenv func(string) string) scriptout.DispatchTable {
-	return eventlog.Instrument(table, eventlog.SinkFromEnv(getenv), Version, time.Now)
+	return eventlog.InstrumentCaller(table, eventlog.SinkFromEnv(getenv), Version, eventlog.CallerFromEnv(getenv), time.Now)
 }
 
 // newDispatchTable builds the issue capability's table (show/create/

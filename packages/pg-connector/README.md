@@ -415,7 +415,42 @@ the paragraph above describes.
 `${XDG_STATE_HOME}/pg-connector-issue-beads/events.jsonl` (override with
 `PG_CONNECTOR_ISSUE_BEADS_EVENTS_FILE`; `off` disables it), same rotation, with the common fields plus
 `bd_calls` (how many `bd` runs the call made), and `bd_slowest_ms` / `bd_slowest_argv` (the longest
-single `bd` run and its argv). The log is registered as a Loki source in
+single `bd` run and its argv). Since bead `pg2-eclw3j.2` the final event also carries these JSON fields (never Loki
+labels, to avoid cardinality):
+
+| Field             | Meaning                                                                                                                                                                                                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`           | The named query of a `list` call (absent for other ops). Group by this: `bd_slowest_argv` embeds per-PR values. Capped at 64 bytes.                                                                                                                                                 |
+| `caller`          | The tool that made the call, read from the `PG_CONNECTOR_CALLER` environment variable (the backend inherits the umbrella's environment): `decider`, `poller`, `pg-desk` or `probe`. Unset records `unknown`. Capped at 64 bytes. There is no `--caller` flag yet; set the variable. |
+| `bd_durations_ms` | The duration of each `bd` run of the call, in run order, capped at 16 entries (`bd_calls` still counts all). For a `list` call each element is one query expression.                                                                                                                |
+
+LogQL that normalises per-PR argv (group by `query` and `caller`, never by `bd_slowest_argv`; the repo and PR number
+embed in argv):
+
+```logql
+sum by (query, caller) (
+  count_over_time({service_name="pg-connector-issue-beads"} | json | op="list" | caller!="" [1h])
+)
+```
+
+```logql
+quantile_over_time(0.95,
+  {service_name="pg-connector-issue-beads"} | json | op="list" | unwrap bd_slowest_ms [15m]
+) by (query)
+```
+
+```logql
+sum by (query, caller) (
+  count_over_time({service_name="pg-connector-issue-beads"} | json | bd_timeouts > 0 [15m])
+)
+```
+
+Reading the baseline (epic `pg2-eclw3j`). Read it only after enough lookups AND at least one host-load episode have
+been logged (the 30-40 s kills only reproduced above host load 65; load 27-39 showed 0.3-1.3 s per call). Capture, at a
+recorded host load: `bd_slowest_ms` for `op=list` grouped by `query` (the second query), call counts per `caller` (the
+first), and `bd_timeouts` per 15 minutes (the third). Record them as a table (query, op, calls, slowest ms,
+timeouts, load) in a comment on `pg2-eclw3j`. The `pg-pr-change` lookup-duration field belongs to epic `pg2-ch5dm7`;
+consume it, do not duplicate it here. The log is registered as a Loki source in
 `darwin/modules/pg-connector-issue-beads`; no alert rule ships with it, and the generic error-rate alert
 is off, because its purpose is to make slow and killed calls attributable by query, not to page.
 
