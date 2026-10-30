@@ -13,6 +13,8 @@ command-executor open question (the Decision's "Open question resolved" section)
 > only from the core's. The "Alternatives Considered" entry that rejected splitting the module is
 > superseded for the binaries, but not for the Go module.
 
+> **Later note (2026-10-30, ADR 0117, epic `pg2-fx5x0l`):** note only, no decision here changes. The hygiene passes this ADR describes as running before a dispatch's capacity check (closed-bead reconcile, default-pool pass, worktree-keyed sweep, lock garbage collection) now run in the handler's janitor, and a dispatch runs the closed-bead reconcile only when its pool is full; orphan handling before the capacity check is unchanged.
+
 ## Context
 
 `ADR 0061`'s Decision, "Participant model: full message-passing is the target; the in-process

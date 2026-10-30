@@ -1,6 +1,6 @@
 # A daemon restart leaves ccpool-backed dispatches running
 
-**Status**: Accepted (amends 0083; resolves `pg2-dtigc`); the answer to question 3 is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`); Decision 1 is amended by the Addendum of 2026-10-20 (the handler split, bead `pg2-12gr4.5`)
+**Status**: Accepted (amends 0083; resolves `pg2-dtigc`); the answer to question 3 is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`); Decision 1 is amended by the Addendum of 2026-10-20 (the handler split, bead `pg2-12gr4.5`); amended 2026-10-30 by 0117 (hygiene passes move to a janitor)
 **Date**: 2026-10-07
 **Deciders**: Phillip Green II
 
@@ -22,6 +22,8 @@
 > written. Survival is declared by a generic `[[role]]` key in the core's TOML, `survives_shutdown`,
 > not by a flag in a per-role JSON file. A role that does not set its own `handler` still reads the
 > JSON flag until the handler split's compat window ends (`ADR 0065`'s Addendum).
+
+> **Later note (2026-10-30, ADR 0117, epic `pg2-fx5x0l`):** where this ADR says the next dispatch of the same role reclaims a spared or dead session, or that the dispatch-time reconcile purges it, the closed-bead reconcile is now run by the janitor and by a dispatch that finds its pool full (capacity pressure); orphans are still reclaimed inline by the next dispatch of the role and also by the janitor. The router's per-role hold of a role's first dispatch behind its `postStartup` hook is removed.
 
 ## Context
 

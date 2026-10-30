@@ -90,7 +90,9 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   for the per-dispatch crossing, plus one lease write per poll interval for as long as that
   dispatch runs and one role-scoped orphan reconcile per dispatch; one sweep per daemon shutdown
   (the core delivers `preShutdown` to the first enabled role's handler only, so the sweep is not
-  repeated per role).
+  repeated per role); and one janitor run per schedule interval (`INV-CCH-41`), which reconciles
+  every pool and every ccpool role, plus at most one closed-bead reconcile in a dispatch that finds
+  its pool full.
   The `preShutdown` sweep MUST spare every actively working session (`INV-CCH-14`): it purges only
   sessions closable for another reason (turn ended, or `needs_input` with its bead already closed)
   and leaves a working session and its worktree untouched. It lists only the default pool; a
@@ -111,13 +113,15 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   its own role's orphaned sessions in that role's pool: a session whose lease has expired is
   reclaimed or, if still working and over its time budget, hard-stopped (`INV-CCH-18`).
   A dispatch of a role with worktree isolation also holds a shared per-bead worktree lock for its
-  whole run and, before checking capacity, sweeps the worktree directory for leaked per-bead
-  worktrees no session row leads to, removing a worktree and its anchor branch only under the
-  guards of `INV-CCH-19`.
+  whole run. The janitor (`INV-CCH-41`), not the dispatch, sweeps the worktree directory for leaked
+  per-bead worktrees no session row leads to, removing a worktree and its anchor branch only under
+  the guards of `INV-CCH-19`, and it also reconciles closed-bead sessions, the default pool's stale
+  sessions and the lock directory (`INV-CCH-14`, `INV-CCH-24`). A dispatch reconciles closed-bead
+  sessions only when its pool is full, once, and then declines as always if no slot freed.
   A session in a per-bead linked worktree is torn down in two phases (`INV-CCH-20`): this module
   closes it without purging, removes the worktree and its anchor branch, and only then purges the
   record, so a removal interrupted midway leaves a record the next reconcile of the same pool
-  retries (one per dispatch; for the default pool, the shutdown sweep too) rather than a worktree
+  retries (one per closed-bead reconcile; for the default pool, the shutdown sweep too) rather than a worktree
   no record leads to. While such a teardown is unfinished, the record is never absorbed
   (`INV-CCH-30`). This marking is a `ccpool` metadata write, never a `ccpool` label.
   A role configured to pre-fetch also runs `git` in the per-bead worktree before the session

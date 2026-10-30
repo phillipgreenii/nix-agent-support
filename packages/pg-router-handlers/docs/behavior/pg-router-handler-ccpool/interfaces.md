@@ -12,7 +12,7 @@ This adapter realizes one interface as pg-router's counterparty and has two boun
   answers the optional `validate` subcommand of the same decision (`INV-CCA-8`).
 
 This adapter is a **full** participant, not only a dispatch endpoint: it also answers the capacity,
-shutdown, startup-reconcile and orphan-sweep obligations the earlier combined handler's set states for
+shutdown, janitor-start and orphan-reconcile obligations the earlier combined handler's set states for
 a session-backed role, because a session outlives the daemon that started it (`INV-CCA-1`).
 
 ## Boundaries this adapter initiates

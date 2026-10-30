@@ -4,6 +4,8 @@
 **Date**: 2026-10-13
 **Deciders**: Phillip Green II
 
+> **Later note (2026-10-30, ADR 0117, epic `pg2-fx5x0l`):** note only, no decision here changes. The hygiene passes this ADR describes as running before a dispatch's capacity check (closed-bead reconcile, default-pool pass, worktree-keyed sweep, lock garbage collection) now run in the handler's janitor, and a dispatch runs the closed-bead reconcile only when its pool is full; orphan handling before the capacity check is unchanged.
+
 ## Context
 
 A `pg-router-ccpool-handler` dispatch looks for a session the role's pool already holds under the

@@ -532,6 +532,16 @@ answers the identical hook more than once. This is a documented cost, not a defe
 `preShutdown` implementation MUST be safe to invoke redundantly (idempotent), the same tolerance
 `INTF-HANDLER`'s "Obligations" paragraph already requires of `dispatch` for a duplicate event.
 
+**A `postStartup` hook never gates dispatch.** The core **MUST** run each enabled role's
+`postStartup` concurrently with the others, **MUST NOT** wait for any of them before it starts its
+producers or its first dispatch pass, and **MUST NOT** hold any role's dispatch behind that role's
+own hook or bound the hook with a timeout; a hook that is slow, fails or never returns delays no
+dispatch. The outcome is logged with the role and the elapsed time. A handler that needs boot-time
+work **MUST** do it without making a dispatch wait for it (the ccpool handler starts one janitor
+run and replies at once, `DEC-WIRE-3`'s amendment of 2026-10-30). An earlier rule, not documented
+in this set, held a role's first dispatch behind its hook for up to five minutes; it is removed
+(`phillipgreenii-nix-agent-support` ADR 0117).
+
 ```mermaid
 sequenceDiagram
     participant Core as core

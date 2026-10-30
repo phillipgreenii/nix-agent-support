@@ -10,12 +10,12 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
 
 - **`INV-CCA-1`** <!-- uuid: 1c9e4008-f2d1-461f-99f4-bcbe441c2e10 --> — **The adapter is a full participant, and a session-backed role's
   lifecycle rules hold for it unchanged.** It answers dispatch, capacity, `preShutdown`,
-  `postStartup` reconcile and the orphan sweeps, because sessions outlive daemon restarts
+  janitor start (its `postStartup` starts one janitor run and sweeps nothing itself) and the orphan reconcile, because sessions outlive daemon restarts
   (`phillipgreenii-nix-agent-support` ADR 0085). The split from the earlier combined handler is a
   split, not a rewrite: duplicate tolerance (`INV-CCH-2`), capacity before isolation (`INV-CCH-6`),
   failure signatures (`INV-CCH-9`), origin unavailability (`INV-CCH-10`), the shutdown sweep that
   spares working sessions (`INV-CCH-14`), closing a settled session (`INV-CCH-17`), the supervision
-  lease (`INV-CCH-18`), the pre-launch precheck (`INV-CCH-22`), the no-strike usage limit
+  lease (`INV-CCH-18`), the pre-launch precheck (`INV-CCH-22`), the janitor and capacity-pressure reconcile instead of per-dispatch sweeps (`INV-CCH-41`), the no-strike usage limit
   (`INV-CCH-28`) and a fresh session per dispatch (`INV-CCH-30`) apply to a role of this adapter
   exactly as they did before, and this set restates none of them.
 - **`INV-CCA-2`** <!-- uuid: 78592e2a-b769-4e72-86ed-5c22e9b93645 --> — **The adapter reads its configuration from the role object, strictly.**

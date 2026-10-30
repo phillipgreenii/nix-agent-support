@@ -270,10 +270,11 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   bead `pg2-hwt7v`), superseding the earlier behavior of closing working sessions and
   force-removing their worktrees.
   - **What bounds a spared session after the daemon exits.** Sparing leaves a deliberate, bounded
-    leak. (a) The dispatch-time reconcile of the next dispatch, run against the dispatching role's
-    own pool, purges it, worktree included, once its turn has ended (`idle` or `needs_input`) and
-    its bead is closed; the next shutdown sweep does too, but only for a session in the default
-    pool. This is the only bound for a session parked in `needs_input` with an open bead, which
+    leak. (a) The closed-bead reconcile purges it, worktree included, once its turn has ended
+    (`idle` or `needs_input`) and its bead is closed. It runs in the janitor (`INV-CCH-41`), once
+    per pool per run, and in a dispatch that finds its pool full (capacity pressure,
+    `INV-CCH-41`); it no longer runs before every dispatch. The next shutdown sweep does too, but
+    only for a session in the default pool. This is the only bound for a session parked in `needs_input` with an open bead, which
     waits for a person by design (a drain session, supervised, is also bounded by `INV-CCH-29`). (b) `ccpool`'s own reaper closes any live session that is not in
     `needs_input` once its last activity is older than `idle_ttl`, and evicts `idle`/`errored`
     sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
@@ -289,17 +290,17 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     session whose turn has already ended, is `INV-CCH-30`'s rule. A handler whose
     daemon is gone cannot deliver its reply; that is not a failure, and it MUST exit normally.
     Only if a handler dies anyway (a crash, a kill) does its lease expire, and the next dispatch
-    of the same role reclaims the session: an idle one is closed and its bead claim released, a
+    of the same role, or the janitor, reclaims the session: an idle one is closed and its bead claim released, a
     working one has its time budget enforced from its launch time. Until then the session runs
     unsupervised. (e) A worktree left with no session row at all
-    is reclaimed by the worktree-keyed sweep of `INV-CCH-19`.
+    is reclaimed by the janitor's worktree-keyed sweep (`INV-CCH-19`).
 - **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
   MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
   or `needs_input` still uses the same directory; the last session to detach removes it. A
   per-bead worktree is shared by every role's session for that bead, so closing the first one
   (or its bead) must not delete the working directory out from under a peer. If the session list
   cannot be read the worktree is left in place. This extends the same sharing rule that
-  `INV-CCH-14` and the dispatch-time reconcile apply to their own purges (bead `pg2-aqpqx`).
+  `INV-CCH-14` and the closed-bead reconcile apply to their own purges (bead `pg2-aqpqx`).
 - **`INV-CCH-16`** — when a ccpool-backed handler session runs under `permissionMode=dontAsk`, the
   prompt the handler sends it MUST carry, ahead of the role's task text, a code-owned notice (not
   editable through any role's prompt file) that writes to the agent runtime's protected paths --
@@ -321,7 +322,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   watchdog, an external idle-timeout, eviction or operator close), and any dispatch ended by daemon
   shutdown are exempt; the shutdown sweep owns that teardown. A session that is not yet quiet is
   left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
-  is logged and the session is left to `ccpool`'s idle timeout. A settled session's row, whether
+  is logged and the session is left to the closed-bead reconcile (`INV-CCH-41`) and `ccpool`'s idle
+  timeout. A settled session's row, whether
   this close reached it or not, MUST NOT be absorbed by a later dispatch, whatever its event id,
   head or outcome, and whoever closed it: while its handler still holds its lease a later dispatch
   declines, and after that the later dispatch runs in a fresh session of its own (`INV-CCH-30`).
@@ -381,18 +383,28 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     closed, so it is never absorbed: a redelivery of the same dispatch launches a fresh session
     (`INV-CCH-30`). Every reclaim and every orphan hard stop is
     recorded as an event naming the session, bead, role, pool, state, lease expiry and launch time.
-    Not covered, accepted: an orphan is handled only when its OWN role next dispatches (until then
-    only `ccpool`'s idle timeout bounds it); a role with no time budget leaves a `working` orphan
-    alone; and only the time budget is enforced for an orphan, not tokens or cost. Operator ruling
-    (Phillip, 2026-10-05, bead `pg2-g2u9m`); see ADR 0083.
+    **Orphans are one inline unit, and the janitor also reclaims them.** The orphan handling above
+    is ONE unit of work that a dispatch completes, for every orphan of its role and not only those
+    of its own bead, before it checks capacity and before it plans an absorb. It is never split into
+    a fast part and a deferred part, and it reads the pool listing the dispatch's plan also uses (the
+    per-session re-read under the lock stays, because it is the correctness guard). The janitor
+    (`INV-CCH-41`) applies the same rules, per ccpool role, on its schedule, so an orphan of a role
+    that does not dispatch for a long time is reclaimed too; the earlier caveat that an orphan was
+    handled only when its OWN role next dispatched is withdrawn. Not covered, accepted: a role with
+    no time budget leaves a `working` orphan alone; and only the time budget is enforced for an
+    orphan, not tokens or cost. Operator rulings (Phillip, 2026-10-05, bead `pg2-g2u9m`; and
+    2026-10-30, verbatim: "do the orphan processing as one unit of work before"); see ADR 0083 and
+    ADR 0117.
 - **`INV-CCH-19`** — a per-bead worktree, and its `pg-router/<bead>` anchor branch, MUST NOT stay
   behind once nothing can be using it, even when no session row leads to it: a handler killed or
   crashed after it created the worktree but before the session existed, or a session closed
-  (`idle_ttl`, eviction, the operator) before anyone reclaimed its worktree, leaves one. Before
-  checking capacity, a dispatch of a role with worktree isolation MUST therefore scan the worktree
-  directory itself (after the orphan reconcile of `INV-CCH-18`, and bounded to a handful of removals
-  per dispatch) and remove a worktree and its anchor branch only when ALL of the following hold,
-  each re-checked while holding an exclusive per-bead lock:
+  (`idle_ttl`, eviction, the operator) before anyone reclaimed its worktree, leaves one. The
+  janitor (`INV-CCH-41`) MUST therefore scan the worktree directory itself, per role with worktree
+  isolation, after that role's orphan reconcile (`INV-CCH-18`) and bounded per run, and remove a
+  worktree and its anchor branch only when ALL of the following hold, each re-checked while holding
+  an exclusive per-bead lock. A dispatch MUST NOT scan the directory before it checks capacity; the
+  one thing it keeps is the same guarded examination of its OWN bead's worktree, before it prepares
+  that worktree, so a worktree its own bead leaked is not reused as if it were fresh:
   - it is a linked worktree directly under the worktree directory whose checked-out branch is
     exactly its own anchor branch, and git does not hold it locked;
   - it is older than a grace window (the launch wait plus the lease TTL);
@@ -411,22 +423,23 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
 
   A session list that cannot be read, a lock that cannot be taken, or a missing lock directory
   means no action. Each removal is logged and recorded as an event naming the bead, role, worktree
-  and age. A worktree that is kept for any reason is left for a later dispatch or for
+  and age. A worktree that is kept for any reason is left for a later janitor run or for
   `pg-disk-reclaimer`. This closes the gap `INV-CCH-15` and the session-keyed reconciles leave: each
   of them keys on a session row. The live-process guard exists because only the dispatching role's
   own pool is visible to the row guard, and a per-bead worktree is shared by every role's session
   for the bead: a session of another role whose handler is gone (spared at a daemon restart) shows
   in no visible row and holds no lock, yet its agent process is still running in the worktree, and
   reclaiming it leaves that process in a deleted directory (bead `pg2-e5yw3`). Not covered,
-  accepted: a worktree is reclaimed only when SOME worktree-isolation role next dispatches (until
-  then it only costs disk); a clean, commit-free worktree whose session in another role's pool has
+  accepted: a worktree is reclaimed only when the janitor next runs (until then it only costs disk); a clean, commit-free worktree whose session in another role's pool has
   no running process is removable (the same blind spot `INV-CCH-15` has, now bounded to sessions
   that are not running); and a session row
   left in `starting`, `ready`, `working` or `errored` by a killed handler is bounded by
   `INV-CCH-18`'s lease, not by this invariant (a lease-bearing row is reclaimed or budget-stopped
   there, and its worktree follows it; a leaseless one is bounded by `ccpool`'s idle timeout, after
   which this invariant reclaims its worktree). Follow-up to bead `pg2-w3usi`; bead `pg2-ganjb`;
-  see ADR 0084.
+  see ADR 0084. The scan moved from every dispatch to the janitor by operator ruling (Phillip,
+  2026-10-30, verbatim: "proceed, don't worry about linux machine support for the handler/daemn",
+  given in reply to a recommendation to approve this change); see ADR 0117.
 
 - **`INV-CCH-20`** — a session's pool record MUST NOT be deleted until its per-bead worktree has
   been removed or confirmed gone; an interrupted removal MUST be retried by the next reconcile of
@@ -441,14 +454,15 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   removed, `INV-CCH-39`) is purged in one step, as is a session whose worktree another
   live session of the pool still uses (`INV-CCH-15`; any state, since a redispatch for the bead
   reuses the directory). A failed or interrupted removal leaves the record in place. Each
-  dispatch-time reconcile of the pool MUST first retry at most one such record, whether or not its
+  closed-bead reconcile of the pool (a janitor run, or a dispatch at capacity pressure,
+  `INV-CCH-41`) MUST first retry at most one such record, whether or not its
   session is still live (a live one that is not `starting`, `ready` or `working` is closed again
   first), and that record MUST be neither closed again as a closed-bead session (`INV-CCH-14`'s
-  dispatch-time reconcile) nor reclaimed as an orphan (`INV-CCH-18`) in the same pass. The
-  default pool's record is also retried by the next shutdown sweep. Bound: the next same-pool
-  dispatch, or for the default pool also the next shutdown; a record with no transcript can be
-  pruned by the pool's own reaper first. Not covered, accepted: the retry removes one worktree
-  per dispatch, so a backlog drains over several dispatches. Bead `pg2-kqegi`; closes the gap in
+  closed-bead reconcile) nor reclaimed as an orphan (`INV-CCH-18`) in the same pass. The
+  default pool's record is also retried by the next shutdown sweep. Bound: the next closed-bead
+  reconcile of the same pool, or for the default pool also the next shutdown; a record with no
+  transcript can be pruned by the pool's own reaper first. Not covered, accepted: the retry removes
+  one worktree per reconcile, so a backlog drains over several runs. Bead `pg2-kqegi`; closes the gap in
   which a purge-first teardown left a half-removed worktree no record led to (`pg2-me0t1`).
 
 - **`INV-CCH-21`** — a role with worktree isolation MAY be configured to pre-fetch. When it is,
@@ -613,7 +627,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   negative override is rejected, not read as "disable the check". A handler-wide window of zero or
   less (the check disabled) is an operator switch no role override re-enables. The override
   applies to the dispatch-time cleanup and close of that role's own dispatches; the closed-bead
-  reconcile and the default-pool stale-session pass act on sessions of every role and keep the
+  reconcile and the default-pool stale-session pass (run by the janitor, and the closed-bead
+  reconcile also at capacity pressure, `INV-CCH-41`) act on sessions of every role and keep the
   handler-wide window. **Why.** While a finished session sits idle and unclosed it still counts
   against the pool's `max_sessions`, because capacity counts every live session that is not
   `needs_input`; the handler closes the session only after the quiet window and the worktree
@@ -646,14 +661,17 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   item 3 and `pg2-vlk1f`; see ADR 0082.
 
 - **`INV-CCH-24`** — the handler's lock directory MUST NOT grow without bound. Every session and
-  every per-bead worktree leaves one empty lock file there (`INV-CCH-18`, `INV-CCH-19`), so a
-  dispatch of a role with worktree isolation MUST also remove a lock file, and only one for which
-  ALL of the following hold: its name ends in `.lock`; nothing has acquired it for more than seven
+  every per-bead worktree leaves one empty lock file there (`INV-CCH-18`, `INV-CCH-19`), so the
+  janitor (`INV-CCH-41`) MUST also remove lock files, once per lock directory per run and after its
+  worktree sweep, and only one for which ALL of the following hold (a dispatch does not run this
+  collection): its name ends in `.lock`; nothing has acquired it for more than seven
   days (each acquisition refreshes its modification time); and the lock can be taken exclusively
   without waiting, so one held by any live dispatch or reclaimer, shared or exclusive, is never
   removed. Removal MUST NOT weaken the lock's mutual exclusion: a taker that had the file open
   when it was removed MUST retry on the file that now exists rather than report a lock it does not
-  hold. A removal that fails is logged-and-ignored, never a dispatch failure. Bead `pg2-bjhoq`.
+  hold. A removal that fails is logged-and-ignored, never a dispatch or janitor failure. Bead
+  `pg2-bjhoq`. The collection moved from every dispatch of a worktree-isolation role to the
+  janitor (operator ruling, Phillip, 2026-10-30; ADR 0117).
 
 - **`INV-CCH-25`** — the tool grants a dispatched session starts with are the handler-wide list
   plus, for a role that sets them, that role's own extra grants, and no other role sees them. The
@@ -844,7 +862,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     logged once (`reminder-suppressed`, reason `needs_input`). The wrap-up that follows the 90%
     cancel is held the same way when the cancel left the session in `needs_input`.
   - **Not covered, accepted.** An orphan in `needs_input` (`INV-CCH-18`) is still left alone: its
-    handler is gone, and the orphan reconcile runs only when its role next dispatches.
+    handler is gone, and the orphan reconcile runs when its role next dispatches and in each
+    janitor run (`INV-CCH-41`).
 
   **Why.** Six sessions (five of them drain sessions) stalled on a permission dialog nobody could
   answer between 2026-10-10 and 2026-10-13, the longest for about 80 minutes, each holding its bead's
@@ -919,13 +938,16 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   - **Redelivered finished work.** A redelivery of an event whose attempt has already settled (the
     narrow crash window, or a daemon restart that lands just as the attempt settles) is a dispatch
     like any other. A role with a pre-launch check (`INV-CCH-22`) completes it as skipped at zero
-    model cost when its bead is already closed, and the dispatch-time reconcile (`INV-CCH-14`) usually purges
-    the settled session of a closed bead before the dispatch looks for one.
+    model cost when its bead is already closed, and the closed-bead reconcile (`INV-CCH-14`,
+    `INV-CCH-41`) usually purges the settled session of a closed bead before the dispatch looks for
+    one, because the janitor runs it on a schedule and a dispatch that finds its pool full runs it.
+    A dispatch that finds free capacity does not run it, so it may still see that settled session;
+    it is never absorbed.
 
   **Not covered, accepted.**
   - A role without a pre-launch check launches one fresh session for a dispatch whose bead is
     already closed: a redelivered event, or an event that was declined while an earlier attempt ran
-    and closed the bead. That was already the outcome whenever the dispatch-time reconcile purged
+    and closed the bead. That was already the outcome whenever the closed-bead reconcile purged
     the settled session first, which is the usual case.
   - A declined event is re-offered only until it expires (`INV-EVT-4`): a born-expired event is
     dropped at once and re-derived on its source's next query, and an event of another type can
@@ -955,7 +977,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   `pg2-afre3`; the outcome of the dispatch, `pg2-tc9c3`) left another case open. The ruling flips
   the default instead of adding a fourth bound. Considered and rejected: keeping a settled session
   absorbable when it served the same event at the same head and its dispatch completed the bead.
-  The dispatch-time reconcile already purges such a session first in the usual case, a pre-launch
+  The closed-bead reconcile already purges such a session first in the usual case, a pre-launch
   check answers the redelivery at zero model cost, and keeping it would keep alive the one path
   behind every false budget stop so far, here on a bead that is already done.
 
@@ -1230,8 +1252,8 @@ changes a core gate or `INV-LIFE-2`.
       without knowing the role's isolation, the type is stamped on the session row at dispatch
       (`pgrouter.keep_worktree`); a row carrying it is purged and its directory is never removed, even
       when the directory lies under the handler's worktree directory. The dispatch-end cleanup, the
-      abandoned-worktree reclaim, the orphan reconcile and the worktree-keyed sweep (`INV-CCH-19`) are
-      scoped to the `worktree` isolation and never act on it; the sweep also matches only a worktree
+      abandoned-worktree reclaim, the orphan reconcile and the worktree-keyed sweep (`INV-CCH-19`,
+      which the janitor runs, `INV-CCH-41`) are scoped to the `worktree` isolation and never act on it; the sweep also matches only a worktree
       directly under the worktree directory on its own `pg-router/<bead>` branch, which a
       `drain/<bead>` worktree is not.
     - **Access is NOT enforced read-only.** The session is an ordinary session and can write in the
@@ -1260,3 +1282,58 @@ changes a core gate or `INV-LIFE-2`.
   so. **Not decided here.** The model of a subagent a session starts: that is the session's own
   agent configuration, not this module's (for the drain, ADR 0113 "Drain subagents are named agents
   with their own model" settles it).
+
+- **`INV-CCH-41`** <!-- uuid: 0c1a76a6-a616-4426-95f5-e903126ac521 --> — housekeeping MUST NOT sit on a dispatch's path: a dispatch pays
+  only for what THAT call needs, and the rest of the hygiene runs on a schedule, once per pool, in a
+  **janitor**. A deployment MAY run without a janitor only while the transitional `inlineSweeps`
+  switch below is on.
+  - **What the janitor does.** One janitor run performs, per pool, the closed-bead reconcile
+    (`INV-CCH-14`, `INV-CCH-20`), the default-pool stale-session pass and the lock-file collection
+    (`INV-CCH-24`); and, per ccpool role, the orphan reconcile (`INV-CCH-18`) and, for a role with
+    worktree isolation, the worktree-keyed sweep (`INV-CCH-19`). It applies the rules of those
+    invariants unchanged; this invariant adds only where and when they run. The pool-level passes
+    run once per distinct pool however many roles share it, including a role on the default pool
+    and a role whose own pool is unset.
+  - **Single-flight.** At most one janitor run is active on a machine. A run that finds another
+    active MUST do nothing, report that one is already running, and end as a success, never as a
+    failure.
+  - **Bounded.** A run has a wall-clock deadline, shorter than the interval at which it is
+    scheduled, and each role gets a share of it, with the role the run starts on rotated between
+    runs, so one slow role or one slow worktree cannot starve the others on every run. A run that
+    reaches its deadline returns what it did and ends as a success; the outcome is in its record.
+    Each pass is best effort: a pass that fails does not stop the others.
+  - **Observable.** Every run records one event naming the run's outcome (completed, skipped
+    because another run was active, or deadline reached), each pass's elapsed time and the count of
+    things it reclaimed, and emits a heartbeat the operator can alert on (a last-success time, the
+    run's duration, per-pass error and reclaim counts). A janitor that stops running MUST be
+    detectable as stale.
+  - **Dry run.** An operator MUST be able to ask a janitor run what each pass WOULD reclaim,
+    without it reclaiming anything.
+  - **Capacity pressure in a dispatch.** A dispatch handles its role's orphans first (`INV-CCH-18`).
+    It then checks capacity (`INV-CCH-6`). When the pool is full and no usage limit is in force, it
+    MUST run the closed-bead reconcile of its pool once and re-check capacity once: if a slot is now
+    free it proceeds, and if not it declines exactly as a full pool always has, with the same
+    decline reason and kind, the detail text saying that a reconcile was tried. It MUST NOT loop. A
+    reconcile that cannot run, or that errors, still ends in that clean decline. Because a pool that
+    stays full would otherwise pay the reconcile on every re-offer, a decline-time reconcile that
+    found nothing MUST be remembered per pool for a short interval, and a decline inside the
+    interval MUST NOT reconcile again. A dispatch MUST NOT run the default-pool stale-session pass,
+    the worktree-keyed sweep or the lock-file collection.
+  - **Boot.** The daemon starts no role's dispatch behind a startup hook: the handler's startup
+    hook (`postStartup`) validates the request, starts one janitor run without waiting for it, and
+    replies `ok`. The single-flight rule makes that run harmless beside the scheduled one. What
+    protects a role's first dispatch after a boot is the capacity-pressure reconcile, the inline
+    orphan unit and that janitor run.
+  - **Transitional switch.** While the handler's launch configuration key `inlineSweeps` is on
+    (the default until the janitor is verified live), a dispatch keeps running the passes it ran
+    before this invariant. The switch is removed, with its on branch, once the change is stable.
+  - **Scope.** The janitor and its schedule are required on macOS only; no Linux supervisor is
+    required of the handler or the daemon.
+  - **Why.** The inline passes ran before every dispatch and at every boot: four roles hit the
+    five-minute startup bound at one boot, a dirty worktree was re-examined with `git status` 271
+    to 508 times, and only the closed-bead reconcile was often productive (339 dispatch-time hits
+    against 3 leaked worktrees, 17 stale locks and 0 orphans in the same period). Operator ruling
+    (Phillip, 2026-10-30), verbatim: "proceed, don't worry about linux machine support for the
+    handler/daemn", given in reply to the plan and to a recommendation to approve this change;
+    orphans stay inline as one unit (verbatim: "do the orphan processing as one unit of work
+    before"). Epic `pg2-fx5x0l`; see ADR 0117.

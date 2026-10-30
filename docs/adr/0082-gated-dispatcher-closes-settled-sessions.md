@@ -15,6 +15,8 @@
 > and gone does not close it again). The rest of item 4 is kept below, marked superseded, as the
 > record of what it replaced.
 
+> **Later note (2026-10-30, ADR 0117, epic `pg2-fx5x0l`):** note only, no decision here changes. The hygiene passes this ADR describes as running before a dispatch's capacity check (closed-bead reconcile, default-pool pass, worktree-keyed sweep, lock garbage collection) now run in the handler's janitor, and a dispatch runs the closed-bead reconcile only when its pool is full; orphan handling before the capacity check is unchanged.
+
 ## Context
 
 ADR 0072 made the pool's cap an admission gate: a programmatic dispatcher does not launch at

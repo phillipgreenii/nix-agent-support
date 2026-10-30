@@ -42,7 +42,8 @@ evaluation time, that every role using that adapter has set it**, so a role cann
 survival. **Rejected:** the adapter declaring survival in its `postStartup` reply, because
 `postStartup` runs only after boot, so the choice would have to move after listener registration (a
 reordering of boot); and deciding from the handler's name, which the core must not know
-(`GOAL-MIN-1`).
+(`GOAL-MIN-1`). A role's `postStartup` hook, whatever it does, never holds that role's first
+dispatch back (`DEC-WIRE-3`'s amendment of 2026-10-30).
 
 **The path per role (S5).** The core chooses between two dispatch paths **per role**, by whether the
 role sets `handler`:

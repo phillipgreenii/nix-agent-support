@@ -1,8 +1,10 @@
 # A worktree-keyed sweep reclaims per-bead worktrees no session row leads to
 
-**Status**: Accepted (amends 0083; follows `pg2-w3usi`)
+**Status**: Accepted (amends 0083; follows `pg2-w3usi`); amended 2026-10-30 by 0117 (hygiene passes move to a janitor)
 **Date**: 2026-10-06
 **Deciders**: Phillip Green II
+
+> **Later note (2026-10-30, ADR 0117, epic `pg2-fx5x0l`):** the worktree-keyed sweep no longer runs before a dispatch's capacity check. The janitor runs it, bounded per run, on a schedule; a dispatch keeps only a check of its own bead's leaked worktree before it prepares one. The guards, the per-bead worktree lock and the never-force removal are unchanged. Operator ruling (Phillip, 2026-10-30), verbatim: "proceed, don't worry about linux machine support for the handler/daemn".
 
 ## Context
 

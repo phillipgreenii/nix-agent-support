@@ -129,25 +129,39 @@ Extensions:
   available to this very dispatch. If this dispatch is instead a redelivery of the event an orphan
   was launched for, and the orphan's turn is still in progress, it absorbs the orphan (2k): it
   takes over the lease and keeps the orphan's original launch time as the start of its budget.
+  This is ONE unit of work a dispatch finishes for all of its role's orphans before it checks
+  capacity. A role that does not dispatch for a long time does not leave its orphans behind: the
+  janitor (2y) reclaims them on its schedule under the same rules.
 - 2e. An earlier dispatch's handler died after it created the per-bead worktree but before the
   session existed (or a session was closed by `ccpool` before anyone reclaimed its worktree), so no
-  session row leads to the worktree. Before checking capacity this module scans the worktree
+  session row leads to the worktree. The next janitor run (2y), not a dispatch, scans the worktree
   directory (`INV-CCH-19`) and removes each worktree, with its anchor branch, that is old enough,
   clean, holds no commit the canonical clone lacks, is not locked by git, is named by no open or
   live session row, is not the working directory of any live process (so a spared session of
   another role's pool is left alone), and is not held by a live dispatch. Anything else is kept and logged. Every
   dispatch of a worktree-isolation role holds a shared lock on its bead's worktree from before it
   creates the worktree until it returns, which is how a live dispatch is told from a dead one.
-  The same pass removes lock files nothing has acquired for over seven days and nobody holds
-  (`INV-CCH-24`), so the lock directory stays bounded.
+  The same run removes lock files nothing has acquired for over seven days and nobody holds
+  (`INV-CCH-24`), so the lock directory stays bounded. A dispatch still examines its OWN bead's
+  worktree, under the same guards, before it prepares that worktree.
 - 2f. An earlier teardown of a session in a per-bead worktree was interrupted (a restart, a crash,
   a slow removal) after the session was closed but before its worktree was gone, so its pool
-  record was kept (`INV-CCH-20`). Before checking capacity this module retries one such record: it
+  record was kept (`INV-CCH-20`). At the pool's next closed-bead reconcile (a janitor run, or a
+  dispatch that finds the pool full, 2y) this module retries one such record: it
   removes the worktree and its anchor branch from the repository root (or, if the directory is
   already gone or git no longer knows it, deletes the husk and prunes), and then purges the
   record. If another live session still uses the worktree (`INV-CCH-15`), the record is purged and
-  the worktree is left for that session. A failed retry leaves the record for the next dispatch.
+  the worktree is left for that session. A failed retry leaves the record for the next reconcile.
   Until then the record is never absorbed (`INV-CCH-30`) and never reclaimed as an orphan.
+- 2y. Hygiene runs off the dispatch path (`INV-CCH-41`). On a schedule, and once when the daemon
+  starts, the janitor runs once per pool (closed-bead reconcile, default-pool stale-session pass,
+  lock-file collection) and once per ccpool role (orphans, then the worktree sweep), under a
+  deadline, and records what each pass took and reclaimed. A second run that starts while one is
+  active does nothing and succeeds. A dispatch that finds its pool full runs the closed-bead
+  reconcile once and re-checks capacity once: a freed slot lets it launch, and no freed slot ends in
+  the usual decline that says a reconcile was tried; a second decline of the same pool inside a
+  short interval does not reconcile again. A dispatch never sweeps worktrees or lock files itself.
+  The daemon holds no role's first dispatch behind a startup hook.
 - 2g. A role with worktree isolation is configured to pre-fetch (`INV-CCH-21`), as a review of a
   pull request is: after the per-bead worktree exists and before the session launches, this module
   makes the item's commit local (fetching it only when it is not), checks the worktree out at it,

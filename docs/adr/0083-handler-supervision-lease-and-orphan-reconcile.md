@@ -1,6 +1,6 @@
 # A handler's supervision lease, and an orphan reconcile that acts on it
 
-**Status**: Accepted (amends 0072 and 0082); amended 2026-10-13 by bead `pg2-zybju`: a drain session stuck in `needs_input` is cleared after a bound (see the Amendment at the end); Decision item 5 amended 2026-10-13 by 0094 (bead `pg2-yunrp`)
+**Status**: Accepted (amends 0072 and 0082); amended 2026-10-13 by bead `pg2-zybju`: a drain session stuck in `needs_input` is cleared after a bound (see the Amendment at the end); Decision item 5 amended 2026-10-13 by 0094 (bead `pg2-yunrp`); amended 2026-10-30 by 0117 (hygiene passes move to a janitor)
 **Date**: 2026-10-06
 **Deciders**: Phillip Green II
 
@@ -9,6 +9,8 @@
 > dispatch that supervises it clears a drain session that has sat in `needs_input` past a bound
 > (default 15 minutes): Escape, then close and release its claim. The orphan reconcile itself still
 > leaves a `needs_input` orphan alone.
+
+> **Later note (2026-10-30, ADR 0117, epic `pg2-fx5x0l`):** the orphan reconcile before a dispatch's capacity check is KEPT, unchanged in semantics (operator ruling, Phillip, 2026-10-30: "do the orphan processing as one unit of work before"). Two things change. The janitor, a scheduled subcommand of the handler, now reclaims the orphans of every ccpool role too, so the Decision's "not covered, accepted" caveat that an orphan is handled only when its OWN role next dispatches no longer holds. The dispatch also no longer runs the other housekeeping passes before its capacity check.
 
 ## Context
 

@@ -418,6 +418,20 @@ It exists so a FUTURE participant with genuine boot-time setup (starting a daemo
 cache) has a hook to use, without a later change having to invent a THIRD lifecycle message and
 retrofit every existing handler to answer it.
 
+**Amendment 2026-10-30 (the per-role dispatch gate is removed; ADR 0117 in
+`phillipgreenii-nix-agent-support`).** The long-running daemon had a rule this decision never
+recorded: it ran each enabled role's `postStartup` in its own goroutine, bounded by a five-minute
+timeout, and held that role's FIRST dispatch until its own hook returned, failed or timed out (it
+never waited for another role's hook, and producers never waited; if shutdown was requested first the
+gate stayed closed). The reason was that the ccpool handler's boot-time reconcile closed sessions
+whose bead had closed before the role's new dispatches started. That hook took minutes under load
+(four roles reached the bound at one boot), so the gate is **removed**: a hook gates nothing, and the
+timeout goes with it. The wire contract (`handler.postStartup` and its reply) is unchanged. The
+handler's own hygiene moves to a scheduled janitor (`INV-CCH-41`), and its `postStartup` only starts
+one janitor run and replies `ok`. This sharpens decision #2: a hook MAY do real boot-time work, but
+MUST NOT make a dispatch wait for it. **Rejected:** keeping the gate with a shorter timeout, because
+any bound still delays the first dispatch of a role by the hook's cost.
+
 **Same transport, no new mechanism.** `DEC-WIRE-1`'s own text already states the general
 principle this decision merely instantiates twice: "a gRPC or in-code transport that carries the
 same message schema conforms equally." `postStartup`/`preShutdown` add two subcommand names and

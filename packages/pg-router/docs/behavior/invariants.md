@@ -465,7 +465,8 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   problems as its reason. The core declines every offer for it as `unavailable` (`INV-FAIL-1`), so
   the wiring stays valid (`INV-WORKFLOW-1`), and **keeps the role's unexpired events**; an event
   born expired is dropped as for any decline (`INV-EVT-4`). The role's `postStartup` still runs,
-  because work it accepted before a restart outlives the restart. The reason **MUST** be visible in
+  because work it accepted before a restart outlives the restart; it never holds the role's
+  dispatch back. The reason **MUST** be visible in
   the logs, a metric, the TUI and `status`; **no alert** is raised for it. An adapter that has no
   `validate` subcommand answers with the usage exit, is reported **not supported** and is **not**
   marked unavailable on that account. An error in the core's own configuration still refuses to
@@ -614,7 +615,8 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   earlier core left owed — above all a dispatch that **survives the core's shutdown** (`INV-LIFE-1`,
   `INTF-HANDLER`'s `stopping` state) — **MUST** make its first offer pass over what the queue
   restored **before** its first pull-source query, once its participants' `postStartup` hooks have
-  returned, and **MUST NOT** make it once shutdown has been requested. A fresh core has no last query
+  been started (the core **MUST NOT** wait for them to return, and **MUST NOT** hold any role's
+  dispatch behind its hook, `INTF-HANDLER`), and **MUST NOT** make it once shutdown has been requested. A fresh core has no last query
   time for any source, so its first source pass queries all of them one after another; without this
   rule a handler still working on the surviving dispatch is re-offered its event (and absorbs it,
   `INV-EVT-2`) only after the slowest of them, and the handler's in-flight status reads idle for

@@ -264,7 +264,8 @@ flowchart LR
 
 **(b) Decided and built: offer before producing, at startup only.**
 
-- The daemon **MUST** run one dispatch pass after its `postStartup` hooks have returned and before its
+- The daemon **MUST** run one dispatch pass after its `postStartup` hooks have been started (not
+  awaited, `DEC-WIRE-3`'s amendment of 2026-10-30) and before its
   first producer tick, and **MUST NOT** run it once shutdown has been requested (the rule every
   later pass already follows). It **SHOULD** log the pass with the number of offers it launched.
   Every later iteration is unchanged.
