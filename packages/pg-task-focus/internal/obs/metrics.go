@@ -152,6 +152,12 @@ func New(version string, schemaVersion int, started time.Time) *Metrics {
 		m.AppendFailures.WithLabelValues(s).Add(0)
 	}
 	m.AlertFailures.Add(0)
+	for _, r := range command.Reasons() {
+		m.Rejections.WithLabelValues(string(r)).Add(0)
+	}
+	for _, t := range event.Types() {
+		m.EventsAppended.WithLabelValues(string(t)).Add(0)
+	}
 	// The closed-set counters are present from the first scrape too, so a
 	// dashboard panel or an increase() over them has a series to read.
 	for _, r := range ReloadResults {
