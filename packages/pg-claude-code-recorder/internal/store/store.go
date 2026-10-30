@@ -168,7 +168,9 @@ func (s *Store) openDB(path string) error {
 		return err
 	}
 	w.SetMaxOpenConns(1)
-	if _, err := w.Exec(schemaSQL + derivedSQL); err != nil {
+	// One transaction: with synchronous=FULL each statement of a multi-statement
+	// Exec would otherwise sync on its own (the FTS5 tables add many).
+	if err := execInTx(w, schemaSQL+derivedSQL); err != nil {
 		_ = w.Close()
 		return err
 	}
@@ -411,3 +413,15 @@ var errNotFound = errors.New("store: not found")
 
 // ErrNotFound is returned by lookups that find nothing.
 var ErrNotFound = errNotFound
+
+func execInTx(db *sql.DB, q string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(q); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
