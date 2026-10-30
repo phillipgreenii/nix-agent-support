@@ -17,7 +17,7 @@ setup() {
 teardown() {
   [ -n "$PARENT" ] && kill -9 "$PARENT" 2>/dev/null || true
   [ -f "$PIDF" ] && kill -9 "$(cat "$PIDF")" 2>/dev/null || true
-  rm -rf "$STATE" "$OUT" "$ERR" "$PIDF" "$OUT2"
+  rm -rf "$STATE" "$OUT" "$ERR" "$PIDF" "$OUT2" "$STATE.stale-inode"
 }
 
 # Starts the listener as a child of a throwaway bash (its $PPID), which stays alive until killed.
@@ -134,13 +134,19 @@ mode_of() { ls -ld "$1" | cut -c1-10; }
     bash "$1" >"$2" 2>"$3" & first=$!
     for _ in $(seq 1 50); do [ -p "$5"/inbox/$$.fifo ] && break; sleep 0.1; done
     kill -9 $first
+    ls -i "$5"/inbox/$$.fifo | cut -d" " -f1 >"$5.stale-inode"
     bash "$1" >"${6:?second output path required}" 2>"$3" & echo $! >"$4"
     wait' _ "$LISTEN" "$OUT" "$ERR" "$PIDF" "$STATE" "$OUT2") &
   PARENT=$!
   FIFO="$STATE/inbox/$PARENT.fifo"
   wait_for 6 test -s "$PIDF"
-  wait_for 4 test -p "$FIFO"
-  printf 'ping second\n' >"$FIFO"
+  stale="$(cat "$STATE.stale-inode")"
+  # the second listener replaces the stale FIFO with a new one (a new inode)
+  fresh_inode() { [ "$(ls -i "$FIFO" | cut -d' ' -f1)" != "$stale" ]; }
+  wait_for 6 fresh_inode
+  exec 9<>"$FIFO" # read-write open never blocks, whoever is reading
+  printf 'ping second\n' >&9
+  exec 9>&-
   wait_for 3 grep -qx 'ping second' "$OUT2"
 }
 
