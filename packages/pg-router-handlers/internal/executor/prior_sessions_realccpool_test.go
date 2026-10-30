@@ -43,6 +43,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
+	"github.com/phillipgreenii/pg-router-handlers/internal/recordertest"
 	"github.com/phillipgreenii/pg-router-handlers/internal/report"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/usage"
@@ -106,6 +107,7 @@ type realSandbox struct {
 	tmuxDir string // TMUX_TMPDIR
 	fake    string // the fake claude
 	pools   atomic.Int32
+	rec     *recordertest.Recorder // the in-process recorder ccpool's fact reads and capacity gate use
 }
 
 // shortTempRoot returns a temp base short enough that a tmux socket under it
@@ -164,6 +166,7 @@ func newRealSandbox(t *testing.T) *realSandbox {
 		t.Setenv(k, d)
 	}
 	t.Setenv("CCPOOL_BIN", ccpoolBin)
+	sb.rec = recordertest.Start(t, os.Getenv("XDG_STATE_HOME")) // ccpool reads its facts from the recorder
 	for _, d := range []string{"bin", "plugin", "locks", "pools", "work"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
 			t.Fatal(err)

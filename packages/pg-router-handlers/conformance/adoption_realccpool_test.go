@@ -49,6 +49,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
+	"github.com/phillipgreenii/pg-router-handlers/internal/recordertest"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -195,6 +196,7 @@ func newAdoptSandbox(t *testing.T) *adoptSandbox {
 	}
 	t.Setenv("CCPOOL_BIN", ccpoolBin)
 	t.Setenv("CCPOOL_POOL", sb.poolDir)
+	recordertest.Start(t, os.Getenv("XDG_STATE_HOME")) // ccpool reads its facts from the recorder
 	for _, d := range []string{sb.poolDir, sb.fakeBin, sb.stateDir, filepath.Join(root, "work"), filepath.Join(root, "wt"), filepath.Join(root, "plugin")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)

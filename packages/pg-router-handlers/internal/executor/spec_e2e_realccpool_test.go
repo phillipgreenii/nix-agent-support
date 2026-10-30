@@ -264,6 +264,9 @@ func TestSpecE2E(t *testing.T) {
 		if s := p.mustRow("k20-a-1"); s.Live {
 			t.Fatalf("precondition: k20-a-1 must be closed; %+v", s)
 		}
+		// ccpool's resumability is the recorder's originals-present fact: let the
+		// recorder see the transcript the stub wrote.
+		sb.rec.Know(p.mustRow("k20-a-1").TranscriptPath)
 		raw, err := os.ReadFile(specOf("k20-a"))
 		if err != nil {
 			t.Fatal(err)
