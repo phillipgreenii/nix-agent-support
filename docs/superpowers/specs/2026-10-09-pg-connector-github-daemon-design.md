@@ -631,12 +631,12 @@ submits, `pkg/provider/pr/iface.go`) and `rerun_failed`.
 
 - **Preconditions read origin.** A write MAY read origin for its own preconditions (the live head that
   `INV-REVHEAD-3` requires, the existing pending comments), outside the cache.
-- **Serialization.** Writes to one PR are serialized; writes to different PRs run in parallel. Until the
-  cleanup phase the daemon MUST keep the existing posted-review sidecar files and their cross-process
-  `flock` at their current path (`cmd/pg-connector-pr-github/internal/posted/sidecar.go`, `lock.go`) as
-  the single source of truth, so a rollback to the old binary sees every review posted since cutover and
-  the operator can still delete a record by hand. A corrupt sidecar stays a refusal (`ErrCorrupt`). The
-  move into the store happens in the cleanup phase, once rollback is no longer possible.
+- **Serialization.** Writes to one PR are serialized in-process; writes to different PRs run in parallel.
+  The posted-review records live in the daemon's store (table `posted_review`, one row per
+  owner/repo/number); there is no per-PR cross-process lock (the daemon is single-instance). Records from
+  the old backend's `<state home>/posted` files are imported once at daemon start (store wins on conflict;
+  the files are left untouched). A corrupt record stays a refusal (`ErrCorrupt`). (Operator ruling,
+  Phillip, 2026-10-30: fix forward, no soak, old backends are not running.)
 - **Idempotence.** A client that retries after `unavailable` (for example a daemon crash after GitHub
   accepted the write) MUST NOT create duplicates; the existing per-comment fingerprints (`AlreadyPresent`)
   provide this for `review_submit`. `rerun_failed` on runs already re-running is a no-op answer.
