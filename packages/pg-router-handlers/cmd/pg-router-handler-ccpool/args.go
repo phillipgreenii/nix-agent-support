@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|split|query|version|help> [flags]"
+const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|janitor|split|query|version|help> [flags]"
 
 const helpText = `pg-router-handler-ccpool — the ccpool adapter for pg-router.
 
@@ -72,6 +72,17 @@ Subcommands:
                  capacity as the ccpool_pool_capacity OTLP gauge (--pool
                  <name>=<dir>, repeatable; OTEL_* env from the caller; failures
                  on stderr).
+  janitor       NOT part of the wire contract (never spawned by core): the scheduled
+                 housekeeping run (INV-CCH-41), started by a launchd agent or by
+                 hand. --config names the launch config, one --role-file per
+                 ccpool role ({"role":{"name","config"}}); --deadline bounds the
+                 run (default 4m, shared out per role, first role rotated each
+                 run); --dry-run lists what each pass would reclaim and changes
+                 nothing. Per pool: the closed-bead reconcile, the default-pool
+                 pass; per role: orphan reconcile, worktree sweep; then the lock
+                 GC. Single-flight (a second run exits 0, "already running").
+                 Exit 0 for completed, skipped or deadline (the janitor_run event
+                 row says which), 2 for bad flags or unreadable inputs.
   split         NOT part of the wire contract: the split-triage role's write
                  path: split apply <bead-id> (JSON plan on stdin) / split
                  unsplittable <bead-id> (reason on stdin). See: split --help

@@ -9413,9 +9413,56 @@
                       enable = true;
                       intervalSeconds = 30;
                     };
+                    # janitor (bead pg2-fx5x0l.4): its script must name a role
+                    # file for EVERY ccpool role (asserted below).
+                    janitor = {
+                      enable = true;
+                      intervalSeconds = 120;
+                      deadlineSeconds = 60;
+                    };
+                    # the janitor script names the launch config (--config).
+                    launchConfig = {
+                      repoRoot = "/tmp/pg2-fx5x0l.4-janitor-repo";
+                      worktreeDir = "/tmp/pg2-fx5x0l.4-janitor-repo/.worktrees";
+                    };
                   };
                   poolMetricsScript =
                     roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.script;
+                  janitorScript = roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.janitor.script;
+                  janitorRoleFiles =
+                    roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.janitor.roleFiles;
+                  janitorReviewRoleFile = janitorRoleFiles.review;
+                  # Every ccpool-adapter role of the fixture: the janitor MUST
+                  # sweep each of them (a role missing from its list would
+                  # silently never be swept).
+                  fixtureCcpoolRoleNames = lib.attrNames (
+                    lib.filterAttrs (
+                      _: r: baseNameOf r.handler == "pg-router-handler-ccpool"
+                    ) roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.roles
+                  );
+                  # deadline not below interval: the eval-time guard must fire.
+                  janitorBadDeadline = evalHM {
+                    enable = true;
+                    roles = { };
+                    janitor = {
+                      enable = true;
+                      intervalSeconds = 300;
+                      deadlineSeconds = 300;
+                    };
+                  };
+                  firedJanitorAssertion = lib.findFirst (a: a.assertion == false) null janitorBadDeadline.assertions;
+                  # inlineSweeps (bead pg2-fx5x0l.4): off renders `false`, the
+                  # default (launchConfigFile above) renders `true`.
+                  noInlineSweepsLaunchConfigFile =
+                    (evalHM {
+                      enable = true;
+                      roles = { };
+                      launchConfig = {
+                        repoRoot = "/tmp/pg2-fx5x0l.4-repo";
+                        worktreeDir = "/tmp/pg2-fx5x0l.4-repo/.worktrees";
+                        inlineSweeps = false;
+                      };
+                    }).phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
 
                   # Handler-wide pool only (no role with its own pool):
                   # poolMetrics must be accepted (no failed assertion) and
@@ -9677,6 +9724,22 @@
                                           default = pkgs.writeShellScript "unset-pool-metrics-script" "true";
                                         };
                                       };
+                                      # janitor (bead pg2-fx5x0l.4): the group
+                                      # the darwin module mirrors into a LaunchAgent.
+                                      janitor = {
+                                        enable = lib.mkOption {
+                                          type = lib.types.bool;
+                                          default = false;
+                                        };
+                                        intervalSeconds = lib.mkOption {
+                                          type = lib.types.ints.unsigned;
+                                          default = 600;
+                                        };
+                                        script = lib.mkOption {
+                                          type = lib.types.package;
+                                          default = pkgs.writeShellScript "unset-janitor-script" "true";
+                                        };
+                                      };
                                     };
                                   }
                                 );
@@ -9714,6 +9777,19 @@
                     };
                   };
                   darwinWithoutPoolMetrics = evalDarwin { enable = true; };
+
+                  # janitor darwin mirror (bead pg2-fx5x0l.4).
+                  janitorScriptFixture = pkgs.writeShellScript "pg2-fx5x0l.4-fake-janitor" "true";
+                  darwinWithJanitor = evalDarwin {
+                    enable = true;
+                    janitor = {
+                      enable = true;
+                      intervalSeconds = 600;
+                      script = janitorScriptFixture;
+                    };
+                  };
+                  janitorAgent =
+                    darwinWithJanitor.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-janitor";
 
                   # daemon darwin mirror healthCheck regression test (bug
                   # pg2-c6l6g): before this bead, the -daemon LaunchAgent set
@@ -10280,6 +10356,9 @@
                           ownPoolRolesJson
                           poolMetricsScript
                           handlerPoolOnlyScript
+                          janitorScript
+                          janitorReviewRoleFile
+                          noInlineSweepsLaunchConfigFile
                           ;
                       }
                       ''
@@ -10463,6 +10542,29 @@
                         grep -qF -- "--pool handler=/tmp/pg2-h5vno/pg-router-ccpool" "$handlerPoolOnlyScript"
                         ! grep -qF -- "--pool review=" "$handlerPoolOnlyScript"
 
+                        # janitor (bead pg2-fx5x0l.4): role coverage. The roles
+                        # file is rendered independently of the janitor, so every
+                        # ccpool role in it MUST have a --role-file in the script
+                        # (a role missing here would silently never be swept).
+                        for f in "$ownPoolRolesJson"/*.json; do
+                          if [ "$(jq -r .type "$f")" = ccpool ]; then
+                            n="$(jq -r .name "$f")"
+                            grep -qF -- "--role-file " "$janitorScript"
+                            grep -qF -- "janitor-role-$n.json" "$janitorScript" || { echo "janitor script lacks role $n" >&2; exit 1; }
+                          fi
+                        done
+                        grep -qF -- "janitor \\" "$janitorScript"
+                        grep -qF -- "--deadline 60s" "$janitorScript"
+                        grep -qF -- "--config " "$janitorScript"
+                        # the handler-wide pool is exported, so a role without its own pool is swept in it
+                        grep -qF -- "export CCPOOL_POOL=/tmp/pg2-h5vno/pg-router-ccpool" "$janitorScript"
+                        # a role file is the request's role object
+                        [ "$(jq -r .role.name "$janitorReviewRoleFile")" = review ]
+                        [ "$(jq -r .role.config.ccpool.actor "$janitorReviewRoleFile")" = review-actor ]
+                        # inlineSweeps: default true, switchable off
+                        [ "$(jq -r .inlineSweeps "$launchConfigFile")" = true ]
+                        [ "$(jq -r .inlineSweeps "$noInlineSweepsLaunchConfigFile")" = false ]
+
                         # pg-wrap wiring (design ruling 30, bead pg2-12gr4.8.12).
                         toml2json() {
                           python3 -c 'import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))))' "$1"
@@ -10594,6 +10696,35 @@
                 assert
                   darwinWithPoolMetrics.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-pool-metrics".serviceConfig.EnvironmentVariables.OTEL_SERVICE_NAME
                   == "ccpool";
+                # janitor LaunchAgent (bead pg2-fx5x0l.4): a one-shot run on a
+                # StartInterval, niced, running the HM module's rendered script,
+                # logging under janitor-launchd-*.log as a raw logSource.
+                assert janitorAgent.label == "com.phillipg.pg-router-ccpool-handler-janitor";
+                assert janitorAgent.keepAlive == false;
+                assert janitorAgent.runAtLoad;
+                assert janitorAgent.healthCheck == false;
+                assert janitorAgent.serviceConfig.StartInterval == 600;
+                assert janitorAgent.serviceConfig.Nice == 10;
+                assert lib.hasInfix (builtins.unsafeDiscardStringContext "${
+                  janitorScriptFixture
+                }") janitorAgent.script;
+                assert lib.hasSuffix "/pg-router-ccpool-handler/janitor-launchd-stderr.log"
+                  janitorAgent.serviceConfig.StandardErrorPath;
+                assert
+                  darwinWithJanitor.phillipgreenii.observability.logSources.pg-router-ccpool-handler-janitor.format
+                  == "raw";
+                assert lib.hasSuffix "/pg-router-ccpool-handler/janitor-launchd-*.log"
+                  darwinWithJanitor.phillipgreenii.observability.logSources.pg-router-ccpool-handler-janitor.path;
+                # No janitor opt-in, no agent and no log source.
+                assert
+                  !(
+                    darwinWithoutPoolMetrics.phillipgreenii.system.launchdServices.userAgents
+                      ? "pg-router-ccpool-handler-janitor"
+                  );
+                assert
+                  !(
+                    darwinWithoutPoolMetrics.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-janitor
+                  );
                 # No HM user opted into poolMetrics -- no LaunchAgent at all
                 # (zero behavior change).
                 assert
@@ -10678,6 +10809,12 @@
                 assert lib.hasInfix "poolMetrics.enable" firedPoolMetricsAssertion.message;
                 # pg2-h5vno: pool.enable alone satisfies the guard.
                 assert handlerPoolOnlyFailedAssertion == null;
+                # janitor (bead pg2-fx5x0l.4): a role file per ccpool role, and
+                # the deadline-below-interval guard fires.
+                assert fixtureCcpoolRoleNames != [ ];
+                assert lib.attrNames janitorRoleFiles == fixtureCcpoolRoleNames;
+                assert firedJanitorAssertion != null;
+                assert lib.hasInfix "janitor.deadlineSeconds" firedJanitorAssertion.message;
                 assert firedMissingDirAssertion != null;
                 assert lib.hasInfix "ccpool.pool.dir" firedMissingDirAssertion.message;
                 # pg-wrap wiring (design ruling 30, bead pg2-12gr4.8.12): the outputs

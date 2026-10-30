@@ -844,6 +844,41 @@ let
       exec ${ccpoolAdapterBin} pool-capacity${poolArgs}
     '';
 
+  # janitorRoleFile / mkJanitorScript (bead pg2-fx5x0l.4, INV-CCH-41): the
+  # `janitor` option group's script. One `--role-file` per ccpool role, derived
+  # from `ccpoolRoles` (EVERY ccpool-kind role, not only `ccpoolRolesWithOwnPool`
+  # like poolMetrics: a role on the handler-wide pool is swept too, and a role
+  # missing from this list would silently never be swept; the eval test asserts
+  # the coverage). A role file is the same `{"role":{"name","config"}}` object a
+  # dispatch request carries, built from the SAME `roleBodyFor` attrs the join
+  # hands to the pg-router role, so the janitor decodes exactly what a dispatch
+  # does. The janitor has no router environment: when the handler-wide pool is
+  # managed, the script exports CCPOOL_POOL to it, exactly as the daemon's
+  # `handlerCcpoolPool` does for dispatches, so a role without its own pool is
+  # swept in the pool it dispatches into.
+  janitorRoleFile =
+    name: roleCfg:
+    pkgs.writeText "pg-router-ccpool-handler-janitor-role-${name}.json" (
+      builtins.toJSON {
+        role = {
+          inherit name;
+          config = roleBodyFor name roleCfg;
+        };
+      }
+    );
+  janitorRoleFiles = lib.mapAttrs janitorRoleFile ccpoolRoles;
+  mkJanitorScript = pkgs.writeShellScript "pg-router-ccpool-handler-janitor" ''
+    set -eu
+    ${lib.optionalString cfg.pool.enable "export CCPOOL_POOL=${lib.escapeShellArg cfg.pool.dir}"}
+    exec ${ccpoolAdapterBin} janitor \
+      --config ${launchConfigFile} \
+      --deadline ${toString cfg.janitor.deadlineSeconds}s${
+        lib.concatMapStrings (name: " \\\n      --role-file ${janitorRoleFiles.${name}}") (
+          lib.attrNames janitorRoleFiles
+        )
+      }
+  '';
+
   # toolSetGrants (bead pg2-cwn44): the grants of one NAMED tool set from
   # `cfg.toolSets`. An undeclared name is an eval-time error rather than a
   # silently empty grant, so a typo in a role's `toolSets` can never leave the
@@ -1181,6 +1216,7 @@ let
         model
         sessionPrefix
         selfLogin
+        inlineSweeps
         ;
       # allowedTools (this bead, pg2-yybrp): extraAllowedTools is additive --
       # appended (comma-joined) onto allowedTools's own value rather than
@@ -2191,6 +2227,19 @@ in
           empty until a deployment sets it explicitly.
         '';
       };
+      inlineSweeps = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          InlineSweeps in the launch config (bead pg2-fx5x0l.4, INV-CCH-41,
+          ADR 0117): the transitional switch. true (the default) keeps
+          today's behavior, the housekeeping passes running inline before
+          every dispatch and at boot. false is read by the dispatch path (a
+          later phase) once the janitor (`janitor.enable`) is verified live,
+          so the janitor can be deployed and observed first and rolled back
+          by flipping this key.
+        '';
+      };
       confirmIngestSeconds = lib.mkOption {
         type = lib.types.ints.unsigned;
         default = 90;
@@ -2518,6 +2567,52 @@ in
         '';
       };
     };
+    # janitor (bead pg2-fx5x0l.4, INV-CCH-41, ADR 0117): the scheduled home of
+    # the housekeeping passes a dispatch used to run inline. darwin only (the
+    # operator ruled no Linux support for the handler: 2026-10-30), so unlike
+    # poolMetrics there is no systemd timer here; the darwin module mirrors
+    # this group into the LaunchAgent `pg-router-ccpool-handler-janitor`.
+    janitor = {
+      enable = lib.mkEnableOption ''
+        the scheduled `pg-router-handler-ccpool janitor` run (a darwin
+        LaunchAgent, mirrored by `darwin/modules/pg-router-ccpool-handler`):
+        per pool the closed-bead reconcile, the default-pool pass and the
+        lock-file collection, per ccpool role the orphan reconcile and the
+        worktree sweep, single-flight and bounded by `deadlineSeconds`
+      '';
+      intervalSeconds = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 600;
+        description = "Seconds between janitor runs (launchd StartInterval). MUST exceed `deadlineSeconds`.";
+      };
+      deadlineSeconds = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 240;
+        description = ''
+          Wall-clock bound of one run, shared out per role (`--deadline`).
+          MUST be below `intervalSeconds`, or a slow run would overlap its
+          successor (the single-flight lock would then skip it).
+        '';
+      };
+      script = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        description = ''
+          Read-only output: the rendered janitor script (`mkJanitorScript`),
+          run by the darwin LaunchAgent. It names one `--role-file` per ccpool
+          role.
+        '';
+      };
+      roleFiles = lib.mkOption {
+        type = lib.types.attrsOf lib.types.package;
+        readOnly = true;
+        description = ''
+          Read-only output: the rendered role file of every ccpool role the
+          janitor sweeps, keyed by role name (the same set as the script's
+          `--role-file` arguments).
+        '';
+      };
+    };
   };
 
   config = lib.mkMerge [
@@ -2569,6 +2664,9 @@ in
         launchConfigFile = if cfg.enable then launchConfigFile else null;
         # poolMetrics.script: bead pg2-mr0sl.
         poolMetrics.script = mkPoolMetricsScript;
+        # janitor.script / janitor.roleFiles: bead pg2-fx5x0l.4.
+        janitor.script = mkJanitorScript;
+        janitor.roleFiles = janitorRoleFiles;
       };
     }
     (lib.mkIf cfg.enable {
@@ -2663,6 +2761,19 @@ in
             requires `pool.enable = true` or at least one
             `roles.<name>.ccpool.pool.enable = true` entry -- there is no
             dedicated pool to report capacity for otherwise.
+          '';
+        }
+        {
+          # janitor (bead pg2-fx5x0l.4): the run MUST end before the next
+          # starts, and its script reads the launch config, which exists only
+          # while the module is enabled.
+          assertion =
+            !cfg.janitor.enable || (cfg.enable && cfg.janitor.deadlineSeconds < cfg.janitor.intervalSeconds);
+          message = ''
+            phillipgreenii.programs.pg-router-ccpool-handler.janitor.enable
+            requires `enable = true` and `janitor.deadlineSeconds` below
+            `janitor.intervalSeconds` (the run's deadline MUST be shorter than
+            its schedule interval).
           '';
         }
         {

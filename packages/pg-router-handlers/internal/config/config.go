@@ -118,6 +118,12 @@ type Config struct {
 	// gate (bead pg2-4gi2c, INV-CCH-10). The zero-origin default watches
 	// nothing, so a deployment that never sets it is unchanged.
 	OriginProbe OriginProbe
+	// InlineSweeps is the transitional switch of INV-CCH-41 (bead pg2-fx5x0l.4,
+	// ADR 0117): true (the default, today's behavior) keeps the housekeeping
+	// passes running inline before every dispatch and at boot; false is read by
+	// the dispatch path (a later phase) once the janitor is verified live, so the
+	// janitor can be deployed first and rolled back by flipping this key.
+	InlineSweeps bool
 	// ConnectorBinary is the pg-connector executable the review precheck
 	// (INV-CCH-22, bead pg2-5x29j) reads PR merged state and pending-review
 	// state through. Empty means "pg-connector" resolved on PATH. A binary that
@@ -444,6 +450,7 @@ func Default() Config {
 		CancelPct:           0.90,
 		HardPct:             1.00,
 		OriginProbe:         DefaultOriginProbe(),
+		InlineSweeps:        true,
 	}
 }
 

@@ -12,7 +12,7 @@
 // DEC-WIRE-1: JSON on stdin, JSON on stdout, a coarse exit code), the outbound
 // manager-contract subcommands register and self-status (the launchd agent runs
 // register; they speak to the core's socket), the ccpool-specific subcommands
-// origin, pool-capacity, split and query (query is the beads-shaped INTF-SOURCE
+// origin, pool-capacity, janitor, split and query (query is the beads-shaped INTF-SOURCE
 // participant, bead pg2-12gr4.10.7), version and help. An unknown subcommand is
 // a usage error.
 //
@@ -79,6 +79,8 @@ func run(args []string) int {
 		return runSplit(args[1:])
 	case "query":
 		return runQuery(args[1:])
+	case "janitor":
+		return runJanitor(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
 		return conformance.ExitUsage

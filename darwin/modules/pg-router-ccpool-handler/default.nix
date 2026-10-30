@@ -50,6 +50,21 @@ let
     else
       null;
 
+  # janitor (bead pg2-fx5x0l.4, INV-CCH-41): the scheduled housekeeping run,
+  # mirrored from the HM `janitor` group exactly as poolMetrics is (plain
+  # integer `intervalSeconds`, the SAME rendered script re-exposed as
+  # `janitor.script`). Darwin only: the operator ruled no Linux support for the
+  # handler (2026-10-30), so the HM module renders no systemd timer for it.
+  janitorUsers = lib.filter (
+    u: u.phillipgreenii.programs.pg-router-ccpool-handler.janitor.enable or false
+  ) (lib.attrValues hmUsers);
+  janitorEnabledByAnyUser = janitorUsers != [ ];
+  janitorCfg =
+    if janitorEnabledByAnyUser then
+      (lib.head janitorUsers).phillipgreenii.programs.pg-router-ccpool-handler.janitor
+    else
+      null;
+
   pkg = pkgs.pg-router-ccpool-handler;
 
   # XDG_STATE_HOME default for macOS user agents. The launchdServices helper
@@ -203,6 +218,40 @@ in
     (lib.mkIf (poolMetricsEnabledByAnyUser && (obs.enable or false)) {
       phillipgreenii.observability.logSources.pg-router-ccpool-handler-pool-metrics = {
         path = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-*.log";
+        format = "raw";
+      };
+    })
+    (lib.mkIf janitorEnabledByAnyUser {
+      # janitor LaunchAgent (bead pg2-fx5x0l.4): the SAME periodic one-shot shape
+      # as -pool-metrics (keepAlive = false, healthCheck = false, StartInterval),
+      # run niced: it is background hygiene and the host is often loaded. The
+      # script is the HM module's rendered `janitor.script`; hmProfileBin puts
+      # `ccpool`/`bd`/`git` on the bare launchd PATH. The janitor is
+      # single-flight, so a run that outlives its interval just makes the next
+      # one skip.
+      phillipgreenii.system.launchdServices.userAgents.pg-router-ccpool-handler-janitor = {
+        label = "com.phillipg.pg-router-ccpool-handler-janitor";
+        script = ''
+          ${lib.optionalString (
+            hmProfileBin != null
+          ) ''export PATH=${lib.escapeShellArg hmProfileBin}:"$PATH"''}
+          exec ${janitorCfg.script}
+        '';
+        runAtLoad = true;
+        keepAlive = false;
+        healthCheck = false; # a one-shot never reaches state=running (pg-ccaudit precedent)
+        serviceConfig = {
+          StartInterval = janitorCfg.intervalSeconds;
+          Nice = 10;
+          StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/janitor-launchd-stderr.log";
+          StandardOutPath = "${stateHome}/pg-router-ccpool-handler/janitor-launchd-stdout.log";
+        };
+      };
+    })
+    # Plain `log/slog` text on stderr, like the -pool-metrics agent: format = "raw".
+    (lib.mkIf (janitorEnabledByAnyUser && (obs.enable or false)) {
+      phillipgreenii.observability.logSources.pg-router-ccpool-handler-janitor = {
+        path = "${stateHome}/pg-router-ccpool-handler/janitor-launchd-*.log";
         format = "raw";
       };
     })
