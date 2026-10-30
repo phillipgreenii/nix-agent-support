@@ -140,6 +140,19 @@ let
       cetaHm.finalPackage
     else
       pkgs.claude-extended-tool-approver;
+  # The claude-tool-tracker on the baseline PATH (bead pg2-h10ra6). The tracker
+  # plugin's command hooks run a BARE `claude-tool-tracker hook` and its mod
+  # appends through the same name; the spec PATH REPLACES the inherited one, so
+  # without this directory every pool-session hook exits 127 and nothing is
+  # recorded. It follows the tracker HM module's package and `enable` gating (the
+  # plugin's binary), and falls back to the overlay package only where that module
+  # is not imported (an isolated eval), as the CETA entry above does.
+  trackerHm = config.phillipgreenii.programs.claude-tool-tracker;
+  claudeBaselineTracker =
+    if options.phillipgreenii.programs ? claude-tool-tracker then
+      lib.optional trackerHm.enable trackerHm.package
+    else
+      [ pkgs.claude-tool-tracker ];
   # mkClaudeBaseline: the baseline for a given `bd` and extra PATH packages.
   # `claudeBaseline` is `mkClaudeBaseline { }`; `claudeBaseline.extend` is this
   # function, so a consumer swaps the bd or adds its role's own tools:
@@ -167,6 +180,7 @@ let
         pkgs.nix
         bd
       ]
+      ++ claudeBaselineTracker
       ++ lib.optional (claudeBaselinePn.success && claudeBaselinePn.value != null) claudeBaselinePn.value
       ++ extraPathPkgs;
       pathDirs = map (p: "${lib.getBin p}/bin") pathPkgs;
