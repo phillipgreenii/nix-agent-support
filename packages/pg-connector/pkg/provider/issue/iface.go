@@ -221,3 +221,12 @@ type ForceCloser interface {
 	// blocker stop it. Closing the issue does not touch its blockers.
 	CloseForce(ctx context.Context, id, reason string) error
 }
+
+// QueryParamsSupporter is an OPTIONAL issue provider capability (bead
+// pg2-eclw3j.3): a provider whose List substitutes {name} placeholders from
+// schema.QueryParamsFromContext (after splitting an expression into tokens)
+// reports true. The "list" dispatch entry refuses a parameterized query, or a
+// request carrying params, for any other provider.
+type QueryParamsSupporter interface {
+	SupportsQueryParams() bool
+}

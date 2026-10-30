@@ -413,6 +413,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	}
 	imprecise := false
 	tracker := b.tracker()
+	qp := schema.QueryParamsFromContext(ctx)
 	seen := make(map[string]bool)
 	entities := make([]schema.Issue, 0)
 	for _, expr := range query {
@@ -425,6 +426,16 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			// ErrUnavailable is this taxonomy's closest fit for "this
 			// backend's own configuration is broken" (INV-ERR-2).
 			return nil, scriptout.WrapError(scriptout.ErrUnavailable, parseErr.Error())
+		}
+		// Parameter values are substituted AFTER the split, so each value is
+		// part of one argv element and cannot add a flag; a placeholder that
+		// names no declared param is left unreplaced and refused, so bd never
+		// sees a literal brace (bead pg2-eclw3j.3). The first failing
+		// expression fails the whole source: the umbrella reports it as a
+		// non-succeeded source and a decider fails closed.
+		argv, subErr := qp.Def.SubstituteParams(argv, qp.Values)
+		if subErr != nil {
+			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "bd: query expression "+subErr.Error())
 		}
 		data, err := b.run(ctx, append(argv, "--json", "--limit", "0")...)
 		if err != nil {
@@ -464,6 +475,10 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	}
 	return result, nil
 }
+
+// SupportsQueryParams implements issue.QueryParamsSupporter: List substitutes
+// {name} placeholders from the context's schema.QueryParams.
+func (b *Backend) SupportsQueryParams() bool { return true }
 
 // Update implements issue.Provider.Update via `bd update <id> ... --json`
 // (bead pg2-2j5ac.28.3): every populated field of fields is applied in ONE

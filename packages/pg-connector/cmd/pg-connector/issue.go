@@ -384,7 +384,15 @@ type issueListOutcome struct {
 // cache-fallback/cache-write behavior on scriptout.ErrUnavailable/live
 // success respectively (see fanOutPRList's own doc comment for the full
 // description; this docket's design of record section 5.6).
-func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints bool) issueListOutcome {
+//
+// params are the --param values of a parameterized query (nil for none). They
+// ride the list request as "params" ONLY when non-empty, so a call without
+// them is byte-identical to before. The cache fallback is skipped for a
+// parameterized call: a fallback is keyed by the query's ledger membership,
+// which exists only for a watched query, and a parameterized query is never
+// watched. The live listing is still written to the shared entity cache (one
+// entry per returned entity, so about 22 for a per-PR query, not 3,740).
+func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints bool, params map[string]string) issueListOutcome {
 	out := issueListOutcome{
 		Entities:   make([]schema.Issue, 0),
 		PresentIDs: make([]string, 0),
@@ -393,7 +401,11 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 	if fingerprints {
 		out.Fingerprints = make(map[string]string)
 	}
-	calls := invokeAll(ctx, reg, backends, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly},
+	listArgs := map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}
+	if len(params) > 0 {
+		listArgs["params"] = params
+	}
+	calls := invokeAll(ctx, reg, backends, "list", listArgs,
 		func(b string) (json.RawMessage, error) { return listBackendConfig(reg, b, bounds) })
 	for i, b := range backends {
 		call := calls[i]
@@ -404,8 +416,9 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 		resp, err := call.resp, call.err
 		if err != nil {
 			// A bounded call never serves the cache fallback (see
-			// fanOutPRList): cached entries are not window-filtered.
-			if errors.Is(err, scriptout.ErrUnavailable) && bounds.IsZero() {
+			// fanOutPRList): cached entries are not window-filtered. Neither
+			// does a parameterized call (see this function's doc comment).
+			if errors.Is(err, scriptout.ErrUnavailable) && bounds.IsZero() && len(params) == 0 {
 				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "issue", b, query); ok {
 					for _, raw := range entries {
 						var issue schema.Issue
@@ -461,6 +474,7 @@ func newIssueListCmd() *cobra.Command {
 	var query string
 	var idsOnly bool
 	var fingerprints bool
+	var rawParams []string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues matching a named query, fanned out across every registered issue backend unless --backend pins one",
@@ -470,12 +484,18 @@ func newIssueListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched issue's id, omitting full entity detail")
 	cmd.Flags().BoolVar(&fingerprints, "fingerprints", false, "also return a fingerprints map (entity id to fingerprint string) so a caller can diff one listing against another without a cursor")
+	cmd.Flags().StringArrayVar(&rawParams, "param", nil, "value of a declared query parameter, name=value (repeatable); names, patterns and expressions come only from the backend's config, and the call is refused when a backend does not declare vocabulary.query_params")
 	bounds := addTimeBoundFlags(cmd, "issues last updated", listTimeBoundAsymmetryHelp)
 	_ = cmd.MarkFlagRequired("query")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		noOutcome := func(json.RawMessage) (string, error) { return "", nil }
 		rng, err := bounds.resolveInvalidArgument(time.Now())
 		if err != nil {
-			return reportIssueTargetedOutcome(cmd, nil, err, func(json.RawMessage) (string, error) { return "", nil })
+			return reportIssueTargetedOutcome(cmd, nil, err, noOutcome)
+		}
+		params, err := parseParamFlags(rawParams)
+		if err != nil {
+			return reportIssueTargetedOutcome(cmd, nil, err, noOutcome)
 		}
 		reg, err := LoadRegistry()
 		if err != nil {
@@ -485,7 +505,12 @@ func newIssueListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutIssueList(cmd.Context(), reg, backends, query, idsOnly, rng, fingerprints)
+		if len(params) > 0 {
+			if err := requireQueryParamsCapability(cmd.Context(), reg, backends); err != nil {
+				return reportIssueTargetedOutcome(cmd, nil, err, noOutcome)
+			}
+		}
+		outcome := fanOutIssueList(cmd.Context(), reg, backends, query, idsOnly, rng, fingerprints, params)
 		if allQueryNotRecognized(outcome.Sources) {
 			return reportIssueTargetedOutcome(cmd, nil, listQueryNotRecognizedErr("issue", query), func(json.RawMessage) (string, error) { return "", nil })
 		}

@@ -505,6 +505,59 @@ The writer mechanics the backends share (the common event fields, size-based rot
 rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
 its alert rules. Other external-service connectors are expected to follow the same pattern.
 
+## Parameterized named queries (`issue list --param`)
+
+A list query in a backend's config MAY declare parameters, so a caller can read one PR's work items instead of
+listing the whole tracker (bead `pg2-eclw3j.3`). Names, expressions and parameter patterns live in the backend's
+config only (`INV-ERR-3`, `INV-STATE-1`); a request supplies values only.
+
+```json
+{
+  "queries": {
+    "work-items-for-pr": {
+      "expr": [
+        "list --all --metadata-field repo={repo} --metadata-field pr_number={pr_number}",
+        "list --all --title-contains {repo}#{pr_number}"
+      ],
+      "params": {
+        "repo": "[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*",
+        "pr_number": "[0-9]{1,9}"
+      }
+    }
+  }
+}
+```
+
+```sh
+pg-connector issue list --query work-items-for-pr --param repo=ZR-Private/ziprecruiter --param pr_number=113446
+```
+
+- `--param name=value` is repeatable; on the wire it is the list request's `params` member (`map[string]string`),
+  sent only when a `--param` was given.
+- Each value MUST fully match its declared regex (anchored at both ends). A missing, unknown or non-matching
+  param is `invalid_argument` naming the param (and the regex), before any `bd` call. A query declaring `params`
+  MUST NOT be `watched`; the config is rejected otherwise.
+- Substitution happens AFTER an expression is split into argv, so a value is part of exactly one argv element and
+  cannot add a flag; a token that did not start with `-` is refused if its value would make it start with one. Any
+  `{...}` left in an expression after substitution (an undeclared placeholder) is refused as `unavailable`; `bd` is
+  never called with a literal brace. This applies to every expression of this backend, parameterized or not.
+- Capability gate: the backend declares `vocabulary.query_params: true`. The umbrella reads capabilities only when
+  `--param` is given and refuses with `invalid_argument` when the key is absent, so an older backend (which would
+  silently drop `params`) is never sent them. An older umbrella has no `--param` flag, so its caller fails closed.
+- Version skew: new config with an OLD backend binary makes the old strict query decoder reject the `params` key,
+  so EVERY named query on that backend answers `query_not_recognized`. The backend binary and its config MUST ship
+  in the same apply. Tests: `pkg/provider/issue/dispatch_params_test.go` (wire skew),
+  `cmd/pg-connector/query_params_test.go` (capability gate).
+- Cache: a parameterized call still writes every returned entity to the umbrella's shared entity cache (about 22
+  entities for one PR, not the 3,740 of a full-tracker listing). The cache fallback on `unavailable` is keyed by
+  query-ledger membership, which exists only for watched queries, so a parameterized call has none and is skipped.
+- Failure: a backend runs a query's expressions serially under one deadline, and the first failing expression
+  fails the whole source (`status` other than `succeeded`), never a partial union; a caller such as the decider
+  then fails closed.
+- Real-`bd` semantics of the per-PR expressions (string and number `pr_number`, keyless legacy beads, closed beads
+  with `--all`, focus items by `source_type`+`source_id`, title-substring false positives) are pinned by
+  `TestBackend_List_PerPRExpressions_RealBD` under `-tags contract`.
+
 ## The Jira daemon (pg-connector-issue-jira)
 
 `pg-connector-issue-jira` is a daemon-backed backend (docket `pg2-2qyyh.2`). One long-lived process owns a SQLite

@@ -204,6 +204,10 @@ func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse 
 		// --fields probe reads this key, so declaring them keeps a requested
 		// one from drawing a warning.
 		"search_attributes": internal.SearchAttributes,
+		// This backend substitutes list --param values into configured
+		// {name} placeholders. The umbrella refuses --param against a backend
+		// that does not declare this key (bead pg2-eclw3j.3).
+		"query_params": true,
 	}
 	if dir, err := backend.Workspace(); err == nil && dir != "" {
 		vocabulary["workspace_dir"] = dir

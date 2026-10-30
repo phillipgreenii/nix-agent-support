@@ -109,16 +109,34 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					Query   string          `json:"query"`
 					Cursor  json.RawMessage `json:"cursor"`
 					IDsOnly bool            `json:"ids_only"`
+					// Params are the VALUES of the query's declared parameters
+					// (bead pg2-eclw3j.3); names, patterns and expressions come
+					// from the backend's config only.
+					Params map[string]string `json:"params"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list args: "+err.Error())
 				}
-				expr, ok := schema.ResolveQuery(scriptout.ConfigFromContext(ctx), a.Query)
+				def, ok := schema.ResolveQueryDef(scriptout.ConfigFromContext(ctx), a.Query)
 				if !ok {
 					return nil, scriptout.WrapError(scriptout.ErrQueryNotRecognized,
 						fmt.Sprintf("query %q is not defined in this backend's config.queries", a.Query))
 				}
-				return p.List(ctx, expr, a.IDsOnly, a.Cursor)
+				if len(def.Params) > 0 || len(a.Params) > 0 {
+					// A provider that does not substitute would run the {name}
+					// placeholders literally, so a parameterized query is
+					// refused unless the provider opts in.
+					if sp, ok := p.(QueryParamsSupporter); !ok || !sp.SupportsQueryParams() {
+						return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+							fmt.Sprintf("query %q: this backend does not support query params", a.Query))
+					}
+					if err := def.CheckParams(a.Params); err != nil {
+						return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+							fmt.Sprintf("query %q: %v", a.Query, err))
+					}
+					ctx = schema.WithQueryParams(ctx, schema.QueryParams{Def: def, Values: a.Params})
+				}
+				return p.List(ctx, def.Expr, a.IDsOnly, a.Cursor)
 			},
 		},
 		// update/close/deps were added by bead pg2-2j5ac.28.3 (this

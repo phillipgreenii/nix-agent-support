@@ -16,8 +16,10 @@ package schema
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -48,22 +50,37 @@ func (q *QueryExpr) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// QueryDef is one configured query: its native expressions and whether
-// its members are watched.
+// QueryDef is one configured query: its native expressions, whether its
+// members are watched, and the parameters its expressions take. Params maps a
+// parameter name to the regular expression every value MUST fully match
+// (bead pg2-eclw3j.3); the expressions carry {name} placeholders. Only the
+// backend's own config declares names, expressions and patterns: a request
+// supplies values only (INV-ERR-3, INV-STATE-1). A query with Params MUST NOT
+// be watched, because a watched query's ledger is keyed by query name alone.
 type QueryDef struct {
 	Expr    QueryExpr
 	Watched bool
+	Params  map[string]string
 }
+
+// paramNamePattern is the closed shape of a declared parameter name, which
+// keeps {name} placeholders unambiguous in an expression.
+var paramNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// placeholderPattern finds every {...} span in an expression token.
+var placeholderPattern = regexp.MustCompile(`\{[^{}]*\}`)
 
 // UnmarshalJSON accepts exactly three forms:
 //
 //	"a native expression"                         (watched false)
 //	["expression one", "expression two"]          (watched false)
-//	{"expr": "one" | ["one", "two"], "watched": true}
+//	{"expr": "one" | ["one", "two"], "watched": true, "params": {"name": "regex"}}
 //
-// An object with a key other than "expr" and "watched", an object with no
-// "expr", and a "watched" that is not a JSON boolean are errors. "watched"
-// defaults to false. JSON null keeps today's result, one empty expression
+// An object with a key other than "expr", "watched" and "params", an object
+// with no "expr", and a "watched" that is not a JSON boolean are errors.
+// "watched" defaults to false. "params" maps a parameter name (lowercase
+// letters, digits and underscores, starting with a letter) to a regular
+// expression that compiles; a watched query with params is an error. JSON null keeps today's result, one empty expression
 // (QueryExpr{""}: unmarshalling null into a string is a no-op), unwatched; a
 // test pins it, because turning it into an error would make ResolveQuery treat
 // the whole queries block as absent.
@@ -83,13 +100,13 @@ func (q *QueryDef) UnmarshalJSON(data []byte) error {
 	}
 	var unknown []string
 	for k := range obj {
-		if k != "expr" && k != "watched" {
+		if k != "expr" && k != "watched" && k != "params" {
 			unknown = append(unknown, k)
 		}
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return fmt.Errorf("query definition: unknown key %q (only \"expr\" and \"watched\" are accepted)", strings.Join(unknown, `", "`))
+		return fmt.Errorf("query definition: unknown key %q (only \"expr\", \"watched\" and \"params\" are accepted)", strings.Join(unknown, `", "`))
 	}
 	rawExpr, ok := obj["expr"]
 	if !ok {
@@ -104,21 +121,42 @@ func (q *QueryDef) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf(`query definition: "watched" must be a JSON boolean`)
 		}
 	}
+	if rawParams, ok := obj["params"]; ok {
+		var params map[string]string
+		if err := json.Unmarshal(rawParams, &params); err != nil || bytes.Equal(bytes.TrimSpace(rawParams), []byte("null")) {
+			return fmt.Errorf(`query definition: "params" must be an object of parameter name to regular expression`)
+		}
+		for name, pattern := range params {
+			if !paramNamePattern.MatchString(name) {
+				return fmt.Errorf("query definition: parameter name %q must match %s", name, paramNamePattern)
+			}
+			if _, err := regexp.Compile(pattern); err != nil {
+				return fmt.Errorf("query definition: parameter %q pattern %q does not compile: %v", name, pattern, err)
+			}
+		}
+		if len(params) > 0 {
+			def.Params = params
+		}
+	}
+	if def.Watched && len(def.Params) > 0 {
+		return fmt.Errorf(`query definition: a query with "params" MUST NOT be watched (its ledger is keyed by query name only)`)
+	}
 	*q = def
 	return nil
 }
 
-// MarshalJSON writes the bare list form for an unwatched definition and the
-// object form otherwise, so a config round-trips and an unwatched
-// deployment's rendered file does not change.
+// MarshalJSON writes the bare list form for an unwatched, unparameterized
+// definition and the object form otherwise, so a config round-trips and an
+// unparameterized deployment's rendered file does not change.
 func (q QueryDef) MarshalJSON() ([]byte, error) {
-	if !q.Watched {
+	if !q.Watched && len(q.Params) == 0 {
 		return json.Marshal(q.Expr)
 	}
 	return json.Marshal(struct {
-		Expr    QueryExpr `json:"expr"`
-		Watched bool      `json:"watched"`
-	}{q.Expr, q.Watched})
+		Expr    QueryExpr         `json:"expr"`
+		Watched bool              `json:"watched,omitempty"`
+		Params  map[string]string `json:"params,omitempty"`
+	}{q.Expr, q.Watched, q.Params})
 }
 
 // QueriesConfig is the {"queries": {...}} shape itself, decoded straight
@@ -160,4 +198,101 @@ func ResolveQueryDef(config json.RawMessage, name string) (QueryDef, bool) {
 	}
 	def, ok := cfg.Queries[name]
 	return def, ok
+}
+
+// CheckParams validates the request's parameter values against the query's
+// declared parameters: an unknown name, a declared name with no value, and a
+// value that does not fully match its declared pattern (Go's $ is end of
+// text, and the pattern is anchored here) are each an error naming the
+// parameter (and, for a mismatch, the pattern). Callers wrap the error as
+// invalid_argument. A query with no declared params accepts no values.
+func (q QueryDef) CheckParams(values map[string]string) error {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, ok := q.Params[name]; !ok {
+			return fmt.Errorf("param %q is not declared by this query", name)
+		}
+	}
+	declared := make([]string, 0, len(q.Params))
+	for name := range q.Params {
+		declared = append(declared, name)
+	}
+	sort.Strings(declared)
+	for _, name := range declared {
+		v, ok := values[name]
+		if !ok {
+			return fmt.Errorf("param %q is required (pattern %s)", name, q.Params[name])
+		}
+		re, err := regexp.Compile(`\A(?:` + q.Params[name] + `)\z`)
+		if err != nil {
+			return fmt.Errorf("param %q pattern %q does not compile: %v", name, q.Params[name], err)
+		}
+		if !re.MatchString(v) {
+			return fmt.Errorf("param %q value %q does not match %s", name, v, q.Params[name])
+		}
+	}
+	return nil
+}
+
+// SubstituteParams replaces every {name} placeholder in argv, an expression
+// ALREADY split into argv tokens, with the validated value of name. Because it
+// runs after the split, a value is part of exactly one token and cannot add or
+// remove a token or a flag. Replacement is a single pass (a value that itself
+// contains braces is never expanded again). It refuses a placeholder naming an
+// undeclared parameter (any {...} left unreplaced), and a token that began
+// with something other than "-" but starts with "-" after substitution (a
+// value would otherwise become a flag). The result is a fresh slice; argv is
+// not modified. values MUST already have passed CheckParams.
+func (q QueryDef) SubstituteParams(argv []string, values map[string]string) ([]string, error) {
+	out := make([]string, len(argv))
+	for i, tok := range argv {
+		var bad error
+		sub := placeholderPattern.ReplaceAllStringFunc(tok, func(ph string) string {
+			name := ph[1 : len(ph)-1]
+			if _, declared := q.Params[name]; !declared {
+				if bad == nil {
+					bad = fmt.Errorf("expression token %q has placeholder %s that names no declared param", tok, ph)
+				}
+				return ph
+			}
+			v, ok := values[name]
+			if !ok && bad == nil {
+				bad = fmt.Errorf("param %q is required", name)
+			}
+			return v
+		})
+		if bad != nil {
+			return nil, bad
+		}
+		if sub != tok && strings.HasPrefix(sub, "-") && !strings.HasPrefix(tok, "-") {
+			return nil, fmt.Errorf("expression token %q would start with \"-\" after substitution", tok)
+		}
+		out[i] = sub
+	}
+	return out, nil
+}
+
+// QueryParams is what a list handler hands a backend through the context:
+// the resolved query definition and the request's parameter values.
+type QueryParams struct {
+	Def    QueryDef
+	Values map[string]string
+}
+
+type queryParamsKey struct{}
+
+// WithQueryParams returns ctx carrying p for QueryParamsFromContext.
+func WithQueryParams(ctx context.Context, p QueryParams) context.Context {
+	return context.WithValue(ctx, queryParamsKey{}, p)
+}
+
+// QueryParamsFromContext returns the QueryParams a list handler attached, or
+// the zero value (no declared params, no values) when none was.
+func QueryParamsFromContext(ctx context.Context) QueryParams {
+	p, _ := ctx.Value(queryParamsKey{}).(QueryParams)
+	return p
 }
