@@ -90,6 +90,14 @@ type Config struct {
 	// for its own dispatches (roles.CCPoolConfig.NeedsInputStall). Every other role
 	// keeps ADR 0037's rule: a needs_input session is spared for a human.
 	NeedsInputStall time.Duration
+	// WorktreeKeepRecheck is how long the worktree-keyed sweep (INV-CCH-19) trusts
+	// its earlier decision to keep a dirty or unpushed worktree before examining
+	// it again; the cache is also invalidated at once when the worktree's HEAD,
+	// index or branch tip changes. <= 0 disables the cache. Default 5m.
+	WorktreeKeepRecheck time.Duration
+	// SweepDeadline bounds the whole worktree-keyed sweep (INV-CCH-19); on expiry
+	// the pass returns what it had done. <= 0 means no deadline. Default 60s.
+	SweepDeadline time.Duration
 	// Effort/Model/PermissionMode/AllowedTools/Autonomous are forwarded
 	// verbatim to `ccpool new` (NewCLIRunner).
 	Effort         string
@@ -439,6 +447,8 @@ func Default() Config {
 		NeedsInputStall:     DefaultNeedsInputStall,
 		WorktreeQuietWindow: 2 * time.Minute,
 		WorktreeQuietMax:    10 * time.Minute,
+		WorktreeKeepRecheck: 5 * time.Minute,
+		SweepDeadline:       60 * time.Second,
 		Effort:              "medium",
 		Model:               "claude-sonnet-5-5",
 		Autonomous:          true,

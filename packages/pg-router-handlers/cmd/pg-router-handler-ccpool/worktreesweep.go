@@ -70,6 +70,11 @@ const (
 	// worktreeSweepMaxPerPass bounds how many worktrees one dispatch removes, so a
 	// large backlog is drained over several dispatches rather than in one.
 	worktreeSweepMaxPerPass = 5
+	// worktreeSweepMaxExamined bounds how many candidates one pass examines with
+	// git (status and commit count), kept or removed, so a backlog of kept
+	// worktrees cannot make one dispatch pay for all of them. A candidate skipped
+	// by the keep cache costs no git work and does not count.
+	worktreeSweepMaxExamined = 20
 	// worktreeEventReclaimed is the eventlog kind recorded per removed worktree.
 	worktreeEventReclaimed = "worktree_reclaimed"
 )
@@ -90,7 +95,20 @@ type leakedWorktree struct {
 
 // sweepLeakedWorktrees reclaims leaked per-bead worktrees; it returns how many
 // it removed.
+//
+// The whole pass runs under deps.Cfg.SweepDeadline (<= 0: none). On expiry it
+// logs and returns what it had done, never an error.
 func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv) (removed int) {
+	if d := deps.Cfg.SweepDeadline; d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
+	defer func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			slog.Warn("worktree sweep: deadline expired; returning the partial result", "role", role.Name, "removed", removed, "deadline", deps.Cfg.SweepDeadline)
+		}
+	}()
 	if role.CCPool == nil || !executor.UsesWorktreeIsolation(role.CCPool.Isolation) {
 		return 0
 	}
@@ -149,12 +167,17 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 		}
 		candidates = kept
 	}
+	examined := 0
 	for _, c := range candidates {
-		if removed >= worktreeSweepMaxPerPass {
+		if removed >= worktreeSweepMaxPerPass || examined >= worktreeSweepMaxExamined || ctx.Err() != nil {
 			break
 		}
-		if reclaimLeakedWorktree(ctx, role, deps, env, c) {
+		ok, didGit := reclaimLeakedWorktree(ctx, role, deps, env, c)
+		if ok {
 			removed++
+		}
+		if didGit {
+			examined++
 		}
 	}
 	return removed
@@ -246,8 +269,10 @@ func worktreeHeldByRow(sessions []ccpool.Session, c leakedWorktree) bool {
 }
 
 // reclaimLeakedWorktree re-checks c under the exclusive per-bead lock and
-// removes it (worktree, then anchor branch) when every guard holds.
-func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, c leakedWorktree) bool {
+// removes it (worktree, then anchor branch) when every guard holds. The second
+// result reports whether it spent git work (status / commit count) on c, which
+// is what the examined cap counts.
+func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, c leakedWorktree) (removed, didGit bool) {
 	lock, err := sessionlock.TryLock(env.lockDir, sessionlock.WorktreeKey(c.bead))
 	if err != nil {
 		if errors.Is(err, sessionlock.ErrHeld) {
@@ -255,7 +280,7 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 		} else {
 			slog.Warn("worktree sweep: could not lock the worktree; skipping", "bead", c.bead, "worktree", c.path, "err", err)
 		}
-		return false
+		return false, didGit
 	}
 	defer lock.Unlock()
 
@@ -265,89 +290,102 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	sessions, err := deps.CC.List(ctx)
 	if err != nil {
 		slog.Warn("worktree sweep: re-list under lock failed; no action", "bead", c.bead, "err", err)
-		return false
+		return false, didGit
 	}
 	if worktreeHeldByRow(sessions, c) {
 		slog.Info("worktree sweep: a session row now names the worktree; keeping it", "bead", c.bead, "worktree", c.path)
-		return false
+		return false, didGit
 	}
 	if env.cwds != nil {
 		cwds, err := env.cwds(ctx)
 		if err != nil {
 			slog.Warn("worktree sweep: live-process probe failed under lock; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
-			return false
+			return false, didGit
 		}
 		if worktreeHeldByProcess(cwds, c) {
 			slog.Info("worktree sweep: a live process has the worktree as its working directory; keeping it", "bead", c.bead, "worktree", c.path)
-			return false
+			return false, didGit
 		}
 	}
 	if _, err := os.Lstat(filepath.Join(c.admin, "locked")); err == nil {
 		slog.Info("worktree sweep: worktree is locked by git; keeping it", "bead", c.bead, "worktree", c.path)
-		return false
+		return false, didGit
 	} else if !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("worktree sweep: cannot read the git lock; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
-		return false
+		return false, didGit
 	}
+
+	// Keep cache: a worktree kept recently for uncommitted changes or unpushed
+	// commits is not re-examined until the TTL passes or its HEAD, index or branch
+	// tip changes. Everything above is cheap and has already run.
+	now := orphanNow(deps)
+	sig := keepSignature(c)
+	if keepCached(env.lockDir, c, sig, now) {
+		slog.Info("worktree sweep: kept recently (dirty or unpushed) and unchanged; skipping the re-examination", "bead", c.bead, "worktree", c.path)
+		return false, false
+	}
+	didGit = true
 
 	branch := "pg-router/" + c.bead
 	wm, err := env.open(ctx, c.path)
 	if err != nil {
 		slog.Warn("worktree sweep: open failed; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
-		return false
+		return false, didGit
 	}
 	loc, okLoc := wm.(gitclient.Locator)
 	st, okSt := wm.(gitclient.StatusReader)
 	if !okLoc || !okSt {
 		slog.Warn("worktree sweep: git client cannot read branch/status; keeping the worktree", "bead", c.bead, "worktree", c.path)
-		return false
+		return false, didGit
 	}
 	cur, err := loc.CurrentBranch(ctx)
 	if err != nil || cur != branch {
 		slog.Info("worktree sweep: checked-out branch is not the anchor branch; keeping the worktree",
 			"bead", c.bead, "worktree", c.path, "branch", cur, "err", err)
-		return false
+		return false, didGit
 	}
 	dirty, err := st.Status(ctx)
 	if err != nil {
 		slog.Warn("worktree sweep: status unreadable; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
-		return false
+		return false, didGit
 	}
 	if len(dirty) > 0 {
 		slog.Warn("worktree sweep: worktree has uncommitted changes; keeping it", "bead", c.bead, "worktree", c.path, "entries", len(dirty))
-		return false
+		keepRemember(env.lockDir, c, sig, now, deps.Cfg.WorktreeKeepRecheck)
+		return false, didGit
 	}
 	root, err := env.open(ctx, deps.Cfg.RepoRoot)
 	if err != nil {
 		slog.Warn("worktree sweep: open repo root failed; keeping the worktree", "bead", c.bead, "err", err)
-		return false
+		return false, didGit
 	}
 	refs, ok := root.(gitclient.RefReader)
 	if !ok {
 		slog.Warn("worktree sweep: git client cannot count commits; keeping the worktree", "bead", c.bead, "worktree", c.path)
-		return false
+		return false, didGit
 	}
 	ahead, err := refs.CommitsAhead(ctx, "HEAD", branch)
 	if err != nil {
 		slog.Warn("worktree sweep: commit count unreadable; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
-		return false
+		return false, didGit
 	}
 	if ahead > 0 {
 		slog.Warn("worktree sweep: branch has commits the repo HEAD lacks; keeping the worktree",
 			"bead", c.bead, "worktree", c.path, "branch", branch, "unique_commits", ahead)
-		return false
+		keepRemember(env.lockDir, c, sig, now, deps.Cfg.WorktreeKeepRecheck)
+		return false, didGit
 	}
 
 	if err := wm.RemoveWorktree(ctx, c.path, false); err != nil {
 		slog.Warn("worktree sweep: removal refused; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
-		return false
+		return false, didGit
 	}
 	deleteAnchorBranch(ctx, env.open, deps.Cfg.RepoRoot, "worktree-sweep:"+c.bead, c.bead)
 	slog.Info("worktree sweep: leaked worktree reclaimed", "bead", c.bead, "worktree", c.path, "role", role.Name, "age", c.age)
 	emitOrphan(deps, "info", worktreeEventReclaimed, "leaked worktree reclaimed", map[string]any{
 		"bead": c.bead, "role": role.Name, "worktree": c.path, "branch": branch, "age_seconds": c.age.Seconds(),
 	})
-	return true
+	return true, true
 }
 
 // sweepStaleLocks garbage-collects the handler's own lock directory (bead
@@ -358,10 +396,12 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 // live dispatch or reclaimer holds (shared or exclusive); the open-then-unlink
 // race against a concurrent opener is closed by the opener's inode re-verification
 // (see sessionlock.SweepStale). It runs after the worktree sweep, which has
-// already released its own per-bead locks. Best effort; returns the count removed.
+// already released its own per-bead locks. It also garbage-collects the worktree
+// keep cache (keepcache.go). Best effort; returns the count removed.
 func sweepStaleLocks(deps executor.Deps) int {
 	if deps.LockDir == "" {
 		return 0
 	}
-	return sessionlock.SweepStale(deps.LockDir, sessionlock.DefaultStaleAge, orphanNow(deps))
+	now := orphanNow(deps)
+	return sessionlock.SweepStale(deps.LockDir, sessionlock.DefaultStaleAge, now) + sweepKeepCache(deps.LockDir, now)
 }

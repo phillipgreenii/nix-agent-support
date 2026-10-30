@@ -1230,6 +1230,9 @@ let
         else
           lib.concatStringsSep "," ([ cfg.launchConfig.allowedTools ] ++ cfg.launchConfig.extraAllowedTools);
       confirmIngest = cfg.launchConfig.confirmIngestSeconds * 1000000000;
+      # worktree sweep bounds (bead pg2-fx5x0l.2, INV-CCH-19): nanoseconds, as above.
+      worktreeKeepRecheck = cfg.launchConfig.worktreeKeepRecheckSeconds * 1000000000;
+      sweepDeadline = cfg.launchConfig.sweepDeadlineSeconds * 1000000000;
       budgetTokens = cfg.launchConfig.budget.tokens;
       budgetCost = cfg.launchConfig.budget.cost;
       budgetTime = cfg.launchConfig.budget.timeSeconds * 1000000000;
@@ -2256,6 +2259,26 @@ in
           `loadRole` that `loadConfig` has no equivalent of; confirmed
           empirically for this bead, pg2-qsred). Default 90 matches
           `internal/config.Default()`'s own `90 * time.Second`.
+        '';
+      };
+      worktreeKeepRecheckSeconds = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 300;
+        description = ''
+          How long (SECONDS) the worktree-keyed sweep (INV-CCH-19) trusts its
+          earlier decision to keep a dirty or unpushed worktree before examining
+          it again; a changed HEAD, index or branch tip re-examines it at once.
+          0 disables the cache. Rendered as nanoseconds like
+          `confirmIngestSeconds`. Default 300 matches `internal/config.Default()`.
+        '';
+      };
+      sweepDeadlineSeconds = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 60;
+        description = ''
+          Deadline (SECONDS) for the whole worktree-keyed sweep (INV-CCH-19); on
+          expiry the pass returns what it had done. 0 means no deadline.
+          Rendered as nanoseconds. Default 60 matches `internal/config.Default()`.
         '';
       };
       originProbe = {

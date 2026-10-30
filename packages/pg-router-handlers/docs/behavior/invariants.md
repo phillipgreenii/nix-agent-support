@@ -400,7 +400,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   crashed after it created the worktree but before the session existed, or a session closed
   (`idle_ttl`, eviction, the operator) before anyone reclaimed its worktree, leaves one. The
   janitor (`INV-CCH-41`) MUST therefore scan the worktree directory itself, per role with worktree
-  isolation, after that role's orphan reconcile (`INV-CCH-18`) and bounded per run, and remove a
+  isolation, after that role's orphan reconcile (`INV-CCH-18`) and bounded per run: a handful of removals, a fixed cap on candidates examined with git, and a deadline for the whole scan, see below, and remove a
   worktree and its anchor branch only when ALL of the following hold, each re-checked while holding
   an exclusive per-bead lock. A dispatch MUST NOT scan the directory before it checks capacity; the
   one thing it keeps is the same guarded examination of its OWN bead's worktree, before it prepares
@@ -420,6 +420,25 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     isolation MUST hold that lock, shared, from before it creates the worktree until it returns;
     the operating system drops it when its holder dies, so a killed handler stops protecting its
     worktree at the moment it dies.
+
+  The scan MUST stay cheap when worktrees are kept, because the handler is one short-lived process
+  per request and would otherwise re-run `git status` and a commit count on every kept worktree
+  on every scan (each janitor run and, while `inlineSweeps` is on, each dispatch):
+  - a worktree kept because its working tree is dirty or its branch holds unpushed commits MUST NOT
+    be examined again until a recheck interval (default five minutes, configurable, zero disables)
+    has passed, unless its `HEAD`, index or branch tip has changed since, in which case it MUST be
+    examined at once. The record of that decision MUST survive the handler or janitor process (a small file in
+    the handler's lock directory, written atomically; a torn or unreadable one counts as absent) and
+    MUST be removed by the lock-file garbage collection of `INV-CCH-24` once it has expired, is
+    unreadable, or names a worktree that is gone. Only the status and commit-count guards are
+    skipped; the age, row, live-process, git-lock and per-bead lock guards run every time;
+  - one scan MUST examine at most a fixed number of candidates with git (twenty), counting kept and
+    removed ones alike but not ones skipped through the record above, in addition to the removal
+    cap;
+  - the whole scan MUST run under a deadline (default sixty seconds, configurable, zero means none);
+    when it expires the scan logs, stops, and returns what it had done, without failing the
+    dispatch or janitor run. Under the janitor this deadline nests inside the per-role share of
+    `INV-CCH-41`.
 
   A session list that cannot be read, a lock that cannot be taken, or a missing lock directory
   means no action. Each removal is logged and recorded as an event naming the bead, role, worktree
@@ -669,8 +688,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   without waiting, so one held by any live dispatch or reclaimer, shared or exclusive, is never
   removed. Removal MUST NOT weaken the lock's mutual exclusion: a taker that had the file open
   when it was removed MUST retry on the file that now exists rather than report a lock it does not
-  hold. A removal that fails is logged-and-ignored, never a dispatch or janitor failure. Bead
-  `pg2-bjhoq`. The collection moved from every dispatch of a worktree-isolation role to the
+  hold. The same pass MUST also remove the worktree-keep records of `INV-CCH-19` that have expired,
+  cannot be read, or name a worktree that is gone, and temp files of an interrupted write. A removal
+  that fails is logged-and-ignored, never a dispatch or janitor failure. Beads `pg2-bjhoq`,
+  `pg2-fx5x0l.2`. The collection moved from every dispatch of a worktree-isolation role to the
   janitor (operator ruling, Phillip, 2026-10-30; ADR 0117).
 
 - **`INV-CCH-25`** — the tool grants a dispatched session starts with are the handler-wide list
