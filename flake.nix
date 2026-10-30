@@ -3507,6 +3507,171 @@
                     touch $out
                   '';
 
+              # darwin/modules/pg-claude-code-recorder (bead pg2-v77tsx.11, phase 7b):
+              # registers the recorder's metrics target, two log sources, alert rules
+              # file (or its deleteRules-only twin) and dashboard, following the Home
+              # Manager flag across home-manager.users. Same stub technique as
+              # test-pg-connector-github-darwin-module. The rule files and dashboard are
+              # created by phase 7c, so the paths are only compared as values here
+              # (never read), which is the stand-in strategy.
+              test-pg-claude-code-recorder-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption {
+                          type = lib.types.bool;
+                          default = true;
+                        };
+                      };
+                    };
+                  metricsTargetSubmodule =
+                    { name, ... }:
+                    {
+                      options = {
+                        port = lib.mkOption { type = lib.types.port; };
+                        jobName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        scrapeInterval = lib.mkOption {
+                          type = lib.types.str;
+                          default = "15s";
+                        };
+                      };
+                    };
+                  evalDarwin =
+                    obsEnable: users:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-claude-code-recorder/default.nix
+                        {
+                          options = {
+                            assertions = lib.mkOption {
+                              type = lib.types.listOf lib.types.anything;
+                              default = [ ];
+                            };
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            phillipgreenii.observability = {
+                              enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = false;
+                              };
+                              metricsTargets = lib.mkOption {
+                                type = lib.types.attrsOf (lib.types.submodule metricsTargetSubmodule);
+                                default = { };
+                              };
+                              logSources = lib.mkOption {
+                                type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                                default = { };
+                              };
+                              alertRuleFiles = lib.mkOption {
+                                type = lib.types.listOf lib.types.path;
+                                default = [ ];
+                              };
+                              dashboardProviders = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          };
+                          config = {
+                            phillipgreenii.observability.enable = obsEnable;
+                            home-manager.users = users;
+                          };
+                        }
+                      ];
+                    }).config;
+                  userWith = extra: {
+                    phillipgreenii.programs.pg-claude-code-recorder = {
+                      daemon.enable = true;
+                      controlStateDir = "/example/state/pg-claude-control";
+                      metrics.port = 49320;
+                    }
+                    // extra;
+                  };
+                  enabled = evalDarwin true { alice = userWith { }; };
+                  obsOff = evalDarwin false { alice = userWith { }; };
+                  noUsers = evalDarwin true { };
+                  idle = evalDarwin true {
+                    alice.phillipgreenii.programs.pg-claude-code-recorder.daemon.enable = false;
+                  };
+                  otherUser = evalDarwin true { alice.home.username = "alice"; };
+                  twoUsers = evalDarwin true {
+                    alice = userWith { };
+                    bob = userWith { };
+                  };
+                  portTwo = evalDarwin true { alice = userWith { metrics.port = 49399; }; };
+                  instanced = evalDarwin true { alice = userWith { instance = "two"; }; };
+                  o = enabled.phillipgreenii.observability;
+                  grafana = ./packages/pg-claude-code-recorder/grafana;
+                  rulesFile = grafana + "/alerting/alerts.yaml";
+                  deleteFile = grafana + "/alerting/alerts-delete.yaml";
+                  failed = c: lib.filter (a: !a.assertion) c.assertions;
+                  nothing =
+                    c:
+                    c.phillipgreenii.observability.metricsTargets == { }
+                    && c.phillipgreenii.observability.logSources == { }
+                    && c.phillipgreenii.observability.dashboardProviders == { }
+                    && c.phillipgreenii.observability.alertRuleFiles == [ ];
+                in
+                # observability.enable = false registers nothing
+                assert nothing obsOff;
+                # the daemon is deployed: everything registered, rules file only
+                assert o.metricsTargets.pg-claude-code-recorder.port == 49320;
+                assert o.metricsTargets.pg-claude-code-recorder.jobName == "pg-claude-code-recorder";
+                assert
+                  lib.attrNames o.logSources == [
+                    "pg-claude-code-recorder"
+                    "pg-claude-control"
+                  ];
+                assert
+                  o.logSources.pg-claude-code-recorder.path
+                  == "\${env:XDG_STATE_HOME}/pg-claude-code-recorder-launchd/launchd-stderr.log";
+                assert o.logSources.pg-claude-code-recorder.serviceName == "pg-claude-code-recorder";
+                assert o.logSources.pg-claude-control.path == "/example/state/pg-claude-control/requests.jsonl";
+                assert o.logSources.pg-claude-control.serviceName == "pg-claude-control";
+                assert o.alertRuleFiles == [ rulesFile ];
+                assert !(lib.elem deleteFile o.alertRuleFiles);
+                assert lib.attrNames o.dashboardProviders == [ "pg-claude-code-recorder" ];
+                assert failed enabled == [ ];
+                # not deployed (no users, daemon off, unrelated user): the twin only
+                assert noUsers.phillipgreenii.observability.alertRuleFiles == [ deleteFile ];
+                assert idle.phillipgreenii.observability.alertRuleFiles == [ deleteFile ];
+                assert otherUser.phillipgreenii.observability.alertRuleFiles == [ deleteFile ];
+                assert noUsers.phillipgreenii.observability.metricsTargets == { };
+                assert idle.phillipgreenii.observability.logSources == { };
+                assert otherUser.phillipgreenii.observability.dashboardProviders == { };
+                assert failed noUsers == [ ];
+                # the scrape follows the home user's metrics.port and the log the instance
+                assert portTwo.phillipgreenii.observability.metricsTargets.pg-claude-code-recorder.port == 49399;
+                assert
+                  instanced.phillipgreenii.observability.logSources.pg-claude-code-recorder.path
+                  == "\${env:XDG_STATE_HOME}/pg-claude-code-recorder-launchd-two/launchd-stderr.log";
+                # one registration per machine
+                assert lib.length (failed twoUsers) == 1;
+                pkgs.runCommand "test-pg-claude-code-recorder-darwin-module-ok" { } "touch $out";
+
               # darwin/modules/pg-connector-issue-jira-daemon (docket pg2-2qyyh.2, "7.
               # Observability"): the Jira daemon's three exact-path log sources and
               # its alert rules, the sibling of test-pg-connector-github-darwin-module

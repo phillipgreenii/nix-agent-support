@@ -94,7 +94,15 @@ let
       maxPerHour = cfg.remove.maxPerHour;
     };
   };
-  settings = lib.recursiveUpdate rendered cfg.settings;
+  # The Prometheus exporter is off in the daemon unless `metrics.addr` is set; it
+  # is rendered only while observability is on, on loopback at `metrics.port`
+  # (the darwin module darwin/modules/pg-claude-code-recorder scrapes that port).
+  settings = lib.recursiveUpdate (
+    rendered
+    // lib.optionalAttrs cfg.observability.enable {
+      metrics.addr = "127.0.0.1:${toString cfg.metrics.port}";
+    }
+  ) cfg.settings;
 
   configUnchecked = tomlFormat.generate "pg-claude-code-recorder-config-unchecked.toml" settings;
 
@@ -267,6 +275,16 @@ in
         Metrics, log source, alert rules and dashboard (wired in
         `darwin/modules/pg-claude-code-recorder`). Follows the system option,
         read null-safely from `osConfig`.
+      '';
+    };
+
+    metrics.port = lib.mkOption {
+      type = lib.types.port;
+      default = 49320;
+      description = ''
+        Loopback port of the daemon's Prometheus exporter. Rendered as
+        `metrics.addr = "127.0.0.1:<port>"` only while `observability.enable` is
+        set; the darwin module registers the scrape target on the same port.
       '';
     };
 
