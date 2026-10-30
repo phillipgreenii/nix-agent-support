@@ -1,0 +1,54 @@
+{
+  "offline_prefix_counts_by_digits": {
+    "1": {
+      "max_rows": 3380,
+      "worst": "zr-private/ziprecruiter#1",
+      "count_over_100": 2,
+      "count_over_50": 2,
+      "prefixes_seen": 7
+    },
+    "2": {
+      "max_rows": 1325,
+      "worst": "zr-private/ziprecruiter#10",
+      "count_over_100": 6,
+      "count_over_50": 9,
+      "prefixes_seen": 22
+    },
+    "3": {
+      "max_rows": 204,
+      "worst": "zr-private/ziprecruiter#109",
+      "count_over_100": 18,
+      "count_over_50": 26,
+      "prefixes_seen": 115
+    },
+    "4": {
+      "max_rows": 54,
+      "worst": "zr-private/ziprecruiter#1223",
+      "count_over_100": 0,
+      "count_over_50": 1,
+      "prefixes_seen": 460
+    },
+    "5": {
+      "max_rows": 49,
+      "worst": "zr-private/ziprecruiter#12237",
+      "count_over_100": 0,
+      "count_over_50": 0,
+      "prefixes_seen": 1197
+    },
+    "6": {
+      "max_rows": 23,
+      "worst": "zr-private/ziprecruiter#122377",
+      "count_over_100": 0,
+      "count_over_50": 0,
+      "prefixes_seen": 1265
+    }
+  },
+  "live_e3_raw_by_digits": {
+    "6": {
+      "prs": 118,
+      "max": 23,
+      "min": 2
+    }
+  },
+  "all_beads": 6725
+}

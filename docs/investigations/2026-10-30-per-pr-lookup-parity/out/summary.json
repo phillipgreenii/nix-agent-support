@@ -1,0 +1,119 @@
+{
+  "work_items_all_rows_per_expression": [1606, 1618, 448, 28, 17, 29],
+  "work_items_all_distinct": 3746,
+  "prs": 118,
+  "prs_with_dedup_key": 118,
+  "pr_node_id_only_unresolved_keys": [],
+  "difference_table": [
+    {
+      "cause": "node_id-only identification (key ident is a node id), no repo/pr_number metadata [E3 finds it]",
+      "beads": 7,
+      "examples": ["zr-2nkwm", "zr-4a8us", "zr-98w64", "zr-9dul4", "zr-lgpkg"]
+    }
+  ],
+  "prs_needing_e3": [
+    "ZR-Private/ziprecruiter#108278",
+    "ZR-Private/ziprecruiter#112995",
+    "ZR-Private/ziprecruiter#113250",
+    "ZR-Private/ziprecruiter#113324",
+    "ZR-Private/ziprecruiter#113368",
+    "ZR-Private/ziprecruiter#113441",
+    "ZR-Private/ziprecruiter#113446"
+  ],
+  "prs_needing_consistency_check": [],
+  "prs_with_gap_e1e2": 7,
+  "prs_with_gap_e1e2e3": 0,
+  "prs_with_index_gap_e1e2": 7,
+  "prs_with_index_gap_e1e2e3": 0,
+  "extras": [
+    {
+      "kind": "extra: belongs() passes, not in work-items-all",
+      "rows": 70,
+      "examples": [
+        "zr-0kwc0.3",
+        "zr-0kwc0.4",
+        "zr-0kwc0.5",
+        "zr-0kwc0.6",
+        "zr-0kwc0.7"
+      ]
+    },
+    {
+      "kind": "extra raw row rejected by belongs() (e3)",
+      "rows": 3,
+      "examples": ["zr-a7qkr", "zr-u0w0p.3", "zr-v6tqi"]
+    }
+  ],
+  "raw_rows": {
+    "e1_raw": {
+      "max": 50,
+      "median": 2,
+      "total": 484
+    },
+    "e2_raw": {
+      "max": 1,
+      "median": 0,
+      "total": 29
+    },
+    "e3_raw": {
+      "max": 23,
+      "median": 2,
+      "total": 453
+    },
+    "union_belongs": {
+      "max": 51,
+      "median": 2,
+      "total": 520
+    }
+  },
+  "offline_all_prs_simulation": {
+    "prs_seen": 1554,
+    "gaps": [
+      {
+        "cause": "keyless legacy item without repo/pr_number metadata (title match)",
+        "beads": 1169,
+        "prs": 1022,
+        "examples": ["zr-00x05", "zr-01kui", "zr-02rk0", "zr-02sts", "zr-03h0i"]
+      },
+      {
+        "cause": "node_id-only identification (key ident is a node id), no repo/pr_number metadata",
+        "beads": 7,
+        "prs": 7,
+        "examples": ["zr-2nkwm", "zr-4a8us", "zr-98w64", "zr-9dul4", "zr-lgpkg"]
+      }
+    ]
+  },
+  "population_work_items_all": {
+    "keyed+repo/pr_number metadata [closed]": {
+      "rows": 282,
+      "examples": ["zr-480my", "zr-tf96v", "zr-vhp9e", "zr-q97z8", "zr-hxpja"]
+    },
+    "keyed+repo/pr_number metadata [open]": {
+      "rows": 132,
+      "examples": ["zr-tc7w4", "zr-g31a0", "zr-ioc2x", "zr-ip8xy", "zr-16i46"]
+    },
+    "keyed, NO repo/pr_number metadata [closed]": {
+      "rows": 7,
+      "examples": ["zr-9dul4", "zr-rtejf", "zr-4a8us", "zr-2nkwm", "zr-lgpkg"]
+    },
+    "keyless+repo/pr_number metadata [closed]": {
+      "rows": 2104,
+      "examples": ["zr-jz8mk", "zr-nqb3j", "zr-afg03", "zr-ma75l", "zr-ri9ji"]
+    },
+    "keyless+repo/pr_number metadata [open]": {
+      "rows": 21,
+      "examples": ["zr-rz3i6", "zr-ymych", "zr-eccao", "zr-xvbqa", "zr-knnu3"]
+    },
+    "keyless, NO repo/pr_number metadata [closed]": {
+      "rows": 1171,
+      "examples": ["zr-s7cp3", "zr-6ytn1", "zr-1l7of", "zr-33bqp", "zr-3b314"]
+    },
+    "pr_number stored as int": {
+      "rows": 1797,
+      "examples": []
+    },
+    "pr_number stored as str": {
+      "rows": 742,
+      "examples": []
+    }
+  }
+}
