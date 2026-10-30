@@ -798,3 +798,23 @@ func TestEnsure_argv_envUnchangedLabelsUnchanged(t *testing.T) {
 		t.Errorf("--label = %v, want %v", gotLabels, want)
 	}
 }
+
+// pg2-iznqf3: the reply call's timeout must exceed the confirm-ingest window
+// (the default 90s window was killed at 60s), and non-confirming replies keep
+// the quick-call bound.
+func TestReplyTimeout_exceedsConfirmWindow(t *testing.T) {
+	for _, confirm := range []time.Duration{config.Default().ConfirmIngest, 55 * time.Second, 5 * time.Minute} {
+		if got := replyTimeout(confirm, ModeNoWait); got <= confirm {
+			t.Errorf("replyTimeout(%v, NoWait) = %v, must exceed the confirm window", confirm, got)
+		}
+	}
+	if got := replyTimeout(90*time.Second, ModeNoWait); got != 120*time.Second {
+		t.Errorf("replyTimeout(90s) = %v, want 2m0s (confirm + 30s)", got)
+	}
+	if got := replyTimeout(90*time.Second, ModeQueue); got != quickCallTimeout {
+		t.Errorf("queue reply timeout = %v, want quickCallTimeout", got)
+	}
+	if got := replyTimeout(0, ModeNoWait); got != quickCallTimeout {
+		t.Errorf("zero-window reply timeout = %v, want quickCallTimeout", got)
+	}
+}

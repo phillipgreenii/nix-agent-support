@@ -27,6 +27,10 @@ type exitCoder interface{ ExitCode() int }
 const (
 	// quickCallTimeout bounds the fast calls (list/reply/cancel/close/meta set).
 	quickCallTimeout = 60 * time.Second
+	// confirmCallSlack is the headroom added on top of a `--confirm-ingest`
+	// window to bound the `ccpool reply` call that carries it, so the call
+	// timeout always exceeds the confirm window (pg2-iznqf3).
+	confirmCallSlack = 30 * time.Second
 	// EnsureTimeout bounds `ccpool new`, which blocks until the session reaches
 	// ready. ccpool's own wait default is 10m, so this sits comfortably above it
 	// to avoid killing a legitimately-slow launch while still bounding a wedge.
@@ -333,4 +337,16 @@ func (c *CLIRunner) List(ctx context.Context) ([]Session, error) {
 func (c *CLIRunner) SetMeta(ctx context.Context, externalID, key, value string) error {
 	_, err := c.ccpool(ctx, quickCallTimeout, "meta", "set", externalID, key, value)
 	return err
+}
+
+// replyTimeout is the per-call bound for `ccpool reply`. A reply carrying
+// `--confirm-ingest <window>` (ModeNoWait with a positive window) blocks up to
+// the window, so its bound is window + confirmCallSlack; with the 90s default
+// the fixed quickCallTimeout (60s) killed the call before the confirm could
+// resolve (pg2-iznqf3). Every other reply keeps quickCallTimeout.
+func replyTimeout(confirm time.Duration, mode SendMode) time.Duration {
+	if confirm > 0 && mode == ModeNoWait && confirm+confirmCallSlack > quickCallTimeout {
+		return confirm + confirmCallSlack
+	}
+	return quickCallTimeout
 }
