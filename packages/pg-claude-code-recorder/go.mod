@@ -3,7 +3,9 @@ module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-cl
 go 1.26.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.61.0
 )

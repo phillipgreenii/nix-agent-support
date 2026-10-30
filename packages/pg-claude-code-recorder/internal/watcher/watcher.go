@@ -47,6 +47,9 @@ type Config struct {
 	MaxReplayGap  time.Duration // default 10m
 	Now           func() time.Time
 	Logger        *slog.Logger
+	// DisableEvents leaves the watcher sweep-only (no FSEvents or inotify
+	// stream); the serve unit tests drive it with Wake and Rescan.
+	DisableEvents bool
 
 	backend backend // test seam; nil selects the platform backend
 }
@@ -89,7 +92,7 @@ func New(cfg Config) (*Watcher, error) {
 		cfg.Logger = slog.Default()
 	}
 	b := cfg.backend
-	if b == nil {
+	if b == nil && !cfg.DisableEvents {
 		b = newBackend()
 	}
 	return &Watcher{cfg: cfg, b: b, notify: make(chan struct{}, 1)}, nil

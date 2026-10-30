@@ -1,10 +1,13 @@
 schema = 3
 cachePackages = [
+  'github.com/BurntSushi/toml',
+  'github.com/BurntSushi/toml/internal',
   'github.com/cespare/xxhash/v2',
   'github.com/dustin/go-humanize',
   'github.com/google/uuid',
   'github.com/mattn/go-isatty',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/x/pprofserver',
   'github.com/remyoudompheng/bigfft',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
@@ -41,6 +44,10 @@ cachePackages = [
 ]
 
 [mod]
+  [mod.'github.com/BurntSushi/toml']
+    version = 'v1.6.0'
+    hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
+
   [mod.'github.com/cespare/xxhash/v2']
     version = 'v2.3.0'
     hash = 'sha256-7hRlwSR+fos1kx4VZmJ/7snR7zHh8ZFKX+qqqqGcQpY='
@@ -60,6 +67,10 @@ cachePackages = [
   [mod.'github.com/ncruces/go-strftime']
     version = 'v1.1.0'
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
+
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261015022436-7b4c351b3c34'
+    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'

@@ -1,0 +1,140 @@
+// Package exporter serves the recorder's registry in the Prometheus text
+// exposition format on GET /metrics, the same shape the other workspace
+// daemons expose. Every series name carries the pg_claude_code_recorder_
+// prefix; labels are the bounded ones the registry holds (source, type, reason,
+// stage, kind, client), never a per-file or per-session label.
+package exporter
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+)
+
+// Prefix is prepended to every exported series name.
+const Prefix = "pg_claude_code_recorder_"
+
+// splitKey splits a registry key "name{a=b,c=d}" into the name and the labels
+// rendered as `a="b",c="d"`.
+func splitKey(k string) (name, labels string) {
+	i := strings.IndexByte(k, '{')
+	if i < 0 {
+		return k, ""
+	}
+	name = k[:i]
+	body := strings.TrimSuffix(k[i+1:], "}")
+	var parts []string
+	for _, kv := range strings.Split(body, ",") {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		parts = append(parts, kv[:eq]+"="+strconv.Quote(kv[eq+1:]))
+	}
+	return name, strings.Join(parts, ",")
+}
+
+func series(name, labels string) string {
+	if labels == "" {
+		return Prefix + name
+	}
+	return Prefix + name + "{" + labels + "}"
+}
+
+// Render writes reg in the text exposition format, series sorted for a stable
+// output.
+func Render(w io.Writer, reg *obs.Registry) {
+	counters, gauges, hists := reg.Snapshot()
+	write := func(kind string, m map[string]float64) {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		typed := map[string]bool{}
+		for _, k := range keys {
+			name, labels := splitKey(k)
+			if !typed[name] {
+				typed[name] = true
+				_, _ = fmt.Fprintf(w, "# TYPE %s%s %s\n", Prefix, name, kind)
+			}
+			_, _ = fmt.Fprintf(w, "%s %s\n", series(name, labels), strconv.FormatFloat(m[k], 'g', -1, 64))
+		}
+	}
+	write("counter", counters)
+	write("gauge", gauges)
+	names := make([]string, 0, len(hists))
+	for n := range hists {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		h := hists[n]
+		_, _ = fmt.Fprintf(w, "# TYPE %s%s histogram\n", Prefix, n)
+		var cum uint64
+		for i, b := range h.Bounds {
+			cum += h.Counts[i]
+			_, _ = fmt.Fprintf(w, "%s%s_bucket{le=\"%s\"} %d\n", Prefix, n, strconv.FormatFloat(b, 'g', -1, 64), cum)
+		}
+		cum += h.Counts[len(h.Bounds)]
+		_, _ = fmt.Fprintf(w, "%s%s_bucket{le=\"+Inf\"} %d\n", Prefix, n, cum)
+		_, _ = fmt.Fprintf(w, "%s%s_sum %s\n", Prefix, n, strconv.FormatFloat(h.Sum, 'g', -1, 64))
+		_, _ = fmt.Fprintf(w, "%s%s_count %d\n", Prefix, n, h.Samples)
+	}
+}
+
+// Handler serves GET /metrics from reg; refresh, when non-nil, runs before each
+// scrape so gauges are current.
+func Handler(reg *obs.Registry, refresh func()) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
+		if refresh != nil {
+			refresh()
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		Render(w, reg)
+	})
+	return mux
+}
+
+// Server is a running exporter.
+type Server struct {
+	srv *http.Server
+	ln  net.Listener
+}
+
+// Start listens on addr (host:port, loopback only) and serves reg.
+func Start(addr string, reg *obs.Registry, refresh func()) (*Server, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("metrics address %q: %w", addr, err)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return nil, fmt.Errorf("metrics address %q: only a loopback host is accepted", addr)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{srv: &http.Server{Handler: Handler(reg, refresh), ReadHeaderTimeout: 5 * time.Second}, ln: ln}
+	go func() { _ = s.srv.Serve(ln) }()
+	return s, nil
+}
+
+// Addr returns the bound address.
+func (s *Server) Addr() string { return s.ln.Addr().String() }
+
+// Close stops the exporter.
+func (s *Server) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = s.srv.Shutdown(ctx)
+}

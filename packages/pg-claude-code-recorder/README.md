@@ -62,6 +62,67 @@ the limit is hit, adding a watch fails with `ENOSPC` and `Start` returns that er
 queue overflow (`fs.inotify.max_queued_events`) triggers a sweep. Linux reports no birth time
 (`FileInfo.Birth` is zero).
 
+## Serve, status and coverage (phase 1d)
+
+`pg-claude-code-recorder serve --config FILE` composes the watcher, the copier and the store and
+listens on `recorder.sock` (mode 0600, HTTP/1.1 with JSON bodies: `GET /v1/hello`,
+`POST /v1/<operation>`). The Go client side reads `PG_CLAUDE_CODE_RECORDER_SOCKET`, else the
+config's `socket` (default `<stateDir>/recorder.sock`). `internal/server` owns the framing and
+the operation registry (`Register(name, kind, handler)`); phases 2, 3, 4 and 6 add operations
+there. `status` and `coverage` are the two operations this phase serves.
+
+Config: `$XDG_CONFIG_HOME/pg-claude-code-recorder/config.toml` (override with `--config` or
+`PG_CLAUDE_CODE_RECORDER_CONFIG`). An option `a.b` is the key `b` in the table `[a]`; durations
+are Go duration strings with a `d` suffix for days. Keys a later phase owns are tolerated.
+`controlStateDir` is optional; when set, `<controlStateDir>/ends` is the watcher's second root and
+`coverage` lists it with its presence and file count.
+
+First run copies newest first with a per-file throttle (`copy.throttle`, default 2ms after each
+file that moved bytes), and answers `degraded: true` (exit 5 from the command, partial answer on
+stdout) until the first full sweep is done; `--allow-partial` turns that into exit 0. Phase 1 has no
+parser, so parse lag is reported as 0 and `caught_up` means the first backfill is done.
+
+### Signals
+
+- Metrics: Prometheus text on `GET /metrics`, every series prefixed `pg_claude_code_recorder_`.
+  **Address and config key:** off by default; set `metrics.addr` in the config (a loopback
+  `host:port`), or `--metrics-addr`, or `PG_CLAUDE_CODE_RECORDER_METRICS_ADDR`. The darwin module
+  packet (7a) chooses the port and registers the scrape. Series: `dropped_bytes_total{reason}`
+  (every reason registered at zero), `copy_lag_bytes`, `copy_lag_seconds`,
+  `copy_lag_seconds_histogram`, `last_sweep_timestamp_seconds` (the heartbeat),
+  `state_free_bytes`, `state_used_bytes`, `requests_total{client,op,outcome}`,
+  `query_duration_seconds`, `feed_latency_seconds`, `wait_duration_seconds`, `backfill_files_*`,
+  `caught_up`. The `client` label is whitelisted (`clients` in the config adds names); any other
+  name is `other`. The exporter is a small text renderer over the in-process registry, so the
+  package takes no Prometheus client dependency.
+- Log: JSONL on standard error (or `logFile`), service `pg-claude-code-recorder`, fields `ts`,
+  `level`, `event`, and where they apply `file_id`, `session_id`, `generation`, `offset`,
+  `parser_version`, `cursor`, `stage`. Each request logs `request` with the caller's `--client`.
+
+### pprof and the profiling harness
+
+`serve --pprof` (or `PG_CLAUDE_CODE_RECORDER_PPROF_ADDR`, which wins) opens the opt-in endpoint
+through `github.com/phillipgreenii/x/pprofserver` on `$XDG_STATE_HOME/pg-claude-code-recorder/pprof.sock`,
+mode 0600. **Recorded mismatch:** the design says elsewhere that `pprof.sock` sits in the state
+directory; this follows the more specific packaging rule above (pg-connector's option), so the
+profiler socket never shares a directory with the data store.
+
+`scripts/profile-cpu.sh --sock SOCK --seconds N [--pid PID]` runs the runbook recipe
+(`curl --unix-socket ... /debug/pprof/profile?seconds=N`, then `go tool pprof -top`) and prints
+`cpu_percent_of_one_core`. The real-tree check runs it for 600 seconds; the bounds are the
+copier and watcher at or below 5% of one core with no client attached, the whole daemon at or
+below 10% once the parser and feed run (re-measure, not derived).
+
+### Exit codes and errors
+
+0 success, 1 unexpected, 2 usage, 3 daemon offline, 4 not found, 5 degraded or behind, 6 wait
+timed out, 7 cursor expired, 8 refused, 9 doctor mismatch (`--help` prints the table). Without
+`--json` stderr gets `error: <name>` and one actionable line; with `--json` one
+`{"error","exit","message"}` object. `status` always answers: offline it prints the socket path,
+launch agent state (`launchctl list <label>`, label from `PG_CLAUDE_CODE_RECORDER_LAUNCH_LABEL`,
+default `com.phillipg.pg-claude-code-recorder` until phase 7a names it), the log path and the
+state directory size read from disk, and exits 3.
+
 ## Conventions for later packets
 
 - External commands go through `github.com/phillipgreenii/x`'s `cmdrun`, as `pg-router-probe` does.
