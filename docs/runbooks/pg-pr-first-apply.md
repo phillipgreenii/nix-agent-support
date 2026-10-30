@@ -218,3 +218,47 @@ Retention is stated above (not rotated away before the plan summary is consumed,
 operator declares the lane stable). The pg-desk log source registers the file but sets no rotation,
 and the file is on no rotation list. When the operator declares the lane stable, the file MAY be
 rotated by an ordinary tool; until then it MUST NOT.
+
+### Rollback, in one place
+
+Rollback is by timestamp, never a restore of the store backup (step 8 above; the decision is recorded in
+[ADR 0116](../adr/0116-the-pr-lane-is-one-composed-command-driven-by-change-events.md)). In short:
+set the role and `pr_lane.mode` back to `plan`, then `pg-pr-backfill rollback` (dry run) and
+`pg-pr-backfill rollback --apply`; it needs the before-image taken by `pg-pr-backfill snapshot` in step 5.
+
+## Where each part of the lane is documented
+
+Every ruling and every source decision of the PR lane refactor maps to a phase (a delivered change with
+its own docs) or is recorded as dropped. The table is the checklist for this runbook; the full set of
+rulings, design calls and risks is in [ADR 0116](../adr/0116-the-pr-lane-is-one-composed-command-driven-by-change-events.md).
+
+| Ruling or goal                                                          | Delivered by                                                      |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1 Fix forward, no store rollback                                        | switch-off, the composed command, this runbook's step 8           |
+| 2 Daemon path, no wait for the shadow run                               | the connector hoist, the GitHub-side flip, the daemon cutover     |
+| 3 Full refactor, no stop-gap                                            | switch-off, role in `plan` mode, this runbook                     |
+| 4 Track until the work item closes                                      | tracking rule, marking step, stale-anchor alert                   |
+| 5 Mass adoption and a hydration burst are acceptable                    | decider readiness, backfill driver, this runbook's steps 2 and 6  |
+| 6 and 14 Threads of tracked PRs                                         | DROPPED by ruling (V6-1): deferred, follow-up bead `pg2-9eec8`    |
+| 7 Alerts and dashboards                                                 | pre-flip observability, remaining alerts and dashboards, deletion |
+| 8 and 9 Tracking and the watched flag                                   | the connector hoist and the GitHub side                           |
+| 10 No reconcile and no sweep                                            | role in `plan` mode (sweeps removed)                              |
+| 11 One composed role                                                    | the composed command, the role in `plan` mode                     |
+| 12 Plan first, then apply; rollback by timestamp                        | run record, backfill driver, this runbook (steps 3 to 8)          |
+| 13 The flip MAY precede the daemon cutover                              | role in `plan` mode, this runbook                                 |
+| 15 Tracked-set threshold                                                | remaining alerts and dashboards                                   |
+| 16 Several review items per PR                                          | decider readiness                                                 |
+| 17 Open-anchor PRs marked watched at cutover                            | the daemon cutover (marking mode), backfill enumerate             |
+| 18 No relation link; review items found by tracker query                | decider readiness                                                 |
+| 19 No canary; decisions exported as a metric                            | the composed command, pre-flip observability                      |
+| Goal: outcome alerts and a test that fails before a migration           | guards, pre-flip observability                                    |
+| Goal: queries defined only in the connector                             | the connector hoist, the GitHub side, deletion                    |
+| Goal: the legacy lane is deleted                                        | deletion phase                                                    |
+| ADR 0077 rollback "restore the store backup"                            | REPLACED by step 8 (V6-3)                                         |
+| Daemon design: `pr-sweep-full` as a 6 h backstop; `desk-reconcile` kept | DROPPED by ruling 10                                              |
+| Review settle window                                                    | REPLACED by several review items per PR (ruling 16)               |
+
+Operating notes that are not part of the first apply: the lookup-ceiling remedy and the run-record
+retention rule above, the driver's commands in [`pg-pr-backfill.md`](pg-pr-backfill.md), the decider's
+behavior in [`docs/behavior/pg-decider/`](../behavior/pg-decider/README.md) and the live `pr lane` status
+line in [`docs/behavior/pg-desk/operator-commands.md`](../behavior/pg-desk/operator-commands.md).
