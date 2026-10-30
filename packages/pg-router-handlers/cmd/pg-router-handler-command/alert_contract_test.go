@@ -54,10 +54,10 @@ func failureRateExclusion(t *testing.T) *regexp.Regexp {
 // commandReasons are the reason strings this adapter can emit, each the string
 // the alert rules would see, and the disposition the design pins for it:
 //
-//   - command-busy is the decline reason of an exit 9 (kind busy). It must stay
-//     COUNTED by the failure-rate rule: the cause is opaque to the adapter and
-//     a command that stays busy must remain visible, not hide inside the
-//     routine-backpressure exclusion that at-capacity has.
+//   - command-busy is the decline reason of an exit 9 (kind busy). It is
+//     EXCLUDED by the failure-rate rule: a busy decline is backpressure, not a
+//     failure (operator ruling 2026-10-29 on pg2-6j0lr5, precedent pg2-v3qn6),
+//     the same routine-backpressure exclusion that at-capacity has.
 //   - the failure signatures of a failed command (failsig.Classify of its
 //     stderr) are recorded as failure_signature on the dispatch_result record.
 //     Each is COUNTED too: a failing command is a real delivery failure.
@@ -67,7 +67,7 @@ func failureRateExclusion(t *testing.T) *regexp.Regexp {
 // until someone decides what the alert rule does with it.
 var (
 	commandReasonDisposition = map[string]string{
-		wire.BusyReasonCommandBusy:   "counted",
+		wire.BusyReasonCommandBusy:   "excluded",
 		string(failsig.GitAuth):      "counted",
 		string(failsig.GitNetwork):   "counted",
 		string(failsig.MountOrPath):  "counted",
