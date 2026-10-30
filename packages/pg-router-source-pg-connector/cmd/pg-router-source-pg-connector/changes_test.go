@@ -16,10 +16,13 @@ import (
 // install as changesNow.
 var pinnedEmitTime = time.Date(2026, 10, 7, 12, 0, 0, 123456789, time.UTC)
 
+// emitSkew shifts the pinned clock for a test that needs a second emit instant.
+var emitSkew time.Duration
+
 func pinEmitTime(t *testing.T) {
 	t.Helper()
 	orig := changesNow
-	changesNow = func() time.Time { return pinnedEmitTime }
+	changesNow = func() time.Time { return pinnedEmitTime.Add(emitSkew) }
 	t.Cleanup(func() { changesNow = orig })
 }
 
@@ -413,8 +416,8 @@ func TestChanges_EntityIDAlwaysPresent(t *testing.T) {
 // suffix, an at/expiresAt key) fails.
 func TestChanges_WindowZeroOrAbsent_IsByteIdenticalApartFromEntityID(t *testing.T) {
 	pinEmitTime(t)
-	const want = `[{"id":"e1","type":"issue","title":"Entity One","metadata":{"change":"added","degraded_sources":["b2"],"entity_id":"e1","source":"b1"}},` +
-		`{"id":"e2","type":"issue","title":"e2","metadata":{"change":"changed","degraded_sources":["b2"],"entity_id":"e2","source":"b2"}}]` + "\n"
+	const want = `[{"id":"e1","type":"issue","title":"Entity One","metadata":{"change":"added","degraded_sources":["b2"],"emitted_at":"2026-10-07T12:00:00.123Z","entity_id":"e1","source":"b1"}},` +
+		`{"id":"e2","type":"issue","title":"e2","metadata":{"change":"changed","degraded_sources":["b2"],"emitted_at":"2026-10-07T12:00:00.123Z","entity_id":"e2","source":"b2"}}]` + "\n"
 	for _, extra := range [][]string{nil, {"--retry-window", "0"}, {"--retry-window", "0s"}} {
 		withFactory(t, "changes_degraded")
 		args := append([]string{"changes", "issue", "q", "--consumer", "c1"}, extra...)
@@ -735,7 +738,7 @@ func TestChanges_RetryWindow_SeqKindsFieldsDoNotReachTheDigest(t *testing.T) {
 func TestChanges_RowsWithoutExtras_ByteIdenticalToTodaysOutput(t *testing.T) {
 	const body = `{"sources":[{"backend":"b1","status":"succeeded","version":1,"truncated":false}],"changes":[` +
 		`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}}]}`
-	const want = `[{"id":"e1","type":"pr","title":"Entity One","metadata":{"change":"added","degraded_sources":[],"entity_id":"e1","source":"b1"}}]` + "\n"
+	const want = `[{"id":"e1","type":"pr","title":"Entity One","metadata":{"change":"added","degraded_sources":[],"emitted_at":"2026-10-07T12:00:00.123Z","entity_id":"e1","source":"b1"}}]` + "\n"
 	for _, window := range []string{"", "0", "0s"} {
 		if stdout, _ := poll(t, window, body); stdout != want {
 			t.Fatalf("window %q: stdout =\n%s\nwant\n%s", window, stdout, want)
@@ -828,5 +831,35 @@ func TestChanges_NeverPassesNoAck_CursorAdvancesAtEmitSoExpiredEventsAreNotRepla
 			t.Fatalf("child argv %v carries --no-ack: the cursor would no longer advance at emit; "+
 				"update the pg2-cfml6k ruling in docs/behavior/README.md if this is deliberate", got)
 		}
+	}
+}
+
+// emitted_at (bead pg2-ch5dm7.3): every item carries the emit instant at
+// millisecond precision in metadata, with or without a window, and it never
+// reaches the event-id digest, so ids of identical rows are the same whatever
+// the clock says.
+func TestChanges_EmittedAt_MillisecondPrecisionAndNotInTheEventID(t *testing.T) {
+	const body = `{"sources":[{"backend":"b1","status":"succeeded","version":1,"truncated":false}],"changes":[` +
+		`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One","head_sha":"h1"}}]}`
+	millis := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`)
+
+	pinEmitTime(t)
+	for _, window := range []string{"", "1h"} {
+		_, items := poll(t, window, body)
+		got, _ := items[0].Metadata["emitted_at"].(string)
+		if !millis.MatchString(got) || got != "2026-10-07T12:00:00.123Z" {
+			t.Fatalf("window %q: metadata.emitted_at = %q, want 2026-10-07T12:00:00.123Z", window, got)
+		}
+	}
+
+	_, first := poll(t, "1h", body)
+	emitSkew = 37*time.Minute + 456*time.Millisecond
+	t.Cleanup(func() { emitSkew = 0 })
+	_, second := poll(t, "1h", body)
+	if first[0].ID != second[0].ID {
+		t.Fatalf("event id changed with the clock: %q vs %q", first[0].ID, second[0].ID)
+	}
+	if first[0].Metadata["emitted_at"] == second[0].Metadata["emitted_at"] {
+		t.Fatalf("emitted_at did not follow the clock: %v", second[0].Metadata["emitted_at"])
 	}
 }

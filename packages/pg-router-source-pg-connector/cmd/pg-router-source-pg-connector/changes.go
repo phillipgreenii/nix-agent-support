@@ -19,6 +19,9 @@ import (
 // "at" stamp --retry-window puts on each item (bead pg2-1ldvy).
 var changesNow = time.Now
 
+// emittedAtLayout is RFC 3339 UTC with millisecond precision (metadata.emitted_at).
+const emittedAtLayout = "2006-01-02T15:04:05.000Z"
+
 // retryIDHexLen is how many hex characters of the change-row digest the
 // retry-window id suffix carries (bead pg2-1ldvy: "12 hex of sha256").
 const retryIDHexLen = 12
@@ -244,7 +247,12 @@ func newChangesCmd() *cobra.Command {
 		// RFC3339 seconds; expiresAt is computed from the truncated at so
 		// expiresAt - at is exactly the window. expiresAt is the bound pg-router's
 		// retry evaluates at attempt time (INV-EVT-4).
-		emitAt := changesNow().UTC().Truncate(time.Second)
+		now := changesNow().UTC()
+		emitAt := now.Truncate(time.Second)
+		// emitted_at (bead pg2-ch5dm7.3): the same instant at millisecond
+		// precision, on every item, window or not. Metadata only: it never
+		// reaches changeIdentity, so event ids and router dedup are unchanged.
+		emittedAt := now.Format(emittedAtLayout)
 
 		items := make([]rawItem, 0, len(wire.Changes))
 		for _, c := range wire.Changes {
@@ -265,7 +273,8 @@ func newChangesCmd() *cobra.Command {
 				// --retry-window the item id carries an @<digest>
 				// suffix, and a handler that needs the real entity id
 				// (a desk argv) reads it from here.
-				"entity_id": id.ID,
+				"entity_id":  id.ID,
+				"emitted_at": emittedAt,
 			}
 			if len(degradedReasons) > 0 {
 				metadata["degraded_reasons"] = degradedReasons

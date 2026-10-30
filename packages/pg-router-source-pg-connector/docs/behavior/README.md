@@ -73,7 +73,7 @@ flowchart LR
 
   `--retry-window <duration>` (bead `pg2-1ldvy`; default `0` = off) gives the router a bounded
   retry window per change. With the default, the item `id` is the bare entity id and the output is
-  byte-identical to a call without the flag apart from `metadata.entity_id`; no `at`/`expiresAt` is
+  byte-identical to a call without the flag apart from `metadata.entity_id` and `metadata.emitted_at`; no `at`/`expiresAt` is
   printed, so every event is born expired and a failed dispatch is offered once (pg-router
   INV-EVT-4). Only when the window is greater than zero:
   - the item `id` becomes `<entity id>@<12 hex>`, the first 12 hex characters of the SHA-256 over
