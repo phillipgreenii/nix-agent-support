@@ -156,7 +156,10 @@ anything.
   row) MUST NOT make its backend stale or unknown while the backend has any row that is not
   abandoned, whether or not the abandoned row ever succeeded. A row polled within that window that
   has no recorded success MUST still read unknown and stale (INV-FRESH-4). When every row of a
-  backend is abandoned they MUST all count. Applying the rule MUST NOT delete a ledger file or a
+  backend is abandoned they MUST all count, unless the operator lists the backend in
+  `freshness.retired_sources`, in which case the backend MUST be absent from the verb and the
+  dashboard `sources[]`; a retired backend with any row that is not abandoned MUST keep
+  reporting (fail closed). Applying the rule MUST NOT delete a ledger file or a
   store row.
 - **INV-FRESH-7.** <!-- uuid: b616cca2-721e-4807-8052-5d5479bba656 --> For a backend that owns its changes, the ledger times pg-desk reads MUST come from
   that backend's own record of its last whole-query origin answer and last error, and a cache

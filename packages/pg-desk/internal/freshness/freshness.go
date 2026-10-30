@@ -18,7 +18,10 @@
 // consumer stamps last_seen on every poll, successful or not. A row whose
 // every consumer was last seen longer than AbandonedAfter ago is a ghost (a
 // retired instance or query) and is not allowed to hold its backend stale
-// (INV-FRESH-6); a live row that has never succeeded still does.
+// (INV-FRESH-6); a live row that has never succeeded still does. A backend
+// whose every row is abandoned keeps reading stale (INV-FRESH-4) unless the
+// operator lists it in freshness.retired_sources, which drops it from the
+// report; the rows stay in the store.
 package freshness
 
 import (
@@ -351,6 +354,10 @@ func Sources(st *store.Store, cfg *config.Config, now time.Time) ([]Row, error) 
 	}
 	aggs := map[string]*agg{}
 	for b, recs := range byBackend {
+		if cfg.IsRetiredSource(b) && allAbandoned(recs, now) {
+			delete(byBackend, b) // retired and nothing polls it: leaves the report
+			continue
+		}
 		recs = liveRecords(recs, now)
 		a := &agg{}
 		aggs[b] = a
@@ -402,6 +409,17 @@ func liveRecords(recs []Record, now time.Time) []Record {
 		return recs
 	}
 	return live
+}
+
+// allAbandoned reports whether every record is abandoned (nothing polls the
+// backend any more).
+func allAbandoned(recs []Record, now time.Time) bool {
+	for _, r := range recs {
+		if !r.abandoned(now) {
+			return false
+		}
+	}
+	return true
 }
 
 // ageSeconds is the whole seconds since t; a future t (clock skew) is 0.

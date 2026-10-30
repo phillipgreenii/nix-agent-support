@@ -84,7 +84,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
-		{"FreshnessConfig", reflect.TypeOf(FreshnessConfig{}), []string{"source_stale_after", "sources"}},
+		{"FreshnessConfig", reflect.TypeOf(FreshnessConfig{}), []string{"source_stale_after", "sources", "retired_sources"}},
 		{"FreshnessSourceConfig", reflect.TypeOf(FreshnessSourceConfig{}), []string{"label", "stale_after"}},
 		{"AttentionConfig", reflect.TypeOf(AttentionConfig{}), []string{"rules", "ordering"}},
 		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days", "due_soon_days"}},
@@ -1284,5 +1284,27 @@ func TestNonOwningInstancesAreDistinctSortedAndSkipUnpinnedQueries(t *testing.T)
 	}
 	if got := cfg.NonOwningInstances("pr"); got != nil {
 		t.Errorf("NonOwningInstances(pr) = %v, want nil", got)
+	}
+}
+
+func TestFreshnessRetiredSources(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+"freshness:\n  retired_sources: [pr-github, pg-connector-issue-old]\n"))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	for backend, want := range map[string]bool{
+		"pg-connector-pr-github": true, "pr-github": true, "pg-connector-issue-old": true,
+		"pg-connector-issue-beads": false,
+	} {
+		if got := cfg.IsRetiredSource(backend); got != want {
+			t.Errorf("IsRetiredSource(%q) = %v, want %v", backend, got, want)
+		}
+	}
+	var nilCfg *Config
+	if nilCfg.IsRetiredSource("x") {
+		t.Error("nil Config retires nothing")
+	}
+	if _, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+"freshness:\n  retired_sources: [\"\"]\n")); err == nil || !strings.Contains(err.Error(), "freshness.retired_sources") {
+		t.Errorf("empty retired name err = %v", err)
 	}
 }

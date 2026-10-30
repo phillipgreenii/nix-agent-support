@@ -521,3 +521,52 @@ func TestRealLedgerShapeClassifiesGhosts(t *testing.T) {
 		t.Errorf("pr-github = %+v, want fresh", r)
 	}
 }
+
+func TestSourcesRetiredBackendWithOnlyAbandonedRowsLeavesTheReport(t *testing.T) {
+	st := store.OpenForTest(t)
+	old := "pg-connector-pr-github"
+	mustUpdate(
+		t, st,
+		seen(ledgerRow(old, "mine", ts(-AbandonedAfter-time.Hour)), -AbandonedAfter-time.Hour),
+		seen(ledgerRow(old, "team", ts(-AbandonedAfter-time.Hour)), -AbandonedAfter-time.Hour),
+		seen(ledgerRow("pg-connector-github", "mine", ts(-time.Minute)), -time.Minute),
+	)
+	for _, name := range []string{"pr-github", old} {
+		cfg := &config.Config{Freshness: config.FreshnessConfig{RetiredSources: []string{name}}}
+		rep, err := Build(st, cfg, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Sources) != 1 || rep.Sources[0].Source != "pg-connector-github" || rep.AnyStale {
+			t.Errorf("retired as %q: report = %+v, want only the live backend and no stale", name, rep)
+		}
+	}
+	// Not deleting store rows (INV-FRESH-6).
+	if kv, _ := st.ListMetaPrefix(MetaKeyPrefix + old); len(kv) != 2 {
+		t.Errorf("store rows = %d, want 2 kept", len(kv))
+	}
+}
+
+func TestSourcesConfiguredBackendWithAllRowsAbandonedStillReadsStale(t *testing.T) {
+	st := store.OpenForTest(t)
+	b := "pg-connector-pr-github"
+	mustUpdate(t, st, seen(ledgerRow(b, "mine", ts(-AbandonedAfter-time.Hour)), -AbandonedAfter-time.Hour))
+	// not retired, and a different backend retired: still reported and stale
+	cfg := &config.Config{Freshness: config.FreshnessConfig{RetiredSources: []string{"issue-beads"}}}
+	for _, c := range []*config.Config{nil, cfg} {
+		r := onlySource(t, mustSources(t, st, c, t0), b)
+		if !r.Stale {
+			t.Errorf("row = %+v, want stale (INV-FRESH-4)", r)
+		}
+	}
+}
+
+func TestSourcesRetiredBackendStillPolledKeepsReporting(t *testing.T) {
+	st := store.OpenForTest(t)
+	b := "pg-connector-pr-github"
+	mustUpdate(t, st, seen(ledgerRow(b, "mine", nil), -time.Minute))
+	cfg := &config.Config{Freshness: config.FreshnessConfig{RetiredSources: []string{"pr-github"}}}
+	if r := onlySource(t, mustSources(t, st, cfg, t0), b); !r.Stale {
+		t.Errorf("row = %+v, a retired-but-polled backend must read stale", r)
+	}
+}

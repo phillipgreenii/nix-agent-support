@@ -1226,6 +1226,28 @@ type FreshnessConfig struct {
 	// the connector backend name (for example "pg-connector-pr-github") or
 	// that name without its "pg-connector-" prefix.
 	Sources map[string]FreshnessSourceConfig `yaml:"sources,omitempty" json:"sources,omitempty"`
+	// RetiredSources names backends that were deliberately retired (a key is
+	// the full backend name or that name without its "pg-connector-" prefix).
+	// A retired backend whose every ledger row is abandoned leaves the
+	// freshness report; one that anything still polls keeps reporting, so a
+	// wrongly listed backend that is merely down still reads stale.
+	RetiredSources []string `yaml:"retired_sources,omitempty" json:"retired_sources,omitempty"`
+}
+
+// IsRetiredSource reports whether backend is listed in
+// freshness.retired_sources (by full or short name). Safe on a nil Config.
+func (c *Config) IsRetiredSource(backend string) bool {
+	if c == nil {
+		return false
+	}
+	short := strings.TrimPrefix(backend, "pg-connector-")
+	for _, n := range c.Freshness.RetiredSources {
+		n = strings.TrimSpace(n)
+		if n != "" && (n == backend || n == short) {
+			return true
+		}
+	}
+	return false
 }
 
 // FreshnessSourceConfig is one entry of freshness.sources.
@@ -1253,6 +1275,11 @@ func validateFreshness(f FreshnessConfig) error {
 	if strings.TrimSpace(f.SourceStaleAfter) != "" {
 		if _, err := parseDayDuration(f.SourceStaleAfter); err != nil {
 			return fmt.Errorf("freshness.source_stale_after: %w", err)
+		}
+	}
+	for _, n := range f.RetiredSources {
+		if strings.TrimSpace(n) == "" {
+			return errors.New("freshness.retired_sources: source name must not be empty")
 		}
 	}
 	names := make([]string, 0, len(f.Sources))
