@@ -656,6 +656,16 @@
               inherit bashBuilders;
               beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).handoff-create.script;
+          # pg-decider-backfill-pr-metadata (bead pg2-eclw3j.5): one-off backfill
+          # of repo/pr_number onto process-feedback children (dry-run default).
+          # Single mkBashScript tool, same shape as handoff-create; `bd` comes
+          # from the ambient PATH, the beads package is for the test check only.
+          pg-decider-backfill-pr-metadata =
+            (import ./packages/pg-decider-backfill-pr-metadata {
+              pkgs = final;
+              inherit bashBuilders;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            }).pg-decider-backfill-pr-metadata.script;
           # hand-to-human (bead pg2-ikkpk): hands a bead to the operator by
           # writing the strict label pair human + attention and removing
           # escalated in ONE update call (the label vocabulary lives in
@@ -17968,6 +17978,13 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
             }).checks
+            # test-pg-decider-backfill-pr-metadata (bead pg2-eclw3j.5), same idiom
+            # as handoff-create above (real-bd throwaway-DB suite).
+            // (import ./packages/pg-decider-backfill-pr-metadata {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+            }).checks
             # test-hand-to-human (bead pg2-ikkpk). Same one-line idiom as
             # handoff-create above: without this the suite (incl. the real-bd
             # throwaway-DB tests) would run in no gate at all.
@@ -18151,6 +18168,9 @@
             # tool holding just the script derivation) -- re-exported so
             # `nix build .#handoff-create` resolves via flake.packages.<system>.
             inherit (pkgs) handoff-create;
+            # pg-decider-backfill-pr-metadata: overlay-only attr, re-exported so
+            # `nix build .#pg-decider-backfill-pr-metadata` resolves.
+            inherit (pkgs) pg-decider-backfill-pr-metadata;
             # hand-to-human is likewise an overlay-only attr (single mkBashScript
             # tool) -- re-exported so `nix build .#hand-to-human` resolves via
             # flake.packages.<system>.

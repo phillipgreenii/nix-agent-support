@@ -1,0 +1,8 @@
+#compdef pg-decider-backfill-pr-metadata
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--bd-dir[Tracker root to run bd against]:directory:_files -/' \
+  '--actor[Actor id recorded on every write]:actor:' \
+  '--apply[Perform the writes (default is a dry run)]'
