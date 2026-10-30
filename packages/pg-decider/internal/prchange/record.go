@@ -61,8 +61,25 @@ type RunRecord struct {
 	// read, so the residual is unknown.
 	ResidualError string `json:"residual_error,omitempty"`
 
+	// Timings is where the run's time went, per stage (whole milliseconds). A
+	// stage the run never reached has no member.
+	Timings *TimingsRecord `json:"timings,omitempty"`
+
 	// Lane says whether the run was recorded through pg-desk's lane write path.
 	Lane LaneRecord `json:"lane_record"`
+}
+
+// TimingsRecord is the wall time of each stage of a run, in whole milliseconds
+// of the run's clock. Every member is omitted when the stage did not run.
+type TimingsRecord struct {
+	// LockWaitMs is the wait for the per-PR lock (also set when the wait ran out).
+	LockWaitMs *int64 `json:"lock_wait_ms,omitempty"`
+	// HydrateMs is the `pg-desk pr refresh` call; ViewReadMs the `pg-desk pr show`
+	// read of the stored view that follows a successful refresh.
+	HydrateMs  *int64 `json:"hydrate_ms,omitempty"`
+	ViewReadMs *int64 `json:"view_read_ms,omitempty"`
+	// DecideMs is the whole decide stage (its parts are on the decide record).
+	DecideMs *int64 `json:"decide_ms,omitempty"`
 }
 
 // HydrateRecord is the hydrate stage of a run. Result is ok, failed or not_run
@@ -87,6 +104,21 @@ type DecideRecord struct {
 	// PlanError is set when the read-only plan the record is built from could not
 	// be read; the lists above are then empty and no decisions are recorded.
 	PlanError string `json:"plan_error,omitempty"`
+
+	// The members below are timings (whole milliseconds) and the lookup item
+	// count; each is omitted when it was not measured or not reported.
+	//
+	// LookupMs and LookupItems are the work-item lookup's wall time and listing
+	// size as the decider's run counters line reports them (apply mode and a
+	// failed-closed lookup; a plan run reports no counters line, so no duration).
+	LookupMs    *int64 `json:"lookup_ms,omitempty"`
+	LookupItems *int64 `json:"lookup_items,omitempty"`
+	// PrePlanMs is the read-only `plan --json` (apply: before the apply; plan: the
+	// one the record is built from). ApplyMs is the decider's own call (the apply,
+	// or in plan mode the plan). ResidualMs is the read-only plan after an apply.
+	PrePlanMs  *int64 `json:"pre_plan_ms,omitempty"`
+	ApplyMs    *int64 `json:"apply_ms,omitempty"`
+	ResidualMs *int64 `json:"residual_ms,omitempty"`
 }
 
 // RuleOutcome is one rule's result of the run. Outcome is planned (plan mode,

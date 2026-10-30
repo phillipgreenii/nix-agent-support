@@ -44,6 +44,7 @@ var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []a
 	run.Skipped(skipped)
 	if lk != nil {
 		run.Lookup(lk.Items(), lk.Ceiling())
+		run.LookupDuration(lk.Elapsed())
 	}
 	fail.OnEscalate(run.Escalated)
 	return []apply.Hook{audit.New(), fail, run}

@@ -36,7 +36,10 @@
 //     was checked against (omitted for a run that made no lookup). A run that
 //     failed closed because of the lookup still reports them, as far as they
 //     are known (the ceiling always, the item count when a listing was read),
-//     so the composed command can persist them on that path too.
+//     so the composed command can persist them on that path too;
+//   - line level, "lookup_ms": the wall time of that lookup in whole
+//     milliseconds (omitted whenever the lookup figures are, and by a decider
+//     that predates it), so the composed command can say where a slow run went.
 //
 // planned is every action of the rule (planned = applied + deduped + failed +
 // skipped); skipped counts skipped-dependency outcomes, which are not failures.
@@ -55,6 +58,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/apply"
@@ -99,6 +103,9 @@ type Line struct {
 	// run; nil (omitted) when not known.
 	LookupItems   *int `json:"lookup_items,omitempty"`
 	LookupCeiling *int `json:"lookup_ceiling,omitempty"`
+	// LookupMs is the wall time of the lookup in milliseconds; nil (omitted)
+	// when not measured.
+	LookupMs *int64 `json:"lookup_ms,omitempty"`
 }
 
 // transitions is the closed set of facts.transition values counted.
@@ -112,6 +119,7 @@ type Hook struct {
 	fromItem                   string
 	skipped                    []action.Skip
 	lookupItems, lookupCeiling *int
+	lookupMs                   *int64
 }
 
 var _ apply.Hook = (*Hook)(nil)
@@ -137,6 +145,10 @@ func (h *Hook) Skipped(skips []action.Skip) { h.skipped = skips }
 // Lookup records the work-item lookup figures of the run (the listing's size
 // and the configured ceiling), so the line carries them.
 func (h *Hook) Lookup(items, ceiling int) { h.lookupItems, h.lookupCeiling = &items, &ceiling }
+
+// LookupDuration records the wall time of the lookup, so the line carries it as
+// lookup_ms (whole milliseconds).
+func (h *Hook) LookupDuration(d time.Duration) { ms := d.Milliseconds(); h.lookupMs = &ms }
 
 // Escalated records one escalation created by the run.
 func (h *Hook) Escalated(string) { h.escalations++ }
@@ -221,6 +233,7 @@ func (h *Hook) Finish(_ context.Context, env apply.Env, evs []apply.Event) error
 	return emit(env, Line{
 		Contract: Contract, Type: h.typ, ID: h.id, Rules: rules, Escalations: h.escalations,
 		Seq: h.seq, FromItem: h.fromItem, LookupItems: h.lookupItems, LookupCeiling: h.lookupCeiling,
+		LookupMs: h.lookupMs,
 	})
 }
 
@@ -236,10 +249,12 @@ func EmitFailureLine(w io.Writer, typ, id, reason string) error {
 
 // EmitLookupFailureLine is EmitFailureLine for a run that failed closed because
 // its work-item lookup could not be trusted: the same line plus the lookup
-// figures known at that point (nil members are omitted).
-func EmitLookupFailureLine(w io.Writer, typ, id, reason string, items, ceiling *int) error {
+// figures known at that point (nil members are omitted) and the time the
+// lookup took before it failed.
+func EmitLookupFailureLine(w io.Writer, typ, id, reason string, items, ceiling *int, took time.Duration) error {
+	ms := took.Milliseconds()
 	return emit(apply.Env{Stderr: w}, Line{
 		Contract: Contract, Type: typ, ID: id, Rules: map[string]RuleCounters{},
-		Failures: map[string]int{reason: 1}, LookupItems: items, LookupCeiling: ceiling,
+		Failures: map[string]int{reason: 1}, LookupItems: items, LookupCeiling: ceiling, LookupMs: &ms,
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/apply"
@@ -230,15 +231,53 @@ func TestLookupFailureLineReportsTheFiguresKnown(t *testing.T) {
 	}{
 		{"both known", &items, &ceiling, `"lookup_items":7100,"lookup_ceiling":7000`, ""},
 		{"only the ceiling", nil, &ceiling, `"lookup_ceiling":7000`, "lookup_items"},
-		{"neither", nil, nil, `"failures":{"lookup-unavailable":1}`, "lookup_"},
+		{"neither", nil, nil, `"failures":{"lookup-unavailable":1}`, "lookup_items"},
 	} {
 		var buf bytes.Buffer
-		if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-unavailable", tc.items, tc.ceiling); err != nil {
+		if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-unavailable", tc.items, tc.ceiling, 0); err != nil {
 			t.Fatal(err)
 		}
 		got := buf.String()
 		if !strings.Contains(got, tc.wantHas) || (tc.wantNo != "" && strings.Contains(got, tc.wantNo)) || !strings.Contains(got, `"rules":{}`) {
 			t.Errorf("%s: line = %s", tc.name, got)
 		}
+	}
+}
+
+// lookup_ms is additive: the listing's wall time in whole milliseconds, on the
+// success line and on the failed-closed line; a line without a measured lookup
+// keeps the shape it had.
+func TestTheLookupDurationRidesTheCountersLineAsWholeMilliseconds(t *testing.T) {
+	var buf bytes.Buffer
+	h := New(nil, "pr", "acme/widgets#42")
+	h.Lookup(120, 7000)
+	h.LookupDuration(1234567 * time.Microsecond)
+	if err := h.Finish(context.Background(), apply.Env{Stderr: &buf}, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/widgets#42","rules":{},"escalations":0,` +
+		`"lookup_items":120,"lookup_ceiling":7000,"lookup_ms":1234}` + "\n"
+	if buf.String() != want {
+		t.Fatalf("got  %q\nwant %q", buf.String(), want)
+	}
+
+	buf.Reset()
+	items, ceiling := 7100, 7000
+	if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-above-ceiling", &items, &ceiling, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	want = `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/widgets#42","rules":{},"escalations":0,` +
+		`"failures":{"lookup-above-ceiling":1},"lookup_items":7100,"lookup_ceiling":7000,"lookup_ms":2000}` + "\n"
+	if buf.String() != want {
+		t.Fatalf("got  %q\nwant %q", buf.String(), want)
+	}
+}
+
+// An older line without lookup_ms still decodes (the composed command reads it).
+func TestALineWithoutLookupMsStillDecodes(t *testing.T) {
+	old := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"x","rules":{},"escalations":0,"lookup_items":3,"lookup_ceiling":7000}`
+	var l Line
+	if err := json.Unmarshal([]byte(old), &l); err != nil || l.LookupMs != nil || l.LookupItems == nil || *l.LookupItems != 3 {
+		t.Fatalf("decode: %v %+v", err, l)
 	}
 }

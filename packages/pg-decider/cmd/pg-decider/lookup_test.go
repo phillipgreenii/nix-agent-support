@@ -6,15 +6,19 @@ package main
 // listing the test controls and records every other call.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-decider/internal/apply"
+	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
 )
@@ -392,6 +396,9 @@ func TestAnUntrustedLookupFailsTheRunClosedAndStillReportsTheFigures(t *testing.
 				}
 				check("lookup_items", line.LookupItems, tc.wantItems)
 				check("lookup_ceiling", line.LookupCeiling, tc.wantCeil)
+				if line.LookupMs == nil || *line.LookupMs < 0 {
+					t.Errorf("lookup_ms = %v, want a measured duration on the failed-closed line", line.LookupMs)
+				}
 			})
 		}
 	}
@@ -409,5 +416,40 @@ func TestAnIssueRunMakesNoWorkItemLookup(t *testing.T) {
 	}
 	if d.listCalls() != 0 {
 		t.Errorf("an issue plan made %d list call(s)", d.listCalls())
+	}
+}
+
+// steppingClock returns a clock that advances by step on every call.
+func steppingClock(step time.Duration) func() time.Time {
+	t := time.Unix(1_700_000_000, 0)
+	return func() time.Time { t = t.Add(step); return t }
+}
+
+// The lookup is timed once: the success path stamps the Lookup with its
+// elapsed time (the counters hook prints it as lookup_ms), the failure path
+// prints it on the failed-closed line.
+func TestReadRunLookupTimesTheLookup(t *testing.T) {
+	origRead, origNow := lookupRead, lookupNow
+	t.Cleanup(func() { lookupRead, lookupNow = origRead, origNow })
+	lookupNow = steppingClock(1500 * time.Millisecond)
+
+	lookupRead = func(context.Context, apply.Env) (*apply.Lookup, error) {
+		return apply.NewLookup(nil, 7000), nil
+	}
+	var errOut bytes.Buffer
+	lk, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, "apply", "pr", "acme/widgets#42")
+	if !ok || lk.Elapsed() != 1500*time.Millisecond {
+		t.Fatalf("ok=%v elapsed=%v", ok, lk.Elapsed())
+	}
+
+	lookupRead = func(context.Context, apply.Env) (*apply.Lookup, error) {
+		return nil, &apply.LookupError{Reason: apply.LookupReasonUnavailable, Err: errors.New("down")}
+	}
+	errOut.Reset()
+	if _, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, "apply", "pr", "acme/widgets#42"); ok {
+		t.Fatal("a failed lookup must not be ok")
+	}
+	if line := countersLine(t, errOut.String()); line.LookupMs == nil || *line.LookupMs != 1500 {
+		t.Fatalf("lookup_ms = %v, want 1500", line.LookupMs)
 	}
 }

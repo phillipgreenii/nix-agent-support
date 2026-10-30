@@ -26,6 +26,10 @@ var lookupRead = func(ctx context.Context, env apply.Env) (*apply.Lookup, error)
 	return apply.ReadLookup(ctx, env)
 }
 
+// lookupNow is the clock the lookup is timed with (the lookup_ms member of the
+// counters line); tests swap it for a deterministic one.
+var lookupNow = time.Now
+
 // readRunLookup reads the lookup of a pr run, once, before the rules run. It
 // returns (nil, true) for any other entity type. On a lookup that cannot be
 // trusted it prints the diagnostic and the failed-closed counters line (with
@@ -35,8 +39,13 @@ func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, ve
 	if typ != lookupEntityType {
 		return nil, true
 	}
+	started := lookupNow()
 	lk, err := lookupRead(ctx, apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut})
+	took := lookupNow().Sub(started)
 	if err == nil {
+		if lk != nil {
+			lk.SetElapsed(took)
+		}
 		return lk, true
 	}
 	reason := "lookup-unavailable"
@@ -46,7 +55,7 @@ func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, ve
 		reason, items, ceiling = le.Reason, le.Items, le.Ceiling
 	}
 	fmt.Fprintf(errOut, "pg-decider: cannot %s %s %s: %v\n", verb, typ, id, err)
-	_ = metrics.EmitLookupFailureLine(errOut, typ, id, reason, items, ceiling)
+	_ = metrics.EmitLookupFailureLine(errOut, typ, id, reason, items, ceiling, took)
 	return nil, false
 }
 

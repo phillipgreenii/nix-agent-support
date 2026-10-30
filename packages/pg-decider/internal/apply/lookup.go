@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/view"
@@ -58,12 +59,21 @@ type ListedItem struct {
 type Lookup struct {
 	items   []ListedItem
 	ceiling int
+	// elapsed is the wall time the listing took, set by the caller that timed
+	// it (SetElapsed); zero when not measured.
+	elapsed time.Duration
 }
 
 // NewLookup builds a Lookup from items already read (tests and the reader).
 func NewLookup(items []ListedItem, ceiling int) *Lookup {
 	return &Lookup{items: items, ceiling: ceiling}
 }
+
+// SetElapsed records the wall time the listing took.
+func (l *Lookup) SetElapsed(d time.Duration) { l.elapsed = d }
+
+// Elapsed is the wall time the listing took (zero when not recorded).
+func (l *Lookup) Elapsed() time.Duration { return l.elapsed }
 
 // Items is the size of the whole listing, before any filtering to a PR.
 func (l *Lookup) Items() int { return len(l.items) }

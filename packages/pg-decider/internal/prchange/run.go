@@ -109,6 +109,20 @@ type run struct {
 	planItems, planCeiling *int64
 }
 
+// ms is the whole milliseconds the run's clock has advanced since t0.
+func (r *run) ms(t0 time.Time) *int64 {
+	n := r.o.Clock().Sub(t0).Milliseconds()
+	return &n
+}
+
+// timings is the run record's timings member, created on first use.
+func (r *run) timings() *TimingsRecord {
+	if r.rec.Timings == nil {
+		r.rec.Timings = &TimingsRecord{}
+	}
+	return r.rec.Timings
+}
+
 func (r *run) execute() int {
 	if r.o.Mode != ModePlan && r.o.Mode != ModeApply {
 		fmt.Fprintf(r.o.Stderr, "pg-pr-change: usage: the mode %q is neither plan nor apply: run pg-pr-change --help\n", r.o.Mode)
@@ -128,7 +142,9 @@ func (r *run) execute() int {
 	r.key = key
 	r.startRecord()
 
+	lockStart := r.o.Clock()
 	lock, err := AcquireLock(r.ctx, r.o.LockDir, id, r.o.LockWait)
+	r.timings().LockWaitMs = r.ms(lockStart)
 	if err != nil {
 		again := fmt.Sprintf("pg-pr-change %s %s", r.o.Mode, id)
 		var code int
@@ -154,7 +170,9 @@ func (r *run) hydrateAndDecide() int {
 	if code, stop := r.hydrate(); stop {
 		return code
 	}
+	decideStart := r.o.Clock()
 	code := r.decide()
+	r.timings().DecideMs = r.ms(decideStart)
 	r.reportActions(code)
 	return code
 }
@@ -213,7 +231,9 @@ func (r *run) planCmd() string    { return "pg-decider plan pr " + r.id }
 // hydrate refreshes the PR and checks the stored view. It returns stop true
 // with the exit code when the run must end here.
 func (r *run) hydrate() (int, bool) {
+	refreshStart := r.o.Clock()
 	res := r.call(Call{Name: "pg-desk", Args: []string{"pr", "refresh", r.id}})
+	r.timings().HydrateMs = r.ms(refreshStart)
 	r.rec.Hydrate.Result = hydrateFailed
 	if res.StartErr == nil && !signaled(res) {
 		code := res.Code
@@ -318,7 +338,9 @@ func viewFromResult(res Result) (v *view.View, class, detail string) {
 // checkView fails closed: an unhydrated or stale view is refused, so the decider
 // can never mint an anchor from it. A legacy row has version 0.
 func (r *run) checkView() (int, bool) {
+	viewStart := r.o.Clock()
 	v, class, detail := r.readView()
+	r.timings().ViewReadMs = r.ms(viewStart)
 	if v == nil {
 		return r.fail(StageHydrate, class, "the stored view cannot be read", detail, r.showCmd()), true
 	}
@@ -381,9 +403,13 @@ func (r *run) decide() int {
 	// each action has, which the apply counters (per rule) do not.
 	var pre *action.PlanResult
 	if r.o.Mode == ModeApply {
+		prePlanStart := r.o.Clock()
 		pre, rec.PlanError = r.readPlan()
+		rec.PrePlanMs = r.ms(prePlanStart)
 	}
+	deciderStart := r.o.Clock()
 	res := r.call(r.deciderCall())
+	rec.ApplyMs = r.ms(deciderStart)
 	code := r.mapDecide(res)
 	rec.ExitCode = res.Code
 	if res.StartErr != nil || signaled(res) {
@@ -393,7 +419,9 @@ func (r *run) decide() int {
 	switch {
 	case r.o.Mode == ModePlan && res.Code == 0:
 		// The plan the decider printed is the plan; its JSON form is the record.
+		prePlanStart := r.o.Clock()
 		pre, rec.PlanError = r.readPlan()
+		rec.PrePlanMs = r.ms(prePlanStart)
 		if pre != nil {
 			n := len(pre.Actions)
 			r.residual = &n
@@ -405,7 +433,10 @@ func (r *run) decide() int {
 		r.residual = &n
 	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == 2):
 		// The residual after an apply: a read-only plan, never a recorded run.
-		if post, msg := r.readPlan(); post != nil {
+		residualStart := r.o.Clock()
+		post, msg := r.readPlan()
+		rec.ResidualMs = r.ms(residualStart)
+		if post != nil {
 			n := len(post.Actions)
 			r.residual = &n
 		} else {
@@ -422,6 +453,10 @@ func (r *run) decide() int {
 	r.lookupItems, r.lookupCeiling = lookupFromDecider(res)
 	if r.lookupItems == nil && r.lookupCeiling == nil {
 		r.lookupItems, r.lookupCeiling = r.planItems, r.planCeiling
+	}
+	rec.LookupItems = r.lookupItems
+	if counters != nil {
+		rec.LookupMs = counters.LookupMs
 	}
 	return code
 }
