@@ -16,38 +16,38 @@ one kind, the newest (by `ts`, then arrival) supplies the value. The event kinds
 One row per call, identified by `session_id` plus `tool_use_id`. `call_id` is a stable integer
 assigned at the call's first ingest; it never changes and is never reused.
 
-| Column              | Meaning                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `call_id`           | stable integer id of the call                                                                                                  |
-| `session_id`        | the Claude Code session                                                                                                        |
-| `tool_use_id`       | the call's id                                                                                                                  |
-| `agent_id`          | the subagent id when the call is a subagent's, else `NULL`                                                                     |
-| `tool_name`         | the tool (`tracker.call_start` `tool`, else the hook events' `tool_name`)                                                      |
-| `tool_input`        | the tool's arguments as JSON text (`tracker.call_start` `input`)                                                               |
-| `cwd`               | the call's working directory (`tracker.call_start`, else `tracker.pre_tool`)                                                   |
-| `verdict`           | the mod's permission decision: `allow`, `ask` or `deny` (`tracker.check` `decision`)                                           |
-| `deciding_hook`     | the classic hook event that decided or whose ask the verdict was reached under (`tracker.check` `hook`)                        |
-| `reason`            | the reason text of the decision (`tracker.check` `reason`)                                                                     |
-| `permission_mode`   | the live permission mode (`tracker.pre_tool`, else `tracker.post_tool`)                                                        |
-| `agent_type`        | the agent type name, in a subagent or an `--agent` session                                                                     |
-| `result`            | how the call ended: `ok`, `error`, `refused` or `interrupted` (`tracker.call_end` `outcome`)                                   |
-| `error_text`        | the error text (`tracker.call_end` `error`, else `tracker.post_tool` `error`)                                                  |
-| `duration_ms`       | Claude Code's tool execution time (`tracker.post_tool`); excludes permission-prompt and hook time                              |
-| `call_start_ts`     | time of `tracker.call_start`                                                                                                   |
-| `running_ts`        | time of `tracker.running`: when the row first showed running (interactive sessions only)                                       |
-| `call_end_ts`       | time of `tracker.call_end`                                                                                                     |
-| `first_event_ts`    | time of the call's earliest event of any source                                                                                |
-| `last_event_ts`     | time of the call's latest event of any source                                                                                  |
-| `is_error`          | `tracker.post_tool` `is_error`; else from `result`: `1` for `error`, `0` for `ok`, `refused`, `interrupted`                    |
-| `denial_reason`     | the denial reason of `tracker.denied`, including the auto-mode classifier's reason                                             |
-| `sandbox_enabled`   | whether the sandbox was enabled for the call (`ceta.verdict`)                                                                  |
-| `engine_verdict`    | CETA's engine verdict: `approve`, `ask`, `reject` or `abstain` (`ceta.verdict` `verdict`)                                      |
-| `delivered_verdict` | the verdict CETA actually delivered (`ceta.verdict` `delivered`)                                                               |
-| `repo`              | the repository name for `cwd`; a git worktree maps to its main checkout's name; `NULL` when `cwd` is no repo                   |
-| `settled_by`        | who settled the call: `ceta`, `person`, `mode`, `rule` or `classifier`; `NULL` when no verdict event exists                    |
-| `settlement`        | `approved`, `refused`, `pending` (no `tracker.call_end`, session may still run) or `unresolved`                                |
-| `converted_ask`     | `1` when CETA said ask and an unattended session delivered a reject (settled `ceta`, `refused`), else `0`                      |
-| `failed_timing`     | `1` when the call ran and errored (`result` `error`; still `approved`), `0` when it ended otherwise, `NULL` with no `call_end` |
+| Column              | Meaning                                                                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call_id`           | stable integer id of the call                                                                                                                                                                       |
+| `session_id`        | the Claude Code session                                                                                                                                                                             |
+| `tool_use_id`       | the call's id                                                                                                                                                                                       |
+| `agent_id`          | the subagent id when the call is a subagent's, else `NULL`                                                                                                                                          |
+| `tool_name`         | the tool (`tracker.call_start` `tool`, else the hook events' `tool_name`)                                                                                                                           |
+| `tool_input`        | the tool's arguments as JSON text (`tracker.call_start` `input`)                                                                                                                                    |
+| `cwd`               | the call's working directory (`tracker.call_start`, else `tracker.pre_tool`)                                                                                                                        |
+| `verdict`           | the mod's permission decision: `allow`, `ask` or `deny` (`tracker.check` `decision`)                                                                                                                |
+| `deciding_hook`     | the classic hook event that decided or whose ask the verdict was reached under (`tracker.check` `hook`)                                                                                             |
+| `reason`            | the reason text of the decision (`tracker.check` `reason`)                                                                                                                                          |
+| `permission_mode`   | the live permission mode (`tracker.pre_tool`, else `tracker.post_tool`)                                                                                                                             |
+| `agent_type`        | the agent type name, in a subagent or an `--agent` session                                                                                                                                          |
+| `result`            | how the call ended: `ok`, `error`, `refused` or `interrupted` (`tracker.call_end` `outcome`)                                                                                                        |
+| `error_text`        | the error text (`tracker.call_end` `error`, else `tracker.post_tool` `error`)                                                                                                                       |
+| `duration_ms`       | Claude Code's tool execution time (`tracker.post_tool`); excludes permission-prompt and hook time                                                                                                   |
+| `call_start_ts`     | time of `tracker.call_start`                                                                                                                                                                        |
+| `running_ts`        | time of `tracker.running`: when the row first showed running (interactive sessions only)                                                                                                            |
+| `call_end_ts`       | time of `tracker.call_end`                                                                                                                                                                          |
+| `first_event_ts`    | time of the call's earliest event of any source                                                                                                                                                     |
+| `last_event_ts`     | time of the call's latest event of any source                                                                                                                                                       |
+| `is_error`          | `tracker.post_tool` `is_error`; else from `result`: `1` for `error`, `0` for `ok`, `refused`, `interrupted`                                                                                         |
+| `denial_reason`     | the denial reason of `tracker.denied`, including the auto-mode classifier's reason                                                                                                                  |
+| `sandbox_enabled`   | whether the sandbox was enabled for the call (`ceta.verdict`)                                                                                                                                       |
+| `engine_verdict`    | CETA's engine verdict: `approve`, `ask`, `reject` or `abstain` (`ceta.verdict` `verdict`)                                                                                                           |
+| `delivered_verdict` | the verdict CETA actually delivered (`ceta.verdict` `delivered`)                                                                                                                                    |
+| `repo`              | the repository name for `cwd`; a git worktree maps to its main checkout's name; `NULL` when `cwd` is no repo                                                                                        |
+| `settled_by`        | who settled the call: `ceta`, `person`, `mode`, `rule` or `classifier`; `NULL` when no verdict event exists                                                                                         |
+| `settlement`        | `approved`, `refused`, `pending` (no `tracker.call_end`, session may still run) or `unresolved`                                                                                                     |
+| `converted_ask`     | `1` when CETA said ask and an unattended session delivered a reject (settled `ceta`, `refused`), else `0`                                                                                           |
+| `failed_timing`     | `1` when the call ran and errored (`result` `error`; still `approved`), `0` when it ended otherwise (a refused call never ran, even when its denial surfaced as `error`), `NULL` with no `call_end` |
 
 ### Settlement
 

@@ -110,7 +110,9 @@ func derive(in settleInput) settleResult {
 		r.settledBy, r.settlement = settledCeta, refused
 	}
 	if in.outcome != "" {
-		r.failed = sql.NullBool{Bool: in.outcome == "error", Valid: true}
+		// A call refused by mode (dontAsk) never ran, whatever error text the
+		// denial produced, so only a call that was not refused counts.
+		r.failed = sql.NullBool{Bool: in.outcome == "error" && r.settlement != refused, Valid: true}
 	}
 	return r
 }

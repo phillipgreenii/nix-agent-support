@@ -144,3 +144,19 @@ func TestSettlementErroredCallApprovedAndFailedForTiming(t *testing.T) {
 		t.Errorf("ok call failed_timing = %v, want 0", f)
 	}
 }
+
+// A call refused by dontAsk never ran: its denial text ends as result=error,
+// but it must not be marked failed for timing.
+func TestSettlementDontAskRefusedErrorIsNotFailedTiming(t *testing.T) {
+	a := newApp(t)
+	now := time.Now().UnixMilli() - 1000
+	a.feed(settleCase{check: "ask", mode: "dontAsk", outcome: "error"}, 1, now)
+	a.ingest()
+	by, st, _, failed := settleOf(t, a.open(), "tu1")
+	if by.String != "mode" || st.String != "refused" {
+		t.Fatalf("got %q %q, want mode refused", by.String, st.String)
+	}
+	if !failed.Valid || failed.Int64 != 0 {
+		t.Errorf("failed_timing = %v, want 0", failed)
+	}
+}
