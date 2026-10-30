@@ -811,3 +811,22 @@ func TestSweep_OutputByteIdentical(t *testing.T) {
 		t.Fatalf("sweep stdout =\n%s\nwant\n%s", stdout, want)
 	}
 }
+
+// Bead pg2-cfml6k: the consumer cursor advances when pg-connector flushes its
+// answer to this adapter (emit), never when pg-router accepts an item. The
+// adapter would have to pass --no-ack and ack later itself to defer it; it does
+// neither, so an event that expires unaccepted is not re-emitted by a later
+// changes call (the next call polls from the already-advanced cursor).
+func TestChanges_NeverPassesNoAck_CursorAdvancesAtEmitSoExpiredEventsAreNotReplayed(t *testing.T) {
+	fake := withFactory(t, "changes_ok_empty")
+	if _, stderr, code := runCLI(t, "changes", "pr", "q", "--consumer", "c1", "--retry-window", "1s"); code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	got := onlyCall(t, fake).Args
+	for _, a := range got {
+		if a == "--no-ack" {
+			t.Fatalf("child argv %v carries --no-ack: the cursor would no longer advance at emit; "+
+				"update the pg2-cfml6k ruling in docs/behavior/README.md if this is deliberate", got)
+		}
+	}
+}

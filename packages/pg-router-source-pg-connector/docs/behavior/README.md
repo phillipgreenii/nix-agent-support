@@ -61,6 +61,16 @@ flowchart LR
   `{backend: reason}` map — omitted entirely when no degraded backend on that call reported one
   (bead `pg2-wa5uk`).
 
+  **Cursor advance is at emit, not at accept (bead `pg2-cfml6k`, ruling).** This adapter never
+  passes `--no-ack`, so `pg-connector changes` acknowledges the consumer's cursor
+  (`changes_ack`) as soon as it has written its answer to this adapter, before pg-router has
+  accepted any item. The feed is at-least-once only up to that flush: a crash of `pg-connector`
+  before the flush is redelivered, but an event that this adapter printed and that then expires
+  unaccepted (past `expiresAt`, or never dispatched) is NOT re-emitted by any later `changes` call;
+  it is lost until that entity changes again, so `--retry-window` MUST be sized to cover the
+  longest expected outage of the dispatcher. Pinned by
+  `TestChanges_NeverPassesNoAck_CursorAdvancesAtEmitSoExpiredEventsAreNotReplayed`.
+
   `--retry-window <duration>` (bead `pg2-1ldvy`; default `0` = off) gives the router a bounded
   retry window per change. With the default, the item `id` is the bare entity id and the output is
   byte-identical to a call without the flag apart from `metadata.entity_id`; no `at`/`expiresAt` is
