@@ -69,14 +69,24 @@ func readReply(path string) (reply, bool) {
 	return r, true
 }
 
-// sleepOrDone is a plain sleep; kept separate so the polling loops read clearly.
-func sleep(d time.Duration) { time.Sleep(d) }
+// pause sleeps through the injectable clock (time.Sleep unless a test replaced it).
+func (a *app) pause(d time.Duration) {
+	if a.sleep != nil {
+		a.sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+// inboxRetryStep is the pause between ENOENT retries. The wait is counted in these steps, not
+// read from the wall clock, so the retry is deterministic under an injected sleep.
+const inboxRetryStep = 50 * time.Millisecond
 
 // openInbox opens <pid>.fifo non-blocking for writing. ENOENT is retried for up to wait (the
 // listener recreates a healed FIFO within seconds), then exit 4; ENXIO (nobody reading) is exit 5.
 func (a *app) openInbox(e entry, state string, wait time.Duration) (int, string, *cmdError) {
 	path := filepath.Join(state, "inbox", strconv.Itoa(e.PID)+".fifo")
-	deadline := time.Now().Add(wait)
+	var waited time.Duration
 	announced := false
 	for {
 		fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
@@ -89,7 +99,7 @@ func (a *app) openInbox(e entry, state string, wait time.Duration) (int, string,
 			}
 			return fd, path, nil
 		case errors.Is(err, syscall.ENOENT):
-			if time.Now().After(deadline) {
+			if waited >= wait {
 				return -1, path, fail(errNoControlMod,
 					"Claude pid %d (session %s) has no control mod: its inbox %s does not exist; "+
 						"enable the pg-claude-control mod and restart that Claude, or end it with: "+
@@ -99,7 +109,8 @@ func (a *app) openInbox(e entry, state string, wait time.Duration) (int, string,
 				announced = true
 				_, _ = fmt.Fprintln(a.errw, "waiting for inbox...")
 			}
-			sleep(50 * time.Millisecond)
+			a.pause(inboxRetryStep)
+			waited += inboxRetryStep
 		case errors.Is(err, syscall.ENXIO):
 			return -1, path, notAccepting(e)
 		default:
@@ -179,7 +190,7 @@ func (a *app) awaitReply(path string, timeout time.Duration) (reply, bool) {
 		if time.Now().After(deadline) {
 			return reply{}, false
 		}
-		sleep(20 * time.Millisecond)
+		a.pause(20 * time.Millisecond)
 	}
 }
 
@@ -345,7 +356,7 @@ func (a *app) stop(e entry, state string, o opts) int {
 		if time.Now().After(deadline) {
 			break
 		}
-		sleep(a.pollEvery())
+		a.pause(a.pollEvery())
 	}
 	if o.escalate > 0 {
 		return a.stopSignal(e, o, id)

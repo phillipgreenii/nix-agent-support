@@ -265,16 +265,52 @@ func TestExit4MessageNamesStopAndMod(t *testing.T) {
 func TestExit4RetriesUntilTheFifoAppears(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		w.inbox(4242, nil)
-	}()
-	w.stdin = "late"
-	if rc := w.run("submit", "4242", "--wait", "3s"); rc != 0 {
+	var ch chan string
+	a := w.app()
+	sleeps := 0
+	// the inbox appears, complete with its reader, during the second retry pause: no wall clock
+	a.sleep = func(time.Duration) {
+		sleeps++
+		if sleeps == 2 {
+			ch = w.inbox(4242, nil)
+		}
+	}
+	a.stdin = strings.NewReader("late")
+	if rc := a.run([]string{"submit", "4242", "--wait", "3s"}); rc != 0 {
 		t.Fatalf("rc=%d err=%s", rc, w.errb.String())
 	}
-	if !strings.Contains(w.errb.String(), "waiting for inbox...") {
-		t.Fatalf("stderr %q", w.errb.String())
+	if sleeps != 2 || strings.Count(w.errb.String(), "waiting for inbox...") != 1 {
+		t.Fatalf("sleeps=%d stderr=%q", sleeps, w.errb.String())
+	}
+	if l := next(t, ch); !strings.HasSuffix(l, " submit late") {
+		t.Fatalf("line %q", l)
+	}
+}
+
+func TestExit4WaitIsCountedInRetrySteps(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	a := w.app()
+	var total time.Duration
+	a.sleep = func(d time.Duration) { total += d }
+	a.stdin = strings.NewReader("x")
+	if rc := a.run([]string{"submit", "4242"}); rc != 4 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if total != defaultWait {
+		t.Fatalf("slept %v, want %v", total, defaultWait)
+	}
+}
+
+func TestFifoWithoutReaderIsExit5NotRetried(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	must(t, syscall.Mkfifo(w.fifoPath(4242), 0o600))
+	a := w.app()
+	a.sleep = func(time.Duration) { t.Fatal("ENXIO must not be retried") }
+	a.stdin = strings.NewReader("x")
+	if rc := a.run([]string{"submit", "4242"}); rc != 5 {
+		t.Fatalf("rc=%d", rc)
 	}
 }
 

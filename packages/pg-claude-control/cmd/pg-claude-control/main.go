@@ -36,6 +36,8 @@ type app struct {
 	wait time.Duration
 	// poll is the liveness/reply polling step (100ms when zero).
 	poll time.Duration
+	// sleep replaces time.Sleep in the retry and polling loops (tests).
+	sleep func(time.Duration)
 }
 
 func (a *app) pollEvery() time.Duration {
