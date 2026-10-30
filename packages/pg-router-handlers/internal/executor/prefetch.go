@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
@@ -49,6 +50,17 @@ const (
 
 	defaultPrefetchTimeout = 5 * time.Minute
 	defaultPrefetchRemote  = "origin"
+
+	// prefetchGitWaitDelay bounds how long a cancelled git child gets to react to
+	// SIGTERM (and its own children, e.g. a smudge filter, to close the pipes)
+	// before it is killed outright (bead pg2-lpctwk).
+	prefetchGitWaitDelay = 15 * time.Second
+
+	// prefetchCheckoutMarker is a file in the worktree's gitdir that exists
+	// only while the pre-fetch checkout is unfinished. A checkout that was
+	// SIGKILLed leaves it behind, and the next pre-fetch reads it as "this
+	// handler-owned scratch worktree is half-updated" (bead pg2-lpctwk).
+	prefetchCheckoutMarker = "pg-router-prefetch-checkout"
 )
 
 // GitRun runs `git <args...>` in dir, writing the child's stdout to stdout. A
@@ -60,6 +72,12 @@ type GitRun func(ctx context.Context, dir string, stdout io.Writer, args ...stri
 // environment (every git child in this module MUST be built by it).
 func osGitRun(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
 	cmd := gitenv.Command(ctx, dir, args...)
+	// Cancel gently: SIGKILL (the exec.CommandContext default) leaves a stale
+	// index.lock in the worktree gitdir that nothing ever removes, because git
+	// cannot clean up after itself. SIGTERM lets git release its lockfiles; the
+	// WaitDelay still kills a child that ignores it (bead pg2-lpctwk).
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = prefetchGitWaitDelay
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -193,8 +211,28 @@ func (r *ccpoolRun) prefetch(ctx context.Context, pf roles.PrefetchConfig, d Dis
 			return fail("resolve", fmt.Errorf("commit %s not found after fetching %s %s", rev, remote, refspec))
 		}
 	}
-	if err := git(ctx, wt, io.Discard, "checkout", "--detach", "--quiet", rev); err != nil {
+	// A previous checkout that was killed leaves index.lock and a half-updated
+	// tree in this handler-owned scratch worktree; recover it before checking
+	// out, or every later dispatch fails on the same lock (bead pg2-lpctwk).
+	gitDir := r.worktreeGitDir(ctx, wt)
+	force := r.recoverPoisonedCheckout(ctx, gitDir, wt, d)
+	marker := ""
+	if gitDir != "" {
+		marker = filepath.Join(gitDir, prefetchCheckoutMarker)
+		if err := os.WriteFile(marker, nil, 0o644); err != nil {
+			slog.Warn("dispatch: worktree pre-fetch: cannot write checkout marker", "path", marker, "err", err)
+			marker = ""
+		}
+	}
+	checkout := []string{"checkout", "--detach", "--quiet"}
+	if force {
+		checkout = append(checkout, "--force")
+	}
+	if err := git(ctx, wt, io.Discard, append(checkout, rev)...); err != nil {
 		return fail("checkout", err)
+	}
+	if marker != "" {
+		_ = os.Remove(marker)
 	}
 	info.OK, info.Rev = true, rev
 
@@ -227,6 +265,49 @@ func (r *ccpoolRun) prefetch(ctx context.Context, pf roles.PrefetchConfig, d Dis
 	slog.Info("dispatch: worktree pre-fetched", "role", d.Role.Name, "bead", d.Item.ID, "worktree", wt,
 		"rev", rev, "diff", info.DiffFile != "", "numstat", info.NumstatFile != "")
 	return info
+}
+
+// worktreeGitDir is the absolute per-worktree gitdir of wt, or "" when it
+// cannot be located (recovery is then skipped).
+func (r *ccpoolRun) worktreeGitDir(ctx context.Context, wt string) string {
+	var out bytes.Buffer
+	if err := r.deps.gitRun()(ctx, wt, &out, "rev-parse", "--path-format=absolute", "--git-dir"); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// recoverPoisonedCheckout clears the state a killed pre-fetch checkout leaves
+// in a handler-owned scratch worktree: a stale <gitdir>/index.lock and/or the
+// unfinished-checkout marker. It reports whether the next checkout must be
+// forced (the tree is half-updated, and the dirt is the failed checkout, not
+// user work). A live session that shares the worktree may legitimately hold
+// the lock, so recovery is skipped when one exists or the pool cannot be
+// listed (bead pg2-lpctwk).
+func (r *ccpoolRun) recoverPoisonedCheckout(ctx context.Context, gitDir, wt string, d DispatchContext) bool {
+	if gitDir == "" {
+		return false
+	}
+	lock := filepath.Join(gitDir, "index.lock")
+	_, lockErr := os.Stat(lock)
+	_, markErr := os.Stat(filepath.Join(gitDir, prefetchCheckoutMarker))
+	if lockErr != nil && markErr != nil {
+		return false
+	}
+	if r.deps.CC != nil && r.worktreeSharedWithLivePeer(ctx, "", wt) {
+		slog.Warn("dispatch: worktree pre-fetch: poisoned checkout state but a live session shares the worktree; not recovering",
+			"role", d.Role.Name, "bead", d.Item.ID, "worktree", wt)
+		return false
+	}
+	if lockErr == nil {
+		if err := os.Remove(lock); err != nil {
+			slog.Warn("dispatch: worktree pre-fetch: cannot remove stale index.lock", "path", lock, "err", err)
+			return false
+		}
+	}
+	slog.Warn("dispatch: worktree pre-fetch: recovering a worktree left by a killed checkout",
+		"role", d.Role.Name, "bead", d.Item.ID, "worktree", wt, "staleLock", lockErr == nil, "marker", markErr == nil)
+	return true
 }
 
 // writeGitOutput streams `git <args>`'s stdout to path, removing a partial
