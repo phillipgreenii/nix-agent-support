@@ -517,6 +517,7 @@ flowchart LR
     PRH["pg-router-handler-ccpool"]
     PROBE["ccpool-probe"]
     CCA["pg-ccaudit"]
+    DESK["pg-desk"]
     SWB["pa-monitor-swiftbar"]
     AA["agent-activity,<br/>pw-agent-activity, pw-reset-agents"]
     WR["work-report"]
@@ -571,6 +572,7 @@ flowchart LR
   B1 ==>|"Conversation, Process and Transcript readings"| PAM
 
   CCA ==>|"Transcript: feed and queries"| REC
+  DESK -->|"whatever it needs, through pg-connector only"| PGC
   SWB -->|"Account usage: windows<br/>Process: counts"| PAM
   AA -->|"Conversation: active agents,<br/>via claude-activity-api"| CA
   WR ==>|"Conversation: activity, if registered"| PGC
@@ -1191,8 +1193,43 @@ A Process that ended while the recorder was down, or before its watch was regist
 already exited pid fails with `ESRCH`, and that failure is the recorded fact. The recorder does not
 record working, blocked, idle or hung, a blocker, whether a Conversation is "complete", or the state
 at the end (mid-turn, waiting, idle); those stay in clients and are derived from the Transcript.
-Whether a Conversation is listed for resume is a pa-monitor command, built after pa-monitor moves
-onto the recorder (agent's proposal; see "Decisions").
+Finding Conversations that ended abruptly is the crash query below, not a separate resume-list
+command (operator 2026-10-30, Decisions item 25).
+
+### The crash query
+
+The operator replaced the resume-list command with a query over the end evidence above (Decisions
+item 25). It is `pg-claude-code-recorder conversations --ended <label> [--since <time>] [--cwd <path>]`
+with `<label>` one of `crashed`, `exited`, `cleared`, `closed` or `unknown`, and the shortcut
+`--crashed` for `--ended crashed`. The daemon returns evidence and never a label (Facts only), so the
+command and every client call the Go client package's `EndLabel` and `Crashed(since)` functions, which
+read `conversation.list` with evidence filters (`registry_present_at_exit`, `exit_observed`,
+`clear_entry`, `exit_entry`) and apply the precedence rules above; the daemon and the client share one table of
+fixtures so they cannot disagree. `conversation.list` and the client's `Crashed` are part of the wire
+contract's operations.
+
+Each row carries: session id, `cwd` (the Transcript's `cwd` fact), end time (the Process's recorded
+exit time), label, the evidence used (so a result can be audited), the stage, whether the originals
+still exist, and the line to resume it: `claude --resume <id>` while the originals exist, and
+`pg-claude-code-recorder extract <id>` first once the Conversation is removed. `--json` carries the
+same fields. The mod's `end_reason` is detail only: it cannot turn a `crashed` into anything else.
+
+After a reboot or a power loss the recorder is down while every Claude dies, so each stale registry
+file names a dead pid and the exit was not observed: the label is `unknown` (precedence rule 3). The
+registry file still present for a dead pid at first discovery is direct evidence of an unclean end, so
+the recorder stores it as the fact `registry_stale_at_discovery`, and `conversations --suspected-crash`
+lists `crashed` rows together with `unknown` rows that carry that fact. Whether that case deserves a sixth
+label is the operator's call (agent's call 21: no new label, the fact and the flag only).
+
+The history entries the rules read are parsed only up to the last newline, so a torn `/exit` line
+counts as no entry until its newline arrives. Fixtures for phase 4: crashed, exited, cleared,
+closed normally, unknown, resumed-then-crashed (the earlier Process is not listed), an in-process
+`/resume` then a crash (judged for the Conversation the Process held at that moment), a reboot
+(every registry file stale; none `crashed`, all suspected), a torn `/exit` tail, `/exit` timestamped
+before, at and after the Process start, a `/clear` made by another Process, and a mod reason
+`prompt_input_exit` with the registry present (still `crashed`). The order in which Claude deletes
+the registry file and exits (Open questions) is measured in the real-Claude tier before the
+`crashed` label is trusted; if deletion is slow, the recorder reads the registry after a grace window.
 
 ### Settle, removal and extract
 
@@ -1234,7 +1271,7 @@ stateDiagram-v2
 
 The check MUST pass for every file of the Conversation before each stage, and each clause is an
 independent failing condition: the copy offset equals the size of the file in the Claude directory
-and the tail hash matches; the parse offset equals the length of the copy; and no file of a parsed
+and the tail hash matches; the parse offset equals the offset after the last newline of the copy, with any bytes after it a torn tail shorter than the line cap (a crash leaves such a tail and the copier keeps it; once the file has been quiet for `settle.after` the recorder records a "torn tail" fact, keeps the tail bytes in the archive, and the check passes); and no file of a parsed
 kind is left unparsed (a bad line counts as parsed). Removal also compares a full-file hash of each
 Claude file with the copy or archive, because the tail check misses an in-place edit that keeps the
 size and the tail. Re-cloning at settle compares the full-file hash as well, not only the tail, so an in-place edit that keeps the size and the last 4,096 bytes cannot replace the preserved copy. A write between that check and `clonefile` is caught by comparing the clone's size after the call with the copy's committed offset: if the clone is longer or the original no longer matches, the clone is discarded and the Conversation stays Quiet. A failure holds the Conversation and shows in coverage.
@@ -1251,10 +1288,11 @@ A settled Conversation that gets new writes goes back to Quiet. Each written fil
 as an uncompressed tail after the settled part (same file id and generation, offsets carry on), and
 the next quiet day settles the tail as another segment.
 
-Removal runs in this order: 1. Re-run the check against the Claude files and, in clone mode, write and verify the archive from the clone. 2. Commit "removal pending", listing each file with its inode, size and hash. 3. Delete the files from the Claude directory (after a `fullfsync` of the copy). 4. Commit "removed".
+Removal runs in this order: 1. Re-run the check against the Claude files and, in clone mode, write and verify the archive from the clone. 2. Commit "removal pending", listing each file with its inode, size and hash. 3. For each file: require that no registry version names the session and no live Process holds it; rename it into a quarantine directory on the same volume; re-hash the quarantined file against the archive or copy (a write through a descriptor opened before the rename shows up as a changed size or hash); on a mismatch rename it back, return the Conversation to Quiet and continue its copy; otherwise unlink it after a `fullfsync` of the copy. 4. Commit "removed".
 
-A restart that finds a pending removal re-checks each listed file: an unchanged file is deleted; a
-file with new writes sends the Conversation back to Quiet and continues its copy. Empty project and
+A restart that finds a pending removal makes the same registry and live-Process check and
+re-checks each listed file: an unchanged file with no new Process goes through step 3; a
+file with new writes or a new Process sends the Conversation back to Quiet and continues its copy. Empty project and
 session directories left behind by a removal are tidied after the last file goes.
 
 Settling writes a manifest for the Conversation (in clone mode before any archive exists), and an archive carries the same manifest. It lists every file: its original path relative to the Claude
@@ -1320,7 +1358,7 @@ rotation (`manageLogs` defaults to on).
 
 ### Signal details
 
-Alerts (each rule uid is `pg-claude-code-recorder-<name>`, each annotation names the first command to run, and each uid is added to `registeredRuleUIDs`):
+Alerts (each rule uid is `pg-ccrec-<name>`, because the structure check caps a uid at 40 characters and `pg-claude-code-recorder-control-inbox-gone` is 42; each annotation names the first command to run, and each uid is added to the router probe's `registeredRuleUIDs` list in `packages/pg-router-probe/cmd/pg-router-probe/run.go`, with a test that compares the rule file's uids to that list):
 
 | Alert                | Fires when                                                                                        | Severity | No data  | First action                   |
 | -------------------- | ------------------------------------------------------------------------------------------------- | -------- | -------- | ------------------------------ |
@@ -1336,7 +1374,7 @@ Alerts (each rule uid is `pg-claude-code-recorder-<name>`, each annotation names
 | `doctor-mismatch`    | `doctor` logged a mismatch                                                                        | critical | OK       | `doctor`                       |
 | `control-inbox-gone` | a live Process has had no control inbox for 10 minutes                                            | warning  | OK       | `pg-claude-control list`       |
 
-The thresholds are agent's calls. The rules carry promtool rule tests and pass the structure check (`check-alert-structure.sh`) the `pg-connector` rules use.
+The thresholds are agent's calls. The rules carry promtool rule tests. `packages/pg-connector/grafana/check-alert-structure.sh` hard-codes the GitHub daemon's uids, group, metric prefix and selector, so it cannot be reused: phase 7 writes a sibling script for this daemon (modelled on it and on `pg-desk`'s), with a `pg_claude_code_recorder_*` metrics catalog, enforcing the uid set, the uid length cap, `noDataState`, catalogued metric names and `deleteRules` twin uids equal to the rule uids. Review findings that shape the rules (the builder applies them): `doctor` runs on a timer and exports `doctor_last_run_timestamp` and `doctor_mismatch_files`, and `doctor-mismatch` alerts on a non-zero gauge or a stale last run, never on a log line; every `reason` series of a counter is registered at zero at start, so the first increase fires; `held_conversations{reason}` and `skipped_files_total{reason}` expose why a file is held or skipped; `conversation_end_total{label}` and `end_reason_source_files_total{outcome}` expose the crash rate and a silent end-reason source, with a ratio alert (crashed share above a threshold and a volume floor); `client` is a whitelisted name, otherwise `other`; `daemon-down` carries the `SYSTEM_PAUSE` guard the `pg-connector` rules use and states the scrape interval; `heartbeat-stale` and `free-space` do not page when `daemon-down` already has; the control mod's events go to an append-only log separate from the 1,000-line request window, and the recorder exports `control_inbox_state{state}` and request outcome counters by `verb` and `outcome`.
 
 **Metric design.** Names carry the prefix `pg_claude_code_recorder_`. Lags and counts are gauges, lost bytes and events are counters, and copy lag, feed latency, query latency and wait duration are histograms. Labels are bounded: `source` (about 10 values), `type` (about 20), `reason` (an enumerated list), `stage`, `kind` and `client`; a per-file or per-session label is forbidden. The exporter is the one the other workspace daemons use, registered in `metricsTargets`.
 
@@ -1549,6 +1587,33 @@ Both modules follow this repo's launchd and plugin rules: eval tests stub the la
 runs unsupervised, and the module asserts that and documents the inotify watch limit. The recorder has
 no SwiftBar plugin in the first version (its `status` output is the surface).
 
+### Packaging
+
+Phase 1a creates `packages/pg-claude-code-recorder` and phase 8 creates `packages/pg-claude-control`.
+Each is a Go module built with `mkGoApp` and a committed `gomod2nix.toml`, carries an `update-deps.sh`
+(the `go-deps-wired` check fails without it) and a README, and has a `*-go-tests` check;
+`.claude/rules/package-versioning.md` is the contract. A module that takes a local `replace` to
+`../claude-transcript` follows that rule's Pattern B, and the `go-local-replace-build` hook then applies.
+The darwin-only cgo file needs the cgo toolchain and Apple SDK from `mkGoApp`; phase 1a states how, and the
+Linux cross-compile check keeps `CGO_ENABLED=0` building. External commands use `github.com/phillipgreenii/x`'s
+`cmdrun`, as `pg-router-probe` does. The identifier guard needs a `MODULES` row with its scope
+(`testdata` or `wide`), its liveness canaries (required files, a minimum file count) and an allowlist file.
+The pprof socket follows `pg-connector`'s option (`$XDG_STATE_HOME/<instance>/pprof.sock`), not `stateDir`,
+so the profiler socket never shares a directory with the data store. `logs.maxBytes` is dropped: the shared
+hourly rotator that `manageLogs` enables rotates the logs, and the daemon does not rotate them itself.
+The module also states the HM-scoped launchd rules from this repo's `CLAUDE.md`: a terminal MUST NOT take it
+without a personal revision that declares `launchdServices.userAgents`, `execPath` is unsupported in the HM scope,
+OTel settings are read null-safely from `osConfig.phillipgreenii.observability`, and the eval-test stub matches
+personal's `lib/launchd-service-submodule.nix`.
+
+Test tiers follow this repo's `docs/adr/0111-real-process-test-suites-split-by-cost-driver-under-v-4.md` and
+the V-4 rule: a test that starts the daemon, runs a binary as a subprocess or needs a real external tool is
+integration, and only a few fast single-process real-tool tests (the listener's `bash` run) stay in the unit
+tier. The checks are `pg-claude-code-recorder-go-tests`, `-integration-tests`, `-integration-tests-gating` (proves
+the tag splits every package; the `faults` and `soak` tags are guarded the same way) and `-soak`. The
+integration check runs under `-race` with a timeout and is never wired into a hook, `run-unit-tests` or pre-land.
+The wire suite's latency target is an integration test.
+
 ### pg-connector
 
 The operator ruled on 2026-10-30 (Decisions item 24) that `agentsession` is retired, not split. Today
@@ -1558,7 +1623,8 @@ fields. Its backend, `cmd/pg-connector-agentsession-pa-monitor`, serves `agentse
 `activity` and `attention` by running pa-monitor, and the deployed machine configuration registers it
 for all four. The retirement bead (`pg2-b7r48a`, rescoped) works in this order:
 
-1. Find every caller of the backend's `search`, `activity` and `attention` capabilities (the
+1. Find pg-desk's use of pg-connector (pg-desk is the one client required to go through it, so state what it
+   needs; if it needs recorder data, the `conversation` capability is not optional), then find every caller of the backend's `search`, `activity` and `attention` capabilities (the
    `agentsession` capability itself had none outside its own command, tests and the approver's allowlist rules).
 2. If nothing calls them, remove the capability, the backend, its package, its registrations and its
    behavior-doc entries (`packages/pg-connector/docs/behavior/journeys.md`: `USECASE-AGENTSESSION-ATTENTION`,
@@ -1689,16 +1755,21 @@ Reuse the patterns of `claude-transcript/sessions_test.go` and `pg-ccaudit` `ing
 
 ## Suggested phases
 
-1. Watcher (FSEvents), copier with clone and byte modes, store, observations journal, coverage and
-   the command's `status` and `coverage`; no parsing (M). Acceptance: the CPU criterion in "Watcher".
+1. Three beads. 1a: the package scaffold and checks (see "Packaging"), the store, the observations
+   journal and the copier with clone and byte modes (M). 1b: the darwin FSEvents watcher (M). 1c: the
+   command's `status` and `coverage`, the pprof flag and a profiling harness (S). The CPU criterion in
+   "Watcher" is measured on the real tree by a separate verification bead gated on `pn:applied`
+   (`pb:pb-gate-lifecycle`), not inside 1a to 1c.
 2. Sources and parser for the transcript, subagent and history sources; query and search (L).
 3. The remaining sources, links, the change feed with wait, the wire contract and the cursor epoch,
    with the Go client package (M).
 4. Conversation and Process facts: registry versions, the exit watch, host binding, end evidence, the `claude-control-end` source (the mod writes the end reason, ruled 2026-10-30), and the crash query that lists Conversations whose end evidence reads as a crash, with session id, cwd and end time (M).
 5. Settle with the manifest, the check and crash recovery (M).
 6. Removal off by default, extract, `held`, `doctor` and the dry run (M).
-7. Home Manager module, LaunchAgent, signals, alerts and dashboards (M). The daemon-down and
-   free-space alerts gate the documentation of `remove.enable` (phase 6's switch).
+7. Three beads. 7a: the Home Manager module and LaunchAgent with their eval checks (M). 7b: the
+   darwin observability module with its eval test (S). 7c: signals, the alert structure check, alerts
+   and dashboards (M). The daemon-down and free-space alerts gate the documentation of `remove.enable`
+   (phase 6's switch).
 8. Control mod, listener, `pg-claude-control` and its Home Manager wiring (M). This phase is
    independent of phases 1 to 7 and can run in parallel; its end files feed phase 4, which ingests them.
 9. Client moves, each its own bead: pa-monitor (policy only; closes `pg2-w6x9y`), ccpool and the
@@ -1707,17 +1778,17 @@ Reuse the patterns of `claude-transcript/sessions_test.go` and `pg-ccaudit` `ing
 
 **Dependencies and acceptance.** Phase 2 needs 1, 3 needs 2, and 4 needs 1 and 3 (the end-label function in the Go client package belongs to phase 4, because it needs the Process facts). Phase 5 needs 4 (a live Process blocks settling), 6 needs 5, and 7 needs the metrics from 1 to 6; the daemon runs from a dev launch until phase 7 adds the module. Phase 8 is independent. Phase 9 needs 3 and 4. Phase 4 tests the `claude-control-end` source against fixture files, so it does not wait for phase 8; the real-output check is in phase 8's real-Claude tier.
 
-| Phase | Done when                                                                                                                                                      |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | every file in the fixture tree is copied byte-exact in both copy modes, crash points recover, coverage reports lag, the CPU criterion holds                    |
-| 2     | transcript, subagent and history sources parse hand-computed fixtures, and the queries and searches in "Queries and results" return their shapes               |
-| 3     | the feed, the wire contract suite and the client package pass, and a re-parse emits resets in order                                                            |
-| 4     | Process and Conversation facts and end evidence match the truth tables, the crash query lists the crashed fixtures, and the real-child integration test passes |
-| 5     | settle passes its boundary, check-clause and crash tests in both modes, and a manifest exists for every settled Conversation                                   |
-| 6     | removal, extract, `held` and `doctor` pass their tests, and a dry run changes nothing                                                                          |
-| 7     | the module, the signals and the alerts are registered and pass their checks; the free-space and daemon-down alerts are live                                    |
-| 8     | the mod, listener and command pass their bats and plugin checks, and the spike scenarios pass in the real-Claude tier                                          |
-| 9     | each client move closes its bead with a re-profile where one is required (pa-monitor closes `pg2-w6x9y`)                                                       |
+| Phase | Done when                                                                                                                                                                              |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | every file in the fixture tree is copied byte-exact in both copy modes, crash points recover, coverage reports lag; the CPU criterion is the gated verification bead                   |
+| 2     | transcript, subagent and history sources parse hand-computed fixtures, and the queries and searches in "Queries and results" return their shapes                                       |
+| 3     | the feed, the wire contract suite and the client package pass, and a re-parse emits resets in order                                                                                    |
+| 4     | Process and Conversation facts and end evidence match the truth tables, the crash query lists the crashed fixtures, and the real-child integration test passes                         |
+| 5     | settle passes its boundary, check-clause and crash tests in both modes, and a manifest exists for every settled Conversation                                                           |
+| 6     | removal, extract, `held` and `doctor` pass their tests, and a dry run changes nothing                                                                                                  |
+| 7     | the module, the signals and the alerts are registered and pass their checks; the free-space and daemon-down alerts are live                                                            |
+| 8     | the mod, listener and command pass their bats and plugin checks, and the spike scenarios pass in the real-Claude tier, run by the operator and recorded on a `human` verification bead |
+| 9     | each client move closes its bead with a re-profile where one is required (pa-monitor closes `pg2-w6x9y`)                                                                               |
 
 **Implementation beads after approval.** Each phase is a bead, labelled `agent-support` and `pg-claude-code-recorder` (the control mod and command also `pg-claude-control`), created by plan-decompose. The lifecycle-record bead (phase 4), whose crash query replaces the resume-list command, satisfies `pg2-ppm4h`'s done-when; the `agentsession` retirement bead (`pg2-b7r48a`, rescoped) is separate. This design covers `pg2-w6x9y`'s "covers or hands back" choice by serving a change feed that clients poll with a wait, and pa-monitor's move closes it.
 
@@ -1800,19 +1871,20 @@ Agent's calls, for the operator to check:
 18. Control requests are at most 512 bytes (macOS `PIPE_BUF`), with longer `submit` text in a payload file; `stop` aborts the turn first and `--escalate` follows with SIGTERM.
 19. The quiet age reads file modification times, and removal holds a source whose bad-line or unknown-key rate exceeds `format.holdRate`.
 20. Error names are stable strings in `--json` output, because the two commands' exit-code tables are independent.
+21. No sixth end label for a reboot: the fact `registry_stale_at_discovery` and the `--suspected-crash` flag cover it.
 
-21. 2026-10-30: pa-monitor and ccpool become policy only, with low-level reading moving to the recorder (the
+22. 2026-10-30: pa-monitor and ccpool become policy only, with low-level reading moving to the recorder (the
     command returns exit code 4 against a Claude without the mod).
-22. 2026-10-30: the mod writes the end reason in the first version, reversing the "no SessionEnd hook in v1"
+23. 2026-10-30: the mod writes the end reason in the first version, reversing the "no SessionEnd hook in v1"
     ruling; other hook moves are follow-up beads.
-23. 2026-10-30: any tool may read the recorder directly (pa-monitor and ccpool do); the only access rule is
+24. 2026-10-30: any tool may read the recorder directly (pa-monitor and ccpool do); the only access rule is
     that pg-desk uses pg-connector.
-24. 2026-10-30: pg-connector's `agentsession` is retired, not split; the bead that retires it first checks
+25. 2026-10-30: pg-connector's `agentsession` is retired, not split; the bead that retires it first checks
     whether anything calls the `search`, `activity` or `attention` capabilities of its backend, and applies
     the `conversation` and `process` split to those only if something does.
-25. 2026-10-30: there is no resume-list command; the recorder's crash query replaces it.
+26. 2026-10-30: there is no resume-list command; the recorder's crash query replaces it.
 
-Awaiting a ruling: the agent's calls above (1 to 20) are not yet confirmed.
+The operator confirmed calls 3, 4, 5, 6, 13, 14 and 18 on 2026-10-30; the other agent's calls above are tunable or reversible, and the builder may tune them.
 
 ## Design patterns used
 
@@ -1840,6 +1912,54 @@ Three decisions pass the ADR tests and are candidates once the design is approve
 - A mod and its listener per Claude cost a one-second wake-up each; the cost with many sessions is not measured.
 - FSEvents history retention across a reboot and the cost of `F_FULLFSYNC` are not measured.
 - The mod API is as of Claude Code 2.1.310 and may change; the plugin validator is the early warning.
+
+## Review findings handed to the builder
+
+The 2026-10-30 six-dimension review found these; each is a requirement on the phase named.
+
+- **Phase 1 (copier and store).** After a power loss a copy can be shorter than its committed offset
+  (plain `fsync` does not flush the drive cache): on start, a copy shorter than its committed offset marks the
+  file `copy_mismatch` and re-copies from the original while it exists, or starts a new generation. State plainly
+  that the copier's appends are weaker than the settle and removal path, which uses `F_FULLFSYNC`. A full-hash
+  mismatch at settle or removal starts a new generation from byte 0 (a reset entry follows) and keeps the old one;
+  `doctor` does the same. The journal is written first with a sequence number, the database records the last
+  sequence applied, and replay is idempotent; seen-times are stored per copy commit. Re-cloning at settle
+  re-hashes the clone before it replaces the preserved copy. A snapshot is atomic per file, and the feed after
+  it carries the remaining resets; reset entries are not pruned by the retention floor until clients behind them advance.
+- **Phase 4 (facts).** A Conversation's end is the moment the registry stops naming it; the label of the
+  Conversation a Process left by an in-process `/resume` is "left, not ended", and a typed `/exit` entry counts only
+  when the registry deletion follows it. The end file has a JSON schema with a `reason` enum and is written once per
+  `session.end`; the recorder removes an end file after ingesting it and a day; a `/clear` end file joins the old
+  session. The reasons `resume` and `logout` are unmeasured: the real-Claude tier measures them. The registry-versus-exit order is
+  measured before `crashed` is trusted. A first task of the phase probes whether `history.jsonl` stores a `/clear`
+  entry under the old or the new session id.
+- **Phases 2 and 3 (sources and client).** Phase 2 delivers the transcript, subagent transcript and history sources;
+  phase 3 delivers meta, tool-result-body, registry, status, session-mode and compaction, and the client package's
+  `Dial`, `Hello`, `Query`, `Search`, `Feed`, `Snapshot` and `Raw`; phase 4 delivers `claude-control-end`,
+  `Conversation`, `Process`, `EndLabel` and `Crashed`.
+- **Phase 7 (module wiring).** `controlStateDir` defaults from the control module's `stateDir` when both are enabled,
+  an assertion fails on a mismatch, and `coverage` reports the `ends/` root.
+- **Phase 8 (mod).** Add a `faults`-style pause seam. The mod's core logic is a module testable under plain `node`
+  against the real file system (cap boundary at 511 and 512 bytes, multibyte text counted as bytes, two concurrent
+  writers, the `id` de-duplication window, the `run` allowlist, the respawn counter's reset after 60 seconds).
+  `submit`, `run` and `stop` pre-check refusals client-side (a `/` prefix, a non-allowlisted `run` verb exit 2) and print
+  `sent; effect not confirmed` unless a reply path was requested.
+- **The two commands.** Exit codes that mean the same thing (usage 2, not found, ambiguous, timeout, offline) use the same number in
+  both tables, and without `--json` an `error: <name>` line goes to stderr. Exit 5 prints the partial answer on stdout, and
+  `--allow-partial` turns it into 0 during the first backfill. `where <session>` prints the stage, `blocked_by` (a stable reason
+  list), the next eligible time and the command that clears it; `remove --dry-run` works while removal is disabled, says so first,
+  and prints a per-Conversation skip report with counts by reason; a missing `--yes` exits 2; `held` has stable columns and a reason enum with a remedy
+  line each. `status` always answers, offline included (socket path, launch agent state, log path, state size read from disk), and
+  `status --watch` or `coverage --wait-caught-up` follow the first run. The control command's exit 4 message names the
+  stop alternative and enabling the mod, and prints `waiting for inbox...` on stderr during the 3-second retry.
+- **Tests.** Crash-point tests run with a recording file-system wrapper that asserts the order `fsync(temp)`, read-back,
+  `fsync(dir)`, rename, commit, and `fullfsync` before the first unlink, because an in-process reopen keeps the page
+  cache and cannot see a missing `fsync`. Add pause seams for a write between the check and the unlink and between the
+  check and `clonefile`. The invariants helper exempts `extract` from "the Claude directory is unchanged", compares
+  copies to the archive or to the generation's recorded bytes, and defines the torn-journal delta. A feed suite covers a
+  reset delivered to filtered feeds, a reset split across pages (the client buffers), a cursor below the retention floor
+  and a cursor beyond the head. A darwin unit test uses a real `clonefile` to check that settle restores shared blocks.
+  Soak budgets are committed with the first run and fail at 1.5 times that baseline.
 
 ## Left to the builder
 
