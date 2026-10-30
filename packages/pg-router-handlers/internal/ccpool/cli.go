@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,6 +316,24 @@ func (c *CLIRunner) Capacity(ctx context.Context) (Capacity, error) {
 // emits. Nothing is decoded; only success/failure matters.
 func (c *CLIRunner) EmitCapacity(ctx context.Context) error {
 	_, err := c.ccpool(ctx, quickCallTimeout, "capacity", "--emit-metrics")
+	return err
+}
+
+// EmitGauge runs `ccpool emit-gauge --name N --value V [--label k=v]...`, the
+// generic gauge emitter (bead pg2-fx5x0l.8): ccpool exports the point over OTLP
+// from the OTEL_* env this process inherited, and exits 0 silently when none is
+// set. Labels are sorted for a deterministic argv.
+func (c *CLIRunner) EmitGauge(ctx context.Context, name string, value float64, labels map[string]string) error {
+	args := []string{"emit-gauge", "--name", name, "--value", strconv.FormatFloat(value, 'g', -1, 64)}
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--label", k+"="+labels[k])
+	}
+	_, err := c.ccpool(ctx, quickCallTimeout, args...)
 	return err
 }
 

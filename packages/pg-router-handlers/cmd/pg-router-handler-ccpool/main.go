@@ -44,6 +44,7 @@ import (
 var version = "dev"
 
 func main() {
+	orphanGaugeEmit = ccpoolGaugeEmit
 	os.Exit(run(os.Args[1:]))
 }
 

@@ -722,6 +722,67 @@
           "expr": "sum(max by (state, live, pool, pgrouter_role) (ccpool_session_states{state=\"working\",live=\"false\"})) or (vector(0) and on() (max(ccpool_pool_capacity) >= 0))"
         }
       ]
+    },
+    {
+      "id": 17,
+      "title": "Janitor run time (p90 over 6h) and deadline hits",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "The pg-router ccpool handler janitor (INV-CCH-41): wall time of its last run, its p90 over 6 hours (creep shows before the deadline is reached) and the runs that hit their deadline. Emitted through ccpool emit-gauge; empty where the janitor is not enabled. Alert rules: pg-router-ccpool-janitor-*.",
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(ccpool_janitor_last_run_seconds)",
+          "legendFormat": "last run",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "quantile_over_time(0.9, max(ccpool_janitor_last_run_seconds)[6h:1m])",
+          "legendFormat": "p90 (6h)",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(ccpool_janitor_deadline_hit)",
+          "legendFormat": "deadline hit",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "s",
+          "noValue": "janitor not running"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     }
   ]
 }

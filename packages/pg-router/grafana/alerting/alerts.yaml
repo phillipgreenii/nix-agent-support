@@ -364,7 +364,8 @@ groups:
       # series in rule-tests/pg-router-queue-stalled.test.yaml. The router now makes its
       # first dispatch pass before its first producer tick (DEC-EVENT-5, pg2-x3zkb), so a
       # restart's hole is the boot plus the postStartup hooks instead of the first producer
-      # tick that stood in front of the re-offer, and the handler that adopts a surviving
+      # tick that stood in front of the re-offer (the postStartup part goes away when
+      # pg2-fx5x0l.6 removes the dispatch gate, INV-CCH-18: then it is the boot alone), and the handler that adopts a surviving
       # session is to report the dispatch's original start (decided, not yet built);
       # neither changes this rule. The dedicated host-awake signal belongs to
       # pg2-9uvm5; when it lands this rule needs one more `unless` clause on that signal
@@ -1786,6 +1787,171 @@ groups:
               editorMode: code
               instant: true
               expr: min_over_time(sum(pg_router_worktree_count)[12h:10m]) - min_over_time(sum(pg_router_worktree_count)[12h:10m] offset 12h) >= 10
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # The ccpool handler's janitor (bead pg2-fx5x0l.7, INV-CCH-41, ADR 0117 of this
+      # repo). The janitor is a scheduled housekeeping run, not part of any dispatch, so a
+      # janitor that stops, keeps hitting its deadline, or runs and reclaims nothing leaves
+      # no failed dispatch behind: these three rules are its only watch. Its gauges reach
+      # Prometheus through `ccpool emit-gauge` (a generic emitter; the names carry ccpool_
+      # because that is its namespace), one push per run that was not skipped:
+      #   ccpool_janitor_last_success_timestamp_seconds  moves only on a COMPLETED run
+      #   ccpool_janitor_last_run_seconds                wall time of the run
+      #   ccpool_janitor_deadline_hit                    1 when the run hit its deadline
+      #   ccpool_janitor_pass_errors{pass}               errors of a pass in that run
+      #   ccpool_janitor_reclaimed{pass}                 things a pass reclaimed in that run
+      # The interval (10 minutes, the HM option's default) is written into the thresholds
+      # below; change them with the option.
+      #
+      # Registered where the janitor is NOT enabled: nothing is emitted there, and every
+      # expression reads `last_over_time(...[7d])` or a window of the gauges themselves, so
+      # a host that never ran the janitor has no series and the rules read no data
+      # (noDataState: OK) instead of firing forever. The cost is that a janitor stopped for
+      # more than 7 days stops alerting; by then the stale alert has long since fired.
+      #
+      # pg-router-ccpool-janitor-stale: the last completed run is more than 3 intervals
+      # (1800 seconds) old. launchd StartInterval does not fire while the machine sleeps,
+      # and the stack that evaluates this rule sleeps with it, so `for: 1h` absorbs the gap
+      # after a wake until the first run lands. First check: the janitor's launchd log
+      # (the LaunchAgent's StandardErrorPath),
+      # then `launchctl list | grep janitor`, then one hand run
+      # (`pg-router-handler-ccpool janitor --config <cfg> --role-file <f>`). Annotations are
+      # STATIC (see the escalation convention above).
+      - uid: pg-router-ccpool-janitor-stale
+        title: ccpool janitor has not completed a run recently
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "the ccpool handler's janitor has not completed a run for more than 30 minutes"
+          description: "ccpool_janitor_last_success_timestamp_seconds is more than 3 janitor intervals (30 minutes, interval 10 minutes) old and stayed that way for an hour, so closed-bead sessions, orphans, leaked worktrees and stale locks are no longer swept between dispatches. First check the janitor's launchd log (the LaunchAgent's StandardErrorPath), then host load and whether the machine was asleep, then run one pass by hand: pg-router-handler-ccpool janitor with the agent's --config and --role-file arguments. A run that only hits its deadline does not count as a success, see pg-router-ccpool-janitor-deadline."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (time() - max(last_over_time(ccpool_janitor_last_success_timestamp_seconds[7d]))) > 1800
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-ccpool-janitor-deadline: three consecutive runs (a 35 minute window holds
+      # three or four pushes at a 10 minute interval) all hit their wall-clock deadline, so
+      # the work no longer fits and the later roles of the rotation are being skipped. The
+      # last_run_seconds gauge (p90 panel on the ccpool pools dashboard) shows the creep
+      # before the deadline is reached. First check: the janitor_run rows in the handler's
+      # events.jsonl (passes.<pass>.elapsed_ms names the slow pass), host load, then a hand
+      # run with a longer --deadline.
+      - uid: pg-router-ccpool-janitor-deadline
+        title: ccpool janitor keeps hitting its deadline
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "the ccpool handler's janitor hit its deadline on its last 3 runs"
+          description: "ccpool_janitor_deadline_hit was 1 on every run of the last 35 minutes (at least 3 runs): each run was cut off by its deadline, so roles late in the rotation are skipped and a pass may never finish. First check the janitor_run rows in the handler's events.jsonl (passes.<pass>.elapsed_ms names the slow pass) and host load, then run the janitor by hand with a longer --deadline. The ccpool_janitor_last_run_seconds panel on the ccpool pools dashboard shows the run time creeping up before this fires."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (min_over_time(ccpool_janitor_deadline_hit[35m]) == 1) and (count_over_time(ccpool_janitor_deadline_hit[35m]) >= 3)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-ccpool-janitor-idle: a janitor that runs but does nothing looks healthy to
+      # the two rules above. Two clauses joined by `or`: (1) a pass reported errors on every
+      # run of the last 35 minutes (at least 3 runs), so one pass keeps failing while the
+      # run as a whole completes; (2) over the last 6 hours the janitor ran at least 3 times
+      # and reclaimed nothing in any pass while some ccpool pool had no free slot for the
+      # whole window, so a full pool is being held by sessions nothing reclaims. A full pool
+      # of genuinely working sessions also reclaims nothing: clause 2 is therefore a hint
+      # to look, and clause 1 is the firm signal. First check: the janitor's log for the
+      # failing pass (`janitor: pass failed`), then `ccpool --pool <pool> list --json` for
+      # idle or orphaned rows, then one hand run.
+      - uid: pg-router-ccpool-janitor-idle
+        title: ccpool janitor runs but reclaims nothing or keeps failing
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "the ccpool handler's janitor keeps failing a pass, or runs without reclaiming anything while a pool is full"
+          description: "Either a janitor pass reported errors on every run of the last 35 minutes (ccpool_janitor_pass_errors, label pass), or the janitor ran at least 3 times in 6 hours, reclaimed nothing in any pass (ccpool_janitor_reclaimed) and a ccpool pool had no free slot throughout (ccpool_pool_capacity dim=free). First check the janitor's log for `janitor: pass failed` lines, then `ccpool --pool <pool> list --json` for idle, errored or orphaned rows holding slots, then run the janitor by hand. A full pool of sessions that are really working also reclaims nothing, so the second case can be a false alarm."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: ((min_over_time(ccpool_janitor_pass_errors[35m]) > 0) and (count_over_time(ccpool_janitor_pass_errors[35m]) >= 3)) or ((count(count_over_time(ccpool_janitor_reclaimed[6h]) >= 3)) and on() (sum(max_over_time(ccpool_janitor_reclaimed[6h])) == 0) and on() (max(min_over_time(ccpool_pool_capacity{dim="free"}[6h])) == 0))
           - refId: B
             datasourceUid: __expr__
             model:

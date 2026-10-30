@@ -1,0 +1,140 @@
+# promtool unit tests for the three ccpool janitor alerts (bead pg2-fx5x0l.7). Run by the
+# flake check test-pg-router-alert-rules, which wraps each rule's refId A as
+# `alert: <uid>` with `expr: (<A>) > 0` and the rule's `for`.
+#
+# Time model: promtool's clock starts at 0; the janitor pushes one sample per run, every
+# 10m (interval below), so a 35m window holds three or four runs. Grafana's `for` is carried
+# over, so a rule is pending for its `for` after the first true evaluation.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: stale fires after the last success is over 30m old and 1h has passed, not when runs are fresh
+    interval: 10m
+    input_series:
+      # Runs succeed until t=30m (sample 3), then stop.
+      - series: ccpool_janitor_last_success_timestamp_seconds
+        values: "0 600 1200 1800"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-router-ccpool-janitor-stale
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: pg-router-ccpool-janitor-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: stale stays quiet while runs keep completing and on a host that never ran the janitor
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_last_success_timestamp_seconds
+        values: "0+600x30"
+      - series: unrelated_metric
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 200m
+        alertname: pg-router-ccpool-janitor-stale
+        exp_alerts: []
+
+  - name: stale is silent when there is no janitor series at all
+    interval: 10m
+    input_series:
+      - series: unrelated_metric
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 200m
+        alertname: pg-router-ccpool-janitor-stale
+        exp_alerts: []
+
+  - name: deadline fires after three runs in a row hit it, not after two or when one run completed
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_deadline_hit
+        values: "0 0 1 1 1 1 1 1 1 1"
+      - series: ccpool_janitor_last_run_seconds
+        values: "240x10"
+    alert_rule_test:
+      # Runs at 20m and 30m both hit: only two in the 35m window that matter, plus a 0 at 10m.
+      - eval_time: 30m
+        alertname: pg-router-ccpool-janitor-deadline
+        exp_alerts: []
+      # Three or more consecutive hits, then `for: 10m`.
+      - eval_time: 60m
+        alertname: pg-router-ccpool-janitor-deadline
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: deadline does not fire when a run in the window completed
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_deadline_hit
+        values: "1 1 1 0 1 1 1 0 1 1 1 0 1 1 1 0"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: pg-router-ccpool-janitor-deadline
+        exp_alerts: []
+
+  - name: idle fires when one pass errors on every run, labelled by pass
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_pass_errors{pass="worktree_sweep"}
+        values: "1x20"
+      - series: ccpool_janitor_pass_errors{pass="orphan_reconcile"}
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-ccpool-janitor-idle
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: pg-router-ccpool-janitor-idle
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+
+  - name: idle does not fire when a pass errors only now and then
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_pass_errors{pass="worktree_sweep"}
+        values: "1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: pg-router-ccpool-janitor-idle
+        exp_alerts: []
+
+  - name: idle fires when nothing is reclaimed for 6h while the pool has no free slot
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_reclaimed{pass="closed_bead_reconcile"}
+        values: "0x80"
+      - series: ccpool_janitor_reclaimed{pass="orphan_reconcile"}
+        values: "0x80"
+      - series: ccpool_pool_capacity{pool="p",dim="free"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: pg-router-ccpool-janitor-idle
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-ccpool-janitor-idle
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: idle does not fire on a healthy janitor that reclaims, or on an idle pool with free slots
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_reclaimed{pass="closed_bead_reconcile"}
+        values: "0x30 1 0x60"
+      - series: ccpool_pool_capacity{pool="p",dim="free"}
+        values: "0x80"
+      - series: ccpool_janitor_reclaimed{pass="lock_gc"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: pg-router-ccpool-janitor-idle
+        exp_alerts: []

@@ -818,3 +818,16 @@ func TestReplyTimeout_exceedsConfirmWindow(t *testing.T) {
 		t.Errorf("zero-window reply timeout = %v, want quickCallTimeout", got)
 	}
 }
+
+// EmitGauge execs the generic `ccpool emit-gauge` with sorted labels.
+func TestCLI_EmitGaugeArgv(t *testing.T) {
+	cli, argv, _ := newSpy()
+	err := cli.EmitGauge(context.Background(), "ccpool_x", 1.5, map[string]string{"role": "r", "pass": "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "emit-gauge --name ccpool_x --value 1.5 --label pass=p --label role=r"
+	if got := strings.Join((*argv)[len(*argv)-1], " "); got != want {
+		t.Fatalf("EmitGauge argv = %q, want %q", got, want)
+	}
+}

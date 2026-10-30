@@ -204,6 +204,9 @@ func orphanFields(role roles.Role, s ccpool.Session) map[string]any {
 }
 
 func emitOrphan(deps executor.Deps, level, kind, msg string, fields map[string]any) {
+	if role, ok := fields["role"].(string); ok {
+		emitOrphanGauge(role, kind, orphanNow(deps))
+	}
 	if deps.Log != nil {
 		_ = deps.Log.Emit(level, kind, msg, fields)
 	}

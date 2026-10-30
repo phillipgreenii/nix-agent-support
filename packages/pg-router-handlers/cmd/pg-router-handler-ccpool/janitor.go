@@ -83,6 +83,8 @@ type janitorPasses struct {
 	orphan      func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int
 	worktree    func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int
 	lockGC      func(deps executor.Deps) int
+	// emit publishes the run's heartbeat gauges; nil (a test) emits nothing.
+	emit gaugeEmitFn
 }
 
 // prodJanitorPasses wires the passes of sweeps.go with the same arguments
@@ -105,6 +107,7 @@ func prodJanitorPasses() janitorPasses {
 			return sweepLeakedWorktrees(ctx, role, deps, orphanEnv{open: worktree.GitOpener, cwds: processCWDs, lockDir: deps.LockDir})
 		},
 		lockGC: sweepStaleLocks,
+		emit:   ccpoolGaugeEmit,
 	}
 }
 
@@ -356,6 +359,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		"roles_skipped": run.skipped,
 	}
 	_ = log.Emit("info", janitorRunEvent, "janitor run "+outcome, fields)
+	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats)
 	fmt.Fprintf(stdout, "janitor: outcome=%s elapsed=%s roles=%d pools=%d reclaimed=%d\n", outcome, elapsed.Round(time.Millisecond), len(jroles), len(poolDone), reclaimed)
 	return conformance.ExitOK
 }

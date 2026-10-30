@@ -1327,7 +1327,13 @@ changes a core gate or `INV-LIFE-2`.
     because another run was active, or deadline reached), each pass's elapsed time and the count of
     things it reclaimed, and emits a heartbeat the operator can alert on (a last-success time, the
     run's duration, per-pass error and reclaim counts). A janitor that stops running MUST be
-    detectable as stale.
+    detectable as stale. The heartbeat is published as gauges through the generic gauge emitter of
+    `ccpool` (the handler itself carries no telemetry client): last-success time (moved only by a
+    completed run), run duration, whether the run hit its deadline, and per-pass error and reclaim
+    counts, each pushed once per run that was not skipped. Each orphan reclaim or hard stop also
+    publishes the time of the latest such event per role and kind. Three alerts watch the heartbeat:
+    no completed run for three intervals, three consecutive deadline runs, and a pass failing on
+    every run or nothing reclaimed for hours while a pool has no free slot.
   - **Dry run.** An operator MUST be able to ask a janitor run what each pass WOULD reclaim,
     without it reclaiming anything.
   - **Capacity pressure in a dispatch.** A dispatch handles its role's orphans first (`INV-CCH-18`).
