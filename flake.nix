@@ -2463,6 +2463,28 @@
                     touch $out
                   '';
 
+              # Shared Grafana dashboard lint (bead pg2-qd4voe.9): every static
+              # packages/*/grafana/*.json (the glob excludes grafana/alerting/) must
+              # pass lint-grafana-dashboards with the fixed-window rule L1 promoted
+              # to an error. Lint package: phillipgreenii-nix-base (bead pg2-rkgr6e).
+              test-grafana-dashboards-lint =
+                pkgs.runCommand "test-grafana-dashboards-lint"
+                  {
+                    nativeBuildInputs = [
+                      phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.lint-grafana-dashboards
+                    ];
+                  }
+                  ''
+                    lint-grafana-dashboards --error L1 \
+                      ${./packages/beads-exporter/grafana/beads.json} \
+                      ${./packages/ccpool/grafana/ccpool-pools.json} \
+                      ${./packages/pa-monitor/grafana/pa-monitor-overview.json} \
+                      ${./packages/pg-connector/grafana/pg-connector-github.json} \
+                      ${./packages/pg-rescue/grafana/pg-rescue-runs.json} \
+                      ${./packages/pg-task-focus/grafana/pg-task-focus.json}
+                    touch $out
+                  '';
+
               # darwin/modules/pg-rescue (bead pg2-lnfwd): ships the run log to
               # Loki. Evaluates the module against a stub of the observability
               # surface that mirrors the REAL logSources submodule's defaults
