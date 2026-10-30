@@ -109,6 +109,78 @@ tests:
         alertname: pg-router-liveness-down
         exp_alerts: []
 
+  # pg2-onqsvn: host-activity is pushing (host_power_transitions_total present) but has recorded
+  # no transition, so neither last-wake nor last-sleep gauge exists. The gate MUST degrade open
+  # (awake): a stalled daemon fires, an unreachable endpoint fires, a healthy one does not.
+  - name: gauges never exported (counters present, no transitions), stalled daemon fires
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x30"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: host_power_transitions_total{kind="full"}
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-liveness-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: pg-router
+              instance: 127.0.0.1:9820
+
+  - name: gauges never exported (counters present), up 0 fires
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 _x30"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x30"
+      - series: host_power_transitions_total{kind="full"}
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-liveness-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: pg-router
+              instance: 127.0.0.1:9820
+
+  - name: gauges never exported (counters present), healthy daemon does not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x40"
+      - series: host_power_transitions_total{kind="full"}
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+
+  # Asleep with zero recorded transitions: every host-activity series, the counter included, ages
+  # out, so the degrade-open branch MUST stay empty and nothing fires.
+  - name: host asleep with gauges never exported (counters aged out too), does not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x50"
+      - series: up{job="pg-router",instance="127.0.0.1:9820"}
+        values: "1x10 0x50"
+      - series: host_power_transitions_total{kind="full"}
+        values: "0x10 _x50"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-router-liveness-down
+        exp_alerts: []
+
   # Dark wakes: the gauges are pushed for a minute at a time, but last-sleep (300) is newer than
   # the last full wake (200), so the host is not awake and the rule stays quiet.
   - name: dark wake (last sleep newer than last full wake), liveness 0, does not fire

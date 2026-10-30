@@ -76,6 +76,19 @@ groups:
       # wake leaves last-sleep newer than last-full-wake, so it stays quiet too. A
       # real stalled daemon (liveness 0) or unreachable endpoint (up 0) with the
       # host awake still returns a 0 sample for the full `for`, so it still pages.
+      # pg2-onqsvn (fail-open when the gauges were never exported): the
+      # host-activity exporter publishes the last-sleep/last-wake gauges only
+      # after a transition was recorded, so a collector with zero transitions
+      # exports neither while it still pushes host_power_transitions_total
+      # (observed live 2026-10-29: gauges absent, counters present, awake).
+      # The awake gate was then an empty vector and the rule could never fire.
+      # CHOICE: fix on the alert side (not a 0 sentinel in the exporter, which is
+      # nix-support-apps). A third awake branch counts the host as awake when BOTH
+      # gauges are absent AND host_power_transitions_total is present, i.e.
+      # host-activity is alive and pushing but has no transition history. A
+      # sleeping host still reads as asleep because ALL host-activity series,
+      # the counter included, age out together, so the third branch is empty
+      # too (the pg2-ph0ut9 case). Cases: rule-tests/pg-router-liveness-down.test.yaml.
       # Coverage for a dead daemon on a host with no host-activity is the
       # launchd-health "daemon not running" per-label rule for
       # com.phillipg.pg-router-daemon (severity critical in launchd-health.nix's
@@ -103,7 +116,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '(pg_router_liveness < 1 or up{job="pg-router"} == 0) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds))'
+              expr: '(pg_router_liveness < 1 or up{job="pg-router"} == 0) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))'
           - refId: B
             datasourceUid: __expr__
             model:
