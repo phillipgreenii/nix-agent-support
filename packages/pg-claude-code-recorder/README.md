@@ -289,3 +289,43 @@ that id has no record after the entry), so the history join is by the Conversati
 Tests: `go test ./...` (unit); the real-child tests (`internal/proc/real_integration_test.go`,
 `internal/serve/realchild_integration_test.go`, tag `integration`) run a real kqueue watch against a
 real child process.
+
+## Removal, extract, held, where and doctor (phase 6)
+
+Removal takes a settled Conversation's files out of the Claude directory once it has been quiet for
+`remove.after` (30 days). It is **off by default** (`remove.enable = false`), and there is **no undo
+except `extract`**. Keys (all in `config.toml`): `remove.enable`, `remove.after`, `remove.maxPerRun` (50),
+`remove.maxPerHour` (200), `held.recheck`, `format.holdRate` (0.01: a source whose bad-line or unknown-key
+rate over the last day is above it is not removed) and `doctor.interval` (24h; doctor also runs from a timer
+inside the daemon, so no external scheduler is needed).
+
+The order, so a crash at any point loses nothing: re-run the check and compare each Claude file's full hash
+with the archive (in clone mode the archive is first written and verified from the clone); commit "removal
+pending" with each file's inode, size and hash; per file, require no registry file naming the session and no
+live Process, rename it into `.pg-recorder-quarantine` (a directory beside the file, on the block list and the
+watcher filter), list the holders of the quarantined inode (a holder restores the file), re-hash it, flush the
+archive with `F_FULLFSYNC`, re-check size and modification time and unlink; then commit "removed" and tidy the
+empty directories. A restart scans the quarantine, maps entries to the pending list by inode and hash, unlinks
+a matching entry with no new Process and restores any other; an unlisted entry is logged as
+`quarantine_orphan_found_on_start` and left. A restore is an exclusive link: a new file at the path is never
+overwritten, both are kept and the Conversation is held with reason `restore_conflict`. The residual window is
+a write between the final re-check and the unlink by a holder the listing missed.
+
+```text
+pg-claude-code-recorder remove --dry-run                 # works while removal is disabled; says so first
+pg-claude-code-recorder where <session>                  # stage, blocked_by, next_eligible, clear
+pg-claude-code-recorder held [--retry]                   # reason codes with a remedy line each
+pg-claude-code-recorder extract <session> [--to DIR]     # byte-exact, mtime now; prints the claude --resume line
+pg-claude-code-recorder doctor                           # exit 9 on a mismatch; writes doctor.json
+```
+
+Removal readiness checklist: the daemon-down and free-space alerts are registered (phase 7c); `doctor` has
+compared every copy against the Claude files and its last run is recent; pa-monitor `sessions` and ccpool resume
+have moved to the recorder; the state directory is backed up (excluding `recorder.sock` and temporary files);
+`remove --dry-run` prints what would go and how many GB.
+
+Signals: `quarantine_files`, `quarantine_bytes`, `quarantine_oldest_age_seconds`,
+`removal_quarantine_mismatch_total`, `removal_backlog_conversations`, `removal_backlog_bytes`,
+`conversations_removed_total`, `skipped_files_total{reason}`, `dropped_bytes_total{reason="removal_race"}`,
+`doctor_last_run_timestamp` and `doctor_mismatch_files` (from `doctor.json`); events `quarantined`,
+`quarantine_restored`, `quarantine_orphan_found_on_start`. The alert rules are phase 7c.

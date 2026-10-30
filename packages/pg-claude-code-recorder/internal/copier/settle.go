@@ -3,6 +3,7 @@ package copier
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
@@ -75,3 +76,28 @@ func (c *Copier) ReplaceCopyLocked(f store.File, gen int, tmp string) error {
 // ReadOriginalPath returns a current path of f that still names the file in the
 // Claude directory ("" when none does).
 func (c *Copier) ReadOriginalPath(f store.File) string { return c.existingPath(f) }
+
+// IdentityOfFile returns the identity (device, inode, birth time) of the file at
+// path, which extract registers before the copier sees the restored file.
+func IdentityOfFile(path string) (Identity, bool) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return Identity{}, false
+	}
+	return identityOf(path, fi)
+}
+
+// FirstHashOf returns the hash of the first FirstBytes bytes of the file at path
+// (0 for a file shorter than that), as the copier records it.
+func FirstHashOf(path string) uint64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return 0
+	}
+	return firstHash(f, fi.Size())
+}

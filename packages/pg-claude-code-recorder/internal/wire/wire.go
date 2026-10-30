@@ -181,7 +181,10 @@ type CoverageSummary struct {
 	Held               int            `json:"held"`
 	Settled            int            `json:"settled"`
 	Removed            int            `json:"removed"`
-	Worst              *Worst         `json:"worst"`
+	// RemovedConversations counts the Conversations whose files are gone from the
+	// Claude directory (their bytes are only in the archives).
+	RemovedConversations int    `json:"removed_conversations"`
+	Worst                *Worst `json:"worst"`
 }
 
 // Coverage is the coverage answer. Files is set only for --view files.

@@ -168,3 +168,20 @@ func CopierAppendOrder(copyPath string) []Step {
 func CopierNewCopyOrder(tmpPath, dir string) []Step {
 	return []Step{{"write", tmpPath}, {"sync", tmpPath}, {"rename", tmpPath}, {"syncdir", dir}, {"mark", "commit"}}
 }
+
+// RemovalOrder is the order removal MUST keep for one file: rename it into the
+// quarantine and flush the directory it left, list the holders, re-hash, flush
+// the archive that holds the bytes (and its directory), then unlink the
+// quarantined file and flush the quarantine directory.
+func RemovalOrder(parent, quarantineDir, archiveSeg string) []Step {
+	return []Step{
+		{"rename", quarantineDir},
+		{"syncdir", parent},
+		{"mark", "holders"},
+		{"mark", "rehash"},
+		{"fullsync", archiveSeg},
+		{"fullsyncdir", ""},
+		{"remove", quarantineDir},
+		{"syncdir", quarantineDir},
+	}
+}

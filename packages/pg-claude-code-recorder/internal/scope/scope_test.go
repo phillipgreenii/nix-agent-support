@@ -71,3 +71,16 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+func TestQuarantineDirectoryIsBlocked(t *testing.T) {
+	s := New("/c", "")
+	for _, p := range []string{
+		"/c/projects/p/" + QuarantineDir + "/12-s.jsonl",
+		"/c/projects/p/s/" + QuarantineDir + "/12-agent.jsonl",
+		"/c/projects/p/" + QuarantineDir,
+	} {
+		if d := s.Match(p); d.Ingest || d.Reason != "quarantine" {
+			t.Errorf("Match(%q) = %+v", p, d)
+		}
+	}
+}

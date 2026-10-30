@@ -20,6 +20,11 @@ Usage:
   pg-claude-code-recorder raw      --record FILE:GEN:OFFSET:ITEM | --file FILE --offset N --length N
   pg-claude-code-recorder conversations [--ended LABEL | --crashed | --suspected-crash] [--since 7d|TIME] [--cwd PATH] [--limit N] [--json]
   pg-claude-code-recorder processes [--live] [--session ID] [--pid N] [--limit N] [--json]
+  pg-claude-code-recorder held     [--retry] [--json]   held Conversations: reason code, since, files and a remedy line each
+  pg-claude-code-recorder where    <session> [--json]   its stage, blocked_by, next eligible time and the command that clears it
+  pg-claude-code-recorder remove   [<session>...] [--dry-run] [--yes] [--all-eligible] [--json]
+  pg-claude-code-recorder extract  <session> [--to DIR] [--json]   restore a removed Conversation (claude --resume works)
+  pg-claude-code-recorder doctor   [--json]   compare every copy with its Claude file by full hash; exit 9 on a mismatch
   pg-claude-code-recorder version
 
 Common flags:
@@ -44,6 +49,10 @@ Examples:
   pg-claude-code-recorder feed --after <cursor> --wait 30s --where '{"field":"type","eq":"assistant"}'
   pg-claude-code-recorder raw --record f_5:1:0:-1   the bytes of one record
 
+  pg-claude-code-recorder remove --dry-run                    what would go and how many GB (works while removal is disabled)
+  pg-claude-code-recorder remove --all-eligible --yes        remove every eligible Conversation
+  pg-claude-code-recorder where 0a1b2c3d-0000-4000-8000-000000000001   why it is not removable yet, and what clears that
+  pg-claude-code-recorder extract 0a1b2c3d-0000-4000-8000-000000000001 --to /example/out
   pg-claude-code-recorder conversations --crashed --since 1d   Conversations whose Process died with its registry file left behind
   pg-claude-code-recorder conversations --suspected-crash      crashed plus unknown with a stale registry file (a power loss)
   pg-claude-code-recorder conversations --ended exited --cwd /example/work
@@ -58,6 +67,13 @@ conversations rows are newest first (default --since 7d, --limit 50); each carri
 label, the evidence used, the stage, whether the originals exist and the line to resume it. An empty
 --crashed result exits 0 and says how many unknown rows have a stale registry file. --ended cannot be
 combined with --crashed or --suspected-crash (exit 2).
+Removal is off by default (remove.enable = false). There is no undo except extract. Before turning it on:
+the daemon-down and free-space alerts are registered, doctor has run clean (it also runs from a timer inside the
+daemon, doctor.interval), pa-monitor sessions and ccpool resume have moved to the recorder, the state directory
+is backed up, and remove --dry-run prints what would go and how many GB. remove acts on the named Conversations
+or, with --all-eligible, on every settled one older than remove.after; it never bypasses the age. Without --yes
+it asks when run interactively and exits 2 when not. extract refuses (exit 8) when the session id exists under any
+project directory or a live Process holds it; --to DIR never touches the Claude directory.
 A cursor is <epoch>:<sequence>. feed exits 6 when its wait ended with nothing (the answer's next_cursor
 still advances), and 7 (cursor_expired) when the cursor is from an old epoch, below the retention floor or
 beyond the head: take a snapshot and tail from its cursor. Delivery is at least once; de-duplicate by record id.
@@ -96,7 +112,8 @@ State machine:
   quiet -> held -> (check passes) -> settled
   removed -> (extract, or the path reappears) -> quiet
 
-This build copies, reports lag and reports live and quiet; settle, hold and removal arrive in a later phase.
+settled -> removal_pending needs remove.enable, remove.after of quiet, no registry file naming the session and no
+live Process; a held Conversation shows its reason code in held and where.
 `
 
 func (a *app) help() {

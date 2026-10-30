@@ -67,6 +67,15 @@ type env struct {
 	before  *invariants.DirSnapshot
 	skipInv bool
 	policy  copier.ClonePolicy
+
+	// Removal: remove turns remove.enable on; holders answers the holder listing
+	// (none by default); claudeFS wraps the file system removal and extract use.
+	removeOn bool
+	holders  func(path string) ([]int, error)
+	claudeFS func(fsx.FS) fsx.FS
+	// after, when set, is the allowed stray-quarantine exception for invariants.
+	allowQuarantine bool
+	extra           func(*Config)
 }
 
 func newEnv(t *testing.T, cloneMode bool) *env {
@@ -82,7 +91,10 @@ func newEnv(t *testing.T, cloneMode bool) *env {
 	e.open()
 	t.Cleanup(func() {
 		if !e.skipInv {
-			invariants.Check(t, e.st, invariants.Options{ClaudeDir: e.claude, ClaudeBefore: e.before})
+			invariants.Check(t, e.st, invariants.Options{
+				ClaudeDir: e.claude, ClaudeBefore: e.before, AllowQuarantine: e.allowQuarantine,
+				AllowClaudeChange: e.removeOn, ArchiveCompare: invariants.RecordedBytes(e.st),
+			})
 		}
 		_ = e.st.Close()
 	})
@@ -109,13 +121,45 @@ func (e *env) open() {
 	}
 	e.cp = cp
 	e.prs = parser.New(parser.Config{Store: st, Sources: sources.All(), ClaudeDir: e.claude, Obs: e.obs, Clock: e.clk})
-	e.sett = New(Config{
+	var cfsys fsx.FS
+	if e.claudeFS != nil {
+		cfsys = e.claudeFS(e.rec)
+	} else {
+		cfsys = e.rec
+	}
+	holders := e.holders
+	if holders == nil {
+		holders = func(string) ([]int, error) { return nil, nil }
+	}
+	cfg := Config{
+		RemoveEnable: e.removeOn, RemoveAfter: 30 * 24 * time.Hour, MaxPerRun: 50, MaxPerHour: 200, Holders: holders, FS: cfsys,
 		Store: st, Copier: cp, Parser: e.prs, Clock: e.clk, Obs: e.obs, ClaudeDir: e.claude,
 		After: 24 * time.Hour, Recheck: time.Hour, MinFreeBytes: 1 << 30, MaxLineBytes: 1 << 20,
-		Live:  func() (map[string]bool, error) { return e.live, nil },
-		Free:  FreeFunc(func(string) (int64, error) { return e.free, nil }),
-		Hooks: Hooks{BeforeClone: func(f int64) { e.hookClone(f) }, BeforeDelete: func(s string) { e.hookDelete(s) }},
-	})
+		Live: func() (map[string]bool, error) { return e.live, nil },
+		Free: FreeFunc(func(string) (int64, error) { return e.free, nil }),
+		Hooks: Hooks{
+			BeforeClone: func(f int64) { e.hookClone(f) }, BeforeDelete: func(s string) { e.hookDelete(s) },
+			BeforeQuarantine: func(s, p string) {
+				if e.hooks.BeforeQuarantine != nil {
+					e.hooks.BeforeQuarantine(s, p)
+				}
+			},
+			AfterQuarantine: func(s, p string) {
+				if e.hooks.AfterQuarantine != nil {
+					e.hooks.AfterQuarantine(s, p)
+				}
+			},
+			BeforeUnlink: func(s, p string) {
+				if e.hooks.BeforeUnlink != nil {
+					e.hooks.BeforeUnlink(s, p)
+				}
+			},
+		},
+	}
+	if e.extra != nil {
+		e.extra(&cfg)
+	}
+	e.sett = New(cfg)
 }
 
 func (e *env) hookClone(f int64) {

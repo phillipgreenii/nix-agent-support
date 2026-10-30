@@ -29,6 +29,41 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
+// quarantineDir is the name of the directory removal quarantines files in
+// (scope.QuarantineDir; repeated here so the helper imports nothing but the store).
+const quarantineDir = ".pg-recorder-quarantine"
+
+// RecordedBytes is the ArchiveCompare hook that compares a generation's copy file
+// with the same bytes read through the record pointer (the archive when the
+// settled part is there, else the copy): they MUST be equal wherever both exist.
+func RecordedBytes(st *store.Store) func(file int64, gen int, copyPath string) error {
+	return func(file int64, gen int, copyPath string) error {
+		arch := st.ArchivedTo(file, gen)
+		if arch == 0 {
+			return nil
+		}
+		cp, err := os.ReadFile(copyPath)
+		if err != nil || len(cp) == 0 {
+			return nil
+		}
+		n := int64(len(cp))
+		if n > arch {
+			n = arch
+		}
+		if bytes.Count(cp[:n], []byte{0}) == int(n) {
+			return nil // the archived part of a settled copy is a hole, not bytes
+		}
+		want, err := st.ReadPointer(file, gen, 0, int(n))
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(want, cp[:n]) {
+			return fmt.Errorf("copy bytes differ from the archive over [0,%d)", n)
+		}
+		return nil
+	}
+}
+
 // Options tunes Check.
 type Options struct {
 	// ClaudeBefore is a snapshot of the Claude directory taken before the test
@@ -38,6 +73,10 @@ type Options struct {
 	// AllowClaudeChange is the extract exemption: extract (and enabled removal)
 	// legitimately change the Claude directory.
 	AllowClaudeChange bool
+	// AllowQuarantine permits entries to remain in the quarantine directories
+	// (a restore conflict keeps one on purpose). Otherwise any file in a
+	// quarantine directory under the Claude directory is a stray.
+	AllowQuarantine bool
 	// ArchiveCompare compares a generation's copy with the archive that holds
 	// it, or with the generation's recorded bytes; the settle and removal
 	// packets provide it. A nil hook skips the comparison.
@@ -127,6 +166,22 @@ func Violations(st *store.Store, o Options) []string {
 		add("dump: replay=%v live=%v", rerr, lerr)
 	case replay != live:
 		add("journal replay differs from database observations:\n--- replay\n%s\n--- database\n%s", replay, live)
+	}
+
+	// The quarantine directory is covered: after a test, every removal has
+	// either unlinked its quarantined files or restored them.
+	if o.ClaudeDir != "" && !o.AllowQuarantine {
+		_ = filepath.WalkDir(o.ClaudeDir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || !d.IsDir() || d.Name() != quarantineDir {
+				return nil
+			}
+			if ents, err := os.ReadDir(p); err == nil {
+				for _, e := range ents {
+					add("stray quarantine file %s", filepath.Join(p, e.Name()))
+				}
+			}
+			return filepath.SkipDir
+		})
 	}
 
 	if o.ClaudeBefore != nil && !o.AllowClaudeChange {

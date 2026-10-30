@@ -38,8 +38,8 @@ func TestRunUsageIsExit2(t *testing.T) {
 	}
 }
 
-func TestLaterAndUnknownSubcommandsAreUsageErrors(t *testing.T) {
-	for _, sub := range []string{"held", "remove", "bogus"} {
+func TestUnknownSubcommandsAndMissingArgumentsAreUsageErrors(t *testing.T) {
+	for _, sub := range []string{"remove", "where", "extract", "bogus"} {
 		a, _, errw := testApp(nil)
 		if code := a.run([]string{sub}); code != 2 {
 			t.Errorf("%s: exit %d", sub, code)

@@ -1,7 +1,6 @@
 // Command pg-claude-code-recorder is the recorder's command: the daemon (serve)
 // and the client subcommands for scripts, skills and the operator. This build
-// carries serve, status, coverage, query, search and find; the other subcommands arrive with their
-// phases.
+// carries every subcommand of the design.
 package main
 
 import (
@@ -30,12 +29,9 @@ type app struct {
 	ctx         context.Context
 	// pollEvery is how often coverage --wait-caught-up polls (1s when zero).
 	pollEvery time.Duration
-}
-
-// laterSubcommands exist in the design and arrive with later phases.
-var laterSubcommands = map[string]string{
-	"held": "phase 6", "where": "phase 6",
-	"extract": "phase 6", "remove": "phase 6", "doctor": "phase 6",
+	// isTTY reports whether the command runs interactively (standard input is a
+	// terminal when nil), which decides whether remove may ask.
+	isTTY func() bool
 }
 
 func (a *app) run(args []string) int {
@@ -72,9 +68,16 @@ func (a *app) run(args []string) int {
 		return a.conversations(args[1:])
 	case "processes":
 		return a.processes(args[1:])
-	}
-	if phase, ok := laterSubcommands[args[0]]; ok {
-		return a.emitError(false, wire.ErrUsage, fmt.Sprintf("%s is not available in this build (it arrives in %s)", args[0], phase))
+	case "held":
+		return a.held(args[1:])
+	case "where":
+		return a.where(args[1:])
+	case "remove":
+		return a.remove(args[1:])
+	case "extract":
+		return a.extract(args[1:])
+	case "doctor":
+		return a.doctor(args[1:])
 	}
 	return a.emitError(false, wire.ErrUsage, fmt.Sprintf("unknown subcommand %q; try --help", args[0]))
 }

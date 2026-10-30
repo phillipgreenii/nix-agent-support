@@ -69,10 +69,13 @@ const (
 	ReasonUnparsed = "file_unparsed"
 	// ReasonTornTooLong: the torn tail is at least parse.maxLineBytes long.
 	ReasonTornTooLong = "torn_tail_too_long"
+	// ReasonRestoreConflict: removal could not put a quarantined file back because
+	// a new file appeared at its path; both are kept.
+	ReasonRestoreConflict = "restore_conflict"
 )
 
 // Reasons lists every held reason code.
-var Reasons = []string{ReasonCopyOffset, ReasonCopyTail, ReasonParseBehind, ReasonUnparsed, ReasonTornTooLong}
+var Reasons = []string{ReasonCopyOffset, ReasonCopyTail, ReasonParseBehind, ReasonUnparsed, ReasonTornTooLong, ReasonRestoreConflict}
 
 // Failure is one failing clause for one file.
 type Failure struct {
@@ -108,6 +111,13 @@ func (f FreeFunc) Free(path string) (int64, error) { return f(path) }
 type Hooks struct {
 	BeforeClone  func(file int64)
 	BeforeDelete func(session string)
+	// BeforeQuarantine runs after the pre-removal check and before a file's
+	// quarantine rename; AfterQuarantine right after the rename (a write through
+	// a descriptor opened earlier lands here); BeforeUnlink after the re-hash and
+	// before the final size and modification-time check.
+	BeforeQuarantine func(session, path string)
+	AfterQuarantine  func(session, path string)
+	BeforeUnlink     func(session, path string)
 }
 
 // Config configures a Settler.
@@ -129,6 +139,20 @@ type Config struct {
 	// Mtime reads a file's modification time (os.Lstat when nil).
 	Mtime func(path string) (time.Time, error)
 	Hooks Hooks
+
+	// RemoveEnable is remove.enable; RemoveAfter remove.after (30 days);
+	// MaxPerRun and MaxPerHour are remove.maxPerRun (50) and remove.maxPerHour
+	// (200); HoldRate is format.holdRate (0.01).
+	RemoveEnable bool
+	RemoveAfter  time.Duration
+	MaxPerRun    int
+	MaxPerHour   int
+	HoldRate     float64
+	// Holders lists the processes that hold path open (the real one asks lsof).
+	Holders func(path string) ([]int, error)
+	// FS is the file system removal and extract act on in the Claude directory
+	// (the store's when nil), so the recording wrapper sees the order.
+	FS fsx.FS
 }
 
 // Settler runs the settle stage.
@@ -140,6 +164,7 @@ type Settler struct {
 	run sync.Mutex // one pass at a time
 
 	mu        sync.Mutex
+	removedAt []time.Time
 	last      map[string]string
 	reasons   map[string]string
 	checkedAt map[string]time.Time
@@ -172,10 +197,28 @@ func New(cfg Config) *Settler {
 			return fi.ModTime(), nil
 		}
 	}
+	if cfg.RemoveAfter <= 0 {
+		cfg.RemoveAfter = 30 * 24 * time.Hour
+	}
+	if cfg.MaxPerRun <= 0 {
+		cfg.MaxPerRun = 50
+	}
+	if cfg.MaxPerHour <= 0 {
+		cfg.MaxPerHour = 200
+	}
+	if cfg.HoldRate <= 0 {
+		cfg.HoldRate = 0.01
+	}
+	if cfg.Holders == nil {
+		cfg.Holders = LsofHolders
+	}
 	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}}
 	if rows, err := s.st.Stages(); err == nil {
 		for _, r := range rows {
 			s.last[r.Session] = r.Stage
+			if r.Stage == store.StageRemoved && cfg.Clock.Now().Sub(time.Unix(0, r.SinceNS)) < time.Hour {
+				s.removedAt = append(s.removedAt, time.Unix(0, r.SinceNS))
+			}
 		}
 	}
 	return s
@@ -289,6 +332,14 @@ func (s *Settler) Tick() error {
 	for _, session := range sessions {
 		if _, err := s.evaluate(groups[session], live[session], now, false); err != nil && first == nil {
 			first = fmt.Errorf("settle %s: %w", session, err)
+		}
+	}
+	if s.cfg.RemoveEnable {
+		if _, err := s.removeLocked(RemoveOptions{}, now); err != nil && first == nil {
+			first = fmt.Errorf("removal pass: %w", err)
+		}
+		if groups, err = s.groups(); err == nil {
+			live, _ = s.cfg.Live()
 		}
 	}
 	// A persisted stage whose Conversation has no files any more is dropped from view.
@@ -436,6 +487,18 @@ func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outco
 		if hasRow {
 			return out, s.clearStage(c.session, "process", now)
 		}
+		return out, nil
+	}
+	switch {
+	case hasRow && row.Stage == store.StageRemoved:
+		// Removed to Quiet: a removed path reappeared (the Conversation has files
+		// with current paths again).
+		if err := s.clearStage(c.session, "path_reappeared", now); err != nil {
+			return out, err
+		}
+		hasRow = false
+	case hasRow && (row.Stage == store.StageRemovalPending || row.Stage == store.StageExtracting):
+		out.Stage, out.Skipped = row.Stage, "removal or extract in progress"
 		return out, nil
 	}
 	if hasRow && row.Stage == StageSettled {
@@ -1237,7 +1300,7 @@ func (s *Settler) Recover() error {
 	if removed > 0 {
 		s.cfg.Obs.Event(obs.EvSettleCrashRecovery, "orphans_removed", strconv.Itoa(removed), "deletes_finished", strconv.Itoa(finished))
 	}
-	return nil
+	return s.recoverRemoval()
 }
 
 // refresh derives every Conversation's stage, emits the stage changes and sets
@@ -1305,6 +1368,15 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 			s.cfg.Obs.Event(obs.EvStageChanged, "session", session, "from", prev, "to", stage, "reason", reason)
 		}
 	}
+	for session, r := range persisted {
+		if _, ok := groups[session]; ok {
+			continue
+		}
+		if r.Stage == store.StageRemoved || r.Stage == store.StageRemovalPending {
+			counts[r.Stage]++
+		}
+	}
+	s.refreshRemovalGauges(groups, live, now)
 	for _, st := range []string{StageLive, StageQuiet, StageHeld, StageSettled, "removal_pending", "removed"} {
 		reg.Set(obs.MConversationsByStage, map[string]string{"stage": st}, float64(counts[st]))
 	}

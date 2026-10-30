@@ -309,7 +309,7 @@ func (m *model) conversation(session string) (Conversation, bool) {
 		c.State, c.Stage = StateOpen, StageLive
 	default:
 		c.Ended = true
-		if st := m.stages[session]; st == StageSettled || st == StageHeld {
+		if st := m.stages[session]; st == StageSettled || st == StageHeld || st == StageRemovalPending || st == StageRemoved {
 			c.Stage = st
 		}
 		if tracked && prow.ExitNS > 0 {

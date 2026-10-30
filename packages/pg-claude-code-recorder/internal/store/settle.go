@@ -28,6 +28,11 @@ type SettleRec struct {
 const (
 	StageSettled = "settled"
 	StageHeld    = "held"
+	// StageRemovalPending and StageRemoved are the removal stages; StageExtracting
+	// marks an extract whose files are not all restored (its Val lists them).
+	StageRemovalPending = "removal_pending"
+	StageRemoved        = "removed"
+	StageExtracting     = "extracting"
 )
 
 func applySettle(tx *sql.Tx, r *Rec) error {

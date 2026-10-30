@@ -73,7 +73,7 @@ func TestHelloAnswersTheFourFactsOverTheFraming(t *testing.T) {
 		t.Fatalf("hello %d %v", code, h)
 	}
 	caps, _ := h["capabilities"].([]any)
-	if fmt.Sprint(caps) != "[conversation.list conversation.show coverage feed hello process.list process.show query raw search snapshot status]" {
+	if fmt.Sprint(caps) != "[conversation.list conversation.show coverage doctor extract feed held hello process.list process.show query raw remove search snapshot status where]" {
 		t.Fatalf("capabilities %v", caps)
 	}
 	if _, ok := h["caught_up"]; !ok {

@@ -81,6 +81,32 @@ const (
 	EvSettleCrashRecovery = "settle_recovered_on_start"
 )
 
+// Metric and event names of removal, quarantine, extract and doctor.
+const (
+	MQuarantineFiles      = "quarantine_files"
+	MQuarantineBytes      = "quarantine_bytes"
+	MQuarantineOldestAge  = "quarantine_oldest_age_seconds"
+	MQuarantineMismatch   = "removal_quarantine_mismatch_total"
+	MRemovalBacklogConvs  = "removal_backlog_conversations"
+	MRemovalBacklogBytes  = "removal_backlog_bytes"
+	MRemovedTotal         = "conversations_removed_total"
+	MSkippedFiles         = "skipped_files_total"
+	MDoctorLastRun        = "doctor_last_run_timestamp"
+	MDoctorMismatchFiles  = "doctor_mismatch_files"
+	EvQuarantined         = "quarantined"
+	EvQuarantineRestored  = "quarantine_restored"
+	EvQuarantineOrphan    = "quarantine_orphan_found_on_start"
+	EvRemoved             = "conversation_removed"
+	EvExtracted           = "conversation_extracted"
+	EvDoctorDone          = "doctor_done"
+	EvRemovalRecovered    = "removal_recovered_on_start"
+	ReasonQuarantineUnavl = "quarantine_unavailable"
+)
+
+// SkipReasons are the removal reasons of skipped_files_total{reason}; each is
+// registered at zero at start, so the first increase fires.
+var SkipReasons = []string{ReasonQuarantineUnavl, "holder_found", "write_after_rename", "file_replaced", "restore_conflict", "live_process", "registry_names_session", "no_archive", "unlink_failed"}
+
 // ControlVerbs, ControlOutcomes, InboxStates and EndFileOutcomes are the bounded
 // label values of the control metrics; anything else is bucketed as "other".
 var (
@@ -178,6 +204,14 @@ func (o *Obs) RegisterStandard() {
 	o.Reg.Set(MBytesPendingSettle, nil, 0)
 	o.Reg.Set(MLowSpace, nil, 0)
 	o.Reg.Add(MSettled, nil, 0)
+	for _, g := range []string{MQuarantineFiles, MQuarantineBytes, MQuarantineOldestAge, MRemovalBacklogConvs, MRemovalBacklogBytes, MDoctorLastRun, MDoctorMismatchFiles} {
+		o.Reg.Set(g, nil, 0)
+	}
+	o.Reg.Add(MQuarantineMismatch, nil, 0)
+	o.Reg.Add(MRemovedTotal, nil, 0)
+	for _, r := range SkipReasons {
+		o.Reg.Add(MSkippedFiles, map[string]string{"reason": r}, 0)
+	}
 	for _, g := range []string{
 		MHeartbeat, MStateFreeBytes, MStateUsedBytes, MCopyLagBytes, MCopyLagSeconds,
 		MCopiedFiles, MBackfillFiles, MCaughtUp, MFeedWaiters,

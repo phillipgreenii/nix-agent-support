@@ -66,6 +66,11 @@ func rel(root, path string) (string, bool) {
 	return filepath.ToSlash(r), true
 }
 
+// QuarantineDir is the name of the directory removal moves a file into before
+// it deletes it. It lies beside the file, so it is on the block list: nothing in
+// it is ingested and a quarantined file creates no path record.
+const QuarantineDir = ".pg-recorder-quarantine"
+
 // Blocked reports whether the base name or any component of path is on the
 // block list: sessions/*.key, atomic-write temporary files (*.tmp.*), .DS_Store
 // and anything under node_modules.
@@ -76,6 +81,12 @@ func Blocked(relPath string) (bool, string) {
 		if p == "node_modules" {
 			return true, "node_modules"
 		}
+		if p == QuarantineDir {
+			return true, "quarantine"
+		}
+	}
+	if base == QuarantineDir {
+		return true, "quarantine"
 	}
 	if base == "node_modules" {
 		return true, "node_modules"

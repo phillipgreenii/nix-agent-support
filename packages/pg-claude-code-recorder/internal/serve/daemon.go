@@ -140,7 +140,10 @@ func Open(opt Options) (*Daemon, error) {
 		Store: st, Copier: d.cp, Parser: d.prs, Live: d.eng.LiveSessions, Clock: opt.Clock, Obs: o,
 		ClaudeDir: cfg.ClaudeDir, After: cfg.SettleAfter, Recheck: cfg.HeldRecheck, HeldAlertAfter: cfg.HeldMaxAge,
 		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
+		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
+		HoldRate: cfg.FormatHoldRate,
 	})
+	d.loadDoctorGauges()
 	if err := d.sett.Recover(); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover settle: %w", err)
@@ -308,6 +311,11 @@ func (d *Daemon) Start() error {
 	d.srv.Register("conversation.list", server.KindQuery, d.opConversationList)
 	d.srv.Register("process.show", server.KindQuery, d.opProcessShow)
 	d.srv.Register("process.list", server.KindQuery, d.opProcessList)
+	d.srv.Register("held", server.KindQuery, d.opHeld)
+	d.srv.Register("where", server.KindQuery, d.opWhere)
+	d.srv.Register("remove", server.KindQuery, d.opRemove)
+	d.srv.Register("extract", server.KindQuery, d.opExtract)
+	d.srv.Register("doctor", server.KindQuery, d.opDoctor)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -329,8 +337,9 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("start watcher: %w", err)
 	}
 	d.tr.Startup()
-	d.refreshing.Add(4)
+	d.refreshing.Add(5)
 	go d.settleLoop()
+	go d.doctorLoop()
 	go d.refreshLoop()
 	go d.parseLoop()
 	go d.trackLoop()
@@ -428,7 +437,10 @@ func (d *Daemon) refreshGauges() {
 	}
 	used := d.usedBytes
 	d.usedMu.Unlock()
-	d.obs.Reg.Set(obs.MStateUsedBytes, nil, float64(used))
+	// The quarantined files are still on disk until their unlink: they count in
+	// the used figure.
+	qb, _ := d.obs.Reg.Gauge(obs.MQuarantineBytes, nil)
+	d.obs.Reg.Set(obs.MStateUsedBytes, nil, float64(used)+qb)
 }
 
 // Close stops everything and flushes the checkpoint.

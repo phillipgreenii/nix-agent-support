@@ -45,7 +45,16 @@ type Config struct {
 	FeedRetention time.Duration
 	RemoveAfter   time.Duration
 	RemoveEnable  bool
-	MetricsAddr   string
+	// RemoveMaxPerRun is remove.maxPerRun and RemoveMaxPerHour remove.maxPerHour:
+	// the most Conversations one removal pass, and one hour, may remove.
+	RemoveMaxPerRun  int
+	RemoveMaxPerHour int
+	// FormatHoldRate is format.holdRate: a source whose bad-line or unknown-key
+	// rate over the last day exceeds it is not removed (default 1%).
+	FormatHoldRate float64
+	// DoctorInterval is doctor.interval: how often the daemon runs doctor itself.
+	DoctorInterval time.Duration
+	MetricsAddr    string
 	// CopyThrottle is the pause after each backfill file copy that moved bytes,
 	// so first-run backfill leaves the laptop usable.
 	CopyThrottle time.Duration
@@ -94,9 +103,17 @@ type file struct {
 		Retention string `toml:"retention"`
 	} `toml:"feed"`
 	Remove struct {
-		After  string `toml:"after"`
-		Enable bool   `toml:"enable"`
+		After      string `toml:"after"`
+		Enable     bool   `toml:"enable"`
+		MaxPerRun  *int   `toml:"maxPerRun"`
+		MaxPerHour *int   `toml:"maxPerHour"`
 	} `toml:"remove"`
+	Format struct {
+		HoldRate *float64 `toml:"holdRate"`
+	} `toml:"format"`
+	Doctor struct {
+		Interval string `toml:"interval"`
+	} `toml:"doctor"`
 	Metrics struct {
 		Addr string `toml:"addr"`
 	} `toml:"metrics"`
@@ -186,6 +203,10 @@ func Defaults(getenv func(string) string) Config {
 		WaitMaxWaiter:     256,
 		FeedRetention:     14 * 24 * time.Hour,
 		RemoveAfter:       30 * 24 * time.Hour,
+		RemoveMaxPerRun:   50,
+		RemoveMaxPerHour:  200,
+		FormatHoldRate:    0.01,
+		DoctorInterval:    24 * time.Hour,
 		CopyThrottle:      2 * time.Millisecond,
 		SettleAfter:       24 * time.Hour,
 		HeldRecheck:       time.Hour,
@@ -255,6 +276,24 @@ func apply(c *Config, f file) error {
 		c.GraceEnable = *f.Process.Grace
 	}
 	c.RemoveEnable = f.Remove.Enable
+	if f.Remove.MaxPerRun != nil {
+		if *f.Remove.MaxPerRun < 1 {
+			return fmt.Errorf("remove.maxPerRun must be at least 1")
+		}
+		c.RemoveMaxPerRun = *f.Remove.MaxPerRun
+	}
+	if f.Remove.MaxPerHour != nil {
+		if *f.Remove.MaxPerHour < 1 {
+			return fmt.Errorf("remove.maxPerHour must be at least 1")
+		}
+		c.RemoveMaxPerHour = *f.Remove.MaxPerHour
+	}
+	if f.Format.HoldRate != nil {
+		if *f.Format.HoldRate < 0 || *f.Format.HoldRate > 1 {
+			return fmt.Errorf("format.holdRate must be between 0 and 1")
+		}
+		c.FormatHoldRate = *f.Format.HoldRate
+	}
 	c.MetricsAddr = f.Metrics.Addr
 	for _, d := range []struct {
 		key string
@@ -265,6 +304,7 @@ func apply(c *Config, f file) error {
 		{"wait.max", f.Wait.Max, &c.WaitMax},
 		{"feed.retention", f.Feed.Retention, &c.FeedRetention},
 		{"remove.after", f.Remove.After, &c.RemoveAfter},
+		{"doctor.interval", f.Doctor.Interval, &c.DoctorInterval},
 		{"copy.throttle", f.Copy.Throttle, &c.CopyThrottle},
 		{"held.maxAge", f.Held.MaxAge, &c.HeldMaxAge},
 		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},

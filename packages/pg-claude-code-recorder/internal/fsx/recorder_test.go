@@ -105,3 +105,42 @@ func TestRecorderRecordsRemovalAndTruncate(t *testing.T) {
 		}
 	}
 }
+
+// removalEvents builds the event list a removal of one file would record, in the
+// given order of the named actions.
+func removalEvents(order ...string) []Event {
+	ev := map[string]Event{
+		"rename":   {Op: "rename", Path: "/c/p/f.jsonl->/c/p/.pg-recorder-quarantine/1-f.jsonl"},
+		"syncdir":  {Op: "syncdir", Path: "/c/p"},
+		"holders":  {Op: "mark", Path: "holders"},
+		"rehash":   {Op: "mark", Path: "rehash"},
+		"fullsync": {Op: "fullsync", Path: "/s/archives/x/000001.seg"},
+		"fsdir":    {Op: "fullsyncdir", Path: "/s/archives/x"},
+		"remove":   {Op: "remove", Path: "/c/p/.pg-recorder-quarantine/1-f.jsonl"},
+		"qsync":    {Op: "syncdir", Path: "/c/p/.pg-recorder-quarantine"},
+	}
+	var out []Event
+	for _, o := range order {
+		out = append(out, ev[o])
+	}
+	return out
+}
+
+func TestRemovalOrderAssertion(t *testing.T) {
+	steps := RemovalOrder("/c/p", ".pg-recorder-quarantine", "000001.seg")
+	right := removalEvents("rename", "syncdir", "holders", "rehash", "fullsync", "fsdir", "remove", "qsync")
+	if err := AssertOrder(right, steps...); err != nil {
+		t.Fatalf("the right order failed: %v", err)
+	}
+	for name, wrong := range map[string][]Event{
+		"unlink before fullsync":           removalEvents("rename", "syncdir", "holders", "rehash", "remove", "fullsync", "fsdir", "qsync"),
+		"skipped directory fsync":          removalEvents("rename", "holders", "rehash", "fullsync", "fsdir", "remove", "qsync"),
+		"skipped quarantine dir fsync":     removalEvents("rename", "syncdir", "holders", "rehash", "fullsync", "fsdir", "remove"),
+		"unlink before the holder listing": removalEvents("rename", "syncdir", "remove", "holders", "rehash", "fullsync", "fsdir", "qsync"),
+		"skipped re-hash":                  removalEvents("rename", "syncdir", "holders", "fullsync", "fsdir", "remove", "qsync"),
+	} {
+		if err := AssertOrder(wrong, steps...); err == nil {
+			t.Errorf("%s: a wrong sequence passed", name)
+		}
+	}
+}

@@ -126,6 +126,8 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 				cov.Held++
 			case store.StageSettled:
 				cov.Settled++
+			case store.StageRemoved:
+				cov.RemovedConversations++
 			}
 		}
 	}
