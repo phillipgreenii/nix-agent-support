@@ -1,0 +1,104 @@
+# promtool unit tests for the pg-ccrec-doctor-mismatch alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+# The value is the mismatch flag plus the stale flag while the daemon is scraped (and on() up == 1),
+# 0 otherwise. A last run of 0 means doctor has not run yet and is not stale.
+tests:
+  - name: a non-zero mismatch gauge fires critical after the 5m for
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x120"
+      - series: pg_claude_code_recorder_doctor_mismatch_files{job="pg-claude-code-recorder"}
+        values: "3x120"
+      - series: pg_claude_code_recorder_doctor_last_run_timestamp{job="pg-claude-code-recorder"}
+        values: "0+60x120"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: a stale last run (older than 2 days) fires with no mismatch
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x4400"
+      - series: pg_claude_code_recorder_doctor_mismatch_files{job="pg-claude-code-recorder"}
+        values: "0x4400"
+      - series: pg_claude_code_recorder_doctor_last_run_timestamp{job="pg-claude-code-recorder"}
+        values: "1000x4400"
+    alert_rule_test:
+      - eval_time: 24h
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts: []
+      - eval_time: 72h
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: a recent last run and no mismatch does not fire
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x120"
+      - series: pg_claude_code_recorder_doctor_mismatch_files{job="pg-claude-code-recorder"}
+        values: "0x120"
+      - series: pg_claude_code_recorder_doctor_last_run_timestamp{job="pg-claude-code-recorder"}
+        values: "0+60x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts: []
+
+  - name: a last run of 0 (doctor has not run yet) is not stale, so a fresh deploy does not page
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x4400"
+      - series: pg_claude_code_recorder_doctor_mismatch_files{job="pg-claude-code-recorder"}
+        values: "0x4400"
+      - series: pg_claude_code_recorder_doctor_last_run_timestamp{job="pg-claude-code-recorder"}
+        values: "0x4400"
+    alert_rule_test:
+      - eval_time: 72h
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts: []
+
+  - name: guarded - a mismatch while the daemon is not scraped (up 0) reads 0, so daemon-down alone pages
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "0x120"
+      - series: pg_claude_code_recorder_doctor_mismatch_files{job="pg-claude-code-recorder"}
+        values: "3x120"
+      - series: pg_claude_code_recorder_doctor_last_run_timestamp{job="pg-claude-code-recorder"}
+        values: "0+60x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_doctor_mismatch)
+        eval_time: 60m
+        exp_samples: []
+      # The rule expression itself (refId A) reads 0, not absent, while the daemon is not scraped.
+      - expr: (((max(pg_claude_code_recorder_doctor_mismatch_files) > bool 0) + ((time() - max(pg_claude_code_recorder_doctor_last_run_timestamp) > bool 172800) * (max(pg_claude_code_recorder_doctor_last_run_timestamp) > bool 0))) and on() (max(up{job="pg-claude-code-recorder"}) == 1)) or vector(0)
+        eval_time: 60m
+        exp_samples:
+          - labels: "{}"
+            value: 0
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-doctor-mismatch
+        exp_alerts: []

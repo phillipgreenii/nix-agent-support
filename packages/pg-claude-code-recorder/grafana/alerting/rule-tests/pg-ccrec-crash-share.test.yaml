@@ -1,0 +1,107 @@
+# promtool unit tests for the pg-ccrec-crash-share alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+# Crash share over 1 day: (crashed evidence class + stale-at-discovery) / (all ends + stale-at-discovery),
+# above 0.2, with at least 20 ends in the day. The crashed class is registry_present=true,
+# exit_observed=true, clear_entry=false, exit_entry=false. The same PromQL runs against the label table
+# (client/testdata/labels.json) in check-crash-share-label-table.sh.
+# Counters rise linearly from t=0; the cases evaluate at 2d, so the 1d window is full.
+tests:
+  - name: a crashed class of 1/min against 3/min of closed fires (share 1440 / 5760 = 0.25 over 1d)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="true",exit_observed="true",clear_entry="false",exit_entry="false"}
+        values: "0+1x2900"
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="false",exit_observed="true",clear_entry="false",exit_entry="false"}
+        values: "0+3x2900"
+      - series: pg_claude_code_recorder_registry_stale_at_discovery_total
+        values: "0x2900"
+    promql_expr_test:
+      - expr: round(wrapped:pg_ccrec_crash_share, 0.01)
+        eval_time: 2d
+        exp_samples:
+          - labels: "{}"
+            value: 0.25
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: pg-ccrec-crash-share
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: exited, cleared and unknown-class ends never count as crashed (the same volume, no crashed class)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="false",exit_observed="true",clear_entry="false",exit_entry="true"}
+        values: "0+1x2900"
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="false",exit_observed="false",clear_entry="true",exit_entry="false"}
+        values: "0+1x2900"
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="false",exit_observed="false",clear_entry="false",exit_entry="false"}
+        values: "0+1x2900"
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="true",exit_observed="true",clear_entry="false",exit_entry="true"}
+        values: "0+1x2900"
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: pg-ccrec-crash-share
+        exp_alerts: []
+
+  - name: a power loss (stale registries at discovery, no crashed class) counts as suspected and fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="false",exit_observed="true",clear_entry="false",exit_entry="false"}
+        values: "0+1x2900"
+      - series: pg_claude_code_recorder_registry_stale_at_discovery_total
+        values: "0+0.5x2900"
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: pg-ccrec-crash-share
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a low crashed share (1440 against 28800 closed, 0.048) does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="true",exit_observed="true",clear_entry="false",exit_entry="false"}
+        values: "0+1x2900"
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="false",exit_observed="true",clear_entry="false",exit_entry="false"}
+        values: "0+20x2900"
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: pg-ccrec-crash-share
+        exp_alerts: []
+
+  - name: the volume floor - every end crashed but only about 5 ends in the day does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_conversation_end_total{registry_present="true",exit_observed="true",clear_entry="false",exit_entry="false"}
+        values: "0+0.0035x2900"
+      - series: pg_claude_code_recorder_registry_stale_at_discovery_total
+        values: "0x2900"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_crash_share)
+        eval_time: 2d
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: pg-ccrec-crash-share
+        exp_alerts: []
+
+  - name: absent counters give no alert
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x2900"
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: pg-ccrec-crash-share
+        exp_alerts: []

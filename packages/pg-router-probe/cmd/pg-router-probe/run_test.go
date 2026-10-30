@@ -371,6 +371,19 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-desk-issue-orphan-read-lag",
 		"pg-conn-beads-budget-denied",
 		"pg-conn-beads-bd-timeouts",
+		"pg-ccrec-daemon-down",
+		"pg-ccrec-heartbeat-stale",
+		"pg-ccrec-copy-lag",
+		"pg-ccrec-parse-stuck",
+		"pg-ccrec-held-old",
+		"pg-ccrec-free-space",
+		"pg-ccrec-unknown-key-burst",
+		"pg-ccrec-data-loss",
+		"pg-ccrec-removal-backlog",
+		"pg-ccrec-doctor-mismatch",
+		"pg-ccrec-control-inbox-gone",
+		"pg-ccrec-crash-share",
+		"pg-ccrec-removal-stuck",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)
@@ -1014,5 +1027,46 @@ func TestRunCmdDegradedThresholdFlag(t *testing.T) {
 	var ece *exitCodeError
 	if !errors.As(err, &ece) || ece.code != 2 {
 		t.Fatalf("--degraded-threshold 0 must be a usage error (exit 2), got %v", err)
+	}
+}
+
+// recorderRuleFile is the pg-claude-code-recorder alert rules file, relative to this package.
+const recorderRuleFile = "../../../pg-claude-code-recorder/grafana/alerting/alerts.yaml"
+
+// The recorder's rule uids (docket pg2-v77tsx, phase 7c) are registered exactly: the pg-ccrec-*
+// entries of registeredRuleUIDs equal the uids of the rule file, in the file's order. The file lives
+// in a sibling module, so a build that carries only this module (the nix go-tests sandbox) cannot see
+// it; the test then checks the list against its own pinned thirteen, and the flake check
+// test-pg-claude-code-recorder-signals-registration compares the real file with run.go.
+func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
+	var registered []string
+	for _, uid := range registeredRuleUIDs {
+		if strings.HasPrefix(uid, "pg-ccrec-") {
+			registered = append(registered, uid)
+		}
+	}
+	if len(registered) != 13 {
+		t.Fatalf("registered pg-ccrec uids = %d, want 13: %v", len(registered), registered)
+	}
+	for _, uid := range registered {
+		if len(uid) > 40 {
+			t.Fatalf("uid %q is over Grafana's 40-character cap", uid)
+		}
+	}
+	data, err := os.ReadFile(recorderRuleFile)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skipf("rule file not in this build (%s); the signals-registration flake check covers it", recorderRuleFile)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fromFile []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "- uid: "); ok {
+			fromFile = append(fromFile, strings.TrimSpace(rest))
+		}
+	}
+	if strings.Join(fromFile, ",") != strings.Join(registered, ",") {
+		t.Fatalf("rule file uids = %v, registeredRuleUIDs pg-ccrec entries = %v", fromFile, registered)
 	}
 }

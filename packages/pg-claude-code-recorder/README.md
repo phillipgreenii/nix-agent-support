@@ -329,3 +329,79 @@ Signals: `quarantine_files`, `quarantine_bytes`, `quarantine_oldest_age_seconds`
 `conversations_removed_total`, `skipped_files_total{reason}`, `dropped_bytes_total{reason="removal_race"}`,
 `doctor_last_run_timestamp` and `doctor_mismatch_files` (from `doctor.json`); events `quarantined`,
 `quarantine_restored`, `quarantine_orphan_found_on_start`. The alert rules are phase 7c.
+
+## Signals, alerts and the dashboard (phase 7c)
+
+Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
+
+| File                                  | What it is                                                                                                                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alerting/alerts.yaml`                | thirteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                            |
+| `alerting/alerts-delete.yaml`         | the `deleteRules`-only twin (same uids), registered instead while no daemon is deployed; the two are never loaded together                                                                  |
+| `alerting/rule-tests/`                | one promtool test file per rule, run through `packages/pg-connector/grafana/check-alert-rules.sh`                                                                                           |
+| `pg_claude_code_recorder_metrics.txt` | the metric catalogue (the Signals table): name, type, labels, with the enumerated label values                                                                                              |
+| `pg-claude-code-recorder.json`        | the dashboard: copy and parse lag, Conversations by stage, held age, dropped bytes by reason, free space and its slope, removal backlog, Processes without an inbox, request rate by client |
+| `check-alert-structure.sh`            | structure check S1 to S8 with `--self-test` negative controls (a 41-character uid, a missing `noDataState`, a missing guard, a twin that differs, and more)                                 |
+| `check-crash-share-label-table.sh`    | runs the crash-share PromQL against `client/testdata/labels.json`, the same label table the daemon, client and command tests use                                                            |
+| `check-signals-registration.sh`       | catalogue against the Go `M*` constants, rule uids against `registeredRuleUIDs`, the twin, the dashboard and this section, with `--self-test`                                               |
+
+Flake checks (build one with `nix build .#checks.<system>.<name>`): `test-pg-claude-code-recorder-alert-rules`,
+`test-pg-claude-code-recorder-alert-structure` and `test-pg-claude-code-recorder-signals-registration`. Every rule uid is also in
+`registeredRuleUIDs` of `packages/pg-router-probe/cmd/pg-router-probe/run.go` (a deployment that passes its own `--rule-uid` list replaces
+that list and must carry the thirteen too).
+
+Alerts and their thresholds (the thresholds are the builder's calls; a literal that stands for a config default is named in the rule):
+
+| Alert                | Fires when                                                                                              | Severity | No data  | First action                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------- | -------- | -------- | --------------------------------- |
+| `daemon-down`        | `up` of the scrape target is 0 for 2 minutes (scrape interval 30s); `SYSTEM_PAUSE` guard                | critical | Alerting | `status`; the launch agent log    |
+| `heartbeat-stale`    | scraped (`and on() up == 1`) and the last sweep is older than 2700 s (3 times `sweep.interval`)         | warning  | Alerting | `status`; pprof goroutine dump    |
+| `copy-lag`           | copy lag over 120 s for 10 minutes                                                                      | warning  | OK       | `coverage`                        |
+| `parse-stuck`        | parse lag bytes above 0 and the parse progress ratio unchanged for 10 minutes                           | warning  | OK       | `coverage`; the log               |
+| `held-old`           | oldest held Conversation over 259200 s (the `held.alertAfter` default, 3 days)                          | warning  | OK       | `held`                            |
+| `free-space`         | free bytes under 20 GiB (the `minFreeBytes` default), or the 6-hour slope predicts full within 24 hours | critical | Alerting | the Disk full runbook             |
+| `unknown-key-burst`  | more than 100 new unknown keys in an hour                                                               | warning  | OK       | `coverage`; update the parser     |
+| `data-loss`          | any increase of `dropped_bytes_total` in an hour (the firing alert carries the `reason`)                | warning  | OK       | `coverage`; the log               |
+| `removal-backlog`    | the removal queue is over 4800 Conversations (24 hours of the default `remove.maxPerHour` of 200)       | warning  | OK       | `remove --dry-run`                |
+| `doctor-mismatch`    | `doctor_mismatch_files` above 0, or a non-zero `doctor_last_run_timestamp` older than 2 days            | critical | Alerting | `doctor`                          |
+| `control-inbox-gone` | a live Process in `control_inbox_state{state="gone"}` for 10 minutes (never `never_loaded`)             | warning  | OK       | `pg-claude-control list`          |
+| `crash-share`        | crashed plus suspected over 20 percent of a day's ends, with at least 20 ends                           | warning  | OK       | `conversations --crashed --since` |
+| `removal-stuck`      | the oldest quarantined file is over an hour old                                                         | warning  | OK       | `remove --dry-run`; the log       |
+
+Grafana has no inhibition, so each guard is in the expression: `daemon-down` carries the `SYSTEM_PAUSE` guard; `heartbeat-stale` and
+`doctor-mismatch` read 0 while the daemon is not scraped (so `daemon-down` alone pages); `free-space` is deliberately unguarded and
+reads the free-bytes figure the node reports, so a full disk pages whether or not the daemon is scraped. A `doctor_last_run_timestamp`
+of 0 means doctor has not run yet (the daemon first runs it one `doctor.interval` after start): that is not stale, and the removal
+readiness checklist treats it as not ready.
+
+Signals added by the second review: `conversation_end_total{registry_present,exit_observed,clear_entry,exit_entry}` (evidence classes,
+each `true` or `false`; never a label such as crashed), `registry_stale_at_discovery_total` and the log event `startup_stale_registries{n}`;
+`quarantine_files`, `quarantine_bytes`, `quarantine_oldest_age_seconds`, `removal_quarantine_mismatch_total` and the events
+`quarantined`, `quarantine_restored`, `quarantine_orphan_found_on_start`; `torn_tail_age_seconds{source}` and the event
+`torn_tail_pending`; `doctor_last_run_timestamp` and `doctor_mismatch_files`; `control_inbox_state{state=present|gone|never_loaded}`,
+`control_requests_total{verb=submit|interrupt|run|read|ping|other, outcome=ok|rejected|duplicate|refused|other}`,
+`end_reason_source_files_total{outcome=ingested|removed|invalid}`, `held_conversations{reason}` and `skipped_files_total{reason}`;
+`requests_total{client,op,outcome}` where `client` is a whitelisted name and anything else is `other`. No label is per file or per
+session. The catalogue file lists every name with its type and labels.
+
+Two exporter facts the alerts rely on: `bad_lines_total` and `unknown_keys_total` carry no `source` or `type` label (the design listed
+them by source and type; the exporter has none), and they are registered when first incremented rather than at zero, so a first burst
+that starts from an absent series reads as no increase until the second scrape.
+
+### Turning on `remove.enable`
+
+**There is no undo other than `extract`.** Once `remove.enable` is true, the recorder removes the Claude files of Conversations settled
+and quiet for `remove.after`; resuming a removed Conversation needs an `extract`, and so the recorder. This section is written only
+because the `daemon-down` and `free-space` alerts are registered (phase 7c): turn removal on only while both are live
+(`darwin/modules/pg-claude-code-recorder` registers `alerts.yaml` while a daemon is deployed).
+
+Readiness checklist, all of it before setting `remove.enable = true`:
+
+1. The `daemon-down` and `free-space` alerts are registered and not firing (and `doctor-mismatch`, `data-loss` and `removal-stuck` are quiet).
+2. `doctor` has compared every copy against the Claude files by full hash, and its last run is recent: `doctor_last_run_timestamp` is
+   non-zero and under 2 days old (a stale doctor, or one that never ran, is not ready) with `doctor_mismatch_files` at 0.
+3. The clients have moved: pa-monitor `sessions` and ccpool resume read the recorder, not the Claude directory.
+4. The state directory is backed up (excluding `recorder.sock` and temporary files).
+5. `pg-claude-code-recorder remove --dry-run` prints what would go and how many GB, and that is what you expect.
+
+`remove.maxPerRun` and `remove.maxPerHour` spread the backlog; `removal_backlog_conversations` shows it.

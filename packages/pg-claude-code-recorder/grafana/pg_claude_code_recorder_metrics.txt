@@ -1,0 +1,71 @@
+# pg-claude-code-recorder metric catalogue: the Signals table's metric names (docket pg2-v77tsx,
+# phase 7c). One line per series "<name> <type> <labels>", every name carrying the prefix
+# pg_claude_code_recorder_ in the Prometheus exposition; a histogram is listed once under its base
+# name (its _bucket, _sum and _count series are implied). Labels are bounded and enumerated; a
+# per-file or per-session label is forbidden. check-signals-registration.sh compares this file with
+# the M* constants of internal/obs/obs.go and internal/parser/parser.go, so a metric added in Go
+# without a line here (or the reverse) fails the flake check
+# test-pg-claude-code-recorder-signals-registration.
+#
+# Enumerated label values:
+#   reason (dropped_bytes_total)   file_vanished generation_restart copy_trimmed snapshot_missed removal_race
+#   reason (held_conversations)    copy_offset_mismatch copy_tail_mismatch parse_behind file_unparsed torn_tail_too_long restore_conflict
+#   reason (skipped_files_total)   quarantine_unavailable holder_found write_after_rename file_replaced
+#                                  restore_conflict live_process registry_names_session no_archive unlink_failed
+#   stage                          live quiet held settled removal_pending removed
+#   state (control_inbox_state)    present gone never_loaded
+#   outcome (end_reason_source_files_total)  ingested removed invalid
+#   verb (control_requests_total)  submit interrupt run read ping other
+#   outcome (control_requests_total)  ok rejected duplicate refused other
+#   registry_present, exit_observed, clear_entry, exit_entry (conversation_end_total)  true false
+#   client (requests_total)        a whitelisted client name, otherwise other
+#   op (requests_total)            the registered operation name, otherwise unknown
+#   source (torn_tail_age_seconds) the source name (about 10 values)
+#   outcome (requests_total)       the wire outcome name
+pg_claude_code_recorder_dropped_bytes_total counter reason
+pg_claude_code_recorder_copy_lag_bytes gauge -
+pg_claude_code_recorder_copy_lag_seconds gauge -
+pg_claude_code_recorder_copy_lag_seconds_histogram histogram -
+pg_claude_code_recorder_clone_private_size_bytes gauge -
+pg_claude_code_recorder_last_sweep_timestamp_seconds gauge -
+pg_claude_code_recorder_state_free_bytes gauge -
+pg_claude_code_recorder_state_used_bytes gauge -
+pg_claude_code_recorder_requests_total counter client,op,outcome
+pg_claude_code_recorder_query_duration_seconds histogram -
+pg_claude_code_recorder_feed_latency_seconds histogram -
+pg_claude_code_recorder_wait_duration_seconds histogram -
+pg_claude_code_recorder_backfill_files_copied gauge -
+pg_claude_code_recorder_backfill_files_total gauge -
+pg_claude_code_recorder_caught_up gauge -
+pg_claude_code_recorder_feed_waiters gauge -
+pg_claude_code_recorder_index_rebuilds_total counter -
+pg_claude_code_recorder_conversation_end_total counter registry_present,exit_observed,clear_entry,exit_entry
+pg_claude_code_recorder_registry_stale_at_discovery_total counter -
+pg_claude_code_recorder_control_inbox_state gauge state
+pg_claude_code_recorder_processes_without_control_inbox gauge -
+pg_claude_code_recorder_end_reason_source_files_total counter outcome
+pg_claude_code_recorder_control_requests_total counter verb,outcome
+pg_claude_code_recorder_stale_fifos_removed_total counter -
+pg_claude_code_recorder_conversations_by_stage gauge stage
+pg_claude_code_recorder_held_conversations gauge reason
+pg_claude_code_recorder_oldest_held_age_seconds gauge -
+pg_claude_code_recorder_bytes_pending_settle gauge -
+pg_claude_code_recorder_torn_tail_age_seconds gauge source
+pg_claude_code_recorder_state_dir_low_space gauge -
+pg_claude_code_recorder_conversations_settled_total counter -
+pg_claude_code_recorder_quarantine_files gauge -
+pg_claude_code_recorder_quarantine_bytes gauge -
+pg_claude_code_recorder_quarantine_oldest_age_seconds gauge -
+pg_claude_code_recorder_removal_quarantine_mismatch_total counter -
+pg_claude_code_recorder_removal_backlog_conversations gauge -
+pg_claude_code_recorder_removal_backlog_bytes gauge -
+pg_claude_code_recorder_conversations_removed_total counter -
+pg_claude_code_recorder_skipped_files_total counter reason
+pg_claude_code_recorder_doctor_last_run_timestamp gauge -
+pg_claude_code_recorder_doctor_mismatch_files gauge -
+pg_claude_code_recorder_bad_lines_total counter -
+pg_claude_code_recorder_unknown_keys_total counter -
+pg_claude_code_recorder_parse_lag_seconds gauge -
+pg_claude_code_recorder_parse_lag_bytes gauge -
+pg_claude_code_recorder_parse_progress gauge -
+pg_claude_code_recorder_unknown_kinds gauge -

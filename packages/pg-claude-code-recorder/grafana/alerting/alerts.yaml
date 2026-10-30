@@ -1,0 +1,591 @@
+# pg-claude-code-recorder unified-alerting rules (docket pg2-v77tsx, phase 7c): the service levels
+# of the recorder's design ("Signals > Signal details"), as Prometheus rules over the daemon's own
+# metrics (every series prefixed pg_claude_code_recorder_, catalogued in
+# packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
+# `up` series of the scrape target for the daemon-down and heartbeat guards.
+#
+# Thirteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# parse-stuck, held-old, free-space, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
+# control-inbox-gone) plus crash-share and removal-stuck of the second review. Each uid is
+# pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
+# command to run, and each uid is registered in registeredRuleUIDs of
+# packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
+# are recorded in the comment above each rule.
+#
+# This file is registered by darwin/modules/pg-claude-code-recorder while a daemon is deployed;
+# otherwise the module registers alerts-delete.yaml, its deleteRules-only twin, in its place. The two
+# files are never loaded together. check-alert-structure.sh (flake check
+# test-pg-claude-code-recorder-alert-structure) pins the uid set, the uid length cap, noDataState,
+# catalogued metric names and the twin; the promtool cases under rule-tests/ (flake check
+# test-pg-claude-code-recorder-alert-rules) pin the PromQL behaviour.
+#
+# Grafana has no inhibition, so each guard is in the expression: daemon-down ends with the
+# SYSTEM_PAUSE guard of the pg-connector rules; heartbeat-stale and doctor-mismatch carry
+# `and on() (max(up) == 1)` and read 0 while the daemon is not scraped, so they never page with
+# daemon-down; free-space is deliberately unguarded.
+#
+# Shape notes (copied from packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml):
+# condition C over refIds A (the query), B (reduce, last), C (threshold); a Prometheus rule is
+# `datasourceUid: prometheus` with the boolean `instant: true`. Folder "pg-claude-code-recorder"
+# converges by title, so no folderUid is ever written. Annotations are static text.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-claude-code-recorder
+    folder: pg-claude-code-recorder
+    interval: 1m
+    rules:
+      # Daemon scraped. noDataState is Alerting (the pg-conn-github-daemon-down polarity): once the
+      # daemon is deployed an absent up series means the scrape target is gone. The scrape interval is
+      # 30s (darwin/modules/pg-claude-code-recorder metricsTargets), so for: 2m is four missed scrapes.
+      # Ends with the SYSTEM_PAUSE guard the pg-connector rules use.
+      - uid: pg-ccrec-daemon-down
+        title: pg-claude-code-recorder daemon is down
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-claude-code-recorder has not been scraped for over 2 minutes"
+          description: "Prometheus has had no successful scrape of the recorder (up of job pg-claude-code-recorder is 0, or the series is gone) for over 2 minutes; the scrape interval is 30s, so about 4 scrapes in a row have failed. The recorder is not copying, so Claude Code files changed meanwhile are caught up on restart (no loss while remove.enable is false). Run pg-claude-code-recorder status, then read the launch agent log (launchd-stderr.log in the agent log directory). Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'min(up{job="pg-claude-code-recorder"}) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+
+      # Heartbeat. Grafana has no inhibition, so the guard is in the expression: the value exists
+      # only while the daemon is scraped (and on() up == 1), and is 0 otherwise, so a down daemon pages
+      # through pg-ccrec-daemon-down alone. The gauge is registered at zero at start, so a daemon that
+      # never completes a sweep reads as an enormous age. noDataState Alerting still catches Prometheus
+      # itself returning nothing.
+      - uid: pg-ccrec-heartbeat-stale
+        title: pg-claude-code-recorder heartbeat is stale
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder last successful sweep is over 45 minutes old"
+          description: "The recorder is scraped (up is 1) but last_sweep_timestamp_seconds is older than 2700 seconds (3 times the default sweep.interval of 15m): the watcher's safety-net sweep is not completing, so a missed FSEvents batch would not be caught. A literal 2700 stands for 3 x the sweep.interval default; raise it with sweep.interval. Run pg-claude-code-recorder status, then take a pprof goroutine dump (pprof.sock in the state directory)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '(((time() - max(pg_claude_code_recorder_last_sweep_timestamp_seconds)) and on() (max(up{job="pg-claude-code-recorder"}) == 1)) or vector(0))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2700]
+
+      # Copy lag, design threshold: over 120 s for 10 minutes.
+      - uid: pg-ccrec-copy-lag
+        title: pg-claude-code-recorder copy lag is high
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder copy lag has been over 120 seconds for 10 minutes"
+          description: "copy_lag_seconds (the age of the oldest byte the recorder has seen but not yet copied) has been above 120 seconds for over 10 minutes: copying is behind. Run pg-claude-code-recorder coverage to see which files lag, then read the recorder log for copy errors or a state directory low on space."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_copy_lag_seconds)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [120]
+
+      # Parse stuck: lag above zero while the progress ratio did not change in 10 minutes (it moves
+      # whenever the parser or the copier advances); for: 10m on top of the 10m window.
+      - uid: pg-ccrec-parse-stuck
+        title: pg-claude-code-recorder parsing is stuck
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder parse lag is above zero with no progress for 10 minutes"
+          description: "parse_lag_bytes (copied bytes not yet parsed) is above 0 and parse_progress has not changed for 10 minutes: the parser is not advancing. A Conversation with an unparsed file is held and never removed. Run pg-claude-code-recorder coverage, then read the recorder log for parse_failed."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_parse_lag_bytes) > 0 and on() (max(changes(pg_claude_code_recorder_parse_progress[10m])) == 0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Held too long. 259200 STANDS FOR the held.alertAfter default (3d).
+      - uid: pg-ccrec-held-old
+        title: pg-claude-code-recorder a Conversation is held too long
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder has a Conversation held for over 3 days"
+          description: "oldest_held_age_seconds is above 259200 (3 days, the default held.alertAfter): a Conversation has been held, so it is never settled or removed. The literal 259200 stands for the held.alertAfter default; change it with that option. Run pg-claude-code-recorder held for the reason code and its remedy line."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_oldest_held_age_seconds)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [259200]
+
+      # Free space, deliberately UNGUARDED (design: Signals added by the second review): it reads the
+      # free-bytes figure the node reports for the state directory and carries neither the up guard nor
+      # the SYSTEM_PAUSE guard, so a full disk pages whether or not the daemon is scraped. Value: 1 for the
+      # floor, 1 for the 24h slope, so any value above 0 fires. 21474836480 STANDS FOR the minFreeBytes
+      # default (20 GiB). noDataState Alerting: no free-space figure at all is itself alarming.
+      - uid: pg-ccrec-free-space
+        title: pg-claude-code-recorder state directory is low on space
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-claude-code-recorder state directory is under its free-space floor or full within a day"
+          description: "The state directory free bytes (state_free_bytes, read from the filesystem of the node the recorder runs on) are under 20 GiB (the minFreeBytes default), or the 6-hour slope predicts it to be full within 24 hours. The recorder is in low-space mode and logs state_dir_low; if it cannot copy it pauses copying. Follow the runbook under Disk full in the recorder design (Operating it): free space or raise minFreeBytes, run pg-claude-code-recorder status, let it catch up. The literal 21474836480 stands for the minFreeBytes default of 20 GiB. This rule is deliberately unguarded (no up and no SYSTEM_PAUSE guard)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "(min(pg_claude_code_recorder_state_free_bytes) < bool 21474836480) + (min(predict_linear(pg_claude_code_recorder_state_free_bytes[6h], 86400)) < bool 0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Unknown-key burst, design threshold: more than 100 new keys in an hour.
+      - uid: pg-ccrec-unknown-key-burst
+        title: pg-claude-code-recorder many new unknown keys
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder saw over 100 new unknown keys in an hour"
+          description: "More than 100 JSON keys the parser does not know arrived in the last hour (unknown_keys_total): Claude Code probably added a field. A source whose unknown-key rate is above format.holdRate is not removed. Run pg-claude-code-recorder coverage to see the keys, then update the parser structs and re-parse."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum(increase(pg_claude_code_recorder_unknown_keys_total[1h]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [100]
+
+      # Data loss: any increase of any reason in an hour. Every reason series is registered at zero at
+      # start, so the first increase is visible.
+      - uid: pg-ccrec-data-loss
+        title: pg-claude-code-recorder dropped bytes
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder dropped bytes in the last hour"
+          description: "dropped_bytes_total increased in the last hour for the reason label shown: a file vanished before it was copied, a generation restarted, a snapshot version was missed, a copy was trimmed on start, or a removal raced a writer. Bytes the recorder saw but could not keep are lost. Run pg-claude-code-recorder coverage, then read the recorder log for the matching event."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum by (reason) (increase(pg_claude_code_recorder_dropped_bytes_total[1h]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Removal backlog. 4800 STANDS FOR 24 x remove.maxPerHour (200).
+      - uid: pg-ccrec-removal-backlog
+        title: pg-claude-code-recorder removal backlog is large
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder removal backlog is over 24 hours of remove.maxPerHour"
+          description: "removal_backlog_conversations is above 4800 (24 hours at the default remove.maxPerHour of 200): removal cannot keep up. The literal 4800 stands for 24 x the remove.maxPerHour default; change it with that option. Run pg-claude-code-recorder remove --dry-run to see what would go."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_removal_backlog_conversations)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [4800]
+
+      # Doctor. Alerts on a non-zero mismatch gauge or a stale last run, never on a log line. Both
+      # series are registered at zero at start; a last run of 0 (never ran, first run is one
+      # doctor.interval after start) is not stale, so a fresh deploy does not page, and the removal
+      # readiness checklist covers it. noDataState
+      # Alerting (the second-review finding) so a broken export is visible; the value is 0 while the
+      # daemon is not scraped (the and on() up guard plus vector(0)), so it never pages with daemon-down.
+      - uid: pg-ccrec-doctor-mismatch
+        title: pg-claude-code-recorder doctor found a mismatch or is stale
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-claude-code-recorder doctor reports a mismatch, or its last run is over 2 days old"
+          description: "doctor_mismatch_files is above 0 (a copy differs from its Claude file), or doctor_last_run_timestamp is non-zero and older than 172800 seconds (2 days: the doctor timer is broken). A last run of 0 means doctor has not run yet since the state directory was created (the daemon first runs it one doctor.interval after start), which the removal readiness checklist treats as not ready. Both are visible as gauges, never as a log line. A stale doctor also blocks the removal readiness checklist. Run pg-claude-code-recorder doctor (exit 9 on a mismatch; it writes doctor.json)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '(((max(pg_claude_code_recorder_doctor_mismatch_files) > bool 0) + ((time() - max(pg_claude_code_recorder_doctor_last_run_timestamp) > bool 172800) * (max(pg_claude_code_recorder_doctor_last_run_timestamp) > bool 0))) and on() (max(up{job="pg-claude-code-recorder"}) == 1)) or vector(0)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Control inbox gone: only state=gone (a Process that had an inbox), never never_loaded.
+      - uid: pg-ccrec-control-inbox-gone
+        title: pg-claude-code-recorder a Process lost its control inbox
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder has a live Process whose control inbox is gone"
+          description: "control_inbox_state has at least one Process in state gone for over 10 minutes: a Claude the recorder expected to have a control inbox (the mod had loaded) no longer has one, so control through the mod is lost for it. A Claude started without the mod is never_loaded and does not page. Run pg-claude-control list."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_claude_code_recorder_control_inbox_state{state="gone"})'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Crash share (second review). Numerator: crashed (the evidence classes of the crashed label:
+      # exit observed, registry present, no clear or exit entry) plus the stale-at-discovery count
+      # (the suspected unknowns). Denominator: all ends plus the stale discoveries (those never reach
+      # conversation_end_total), under a volume floor of 20 so a quiet day cannot page. Tested against
+      # the label table by check-crash-share-label-table.sh.
+      - uid: pg-ccrec-crash-share
+        title: pg-claude-code-recorder crashed share of Conversation ends is high
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder crashed or suspected-crashed Conversations are over 20 percent of ends in a day"
+          description: "Over the last day, Conversations that ended crashed (registry file present at the exit, no /exit or /clear entry) plus those suspected after a stale registry at discovery are above 20 percent of all ends, with at least 20 ends in the day (the volume floor). A power loss or a Claude Code regression shows here. Run pg-claude-code-recorder conversations --crashed --since 1d."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '(((sum(increase(pg_claude_code_recorder_conversation_end_total{registry_present="true",exit_observed="true",clear_entry="false",exit_entry="false"}[1d])) or vector(0)) + (sum(increase(pg_claude_code_recorder_registry_stale_at_discovery_total[1d])) or vector(0))) / (((sum(increase(pg_claude_code_recorder_conversation_end_total[1d])) or vector(0)) + (sum(increase(pg_claude_code_recorder_registry_stale_at_discovery_total[1d])) or vector(0))) > 20))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.2]
+
+      # Removal stuck: the quarantine is a seconds-long step, so an hour is stuck.
+      - uid: pg-ccrec-removal-stuck
+        title: pg-claude-code-recorder a file is stuck in quarantine
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder has a quarantined file older than an hour"
+          description: "quarantine_oldest_age_seconds is above 3600: a file moved into the removal quarantine has not been unlinked or restored, though the quarantine step takes seconds. Nothing is lost (the file is in .pg-recorder-quarantine beside its original path). Run pg-claude-code-recorder remove --dry-run, then read the recorder log for quarantined and quarantine_orphan_found_on_start."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_quarantine_oldest_age_seconds)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3600]

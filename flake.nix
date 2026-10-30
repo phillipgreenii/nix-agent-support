@@ -7263,6 +7263,101 @@
                     touch "$out"
                   '';
 
+              # pg-claude-code-recorder alert rules (docket pg2-v77tsx, phase 7c): the promtool
+              # behaviour of each Prometheus rule through the pg-connector wrapping script (one
+              # <uid>.test.yaml per rule, guards tested both ways: heartbeat-stale with up == 1 and
+              # with up == 0, free-space unguarded), then the crash-share PromQL against the shared
+              # label table (client/testdata/labels.json) with a negative control (a mutated rule
+              # must be rejected). Grafana-only fields are pinned by the structure check below.
+              test-pg-claude-code-recorder-alert-rules =
+                pkgs.runCommand "test-pg-claude-code-recorder-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    alerts=${./packages/pg-claude-code-recorder/grafana/alerting/alerts.yaml}
+                    bash ${./packages/pg-connector/grafana/check-alert-rules.sh} "$alerts" \
+                      ${./packages/pg-claude-code-recorder/grafana/alerting/rule-tests}
+                    script=${./packages/pg-claude-code-recorder/grafana/check-crash-share-label-table.sh}
+                    table=${./packages/pg-claude-code-recorder/client/testdata/labels.json}
+                    bash "$script" "$alerts" "$table"
+                    # Negative control: the crashed class selector flipped must not read the table's share.
+                    yq '(.groups[0].rules[] | select(.uid == "pg-ccrec-crash-share") | .data[0].model.expr) |= sub("clear_entry=\"false\"", "clear_entry=\"true\"")' "$alerts" > mutant.yaml
+                    if bash "$script" mutant.yaml "$table"; then
+                      echo "negative control: the mutated crash-share rule was accepted" >&2
+                      exit 1
+                    fi
+                    touch "$out"
+                  '';
+
+              # pg-claude-code-recorder alert structure: rules S1-S8 over the rules file, the metric
+              # catalogue and the deleteRules twin, then the script's own mutant self-tests (a
+              # 41-character uid, a missing noDataState, a missing guard, a twin that differs).
+              test-pg-claude-code-recorder-alert-structure =
+                pkgs.runCommand "test-pg-claude-code-recorder-alert-structure"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.yq-go
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-claude-code-recorder/grafana/check-alert-structure.sh}
+                    alerts=${./packages/pg-claude-code-recorder/grafana/alerting/alerts.yaml}
+                    catalog=${./packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt}
+                    deletes=${./packages/pg-claude-code-recorder/grafana/alerting/alerts-delete.yaml}
+                    bash "$script" "$alerts" "$catalog" "$deletes"
+                    bash "$script" --self-test "$alerts" "$catalog" "$deletes"
+                    touch "$out"
+                  '';
+
+              # pg-claude-code-recorder signals registration: the metric catalogue against the Go M*
+              # constants of the daemon, the rule uids against registeredRuleUIDs of pg-router-probe,
+              # the deleteRules twin, the dashboard (catalogued names, promtool parse, the eight
+              # panels) and the README's remove.enable section, then the script's own mutants.
+              test-pg-claude-code-recorder-signals-registration =
+                pkgs.runCommand "test-pg-claude-code-recorder-signals-registration"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.yq-go
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.gawk
+                      pkgs.diffutils
+                      pkgs.coreutils
+                      pkgs.prometheus.cli
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-claude-code-recorder/grafana/check-signals-registration.sh}
+                    args=(
+                      ${./packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt}
+                      ${./packages/pg-claude-code-recorder/internal/obs/obs.go}
+                      ${./packages/pg-claude-code-recorder/internal/parser/parser.go}
+                      ${./packages/pg-claude-code-recorder/grafana/alerting/alerts.yaml}
+                      ${./packages/pg-claude-code-recorder/grafana/alerting/alerts-delete.yaml}
+                      ${./packages/pg-router-probe/cmd/pg-router-probe/run.go}
+                      ${./packages/pg-claude-code-recorder/grafana/pg-claude-code-recorder.json}
+                      ${./packages/pg-claude-code-recorder/README.md}
+                    )
+                    bash "$script" "''${args[@]}"
+                    bash "$script" --self-test "''${args[@]}"
+                    touch "$out"
+                  '';
+
               # darwin/modules/beads-exporter: evaluated standalone against stubs of the
               # launchd and observability surfaces (declared in other flakes), with
               # synthetic databases alpha and beta. Proves the gate (observability off,

@@ -162,6 +162,14 @@ import (
 // the call deadline, the signals that would justify a beads daemon. Registered
 // the same way, with no escalation label.
 //
+// The thirteen pg-ccrec-* rules of the recorder's alert file (packages/
+// pg-claude-code-recorder/grafana/alerting/alerts.yaml, docket pg2-v77tsx phase 7c;
+// registered by darwin/modules/pg-claude-code-recorder while the daemon is deployed):
+// daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old, free-space,
+// unknown-key-burst, data-loss, removal-backlog, doctor-mismatch, control-inbox-gone,
+// crash-share and removal-stuck. Registered the same way, with no escalation label.
+// TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
+//
 // pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
 // probe files escalated beads/dispatches triagers, so probing triager failures
 // could feed a loop (operator decision pending).
@@ -197,6 +205,19 @@ var registeredRuleUIDs = []string{
 	"pg-desk-issue-orphan-read-lag",
 	"pg-conn-beads-budget-denied",
 	"pg-conn-beads-bd-timeouts",
+	"pg-ccrec-daemon-down",
+	"pg-ccrec-heartbeat-stale",
+	"pg-ccrec-copy-lag",
+	"pg-ccrec-parse-stuck",
+	"pg-ccrec-held-old",
+	"pg-ccrec-free-space",
+	"pg-ccrec-unknown-key-burst",
+	"pg-ccrec-data-loss",
+	"pg-ccrec-removal-backlog",
+	"pg-ccrec-doctor-mismatch",
+	"pg-ccrec-control-inbox-gone",
+	"pg-ccrec-crash-share",
+	"pg-ccrec-removal-stuck",
 }
 
 func defaultSnapshotPath() string {

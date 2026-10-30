@@ -1,0 +1,45 @@
+# Explicit deletion of the pg-claude-code-recorder alert rules (docket pg2-v77tsx, phase 7c).
+#
+# Grafana's file provisioner only adds and updates rules present in the provisioned YAML: dropping
+# alerts.yaml from alertRuleFiles leaves the already-provisioned rules live (provenance=file), and
+# the critical daemon-down rule would keep firing against a daemon that is no longer deployed. A rule
+# is removed only by a `deleteRules:` entry for its uid, applied on a provisioning reload or restart
+# (the pg-connector-github-alerts-delete.yaml precedent, pg2-susum).
+#
+# darwin/modules/pg-claude-code-recorder registers THIS file in place of alerts.yaml while no
+# home-manager user sets `phillipgreenii.programs.pg-claude-code-recorder.daemon.enable`; once the
+# daemon is deployed it registers the rules file instead and the rules are provisioned again (a
+# deleteRules entry for a uid alongside the rule that defines it is never emitted). The two files
+# are therefore never loaded together.
+#
+# The uids MUST equal the rule uids of alerts.yaml: rule S8 of check-alert-structure.sh (flake check
+# test-pg-claude-code-recorder-alert-structure) pins that. Keep the entries for as long as any
+# Grafana database may still hold the rules; they are harmless once the rules are gone.
+apiVersion: 1
+deleteRules:
+  - orgId: 1
+    uid: pg-ccrec-control-inbox-gone
+  - orgId: 1
+    uid: pg-ccrec-copy-lag
+  - orgId: 1
+    uid: pg-ccrec-crash-share
+  - orgId: 1
+    uid: pg-ccrec-daemon-down
+  - orgId: 1
+    uid: pg-ccrec-data-loss
+  - orgId: 1
+    uid: pg-ccrec-doctor-mismatch
+  - orgId: 1
+    uid: pg-ccrec-free-space
+  - orgId: 1
+    uid: pg-ccrec-heartbeat-stale
+  - orgId: 1
+    uid: pg-ccrec-held-old
+  - orgId: 1
+    uid: pg-ccrec-parse-stuck
+  - orgId: 1
+    uid: pg-ccrec-removal-backlog
+  - orgId: 1
+    uid: pg-ccrec-removal-stuck
+  - orgId: 1
+    uid: pg-ccrec-unknown-key-burst

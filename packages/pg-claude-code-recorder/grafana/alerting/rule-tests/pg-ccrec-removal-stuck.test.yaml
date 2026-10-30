@@ -1,0 +1,65 @@
+# promtool unit tests for the pg-ccrec-removal-stuck alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# The quarantine step takes seconds; over an hour is stuck.
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: quarantine_oldest_age_seconds of 7200 held past the for fires with severity warning only
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_quarantine_oldest_age_seconds{job="pg-claude-code-recorder"}
+        values: "7200x80"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-ccrec-removal-stuck
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-ccrec-removal-stuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: quarantine_oldest_age_seconds of 100 never fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_quarantine_oldest_age_seconds{job="pg-claude-code-recorder"}
+        values: "100x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-removal-stuck
+        exp_alerts: []
+
+  - name: a breach shorter than the for resolves without firing
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_quarantine_oldest_age_seconds{job="pg-claude-code-recorder"}
+        values: "100x10 7200x3 100x80"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-ccrec-removal-stuck
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-ccrec-removal-stuck
+        exp_alerts: []
+
+  - name: an absent series gives no sample and no alert (noDataState OK in Grafana)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x80"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_removal_stuck)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-removal-stuck
+        exp_alerts: []

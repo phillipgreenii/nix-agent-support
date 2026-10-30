@@ -1,0 +1,63 @@
+# promtool unit tests for the pg-ccrec-control-inbox-gone alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a Process in state gone held past the 10m for fires (the Process had an inbox and lost it)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_control_inbox_state{state="gone"}
+        values: "1x80"
+      - series: pg_claude_code_recorder_control_inbox_state{state="present"}
+        values: "2x80"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-ccrec-control-inbox-gone
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-ccrec-control-inbox-gone
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: Processes that never loaded the mod do not page (never_loaded is not gone)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_control_inbox_state{state="gone"}
+        values: "0x80"
+      - series: pg_claude_code_recorder_control_inbox_state{state="never_loaded"}
+        values: "4x80"
+      - series: pg_claude_code_recorder_control_inbox_state{state="present"}
+        values: "2x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-control-inbox-gone
+        exp_alerts: []
+
+  - name: a gone Process that recovers inside the for never fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_control_inbox_state{state="gone"}
+        values: "0x10 1x4 0x80"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-ccrec-control-inbox-gone
+        exp_alerts: []
+
+  - name: an absent series gives no alert
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-control-inbox-gone
+        exp_alerts: []

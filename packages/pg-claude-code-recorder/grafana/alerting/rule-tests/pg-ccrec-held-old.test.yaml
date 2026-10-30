@@ -1,0 +1,65 @@
+# promtool unit tests for the pg-ccrec-held-old alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# 259200 STANDS FOR the held.alertAfter default of 3 days.
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: oldest_held_age_seconds of 300000 held past the for fires with severity warning only
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_oldest_held_age_seconds{job="pg-claude-code-recorder"}
+        values: "300000x80"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-ccrec-held-old
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-ccrec-held-old
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: oldest_held_age_seconds of 100000 never fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_oldest_held_age_seconds{job="pg-claude-code-recorder"}
+        values: "100000x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-held-old
+        exp_alerts: []
+
+  - name: a breach shorter than the for resolves without firing
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_oldest_held_age_seconds{job="pg-claude-code-recorder"}
+        values: "100000x10 300000x3 100000x80"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-ccrec-held-old
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-ccrec-held-old
+        exp_alerts: []
+
+  - name: an absent series gives no sample and no alert (noDataState OK in Grafana)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x80"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_held_old)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-held-old
+        exp_alerts: []

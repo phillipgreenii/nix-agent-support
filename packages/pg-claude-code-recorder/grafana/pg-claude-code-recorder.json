@@ -1,0 +1,348 @@
+{
+  "uid": "pg-claude-code-recorder",
+  "title": "pg-claude-code-recorder",
+  "schemaVersion": 39,
+  "tags": ["pg-claude-code-recorder"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Copy and parse lag",
+      "description": "Age of the oldest byte the recorder has seen but not yet copied (copy lag) and not yet parsed (parse lag), in seconds. The copy-lag alert fires above 120 s for 10 minutes; parse-stuck fires when parse lag bytes stay above 0 with no progress.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_copy_lag_seconds)",
+          "range": true,
+          "legendFormat": "copy lag"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_parse_lag_seconds)",
+          "range": true,
+          "legendFormat": "parse lag"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Conversations by stage",
+      "description": "Conversations per stage: live, quiet, held, settled, removal_pending, removed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (stage) (pg_claude_code_recorder_conversations_by_stage)",
+          "range": true,
+          "legendFormat": "{{stage}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Held age",
+      "description": "Age of the oldest held Conversation (the held-old alert fires above 3 days) and the number held by reason.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_oldest_held_age_seconds)",
+          "range": true,
+          "legendFormat": "oldest held age"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (reason) (pg_claude_code_recorder_held_conversations)",
+          "range": true,
+          "legendFormat": "held: {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Dropped bytes by reason",
+      "description": "Bytes the recorder saw but could not keep, per reason, over the rate interval. Any increase fires the data-loss alert.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (increase(pg_claude_code_recorder_dropped_bytes_total[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Free space and its slope",
+      "description": "Free bytes of the state directory filesystem (the free-space alert fires under 20 GiB or when the 6-hour slope predicts it full within 24 hours) and the 6-hour slope in bytes per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min(pg_claude_code_recorder_state_free_bytes)",
+          "range": true,
+          "legendFormat": "free bytes"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min(deriv(pg_claude_code_recorder_state_free_bytes[6h]))",
+          "range": true,
+          "legendFormat": "slope, bytes per second"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Removal backlog",
+      "description": "Settled Conversations eligible for removal that have not been removed (the removal-backlog alert fires above 24 hours of remove.maxPerHour), their bytes and the age of the oldest quarantined file.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_removal_backlog_conversations)",
+          "range": true,
+          "legendFormat": "backlog, Conversations"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_removal_backlog_bytes)",
+          "range": true,
+          "legendFormat": "backlog, bytes"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_quarantine_oldest_age_seconds)",
+          "range": true,
+          "legendFormat": "oldest quarantine age, seconds"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Processes without an inbox",
+      "description": "Live Claude Processes with no control inbox, and the control inbox states: present, gone (the Process had one and lost it; the control-inbox-gone alert) and never_loaded (started without the mod).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_processes_without_control_inbox)",
+          "range": true,
+          "legendFormat": "without an inbox"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (state) (pg_claude_code_recorder_control_inbox_state)",
+          "range": true,
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Request rate by client",
+      "description": "Requests per second to the recorder by whitelisted client name (anything else is other).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (client) (rate(pg_claude_code_recorder_requests_total[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{client}}"
+        }
+      ]
+    }
+  ]
+}

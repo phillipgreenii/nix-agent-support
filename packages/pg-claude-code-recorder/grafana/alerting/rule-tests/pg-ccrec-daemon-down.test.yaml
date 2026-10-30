@@ -1,0 +1,95 @@
+# promtool unit tests for the pg-ccrec-daemon-down alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through ../../../../pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+# NOT provable here: noDataState Alerting is a Grafana field (an ABSENT up series pages in production);
+# promtool only sees that the PromQL yields no sample. check-alert-structure.sh pins the field.
+tests:
+  - name: up of 0 held past the 2m for fires critical (severity only, min() has no by)
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: up of 1 never fires
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []
+
+  - name: another job's up of 0 is not this daemon
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "1x30"
+      - series: up{job="pg-router",instance="127.0.0.1:1"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []
+
+  - name: guarded - up of 0 under an active SYSTEM_PAUSE gate does not fire
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "0x30"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE"}
+        values: "1x30"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_daemon_down)
+        eval_time: 10m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []
+
+  - name: a SYSTEM_PAUSE gate of 0 (inactive) does not suppress
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "0x30"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: an absent up series gives no sample and no Prometheus alert (Grafana pages via noDataState Alerting)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="x"}
+        values: "1x30"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_daemon_down)
+        eval_time: 10m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []

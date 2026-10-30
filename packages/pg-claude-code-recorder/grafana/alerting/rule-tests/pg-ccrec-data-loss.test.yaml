@@ -1,0 +1,72 @@
+# promtool unit tests for the pg-ccrec-data-loss alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+# Every reason series is registered at zero at start, so the first increase fires; the alert carries
+# the reason label of the series that increased.
+tests:
+  - name: an increase of one reason fires with that reason and severity warning, the zero-registered others stay quiet
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_dropped_bytes_total{reason="file_vanished"}
+        values: "0x10 512x100"
+      - series: pg_claude_code_recorder_dropped_bytes_total{reason="removal_race"}
+        values: "0x110"
+      - series: pg_claude_code_recorder_dropped_bytes_total{reason="copy_trimmed"}
+        values: "0x110"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-ccrec-data-loss
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-ccrec-data-loss
+        exp_alerts:
+          - exp_labels:
+              reason: file_vanished
+              severity: warning
+
+  - name: all reasons registered at zero and never increasing does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_dropped_bytes_total{reason="file_vanished"}
+        values: "0x110"
+      - series: pg_claude_code_recorder_dropped_bytes_total{reason="removal_race"}
+        values: "0x110"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-data-loss
+        exp_alerts: []
+
+  - name: the alert clears once the increase is more than an hour old
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_dropped_bytes_total{reason="removal_race"}
+        values: "0x10 100x200"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-ccrec-data-loss
+        exp_alerts:
+          - exp_labels:
+              reason: removal_race
+              severity: warning
+      - eval_time: 150m
+        alertname: pg-ccrec-data-loss
+        exp_alerts: []
+
+  - name: an absent counter gives no alert
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x110"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-data-loss
+        exp_alerts: []
