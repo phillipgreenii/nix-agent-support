@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/pg-claude-control/session-end.schema.json",
+  "title": "pg-claude-control session end file",
+  "description": "One file <controlStateDir>/ends/<session-id>.<unix-ms>.json per session.end, written through a temporary name and mv so a reader never sees a torn file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sessionId", "reason", "timeMs"],
+  "properties": {
+    "sessionId": { "type": "string", "minLength": 1 },
+    "reason": {
+      "type": "string",
+      "enum": ["prompt_input_exit", "clear", "other", "resume", "logout"],
+      "description": "prompt_input_exit: /exit, Ctrl-D, run exit (measured); clear: /clear (measured); other: SIGTERM and SIGHUP (measured); resume and logout are not yet measured."
+    },
+    "timeMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix time in milliseconds when the file was written; equals the <unix-ms> in the file name."
+    }
+  }
+}

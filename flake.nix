@@ -5144,6 +5144,74 @@
                     touch $out
                   '';
 
+              # pg-claude-control (docket pg2-v77tsx, phase 8a): the control mod's core logic under
+              # plain node against the real file system and the real listener script, outside the Go
+              # unit gate. Same engine shim as test-claude-tool-tracker-mod; `claude plugin validate`
+              # and `claude plugin test` need the claude binary and are run by hand.
+              pg-claude-control-mod-node-tests =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/pg-claude-control;
+                  };
+                in
+                pkgs.runCommand "pg-claude-control-mod-node-tests"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.nodejs
+                      pkgs.jq
+                      pkgs.bash
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    set -euo pipefail
+                    plugin=${src}/claude-marketplace/pg-claude-control
+                    jq -e '.modules == ["./register.ts"]' "$plugin/hooks/hooks.json" >/dev/null
+                    jq -e '.defaultEnabled == true' "$plugin/.claude-plugin/plugin.json" >/dev/null
+                    jq -e '.properties.reason.enum == ["prompt_input_exit","clear","other","resume","logout"]' "$plugin/schema/session-end.schema.json" >/dev/null
+                    for f in register.ts core.ts core.test.ts; do test -f "$plugin/hooks/$f"; done
+                    mkdir -p work/hooks work/scripts work/schema
+                    cp "$plugin/hooks/core.ts" work/hooks/core.ts
+                    sed -e "s#'./core'#'./core.ts'#" "$plugin/hooks/core.test.ts" > work/hooks/core.test.ts
+                    cp "$plugin/scripts/listen.sh" work/scripts/listen.sh
+                    cp "$plugin/schema/session-end.schema.json" work/schema/
+                    chmod +x work/scripts/listen.sh
+                    cd work/hooks
+                    export HOME="$TMPDIR" TMPDIR="$TMPDIR"
+                    node --experimental-strip-types --test --test-timeout=120000 core.test.ts
+                    touch $out
+                  '';
+
+              # pg-claude-control listener bats (docket pg2-v77tsx, phase 8a): the listener under the
+              # real bash in a temporary state directory. `fast` = reading, the burst of 200,
+              # directory rules; `slow` = heal, replace, stale file, parent-death cleanup (they wait
+              # for the one-second health check).
+              pg-claude-control-listener-bats =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/pg-claude-control;
+                  };
+                in
+                pkgs.runCommand "pg-claude-control-listener-bats"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gawk
+                    ]
+                    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    export PGCC_LISTEN=${src}/claude-marketplace/pg-claude-control/scripts/listen.sh
+                    bats --verbose-run ${src}/claude-marketplace/pg-claude-control/tests/listen.bats
+                    touch $out
+                  '';
+
               # test-claude-baseline-hook-commands (bead pg2-12gr4.8.31, design ruling
               # 30): the "hook-command scan". The ccpool handler module's
               # `claudeBaseline` (an INTERIM helper until flox environments exist for

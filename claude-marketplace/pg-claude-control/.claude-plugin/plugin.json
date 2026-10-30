@@ -1,0 +1,6 @@
+{
+  "name": "pg-claude-control",
+  "description": "Control mod: a per-process inbox (FIFO) through which a tool submits, interrupts, runs an allowlisted slash command, reads the prompt draft or pings its own Claude, plus the session end reason",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
