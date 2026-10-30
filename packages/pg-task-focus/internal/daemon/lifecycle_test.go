@@ -112,7 +112,7 @@ func startErr(t *testing.T, e *env) error {
 	t.Helper()
 	_, err := daemon.Start(context.Background(), daemon.Params{
 		ConfigPath: e.cfg, DataDir: e.dir, Version: "test", Log: e.log, Clock: e.clock,
-		Player: e.player, Notifier: e.player,
+		Notifier: e.player,
 	})
 	return err
 }

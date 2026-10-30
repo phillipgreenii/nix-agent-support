@@ -3115,6 +3115,12 @@
                     jq -e '.apiVersion == 1' alerts.json >/dev/null
                     jq -e '[.groups[].folder] | unique == ["Focus"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Focus" >&2; exit 1; }
                     jq -e '[.groups[].rules[]] | length == 11' alerts.json >/dev/null || { echo "FAIL: expected 11 rules" >&2; exit 1; }
+                    # TF-10: the sound-failing rule keeps its expression on the failure counter and
+                    # its description names the notifier daemon and the Notifications permission,
+                    # not the retired afplay and osascript.
+                    jq -e '[.groups[].rules[] | select(.uid == "pg-task-focus-sound-failing")] | length == 1' alerts.json >/dev/null || { echo "FAIL: rule pg-task-focus-sound-failing missing" >&2; exit 1; }
+                    jq -e '.groups[].rules[] | select(.uid == "pg-task-focus-sound-failing") | ([.data[].model.expr? // empty] | any(contains("pg_task_focus_alert_failures_total")))' alerts.json >/dev/null || { echo "FAIL: sound-failing expression moved off pg_task_focus_alert_failures_total" >&2; exit 1; }
+                    jq -e '.groups[].rules[] | select(.uid == "pg-task-focus-sound-failing") | .annotations.description | (contains("pg-osx-notifier") and contains("Notifications") and (contains("afplay") | not) and (contains("osascript") | not))' alerts.json >/dev/null || { echo "FAIL: sound-failing description text" >&2; exit 1; }
                     jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
                     jq -e '.uid == "pg-task-focus" and ([.panels[].targets[]?] | length) > 20' ${./packages/pg-task-focus/grafana/pg-task-focus.json} >/dev/null
                     touch $out

@@ -2,97 +2,100 @@ package notify_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notify"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notifyclient"
 )
 
-type call struct {
-	name string
-	args []string
-}
-
-func recorder(err error) (notify.Runner, *[]call) {
-	var calls []call
-	return func(_ context.Context, name string, args ...string) error {
-		calls = append(calls, call{name, args})
-		return err
-	}, &calls
-}
-
-func TestPlayResolvesTheNameToASoundFileAndRunsAfplay(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Glass.aiff"), nil, 0o600); err != nil {
+// serve answers one connection on a short socket path with reply and returns
+// the decoded request.
+func serve(t *testing.T, reply string) (path string, req chan map[string]any) {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "nfy")
+	if err != nil {
 		t.Fatal(err)
 	}
-	run, calls := recorder(nil)
-	s := notify.System{Run: run, SoundDirs: []string{filepath.Join(dir, "missing"), dir}}
-	if err := s.Play(context.Background(), "Glass"); err != nil {
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path = filepath.Join(dir, "s.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	want := []call{{"afplay", []string{filepath.Join(dir, "Glass.aiff")}}}
-	if !reflect.DeepEqual(*calls, want) {
-		t.Errorf("calls = %v, want %v", *calls, want)
+	t.Cleanup(func() { _ = l.Close() })
+	req = make(chan map[string]any, 1)
+	go func() {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		var m map[string]any
+		if json.NewDecoder(c).Decode(&m) == nil {
+			req <- m
+			_, _ = c.Write([]byte(reply + "\n"))
+		}
+	}()
+	return path, req
+}
+
+// TF-4: hostile text reaches the daemon as the plain data it is, over the socket.
+func TestSystemPostsTheTextAsDataOverTheSocket(t *testing.T) {
+	path, req := serve(t, `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"x"}}`)
+	s := notify.System{Client: notifyclient.Client{SocketPath: path}}
+	title, body := `-e "x" \ end tell`, "say \"hi\" & do shell script \"id\"\nünï"
+	if err := s.Notify(context.Background(), title, body, "Glass"); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := (<-req)["args"].(map[string]any)
+	want := map[string]any{"title": title, "body": body, "sound": "Glass", "source": "pg-task-focus"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("args = %v, want %v", args, want)
 	}
 }
 
-func TestPlayRefusesANameThatIsNotAPlainName(t *testing.T) {
-	run, calls := recorder(nil)
-	s := notify.System{Run: run, SoundDirs: []string{t.TempDir()}}
-	for _, name := range []string{"../../etc/passwd", "a/b", "", "Glass.aiff", strings.Repeat("x", 65), "a;b"} {
-		if err := s.Play(context.Background(), name); err == nil {
-			t.Errorf("Play(%q) succeeded", name)
+// TF-7: a daemon refusal is returned, not swallowed.
+func TestSystemReturnsADaemonRefusal(t *testing.T) {
+	path, _ := serve(t, `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unauthenticated","message":"denied"}}`)
+	s := notify.System{Client: notifyclient.Client{SocketPath: path}}
+	if err := s.Notify(context.Background(), "t", "b", ""); err == nil {
+		t.Fatal("a refusal was swallowed")
+	}
+}
+
+// TF-6: ValidSoundName stays, for config validation.
+func TestValidSoundNameRefusesANameThatIsNotAPlainName(t *testing.T) {
+	for _, bad := range []string{"../..", "a/b", "", "Glass.aiff", string(make([]byte, 65)), "a;b"} {
+		if notify.ValidSoundName(bad) {
+			t.Errorf("%q accepted", bad)
 		}
 	}
-	if err := s.Play(context.Background(), "Nonesuch"); err == nil || !strings.Contains(err.Error(), "no sound named") {
-		t.Errorf("an unknown sound: %v", err)
+	for _, good := range []string{"Glass", "My Sound_1-b"} {
+		if !notify.ValidSoundName(good) {
+			t.Errorf("%q refused", good)
+		}
 	}
-	if len(*calls) != 0 {
-		t.Errorf("a program ran for a refused name: %v", *calls)
+	long := make([]byte, 64)
+	for i := range long {
+		long[i] = 'a'
 	}
-}
-
-func TestNotifyPassesTheTextAsArgumentsNeverInTheScript(t *testing.T) {
-	run, calls := recorder(nil)
-	title, body := `Deep "work" \ cycle`, `5 min over"; do shell script "x"`
-	if err := (notify.System{Run: run}).Notify(context.Background(), title, body); err != nil {
-		t.Fatal(err)
-	}
-	c := (*calls)[0]
-	if c.name != "osascript" || len(c.args) != 4 || c.args[2] != body || c.args[3] != title {
-		t.Fatalf("call = %+v", c)
-	}
-	if strings.Contains(c.args[1], "work") || strings.Contains(c.args[1], "shell script") {
-		t.Errorf("the script holds the text: %q", c.args[1])
-	}
-}
-
-func TestAFailureIsReturnedNotSwallowed(t *testing.T) {
-	boom := errors.New("no audio device")
-	run, _ := recorder(boom)
-	dir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(dir, "Glass.aiff"), nil, 0o600)
-	s := notify.System{Run: run, SoundDirs: []string{dir}}
-	if err := s.Play(context.Background(), "Glass"); !errors.Is(err, boom) {
-		t.Errorf("Play = %v", err)
-	}
-	if err := s.Notify(context.Background(), "t", "b"); !errors.Is(err, boom) {
-		t.Errorf("Notify = %v", err)
+	if !notify.ValidSoundName(string(long)) {
+		t.Error("64 characters refused")
 	}
 }
 
 func TestFakeRecordsAndFails(t *testing.T) {
-	f := &notify.Fake{PlayErr: errors.New("x")}
-	if err := f.Play(context.Background(), "Glass"); err == nil {
-		t.Error("the configured error was not returned")
+	f := &notify.Fake{NotifyErr: errors.New("x")}
+	if err := f.Notify(context.Background(), "t", "b", "Glass"); err == nil {
+		t.Fatal("the failure was swallowed")
 	}
-	_ = f.Notify(context.Background(), "t", "b")
-	if !reflect.DeepEqual(f.Played(), []string{"Glass"}) || len(f.Notified()) != 1 {
-		t.Errorf("recorded %v, %v", f.Played(), f.Notified())
+	if !reflect.DeepEqual(f.Sounds(), []string{"Glass"}) || f.Notified()[0].Source != "pg-task-focus" {
+		t.Errorf("recorded %v, %v", f.Sounds(), f.Notified())
 	}
 }

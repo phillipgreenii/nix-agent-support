@@ -65,17 +65,11 @@ func (d *Daemon) wire(ctx context.Context) {
 	e := d.eng
 	d.srv.Attach(e, d.replay, d.recovery)
 
-	player, notifier := d.p.Player, d.p.Notifier
-	if player == nil || notifier == nil {
-		sys := notify.System{}
-		if player == nil {
-			player = sys
-		}
-		if notifier == nil {
-			notifier = sys
-		}
+	notifier := d.p.Notifier
+	if notifier == nil {
+		notifier = notify.System{}
 	}
-	alerter := NewAlerter(e, d.clk, player, notifier, d.log, d.metrics)
+	alerter := NewAlerter(e, d.clk, notifier, d.log, d.metrics)
 	d.alerter.Store(alerter) // the server is already serving: this hands it the alerter
 	d.metrics.RegisterProjection(source{d})
 

@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notify"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notifyclient"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/obs"
 )
 
@@ -24,8 +25,8 @@ const maxWait = 30 * time.Second
 // minWait keeps a poll that plays nothing from becoming a busy loop.
 const minWait = 500 * time.Millisecond
 
-// Alerter polls the alert scheduler and plays what is due: the sound and the
-// notification, through the SoundPlayer and Notifier. The scheduler is
+// Alerter polls the alert scheduler and plays what is due: one banner with
+// its sound, posted through the Notifier. The scheduler is
 // poll-driven, so the daemon polls after every commit and every reload (the
 // callbacks call Poll) and at the instant the scheduler names. A missed or an
 // extra sound under rare circumstances is accepted (operator ruling,
@@ -42,7 +43,6 @@ type Alerter struct {
 	eng     *engine.Engine
 	clock   clock.Clock
 	sched   *alert.Scheduler
-	player  notify.SoundPlayer
 	notifer notify.Notifier
 	log     *slog.Logger
 	metrics *obs.Metrics
@@ -53,9 +53,9 @@ type Alerter struct {
 }
 
 // NewAlerter builds the alerter for an open engine.
-func NewAlerter(eng *engine.Engine, clk clock.Clock, p notify.SoundPlayer, n notify.Notifier, log *slog.Logger, m *obs.Metrics) *Alerter {
+func NewAlerter(eng *engine.Engine, clk clock.Clock, n notify.Notifier, log *slog.Logger, m *obs.Metrics) *Alerter {
 	return &Alerter{
-		eng: eng, clock: clk, sched: alert.NewScheduler(), player: p, notifer: n, log: log, metrics: m,
+		eng: eng, clock: clk, sched: alert.NewScheduler(), notifer: n, log: log, metrics: m,
 		queue: make(chan alert.Alert, 16), kick: make(chan struct{}, 1),
 	}
 }
@@ -69,7 +69,7 @@ func (a *Alerter) Poll() {
 		select {
 		case a.queue <- *al:
 		default:
-			a.log.Warn("alert dropped: the playback queue is full", "kind", string(al.Kind))
+			a.log.Warn("alert queue full", "kind", string(al.Kind), "cycle_id", string(al.CycleID))
 		}
 	}
 	select {
@@ -130,9 +130,8 @@ func (a *Alerter) Run(ctx context.Context) {
 	}
 }
 
-// play plays one alert: the sound, when the type has one, and the
-// notification. A failure of either is logged and counted and never touches
-// cycle state.
+// play posts one alert as a single banner carrying its sound. A failure is
+// logged and counted once and never touches cycle state.
 func (a *Alerter) play(ctx context.Context, al alert.Alert) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -150,14 +149,18 @@ func (a *Alerter) play(ctx context.Context, al alert.Alert) {
 		}
 		body = overtimeBody(c.Title, c.Note, status)
 	}
-	a.metrics.AlertsPlayed.WithLabelValues(string(al.Kind)).Inc()
-	if al.Sound != "" {
-		if err := a.player.Play(ctx, al.Sound); err != nil {
-			a.log.Warn("sound playback failed", "kind", string(al.Kind), "cycle_id", string(al.CycleID), "error", err.Error())
-			a.metrics.AlertFailures.Inc()
-		}
+	title = notifyclient.CutBytes(strings.TrimSpace(title), maxTitleBytes)
+	if title == "" {
+		title = "Cycle"
 	}
-	if err := a.notifer.Notify(ctx, title, body); err != nil {
+	sound := al.Sound
+	if sound != "" && !notify.ValidSoundName(sound) {
+		// The post still goes out, without a sound; the bad name is never sent.
+		a.log.Warn("alert sound ignored: not a valid sound name", "kind", string(al.Kind), "cycle_id", string(al.CycleID))
+		sound = ""
+	}
+	a.metrics.AlertsPlayed.WithLabelValues(string(al.Kind)).Inc()
+	if err := a.notifer.Notify(ctx, title, body, sound); err != nil {
 		a.log.Warn("notification failed", "kind", string(al.Kind), "cycle_id", string(al.CycleID), "error", err.Error())
 		a.metrics.AlertFailures.Inc()
 	}
@@ -171,6 +174,7 @@ const (
 	maxBodyTitleRunes = 60
 	maxBodyNoteRunes  = 100
 	truncationMarker  = "…"
+	maxTitleBytes     = 256 // the notifier's cap on a title
 )
 
 // overtimeBody is the body of an overtime notification: it names the cycle and
@@ -178,8 +182,8 @@ const (
 // "Deep work: Reviewed the plan. Time is up." and, with no note,
 // "Deep work. Time is up.". The title and the note are bounded (a note
 // is free text of any length and may span lines, which a notification does not
-// show well) and are only ever text: the notifier passes the body to osascript
-// as an argument, never inside the script.
+// show well) and are only ever text: the notifier daemon receives them as JSON
+// data.
 func overtimeBody(title, note, status string) string {
 	title = truncateRunes(oneLine(title), maxBodyTitleRunes)
 	note = truncateRunes(oneLine(note), maxBodyNoteRunes)

@@ -173,7 +173,7 @@ func (e *env) start(fs store.FS) {
 	e.t.Helper()
 	d, err := daemon.Start(context.Background(), daemon.Params{
 		ConfigPath: e.cfg, DataDir: e.dir, Version: "test", Log: e.log, Clock: e.clock,
-		Player: e.player, Notifier: e.player, FS: fs, OTLPLogs: e.otlp, Tracing: e.tracing, WriteTimeout: e.writeTimeout, HeartbeatInterval: 50 * time.Millisecond,
+		Notifier: e.player, FS: fs, OTLPLogs: e.otlp, Tracing: e.tracing, WriteTimeout: e.writeTimeout, HeartbeatInterval: 50 * time.Millisecond,
 		ProbeInterval: e.probeInterval(), ExtraObserver: e.observer,
 	})
 	if err != nil {

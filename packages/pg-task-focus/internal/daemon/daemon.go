@@ -45,8 +45,7 @@ type Params struct {
 	Log io.Writer
 	// Clock is the time source; nil means the system clock.
 	Clock clock.Clock
-	// Player and Notifier play and send alerts; nil means the system ones.
-	Player   notify.SoundPlayer
+	// Notifier posts alerts; nil means the system one (the notifier daemon).
 	Notifier notify.Notifier
 	// Host is the interface to bind; it MUST be a loopback address and
 	// defaults to 127.0.0.1. A test passes port 0 through the config and reads

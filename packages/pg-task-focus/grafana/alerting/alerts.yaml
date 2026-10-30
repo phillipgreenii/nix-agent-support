@@ -364,8 +364,8 @@ groups:
         annotations:
           __dashboardUid__: pg-task-focus
           __panelId__: "21"
-          summary: "pg-task-focus could not play an overtime sound or send its notification"
-          description: "Playback or notification failed in the last hour (it never affects the cycle). Check that the configured sound names exist in /System/Library/Sounds, /Library/Sounds or ~/Library/Sounds, that afplay and osascript run for this user, and that notifications are allowed."
+          summary: "pg-task-focus could not post its overtime banner to the notifier daemon"
+          description: "A banner post to the notifier daemon failed in the last hour (it never affects the cycle). Check that pg-osx-notifier is running and answering on its socket, and that notifications are allowed for it (System Settings, Notifications, pg-osx-notifier)."
         data:
           - refId: A
             relativeTimeRange:

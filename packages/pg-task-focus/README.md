@@ -122,7 +122,7 @@ loopback `host:port`; any other value is refused with a line on stderr and the d
 ## Tests
 
 `go test ./...` runs everything, including the daemon's end-to-end tests: a real daemon on an
-ephemeral loopback port with a fake clock and a fake sound player, driven over HTTP and through the
+ephemeral loopback port with a fake clock and a fake notifier, driven over HTTP and through the
 command line, every request and response validated against `api/openapi.yaml`. The nix gate is
 `checks.<system>.pg-task-focus-go-tests`.
 

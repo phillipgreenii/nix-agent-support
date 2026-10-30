@@ -21,8 +21,8 @@ func (e *env) pollAt(t time.Time) {
 
 func (e *env) waitSounds(n int) []string {
 	e.t.Helper()
-	eventually(e.t, "the sounds to be played", func() bool { return len(e.player.Played()) >= n })
-	return e.player.Played()
+	eventually(e.t, "the banners to be posted", func() bool { return len(e.player.Sounds()) >= n })
+	return e.player.Sounds()
 }
 
 func (e *env) settle() {
@@ -41,7 +41,7 @@ func TestExpiryAndRemindersCountRunningTime(t *testing.T) {
 
 	e.pollAt(local(9, 49))
 	e.settle()
-	if got := e.player.Played(); len(got) != 0 {
+	if got := e.player.Sounds(); len(got) != 0 {
 		t.Fatalf("a sound before the time is up: %v", got)
 	}
 
@@ -51,8 +51,8 @@ func TestExpiryAndRemindersCountRunningTime(t *testing.T) {
 	}
 	e.pollAt(local(9, 52))
 	e.settle()
-	if len(e.player.Played()) != 1 {
-		t.Fatalf("no repeat before repeat_minutes: %v", e.player.Played())
+	if len(e.player.Sounds()) != 1 {
+		t.Fatalf("no repeat before repeat_minutes: %v", e.player.Sounds())
 	}
 
 	// Paused at 9:55 (5 minutes into overtime, 5 of 10 toward the first reminder): silent for any wall-clock time.
@@ -60,16 +60,16 @@ func TestExpiryAndRemindersCountRunningTime(t *testing.T) {
 	e.ok("/api/v1/cycles/pause", map[string]any{"cycle_id": c})
 	e.pollAt(local(11, 0))
 	e.settle()
-	if len(e.player.Played()) != 1 {
-		t.Fatalf("a paused cycle played a sound: %v", e.player.Played())
+	if len(e.player.Sounds()) != 1 {
+		t.Fatalf("a paused cycle played a sound: %v", e.player.Sounds())
 	}
 
 	// Resumed at 11:00, it reminds after the 5 running minutes that remain, not after 10.
 	e.ok("/api/v1/cycles/resume", map[string]any{"cycle_id": c})
 	e.pollAt(local(11, 4))
 	e.settle()
-	if len(e.player.Played()) != 1 {
-		t.Fatalf("the reminder fell due early: %v", e.player.Played())
+	if len(e.player.Sounds()) != 1 {
+		t.Fatalf("the reminder fell due early: %v", e.player.Sounds())
 	}
 	e.pollAt(local(11, 5))
 	e.waitSounds(2)
@@ -108,8 +108,8 @@ func TestBoostOutOfOvertimeReArmsTheExpiry(t *testing.T) {
 	e.ok("/api/v1/cycles/boost", map[string]any{"minutes": 25}) // the commit polls: the anchor is unset
 	e.pollAt(local(10, 14))
 	e.settle()
-	if len(e.player.Played()) != 1 {
-		t.Fatalf("still within the boosted time: %v", e.player.Played())
+	if len(e.player.Sounds()) != 1 {
+		t.Fatalf("still within the boosted time: %v", e.player.Sounds())
 	}
 	e.pollAt(local(10, 15)) // 50 + 25 minutes of running time
 	if got := e.waitSounds(2); got[1] != "Hero" {
@@ -129,32 +129,99 @@ func TestNoSoundStillNotifies(t *testing.T) {
 	eventually(t, "the notification", func() bool { return len(e.player.Notified()) >= 1 })
 	e.pollAt(local(10, 0))
 	eventually(t, "the reminder notification", func() bool { return len(e.player.Notified()) >= 2 })
-	if got := e.player.Played(); len(got) != 0 {
-		t.Fatalf("a null sound played %v", got)
+	for _, n := range e.player.Notified() {
+		if n.Sound != "" {
+			t.Fatalf("a null sound was sent: %+v", n)
+		}
 	}
 }
 
-// A playback failure is logged and counted and never touches cycle state.
-func TestPlaybackFailureIsCountedAndHarmless(t *testing.T) {
+// A failed post is logged at Warn and counted once and never touches cycle
+// state. The sound used to play through afplay even when the banner failed;
+// now one post carries both, so a denied permission silences both (TF-7).
+func TestPostFailureIsCountedOnceAndHarmless(t *testing.T) {
 	e := newEnv(t, options{})
 	e.bootstrap()
 	e.clock.Set(local(9, 0))
 	c := e.startCycle("deep-work")
-	e.player.PlayErr = errors.New("no audio device")
+	e.player.NotifyErr = errors.New("notifier unreachable")
 	e.pollAt(local(9, 50))
 	eventually(t, "the failure to be counted", func() bool {
 		v, _ := sampleValue(e.scrape()["pg_task_focus_alert_failures_total"], nil)
 		return v >= 1
 	})
-	if !strings.Contains(e.log.String(), "sound playback failed") {
-		t.Errorf("the failure was not logged:\n%s", e.log.String())
+	e.settle()
+	if v, _ := sampleValue(e.scrape()["pg_task_focus_alert_failures_total"], nil); v != 1 {
+		t.Errorf("alert_failures_total = %v, want 1", v)
+	}
+	for _, want := range []string{"notification failed", `"kind":"expiry"`, `"cycle_id"`} {
+		if !strings.Contains(e.log.String(), want) {
+			t.Errorf("the failure log lacks %q:\n%s", want, e.log.String())
+		}
 	}
 	focus, _ := e.state()["focus"].(map[string]any)
 	if focus == nil || focus["id"] != c || focus["status"] != "running" {
-		t.Fatalf("a playback failure changed the cycle: %v", focus)
+		t.Fatalf("a post failure changed the cycle: %v", focus)
 	}
-	if len(e.player.Notified()) == 0 {
-		t.Errorf("the notification is still sent when the sound fails")
+}
+
+// A panic in the notifier is recovered and counted; the daemon keeps serving.
+func TestNotifierPanicIsRecovered(t *testing.T) {
+	e := newEnv(t, options{})
+	e.bootstrap()
+	e.clock.Set(local(9, 0))
+	c := e.startCycle("deep-work")
+	e.player.Panic = "boom"
+	e.pollAt(local(9, 50))
+	eventually(t, "the panic to be counted", func() bool {
+		v, _ := sampleValue(e.scrape()["pg_task_focus_alert_failures_total"], nil)
+		return v >= 1
+	})
+	if !strings.Contains(e.log.String(), "alert playback panicked") {
+		t.Errorf("the panic was not logged:\n%s", e.log.String())
+	}
+	focus, _ := e.state()["focus"].(map[string]any)
+	if focus == nil || focus["id"] != c {
+		t.Fatalf("a panic changed the cycle: %v", focus)
+	}
+}
+
+// Expiry uses Sound and the reminder uses ReminderSound, each with the source
+// token; the request carries nothing else the alerter chose (TF-1, TF-5).
+func TestExpiryAndReminderUseTheirOwnSounds(t *testing.T) {
+	e := newEnv(t, options{editConfig: func(c map[string]any) {
+		c["cycles"].(map[string]any)["deep-work"].(map[string]any)["alert"] = map[string]any{"sound": "Hero", "reminder_sound": "Glass", "repeat_minutes": 10}
+	}})
+	e.bootstrap()
+	e.clock.Set(local(9, 0))
+	e.startCycle("deep-work")
+	e.pollAt(local(9, 50))
+	e.waitSounds(1)
+	e.pollAt(local(10, 0))
+	if got := e.waitSounds(2); got[0] != "Hero" || got[1] != "Glass" {
+		t.Fatalf("sounds = %v, want Hero then Glass", got)
+	}
+	for _, n := range e.player.Notified() {
+		if n.Source != "pg-task-focus" {
+			t.Errorf("source = %q", n.Source)
+		}
+	}
+}
+
+// A title over the notifier's cap is cut on a rune boundary (TF-12).
+func TestOvertimeTitleIsCutToTheContractCap(t *testing.T) {
+	long := strings.Repeat("é", 200) // 400 bytes
+	e := newEnv(t, options{editConfig: func(c map[string]any) {
+		c["cycles"].(map[string]any)["deep-work"].(map[string]any)["title"] = long
+	}})
+	e.bootstrap()
+	e.clock.Set(local(9, 0))
+	e.startCycle("deep-work")
+	e.pollAt(local(9, 50))
+	eventually(t, "the notification", func() bool { return len(e.player.Notified()) >= 1 })
+	title := e.player.Notified()[0].Title
+	if len(title) != 256 || !utf8.ValidString(title) || title != strings.Repeat("é", 128) {
+		t.Errorf("title is %d bytes: %q", len(title), title)
 	}
 }
 
@@ -170,7 +237,7 @@ func TestRestartPlaysOneCatchUpAlert(t *testing.T) {
 	e.start(nil)
 	e.waitSounds(1)
 	e.settle()
-	if got := e.player.Played(); len(got) != 1 {
+	if got := e.player.Sounds(); len(got) != 1 {
 		t.Fatalf("a burst of %d alerts after a restart, want one catch-up: %v", len(got), got)
 	}
 }
@@ -245,7 +312,7 @@ func TestOvertimeNotificationBoundsALongNote(t *testing.T) {
 }
 
 // A note with quotes, backslashes and AppleScript syntax reaches the notifier
-// as the plain text it is: the notifier passes it to osascript as an argument.
+// as the plain text it is: the notifier daemon receives it as data.
 func TestOvertimeNotificationKeepsQuotesInTheNote(t *testing.T) {
 	note := `say "hi" \ 'x' & do shell script "id"`
 	expiry, reminder := overtimeNotifications(t, note)
@@ -254,5 +321,30 @@ func TestOvertimeNotificationKeepsQuotesInTheNote(t *testing.T) {
 	}
 	if want := "Deep work cycle: " + note + ". 10 min over"; reminder.Body != want {
 		t.Errorf("reminder body = %q, want %q", reminder.Body, want)
+	}
+}
+
+// With the notifier stuck, the 16-entry queue drops further alerts with a Warn
+// (TF-8); the drop names the kind and the cycle.
+func TestFullAlertQueueDropsWithAWarn(t *testing.T) {
+	e := newEnv(t, options{})
+	e.bootstrap()
+	e.clock.Set(local(9, 0))
+	e.startCycle("deep-work")
+	e.player.Block = make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-e.player.Block:
+		default:
+			close(e.player.Block)
+		}
+	})
+	for k := 0; k < 22; k++ { // one alert per repeat interval: 1 in flight + 16 queued + drops
+		e.pollAt(local(9, 50).Add(time.Duration(k) * 10 * time.Minute))
+		e.d.Alerter().Poll()
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(e.log.String(), "alert queue full") || !strings.Contains(e.log.String(), `"cycle_id"`) {
+		t.Errorf("no queue-full Warn:\n%s", e.log.String())
 	}
 }
