@@ -54,6 +54,7 @@ SELF="scripts/check-identifier-allowlist.sh"
 # Subtree minimums are  <relative-prefix>=<n>  or  kind:go=<n>, kind:testdata=<n>,
 # kind:docs=<n>  (files of that kind among the scanned ones).
 MODULES=(
+  "pg-claude-code-recorder|packages/pg-claude-code-recorder|wide|7|cmd/pg-claude-code-recorder/main.go internal/platform/platform_darwin.go cmd/pg-claude-code-recorder/unit_tier_guard_test.go|kind:go=7"
   "pg-connector|packages/pg-connector|testdata|60|pkg/scriptout/conformance/testdata/golden/response-success.json pkg/scriptout/conformance/testdata/golden/error.json|"
   "pg-decider|packages/pg-decider|testdata|200|testdata/pr_view_minimal.json|"
   "pg-desk|packages/pg-desk|testdata|70|internal/config/testdata/config.example.yaml|internal/focus/testdata/=25"

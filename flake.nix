@@ -411,6 +411,11 @@
           pg-keep-awake = final.callPackage ./packages/pg-keep-awake {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-claude-code-recorder (docket pg2-v77tsx, phase 1a): Pattern A (ADR 0008)
+          # scaffold; one darwin-only cgo file, Linux builds with CGO_ENABLED=0.
+          pg-claude-code-recorder = final.callPackage ./packages/pg-claude-code-recorder {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-probe (bead pg2-pqztiu, operator ruling pg2-r9kv7 W8): Pattern A
           # (ADR 0008), stdlib only. A read-only pprof-socket GET client over a
           # fixed path allowlist plus `wait-log`; NOT a generic curl.
@@ -1860,6 +1865,7 @@
                 "pg-task-focus"
                 "pg-keep-awake"
                 "pg-probe"
+                "pg-claude-code-recorder"
                 "claude-tool-tracker"
                 "pg-wrap"
                 # pg2-rpo30t: Pattern A since its claude-transcript replace went.
@@ -1875,6 +1881,8 @@
                 "pg-rescue"
                 # internal/contract is `contract`-tagged.
                 "beads-exporter"
+                # cmd/pg-claude-code-recorder is `integration`-tagged.
+                "pg-claude-code-recorder"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -6033,6 +6041,142 @@
                 gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
                 testFlags = [ "-v" ];
               };
+
+              # pg-claude-code-recorder (docket pg2-v77tsx, phase 1a) - whole-module Go
+              # test gate, the UNIT tier only (no build tags). `-timeout 120s` is the
+              # per-package time budget that guards the unit gate: go test applies it
+              # to each package's test binary, so a package that runs longer fails
+              # (raising it to fit a slow test is the wrong fix: tag the test
+              # integration, V-4). Pattern A, no testDeps.
+              pg-claude-code-recorder-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-claude-code-recorder-go-tests";
+                src = lib.cleanSource ./packages/pg-claude-code-recorder; # matches default.nix
+                gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                testFlags = [
+                  "-v"
+                  "-timeout"
+                  "120s"
+                ];
+              };
+
+              # pg-claude-code-recorder INTEGRATION tier. ON DEMAND ONLY: build it by hand
+              # (`nix build .#checks.<system>.pg-claude-code-recorder-integration-tests`).
+              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land gate
+              # (V-4; docs/adr/0111). Runs EXACTLY the tests of files tagged
+              # `//go:build integration` (the tagged list minus the untagged list) under
+              # -race with a 60m timeout; fails when none exist, when one does not report
+              # PASS, or when one is skipped. Same shape as pg-connector-integration-tests.
+              pg-claude-code-recorder-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-integration-tests";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/integration.log"
+                      : > "$log"
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                      if [ -z "$pkgs" ]; then
+                        echo "pg-claude-code-recorder-integration-tests: no test file carries //go:build integration" >&2
+                        exit 1
+                      fi
+                      total=0
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                        if [ -z "$names" ]; then
+                          echo "pg-claude-code-recorder-integration-tests: $dir lists no integration-only tests" >&2
+                          exit 1
+                        fi
+                        regex="^($(echo "$names" | paste -sd'|' -))\$"
+                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                          cat "$log"
+                          echo "pg-claude-code-recorder-integration-tests: $dir FAILED" >&2
+                          exit 1
+                        fi
+                        for t in $names; do
+                          if ! grep -q -- "^--- PASS: $t " "$log"; then
+                            cat "$log"
+                            echo "pg-claude-code-recorder-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                            exit 1
+                          fi
+                        done
+                        total=$((total + $(echo "$names" | wc -l)))
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-claude-code-recorder-integration-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-claude-code-recorder-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # Regression guard for the unit/integration split: against the REAL go
+              # tool, proves that for each of the integration, faults and soak tags
+              # every package carrying a file with that tag lists strictly more tests
+              # in the tagged build than in the default build, that the integration tag
+              # is carried by at least one package, and that the module vets with and
+              # without each tag. The source-level rule is the unit test
+              # TestUnitTierHasNoIntegrationTests in cmd/pg-claude-code-recorder.
+              pg-claude-code-recorder-integration-tests-gating =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-integration-tests-gating";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      fail() { echo "pg-claude-code-recorder-integration-tests-gating: $*" >&2; exit 1; }
+                      for tag in integration faults soak; do
+                        pkgs=$(grep -rl --include='*_test.go' "^//go:build $tag" . | xargs -r -n1 dirname | sort -u || true)
+                        if [ "$tag" = integration ] && [ -z "$pkgs" ]; then
+                          fail "no test file carries //go:build integration"
+                        fi
+                        for dir in $pkgs; do
+                          tagged=$(go test -tags "$tag" -list '.*' "$dir" | grep -c '^Test' || true)
+                          plain=$(go test -list '.*' "$dir" | grep -c '^Test' || true)
+                          [ "$tagged" -gt "$plain" ] || fail "$dir: the $tag build lists $tagged tests, the default build $plain; the tag moves nothing"
+                        done
+                        go vet -tags "$tag" ./... || fail "go vet of the $tag build failed"
+                      done
+                      go vet ./... || fail "go vet of the default build failed"
+                      echo "pg-claude-code-recorder-integration-tests-gating: the integration, faults and soak tags split every package that carries them; every build vets clean"
+                      runHook postBuild
+                    '';
+                  });
+
+              # Linux cross-compile guard (pg-connector precedent): the recorder is pure
+              # Go except one darwin-only cgo file, and Linux builds with CGO_ENABLED=0.
+              # `go vet` for GOOS=linux compiles every package and test file (the darwin
+              # cgo file is excluded by its build constraint). Cheap, so a plain check.
+              pg-claude-code-recorder-linux-cross-compile =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-linux-cross-compile";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      GOOS=linux CGO_ENABLED=0 go vet ./...
+                      GOOS=linux CGO_ENABLED=0 go vet -tags integration ./...
+                      echo "pg-claude-code-recorder-linux-cross-compile: GOOS=linux CGO_ENABLED=0 go vet ./... clean"
+                      runHook postBuild
+                    '';
+                  });
 
               # pg-probe (bead pg2-pqztiu) - whole-module Go test gate. Pattern A,
               # stdlib only. The tests use real unix sockets and real files under
@@ -17455,6 +17599,7 @@
               pg-task-focus
               pg-keep-awake
               pg-probe
+              pg-claude-code-recorder
               claude-tool-tracker
               integrate-branch-support
               pg-desk
