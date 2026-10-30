@@ -16172,6 +16172,107 @@
                     touch $out
                   '';
 
+              # pg-claude-code-recorder HM module (docket pg2-v77tsx, phase 7a): the eval
+              # cases live in tests/pg-claude-code-recorder-hm-launchd.nix (the launchd
+              # registry is the shared STUB, tests/launchd-registry-stub.nix; the control
+              # module is a stub option). This check then builds the rendered configs (the
+              # module's build-time check runs the REAL binary on them), rejects a bad
+              # duration with the same command, reads the rendered TOML back, and runs the
+              # rendered launchd command under `env -i` against throwaway directories: the
+              # real daemon starts, `status --json` answers from it, and `coverage --json`
+              # reports the control state directory's ends/ root. Nothing is applied.
+              test-pg-claude-code-recorder-hm-launchd =
+                let
+                  r = import ./tests/pg-claude-code-recorder-hm-launchd.nix { inherit lib pkgs; };
+                  bin = "${r.live.package}/bin/pg-claude-code-recorder";
+                in
+                pkgs.runCommand "pg-claude-code-recorder-hm-launchd"
+                  {
+                    nativeBuildInputs = [
+                      r.live.package
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.bash
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-claude-code-recorder launchd eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+
+                    # ---- the rendered TOML (the check that also builds the checked files)
+                    yq -p toml -o json ${r.live.configFileDefault} > default.json
+                    jq -e '
+                      .settle.after == "24h" and .remove.enable == false and .remove.after == "30d"
+                      and .sweep.interval == "15m" and .feed.retention == "14d"
+                      and .wait.maxWaiters == 256 and .minFreeBytes == 21474836480
+                      and (.socket | endswith("/recorder.sock"))
+                    ' default.json >/dev/null || { echo "unexpected rendered config:" >&2; cat default.json >&2; exit 1; }
+
+                    # the negative control: the build-time check's command REJECTS a bad
+                    # duration (usage error, exit 2), so the check is not vacuous
+                    export HOME=$TMPDIR
+                    rc=0
+                    ${bin} status --json --config ${r.live.uncheckedBadDuration} \
+                      --socket "$TMPDIR/absent.sock" >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 2 ] || { echo "FAIL: a bad duration exited $rc, want 2:" >&2; cat out.txt >&2; exit 1; }
+
+                    # ---- the live trigger: the rendered command, under env -i
+                    w=$TMPDIR/w
+                    mkdir -p "$w/claude" "$w/control/ends" "$w/h"
+                    sed "s#/example/live#$w#g" ${r.live.configFile} > "$w/config.toml"
+                    printf '%s' ${lib.escapeShellArg r.live.script} > entry.sh
+                    grep -q '^exec ${bin} serve --config ${r.live.configFile} --pprof$' entry.sh \
+                      || { echo "entry is not the serve command: $(cat entry.sh)" >&2; exit 1; }
+                    sed "s#${r.live.configFile}#$w/config.toml#" entry.sh > entry.live.sh
+
+                    envs=(PATH=${lib.makeBinPath [ pkgs.coreutils ]} HOME="$w/h" XDG_STATE_HOME="$w/xs")
+                    ( cd / && exec env -i "''${envs[@]}" ${pkgs.bash}/bin/bash "$TMPDIR/entry.live.sh" ) >"$w/daemon.out" 2>&1 &
+                    pid=$!
+
+                    ok=
+                    for _ in $(seq 1 100); do
+                      if ! kill -0 "$pid" 2>/dev/null; then
+                        echo "the rendered command exited before answering:" >&2
+                        cat "$w/daemon.out" >&2
+                        exit 1
+                      fi
+                      env -i "''${envs[@]}" ${bin} status --json --config "$w/config.toml" > "$w/status.json" 2>/dev/null || true
+                      if jq -e '.short != "down" and .protocol_version >= 1' "$w/status.json" >/dev/null 2>&1; then
+                        ok=1
+                        break
+                      fi
+                      sleep 0.2
+                    done
+                    if [ -z "$ok" ]; then
+                      echo "no status answer from the daemon the rendered command started:" >&2
+                      cat "$w/status.json" "$w/daemon.out" >&2
+                      kill "$pid" 2>/dev/null || true
+                      exit 1
+                    fi
+
+                    # coverage reports the control directory's ends/ root (controlStateDir
+                    # reached the daemon through the rendered config)
+                    env -i "''${envs[@]}" ${bin} coverage --json --allow-partial --config "$w/config.toml" > "$w/coverage.json" \
+                      || { echo "coverage failed" >&2; cat "$w/coverage.json" "$w/daemon.out" >&2; kill "$pid"; exit 1; }
+                    jq -e --arg ends "$w/control/ends" '[.roots[].path] | index($ends) != null' "$w/coverage.json" >/dev/null \
+                      || { echo "coverage did not report the ends/ root:" >&2; cat "$w/coverage.json" >&2; kill "$pid"; exit 1; }
+
+                    # the --pprof flag took effect: the socket is in XDG_STATE_HOME, not stateDir
+                    [ -S "$w/xs/pg-claude-code-recorder/pprof.sock" ] \
+                      || { echo "no pprof socket" >&2; ls -R "$w/xs" >&2; kill "$pid"; exit 1; }
+
+                    kill -TERM "$pid"
+                    rc=0
+                    wait "$pid" || rc=$?
+                    [ "$rc" = 0 ] || { echo "SIGTERM exit = $rc" >&2; cat "$w/daemon.out" >&2; exit 1; }
+                    touch $out
+                  '';
+
               # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
               # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the
               # wrapper's bounds are really on a built check and are additive to the
