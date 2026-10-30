@@ -290,20 +290,29 @@ func TestSIGKILLMidCopyThenRestartRecovers(t *testing.T) {
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		f, err := os.OpenFile(d.transcript(), os.O_APPEND|os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		defer func() { _ = f.Close() }()
 		line := strings.Repeat("x", 4000) + "\n"
-		for i := 0; ; i++ {
+		for {
 			select {
 			case <-stopWriter:
 				return
 			default:
 			}
-			_, _ = f.WriteString(line)
-			time.Sleep(time.Millisecond) // about 4 MB/s: faster than the copier needs, not a disk filler
+			// Open, append a few lines and close, as a message-at-a-time writer
+			// does. Measured on macOS (pg2-yyak5l): while one descriptor stays open
+			// and writing, the daemon's FSEvents stream delivers no event for the
+			// file at all (the copy offset stayed at its first value for 60s while
+			// the file grew to 180 MB, and the daemon sat idle), and the copy only
+			// moved after the writer stopped. The same held at the phase 1d commit,
+			// so it is the host's FSEvents behaviour, not a recorder regression.
+			f, err := os.OpenFile(d.transcript(), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				return
+			}
+			for i := 0; i < 20; i++ {
+				_, _ = f.WriteString(line)
+			}
+			_ = f.Close()
+			time.Sleep(5 * time.Millisecond) // bursts of 80 KB: more than the copier needs, not a disk filler
 		}
 	}()
 	poll(t, "some bytes copied", 60*time.Second, func() bool {
