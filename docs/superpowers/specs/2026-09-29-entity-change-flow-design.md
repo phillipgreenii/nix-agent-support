@@ -651,6 +651,29 @@ whose own condition is false). This answers STORY-DBG-3.
 
 ### 7.3 PR decider rules (single source for all PR rule behavior)
 
+**Decision flow at a glance** (an overview only; the table below is the single source, and this
+diagram restates none of it). Every evaluated rule reports an outcome with facts that reach the run
+record and the log (`pg-pr-change`), so a rule that did not act says why; no step is assumed to have
+happened.
+
+```mermaid
+flowchart TD
+    V["decide(view)"] --> H{"hidden?"}
+    H -->|"yes"| HS["skip the entity: no rule runs"]
+    H -->|"no"| R["evaluate every rule against the current view"]
+    R --> S{"kind suppressed?"}
+    S -->|"yes"| SK["skip that kind: reason suppressed"]
+    S -->|"no"| T{"terminal PR and rule acts on live work?"}
+    T -->|"yes"| TS["skip: not matched, fact pr_state"]
+    T -->|"no"| C{"rule condition holds?"}
+    C -->|"no"| CS["skip: not matched or already handled, with facts"]
+    C -->|"yes"| A["actions: create, update, reopen, close, annotate"]
+    SK --> O["outcome and facts per rule: run record rules, one log line"]
+    TS --> O
+    CS --> O
+    A --> O
+```
+
 _Ported_ rows reproduce pg-desk's current `internal/sync` behavior (`internal/sync/rules.go`,
 `docs/behavior/pg-desk/sync.md` "Rules" and "Adoption"). The **Behavior** column states, for every
 row, whether it matches today's `sync` or differs from it — this table is the only place PR rule

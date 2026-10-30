@@ -98,6 +98,9 @@ type RuleOutcome struct {
 	Outcome string         `json:"outcome"`
 	Reason  string         `json:"reason,omitempty"`
 	Counts  map[string]int `json:"counts,omitempty"`
+	// Facts are the facts the rule reported: why it skipped, or (planned) the
+	// facts of its first action. Absent when the rule reported none.
+	Facts map[string]any `json:"facts,omitempty"`
 }
 
 // PlannedAction is one action of the plan.

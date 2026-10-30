@@ -25,6 +25,7 @@ var Version = "dev"
 const (
 	lockDirEnv   = "PG_PR_CHANGE_LOCK_DIR"
 	runRecordEnv = "PG_PR_CHANGE_RUN_RECORD"
+	logSkipsEnv  = "PG_PR_CHANGE_LOG_SKIPS"
 )
 
 const usage = `usage: pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] <plan|apply> <id> [<seq>]
@@ -47,6 +48,8 @@ Hydrate one PR with "pg-desk pr refresh <id>" and then decide it with
   --lock-wait DURATION  longest wait for the lock (default 30s)
   --run-record FILE     file one JSON record per run is appended to
                         (env ` + runRecordEnv + `; default: $XDG_STATE_HOME/pg-pr-change/` + prchange.RunRecordFileName + `)
+  --log-skips           also log a line for every rule that skipped (debug level)
+                        (env ` + logSkipsEnv + `, any value)
 
 Exit codes are published in docs/behavior/pg-decider/pr-change.md; none is 1 or 9.
 `
@@ -88,6 +91,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	lockDir := fs.String("lock-dir", defaultLockDir(), "")
 	lockWait := fs.Duration("lock-wait", prchange.DefaultLockWait, "")
 	runRecord := fs.String("run-record", defaultRunRecord(), "")
+	logSkips := fs.Bool("log-skips", os.Getenv(logSkipsEnv) != "", "")
 	showVersion := fs.Bool("version", false, "")
 	help := fs.Bool("help", false, "")
 	fs.BoolVar(help, "h", false, "")
@@ -132,6 +136,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		LockWait:      *lockWait,
 		Seq:           seq,
 		RunRecordPath: *runRecord,
+		LogSkips:      *logSkips,
 		Config:        cfg,
 		Stdout:        stdout,
 		Stderr:        stderr,

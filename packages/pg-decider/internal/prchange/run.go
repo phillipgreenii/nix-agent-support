@@ -48,6 +48,10 @@ type Options struct {
 	// means a random one.
 	Clock    func() time.Time
 	NewRunID func() string
+	// LogSkips raises the per-rule log line of a skipped rule from debug (not
+	// printed) to info. Lines of rules that planned or applied actions are always
+	// printed.
+	LogSkips bool
 	// Runner runs the subprocesses; nil means ExecRunner.
 	Runner Runner
 	// Stdout receives pg-desk's refresh line and the decider's plan output;
@@ -379,6 +383,7 @@ func (r *run) decide() int {
 	rec.Actions, rec.ByKind = plannedActions(pre)
 	rec.Rules = ruleOutcomes(r.o.Mode, pre, counters)
 	r.decisions = decisionsFor(r.o.Mode, pre, counters)
+	r.logRules(rec.Rules)
 	r.rec.Adoption = adoptionOutcome(r.o.Mode, r.view, pre, counters)
 	r.lookupItems, r.lookupCeiling = lookupFromDecider(res)
 	if r.lookupItems == nil && r.lookupCeiling == nil {
@@ -483,4 +488,28 @@ func splitDeciderStderr(stderr string) (counters, others []string) {
 		}
 	}
 	return counters, others
+}
+
+// logRules prints one line per rule of the run (rule, outcome, reason, facts,
+// event id, run id) to stderr, so why an action was or was not taken can be read
+// without querying pg-desk. Skipped rules are debug level and printed only when
+// Options.LogSkips is set; rules that planned or applied actions are info.
+func (r *run) logRules(rules []RuleOutcome) {
+	for _, ro := range rules {
+		if ro.Outcome == outcomeSkipped && ro.Counts == nil && !r.o.LogSkips {
+			continue
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "pg-pr-change: rule=%s outcome=%s", ro.Rule, ro.Outcome)
+		if ro.Reason != "" {
+			fmt.Fprintf(&b, " reason=%q", ro.Reason)
+		}
+		if len(ro.Facts) > 0 {
+			if j, err := json.Marshal(ro.Facts); err == nil {
+				fmt.Fprintf(&b, " facts=%s", j)
+			}
+		}
+		fmt.Fprintf(&b, " event=%s run=%s", r.o.RawID, r.rec.RunID)
+		fmt.Fprintln(r.o.Stderr, b.String())
+	}
 }

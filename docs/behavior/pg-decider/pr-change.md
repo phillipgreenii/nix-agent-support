@@ -10,7 +10,7 @@ of this repo, not a shell snippet in a deployment's configuration, so its exit-c
 testable.
 
 ```text
-pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] <plan|apply> <id> [<seq>]
+pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--log-skips] <plan|apply> <id> [<seq>]
 ```
 
 `<seq>` is the item's change sequence as the router renders it into the role's argv; the next
@@ -111,6 +111,16 @@ The decider's audit comment names the delivery key, NOT a change sequence: its `
 sequence when the item carried one and otherwise the value of the id suffix, and `none` for a run with
 no key.
 
+## Why each rule did or did not act
+
+Every run that reaches the decider prints one line per rule to stderr: `pg-pr-change: rule=<rule>
+outcome=<outcome> reason="<reason>" facts=<json> event=<item id> run=<run id>`, the same members as the
+rule's entry in the run record. A rule that planned or applied actions logs at info and is always
+printed. A rule that skipped logs at debug and is printed only with `--log-skips` or the environment
+variable `PG_PR_CHANGE_LOG_SKIPS` set (to any value), which an operator raises while debugging and
+leaves off to cut noise. No step is assumed to have happened: a rule absent from the lines was not
+evaluated.
+
 ## The run record
 
 Every run that gets past argument checking appends one JSON line to the run record file, in one write
@@ -137,7 +147,8 @@ A line carries `contract` (`pg-pr-change.run-record/v1`), `run_id`, `at` and `fi
 not_run, the refresh `exit_code`, `class` and the refresh `line`), `exit_code`, `error_class` and
 `failing_stage` (`lock`, `hydrate` or `decide`; both absent for a run that succeeded), `lane_record`
 (whether the lane write path took the run), and, when the decider ran, `decide` (its `exit_code`, the
-per-rule outcome and skip reason in `rules`, the planned `actions` as kind and operation, `by_kind`,
+per-rule outcome, skip reason and `facts` in `rules` (the facts a skipped rule reported, such as the
+relationship that did not match or a count of zero, or those of a planned rule's first action), the planned `actions` as kind and operation, `by_kind`,
 the count per kind, and `plan_error` when the plan could not be read), `adoption` (the adoption
 `outcome` and the `candidates`, the anchors the view links with their state and whether each is
 already keyed) and, for `apply`, `residual` (the number of actions a read-only plan still lists after
@@ -308,6 +319,9 @@ in `apply` mode.
 - **INV-PRCHANGE-11.** <!-- uuid: e1d04ad0-353b-41e7-892f-0adcf4f3c7e9 --> Every run that passes argument checking MUST append exactly one JSON line to the run record, in one
   write, whose file name differs from pg-desk's `run-record.log`; a run that stops before the decider
   MUST still be recorded, with its `error_class` and no `decide` members.
+- **INV-PRCHANGE-11a.** <!-- uuid: 674b692b-8fb6-4ec6-9c0c-93d0980283fa --> A rule's entry in the run record MUST carry the facts the rule reported, and a run that reaches the decider
+  MUST print one line per rule naming the rule, outcome, reason, facts, event id and run id, the lines of
+  skipped rules only when `--log-skips` or `PG_PR_CHANGE_LOG_SKIPS` asks for them.
 - **INV-PRCHANGE-12.** <!-- uuid: 5feaffc9-ac3e-462a-ba54-74f174871ee0 --> A run that holds the per-PR lock MUST record itself once through the lane write path with the
   mode it ran in, MUST pass the residual plan an `apply` makes afterwards as that run's residual and
   not as a run, and MUST NOT change its exit code because the lane write path failed.

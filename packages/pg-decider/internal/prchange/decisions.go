@@ -161,18 +161,20 @@ func ruleOutcomes(mode string, pre *action.PlanResult, counters *metrics.Line) [
 		return out
 	}
 	for _, s := range pre.Skipped {
-		out = append(out, RuleOutcome{Rule: s.Rule, Outcome: outcomeSkipped, Reason: s.Reason})
+		out = append(out, RuleOutcome{Rule: s.Rule, Outcome: outcomeSkipped, Reason: s.Reason, Facts: s.Facts})
 	}
 	planned := map[string]int{}
+	firstFacts := map[string]map[string]any{}
 	var order []string
 	for _, a := range pre.Actions {
 		if planned[a.Rule] == 0 {
 			order = append(order, a.Rule)
+			firstFacts[a.Rule] = a.Facts
 		}
 		planned[a.Rule]++
 	}
 	for _, rule := range order {
-		ro := RuleOutcome{Rule: rule, Outcome: outcomePlanned}
+		ro := RuleOutcome{Rule: rule, Outcome: outcomePlanned, Facts: firstFacts[rule]}
 		if mode == ModeApply && counters != nil {
 			if c, ok := counters.Rules[rule]; ok {
 				ro.Counts = map[string]int{"planned": c.Planned, "applied": c.Applied, "deduped": c.Deduped, "failed": c.Failed, "skipped": c.Skipped}
