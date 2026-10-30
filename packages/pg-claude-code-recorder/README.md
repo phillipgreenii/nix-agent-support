@@ -39,6 +39,29 @@ The integration check MUST NOT be wired into a hook, `run-unit-tests` or pre-lan
 The unit gate has a per-package time budget: the check runs `go test -timeout 120s`, so a
 package whose tests exceed it fails.
 
+## The watcher
+
+`internal/watcher` reports changed paths under the Claude directory and
+`<controlStateDir>/ends` to a sink. Every event is a hint: the watcher filters the path, does one
+`lstat`, then reports; event flags are never trusted. On darwin one FSEvents stream (a small cgo
+wrapper, `backend_darwin.go`) covers both roots. After downtime it replays FSEvents only when the
+gap is under about 10 minutes and the volume UUID is unchanged (otherwise it logs `fsevents_gap`
+and sweeps), and it sweeps on `MustScanSubDirs` and every `sweep.interval` (default 15 minutes).
+The darwin sweep uses `getattrlistbulk`; it reports device, inode, birth time, size and
+modification time per file. `Wake(path)` and `Rescan()` are the test seams. `fsnotify` is not
+used (kqueue needs one file descriptor per watched file).
+
+### Linux: the inotify watch limit
+
+On Linux the watcher uses inotify (`CGO_ENABLED=0`, standard library only) with one watch per
+directory, and the sweep is a plain directory walk. inotify keeps no history, so every start
+sweeps. The kernel caps watches per user with `fs.inotify.max_user_watches`; the Claude
+directory needs roughly one watch per directory (about 13,000 on a large tree), so raise the
+limit above the directory count, for example `sysctl fs.inotify.max_user_watches=524288`. When
+the limit is hit, adding a watch fails with `ENOSPC` and `Start` returns that error. An inotify
+queue overflow (`fs.inotify.max_queued_events`) triggers a sweep. Linux reports no birth time
+(`FileInfo.Birth` is zero).
+
 ## Conventions for later packets
 
 - External commands go through `github.com/phillipgreenii/x`'s `cmdrun`, as `pg-router-probe` does.
