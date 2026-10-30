@@ -346,3 +346,10 @@ none of them well, and a future backend is free to pick whatever chain fits its 
   and its `pg-connector-agentsession-pa-monitor` backend: the capability list in this ADR no longer
   includes `agentsession`, and the capability was removed from the umbrella, the schema registry and
   the home module.
+- Amended by bead `pg2-eclw3j.4` (operator approved 2026-10-30, session c1c1ef99), which records
+  parameterized named queries (bead `pg2-eclw3j.3`): a `list` query MAY declare `params` (name to
+  regex) in the backend's own config and the request supplies values only (`issue list --param`,
+  the `list` request's `params` member), so the Decision's rule that names and declarations come from
+  config only still holds. A backend declares the `vocabulary.query_params` capability key; a
+  parameterized query MUST NOT be watched; the backend binary and config MUST ship in the same apply.
+  See `packages/pg-connector/docs/behavior/interfaces.md` (`list`) and `INV-ERR-3`.

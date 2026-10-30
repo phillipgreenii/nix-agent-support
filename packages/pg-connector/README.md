@@ -544,6 +544,12 @@ pg-connector issue list --query work-items-for-pr --param repo=ZR-Private/ziprec
 - Capability gate: the backend declares `vocabulary.query_params: true`. The umbrella reads capabilities only when
   `--param` is given and refuses with `invalid_argument` when the key is absent, so an older backend (which would
   silently drop `params`) is never sent them. An older umbrella has no `--param` flag, so its caller fails closed.
+- Help and tldr: `pg-connector issue list --help` documents `--param`; the `pg-connector-issue-list` tldr page
+  (`share/tldr/pages.common`, registered by the home module when `programs.tldr` is enabled) shows the per-PR
+  call. Callers SHOULD pin `--backend`, because `--param` fails against a backend without `query_params`.
+- Nix: `phillipgreenii.programs.pg-connector.backends.<name>.queries.<q>` takes `{ expr; params; }`; the module
+  fails evaluation for a query that has both `params` and `watched = true`, and pg-desk never derives such a query
+  as watched (`tests/pg-desk-watch-render.nix`).
 - Version skew: new config with an OLD backend binary makes the old strict query decoder reject the `params` key,
   so EVERY named query on that backend answers `query_not_recognized`. The backend binary and its config MUST ship
   in the same apply. Tests: `pkg/provider/issue/dispatch_params_test.go` (wire skew),

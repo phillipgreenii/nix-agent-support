@@ -478,7 +478,18 @@ func newIssueListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues matching a named query, fanned out across every registered issue backend unless --backend pins one",
-		Args:  cobra.NoArgs,
+		Long: "List issues matching a named query, fanned out across every registered issue backend unless --backend pins one.\n\n" +
+			"A query MAY declare parameters in the backend's config (queries.<name>.params: parameter name to regular expression).\n" +
+			"Supply each value with a repeatable --param name=value; a value MUST fully match its declared regex, and a missing,\n" +
+			"unknown or non-matching param is invalid_argument before any tracker call. Names, expressions and patterns come only\n" +
+			"from the backend's config; a request supplies values only. A parameterized query MUST NOT be watched.\n\n" +
+			"--param needs a backend that declares vocabulary.query_params (the call is refused otherwise), so pin --backend when a\n" +
+			"caller depends on it. The backend binary and its config MUST ship in the same apply: a new config with an old backend\n" +
+			"binary makes every named query on that backend answer query_not_recognized.\n\n" +
+			"The calling tool is recorded in the backend's event log from the PG_CONNECTOR_CALLER environment variable (decider,\n" +
+			"poller, pg-desk or probe; unset records unknown). There is no --caller flag.\n\n" +
+			"Example:\n  pg-connector issue list --backend <backend> --query work-items-for-pr --param repo=<owner/name> --param pr_number=<n>",
+		Args: cobra.NoArgs,
 	}
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered issue backend")
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")

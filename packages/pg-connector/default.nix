@@ -101,6 +101,11 @@ mkGoApp {
     $out/bin/pg-connector completion bash > $out/share/bash-completion/completions/pg-connector
     $out/bin/pg-connector completion zsh > $out/share/zsh/site-functions/_pg-connector
     $out/bin/pg-connector completion fish > $out/share/fish/vendor_completions.d/pg-connector.fish
+
+    # The tldr page, flat under share/tldr/pages.common (the layout pg-desk
+    # ships); the home module registers it through programs.tldr.customPages.
+    mkdir -p $out/share/tldr/pages.common
+    cp ${./share/tldr/pages.common/pg-connector-issue-list.md} $out/share/tldr/pages.common/pg-connector-issue-list.md
   '';
 
   meta = with lib; {

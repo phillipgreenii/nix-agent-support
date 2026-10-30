@@ -179,3 +179,18 @@ func TestIssueList_Param_UnavailableNeverServesTheCacheFallback(t *testing.T) {
 		t.Fatalf("outcome = %+v, want one degraded source and no entities", outcome)
 	}
 }
+
+// TestIssueList_Help_DocumentsParamAndCaller pins the help text the operator
+// reads (bead pg2-eclw3j.4): --param, the capability gate, the same-apply
+// coupling and the env-var-only caller.
+func TestIssueList_Help_DocumentsParamAndCaller(t *testing.T) {
+	stdout, _, code := executePr(t, []string{"issue", "list", "--help"})
+	if code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	for _, want := range []string{"--param", "vocabulary.query_params", "same apply", "PG_CONNECTOR_CALLER", "MUST NOT be watched"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("issue list --help lacks %q:\n%s", want, stdout)
+		}
+	}
+}

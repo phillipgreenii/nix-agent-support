@@ -55,17 +55,19 @@ let
   # instance's backends.<name>.queries; the shorthand forms (a bare string, a
   # list) are unwatched. A backend registered under connector.pr or connector.ci
   # is not an issue backend (its watched queries feed the pr flow), so it
-  # contributes nothing here. Nothing is derived while the connector module is
-  # disabled.
+  # contributes nothing here. A query that declares `params` is never derived
+  # (bead pg2-eclw3j.4): its ledger is keyed by query name alone, and
+  # pg-connector's own assertion fails a config that marks one watched. Nothing
+  # is derived while the connector module is disabled.
   connectorCfg = config.phillipgreenii.programs.pg-connector;
   registeredName = e: if builtins.isString e then e else e.name;
   nonIssueInstances = map registeredName (connectorCfg.connector.pr ++ connectorCfg.connector.ci);
   watchedQueryNames =
     instance:
     lib.attrNames (
-      lib.filterAttrs (_: q: builtins.isAttrs q && (q.watched or false) == true) (
-        (connectorCfg.backends.${instance} or { }).queries or { }
-      )
+      lib.filterAttrs (
+        _: q: builtins.isAttrs q && (q.watched or false) == true && (q.params or { }) == { }
+      ) ((connectorCfg.backends.${instance} or { }).queries or { })
     );
   derivedWatchPairs = lib.optionals connectorCfg.enable (
     lib.concatMap (

@@ -188,4 +188,38 @@ in
       };
     };
   });
+
+  # A parameterized query (bead pg2-eclw3j.4) that is NOT watched evaluates
+  # cleanly and is never derived into the pg-desk watch block.
+  parameterizedUnwatched = summarize (evaluate {
+    connector = {
+      enable = true;
+      connector.issue = [ otherInstance ];
+      backends.${otherInstance}.queries = {
+        watched-demo-query = {
+          expr = "example-expr-a";
+          watched = true;
+        };
+        param-demo-query = {
+          expr = "example-expr {repo}";
+          params.repo = "[a-z]+";
+        };
+      };
+    };
+  });
+
+  # A query that declares params AND watched = true: the pg-connector module's
+  # assertion fails (the backend's own decoder rejects the same combination),
+  # and pg-desk never derives it as watched.
+  parameterizedWatched = summarize (evaluate {
+    connector = {
+      enable = true;
+      connector.issue = [ otherInstance ];
+      backends.${otherInstance}.queries.param-demo-query = {
+        expr = "example-expr {repo}";
+        watched = true;
+        params.repo = "[a-z]+";
+      };
+    };
+  });
 }

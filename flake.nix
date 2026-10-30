@@ -17176,6 +17176,12 @@
                 assert !(lib.hasInfix "watched-demo-query," (lib.head r.mixedWithManual.failedAssertions));
                 assert r.manualDerivedOnly.failedAssertions == [ ];
                 assert r.connectorOff.failedAssertions == [ ];
+                # A parameterized query is never watched (bead pg2-eclw3j.4):
+                # unwatched is fine, watched fails an assertion naming it.
+                assert r.parameterizedUnwatched.failedAssertions == [ ];
+                assert lib.length r.parameterizedWatched.failedAssertions == 1;
+                assert lib.hasInfix "param-demo-query" (lib.head r.parameterizedWatched.failedAssertions);
+                assert lib.hasInfix "MUST NOT be watched" (lib.head r.parameterizedWatched.failedAssertions);
                 pkgs.runCommand "pg-desk-watch-render-ok"
                   {
                     nativeBuildInputs = [
@@ -17198,6 +17204,13 @@
                       and (.watch | has("pr") | not)
                     ' >/dev/null || { echo "mixed: wrong watch block:" >&2; cat ${r.mixed.yaml} >&2; exit 1; }
                     ! grep -qE 'unwatched-demo|watched-demo-pr-query' ${r.mixed.yaml}
+
+                    # A parameterized query is never derived as watched.
+                    j ${r.parameterizedUnwatched.yaml} | jq -e '
+                      .watch.issue.queries == ["watched-demo-query"]
+                    ' >/dev/null || { echo "parameterizedUnwatched: wrong watch block" >&2; exit 1; }
+                    ! grep -q 'param-demo-query' ${r.parameterizedUnwatched.yaml}
+                    ! grep -q 'param-demo-query' ${r.parameterizedWatched.yaml}
 
                     # Exact-watched narrowing: a manual name that is not derived is
                     # rejected by an assertion (naming it and telling the deployment
@@ -17242,7 +17255,24 @@
                 assert r.tldrOn.source == page;
                 assert r.tldrOff.pages == [ ];
                 assert r.deskDisabled.pages == [ ];
+                assert
+                  r.connectorOn.pages == [
+                    "pg-connector-issue-list"
+                    "pg-desk-focus"
+                  ];
+                assert
+                  r.connectorOn.connectorSource
+                  == "${pkgs.pg-connector}/share/tldr/pages.common/pg-connector-issue-list.md";
+                assert r.connectorTldrOff.pages == [ ];
                 pkgs.runCommand "pg-desk-tldr-registration-ok" { } ''
+                  for f in \
+                    ${pkgs.pg-connector}/share/tldr/pages.common/pg-connector-issue-list.md; do
+                    if [ ! -s "$f" ]; then
+                      echo "missing or empty: $f" >&2
+                      exit 1
+                    fi
+                  done
+                  grep -q -- '--param' ${pkgs.pg-connector}/share/tldr/pages.common/pg-connector-issue-list.md
                   for f in \
                     ${pkgs.pg-desk}/share/tldr/pages.common/pg-desk-focus.md \
                     ${pkgs.pg-desk}/share/bash-completion/completions/pg-desk \

@@ -12,6 +12,7 @@ let
     {
       deskEnable,
       tldrEnable,
+      connectorEnable ? false,
     }:
     (lib.evalModules {
       specialArgs = { inherit pkgs lib; };
@@ -58,12 +59,14 @@ let
             enable = deskEnable;
             selfLogin = "example-login";
           };
+          phillipgreenii.programs.pg-connector.enable = connectorEnable;
         }
       ];
     }).config;
 
   summarize = c: {
     pages = builtins.attrNames c.programs.tldr.customPages;
+    connectorSource = c.programs.tldr.customPages.pg-connector-issue-list.source or null;
     platform = c.programs.tldr.customPages.pg-desk-focus.platform or null;
     source = c.programs.tldr.customPages.pg-desk-focus.source or null;
   };
@@ -83,5 +86,17 @@ in
   deskDisabled = summarize (evaluate {
     deskEnable = false;
     tldrEnable = true;
+  });
+  # pg-connector enabled with tldr on (bead pg2-eclw3j.4): its issue-list page
+  # is registered next to pg-desk's; with tldr off nothing is.
+  connectorOn = summarize (evaluate {
+    deskEnable = true;
+    tldrEnable = true;
+    connectorEnable = true;
+  });
+  connectorTldrOff = summarize (evaluate {
+    deskEnable = true;
+    tldrEnable = false;
+    connectorEnable = true;
   });
 }

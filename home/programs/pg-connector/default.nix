@@ -20,6 +20,23 @@ let
   # the full reasoning. A linux host may not import personal at all, so the
   # entry below is only defined where the option exists.
   hasLaunchdRegistry = options.phillipgreenii.programs ? launchdServices;
+  # Same reasoning for home-manager's programs.tldr: read from `options`, and the
+  # custom page is defined only where the option exists.
+  hasTldr = options ? programs && options.programs ? tldr;
+  # `backend.query` for every configured query that declares non-empty `params`
+  # AND is marked watched (bead pg2-eclw3j.4): the backend's own config decoder
+  # rejects the combination, so the module fails it at eval time instead of at
+  # the first call. Only the object form can carry either key.
+  parameterizedWatched = lib.concatLists (
+    lib.mapAttrsToList (
+      backend: block:
+      lib.mapAttrsToList (query: _: "${backend}.${query}") (
+        lib.filterAttrs (
+          _: q: builtins.isAttrs q && (q.watched or false) == true && (q.params or { }) != { }
+        ) (if builtins.isAttrs (block.queries or null) then block.queries else { })
+      )
+    ) cfg.backends
+  );
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
   wantsLaunchd = gh.enable && gh.supervisor == "launchd";
   wantsJiraLaunchd = jr.enable && jr.supervisor == "launchd";
@@ -771,8 +788,16 @@ in
         keys itself.
 
         A configured query (`queries.<name>`) may be a string, a list of
-        strings, or `{ expr = <string or list>; watched = true; }`; the last
-        form marks the query's members watched. The same declaration renders
+        strings, or `{ expr = <string or list>; watched = true; params = { <name> = "<regex>"; }; }`;
+        the object form marks the query's members watched (`watched`) and/or
+        declares the parameters its `{name}` placeholders take (`params`: parameter
+        name to the regular expression a `--param name=value` MUST fully match).
+        A query with `params` MUST NOT be `watched` (an assertion fails the
+        evaluation), and it is run only by `pg-connector issue list --query
+        <name> --param name=value`, which needs a backend that declares
+        `vocabulary.query_params`; the backend binary and this config MUST ship
+        in the same apply (a new config with an old backend binary makes every
+        named query on that backend answer `query_not_recognized`). The same declaration renders
         into the umbrella's block and, with `github.enable`, into the GitHub
         daemon's own config, so a query is declared once. Nothing is watched
         by default.
@@ -1154,103 +1179,114 @@ in
         };
       };
     }
-    (lib.mkIf cfg.enable {
-      # cfg.package (the Tier-1 umbrella binary) dispatches to its Tier-2
-      # capability backends by execing a bare binary name found on $PATH —
-      # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
-      # binary named in the connector.<type> registry
-      # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
-      # linkage between the binaries. All the backends therefore MUST ship
-      # alongside cfg.package whenever this module is enabled, or dispatch to
-      # that capability fails at runtime with "executable file not found in
-      # $PATH". None of the seven has an independent CLI identity of its own
-      # (each package's own meta.description says so — they speak only the
-      # scriptout wire protocol) or a tldr page, so — unlike cfg.package — they
-      # are not exposed as separate mkPackageOption overrides here; they are
-      # read straight from pkgs, matching flake.nix's own package-attr names.
-      # pg-connector-issue-jira joined the other four here (pg2-2j5ac.28.5):
-      # the module previously omitted it entirely, alongside ZR's own
-      # connector.issue registry. pg-connector-thread-slack joins in turn
-      # (bead pg2-2j5ac.40.3): without this, the binary is never actually
-      # installed even though its nix output exists. pg-connector-calendar-
-      # osx-bridge joins in turn (docket pg2-o2dmu): installed
-      # unconditionally, independent of whether connector.calendar is itself
-      # populated -- mirrors every other Tier-2 backend's own
-      # always-installed convention.
-      # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
-      # always-installed, independent of whether connector.alert is itself
-      # populated -- it answers the attention capability too.
-      # pg-connector-mail-osx-bridge joins last (docket pg2-qc5uc): also
-      # always-installed, independent of whether connector.mail is itself
-      # populated -- it answers the attention and search capabilities too.
-      # pg-connector-calendar-task-focus joins (bead pg2-t7me1.4): also
-      # always-installed, independent of whether connector.calendar or
-      # attention.sources name it -- it answers the attention capability too.
-      # The backends live in `backendPackages` (top of this file), which
-      # `lib.backendBinDirs` also reads; add a new backend THERE, not here.
-      home.packages = [ cfg.package ] ++ backendPackages;
+    (lib.mkIf cfg.enable (
+      {
+        # cfg.package (the Tier-1 umbrella binary) dispatches to its Tier-2
+        # capability backends by execing a bare binary name found on $PATH —
+        # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
+        # binary named in the connector.<type> registry
+        # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
+        # linkage between the binaries. All the backends therefore MUST ship
+        # alongside cfg.package whenever this module is enabled, or dispatch to
+        # that capability fails at runtime with "executable file not found in
+        # $PATH". None of the seven has an independent CLI identity of its own
+        # (each package's own meta.description says so — they speak only the
+        # scriptout wire protocol) or a tldr page, so — unlike cfg.package — they
+        # are not exposed as separate mkPackageOption overrides here; they are
+        # read straight from pkgs, matching flake.nix's own package-attr names.
+        # pg-connector-issue-jira joined the other four here (pg2-2j5ac.28.5):
+        # the module previously omitted it entirely, alongside ZR's own
+        # connector.issue registry. pg-connector-thread-slack joins in turn
+        # (bead pg2-2j5ac.40.3): without this, the binary is never actually
+        # installed even though its nix output exists. pg-connector-calendar-
+        # osx-bridge joins in turn (docket pg2-o2dmu): installed
+        # unconditionally, independent of whether connector.calendar is itself
+        # populated -- mirrors every other Tier-2 backend's own
+        # always-installed convention.
+        # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
+        # always-installed, independent of whether connector.alert is itself
+        # populated -- it answers the attention capability too.
+        # pg-connector-mail-osx-bridge joins last (docket pg2-qc5uc): also
+        # always-installed, independent of whether connector.mail is itself
+        # populated -- it answers the attention and search capabilities too.
+        # pg-connector-calendar-task-focus joins (bead pg2-t7me1.4): also
+        # always-installed, independent of whether connector.calendar or
+        # attention.sources name it -- it answers the attention capability too.
+        # The backends live in `backendPackages` (top of this file), which
+        # `lib.backendBinDirs` also reads; add a new backend THERE, not here.
+        home.packages = [ cfg.package ] ++ backendPackages;
 
-      # With github.enable but no supervisor and no allowUnsupervised the binary
-      # and config are installed but the registry is left alone; say why, so a
-      # shared home-manager config that sets enable = true on a Linux host is not
-      # silently a no-op.
-      warnings =
-        lib.optional (gh.enable && !rewriteRegistry) (
-          "phillipgreenii.programs.pg-connector.github.enable is set with supervisor = \"none\" and allowUnsupervised = false: "
-          + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten. The old "
-          + "pg-connector-pr-github and pg-connector-ci-github-actions backends are no longer installed (only their instance names remain as config keys), and nothing on this host "
-          + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
-        )
-        ++ lib.optional (jr.enable && jr.registry.rewrite && !rewriteJira) (
-          "phillipgreenii.programs.pg-connector.jira.registry.rewrite is set with supervisor = \"none\" and allowUnsupervised = false: "
-          + "the registry is NOT rewritten and the old pg-connector-issue-jira backend stays registered, because nothing on this host "
-          + "would keep the daemon running. Set jira.allowUnsupervised = true to rewrite the registry anyway."
-        );
+        # With github.enable but no supervisor and no allowUnsupervised the binary
+        # and config are installed but the registry is left alone; say why, so a
+        # shared home-manager config that sets enable = true on a Linux host is not
+        # silently a no-op.
+        warnings =
+          lib.optional (gh.enable && !rewriteRegistry) (
+            "phillipgreenii.programs.pg-connector.github.enable is set with supervisor = \"none\" and allowUnsupervised = false: "
+            + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten. The old "
+            + "pg-connector-pr-github and pg-connector-ci-github-actions backends are no longer installed (only their instance names remain as config keys), and nothing on this host "
+            + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
+          )
+          ++ lib.optional (jr.enable && jr.registry.rewrite && !rewriteJira) (
+            "phillipgreenii.programs.pg-connector.jira.registry.rewrite is set with supervisor = \"none\" and allowUnsupervised = false: "
+            + "the registry is NOT rewritten and the old pg-connector-issue-jira backend stays registered, because nothing on this host "
+            + "would keep the daemon running. Set jira.allowUnsupervised = true to rewrite the registry anyway."
+          );
 
-      # supervisor = "launchd" is a darwin-only construct: the HM registry the
-      # entry below goes through has no Linux counterpart until pg2-opk5g. Both
-      # failures are assertions (never a silent no-op), checked in this order so
-      # a Linux host is told the platform reason, not the missing-option one.
-      assertions = [
-        {
-          assertion = !wantsLaunchd || isDarwin;
-          message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" is only supported on darwin: launchd does not exist on this host, and the systemd supervisor is planned work (pg2-opk5g). Set github.supervisor = \"none\" (and github.allowUnsupervised = true to rewrite the registry anyway) and start `pg-connector-github serve` by hand.";
-        }
-        {
-          assertion = !(wantsLaunchd && isDarwin) || hasLaunchdRegistry;
-          message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
-        }
-        {
-          assertion = !wantsJiraLaunchd || isDarwin;
-          message = "phillipgreenii.programs.pg-connector.jira.supervisor = \"launchd\" is only supported on darwin: launchd does not exist on this host, and the systemd supervisor is planned work (pg2-opk5g). Set jira.supervisor = \"none\" (and jira.allowUnsupervised = true to rewrite the registry anyway) and start `pg-connector-issue-jira serve` by hand.";
-        }
-        {
-          assertion = !(wantsJiraLaunchd && isDarwin) || hasLaunchdRegistry;
-          message = "phillipgreenii.programs.pg-connector.jira.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
-        }
-        {
-          assertion = !jr.enable || (jr.pjiraPath != null && lib.hasPrefix "/" jr.pjiraPath);
-          message = "phillipgreenii.programs.pg-connector.jira.enable needs jira.pjiraPath, an ABSOLUTE path to pjira: launchd supplies no PATH, so the daemon cannot find it by name.";
-        }
-      ];
+        # supervisor = "launchd" is a darwin-only construct: the HM registry the
+        # entry below goes through has no Linux counterpart until pg2-opk5g. Both
+        # failures are assertions (never a silent no-op), checked in this order so
+        # a Linux host is told the platform reason, not the missing-option one.
+        assertions = [
+          {
+            assertion = !wantsLaunchd || isDarwin;
+            message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" is only supported on darwin: launchd does not exist on this host, and the systemd supervisor is planned work (pg2-opk5g). Set github.supervisor = \"none\" (and github.allowUnsupervised = true to rewrite the registry anyway) and start `pg-connector-github serve` by hand.";
+          }
+          {
+            assertion = !(wantsLaunchd && isDarwin) || hasLaunchdRegistry;
+            message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
+          }
+          {
+            assertion = !wantsJiraLaunchd || isDarwin;
+            message = "phillipgreenii.programs.pg-connector.jira.supervisor = \"launchd\" is only supported on darwin: launchd does not exist on this host, and the systemd supervisor is planned work (pg2-opk5g). Set jira.supervisor = \"none\" (and jira.allowUnsupervised = true to rewrite the registry anyway) and start `pg-connector-issue-jira serve` by hand.";
+          }
+          {
+            assertion = !(wantsJiraLaunchd && isDarwin) || hasLaunchdRegistry;
+            message = "phillipgreenii.programs.pg-connector.jira.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
+          }
+          {
+            assertion = parameterizedWatched == [ ];
+            message = "phillipgreenii.programs.pg-connector.backends: ${lib.concatStringsSep ", " parameterizedWatched} declare both `params` and `watched = true`. A parameterized query MUST NOT be watched: a watched query's ledger and change stream are keyed by query name alone, so a per-call value would mix result sets, and the backend rejects such a config. Remove `watched = true` (or the `params`).";
+          }
+          {
+            assertion = !jr.enable || (jr.pjiraPath != null && lib.hasPrefix "/" jr.pjiraPath);
+            message = "phillipgreenii.programs.pg-connector.jira.enable needs jira.pjiraPath, an ABSOLUTE path to pjira: launchd supplies no PATH, so the daemon cannot find it by name.";
+          }
+        ];
 
-      # No programs.tldr.customPages entry: packages/pg-connector/default.nix's
-      # postInstall generates only a man page + completions — it does not
-      # copy/generate a tldr page — so there is nothing at ${cfg.package}/share/tldr/pages.common/pg-connector.md
-      # to reference yet.
-
-      # The config file (pg2-2j5ac.28.5): the path stays "pg-pr/config.yaml"
-      # deliberately, even though pg-pr is retired (pg2-ijsep) and this module is
-      # now the only writer and pg-connector the only reader. registry.go's
-      # resolution order ($PG_PR_CONFIG -> $XDG_CONFIG_HOME/pg-pr/config.yaml ->
-      # ~/.config/pg-pr/config.yaml) is a deployed contract that pg-desk, pg-decider,
-      # and work-report also rely on, and the env var is exported by
-      # consumer-repo services; renaming the path/env var is a coordinated
-      # multi-package change tracked separately, not part of the pg-pr removal.
-      xdg.configFile."pg-pr/config.yaml".source =
-        (pkgs.formats.yaml { }).generate "pg-pr-config.yaml"
-          renderedConfig;
-    })
+        # The pg-connector-issue-list tldr page ships in the package (postInstall in
+        # packages/pg-connector/default.nix), registered like pg-desk's. A
+        # standalone eval that does not declare home-manager's programs.tldr
+        # (several checks evaluate this module that way) skips it.
+        # The config file (pg2-2j5ac.28.5): the path stays "pg-pr/config.yaml"
+        # deliberately, even though pg-pr is retired (pg2-ijsep) and this module is
+        # now the only writer and pg-connector the only reader. registry.go's
+        # resolution order ($PG_PR_CONFIG -> $XDG_CONFIG_HOME/pg-pr/config.yaml ->
+        # ~/.config/pg-pr/config.yaml) is a deployed contract that pg-desk, pg-decider,
+        # and work-report also rely on, and the env var is exported by
+        # consumer-repo services; renaming the path/env var is a coordinated
+        # multi-package change tracked separately, not part of the pg-pr removal.
+        xdg.configFile."pg-pr/config.yaml".source =
+          (pkgs.formats.yaml { }).generate "pg-pr-config.yaml"
+            renderedConfig;
+      }
+      // lib.optionalAttrs hasTldr {
+        programs.tldr.customPages.pg-connector-issue-list = lib.mkIf config.programs.tldr.enable {
+          platform = "common";
+          source = "${cfg.package}/share/tldr/pages.common/pg-connector-issue-list.md";
+        };
+      }
+    ))
 
     # The daemon's supervisor (docket pg2-z5fax, Phase 2): ONE HM launchd
     # user-agent entry that starts `pg-connector-github --config <path> serve` at

@@ -235,6 +235,25 @@ ledger (`ledger.go`'s hash-based diff) tolerates a full re-fetch correctly eithe
 re-derives added/changed/removed from the returned `entities`/`present_ids` regardless of how much
 of the match set the backend actually skipped via its own cursor.
 
+**Parameterized queries — the `params` field and the `query_params` capability key.** A
+`config.queries` entry in object form MAY carry `params`, an object of parameter name to a regular
+expression, and its expressions then carry `{name}` placeholders. The `list` request's `args` MAY
+carry `params`, an object of parameter name to value, present ONLY when the caller gave values
+(`pg-connector issue list --param name=value`, repeatable); a call without it is byte-identical to
+before. Names, expressions and patterns come from the backend's config only (`INV-STATE-1`,
+`INV-ERR-3`); the request supplies values only. Each value MUST fully match its declared pattern; a
+missing, unknown or non-matching value is `invalid_argument` naming the parameter, before any
+upstream call. Substitution happens after an expression is split into argv, so a value cannot add a
+flag; a `{...}` left in any expression after substitution is refused as `unavailable` (this applies to
+every expression of the backend, parameterized or not). A query that declares `params` MUST NOT be
+`watched`, and its config is rejected otherwise. A backend that supports this declares
+`vocabulary.query_params: true` in its `capabilities` answer; the umbrella reads capabilities only when
+`--param` is given and refuses with `invalid_argument` when the key is absent, because an older
+backend decodes `list` args leniently and would silently run the query without the values. Skew: a new
+config with an older backend binary makes the older strict query decoder reject the `params` key, so
+every named query on that backend answers `query_not_recognized`; the backend binary and its config
+MUST therefore ship in the same apply.
+
 A name the backend's own config does not define answers `query_not_recognized` (`INV-ERR-3`) —
 never a usage error, a crash, or a silently empty result. The umbrella's own fan-out treats that
 answer as "not applicable to this backend" (`disabled` in `sources[]`, excluded from

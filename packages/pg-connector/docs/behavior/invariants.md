@@ -68,7 +68,10 @@ distinction come from the behavior-docs method
   variable, or other local state it reads or resolves itself for that purpose. The umbrella is the
   sole place such a backend's own config is authored and read from disk; a backend that instead
   resolved its own config file would make the SAME backend binary behave differently depending on
-  which host/process invoked it, defeating the umbrella's own single point of configuration. A
+  which host/process invoked it, defeating the umbrella's own single point of configuration.
+  A request MAY supply parameter VALUES for a query (the `list` request's `params`, bead
+  `pg2-eclw3j.3`), but the parameter names, the expressions and the value patterns come from the
+  config alone; a value is data, never policy. A
   **daemon-backed backend** MAY read its per-call policy from its own rendered config file instead
   (ADR 0090): the daemon and its client both start from one config file, rendered from the same
   option that authors the registry entry, so the binary still behaves identically whichever
@@ -367,6 +370,12 @@ comment`, `issue transition`, `issue update`, `issue close` and `pr review submi
   unrecognized query name as a usage error, a crash, or a silently empty result — it MUST answer
   `query_not_recognized` — and MUST NOT ship any built-in query name of its own (`INV-STATE-1`), so
   every name a caller can legitimately supply comes from that backend's own registered config.
+
+  Parameterized queries (bead `pg2-eclw3j.3`) do not loosen this: a query's parameter NAMES, its
+  expressions and its value patterns are declared in the backend's own config only; a request
+  supplies parameter VALUES only (the `list` request's optional `params` member), and each value
+  MUST fully match its declared pattern or the call is `invalid_argument`. A request cannot declare
+  a parameter, add an expression or change a pattern.
 
   The umbrella's own `list` fan-out (`INTF-CLI`) treats one backend answering
   `query_not_recognized` as "not applicable to this backend": skip it, report it in `sources[]` as
