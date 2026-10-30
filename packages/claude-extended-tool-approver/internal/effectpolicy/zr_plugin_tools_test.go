@@ -222,37 +222,3 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 		})
 	}
 }
-
-// TestClaudeProjectsReadIsNotApproved pins pg2-ra5o5s (operator ruling 2026-10-29,
-// pg2-rh805n item 3) for the effect pipeline: a Bash read of the session
-// transcripts under ~/.claude/projects is not approved, while a read of another
-// ~/.claude path (and of the project) still is.
-func TestClaudeProjectsReadIsNotApproved(t *testing.T) {
-	root, _ := fixture(t)
-	home := "/home/testuser"
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", "")
-	reg := cmddesc.DefaultRegistry()
-	run := func(command string) evalcontract.Response {
-		return Evaluate(evalcontract.Request{Command: command, CWD: root, ProjectRoot: root}, reg, DefaultPolicies(), DefaultGraphPolicies())
-	}
-	for _, cmd := range []string{
-		"cat " + home + "/.claude/projects/-p/abc.jsonl",
-		"ls " + home + "/.claude/projects",
-		"ls -la " + home + "/.claude/projects/-p",
-		"rg -l -F sess-1 " + home + "/.claude/projects",
-	} {
-		if resp := run(cmd); resp.Decision == evalcontract.Approve {
-			t.Errorf("%q approved, want not approved (reason: %s)", cmd, resp.Reason)
-		}
-	}
-	for _, cmd := range []string{
-		"cat go.mod",
-		"cat " + home + "/.claude/settings.json",
-		"ls " + home + "/.claude/plans",
-	} {
-		if resp := run(cmd); resp.Decision != evalcontract.Approve {
-			t.Errorf("%q: got %v, want approve (other zones unchanged; reason: %s)", cmd, resp.Decision, resp.Reason)
-		}
-	}
-}

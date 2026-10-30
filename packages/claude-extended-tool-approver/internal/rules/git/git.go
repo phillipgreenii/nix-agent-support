@@ -1762,7 +1762,7 @@ func (r *Rule) chdirSafe(cwd string, chdirs []string, subcmd string, rest []stri
 	}
 	access := r.eval.Evaluate(effectiveDir(cwd, chdirs))
 	if readOnlySubcommands[subcmd] || subcmd == "remote" || subcmd == "symbolic-ref" || isWorktreeList(subcmd, rest) {
-		return r.eval.EvaluateBashRead(effectiveDir(cwd, chdirs)).CanRead()
+		return access.CanRead()
 	}
 	return access.CanWrite()
 }

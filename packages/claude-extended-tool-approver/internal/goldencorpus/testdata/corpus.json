@@ -10869,8 +10869,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "not-approve",
-    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 2). Flipped approve -> not-approve by pg2-ra5o5s (operator ruling 2026-10-29, pg2-rh805n item 3): ~/.claude/projects is no longer a Bash read zone."
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 2)."
   },
   {
     "case": "pb_plugin_git_status_porcelain",

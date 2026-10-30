@@ -104,11 +104,11 @@ func TestPathEvaluator_ClaudeProjects_ReadWrite(t *testing.T) {
 	}
 }
 
-// TestPathEvaluator_ClaudeProjects_NotABashReadZone pins pg2-ra5o5s (operator
+// TestPathEvaluator_ClaudeProjects_IsReported pins pg2-ra5o5s (operator
 // ruling 2026-10-29, pg2-rh805n item 3): ~/.claude/projects stays read-write for
-// the file tools (Evaluate, above) but is no Bash read zone (EvaluateBashRead), and
-// no other ~/.claude or home zone moves.
-func TestPathEvaluator_ClaudeProjects_NotABashReadZone(t *testing.T) {
+// the file tools (Evaluate, above) but is reported by InClaudeProjects (the safe-commands
+// rule uses it for cat and ls only), and no other ~/.claude or home zone is.
+func TestPathEvaluator_ClaudeProjects_IsReported(t *testing.T) {
 	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	for _, p := range []string{
@@ -117,21 +117,21 @@ func TestPathEvaluator_ClaudeProjects_NotABashReadZone(t *testing.T) {
 		filepath.Join(home, ".claude/projects/-some-proj/memory/MEMORY.md"),
 		filepath.Join(home, ".claude/projects/../projects/x.jsonl"),
 	} {
-		if got := pe.EvaluateBashRead(p); got.CanRead() {
-			t.Errorf("EvaluateBashRead(%s) = %v, want not readable", p, got)
+		if !pe.InClaudeProjects(p) {
+			t.Errorf("InClaudeProjects(%s) = false, want true", p)
 		}
 		if got := pe.Evaluate(p); got != PathReadWrite {
 			t.Errorf("Evaluate(%s) = %v, want PathReadWrite (file tools unchanged)", p, got)
 		}
 	}
-	for p, want := range map[string]PathAccess{
-		filepath.Join(home, ".claude/settings.json"):    PathReadOnly,
-		filepath.Join(home, ".claude/plans/p.md"):       PathReadWrite,
-		filepath.Join(home, ".claude/projects-other/x"): PathReadOnly,
-		"/project/foo.go": PathReadWrite,
+	for _, p := range []string{
+		filepath.Join(home, ".claude/settings.json"),
+		filepath.Join(home, ".claude/plans/p.md"),
+		filepath.Join(home, ".claude/projects-other/x"),
+		"/project/foo.go",
 	} {
-		if got := pe.EvaluateBashRead(p); got != want {
-			t.Errorf("EvaluateBashRead(%s) = %v, want %v", p, got, want)
+		if pe.InClaudeProjects(p) {
+			t.Errorf("InClaudeProjects(%s) = true, want false", p)
 		}
 	}
 }

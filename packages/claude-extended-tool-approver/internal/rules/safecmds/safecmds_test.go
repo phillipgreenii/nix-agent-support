@@ -2141,11 +2141,12 @@ func TestSafecmds_Lsof_Approve(t *testing.T) {
 	}
 }
 
-// TestSafecmds_ClaudeProjectsReadIsNotApproved pins pg2-ra5o5s (operator ruling
-// 2026-10-29, pg2-rh805n item 3): cat/ls/grep of the session transcripts under
-// ~/.claude/projects are no longer auto-approved, while the same commands on a
-// project file and on another ~/.claude path still are.
-func TestSafecmds_ClaudeProjectsReadIsNotApproved(t *testing.T) {
+// TestSafecmds_ClaudeProjectsCatLsNotApproved pins pg2-ra5o5s (operator ruling
+// 2026-10-29, pg2-rh805n item 3): only cat and ls of the session transcripts under
+// ~/.claude/projects are no longer auto-approved. Search commands (rg, grep) keep
+// approving, as does every other zone, because a shipped skill instructs
+// `rg -l -F <id> ~/.claude/projects` and the ruling names only cat and ls.
+func TestSafecmds_ClaudeProjectsCatLsNotApproved(t *testing.T) {
 	home := "/home/testuser"
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", "")
@@ -2161,23 +2162,27 @@ func TestSafecmds_ClaudeProjectsReadIsNotApproved(t *testing.T) {
 	}
 	for _, cmd := range []string{
 		"cat " + home + "/.claude/projects/-p/abc.jsonl",
-		"cat " + home + "/.claude/projects/-p/memory/MEMORY.md",
+		"cat -n " + home + "/.claude/projects/-p/memory/MEMORY.md",
 		"ls " + home + "/.claude/projects",
 		"ls -la " + home + "/.claude/projects/-p",
-		"head -n 5 " + home + "/.claude/projects/-p/abc.jsonl",
-		"grep sess " + home + "/.claude/projects/-p/abc.jsonl",
+		"ls ~/.claude/projects",
+		"echo x | xargs cat " + home + "/.claude/projects/-p/abc.jsonl",
 	} {
 		if got := run(cmd); got == hookio.Approve {
-			t.Errorf("%q: approved, want not approved (~/.claude/projects is no Bash read zone)", cmd)
+			t.Errorf("%q: approved, want not approved (cat/ls of ~/.claude/projects)", cmd)
 		}
 	}
 	for _, cmd := range []string{
+		"rg -l -F sess-1 " + home + "/.claude/projects",
+		"rg sess " + home + "/.claude/projects/-p/abc.jsonl",
+		"grep sess " + home + "/.claude/projects/-p/abc.jsonl",
+		"head -n 5 " + home + "/.claude/projects/-p/abc.jsonl",
 		"cat /home/user/project/README.md",
 		"ls " + home + "/.claude/plans",
 		"cat " + home + "/.claude/settings.json",
 	} {
 		if got := run(cmd); got != hookio.Approve {
-			t.Errorf("%q: got %s, want approve (other zones unchanged)", cmd, got)
+			t.Errorf("%q: got %s, want approve (only cat/ls of ~/.claude/projects narrowed)", cmd, got)
 		}
 	}
 }

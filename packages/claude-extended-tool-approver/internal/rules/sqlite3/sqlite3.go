@@ -94,7 +94,7 @@ func (r *Rule) evaluateSqlite3(args []string) (hookio.RuleResult, error) {
 	kind := classifyQuery(query)
 
 	switch {
-	case kind == queryRead && r.pathEval.EvaluateBashRead(dbPath).CanRead():
+	case kind == queryRead && access.CanRead():
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "sqlite3: read query on " + access.String() + " path",

@@ -252,7 +252,7 @@ func evaluateTar(args []string, pe *patheval.PathEvaluator, cwd, module string) 
 	if !filepath.IsAbs(archivePath) {
 		archivePath = filepath.Join(cwd, archivePath)
 	}
-	if !pe.EvaluateBashRead(archivePath).CanRead() {
+	if !pe.Evaluate(archivePath).CanRead() {
 		return refuse("archive references unknown path " + archive)
 	}
 	target := dest

@@ -366,6 +366,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			continue
 		}
 		basename := filepath.Base(pc.Executable)
+		// cat/ls never read ~/.claude/projects (pg2-ra5o5s); see claudeProjectsIssue.
+		if issue := claudeProjectsIssue(basename, pc.Args, pe); issue != "" {
+			return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
+		}
 		// The variables THIS SAME command establishes for leaf i (pg2-yeli3, wiring
 		// the pg2-wq3ki InCommandVars/ExpandInCommand seam into the read guard —
 		// the identical primarycommit.LeafVars overlay envvars' preservesCallerValue
@@ -499,6 +503,9 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				return r.refuse("safe-commands: xargs replacement string appears in the command name (deferred to claude-code)")
 			}
 			innerBase := filepath.Base(innerExec)
+			if issue := claudeProjectsIssue(innerBase, innerArgs, pe); issue != "" {
+				return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
+			}
 			// sh/bash -c '<script>': delegate the SOLE -c script argument through
 			// the I13 structural entry point (pg2-1zrup).
 			//
@@ -1209,6 +1216,30 @@ func argsHaveDynamicExpansion(args []string) bool {
 	return false
 }
 
+// claudeProjectsIssue returns a REASON FRAGMENT when program is cat or ls and one
+// of its path operands is ~/.claude/projects or anything under it (also after
+// symlink resolution), and "" otherwise. pg2-ra5o5s, operator ruling 2026-10-29 on
+// pg2-rh805n item 3: the session transcripts there can hold secrets from earlier
+// sessions, so cat and ls of them are deferred, in every session. The ruling names
+// only cat and ls; rg, grep, head, tail, find and every other read command are
+// deliberately NOT narrowed (a shipped skill instructs `rg -l -F <id>
+// ~/.claude/projects`). Read/Grep/Glob and Bash writes are unchanged.
+func claudeProjectsIssue(program string, args []string, pe *patheval.PathEvaluator) string {
+	if program != "cat" && program != "ls" {
+		return ""
+	}
+	for _, a := range args {
+		cand, ok, malformed := pathCandidate(a)
+		if !ok || malformed {
+			continue
+		}
+		if looksLikePath(cand) && pe.InClaudeProjects(cand) {
+			return "reads " + cand + " under ~/.claude/projects, which holds session transcripts"
+		}
+	}
+	return ""
+}
+
 // browsingPathIssue returns a REASON FRAGMENT describing the first argument a
 // browsingCmds (or "test") invocation cannot statically clear, or "" when
 // every argument is clear. See browsingCmds' doc comment for the pg2-4k7yd
@@ -1242,7 +1273,7 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 			return "has malformed glued quoting " + cand
 		}
 		if looksLikePath(cand) {
-			if !pe.EvaluateBashRead(cand).CanRead() && !isProcSafeReadPath(cand) {
+			if !pe.Evaluate(cand).CanRead() && !isProcSafeReadPath(cand) {
 				return "references unknown path " + cand
 			}
 		}
@@ -1424,7 +1455,7 @@ func findPathIssue(args []string, pe *patheval.PathEvaluator) string {
 		if !looksLikePath(cand) {
 			continue
 		}
-		if pe.EvaluateBashRead(cand).CanRead() {
+		if pe.Evaluate(cand).CanRead() {
 			continue
 		}
 		if projectRoot != "" {
@@ -1622,7 +1653,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 				// one candidate here, so this is behaviour-preserving for it.
 				for _, resolved := range resolvedList {
 					if looksLikePath(resolved) {
-						if !pe.EvaluateBashRead(resolved).CanRead() {
+						if !pe.Evaluate(resolved).CanRead() {
 							return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
 						}
 					}
@@ -1642,7 +1673,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 				// (patheval.PathEvaluator.ResolvePath's contract), so it is judged
 				// by the same zone check a resolved literal gets above, minus the
 				// looksLikePath gate that text does not need.
-				if !pe.EvaluateBashRead(resolved).CanRead() {
+				if !pe.Evaluate(resolved).CanRead() {
 					return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
 				}
 				continue
@@ -1650,7 +1681,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 			return "has a dynamically-expanded path arg " + cand, hookio.RefusalCategoryDynamicPathRead
 		}
 		if looksLikePath(cand) {
-			if !pe.EvaluateBashRead(cand).CanRead() && !isProcSafeReadPath(cand) {
+			if !pe.Evaluate(cand).CanRead() && !isProcSafeReadPath(cand) {
 				return "references unknown path " + cand, hookio.RefusalCategoryUnspecified
 			}
 		}
@@ -2075,7 +2106,7 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 			if cand == targetDir {
 				continue
 			}
-			if looksLikePath(cand) && !pe.EvaluateBashRead(cand).CanRead() {
+			if looksLikePath(cand) && !pe.Evaluate(cand).CanRead() {
 				return hookio.Refused(module, "safe-commands: cp source references non-readable path "+cand+" (deferred to claude-code)")
 			}
 		}
@@ -2116,7 +2147,7 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 	}
 
 	for _, src := range pathArgs[:len(pathArgs)-1] {
-		if !pe.EvaluateBashRead(src).CanRead() {
+		if !pe.Evaluate(src).CanRead() {
 			return hookio.Refused(module, "safe-commands: cp source references non-readable path "+src+" (deferred to claude-code)")
 		}
 	}
@@ -2437,7 +2468,7 @@ func evaluateUnzip(args []string, pe *patheval.PathEvaluator, cwd string, module
 
 	// Validate archive path is readable
 	if archivePath != "" && looksLikePath(archivePath) {
-		if !pe.EvaluateBashRead(archivePath).CanRead() {
+		if !pe.Evaluate(archivePath).CanRead() {
 			return hookio.Refused(module, "safe-commands: unzip archive references unknown path "+archivePath+" (deferred to claude-code)")
 		}
 	}

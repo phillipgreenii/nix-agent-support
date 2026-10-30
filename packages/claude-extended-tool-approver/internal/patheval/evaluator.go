@@ -407,25 +407,16 @@ func (pe *PathEvaluator) Evaluate(path string) PathAccess {
 	return pe.classify(path)
 }
 
-// EvaluateBashRead is Evaluate for a path a BASH command would READ (cat, ls, rg,
-// a `<` redirection, ...). It differs from Evaluate in exactly one zone: the
-// session transcripts and memory under ~/.claude/projects stay read-write for the
-// file tools (Read/Write/Edit/Grep/Glob, pathsafety) but are NOT a Bash read zone
-// — they can hold secrets from earlier sessions (operator ruling 2026-10-29 on
-// pg2-rh805n item 3, bead pg2-ra5o5s). Such a path reports PathUnknown, so a Bash
-// read of it is deferred rather than auto-approved, in every session. Writes are
-// untouched: callers that gate a WRITE keep using Evaluate.
-func (pe *PathEvaluator) EvaluateBashRead(path string) PathAccess {
-	access := pe.Evaluate(path)
-	if access.CanRead() && pe.inClaudeProjects(path) {
-		return PathUnknown
-	}
-	return access
-}
-
-// inClaudeProjects reports whether path (as written, or after symlink
-// resolution) is ~/.claude/projects or anything under it.
-func (pe *PathEvaluator) inClaudeProjects(path string) bool {
+// InClaudeProjects reports whether path (as written, or after symlink
+// resolution) is ~/.claude/projects or anything under it. ~/.claude/projects
+// stays read-write for the file tools (Evaluate: Read/Write/Edit/Grep/Glob), but
+// the transcripts under it can hold secrets from earlier sessions, so the
+// safe-commands rule refuses `cat` and `ls` of it in every session (operator
+// ruling 2026-10-29 on pg2-rh805n item 3, bead pg2-ra5o5s). The ruling names only
+// cat and ls: search commands (rg, grep) keep reading it, because a shipped skill
+// instructs `rg -l -F <id> ~/.claude/projects`. Evaluate is unchanged; the
+// per-command narrowing lives with the caller.
+func (pe *PathEvaluator) InClaudeProjects(path string) bool {
 	if pe.home == "" || pe.inContainer {
 		return false
 	}

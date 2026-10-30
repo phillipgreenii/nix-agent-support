@@ -1930,7 +1930,7 @@ func (e *Engine) evaluateRedirections(redirs []hooktypes.Redirection, override *
 		// (tc-xs8x added two) lands on the write branch by default rather than
 		// silently becoming read-only here.
 		if !r.Kind.IsWrite() {
-			if !pe.EvaluateBashRead(path).CanRead() {
+			if !access.CanRead() {
 				return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: stdin from non-readable path " + path, Module: "engine"}
 			}
 			continue
