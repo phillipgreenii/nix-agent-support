@@ -34,6 +34,9 @@ type Config struct {
 	MaxLineBytes int
 	// ChunkBytes bounds the bytes parsed per transaction (tests shrink it).
 	ChunkBytes int
+	// FeedRetention is feed.retention: the feed marks older than it (bar the
+	// newest) are pruned. 14 days when zero.
+	FeedRetention time.Duration
 }
 
 // Parser parses copies into records.
@@ -58,6 +61,9 @@ func New(cfg Config) *Parser {
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = clock.Real{}
+	}
+	if cfg.FeedRetention <= 0 {
+		cfg.FeedRetention = 14 * 24 * time.Hour
 	}
 	if cfg.Obs == nil {
 		cfg.Obs = obs.New(nil)
@@ -114,7 +120,16 @@ func (p *Parser) ParseAll() error {
 	}
 	var first error
 	for _, f := range files {
-		if !p.HasSource(f.Source) || f.Mode != "append" {
+		if !p.HasSource(f.Source) {
+			continue
+		}
+		if f.Mode == "snapshot" {
+			if _, err := p.ParseFile(f.ID); err != nil && first == nil {
+				first = err
+			}
+			continue
+		}
+		if f.Mode != "append" {
 			continue
 		}
 		if err := p.reparseStale(f); err != nil && first == nil {
@@ -162,6 +177,12 @@ func (p *Parser) Reparse(sourceName string, files ...int64) error {
 		if f.Source != sourceName || (len(want) > 0 && !want[f.ID]) {
 			continue
 		}
+		if f.Mode == "snapshot" {
+			if err := p.reparseSnapshots(f); err != nil {
+				return err
+			}
+			continue
+		}
 		gens, err := p.cfg.Store.Generations(f.ID)
 		if err != nil {
 			return err
@@ -185,6 +206,9 @@ func (p *Parser) ParseFile(file int64) (int, error) {
 		return 0, err
 	}
 	src, ok := p.bySrc[f.Source]
+	if ok && f.Mode == "snapshot" {
+		return p.parseSnapshots(f, src, false)
+	}
 	if !ok || f.Mode != "append" {
 		return 0, nil
 	}
@@ -271,7 +295,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 	if !ok {
 		return 0, nil
 	}
-	fh, err := os.Open(p.cfg.Store.CopyPath(f.ID, g.Gen))
+	fh, err := p.cfg.Store.OpenPointer(f.ID, g.Gen)
 	if err != nil {
 		return 0, err
 	}
@@ -318,8 +342,10 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 			f.ID, g.Gen, src.Version()); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`)
-		return err
+		if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
+			return err
+		}
+		return p.mark(tx)
 	}
 	// A normal parse commits a bounded run of lines per transaction; a re-parse
 	// is one transaction so the new records appear together.
@@ -331,6 +357,9 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		one := func(rawTx *sql.Tx) error {
 			tx := newPS(rawTx)
 			defer tx.Close()
+			if err := p.genReset(tx, f, src, g, start); err != nil {
+				return err
+			}
 			n, err := p.chunk(tx, fh, f, src, caps, g, commits, start, end, &count)
 			if err != nil {
 				return err
@@ -343,8 +372,10 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 				f.ID, g.Gen, src.Version()); err != nil {
 				return err
 			}
-			_, err = tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`)
-			return err
+			if _, err = tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
+				return err
+			}
+			return p.mark(tx)
 		}
 		if err := p.cfg.Store.WithWrite("parse.before-commit", one); err != nil {
 			return count, err
@@ -690,7 +721,7 @@ func (p *Parser) Value(file int64, gen int, off int64, ln int, srcName string, i
 	if !ok {
 		return "", fmt.Errorf("file %d does not match %s", file, srcName)
 	}
-	fh, err := os.Open(p.cfg.Store.CopyPath(file, gen))
+	fh, err := p.cfg.Store.OpenPointer(file, gen)
 	if err != nil {
 		return "", err
 	}
@@ -718,7 +749,7 @@ func (p *Parser) Value(file int64, gen int, off int64, ln int, srcName string, i
 
 // Line returns the raw bytes of a stored line from the copy.
 func (p *Parser) Line(file int64, gen int, off int64, ln int) ([]byte, error) {
-	fh, err := os.Open(p.cfg.Store.CopyPath(file, gen))
+	fh, err := p.cfg.Store.OpenPointer(file, gen)
 	if err != nil {
 		return nil, err
 	}

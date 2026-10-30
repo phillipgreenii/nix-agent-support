@@ -35,7 +35,7 @@ type app struct {
 // laterSubcommands exist in the design and arrive with later phases.
 var laterSubcommands = map[string]string{
 	"conversations": "phase 4", "processes": "phase 4",
-	"feed": "phase 3", "raw": "phase 3", "snapshot": "phase 3", "held": "phase 6", "where": "phase 6",
+	"held": "phase 6", "where": "phase 6",
 	"extract": "phase 6", "remove": "phase 6", "doctor": "phase 6",
 }
 
@@ -61,6 +61,14 @@ func (a *app) run(args []string) int {
 		return a.request(args[0], args[1:])
 	case "find":
 		return a.find(args[1:])
+	case "feed":
+		return a.feed(args[1:])
+	case "snapshot":
+		return a.snapshot(args[1:])
+	case "raw":
+		return a.raw(args[1:])
+	case "rebuild":
+		return a.rebuild(args[1:])
 	}
 	if phase, ok := laterSubcommands[args[0]]; ok {
 		return a.emitError(false, wire.ErrUsage, fmt.Sprintf("%s is not available in this build (it arrives in %s)", args[0], phase))

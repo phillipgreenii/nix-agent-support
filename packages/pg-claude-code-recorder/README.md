@@ -1,9 +1,8 @@
 # pg-claude-code-recorder
 
-Scaffold of the recorder for Claude Code state (docket `pg2-v77tsx`; design
-`docs/superpowers/specs/2026-10-30-pg-claude-code-recorder-design.md`). This
-package carries no recorder logic yet: it builds, has its checks and guards, and
-holds the conventions later packets land into.
+The recorder for Claude Code state (docket `pg2-v77tsx`; design
+`docs/superpowers/specs/2026-10-30-pg-claude-code-recorder-design.md`). The sections below
+follow the phases as they landed.
 
 ## Packaging
 
@@ -156,3 +155,65 @@ A substring query under three characters returns no hits and `too_short: true`. 
 `parse.maxLineBytes` bounds a line (longer lines are bad lines). The soak check
 (`nix build .#checks.<system>.pg-claude-code-recorder-soak -L`, on demand) fails at 1.5 times the
 committed baseline.
+
+## Remaining sources, links, the change feed and the Go client (phase 3)
+
+Six more sources are compiled in: `claude-subagent-meta` (`subagents/agent-*.meta.json`, linked to its
+`tool_use_id`), `claude-tool-result-body` (`tool-results/*`, linked to its `tool_result` by
+`tool_use_id` for `toolu_*` names and by the saved-to path otherwise), `session-registry`
+(`sessions/<pid>.json`, one record per version keyed by `registry_key` = pid, `procStart` and content
+hash, plus a `registry_deleted` record when the file vanishes), `claude-status` (append),
+`session-mode` and `session-compaction`. A snapshot source writes one record per stored version
+(generation = version); the default query shows the newest version, `old_generations` all of them.
+`query` follows `parent`, `result`, `call`, `body`, `subagents`, `status`, `mode`, `registry` and
+`compaction`.
+
+Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_version`,
+`schema_version`, `epoch`, `capabilities`, `caught_up`, `degraded`), `feed`, `snapshot` and `raw`.
+
+- **Cursor** `<epoch>:<sequence>`, opaque. A record's sequence is twice its id; a reset (a re-parse or
+  a new generation) is its own entry just before the records it brings. `feed` takes `after`, `where`,
+  `project`, `wait_ms` (at most 60,000; `wait.max`) and `limit` (default 1,000, at most 10,000) and
+  answers `entries`, `next_cursor` (advanced even when nothing matched), `more` and `timed_out`.
+  A reset is delivered to every feed whose filter could match any record of that file (judged from the
+  file's source and record types).
+- **cursor_expired** (HTTP 410, exit 7) carries `cursor`, the head to resync from: the cursor is from
+  an old epoch (a rebuild bumps it), older than `feed.retention` (default 14 days of commit time, kept
+  as `feed_marks` rows written with each parse commit), or beyond the head. Resync with `snapshot`:
+  pages of the state at a cursor (pass the first answer's `cursor` as `at` and `next_page` as `page`),
+  then tail `feed` after that cursor. Resets are never pruned, so the feed after a snapshot always
+  carries the remaining ones.
+- **Waiting**: the daemon admits `wait.maxWaiters` (default 256) waiters, then answers `busy` (429);
+  a waiter wakes on a parse commit and answers only when a committed record matches its filter.
+  `serve` closes waiting connections on shutdown, so a client reconnects with the same cursor.
+- **raw** answers a record (`{"record":{file,gen,offset,item}}`) or a file range. Every reader of
+  stored bytes (raw, snippets, substring verification, field reads) goes through
+  `Store.OpenPointer`, one abstraction over a copy, a snapshot version and an archive.
+- **Rebuild**: `serve` rebuilds `index.db` itself when it is missing (journal first, then a re-parse);
+  `rebuild` (daemon stopped) or `serve --rebuild` forces it and sets the old index aside as
+  `index.db.pre-rebuild`. A rebuild bumps the epoch, counts `index_rebuilds_total` and logs
+  `index_rebuilt`. A binary that meets a newer `schema_version` refuses to start and says so;
+  `--rebuild` is the way past it. `feed_waiters` is the gauge of waiters in progress.
+
+```sh
+pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'
+pg-claude-code-recorder feed --after 3:918431 --wait 30s --where '{"field":"type","eq":"assistant"}'
+pg-claude-code-recorder raw --record f_5:1:0:-1
+```
+
+### The Go client
+
+`client` (outside `internal/`, so other workspace modules import it) has `Dial(ctx, Options)`,
+`Hello`, `Query`, `Search`, `Feed(ctx, filter, after)` (an iterator: it applies a reset before
+de-duplicating by record id, backs off on busy and unavailable from 1 s doubling to 30 s, and
+reconnects with the same cursor after a daemon restart; persist `Cursor()`), `Snapshot` and `Raw`,
+and the typed errors `ErrDown`, `ErrBehind`, `ErrBusy`, `ErrUnavailable`, `ErrBadRequest`,
+`ErrNotFound` and `ErrCursorExpired` (match with `errors.Is`; `*client.Error.Cursor` is the resync
+cursor). The socket is `PG_CLAUDE_CODE_RECORDER_SOCKET`, else `$XDG_STATE_HOME/pg-claude-code-recorder/recorder.sock`;
+connecting has a timeout. A higher `protocol_version` than the client knows is refused (`ErrProtocol`).
+`client/clienttest` starts a real daemon in process over throwaway directories for tests of packages
+that use the client. Phase 4 adds `Conversation`, `Process`, `EndLabel` and `Crashed`.
+
+The wire-contract suite is `client/contract_test.go` (in process, over the socket); the
+write-to-feed latency test is `client/latency_integration_test.go` (tag `integration`, logs its
+measurement, enforces a 3 s bound).

@@ -43,6 +43,20 @@ type Options struct {
 	Obs *obs.Obs // events and metrics (discarding when nil)
 	// ReplayOnly opens for comparison: it never appends an epoch record.
 	ReplayOnly bool
+	// Rebuild forces a rebuild of index.db from the journal: the existing
+	// database is set aside (index.db.pre-rebuild) and the feed epoch bumps.
+	// It is also the way past a database whose schema_version is newer than
+	// this binary knows.
+	Rebuild bool
+}
+
+// SchemaNewerError is returned by Open when index.db carries a newer
+// schema_version than this binary knows.
+type SchemaNewerError struct{ Found, Known int }
+
+func (e *SchemaNewerError) Error() string {
+	return fmt.Sprintf("index.db schema_version %d is newer than the %d this binary knows; "+
+		"upgrade the binary, or start with --rebuild to rebuild the index from the journal", e.Found, e.Known)
 }
 
 // Store is an open state directory.
@@ -60,6 +74,7 @@ type Store struct {
 	nextFile int64
 	lastSeq  int64
 	hooks    []func()
+	wrHooks  []func()
 
 	// TornBytes is the size of the torn journal tail dropped on open.
 	TornBytes int64
@@ -117,6 +132,15 @@ func Open(dir string, opt Options) (*Store, error) {
 	dbPath := filepath.Join(dir, DBName)
 	_, statErr := os.Stat(dbPath)
 	dbExisted := statErr == nil
+	if opt.Rebuild && dbExisted {
+		for _, suf := range []string{"-wal", "-shm"} {
+			_ = os.Remove(dbPath + suf)
+		}
+		if err := os.Rename(dbPath, dbPath+".pre-rebuild"); err != nil {
+			return nil, err
+		}
+		dbExisted = false
+	}
 	if err := s.openDB(dbPath); err != nil {
 		if !dbExisted {
 			return nil, err
@@ -135,15 +159,25 @@ func Open(dir string, opt Options) (*Store, error) {
 		}
 	}
 	s.lastSeq = s.metaInt("last_seq")
+	if dbExisted && s.lastSeq == 0 && len(recs) > 0 {
+		// A database that applied nothing of a non-empty journal is a rebuild
+		// that was interrupted before it committed: it is still a rebuild (the
+		// epoch must bump so clients resync).
+		dbExisted = false
+	}
 	if v := s.metaInt("schema_version"); v > SchemaVersion {
 		_ = s.Close()
-		return nil, fmt.Errorf("store: index.db schema_version %d is newer than %d", v, SchemaVersion)
+		return nil, &SchemaNewerError{Found: int(v), Known: SchemaVersion}
 	}
 	if err := s.replay(recs); err != nil {
 		_ = s.Close()
 		return nil, err
 	}
 	s.Rebuilt = !dbExisted && len(recs) > 0
+	if s.Rebuilt {
+		s.obs.Reg.Add(obs.MIndexRebuilds, nil, 1)
+		s.obs.Event(obs.EvIndexRebuilt, "journal_records", strconv.Itoa(len(recs)), "forced", strconv.FormatBool(opt.Rebuild))
+	}
 	jf, err := s.fs.OpenFile(jpath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		_ = s.Close()
@@ -226,6 +260,14 @@ func (s *Store) SchemaVersion() int { return int(s.metaInt("schema_version")) }
 func (s *Store) OnCommit(fn func()) {
 	s.mu.Lock()
 	s.hooks = append(s.hooks, fn)
+	s.mu.Unlock()
+}
+
+// OnWrite registers a hook called after each successful WithWrite commit (the
+// parser's record commits). A hook runs under the write lock and MUST NOT block.
+func (s *Store) OnWrite(fn func()) {
+	s.mu.Lock()
+	s.wrHooks = append(s.wrHooks, fn)
 	s.mu.Unlock()
 }
 
@@ -319,6 +361,7 @@ func (s *Store) replay(recs []Rec) error {
 	if len(pending) == 0 {
 		return nil
 	}
+	faults.At("store.replay")
 	return s.applyAll(pending)
 }
 

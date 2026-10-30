@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
@@ -26,15 +27,20 @@ type Kit struct {
 	Obs    *obs.Obs
 	Parser *parser.Parser
 	Engine *query.Engine
-	clock  int64
-	sizes  map[int64]int64
-	gens   map[int64]int
+	// Clk is the parser's clock (the real one unless NewWithClock was used).
+	Clk   clock.Clock
+	clock int64
+	sizes map[int64]int64
+	gens  map[int64]int
 }
 
 // New returns a Kit over a fresh state directory.
-func New(t *testing.T) *Kit {
+func New(t *testing.T) *Kit { return NewWithClock(t, nil) }
+
+// NewWithClock is New with the parser's clock (feed retention reads it).
+func NewWithClock(t *testing.T, clk clock.Clock) *Kit {
 	t.Helper()
-	k := &Kit{T: t, Dir: t.TempDir(), sizes: map[int64]int64{}, gens: map[int64]int{}}
+	k := &Kit{T: t, Dir: t.TempDir(), Clk: clk, sizes: map[int64]int64{}, gens: map[int64]int{}}
 	k.open()
 	t.Cleanup(func() { _ = k.Store.Close() })
 	return k
@@ -49,7 +55,7 @@ func (k *Kit) open() {
 	}
 	k.Store = st
 	srcs := sources.All()
-	k.Parser = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: ClaudeDir, Obs: k.Obs})
+	k.Parser = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: ClaudeDir, Obs: k.Obs, Clock: k.Clk})
 	k.Engine = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), Res: k.Parser}
 }
 

@@ -381,3 +381,37 @@ func unknown(v any, t reflect.Type, path string, out *[]string) {
 
 // Itoa is strconv.Itoa for callers that name captures.
 func Itoa(i int) string { return strconv.Itoa(i) }
+
+// Tombstoner is implemented by a snapshot source whose deleted file is itself
+// a fact (the session registry): Tombstone returns the deletion record, built
+// from the file's last stored version last (nil when none) and the deletion
+// time. A source that does not implement it records no deletion.
+type Tombstoner interface {
+	Tombstone(c Captures, last []byte, at time.Time) (Record, bool)
+}
+
+// ItemTombstone is the Item of a deletion record.
+const ItemTombstone = -2
+
+// JSONRecord is the shared tail of a JSON source's Parse: it decodes raw into
+// v (a pointer to the source's struct), extracts the indexed fields and the
+// unknown keys, and returns the one record of type typ.
+func JSONRecord(typ, session string, raw []byte, v any) (Record, error) {
+	raw = bytes.TrimSpace(raw)
+	if err := json.Unmarshal(raw, v); err != nil {
+		return Record{}, err
+	}
+	rec := Record{Type: typ, Item: ItemLine, Session: session}
+	rec.Fields = Extract(v, "")
+	rec.Unknown = UnknownKeys(raw, reflect.TypeOf(v).Elem(), "")
+	return rec, nil
+}
+
+// Str returns a keyword-style field for a capture value (empty values yield no
+// field).
+func Str(name string, kind Kind, s string) []Field {
+	if s == "" {
+		return nil
+	}
+	return []Field{{Name: name, Kind: kind, S: s}}
+}

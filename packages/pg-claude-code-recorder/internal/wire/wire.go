@@ -89,6 +89,8 @@ func HTTPStatus(name string) int {
 type Error struct {
 	Name    string `json:"error"`
 	Message string `json:"message"`
+	// Cursor is the cursor to resync from, set on cursor_expired.
+	Cursor string `json:"cursor,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Name + ": " + e.Message }
@@ -204,4 +206,16 @@ type UnknownKey struct {
 type UnparsedKind struct {
 	Kind  string `json:"kind"`
 	Files int    `json:"files"`
+}
+
+// Hello is the GET /v1/hello answer: every client starts with it.
+type Hello struct {
+	Service         string   `json:"service"`
+	Version         string   `json:"version"`
+	ProtocolVersion int      `json:"protocol_version"`
+	SchemaVersion   int      `json:"schema_version"`
+	Epoch           int      `json:"epoch"`
+	Capabilities    []string `json:"capabilities"`
+	CaughtUp        bool     `json:"caught_up"`
+	Degraded        bool     `json:"degraded"`
 }

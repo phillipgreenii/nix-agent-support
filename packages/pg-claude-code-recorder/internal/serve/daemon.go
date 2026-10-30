@@ -20,6 +20,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/exporter"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
@@ -41,6 +42,9 @@ type Options struct {
 	NoEvents bool
 	// Metrics, when non-empty, overrides Config.MetricsAddr.
 	MetricsAddr string
+	// Rebuild forces index.db to be rebuilt from the journal (serve --rebuild,
+	// the rebuild command); it is also the way past a newer schema_version.
+	Rebuild bool
 }
 
 // Daemon is the composed recorder.
@@ -55,6 +59,7 @@ type Daemon struct {
 	ckpt  *fileCheckpoint
 	prs   *parser.Parser
 	qe    *query.Engine
+	fe    *feed.Engine
 	srv   *server.Server
 	exp   *exporter.Server
 	clock clock.Clock
@@ -92,7 +97,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	st, err := store.Open(cfg.StateDir, store.Options{Obs: o})
+	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -108,8 +113,13 @@ func Open(opt Options) (*Daemon, error) {
 		return nil, fmt.Errorf("recover copies: %w", err)
 	}
 	srcs := sources.All()
-	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes})
+	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes, FeedRetention: cfg.FeedRetention})
 	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), Res: d.prs, Behind: func() bool { return !d.backfillDone.Load() }}
+	d.fe = &feed.Engine{
+		Q: d.qe, Store: st, Clock: opt.Clock, Obs: o, Retention: cfg.FeedRetention, WaitMax: cfg.WaitMax,
+		MaxWaiters: cfg.WaitMaxWaiter, Behind: d.qe.Behind,
+	}
+	st.OnWrite(d.fe.Notify)
 	d.ckpt = newFileCheckpoint(cfg.StateDir)
 	d.w, err = watcher.New(watcher.Config{
 		Roots:         cfg.Roots(),
@@ -196,6 +206,21 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 	if err := d.cp.SweepMissing(found); err != nil {
 		d.obs.Log.Warn("sweep_missing_failed", "err", err.Error())
 	}
+	d.notifyDeletedSnapshots()
+}
+
+// notifyDeletedSnapshots asks the parser to look at snapshot files that a sweep
+// found deleted, so their deletion records are written.
+func (d *Daemon) notifyDeletedSnapshots() {
+	files, err := d.st.AllFiles()
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		if f.Mode == "snapshot" && f.State == "deleted" && d.prs.HasSource(f.Source) {
+			d.prs.Notify(f.ID)
+		}
+	}
 }
 
 func (d *Daemon) backfill(files []watcher.FileInfo) {
@@ -230,6 +255,9 @@ func (d *Daemon) Start() error {
 	d.srv.Register("coverage", server.KindQuery, d.opCoverage)
 	d.srv.Register("query", server.KindQuery, d.opQuery)
 	d.srv.Register("search", server.KindQuery, d.opSearch)
+	d.srv.Register("feed", server.KindFeed, d.fe.Feed)
+	d.srv.Register("snapshot", server.KindQuery, d.fe.Snapshot)
+	d.srv.Register("raw", server.KindQuery, d.fe.Raw)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -340,7 +368,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 func (d *Daemon) hello() any {
-	return map[string]any{"service": serviceName, "version": d.opt.Version, "protocol_version": wire.ProtocolVersion}
+	return wire.Hello{
+		Service: serviceName, Version: d.opt.Version, ProtocolVersion: wire.ProtocolVersion,
+		SchemaVersion: d.st.SchemaVersion(), Epoch: d.st.Epoch(), Capabilities: d.srv.Operations(),
+		CaughtUp: d.backfillDone.Load(), Degraded: !d.backfillDone.Load(),
+	}
 }
 
 // realPath resolves symlinks in p when it exists, else returns p unchanged.

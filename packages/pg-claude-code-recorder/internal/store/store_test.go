@@ -1,12 +1,15 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
 func open(t *testing.T, dir string) *Store {
@@ -250,5 +253,150 @@ func TestSingleWriteConnection(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	if got := s.wdb.Stats().MaxOpenConnections; got != 1 {
 		t.Fatalf("write connection pool %d", got)
+	}
+}
+
+func TestNewerSchemaSaysHowToProceedAndRebuildIsThatWay(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := seed(t, s)
+	epoch := s.Epoch()
+	if _, err := s.wdb.Exec(`UPDATE meta SET value='99' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	_, err := Open(dir, Options{})
+	var ne *SchemaNewerError
+	if !errors.As(err, &ne) || ne.Found != 99 || ne.Known != SchemaVersion || !strings.Contains(err.Error(), "--rebuild") {
+		t.Fatalf("newer schema: %v", err)
+	}
+	o := obs.New(nil)
+	s2, err := Open(dir, Options{Rebuild: true, Obs: o})
+	if err != nil {
+		t.Fatalf("--rebuild is the way past it: %v", err)
+	}
+	defer func() { _ = s2.Close() }()
+	if s2.SchemaVersion() != SchemaVersion || s2.Epoch() != epoch+1 || !s2.Rebuilt {
+		t.Fatalf("schema %d epoch %d rebuilt %v", s2.SchemaVersion(), s2.Epoch(), s2.Rebuilt)
+	}
+	if _, err := s2.File(id); err != nil {
+		t.Fatalf("the journal's observations came back: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, DBName+".pre-rebuild")); err != nil {
+		t.Fatalf("the old index is kept aside: %v", err)
+	}
+	if v, _ := o.Reg.Counter(obs.MIndexRebuilds, nil); v != 1 {
+		t.Fatalf("rebuild counter %v", v)
+	}
+	if ev := o.EventsNamed(obs.EvIndexRebuilt); len(ev) != 1 || ev[0].Attrs["forced"] != "true" {
+		t.Fatalf("index_rebuilt events %+v", ev)
+	}
+}
+
+func TestAForcedRebuildBumpsTheEpochAndKeepsEveryObservation(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	seed(t, s)
+	want, _ := s.Dump()
+	epoch := s.Epoch()
+	_ = s.Close()
+	s2, err := Open(dir, Options{Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	got, _ := s2.Dump()
+	if s2.Epoch() != epoch+1 || strip(got) != strip(want) {
+		t.Fatalf("epoch %d (was %d); observations differ:\n%s\n---\n%s", s2.Epoch(), epoch, got, want)
+	}
+	// The observations replayed from the journal equal those in the database.
+	replay, err := ReplayDump(filepath.Join(dir, JournalName))
+	if err != nil || replay != got {
+		t.Fatalf("journal replay differs from the database: %v", err)
+	}
+	// A normal start does not rebuild.
+	_ = s2.Close()
+	s3 := open(t, dir)
+	defer func() { _ = s3.Close() }()
+	if s3.Rebuilt || s3.Epoch() != epoch+1 {
+		t.Fatalf("rebuilt=%v epoch %d", s3.Rebuilt, s3.Epoch())
+	}
+}
+
+func TestAnInterruptedRebuildFromTheJournalRecovers(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := seed(t, s)
+	want, _ := s.Dump()
+	_ = s.Close()
+	for _, n := range []string{DBName, DBName + "-wal", DBName + "-shm"} {
+		_ = os.Remove(filepath.Join(dir, n))
+	}
+	disarm := faults.ArmPanic("store.replay")
+	crashed := faults.Recover(func() { _, _ = Open(dir, Options{}) })
+	disarm()
+	if !crashed {
+		t.Fatal("the rebuild did not reach its replay crash point")
+	}
+	s2 := open(t, dir)
+	defer func() { _ = s2.Close() }()
+	got, _ := s2.Dump()
+	if strip(got) != strip(want) || !s2.Rebuilt {
+		t.Fatalf("after the interrupted rebuild: rebuilt=%v\n%s\n---\n%s", s2.Rebuilt, got, want)
+	}
+	if g, err := s2.Generation(id, 1); err != nil || g.CopyOffset != 10 {
+		t.Fatalf("generation %+v %v", g, err)
+	}
+}
+
+func TestOnWriteHooksRunAfterAParseCommit(t *testing.T) {
+	s := open(t, t.TempDir())
+	defer func() { _ = s.Close() }()
+	n := 0
+	s.OnWrite(func() { n++ })
+	if err := s.WithWrite("", func(tx *sql.Tx) error { return nil }); err != nil || n != 1 {
+		t.Fatalf("hook ran %d times, err %v", n, err)
+	}
+	if err := s.WithWrite("", func(tx *sql.Tx) error { return errors.New("no") }); err == nil || n != 1 {
+		t.Fatalf("a rolled-back write must not fire the hook: %d %v", n, err)
+	}
+}
+
+func TestOpenPointerReadsACopyASnapshotVersionAndAnArchive(t *testing.T) {
+	s := open(t, t.TempDir())
+	defer func() { _ = s.Close() }()
+	app, snap := s.NewFileID(), s.NewFileID()
+	if err := s.Commit(
+		&Rec{T: TFile, At: 1, File: app, Source: "claude-transcript", Mode: "append"},
+		&Rec{T: TFile, At: 1, File: snap, Source: "session-mode", Mode: "snapshot"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	for p, c := range map[string]string{s.CopyPath(app, 1): "copy-bytes", s.SnapshotPath(snap, 2): "snapshot-bytes"} {
+		if err := os.WriteFile(p, []byte(c), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		file int64
+		gen  int
+		want string
+	}{{app, 1, "copy-bytes"}, {snap, 2, "snapshot-bytes"}} {
+		b, err := s.ReadPointer(tc.file, tc.gen, 0, 64)
+		if err != nil || string(b) != tc.want {
+			t.Errorf("file %d gen %d: %q %v", tc.file, tc.gen, b, err)
+		}
+	}
+	if b, err := s.ReadPointer(app, 1, 5, 5); err != nil || string(b) != "bytes" {
+		t.Errorf("a range: %q %v", b, err)
+	}
+	if err := os.Rename(s.CopyPath(app, 1), s.ArchivePath(app, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := s.ReadPointer(app, 1, 0, 64); err != nil || string(b) != "copy-bytes" {
+		t.Errorf("archived: %q %v", b, err)
+	}
+	if _, err := s.ReadPointer(app, 7, 0, 4); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing bytes: %v", err)
 	}
 }

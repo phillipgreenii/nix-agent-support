@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,19 @@ func (s *Server) Register(name string, kind Kind, h Handler) {
 	s.mu.Lock()
 	s.ops[name] = operation{h: h, kind: kind}
 	s.mu.Unlock()
+}
+
+// Operations lists the registered operation names (hello is always served), the
+// capabilities list hello reports.
+func (s *Server) Operations() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []string{"hello"}
+	for n := range s.ops {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Handler returns the http.Handler (used by Serve, and directly by tests).
@@ -205,9 +219,14 @@ func (s *Server) Close() {
 	if s.srv == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_ = s.srv.Shutdown(ctx)
+	// A waiting feed would hold a graceful shutdown for up to a minute: after a
+	// short grace the connections are closed, which is how a client sees a
+	// restart (it reconnects with the same cursor).
+	if err := s.srv.Shutdown(ctx); err != nil {
+		_ = s.srv.Close()
+	}
 	<-s.done
 	_ = os.Remove(s.path)
 }

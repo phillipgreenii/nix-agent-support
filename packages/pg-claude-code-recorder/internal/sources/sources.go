@@ -4,12 +4,21 @@ package sources
 import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudehistory"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudestatus"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudesubagentmeta"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudetoolresult"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudetranscript"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/sessioncompaction"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/sessionmode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/sessionregistry"
 )
 
 // All returns the compiled-in sources.
 func All() []source.Source {
-	return []source.Source{claudetranscript.New(), claudehistory.New()}
+	return []source.Source{
+		claudetranscript.New(), claudehistory.New(), claudesubagentmeta.New(), claudetoolresult.New(),
+		sessionregistry.New(), claudestatus.New(), sessionmode.New(), sessioncompaction.New(),
+	}
 }
 
 // Catalog merges every source's field catalog (name to kind).

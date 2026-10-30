@@ -60,6 +60,9 @@ func badf(format string, a ...any) *wire.Error {
 // source declares is retried under "message." (the example requests write
 // model for message.model).
 func (b *builder) resolve(name string) (string, source.Kind, *wire.Error) {
+	if name == "session_id" {
+		name = "session" // the answers' key for the session field
+	}
 	switch name {
 	case "source", "type":
 		return name, source.KindKeyword, nil

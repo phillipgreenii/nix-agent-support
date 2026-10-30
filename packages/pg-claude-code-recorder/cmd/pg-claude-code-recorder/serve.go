@@ -23,10 +23,11 @@ func (l logLines) Write(p []byte) (int, error) {
 func (a *app) serve(args []string) int {
 	fs := newFlagSet("serve", a.errw)
 	var configPath, metricsAddr string
-	var pprofOn bool
+	var pprofOn, rebuild bool
 	fs.StringVar(&configPath, "config", "", "the TOML config file")
 	fs.StringVar(&metricsAddr, "metrics-addr", "", "loopback host:port for the Prometheus /metrics endpoint (overrides the config's metrics.addr)")
 	fs.BoolVar(&pprofOn, "pprof", false, "open the opt-in pprof endpoint on $XDG_STATE_HOME/pg-claude-code-recorder/pprof.sock")
+	fs.BoolVar(&rebuild, "rebuild", false, "rebuild index.db from the journal before serving (the way past a newer schema_version)")
 	if err := fs.Parse(args); err != nil {
 		return a.emitError(false, wire.ErrUsage, err.Error())
 	}
@@ -50,7 +51,7 @@ func (a *app) serve(args []string) int {
 	log := serve.NewLogger(logw)
 	stopPprof := startPprof(pprofOn, a.getenv, logLines{log})
 	defer stopPprof()
-	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, MetricsAddr: metricsAddr})
+	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, MetricsAddr: metricsAddr, Rebuild: rebuild})
 	if err != nil {
 		log.Error("open_failed", "err", err.Error())
 		return a.emitError(false, wire.ErrUnavailable, fmt.Sprintf("cannot start: %v", err))

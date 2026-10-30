@@ -43,6 +43,9 @@ const (
 	MCopiedFiles     = "backfill_files_copied"
 	MBackfillFiles   = "backfill_files_total"
 	MCaughtUp        = "caught_up"
+	MFeedWaiters     = "feed_waiters"
+	MIndexRebuilds   = "index_rebuilds_total"
+	EvIndexRebuilt   = "index_rebuilt"
 	ClientOther      = "other"
 	UnknownClientLbl = "client"
 )
@@ -103,9 +106,10 @@ func (o *Obs) RegisterStandard() {
 	for _, r := range AllReasons {
 		o.Reg.Add(MDroppedBytes, map[string]string{"reason": r}, 0)
 	}
+	o.Reg.Add(MIndexRebuilds, nil, 0)
 	for _, g := range []string{
 		MHeartbeat, MStateFreeBytes, MStateUsedBytes, MCopyLagBytes, MCopyLagSeconds,
-		MCopiedFiles, MBackfillFiles, MCaughtUp,
+		MCopiedFiles, MBackfillFiles, MCaughtUp, MFeedWaiters,
 	} {
 		if _, ok := o.Reg.Gauge(g, nil); !ok {
 			o.Reg.Set(g, nil, 0)

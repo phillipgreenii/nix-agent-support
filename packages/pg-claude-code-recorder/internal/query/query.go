@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,15 +109,8 @@ func limitOf(n int) int {
 }
 
 func (e *Engine) asOf(tx *sql.Tx) string {
-	var epoch, seq int64
-	var s string
-	if tx.QueryRow(`SELECT value FROM meta WHERE key='epoch'`).Scan(&s) == nil {
-		epoch, _ = strconv.ParseInt(s, 10, 64)
-	}
-	if tx.QueryRow(`SELECT value FROM meta WHERE key='parse_seq'`).Scan(&s) == nil {
-		seq, _ = strconv.ParseInt(s, 10, 64)
-	}
-	return fmt.Sprintf("%d:%d", epoch, seq)
+	epoch, head, _ := Head(tx)
+	return Cursor(epoch, head)
 }
 
 // base joins records with files and applies the current-generation filter.
@@ -301,34 +295,94 @@ func present(kind source.Kind, v any) any {
 	return v
 }
 
-type linkSpec struct{ from, to, fromType, toType string }
+type linkSpec struct {
+	from, to, fromType, toType string
+	// bySession links on the record's session instead of a field; toTypes then
+	// lists the target record types.
+	bySession bool
+	toTypes   []string
+	// pathBody links a tool_result to its tool-results body by the saved-to
+	// path in its text when no tool_use_id matches (and the reverse).
+	pathBody bool
+}
 
 func linkOf(follow string) (linkSpec, bool) {
 	switch follow {
 	case "parent":
 		return linkSpec{from: "parent_uuid", to: "uuid"}, true
 	case "result":
-		return linkSpec{from: "tool_use_id", to: "tool_use_id", fromType: "tool_use", toType: "tool_result"}, true
+		return linkSpec{from: "tool_use_id", to: "tool_use_id", fromType: "tool_use", toType: "tool_result", pathBody: true}, true
 	case "call":
 		return linkSpec{from: "tool_use_id", to: "tool_use_id", fromType: "tool_result", toType: "tool_use"}, true
+	case "body":
+		return linkSpec{from: "tool_use_id", to: "tool_use_id", fromType: "tool_result", toType: "tool_result_body", pathBody: true}, true
+	case "subagents":
+		return linkSpec{bySession: true, toTypes: []string{"subagent_meta"}}, true
+	case "status":
+		return linkSpec{bySession: true, toTypes: []string{"status"}}, true
+	case "mode":
+		return linkSpec{bySession: true, toTypes: []string{"session_mode"}}, true
+	case "registry":
+		return linkSpec{bySession: true, toTypes: []string{"registry", "registry_deleted"}}, true
+	case "compaction":
+		return linkSpec{bySession: true, toTypes: []string{"compaction"}}, true
 	}
 	return linkSpec{}, false
 }
 
-func (e *Engine) follow(tx *sql.Tx, req Request, ids, files []int64, cols []colSpec) ([][]Link, *wire.Error) {
-	ls, ok := linkOf(req.Follow)
-	if !ok {
-		return nil, badf("follow %q: use parent, result or call", req.Follow)
+// savedToRe finds the path a transcript's tool_result preview says the full
+// output was saved to.
+var savedToRe = regexp.MustCompile(`\S*/(projects/[^\s"']+/tool-results/[^\s"']+)`)
+
+type tgt struct {
+	id   int64
+	file int64
+	ref  RecordRef
+}
+
+func (e *Engine) scanTargets(tx *sql.Tx, q string, args []any) ([]tgt, *wire.Error) {
+	rs, err := tx.Query(q, args...)
+	if err != nil {
+		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
-	out := make([][]Link, len(ids))
-	for i, id := range ids {
-		var key sql.NullString
-		_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name=?`, id, ls.from).Scan(&key)
-		out[i] = []Link{}
-		if !key.Valid || key.String == "" {
-			continue
+	defer func() { _ = rs.Close() }()
+	var out []tgt
+	for rs.Next() {
+		var t tgt
+		var item int
+		var fid int64
+		if err := rs.Scan(&t.id, &fid, &t.ref.Gen, &t.ref.Offset, &item); err != nil {
+			return nil, wire.Errf(wire.ErrInternal, err.Error())
 		}
-		q := `SELECT r.id,r.file_id,r.gen,r.off,r.item FROM fields fu JOIN records r ON r.id=fu.rec_id JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen WHERE fu.name=? AND fu.s=? AND r.id<>?`
+		t.file, t.ref.File, t.ref.Item = fid, FileRef(fid), item
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+const targetHead = `SELECT r.id,r.file_id,r.gen,r.off,r.item FROM records r JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen`
+
+// linkTargets returns the records record id links to under ls (before the
+// same-file preference).
+func (e *Engine) linkTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Error) {
+	if ls.bySession {
+		var session string
+		_ = tx.QueryRow(`SELECT session FROM records WHERE id=?`, id).Scan(&session)
+		if session == "" {
+			return nil, nil
+		}
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(ls.toTypes)), ",")
+		args := []any{session}
+		for _, t := range ls.toTypes {
+			args = append(args, t)
+		}
+		return e.scanTargets(tx, targetHead+` WHERE r.session=? AND r.type IN (`+ph+`) ORDER BY r.id LIMIT `+strconv.Itoa(defaultLimit), args)
+	}
+	var key sql.NullString
+	_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name=?`, id, ls.from).Scan(&key)
+	var out []tgt
+	if key.Valid && key.String != "" {
+		q := targetHead + ` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name=? AND fu.s=? AND r.id<>?`
 		args := []any{ls.to, key.String, id}
 		if ls.toType != "" {
 			q += ` AND r.type=?`
@@ -336,33 +390,84 @@ func (e *Engine) follow(tx *sql.Tx, req Request, ids, files []int64, cols []colS
 		} else {
 			q += ` AND r.item=-1`
 		}
-		rs, err := tx.Query(q+` ORDER BY r.id`, args...)
+		var err *wire.Error
+		if out, err = e.scanTargets(tx, q+` ORDER BY r.id`, args); err != nil {
+			return nil, err
+		}
+	}
+	if len(out) > 0 || !ls.pathBody {
+		return out, nil
+	}
+	return e.pathTargets(tx, ls, id)
+}
+
+// pathTargets links a tool_result to the tool-results body its text names, and a
+// body without a tool_use_id back to the tool_result that names its path.
+func (e *Engine) pathTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Error) {
+	var typ, src string
+	var file, off, item, ln int64
+	var gen int
+	if tx.QueryRow(`SELECT type,source,file_id,gen,off,item,len FROM records WHERE id=?`, id).Scan(&typ, &src, &file, &gen, &off, &item, &ln) != nil {
+		return nil, nil
+	}
+	if typ == "tool_result" && ls.toType == "tool_result_body" && e.Res != nil {
+		text, err := e.Res.Value(file, gen, off, int(ln), src, int(item), "tool_result.body")
 		if err != nil {
-			return nil, wire.Errf(wire.ErrInternal, err.Error())
+			return nil, nil
 		}
-		type tgt struct {
-			id   int64
-			file int64
-			ref  RecordRef
+		m := savedToRe.FindStringSubmatch(text)
+		if m == nil {
+			return nil, nil
 		}
-		var all, same []tgt
-		for rs.Next() {
-			var t tgt
-			var item int
-			var fid int64
-			if err := rs.Scan(&t.id, &fid, &t.ref.Gen, &t.ref.Offset, &item); err != nil {
-				_ = rs.Close()
-				return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return e.scanTargets(tx, targetHead+` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name='rel_path' AND fu.s=? AND r.type='tool_result_body' ORDER BY r.id`, []any{m[1]})
+	}
+	if typ == "tool_result_body" && ls.toType == "tool_result" {
+		var rel sql.NullString
+		_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name='rel_path'`, id).Scan(&rel)
+		if !rel.Valid || len(rel.String) < MinSubstringChars {
+			return nil, nil
+		}
+		cands, err := e.scanTargets(tx, `SELECT r.id,r.file_id,r.gen,r.off,r.item FROM fts_tri JOIN texts t ON t.id=fts_tri.rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen WHERE fts_tri MATCH ? AND t.field='tool_result.body' AND r.type='tool_result' ORDER BY r.id`,
+			[]any{`"` + strings.ReplaceAll(rel.String, `"`, `""`) + `"`})
+		if err != nil || e.Res == nil {
+			return nil, err
+		}
+		var out []tgt
+		for _, c := range cands {
+			var csrc string
+			var cln int
+			if tx.QueryRow(`SELECT source,len FROM records WHERE id=?`, c.id).Scan(&csrc, &cln) != nil {
+				continue
 			}
-			t.file, t.ref.File, t.ref.Item = fid, FileRef(fid), item
-			all = append(all, t)
-			if fid == files[i] {
+			if text, err := e.Res.Value(c.file, c.ref.Gen, c.ref.Offset, cln, csrc, c.ref.Item, "tool_result.body"); err == nil && strings.Contains(text, rel.String) {
+				out = append(out, c)
+			}
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
+func (e *Engine) follow(tx *sql.Tx, req Request, ids, files []int64, cols []colSpec) ([][]Link, *wire.Error) {
+	ls, ok := linkOf(req.Follow)
+	if !ok {
+		return nil, badf("follow %q: use parent, result, call, body, subagents, status, mode, registry or compaction", req.Follow)
+	}
+	out := make([][]Link, len(ids))
+	for i, id := range ids {
+		out[i] = []Link{}
+		all, err := e.linkTargets(tx, ls, id)
+		if err != nil {
+			return nil, err
+		}
+		var same []tgt
+		for _, t := range all {
+			if t.file == files[i] {
 				same = append(same, t)
 			}
 		}
-		_ = rs.Close()
 		use := same
-		if len(use) == 0 {
+		if len(use) == 0 || ls.bySession {
 			use = all
 		}
 		for _, t := range use {

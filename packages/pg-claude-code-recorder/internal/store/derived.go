@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS parse_resets(
   at_ns INTEGER NOT NULL,
   next_rec INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS feed_marks(
+  rec_id INTEGER PRIMARY KEY,
+  at_ns INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS bad_lines(
   file_id INTEGER NOT NULL,
   gen INTEGER NOT NULL,
@@ -106,6 +110,9 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 		return err
 	}
 	done = true
+	for _, h := range s.wrHooks {
+		h()
+	}
 	return nil
 }
 

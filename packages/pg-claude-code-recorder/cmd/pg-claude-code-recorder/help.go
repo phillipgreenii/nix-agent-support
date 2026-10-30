@@ -8,12 +8,16 @@ import (
 const helpText = `pg-claude-code-recorder records Claude Code state and answers queries about it.
 
 Usage:
-  pg-claude-code-recorder serve    [--config FILE] [--metrics-addr HOST:PORT] [--pprof]
+  pg-claude-code-recorder serve    [--config FILE] [--metrics-addr HOST:PORT] [--pprof] [--rebuild]
+  pg-claude-code-recorder rebuild  [--config FILE]   rebuild index.db from the journal and re-parse (daemon stopped)
   pg-claude-code-recorder status   [--json|--short] [--watch] [--allow-partial]
   pg-claude-code-recorder coverage [--view summary|files] [--json] [--wait-caught-up] [--allow-partial]
   pg-claude-code-recorder query    [--request FILE] [--limit N] [--jsonl] [--json]   request JSON on standard input
   pg-claude-code-recorder search   [--request FILE] [--limit N] [--jsonl] [--json]   word or substring search
   pg-claude-code-recorder find     <session-id|text> [--limit N]
+  pg-claude-code-recorder feed     [--after CURSOR] [--wait 30s] [--where JSON] [--project a,b] [--limit N] [--jsonl]
+  pg-claude-code-recorder snapshot [--where JSON] [--project a,b] [--limit N] [--all] [--jsonl]
+  pg-claude-code-recorder raw      --record FILE:GEN:OFFSET:ITEM | --file FILE --offset N --length N
   pg-claude-code-recorder version
 
 Common flags:
@@ -34,6 +38,13 @@ Examples:
   echo '{"mode":"word","q":"registry file"}' | pg-claude-code-recorder search --limit 5
   pg-claude-code-recorder find pg2-abc               a bead id is a text search
   pg-claude-code-recorder status --client swiftbar  count this call under client "swiftbar"
+  pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'   the state, then tail it:
+  pg-claude-code-recorder feed --after <cursor> --wait 30s --where '{"field":"type","eq":"assistant"}'
+  pg-claude-code-recorder raw --record f_5:1:0:-1   the bytes of one record
+
+A cursor is <epoch>:<sequence>. feed exits 6 when its wait ended with nothing (the answer's next_cursor
+still advances), and 7 (cursor_expired) when the cursor is from an old epoch, below the retention floor or
+beyond the head: take a snapshot and tail from its cursor. Delivery is at least once; de-duplicate by record id.
 
 First run: enable the module, run status, and read coverage until caught_up is true.
 status and coverage exit 5 with the partial answer on stdout while the recorder is behind;
