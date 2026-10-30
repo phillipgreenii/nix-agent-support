@@ -104,6 +104,17 @@ type Deps struct {
 	// ParkGit is the git seam the park note's worktree and branch discovery
 	// uses (bead pg2-78mxs); nil => parknote.OSGit (hermetic, bounded).
 	ParkGit parknote.Git
+	// Reconciler runs the on-demand housekeeping of INV-CCH-41 (the
+	// capacity-pressure closed-bead reconcile and the own-bead worktree check)
+	// when Cfg.InlineSweeps is false. nil => none; a dispatch then declines or
+	// proceeds exactly as it would without one.
+	Reconciler Reconciler
+	// PoolListing/PoolListed carry the one pool listing the dispatch's orphan unit
+	// read (before the prior-session plan), when that unit found no orphan and so
+	// changed nothing: the plan then reuses it instead of listing again. The plan
+	// consumes it once (INV-CCH-41).
+	PoolListing []ccpool.Session
+	PoolListed  bool
 }
 
 func (d Deps) git() watchdog.GitRunner {

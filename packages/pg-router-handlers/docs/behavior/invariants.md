@@ -1349,10 +1349,11 @@ changes a core gate or `INV-LIFE-2`.
     It then checks capacity (`INV-CCH-6`). When the pool is full and no usage limit is in force, it
     MUST run the closed-bead reconcile of its pool once and re-check capacity once: if a slot is now
     free it proceeds, and if not it declines exactly as a full pool always has, with the same
-    decline reason and kind, the detail text saying that a reconcile was tried. It MUST NOT loop. A
+    decline reason and kind, the decline's error text (logged; an at-capacity reply carries no detail on the wire) saying that a reconcile was tried. It MUST NOT loop. A
     reconcile that cannot run, or that errors, still ends in that clean decline. Because a pool that
     stays full would otherwise pay the reconcile on every re-offer, a decline-time reconcile that
-    found nothing MUST be remembered per pool for a short interval, and a decline inside the
+    found nothing MUST be remembered per pool for a short interval (launch configuration key
+    `declineReconcileMinInterval`, 30 seconds by default, zero disables), and a decline inside the
     interval MUST NOT reconcile again. A dispatch MUST NOT run the default-pool stale-session pass,
     the worktree-keyed sweep or the lock-file collection.
   - **Boot.** The daemon starts no role's dispatch behind a startup hook: the handler's startup

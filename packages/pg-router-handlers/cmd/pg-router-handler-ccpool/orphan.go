@@ -43,7 +43,9 @@ import (
 // A session with no lease (launched by an older build) is never an orphan;
 // ccpool's idle_ttl reaper bounds it. Only the time budget is enforced for an
 // orphan (tokens/cost could be read statelessly from the transcript; a possible
-// follow-up). An orphan is reclaimed only when its OWN role next dispatches.
+// follow-up). An orphan is reclaimed when its role next
+// dispatches (inline, as one unit before the capacity check) or by the janitor
+// (INV-CCH-41).
 //
 // Mutual exclusion with an absorbing dispatch is a non-blocking flock per
 // session (internal/sessionlock): the reconcile skips a session whose lock is
@@ -90,11 +92,24 @@ func reconcileOrphanSessions(ctx context.Context, role roles.Role, deps executor
 		slog.Warn("orphan reconcile: list failed", "role", role.Name, "err", err)
 		return 0, 0
 	}
+	reclaimed, hardStopped, _ = reconcileOrphanSessionsFrom(ctx, role, deps, env, sessions)
+	return reclaimed, hardStopped
+}
+
+// reconcileOrphanSessionsFrom is reconcileOrphanSessions over a pool listing the
+// caller already read (INV-CCH-41's one shared listing: the dispatch's orphan
+// unit reads the pool once and hands the same rows to the prior-session plan when
+// no orphan was found). candidates is how many sessions of the role were
+// orphans at that listing, whatever came of them; zero means the unit touched
+// nothing, so the listing is still the pool as it is. Each candidate is still
+// re-read under its own lock, the correctness guard.
+func reconcileOrphanSessionsFrom(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, sessions []ccpool.Session) (reclaimed, hardStopped, candidates int) {
 	now := orphanNow(deps)
 	for _, s := range sessions {
 		if !isOrphanOf(s, role, deps.Cfg.SessionPrefix, now) {
 			continue
 		}
+		candidates++
 		switch reconcileOneOrphan(ctx, role, deps, env, s) {
 		case orphanReclaimed:
 			reclaimed++
@@ -102,7 +117,7 @@ func reconcileOrphanSessions(ctx context.Context, role roles.Role, deps executor
 			hardStopped++
 		}
 	}
-	return reclaimed, hardStopped
+	return reclaimed, hardStopped, candidates
 }
 
 type orphanOutcome int

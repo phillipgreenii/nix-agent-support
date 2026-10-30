@@ -9576,6 +9576,7 @@
                         repoRoot = "/tmp/pg2-fx5x0l.4-repo";
                         worktreeDir = "/tmp/pg2-fx5x0l.4-repo/.worktrees";
                         inlineSweeps = false;
+                        declineReconcileMinIntervalSeconds = 5;
                       };
                     }).phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
 
@@ -10680,6 +10681,9 @@
                         # inlineSweeps: default true, switchable off
                         [ "$(jq -r .inlineSweeps "$launchConfigFile")" = true ]
                         [ "$(jq -r .inlineSweeps "$noInlineSweepsLaunchConfigFile")" = false ]
+                        # declineReconcileMinInterval (bead pg2-fx5x0l.5): nanoseconds, default 30 s
+                        [ "$(jq -r .declineReconcileMinInterval "$launchConfigFile")" = 30000000000 ]
+                        [ "$(jq -r .declineReconcileMinInterval "$noInlineSweepsLaunchConfigFile")" = 5000000000 ]
 
                         # pg-wrap wiring (design ruling 30, bead pg2-12gr4.8.12).
                         toml2json() {

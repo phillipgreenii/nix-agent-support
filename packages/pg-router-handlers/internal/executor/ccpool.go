@@ -260,6 +260,18 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
 		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
 	}
+	// Capacity pressure (INV-CCH-41): with inlineSweeps off, a full pool with no
+	// usage limit in force is reconciled once (closed-bead sessions) and capacity
+	// is read once more. The decline below keeps its reason; only the detail says a
+	// reconcile was tried.
+	reconcileNote := ""
+	if capacity.Free == 0 && capacity.UsageLimit == nil && r.admissionActive() {
+		capacity, capErr, reconcileNote = r.reconcileForCapacity(ctx, d, capacity)
+		if capErr != nil {
+			slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
+			return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
+		}
+	}
 	if capacity.Free == 0 {
 		if ul := capacity.UsageLimit; ul != nil {
 			// The account's usage window is at its limit, so ccpool reports no free
@@ -275,8 +287,11 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		}
 		slog.Info("dispatch declined: pool at capacity", "role", d.Role.Name, "bead", d.Item.ID,
 			"counted", capacity.Counted, "max", capacity.MaxSessions, "preserved", capacity.Preserved)
-		return report.Result{}, fmt.Errorf("%w: counted=%d max=%d preserved=%d",
-			ErrPoolAtCapacity, capacity.Counted, capacity.MaxSessions, capacity.Preserved)
+		detail := fmt.Sprintf("counted=%d max=%d preserved=%d", capacity.Counted, capacity.MaxSessions, capacity.Preserved)
+		if reconcileNote != "" {
+			detail += " (" + reconcileNote + ")"
+		}
+		return report.Result{}, fmt.Errorf("%w: %s", ErrPoolAtCapacity, detail)
 	}
 
 	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
@@ -296,6 +311,15 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// a live dispatch is using from one a killed handler leaked (pg2-ganjb,
 	// INV-CCH-19). A SIGKILL drops the lock with the process.
 	if usesWorktreeIsolation(cc.Isolation) {
+		// Before the shared lock (the examination takes the lock exclusively): a
+		// worktree this bead's own earlier attempt leaked is reclaimed, under the
+		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19). With
+		// inlineSweeps on the whole-directory sweep already ran before this call.
+		if r.admissionActive() {
+			if err := r.deps.Reconciler.ReclaimLeakedWorktree(ctx, d.Item.ID); err != nil {
+				slog.Warn("own-bead worktree check failed; continuing", "bead", d.Item.ID, "err", err)
+			}
+		}
 		defer r.holdWorktreeLock(ctx, d.Item.ID)()
 	}
 	preexisting := usesWorktreeIsolation(cc.Isolation) && r.worktreePathExists(d.Item.ID)
@@ -1171,9 +1195,18 @@ func inFlightWhy(s ccpool.Session, eventID string) string {
 // comment above). A list error is a pool that cannot be read, which counts as
 // one in flight: decline with ErrPoolUnreadable.
 func (r *ccpoolRun) planPriorSessions(ctx context.Context, d DispatchContext, display string) priorPlan {
-	sessions, err := r.deps.CC.List(ctx)
-	if err != nil {
-		return priorPlan{verdict: verdictDecline, why: "the pool's sessions cannot be read: " + err.Error()}
+	var sessions []ccpool.Session
+	if r.deps.PoolListed {
+		// The orphan unit read the pool a moment ago and found no orphan, so the
+		// listing is still the pool as it is: one shared read (INV-CCH-41).
+		sessions = r.deps.PoolListing
+		r.deps.PoolListed, r.deps.PoolListing = false, nil
+	} else {
+		var err error
+		sessions, err = r.deps.CC.List(ctx)
+		if err != nil {
+			return priorPlan{verdict: verdictDecline, why: "the pool's sessions cannot be read: " + err.Error()}
+		}
 	}
 	clk := priorClock{now: r.deps.clock(), window: r.launchWindow()}
 	var candidates, busy, leftovers []ccpool.Session

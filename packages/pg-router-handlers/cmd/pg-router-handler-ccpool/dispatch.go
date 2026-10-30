@@ -113,8 +113,18 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// (closed-bead sessions, default pool, orphans, leaked worktrees, stale locks),
 	// in the same place and order, so a reclaimed orphan frees its slot for this
 	// very dispatch. Best effort, never a dispatch failure; postStartup runs the
-	// same passes.
-	runSweeps(ctx, "dispatch", role, cfg, deps)
+	// same passes. With inlineSweeps off (INV-CCH-41, ADR 0117) the janitor owns
+	// them: the dispatch runs only its role's orphans, as one unit, and the
+	// executor reconciles closed-bead sessions on capacity pressure and checks its
+	// own bead's worktree, through the Reconciler seam.
+	if cfg.InlineSweeps {
+		runSweeps(ctx, "dispatch", role, cfg, deps)
+	} else {
+		deps = runOrphanUnit(ctx, role, cfg, deps)
+		if deps.Reconciler == nil {
+			deps.Reconciler = newPoolReconciler(role, cfg, deps)
+		}
+	}
 
 	// Zero-model-cost precheck (INV-CCH-22): a dispatch whose bead no longer
 	// warrants a session launches none. Read-only; fails open, except that a

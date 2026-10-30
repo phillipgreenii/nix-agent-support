@@ -136,6 +136,12 @@ type Config struct {
 	// the dispatch path (a later phase) once the janitor is verified live, so the
 	// janitor can be deployed first and rolled back by flipping this key.
 	InlineSweeps bool
+	// DeclineReconcileMinInterval is the negative-cache TTL of the capacity-pressure
+	// closed-bead reconcile (INV-CCH-41, bead pg2-fx5x0l.5): a dispatch that finds
+	// its pool full and whose reconcile found nothing is remembered per pool for
+	// this long, and a decline inside it does not reconcile again. Zero or
+	// negative disables the cache. Read only when InlineSweeps is false.
+	DeclineReconcileMinInterval time.Duration
 	// ConnectorBinary is the pg-connector executable the review precheck
 	// (INV-CCH-22, bead pg2-5x29j) reads PR merged state and pending-review
 	// state through. Empty means "pg-connector" resolved on PATH. A binary that
@@ -438,36 +444,41 @@ func MergeAllowedTools(base string, extra []string) string {
 // says effort "max" and no model. A role that sets neither takes these values.
 func Default() Config {
 	return Config{
-		WorktreeDir:         "",
-		BeadsPrefix:         "zr",
-		MaxWait:             1800 * time.Second,
-		PollInterval:        10 * time.Second,
-		WatchdogPoll:        30 * time.Second,
-		LeaseTTL:            2 * time.Minute,
-		NeedsInputStall:     DefaultNeedsInputStall,
-		WorktreeQuietWindow: 2 * time.Minute,
-		WorktreeQuietMax:    10 * time.Minute,
-		WorktreeKeepRecheck: 5 * time.Minute,
-		SweepDeadline:       60 * time.Second,
-		Effort:              "medium",
-		Model:               "claude-sonnet-5-5",
-		Autonomous:          true,
-		PermissionMode:      "dontAsk",
-		AllowedTools:        baseAllowedTools,
-		SessionPrefix:       "pg-router-",
-		ReminderMsg:         "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
-		WrapUpMsg:           "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
-		ConfirmIngest:       90 * time.Second,
-		BudgetTokens:        0,                // unlimited until ccpool N3
-		BudgetCost:          0,                // unlimited until ccpool N3
-		BudgetTime:          25 * time.Minute, // strictly < MaxWait (30m); the effective wait is 35m
-		ReminderPct:         0.725,
-		CancelPct:           0.90,
-		HardPct:             1.00,
-		OriginProbe:         DefaultOriginProbe(),
-		InlineSweeps:        true,
+		WorktreeDir:                 "",
+		BeadsPrefix:                 "zr",
+		MaxWait:                     1800 * time.Second,
+		PollInterval:                10 * time.Second,
+		WatchdogPoll:                30 * time.Second,
+		LeaseTTL:                    2 * time.Minute,
+		NeedsInputStall:             DefaultNeedsInputStall,
+		WorktreeQuietWindow:         2 * time.Minute,
+		WorktreeQuietMax:            10 * time.Minute,
+		WorktreeKeepRecheck:         5 * time.Minute,
+		SweepDeadline:               60 * time.Second,
+		Effort:                      "medium",
+		Model:                       "claude-sonnet-5-5",
+		Autonomous:                  true,
+		PermissionMode:              "dontAsk",
+		AllowedTools:                baseAllowedTools,
+		SessionPrefix:               "pg-router-",
+		ReminderMsg:                 "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
+		WrapUpMsg:                   "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest:               90 * time.Second,
+		BudgetTokens:                0,                // unlimited until ccpool N3
+		BudgetCost:                  0,                // unlimited until ccpool N3
+		BudgetTime:                  25 * time.Minute, // strictly < MaxWait (30m); the effective wait is 35m
+		ReminderPct:                 0.725,
+		CancelPct:                   0.90,
+		HardPct:                     1.00,
+		OriginProbe:                 DefaultOriginProbe(),
+		InlineSweeps:                true,
+		DeclineReconcileMinInterval: DefaultDeclineReconcileMinInterval,
 	}
 }
+
+// DefaultDeclineReconcileMinInterval is the default TTL of the decline-time
+// reconcile's negative cache (plan pg2-fx5x0l rev 3, Phase 4).
+const DefaultDeclineReconcileMinInterval = 30 * time.Second
 
 // LeaseTTLMinPolls is the smallest LeaseTTL, in PollInterval units, Validate
 // accepts: the lease is refreshed once per poll, so a TTL below this many polls

@@ -1233,6 +1233,7 @@ let
       # worktree sweep bounds (bead pg2-fx5x0l.2, INV-CCH-19): nanoseconds, as above.
       worktreeKeepRecheck = cfg.launchConfig.worktreeKeepRecheckSeconds * 1000000000;
       sweepDeadline = cfg.launchConfig.sweepDeadlineSeconds * 1000000000;
+      declineReconcileMinInterval = cfg.launchConfig.declineReconcileMinIntervalSeconds * 1000000000;
       budgetTokens = cfg.launchConfig.budget.tokens;
       budgetCost = cfg.launchConfig.budget.cost;
       budgetTime = cfg.launchConfig.budget.timeSeconds * 1000000000;
@@ -2237,10 +2238,28 @@ in
           InlineSweeps in the launch config (bead pg2-fx5x0l.4, INV-CCH-41,
           ADR 0117): the transitional switch. true (the default) keeps
           today's behavior, the housekeeping passes running inline before
-          every dispatch and at boot. false is read by the dispatch path (a
-          later phase) once the janitor (`janitor.enable`) is verified live,
-          so the janitor can be deployed and observed first and rolled back
-          by flipping this key.
+          every dispatch and at boot. false (bead pg2-fx5x0l.5) makes a
+          dispatch handle only its role's orphans inline and reconcile
+          closed-bead sessions on capacity pressure, leaving the rest to the
+          janitor (`janitor.enable`); set it once the janitor is verified
+          live. Flip it back to roll back.
+        '';
+      };
+      declineReconcileMinIntervalSeconds = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 30;
+        description = ''
+          DeclineReconcileMinInterval in the launch config, in SECONDS --
+          rendered into the JSON's `declineReconcileMinInterval` key as
+          nanoseconds (`declineReconcileMinIntervalSeconds * 1e9`), the same
+          way `confirmIngestSeconds` is. The time to live of the
+          capacity-pressure reconcile's negative cache (bead pg2-fx5x0l.5,
+          INV-CCH-41): a dispatch that finds its pool full runs the
+          closed-bead reconcile once, and when it finds nothing the pool is
+          remembered for this long, so a decline inside the interval does not
+          reconcile again. 0 disables the cache. Read only while
+          `inlineSweeps` is false. Default 30 matches
+          `internal/config.Default()`.
         '';
       };
       confirmIngestSeconds = lib.mkOption {
