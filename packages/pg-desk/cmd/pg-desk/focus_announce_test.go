@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // captureInject replaces focusInject with a recorder for one test.
@@ -88,4 +90,60 @@ func TestSelectAnnounceFailureWarnsAndKeepsExitOK(t *testing.T) {
 	_, errOut, err := sel(t, "ok", "--apply")
 	mustOK(t, err)
 	mustContain(t, errOut, "selection not announced to the decider", "pg-pr-change apply o/r#1")
+}
+
+// Bead pg2-2qyrca: locking a plan with a quiet PR and a quiet issue (neither
+// changes afterwards) reaches the decider with no manual backfill. The PR is
+// announced with exactly one pr.changed injection; the issue gets exactly one
+// annotation_changed change_log row, which the issue change feed delivers as
+// an issue.changed item. A re-run of select --apply writes and announces
+// nothing, so the doctor "unminted selections" gate has nothing to fail on.
+func TestSelectApplyQuietPRAndIssueReachDeciderExactlyOnce(t *testing.T) {
+	f := newSelFixture(t)
+	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
+	f.showDraft(t)
+	withHydrator(t, &writingHydrator{st: f.st, write: func(st *store.Store, typ, id string) error {
+		e := store.Entity{Repo: showRepo, EntityType: typ, EntityID: id, Facts: `{"issue_show":{"id":"J-9","state":"In Progress","title":"quiet"}}`, AsOf: showAt, ContentHash: "hJ-9"}
+		if _, err := st.WriteEntityStateWithLog(e, 0, showAt, true, []string{"created"}, "sync", showAt); err != nil {
+			return err
+		}
+		// A selected issue is a watched one: only a watched issue's
+		// annotation reaches the issue change feed (INV-ICD-16).
+		on := true
+		return st.SetEntityColumns(showRepo, typ, id, nil, &on)
+	}})
+	got := captureInject(t, nil)
+
+	_, _, err := sel(t, "ok +J-9", "--apply")
+	mustOK(t, err)
+	if len(*got) != 1 || !strings.Contains((*got)[0], `"entity_id":"o/r#1"`) {
+		t.Fatalf("injections = %v, want exactly one for o/r#1", *got)
+	}
+	prHist := kindsOf(t, f.st, "pr", "o/r#1")
+	issHist := kindsOf(t, f.st, "issue", "J-9")
+	count := func(h []string) (n int) {
+		for _, k := range h {
+			if k == "annotation_changed@pg-desk" {
+				n++
+			}
+		}
+		return n
+	}
+	if count(prHist) != 1 || count(issHist) != 1 {
+		t.Fatalf("annotation_changed rows pr=%v issue=%v, want one each", prHist, issHist)
+	}
+
+	// Re-run: nothing is written and nothing is announced.
+	*got = nil
+	_, _, err = sel(t, "ok", "--apply")
+	mustOK(t, err)
+	if len(*got) != 0 {
+		t.Errorf("re-run announced %v", *got)
+	}
+	if h := kindsOf(t, f.st, "pr", "o/r#1"); len(h) != len(prHist) {
+		t.Errorf("re-run changed pr history: %v -> %v", prHist, h)
+	}
+	if h := kindsOf(t, f.st, "issue", "J-9"); len(h) != len(issHist) {
+		t.Errorf("re-run changed issue history: %v -> %v", issHist, h)
+	}
 }
