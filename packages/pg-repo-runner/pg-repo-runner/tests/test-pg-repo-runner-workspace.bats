@@ -442,12 +442,35 @@ EOF
   [ -z "$(ws_sets)" ]
 }
 
-@test "real pn: a workspace id the canonical workspace already registered is a malfunction, not a red verdict" {
+@test "real pn: a set build is not refused by the wsid check once the canonical workspace owns the id" {
   ws_require_real_pn
   # the canonical workspace builds once (as the operator's own pn workspace build does)
-  # and so owns the wsid in the machine registry
+  # and so owns the wsid in the machine registry; a workforest set root is exempt from
+  # the uniqueness check (nix-repo-base d95cb33)
   (cd "$WS/nix-gamma" && PN_WORKSPACE_ROOT="$WS" pn workspace build >/dev/null 2>&1)
+  local reg="$XDG_DATA_HOME/pn-workspace/wsids" before
+  [ -n "$(ls "$reg")" ]
+  before="$(grep -r '' "$reg")"
   ws_build
+  [ "$status" -eq 0 ]
+  [ -e "$(ws_verdict_file)" ]
+  [ -z "$(ws_sets)" ]
+  # the canonical root's wsid entry is unchanged
+  [ "$(grep -r '' "$reg")" = "$before" ]
+}
+
+@test "a pn that refuses the set on the wsid check (one predating the set exemption) is a malfunction, not a red verdict" {
+  # a wrapper over the tier's pn whose build fails the way pn's checkWsidUnique does
+  cat >"$TEST_DIR/wsid-pn" <<EOF2
+#!/usr/bin/env bash
+if [[ \${1:-} == workspace && \${2:-} == build ]]; then
+  echo 'wsid "x" already used by workspace "/canonical" (must be unique per machine)' >&2
+  exit 1
+fi
+exec "$PN_REAL" "\$@"
+EOF2
+  chmod +x "$TEST_DIR/wsid-pn"
+  PG_REPO_RUNNER_PN_BIN="$TEST_DIR/wsid-pn" ws_build
   [ "$status" -eq 1 ]
   [[ $output == *"already registered to the canonical workspace"* ]]
   [ ! -e "$(ws_verdict_file)" ]

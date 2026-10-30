@@ -377,15 +377,15 @@ The deployment MUST give the role a PATH that provides `pn`, `nix` and `darwin-r
 ### Known limit: pn's workspace id check
 
 `pn workspace build` runs the machine-local workspace id uniqueness check of its prelude
-(`checkWsidUnique`, nix-repo-base ADR 0012) against the root it runs in. A set carries a copy of the
-canonical `[workspace] id`, so once the canonical workspace has claimed the id (any apply or build from the
-canonical root does), a build in a set fails with `wsid "<id>" already used by workspace "<canonical root>"
-(must be unique per machine)`, exit 1. The runner reports that as a malfunction (exit 1, no verdict, the
-set removed) and never works around it (no edit of the set's `pn-workspace.toml`, no trust change, no
-private `XDG_DATA_HOME`, which would also hide nix's own trusted-settings). The tests prove it with the real
-pn (`real pn: a workspace id the canonical workspace already registered ...`). Runner C therefore needs
-`pn` to exempt a workforest set from that check before it can be enabled on a machine that has applied the
-workspace; no repo enables `build` in this repository.
+(`checkWsidUnique`, nix-repo-base ADR 0012). A set carries a copy of the canonical `[workspace] id`, so
+before nix-repo-base d95cb33 a build in a set failed with `wsid "<id>" already used by workspace
+"<canonical root>" (must be unique per machine)`, exit 1. pn now exempts a workforest set root from that
+check, so a set build passes it and leaves the canonical root's registry entry unchanged (real-pn test:
+`real pn: a set build is not refused by the wsid check ...`). The runner keeps its classification branch for
+a host whose pn predates that change: it reports the refusal as a malfunction (exit 1, no verdict, the set
+removed) and never works around it (no edit of the set's `pn-workspace.toml`, no trust change, no private
+`XDG_DATA_HOME`, which would also hide nix's own trusted-settings). A stand-in-tier test emits the message
+so the branch stays tested hermetically (`a pn that refuses the set on the wsid check ...`).
 
 ### Measurements (2026-10-28, a throwaway fixture only)
 
