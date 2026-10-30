@@ -5,19 +5,29 @@ Consumed verbatim by the ccpool-pools dashboard (packet E).
 ## Expression
 
 ```promql
-pa_monitor_session_tokens
-  * on (session_id) group_left (pool, pgrouter_role)
-    label_replace(
-      max by (claude_session_id, pool, pgrouter_role) (ccpool_session_info),
-      "session_id", "$1", "claude_session_id", "(.*)"
-    )
+label_replace(
+  sum by (pool, pgrouter_role) (
+    max by (session_id) (pa_monitor_session_tokens)
+      * on (session_id) group_left (pool, pgrouter_role)
+        label_replace(
+          max by (claude_session_id, pool, pgrouter_role) (
+            ccpool_session_info{pool=~"$pool", pgrouter_role=~"$role"}
+          ),
+          "session_id", "$1", "claude_session_id", "(.*)"
+        )
+  ),
+  "pgrouter_role", "unlabelled", "pgrouter_role", "^$"
+)
 ```
 
-Dashboard panels aggregate the result with `sum by (pool)` (optionally also
-`by (pgrouter_role)`). Sessions with no `ccpool_session_info` match (for
-example non-ccpool sessions such as `pristine-a1`) drop out of the `*` join and
-are never mislabelled. The right side is deduplicated with `max by` so a
-session seen by more than one reap cannot cause a many-to-many error.
+`claude_session_id` equals `session_id` 1:1 per (pool, role), which is what
+makes the `group_left` join unique once both sides are deduplicated with
+`max by`: the left side by `session_id` (a restarted exporter can briefly push
+the same session twice), the right side by `(claude_session_id, pool,
+pgrouter_role)`. Sessions with no `ccpool_session_info` match (for example
+non-ccpool sessions such as `pristine-a1`) drop out of the `*` join and are
+never mislabelled. The `$pool` and `$role` filters apply on the right side, so
+the join result needs no further `and on (pool)` clause.
 
 ## Panel description
 

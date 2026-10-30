@@ -10,7 +10,7 @@
     "to": "now"
   },
   "refresh": "1m",
-  "description": "ccpool sessions grouped by pool (the basename of the pool directory). The pool variable falls back to All (regex .*), so panels render even before the first reaper sweep populates ccpool_session_info. A series with no pgrouter_role label is shown as unlabelled.",
+  "description": "ccpool sessions grouped by pool (the basename of the pool directory). The pool variable lists the pools that report capacity, and All expands to those pools. A series with no pgrouter_role label is shown as unlabelled.",
   "templating": {
     "list": [
       {
@@ -21,12 +21,11 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "query": "label_values(ccpool_session_info, pool)",
-        "definition": "label_values(ccpool_session_info, pool)",
+        "query": "label_values(ccpool_pool_capacity, pool)",
+        "definition": "label_values(ccpool_pool_capacity, pool)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
-        "allValue": ".*",
         "current": {
           "value": "$__all",
           "text": "All"
@@ -40,8 +39,8 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "query": "label_values(ccpool_session_info, pgrouter_role)",
-        "definition": "label_values(ccpool_session_info, pgrouter_role)",
+        "query": "label_values(ccpool_sessions_preserved_for_human, pgrouter_role)",
+        "definition": "label_values(ccpool_sessions_preserved_for_human, pgrouter_role)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -106,7 +105,8 @@
           "color": {
             "mode": "palette-classic-by-name"
           },
-          "unit": "s"
+          "unit": "s",
+          "noValue": "no runs in window"
         },
         "overrides": []
       },
@@ -148,7 +148,9 @@
         "defaults": {
           "color": {
             "mode": "palette-classic-by-name"
-          }
+          },
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -219,7 +221,10 @@
             "stacking": {
               "mode": "normal"
             }
-          }
+          },
+          "noValue": "no retries yet (or exporter down)",
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -232,13 +237,13 @@
     },
     {
       "id": 6,
-      "title": "Failures and launch outcomes",
+      "title": "Launch outcomes and cancels",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Launch outcomes by pool, outcome and route; cancel outcomes by pool; and, for context, pg-router failures by class and reason (not pool-scoped; the handler-error series has no reason, shown as none). Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "description": "Launch outcomes by pool, outcome and route, and cancel outcomes by pool. Router-wide failures live on the pg-router dashboard. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
       "gridPos": {
         "x": 12,
         "y": 10,
@@ -260,18 +265,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pool) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
-          "legendFormat": "cancel {{pool}}",
+          "expr": "sum by (pool, outcome) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "cancel {{pool}} / {{outcome}}",
           "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (class, reason) (label_replace(increase(pg_router_failures_total[$__rate_interval]), \"reason\", \"none\", \"reason\", \"^$\"))",
-          "legendFormat": "pg-router {{class}} / {{reason}}",
-          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -285,7 +281,10 @@
             "stacking": {
               "mode": "normal"
             }
-          }
+          },
+          "noValue": "no launches in window",
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -329,7 +328,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "label_replace(sum by (pool, pgrouter_role) (pa_monitor_session_tokens\n  * on (session_id) group_left (pool, pgrouter_role)\n    label_replace(\n      max by (claude_session_id, pool, pgrouter_role) (ccpool_session_info),\n      \"session_id\", \"$1\", \"claude_session_id\", \"(.*)\"\n    )) and on (pool) ccpool_session_info{pool=~\"$pool\"}, \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
+          "expr": "label_replace(sum by (pool, pgrouter_role) (max by (session_id) (pa_monitor_session_tokens)\n  * on (session_id) group_left (pool, pgrouter_role)\n    label_replace(\n      max by (claude_session_id, pool, pgrouter_role) (ccpool_session_info{pool=~\"$pool\", pgrouter_role=~\"$role\"}),\n      \"session_id\", \"$1\", \"claude_session_id\", \"(.*)\"\n    )), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
           "legendFormat": "{{pool}} / {{pgrouter_role}}",
           "refId": "A"
         }
@@ -342,7 +341,10 @@
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10
-          }
+          },
+          "noValue": "none (or exporter down)",
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -396,7 +398,9 @@
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10
-          }
+          },
+          "unit": "none",
+          "min": 0
         },
         "overrides": []
       },
@@ -438,7 +442,9 @@
         "defaults": {
           "color": {
             "mode": "palette-classic-by-name"
-          }
+          },
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -488,7 +494,10 @@
             "stacking": {
               "mode": "normal"
             }
-          }
+          },
+          "noValue": "no tokens in window",
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -498,6 +507,221 @@
           "placement": "bottom"
         }
       }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Session health",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Sessions by state",
+      "description": "Sessions by state and liveness (live=true means the owning process is alive). Source: ccpool_session_states, deduplicated per pool and role with max by before summing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "legendFormat": "{{state}} / live={{live}}",
+          "expr": "sum by (state, live) (max by (state, live, pool, pgrouter_role) (ccpool_session_states))"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Preserved for human",
+      "description": "Sessions preserved for a human to look at, by pool. Source: ccpool_sessions_preserved_for_human, deduplicated per pool and role with max by before summing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "legendFormat": "{{pool}}",
+          "expr": "sum by (pool) (max by (pool, pgrouter_role) (ccpool_sessions_preserved_for_human{pool=~\"$pool\",pgrouter_role=~\"$role\"}))"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "needs_input (live)",
+      "description": "Live sessions waiting for input. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "",
+          "expr": "sum(max by (state, live, pool, pgrouter_role) (ccpool_session_states{state=\"needs_input\",live=\"true\"})) or (vector(0) and on() (max(ccpool_pool_capacity) >= 0))"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "dead-but-working",
+      "description": "Sessions recorded as working whose process is dead. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 44,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "",
+          "expr": "sum(max by (state, live, pool, pgrouter_role) (ccpool_session_states{state=\"working\",live=\"false\"})) or (vector(0) and on() (max(ccpool_pool_capacity) >= 0))"
+        }
+      ]
     }
   ]
 }
