@@ -576,3 +576,75 @@ func TestDashboardReadsRealMetrics(t *testing.T) {
 }
 
 func yamlJSON(raw []byte, v any) error { return yaml.Unmarshal(raw, v) }
+
+// dashStat reads the stat panels of the dashboard for the instant-stat guard.
+type dashStatPanel struct {
+	ID      int
+	Type    string
+	Title   string
+	Targets []struct {
+		Expr    string
+		Instant bool
+	}
+}
+
+var (
+	rangeFn        = regexp.MustCompile(`\b(rate|irate|increase)\(`)
+	timestampMul   = regexp.MustCompile(`_timestamp_seconds\b[^*]*\*`)
+	timestampGuard = regexp.MustCompile(`_timestamp_seconds\b[^)]*>\s*0`)
+)
+
+// statsAreInstant returns the problems the instant-stat rules find in the
+// panels: a stat panel reading rate/irate/increase must query instant, and a
+// *_timestamp_seconds gauge multiplied into milliseconds needs a > 0 guard
+// (an unset gauge is 0, which renders as 1970).
+func statsAreInstant(panels []dashStatPanel) []string {
+	var bad []string
+	for _, p := range panels {
+		for _, tg := range p.Targets {
+			if p.Type == "stat" && rangeFn.MatchString(tg.Expr) && !tg.Instant {
+				bad = append(bad, "stat panel "+p.Title+" reads "+tg.Expr+" without instant: true")
+			}
+			if timestampMul.MatchString(tg.Expr) && !timestampGuard.MatchString(tg.Expr) {
+				bad = append(bad, "panel "+p.Title+" multiplies a timestamp gauge without a > 0 guard: "+tg.Expr)
+			}
+		}
+	}
+	return bad
+}
+
+func TestDashboardStatsAreInstant(t *testing.T) {
+	raw, err := os.ReadFile("../../grafana/pg-task-focus.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d struct{ Panels []dashStatPanel }
+	if err := yamlJSON(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range statsAreInstant(d.Panels) {
+		t.Error(b)
+	}
+	// Negative control: flipping panel 32 to a range query with no guard, and
+	// a range stat over increase(), must both be caught.
+	for _, p := range d.Panels {
+		if p.ID != 32 {
+			continue
+		}
+		if len(p.Targets) == 0 || !p.Targets[0].Instant {
+			t.Error("panel 32 Next reminder must be an instant query")
+		}
+		mut := p
+		mut.Targets = []struct {
+			Expr    string
+			Instant bool
+		}{{Expr: "pg_task_focus_next_reminder_timestamp_seconds * 1000", Instant: false}}
+		if len(statsAreInstant([]dashStatPanel{mut})) == 0 {
+			t.Error("negative control: the unguarded timestamp multiplication was not caught")
+		}
+		mut.Targets[0].Expr = "increase(pg_task_focus_x[1d])"
+		if len(statsAreInstant([]dashStatPanel{mut})) == 0 {
+			t.Error("negative control: a range stat over increase() was not caught")
+		}
+	}
+}

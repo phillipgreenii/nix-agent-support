@@ -55,7 +55,8 @@
           },
           "expr": "up{job=\"pg-task-focus\"}",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -85,7 +86,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "DOWN"
         },
         "overrides": []
       }
@@ -114,7 +116,8 @@
           },
           "expr": "pg_task_focus_ready",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -144,7 +147,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "DOWN"
         },
         "overrides": []
       }
@@ -173,7 +177,8 @@
           },
           "expr": "pg_task_focus_store_writable",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -203,7 +208,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "DOWN"
         },
         "overrides": []
       }
@@ -232,7 +238,8 @@
           },
           "expr": "pg_task_focus_store_read_only",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -262,7 +269,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "DOWN"
         },
         "overrides": []
       }
@@ -291,7 +299,8 @@
           },
           "expr": "pg_task_focus_config_valid",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -321,7 +330,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "DOWN"
         },
         "overrides": []
       }
@@ -350,13 +360,29 @@
           },
           "expr": "pg_task_focus_build_info",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true,
+          "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {},
         "overrides": []
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
     },
     {
       "id": 8,
@@ -380,7 +406,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (route, status) (rate(pg_task_focus_http_requests_total[5m]))",
+          "expr": "sum by (route, status) (rate(pg_task_focus_http_requests_total{route!=\"/metrics\"}[$__rate_interval]))",
           "editorMode": "code",
           "range": true,
           "legendFormat": "{{route}} {{status}}"
@@ -415,7 +441,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(pg_task_focus_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(pg_task_focus_http_request_duration_seconds_bucket[$__rate_interval])))",
           "editorMode": "code",
           "range": true,
           "legendFormat": "{{route}}"
@@ -432,7 +458,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Rejections by reason",
-      "description": "Refusals the daemon sent, by the closed reason set.",
+      "description": "Refusals the daemon sent, by the closed reason set. window: fixed - rolling hour, sparse events",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -457,7 +483,9 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "none yet (or daemon down)"
+        },
         "overrides": []
       }
     },
@@ -465,7 +493,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Appends: events by type",
-      "description": "",
+      "description": "window: fixed - rolling hour, sparse events",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -490,7 +518,9 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "none yet (or daemon down)"
+        },
         "overrides": []
       }
     },
@@ -498,7 +528,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Append and fsync latency p95",
-      "description": "",
+      "description": "p95 over a rolling hour; empty when nothing was appended in that hour. window: fixed - rolling hour, sparse events",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -516,7 +546,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pg_task_focus_append_duration_seconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le)(rate(pg_task_focus_append_duration_seconds_bucket[1h]))) and on() (sum(rate(pg_task_focus_append_duration_seconds_count[1h])) > 0)",
           "editorMode": "code",
           "range": true,
           "legendFormat": "append"
@@ -527,7 +557,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pg_task_focus_fsync_duration_seconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le)(rate(pg_task_focus_fsync_duration_seconds_bucket[1h]))) and on() (sum(rate(pg_task_focus_fsync_duration_seconds_count[1h])) > 0)",
           "editorMode": "code",
           "range": true,
           "legendFormat": "fsync"
@@ -535,7 +565,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "noValue": "no appends"
         },
         "overrides": []
       }
@@ -544,7 +575,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Append failures by stage",
-      "description": "write, fsync or project. Any increase is critical.",
+      "description": "write, fsync or project. Any increase is critical. window: fixed - rolling hour, sparse events",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -577,7 +608,7 @@
       "id": 14,
       "type": "timeseries",
       "title": "Log size",
-      "description": "",
+      "description": "Size of the event log on disk.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -595,9 +626,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_task_focus_store_size_bytes",
+          "expr": "max(pg_task_focus_store_size_bytes)",
           "editorMode": "code",
-          "range": true
+          "range": true,
+          "legendFormat": "log size"
         }
       ],
       "fieldConfig": {
@@ -619,7 +651,7 @@
       "gridPos": {
         "x": 6,
         "y": 20,
-        "w": 6,
+        "w": 12,
         "h": 7
       },
       "targets": [
@@ -629,7 +661,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_task_focus_replay_duration_seconds",
+          "expr": "max(pg_task_focus_replay_duration_seconds)",
           "editorMode": "code",
           "range": true,
           "legendFormat": "seconds"
@@ -640,54 +672,41 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_task_focus_replay_event_count",
+          "expr": "max(pg_task_focus_replay_event_count)",
           "editorMode": "code",
           "range": true,
           "legendFormat": "events"
         }
       ],
       "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      }
-    },
-    {
-      "id": 16,
-      "type": "timeseries",
-      "title": "State version (log lines)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 20,
-        "w": 6,
-        "h": 7
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "pg_task_focus_state_version",
-          "editorMode": "code",
-          "range": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "events"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 17,
       "type": "timeseries",
       "title": "Last append age",
-      "description": "0 timestamp before the first append of this process shows a very large age.",
+      "description": "Seconds since the last append; empty before the first append of this process.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -705,9 +724,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "time() - pg_task_focus_last_append_timestamp_seconds",
+          "expr": "(time() - max(pg_task_focus_last_append_timestamp_seconds)) and (max(pg_task_focus_last_append_timestamp_seconds) > 0)",
           "editorMode": "code",
-          "range": true
+          "range": true,
+          "legendFormat": "age"
         }
       ],
       "fieldConfig": {
@@ -721,7 +741,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "SSE clients and events",
-      "description": "",
+      "description": "SSE clients (left axis) and events sent per second (right axis).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -739,7 +759,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_task_focus_sse_clients",
+          "expr": "max(pg_task_focus_sse_clients)",
           "editorMode": "code",
           "range": true,
           "legendFormat": "clients"
@@ -750,7 +770,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(pg_task_focus_sse_events_sent_total[5m]))",
+          "expr": "sum(rate(pg_task_focus_sse_events_sent_total[$__rate_interval]))",
           "editorMode": "code",
           "range": true,
           "legendFormat": "events/s"
@@ -758,7 +778,24 @@
       ],
       "fieldConfig": {
         "defaults": {},
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "events/s"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -783,7 +820,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_task_focus_startup_recovery",
+          "expr": "max by (kind) (pg_task_focus_startup_recovery)",
           "editorMode": "code",
           "range": true,
           "legendFormat": "{{kind}}"
@@ -798,7 +835,7 @@
       "id": 20,
       "type": "table",
       "title": "Last request per client",
-      "description": "Seconds since each client (cli, web, connector, swiftbar, unknown) last had a request counted. A silent SwiftBar plugin shows here; no alert is defined on it.",
+      "description": "Seconds since each client (cli, web, connector, swiftbar, unknown) last had a request counted. A silent SwiftBar plugin shows here; no alert is defined on it. window: fixed - last-request age per client",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -818,7 +855,9 @@
           },
           "expr": "time() - max by (client) (max_over_time(timestamp(pg_task_focus_http_requests_total and (changes(pg_task_focus_http_requests_total[1m]) > 0))[24h:1m]))",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -826,13 +865,27 @@
           "unit": "s"
         },
         "overrides": []
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
     },
     {
       "id": 21,
-      "type": "timeseries",
+      "type": "stat",
       "title": "Alerts played and failed",
-      "description": "",
+      "description": "Alerts played by kind and alert failures over the dashboard time range.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -850,10 +903,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (kind) (increase(pg_task_focus_alerts_played_total[1d]))",
+          "expr": "sum by (kind) (increase(pg_task_focus_alerts_played_total[$__range]))",
           "editorMode": "code",
-          "range": true,
-          "legendFormat": "{{kind}}"
+          "range": false,
+          "legendFormat": "{{kind}}",
+          "instant": true
         },
         {
           "refId": "B",
@@ -861,22 +915,32 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(pg_task_focus_alert_failures_total[1d]))",
+          "expr": "sum(increase(pg_task_focus_alert_failures_total[$__range]))",
           "editorMode": "code",
-          "range": true,
-          "legendFormat": "failures"
+          "range": false,
+          "legendFormat": "failures",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {},
         "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "colorMode": "value",
+        "graphMode": "none"
       }
     },
     {
       "id": 22,
-      "type": "timeseries",
+      "type": "stat",
       "title": "Config reloads",
-      "description": "",
+      "description": "Config reloads by result over the dashboard time range.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -894,21 +958,31 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (result) (increase(pg_task_focus_config_reload_total[1d]))",
+          "expr": "sum by (result) (increase(pg_task_focus_config_reload_total[$__range]))",
           "editorMode": "code",
-          "range": true,
-          "legendFormat": "{{result}}"
+          "range": false,
+          "legendFormat": "{{result}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {},
         "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "colorMode": "value",
+        "graphMode": "none"
       }
     },
     {
       "id": 23,
       "type": "row",
-      "title": "Your usage (live-state views: a correction or retraction rewrites the past, while Prometheus keeps what the gauge said at the time; the log is the authoritative history)",
+      "title": "Your usage (live-state views)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -922,7 +996,7 @@
       "id": 24,
       "type": "timeseries",
       "title": "Cycle time today by type",
-      "description": "Segments clipped to the civil date of the active day period, in that period's zone.",
+      "description": "Cycle time per type today.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -956,8 +1030,8 @@
     {
       "id": 25,
       "type": "timeseries",
-      "title": "Cycles active, overtime and paused by type",
-      "description": "",
+      "title": "Cycles overtime and paused by type",
+      "description": "Overtime and paused seconds per cycle type (the stuck-overtime alert reads them); cycle_active is on its own state timeline below.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -969,17 +1043,6 @@
         "h": 7
       },
       "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "pg_task_focus_cycle_active",
-          "editorMode": "code",
-          "range": true,
-          "legendFormat": "active {{type}}"
-        },
         {
           "refId": "B",
           "datasource": {
@@ -1012,7 +1075,7 @@
       "id": 26,
       "type": "timeseries",
       "title": "Attention items",
-      "description": "",
+      "description": "Attention items by type and severity.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1045,7 +1108,7 @@
       "id": 27,
       "type": "timeseries",
       "title": "Tasks by cadence and status",
-      "description": "",
+      "description": "Task counts by cadence and status.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1078,7 +1141,7 @@
       "id": 28,
       "type": "timeseries",
       "title": "Tasks overdue",
-      "description": "",
+      "description": "Overdue tasks by cadence.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1109,9 +1172,9 @@
     },
     {
       "id": 29,
-      "type": "timeseries",
-      "title": "Miss rate, last 30 days",
-      "description": "Missed over all resolutions whose effective_at is in the last 30 days.",
+      "type": "stat",
+      "title": "Miss rate (retained window)",
+      "description": "Missed over all resolutions whose effective_at is in the last 30 days; Prometheus retains only 168 h, so history beyond that is not shown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1131,8 +1194,9 @@
           },
           "expr": "sum by (cadence) (pg_task_focus_task_resolutions_30d{outcome=\"missed\"}) / clamp_min(sum by (cadence) (pg_task_focus_task_resolutions_30d), 1)",
           "editorMode": "code",
-          "range": true,
-          "legendFormat": "{{cadence}}"
+          "range": false,
+          "legendFormat": "{{cadence}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -1140,13 +1204,22 @@
           "unit": "percentunit"
         },
         "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "colorMode": "value",
+        "graphMode": "none"
       }
     },
     {
       "id": 30,
       "type": "timeseries",
       "title": "Resolutions by outcome (whole log)",
-      "description": "",
+      "description": "Resolutions by outcome over the whole log.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1177,9 +1250,9 @@
     },
     {
       "id": 31,
-      "type": "timeseries",
-      "title": "Correction rate",
-      "description": "Corrections and retractions committed in the last 7 days; a high value signals a UX problem.",
+      "type": "stat",
+      "title": "Correction rate (retained window)",
+      "description": "Corrections and retractions committed over the dashboard time range (Prometheus retains 168 h); a high value signals a UX problem.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1197,22 +1270,32 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (kind) (increase(pg_task_focus_corrections_applied_total[7d]))",
+          "expr": "sum by (kind) (increase(pg_task_focus_corrections_applied_total[$__range]))",
           "editorMode": "code",
-          "range": true,
-          "legendFormat": "{{kind}}"
+          "range": false,
+          "legendFormat": "{{kind}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {},
         "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "colorMode": "value",
+        "graphMode": "none"
       }
     },
     {
       "id": 32,
       "type": "stat",
       "title": "Next reminder",
-      "description": "When the running cycle next alerts; 0 when none runs.",
+      "description": "When the running cycle next alerts; empty when none runs.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1230,14 +1313,17 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_task_focus_next_reminder_timestamp_seconds * 1000",
+          "expr": "max(pg_task_focus_next_reminder_timestamp_seconds > 0) * 1000",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true,
+          "legendFormat": "next reminder"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "dateTimeAsLocal"
+          "unit": "dateTimeAsLocal",
+          "noValue": "none running"
         },
         "overrides": []
       }
@@ -1246,7 +1332,7 @@
       "id": 33,
       "type": "timeseries",
       "title": "Restarts in the last 30 minutes",
-      "description": "Distinct process starts seen as changes in the start timestamp; the restart-loop alert fires at 3 or more.",
+      "description": "Distinct process starts seen as changes in the start timestamp; the restart-loop alert fires at 3 or more. window: fixed - 30-minute restart count",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1264,14 +1350,69 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "changes(pg_task_focus_start_timestamp_seconds[30m])",
+          "expr": "max(changes(pg_task_focus_start_timestamp_seconds[30m]))",
           "editorMode": "code",
-          "range": true
+          "range": true,
+          "legendFormat": "restarts"
         }
       ],
       "fieldConfig": {
         "defaults": {},
         "overrides": []
+      }
+    },
+    {
+      "id": 34,
+      "type": "state-timeline",
+      "title": "Cycle active by type",
+      "description": "1 while a cycle of that type is active.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 63,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_task_focus_cycle_active",
+          "editorMode": "code",
+          "range": true,
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 35,
+      "type": "text",
+      "title": "About the usage panels",
+      "description": "Explains why the usage panels are live-state views.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 70,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "A correction or retraction rewrites the past, while Prometheus keeps what the gauge said at the time; the log is the authoritative history."
       }
     }
   ]
