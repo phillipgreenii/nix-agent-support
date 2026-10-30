@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -39,6 +42,7 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 	}
 	now := d.clock.Now()
 	var cov wire.Coverage
+	kinds := map[string]int{}
 	cov.Roots = make([]wire.RootCoverage, 0, len(d.cfg.Roots()))
 	counts := map[string]int{}
 	for _, f := range files {
@@ -52,6 +56,9 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 		}
 		p := paths[0]
 		cov.Files++
+		if !d.prs.HasSource(f.Source) {
+			kinds[f.Source]++
+		}
 		for _, root := range d.cfg.Roots() {
 			if strings.HasPrefix(p, root+string(os.PathSeparator)) {
 				counts[root]++
@@ -75,7 +82,15 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 				fc.CopyOffset = fc.Size // a snapshot file is copied whole, version by version
 			}
 		}
-		// Phase 1 has no parser: parse lag is reported once a parser exists.
+		if f.Mode == "append" && d.prs.HasSource(f.Source) && fc.CopyOffset > fc.ParseOffset {
+			fc.ParseLagBytes = fc.CopyOffset - fc.ParseOffset
+			if fc.ParseLagBytes > cov.ParseLagBytesMax {
+				cov.ParseLagBytesMax = fc.ParseLagBytes
+			}
+			if s := d.parseLagSeconds(f.ID, f.CurGen, fc.ParseOffset, now); s > cov.ParseLagSecondsMax {
+				cov.ParseLagSecondsMax = s
+			}
+		}
 		if fc.CopyLagBytes > cov.CopyLagBytesMax {
 			cov.CopyLagBytesMax = fc.CopyLagBytes
 			cov.Worst = &wire.Worst{FileID: f.ID, Path: p, CopyLagBytes: fc.CopyLagBytes}
@@ -91,6 +106,18 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 		_, err := os.Stat(root)
 		cov.Roots = append(cov.Roots, wire.RootCoverage{Path: root, Present: err == nil, Files: counts[root]})
 	}
+	if sum, err := parser.Summarize(d.st); err == nil {
+		cov.BadLines = sum.BadLines
+		cov.UnknownKeys = []wire.UnknownKey{}
+		for _, u := range sum.UnknownKeys {
+			cov.UnknownKeys = append(cov.UnknownKeys, wire.UnknownKey{Source: u.Source, Type: u.Type, Path: u.Path, Count: u.Count})
+		}
+	}
+	cov.UnparsedKinds = []wire.UnparsedKind{}
+	for k, n := range kinds {
+		cov.UnparsedKinds = append(cov.UnparsedKinds, wire.UnparsedKind{Kind: k, Files: n})
+	}
+	sort.Slice(cov.UnparsedKinds, func(i, j int) bool { return cov.UnparsedKinds[i].Kind < cov.UnparsedKinds[j].Kind })
 	cov.CaughtUp = d.backfillDone.Load()
 	cov.Degraded = !cov.CaughtUp
 	cov.Backfill = d.backfillProgress()
@@ -135,7 +162,7 @@ func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
 	free, _ := FreeBytes(d.cfg.StateDir)
 	st := wire.Status{
 		CopyLagS:       cov.CopyLagSecondsMax,
-		ParseLagS:      0,
+		ParseLagS:      cov.ParseLagSecondsMax,
 		Held:           cov.Held,
 		FreeBytes:      free,
 		StageCounts:    map[string]int{},
@@ -170,4 +197,45 @@ func Verdict(st wire.Status, minFree int64) (healthy bool, verdict, short string
 		return false, fmt.Sprintf("behind: %d bytes free is below minFreeBytes %d", st.FreeBytes, minFree), "behind"
 	}
 	return true, fmt.Sprintf("healthy: copy lag %.0fs, parse lag %.0fs, nothing held, %d bytes free", st.CopyLagS, st.ParseLagS, st.FreeBytes), "ok"
+}
+
+// parseLagSeconds is how long the byte at the parse offset has waited: the time
+// since the recorder saw it.
+func (d *Daemon) parseLagSeconds(file int64, gen int, off int64, now time.Time) float64 {
+	cc, err := d.st.CopyCommits(file)
+	if err != nil {
+		return 0
+	}
+	for i := len(cc) - 1; i >= 0; i-- {
+		if c := cc[i]; c.Gen == gen && c.From <= off && off < c.To {
+			if s := now.Sub(time.Unix(0, c.SeenNS)).Seconds(); s > 0 {
+				return s
+			}
+		}
+	}
+	return 0
+}
+
+func (d *Daemon) opQuery(ctx context.Context, body []byte) (any, *wire.Error) {
+	var req query.Request
+	if err := query.Decode(body, &req); err != nil {
+		return nil, err
+	}
+	ans, err := d.qe.Query(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return ans, nil
+}
+
+func (d *Daemon) opSearch(ctx context.Context, body []byte) (any, *wire.Error) {
+	var req query.SearchRequest
+	if err := query.Decode(body, &req); err != nil {
+		return nil, err
+	}
+	ans, err := d.qe.Search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return ans, nil
 }

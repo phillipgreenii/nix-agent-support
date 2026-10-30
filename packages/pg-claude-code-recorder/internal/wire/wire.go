@@ -162,17 +162,18 @@ type Worst struct {
 
 // CoverageSummary is coverage --view summary.
 type CoverageSummary struct {
-	Files             int     `json:"files"`
-	CopyLagBytesMax   int64   `json:"copy_lag_bytes_max"`
-	ParseLagBytesMax  int64   `json:"parse_lag_bytes_max"`
-	CopyLagSecondsMax float64 `json:"copy_lag_seconds_max"`
-	BadLines          int     `json:"bad_lines"`
-	UnknownKeys       int     `json:"unknown_keys"`
-	UnparsedKinds     int     `json:"unparsed_kinds"`
-	Held              int     `json:"held"`
-	Settled           int     `json:"settled"`
-	Removed           int     `json:"removed"`
-	Worst             *Worst  `json:"worst"`
+	Files              int            `json:"files"`
+	CopyLagBytesMax    int64          `json:"copy_lag_bytes_max"`
+	ParseLagBytesMax   int64          `json:"parse_lag_bytes_max"`
+	CopyLagSecondsMax  float64        `json:"copy_lag_seconds_max"`
+	ParseLagSecondsMax float64        `json:"parse_lag_seconds_max"`
+	BadLines           int            `json:"bad_lines"`
+	UnknownKeys        []UnknownKey   `json:"unknown_keys"`
+	UnparsedKinds      []UnparsedKind `json:"unparsed_kinds"`
+	Held               int            `json:"held"`
+	Settled            int            `json:"settled"`
+	Removed            int            `json:"removed"`
+	Worst              *Worst         `json:"worst"`
 }
 
 // Coverage is the coverage answer. Files is set only for --view files.
@@ -188,4 +189,19 @@ type Coverage struct {
 // CoverageRequest is the POST /v1/coverage body.
 type CoverageRequest struct {
 	View string `json:"view,omitempty"` // summary (default) or files
+}
+
+// UnknownKey is a key a parser does not recognize, counted once per distinct
+// dotted path per source and record type.
+type UnknownKey struct {
+	Source string `json:"source"`
+	Type   string `json:"record_type,omitempty"`
+	Path   string `json:"path"`
+	Count  int    `json:"count"`
+}
+
+// UnparsedKind is a kind of file no parser reads yet, with its file count.
+type UnparsedKind struct {
+	Kind  string `json:"kind"`
+	Files int    `json:"files"`
 }

@@ -11,6 +11,9 @@ Usage:
   pg-claude-code-recorder serve    [--config FILE] [--metrics-addr HOST:PORT] [--pprof]
   pg-claude-code-recorder status   [--json|--short] [--watch] [--allow-partial]
   pg-claude-code-recorder coverage [--view summary|files] [--json] [--wait-caught-up] [--allow-partial]
+  pg-claude-code-recorder query    [--request FILE] [--limit N] [--jsonl] [--json]   request JSON on standard input
+  pg-claude-code-recorder search   [--request FILE] [--limit N] [--jsonl] [--json]   word or substring search
+  pg-claude-code-recorder find     <session-id|text> [--limit N]
   pg-claude-code-recorder version
 
 Common flags:
@@ -27,6 +30,9 @@ Examples:
   pg-claude-code-recorder status --watch            follow the first run until it is caught up
   pg-claude-code-recorder coverage --wait-caught-up block until the first backfill is done
   pg-claude-code-recorder coverage --view files     per-file copy and parse offsets and lag
+  echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"count"}]}' | pg-claude-code-recorder query
+  echo '{"mode":"word","q":"registry file"}' | pg-claude-code-recorder search --limit 5
+  pg-claude-code-recorder find pg2-abc               a bead id is a text search
   pg-claude-code-recorder status --client swiftbar  count this call under client "swiftbar"
 
 First run: enable the module, run status, and read coverage until caught_up is true.

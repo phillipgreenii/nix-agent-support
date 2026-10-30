@@ -59,7 +59,7 @@ func (a *app) printCoverage(cov wire.Coverage, jsonOut bool) {
 	}
 	_, _ = fmt.Fprintf(a.out, "caught up: %t\nfiles: %d\ncopy lag: %d bytes max, %.0fs max\nparse lag: %d bytes max\nbad lines: %d, unknown keys: %d, unparsed kinds: %d\nheld: %d, settled: %d, removed: %d\n",
 		cov.CaughtUp, cov.Files, cov.CopyLagBytesMax, cov.CopyLagSecondsMax, cov.ParseLagBytesMax,
-		cov.BadLines, cov.UnknownKeys, cov.UnparsedKinds, cov.Held, cov.Settled, cov.Removed)
+		cov.BadLines, len(cov.UnknownKeys), len(cov.UnparsedKinds), cov.Held, cov.Settled, cov.Removed)
 	if cov.Worst != nil {
 		_, _ = fmt.Fprintf(a.out, "worst: %s (%d bytes behind)\n", cov.Worst.Path, cov.Worst.CopyLagBytes)
 	}

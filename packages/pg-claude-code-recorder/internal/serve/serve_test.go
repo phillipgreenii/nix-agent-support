@@ -355,3 +355,54 @@ func TestRestartRecoversAndKeepsTheCopy(t *testing.T) {
 		t.Fatalf("%+v", cov.FileList)
 	}
 }
+
+func TestParsedRecordsAnswerQueryAndSearchThroughTheDaemonOps(t *testing.T) {
+	e := newEnv(t, false)
+	e.transcript("s1.jsonl", `{"type":"assistant","uuid":"u1","sessionId":"example-session-1","timestamp":"2026-10-29T20:00:00Z","message":{"id":"m1","model":"example-model-a","role":"assistant","usage":{"output_tokens":7},"content":[{"type":"text","text":"the registry file was deleted"}]}}`+"\n{broken\n", time.Now())
+	d := e.open(t)
+	defer func() { _ = d.Close() }()
+	if err := d.Watcher().Rescan(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Parser().Drain(); err != nil {
+		t.Fatal(err)
+	}
+	ans, werr := d.opQuery(context.Background(), []byte(`{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}`))
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	b, _ := json.Marshal(ans)
+	if !strings.Contains(string(b), `"rows":[["example-model-a",7]]`) || !strings.Contains(string(b), `"as_of"`) {
+		t.Fatalf("query answer %s", b)
+	}
+	hits, werr := d.opSearch(context.Background(), []byte(`{"q":"registry deleted"}`))
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	b, _ = json.Marshal(hits)
+	if !strings.Contains(string(b), `[registry]`) {
+		t.Fatalf("search answer %s", b)
+	}
+	cov, err := d.coverage("files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov.BadLines != 1 || cov.ParseLagBytesMax != 0 || len(cov.FileList) != 1 || cov.FileList[0].ParseOffset != cov.FileList[0].CopyOffset {
+		t.Fatalf("coverage %+v", cov)
+	}
+	d.Parser().UpdateGauges()
+	if v, ok := d.Obs().Reg.Gauge("parse_progress", nil); !ok || v != 1 {
+		t.Fatalf("parse_progress %v %v", v, ok)
+	}
+	for _, g := range []string{"parse_lag_seconds", "parse_lag_bytes", "unknown_kinds"} {
+		if _, ok := d.Obs().Reg.Gauge(g, nil); !ok {
+			t.Fatalf("gauge %s not exported", g)
+		}
+	}
+	if v, _ := d.Obs().Reg.Counter("bad_lines_total", nil); v != 1 {
+		t.Fatalf("bad_lines_total %v", v)
+	}
+	if _, werr := d.opQuery(context.Background(), []byte(`{"where":{"field":"nope","exists":true}}`)); werr == nil || werr.Name != wire.ErrBadRequest {
+		t.Fatalf("bad field: %v", werr)
+	}
+}

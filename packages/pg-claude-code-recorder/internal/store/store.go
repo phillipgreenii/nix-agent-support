@@ -168,7 +168,7 @@ func (s *Store) openDB(path string) error {
 		return err
 	}
 	w.SetMaxOpenConns(1)
-	if _, err := w.Exec(schemaSQL); err != nil {
+	if _, err := w.Exec(schemaSQL + derivedSQL); err != nil {
 		_ = w.Close()
 		return err
 	}

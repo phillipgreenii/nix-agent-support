@@ -52,6 +52,8 @@ type Config struct {
 	// HeldMaxAge is how long a Conversation may be held before status calls the
 	// recorder unhealthy.
 	HeldMaxAge time.Duration
+	// ParseMaxLineBytes is parse.maxLineBytes: a longer transcript line is a bad line.
+	ParseMaxLineBytes int
 }
 
 type file struct {
@@ -86,6 +88,9 @@ type file struct {
 	Held struct {
 		MaxAge string `toml:"maxAge"`
 	} `toml:"held"`
+	Parse struct {
+		MaxLineBytes *int `toml:"maxLineBytes"`
+	} `toml:"parse"`
 }
 
 // ParseDuration parses a Go duration string with an optional d (days) unit.
@@ -145,17 +150,18 @@ func Defaults(getenv func(string) string) Config {
 	}
 	state := StateHome(getenv)
 	c := Config{
-		ClaudeDir:     claude,
-		StateDir:      state,
-		SweepInterval: 15 * time.Minute,
-		MinFreeBytes:  5 << 30,
-		WaitMax:       60 * time.Second,
-		WaitMaxWaiter: 64,
-		FeedRetention: 30 * 24 * time.Hour,
-		RemoveAfter:   30 * 24 * time.Hour,
-		CopyThrottle:  2 * time.Millisecond,
-		HeldMaxAge:    3 * 24 * time.Hour,
-		Clients:       DefaultClients(),
+		ClaudeDir:         claude,
+		StateDir:          state,
+		SweepInterval:     15 * time.Minute,
+		MinFreeBytes:      5 << 30,
+		WaitMax:           60 * time.Second,
+		WaitMaxWaiter:     64,
+		FeedRetention:     30 * 24 * time.Hour,
+		RemoveAfter:       30 * 24 * time.Hour,
+		CopyThrottle:      2 * time.Millisecond,
+		HeldMaxAge:        3 * 24 * time.Hour,
+		ParseMaxLineBytes: 64 << 20,
+		Clients:           DefaultClients(),
 	}
 	c.Socket = filepath.Join(c.StateDir, SocketName)
 	return c
@@ -208,6 +214,9 @@ func apply(c *Config, f file) error {
 	}
 	if f.Wait.MaxWaiters != nil {
 		c.WaitMaxWaiter = *f.Wait.MaxWaiters
+	}
+	if f.Parse.MaxLineBytes != nil {
+		c.ParseMaxLineBytes = *f.Parse.MaxLineBytes
 	}
 	c.RemoveEnable = f.Remove.Enable
 	c.MetricsAddr = f.Metrics.Addr

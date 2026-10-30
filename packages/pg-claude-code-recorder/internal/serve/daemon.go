@@ -21,8 +21,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/exporter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/server"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
@@ -50,6 +53,8 @@ type Daemon struct {
 	scope *scope.Scope
 	w     *watcher.Watcher
 	ckpt  *fileCheckpoint
+	prs   *parser.Parser
+	qe    *query.Engine
 	srv   *server.Server
 	exp   *exporter.Server
 	clock clock.Clock
@@ -102,6 +107,9 @@ func Open(opt Options) (*Daemon, error) {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover copies: %w", err)
 	}
+	srcs := sources.All()
+	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes})
+	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), Res: d.prs, Behind: func() bool { return !d.backfillDone.Load() }}
 	d.ckpt = newFileCheckpoint(cfg.StateDir)
 	d.w, err = watcher.New(watcher.Config{
 		Roots:         cfg.Roots(),
@@ -123,6 +131,9 @@ func Open(opt Options) (*Daemon, error) {
 
 // Obs returns the daemon's registry and logger.
 func (d *Daemon) Obs() *obs.Obs { return d.obs }
+
+// Parser returns the parse stage (tests drain it).
+func (d *Daemon) Parser() *parser.Parser { return d.prs }
 
 // Store returns the open store (tests and later phases).
 func (d *Daemon) Store() *store.Store { return d.st }
@@ -157,6 +168,9 @@ func (d *Daemon) ingest(p string) copier.Result {
 	res, err := d.cp.Ingest(p)
 	if err != nil {
 		d.obs.Log.Warn("ingest_failed", "path", p, "err", err.Error())
+	}
+	if res.File != 0 {
+		d.prs.Notify(res.File)
 	}
 	return res
 }
@@ -214,6 +228,8 @@ func (d *Daemon) Start() error {
 	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
 	d.srv.Register("status", server.KindQuery, d.opStatus)
 	d.srv.Register("coverage", server.KindQuery, d.opCoverage)
+	d.srv.Register("query", server.KindQuery, d.opQuery)
+	d.srv.Register("search", server.KindQuery, d.opSearch)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -234,11 +250,31 @@ func (d *Daemon) Start() error {
 		d.srv.Close()
 		return fmt.Errorf("start watcher: %w", err)
 	}
-	d.refreshing.Add(1)
+	d.refreshing.Add(2)
 	go d.refreshLoop()
+	go d.parseLoop()
 	d.obs.Event("serving", "socket", d.cfg.Socket, "claude_dir", d.cfg.ClaudeDir, "state_dir", d.cfg.StateDir,
 		"version", d.opt.Version)
 	return nil
+}
+
+// parseLoop catches up every copy on start (and re-parses what an older parser
+// version stored), then parses each file as the copier reports new bytes.
+func (d *Daemon) parseLoop() {
+	defer d.refreshing.Done()
+	if err := d.prs.ParseAll(); err != nil {
+		d.obs.Log.Warn("parse_all_failed", "err", err.Error())
+	}
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-d.prs.Wake():
+			if err := d.prs.Drain(); err != nil {
+				d.obs.Log.Warn("parse_failed", "err", err.Error())
+			}
+		}
+	}
 }
 
 func (d *Daemon) refreshLoop() {
@@ -259,6 +295,7 @@ func (d *Daemon) refreshLoop() {
 // state directory's free and used bytes. Used bytes walk the directory, so they
 // are recomputed at most once a minute.
 func (d *Daemon) refreshGauges() {
+	d.prs.UpdateGauges()
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)
 	}

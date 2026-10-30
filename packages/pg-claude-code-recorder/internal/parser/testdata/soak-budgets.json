@@ -1,0 +1,8 @@
+{
+  "seconds": 5.337606417,
+  "peak_heap_bytes": 4554752,
+  "wal_bytes": 8264752,
+  "trigram_bytes": 5791744,
+  "input_bytes": 9866360,
+  "records": 48000
+}

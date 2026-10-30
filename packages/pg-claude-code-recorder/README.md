@@ -22,12 +22,12 @@ the `-linux-cross-compile` check (`GOOS=linux CGO_ENABLED=0 go vet ./...`) keeps
 
 ## Build tags and checks
 
-| Tag           | Tier                                               | Check                                                                         |
-| ------------- | -------------------------------------------------- | ----------------------------------------------------------------------------- |
-| none          | unit (fast, hermetic, `-timeout 120s` per package) | `pg-claude-code-recorder-go-tests`                                            |
-| `integration` | daemon, subprocess, real external tool             | `pg-claude-code-recorder-integration-tests` (on demand, `-race`, 60m timeout) |
-| `faults`      | fault injection                                    | guarded by `-integration-tests-gating`                                        |
-| `soak`        | soak (its check lands in phase 2)                  | guarded by `-integration-tests-gating`                                        |
+| Tag           | Tier                                                                                                           | Check                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| none          | unit (fast, hermetic, `-timeout 120s` per package)                                                             | `pg-claude-code-recorder-go-tests`                                            |
+| `integration` | daemon, subprocess, real external tool                                                                         | `pg-claude-code-recorder-integration-tests` (on demand, `-race`, 60m timeout) |
+| `faults`      | fault injection                                                                                                | guarded by `-integration-tests-gating`                                        |
+| `soak`        | soak (`checks.<system>.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`) | guarded by `-integration-tests-gating`                                        |
 
 `TestUnitTierHasNoIntegrationTests` fails a unit-tier test file that execs a built binary,
 builds Go, or needs a real external tool. `pg-claude-code-recorder-integration-tests-gating`
@@ -136,3 +136,23 @@ state directory size read from disk, and exits 3.
   `osConfig.phillipgreenii.observability`; the eval-test stub matches personal's
   `lib/launchd-service-submodule.nix`.
 - Fixtures use generic `example-*` names (the identifier guard, `scripts/identifier-allowlists/pg-claude-code-recorder.txt`).
+
+## Parse, query and search (phase 2)
+
+Sources are compiled in (`internal/source`): `claude-transcript` (session and subagent transcripts)
+and `claude-history`. The parser (`internal/parser`) reads each copy from its parse offset to the
+last newline within the copy offset and commits records, typed fields, text indexes and the new
+parse offset in one transaction; a re-parse replaces a file generation atomically behind a
+`parse_resets` marker. Only `text` fields (FTS5 word index) and `opaque` fields (FTS5 trigram index,
+case sensitive, every hit verified against the copy) are search-indexed; no file contents are stored.
+
+```sh
+echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}' | pg-claude-code-recorder query
+echo '{"mode":"substring","q":"--no-verify","fields":["tool_use.input"]}' | pg-claude-code-recorder search
+pg-claude-code-recorder find <session-id|text>
+```
+
+A substring query under three characters returns no hits and `too_short: true`. Config key
+`parse.maxLineBytes` bounds a line (longer lines are bad lines). The soak check
+(`nix build .#checks.<system>.pg-claude-code-recorder-soak -L`, on demand) fails at 1.5 times the
+committed baseline.

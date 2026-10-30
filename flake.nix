@@ -6111,6 +6111,43 @@
                     '';
                   });
 
+              # pg-claude-code-recorder SOAK tier (docket pg2-v77tsx, phase 2). ON DEMAND
+              # ONLY: build it by hand
+              # (`nix build .#checks.<system>.pg-claude-code-recorder-soak -L`). It MUST NOT be
+              # wired into any hook, run-unit-tests, pre-land or land gate (V-4). Runs the
+              # `//go:build soak` tests (a generated tree: first-run parse throughput, memory
+              # ceiling, WAL growth, trigram index size) and fails when a measure exceeds 1.5
+              # times the baseline committed in internal/parser/testdata/soak-budgets.json.
+              pg-claude-code-recorder-soak =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-soak";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/soak.log"
+                      if ! go test -tags soak -run 'TestSoak' -count=1 -v -timeout 30m ./... > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-claude-code-recorder-soak: a soak test FAILED or a budget was exceeded" >&2
+                        exit 1
+                      fi
+                      cat "$log"
+                      grep -q -- '^--- PASS: TestSoakFirstRunParse ' "$log" || {
+                        echo "pg-claude-code-recorder-soak: TestSoakFirstRunParse did not report PASS" >&2
+                        exit 1
+                      }
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        echo "pg-claude-code-recorder-soak: a soak test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      runHook postBuild
+                    '';
+                  });
+
               # Regression guard for the unit/integration split: against the REAL go
               # tool, proves that for each of the integration, faults and soak tags
               # every package carrying a file with that tag lists strictly more tests

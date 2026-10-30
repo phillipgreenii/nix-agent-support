@@ -1,6 +1,6 @@
 // Command pg-claude-code-recorder is the recorder's command: the daemon (serve)
 // and the client subcommands for scripts, skills and the operator. This build
-// carries serve, status and coverage; the other subcommands arrive with their
+// carries serve, status, coverage, query, search and find; the other subcommands arrive with their
 // phases.
 package main
 
@@ -34,9 +34,9 @@ type app struct {
 
 // laterSubcommands exist in the design and arrive with later phases.
 var laterSubcommands = map[string]string{
-	"conversations": "phase 4", "processes": "phase 4", "query": "phase 2", "search": "phase 2",
+	"conversations": "phase 4", "processes": "phase 4",
 	"feed": "phase 3", "raw": "phase 3", "snapshot": "phase 3", "held": "phase 6", "where": "phase 6",
-	"find": "phase 6", "extract": "phase 6", "remove": "phase 6", "doctor": "phase 6",
+	"extract": "phase 6", "remove": "phase 6", "doctor": "phase 6",
 }
 
 func (a *app) run(args []string) int {
@@ -57,6 +57,10 @@ func (a *app) run(args []string) int {
 		return a.status(args[1:])
 	case "coverage":
 		return a.coverage(args[1:])
+	case "query", "search":
+		return a.request(args[0], args[1:])
+	case "find":
+		return a.find(args[1:])
 	}
 	if phase, ok := laterSubcommands[args[0]]; ok {
 		return a.emitError(false, wire.ErrUsage, fmt.Sprintf("%s is not available in this build (it arrives in %s)", args[0], phase))
