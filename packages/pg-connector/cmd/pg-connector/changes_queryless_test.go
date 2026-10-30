@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // This file tests the query-less call of the changes verb (HT-27, INV-HOIST-16):
@@ -92,7 +93,7 @@ func ledgerFiles(t *testing.T, stateDir string) []string {
 	return out
 }
 
-func TestQuerylessChanges_OwningBackend_ForwardsWithoutAQuery_PassesTheStoreIdentity_StampsNoLedger(t *testing.T) {
+func TestQuerylessChanges_OwningBackend_ForwardsWithoutAQuery_PassesTheStoreIdentity_StampsEachFreshnessRow(t *testing.T) {
 	stateDir := setupTypedRegistry(t, "pr", "backend-ql-owning")
 	logPath := filepath.Join(t.TempDir(), "requests.log")
 	writeRecordingBackend(t, "backend-ql-owning", logPath, map[string]string{
@@ -134,8 +135,52 @@ func TestQuerylessChanges_OwningBackend_ForwardsWithoutAQuery_PassesTheStoreIden
 	if len(src) != 1 || src[0].StoreIdentity != qlIdentity || src[0].NextSeq == nil || *src[0].NextSeq != 57 {
 		t.Fatalf("sources = %+v, want the store identity passed through on the source row", src)
 	}
-	if got := ledgerFiles(t, stateDir); len(got) != 0 {
-		t.Fatalf("a query-less call created or stamped a per-query ledger entry: %v", got)
+	// pg2-qtwbjo: the answer's one sources_freshness[] row ("mine") is stamped on
+	// the real ledger, with the backend's own last_success_at.
+	got := ledgerFiles(t, stateDir)
+	if len(got) != 1 {
+		t.Fatalf("ledger files = %v, want exactly the one freshness row's key", got)
+	}
+	l, err := loadLedger(LedgerKey{Type: "pr", Backend: "backend-ql-owning", Query: "mine", Instance: ledgerInstanceDiscriminator("pr")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if l.RefreshedAt == nil || !l.RefreshedAt.Equal(want) {
+		t.Fatalf("refreshed_at = %v, want %v", l.RefreshedAt, want)
+	}
+	if l.Consumers["c1"].LastSeen.IsZero() {
+		t.Fatalf("consumer last_seen not stamped: %+v", l.Consumers)
+	}
+}
+
+// pg2-qtwbjo: one query-less poll of a daemon-backed source stamps a ledger row
+// per configured query, so pg-connector ledger show lists each with its own
+// last_success_at.
+func TestQuerylessChanges_StampsOneLedgerRowPerQuery_VisibleInLedgerShow(t *testing.T) {
+	stateDir := setupTypedRegistry(t, "pr", "backend-ql-multi")
+	logPath := filepath.Join(t.TempDir(), "requests.log")
+	ans := fmt.Sprintf(fwdEnvelope, `{"sources":[{"backend":"backend-ql-multi","status":"succeeded","version":5,"truncated":false,"next_seq":9}],"changes":[],"sources_freshness":[{"query":"assigned-to-me","last_success_at":"2026-10-30T06:36:07Z"},{"query":"created-by-me","last_success_at":"2026-10-30T06:37:07Z"}],"store_identity":"0123456789abcdef0123456789abcdef"}`)
+	writeRecordingBackend(t, "backend-ql-multi", logPath, map[string]string{
+		"capabilities": fwdCapsOwning,
+		"changes":      ans,
+		"changes_ack":  fwdAckOK,
+	})
+	if stdout, code := runTypedChanges(t, logPath, "pr"); code != 0 {
+		t.Fatalf("exit code = %d; stdout=%s", code, stdout)
+	}
+	if got := ledgerFiles(t, stateDir); len(got) != 2 {
+		t.Fatalf("ledger files = %v, want one per query", got)
+	}
+	for q, ts := range map[string]string{"assigned-to-me": "2026-10-30T06:36:07Z", "created-by-me": "2026-10-30T06:37:07Z"} {
+		l, err := loadLedger(LedgerKey{Type: "pr", Backend: "backend-ql-multi", Query: q, Instance: ledgerInstanceDiscriminator("pr")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := time.Parse(time.RFC3339, ts)
+		if l.RefreshedAt == nil || !l.RefreshedAt.Equal(want) {
+			t.Fatalf("%s refreshed_at = %v, want %v", q, l.RefreshedAt, want)
+		}
 	}
 }
 
@@ -242,7 +287,11 @@ func TestQuerylessChanges_MixedRegistry_AnswersTheOwningOne_AndReportsTheOtherAs
 	if ops := backendOps(readRequestLog(t, logPlain)); len(ops) != 1 || ops[0] != "capabilities" {
 		t.Fatalf("non-owning backend requests = %v", ops)
 	}
-	if got := ledgerFiles(t, stateDir); len(got) != 0 {
-		t.Fatalf("ledger files written: %v", got)
+	// Only the owning backend's freshness row is stamped (pg2-qtwbjo); the
+	// non-owning backend never gets a ledger entry.
+	for _, f := range ledgerFiles(t, stateDir) {
+		if !strings.Contains(f, "backend-ql-mix-owning") {
+			t.Fatalf("unexpected ledger file written: %s", f)
+		}
 	}
 }

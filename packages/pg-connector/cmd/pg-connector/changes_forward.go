@@ -19,8 +19,9 @@
 //     output step already consumes (changesBackendResult).
 //  3. Stamp the ledger key (type, backend, query) from the answer
 //     (INV-LEDGER-FRESH-5), before the output is written. See stampForwarded.
-//     A call with no query has no key to stamp: nothing is stamped on either
-//     the success or the failure path, and no ledger file is created.
+//     A call with no query has no polled key: on success every
+//     sources_freshness[] row is stamped under its own query key; on failure
+//     nothing is stamped and no ledger file is created.
 //  4. After the caller's output is written and flushed, newChangesCmd's RunE
 //     sends changes_ack {consumer, query?, next_seq} per source that answered
 //     (commitForwardedAcks); a backend that did not answer is never
@@ -40,9 +41,10 @@
 //     answer's names therefore always agree, and agree with the ledger key.
 //   - An answer must carry exactly one sources[] row (the polled key's own);
 //     anything else is a malformed answer: degraded, no delivery, no ack.
-//   - Only the POLLED query's key is stamped from sources_freshness[]; the
-//     other entries (one per configured query) are ignored, so a poll never
-//     creates a ledger file for a query no consumer has polled.
+//   - A call that names a query stamps only that query's key from
+//     sources_freshness[]; the other entries are ignored, so a poll never
+//     creates a ledger file for a query no consumer has polled. A call that
+//     names none stamps every entry (the consumer reads the whole instance).
 //   - A failed call stamps the consumer's last_seen and records the failure's
 //     wire error code as the key's last_error, except for invalid_argument (a
 //     caller-state answer such as cursor_expired:), unknown_op and
@@ -210,8 +212,22 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 	}
 
 	if query == "" {
-		// No query: no per-query ledger key exists, so nothing is created or
-		// stamped (the daemon's status positions carry the consumer's last_seen).
+		// No query (pg-desk reads each owning instance this way): the call has no
+		// polled key, so every sources_freshness[] row of the answer is stamped
+		// under its own (type, backend, query) key. Without this a daemon-polled
+		// source never reaches the ledger and pg-connector ledger show (and so
+		// pg-desk freshness) cannot see its per-query freshness (pg2-qtwbjo).
+		// A failed call stamps nothing: it names no key.
+		for i := range ans.SourcesFreshness {
+			q := ans.SourcesFreshness[i].Query
+			if q == "" {
+				continue
+			}
+			k := LedgerKey{Type: entityType, Backend: backend, Query: q, Instance: key.Instance}
+			if serr := stampForwarded(reg, k, consumerID, time.Now(), &ans.SourcesFreshness[i], nil); serr != nil {
+				res.notes = append(res.notes, serr.Error())
+			}
+		}
 		return res
 	}
 	var fresh *schema.SourceFreshness
