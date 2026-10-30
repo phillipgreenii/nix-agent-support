@@ -18,6 +18,8 @@ Usage:
   pg-claude-code-recorder feed     [--after CURSOR] [--wait 30s] [--where JSON] [--project a,b] [--limit N] [--jsonl]
   pg-claude-code-recorder snapshot [--where JSON] [--project a,b] [--limit N] [--all] [--jsonl]
   pg-claude-code-recorder raw      --record FILE:GEN:OFFSET:ITEM | --file FILE --offset N --length N
+  pg-claude-code-recorder conversations [--ended LABEL | --crashed | --suspected-crash] [--since 7d|TIME] [--cwd PATH] [--limit N] [--json]
+  pg-claude-code-recorder processes [--live] [--session ID] [--pid N] [--limit N] [--json]
   pg-claude-code-recorder version
 
 Common flags:
@@ -42,6 +44,20 @@ Examples:
   pg-claude-code-recorder feed --after <cursor> --wait 30s --where '{"field":"type","eq":"assistant"}'
   pg-claude-code-recorder raw --record f_5:1:0:-1   the bytes of one record
 
+  pg-claude-code-recorder conversations --crashed --since 1d   Conversations whose Process died with its registry file left behind
+  pg-claude-code-recorder conversations --suspected-crash      crashed plus unknown with a stale registry file (a power loss)
+  pg-claude-code-recorder conversations --ended exited --cwd /example/work
+  pg-claude-code-recorder processes --live                     live Processes: pid, start, session, host, control inbox
+A Conversation ended how its evidence says (the recorder stores evidence, the command derives the label):
+  cleared  a /clear entry, and the registry now names a new session
+  exited   a typed /exit entry after the Process started
+  unknown  the recorder did not watch the Process across its end
+  crashed  the registry file was still present when the Process exited
+  closed   otherwise (Ctrl-D, a closed terminal, SIGTERM, SIGHUP; also "closed normally")
+conversations rows are newest first (default --since 7d, --limit 50); each carries session id, cwd, end time,
+label, the evidence used, the stage, whether the originals exist and the line to resume it. An empty
+--crashed result exits 0 and says how many unknown rows have a stale registry file. --ended cannot be
+combined with --crashed or --suspected-crash (exit 2).
 A cursor is <epoch>:<sequence>. feed exits 6 when its wait ended with nothing (the answer's next_cursor
 still advances), and 7 (cursor_expired) when the cursor is from an old epoch, below the retention floor or
 beyond the head: take a snapshot and tail from its cursor. Delivery is at least once; de-duplicate by record id.
@@ -80,7 +96,7 @@ State machine:
   quiet -> held -> (check passes) -> settled
   removed -> (extract, or the path reappears) -> quiet
 
-This build copies and reports lag; settle, hold and removal arrive in a later phase.
+This build copies, reports lag and reports live and quiet; settle, hold and removal arrive in a later phase.
 `
 
 func (a *app) help() {

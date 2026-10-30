@@ -54,6 +54,16 @@ type Config struct {
 	HeldMaxAge time.Duration
 	// ParseMaxLineBytes is parse.maxLineBytes: a longer transcript line is a bad line.
 	ParseMaxLineBytes int
+	// GraceEnable is process.grace: when the registry file is still present at a
+	// Process's exit, read it again after GraceWindow before deciding it was
+	// present (the grace-window fallback for a slow deletion; on by default until
+	// the registry-versus-exit order is measured on real Claude).
+	GraceEnable bool
+	// GraceWindow is process.graceWindow.
+	GraceWindow time.Duration
+	// LivenessInterval is process.livenessInterval: how often the last-seen-alive
+	// time of a live Process is refreshed.
+	LivenessInterval time.Duration
 }
 
 type file struct {
@@ -91,6 +101,11 @@ type file struct {
 	Parse struct {
 		MaxLineBytes *int `toml:"maxLineBytes"`
 	} `toml:"parse"`
+	Process struct {
+		Grace            *bool  `toml:"grace"`
+		GraceWindow      string `toml:"graceWindow"`
+		LivenessInterval string `toml:"livenessInterval"`
+	} `toml:"process"`
 }
 
 // ParseDuration parses a Go duration string with an optional d (days) unit.
@@ -162,6 +177,9 @@ func Defaults(getenv func(string) string) Config {
 		HeldMaxAge:        3 * 24 * time.Hour,
 		ParseMaxLineBytes: 64 << 20,
 		Clients:           DefaultClients(),
+		GraceEnable:       true,
+		GraceWindow:       time.Second,
+		LivenessInterval:  5 * time.Second,
 	}
 	c.Socket = filepath.Join(c.StateDir, SocketName)
 	return c
@@ -218,6 +236,9 @@ func apply(c *Config, f file) error {
 	if f.Parse.MaxLineBytes != nil {
 		c.ParseMaxLineBytes = *f.Parse.MaxLineBytes
 	}
+	if f.Process.Grace != nil {
+		c.GraceEnable = *f.Process.Grace
+	}
 	c.RemoveEnable = f.Remove.Enable
 	c.MetricsAddr = f.Metrics.Addr
 	for _, d := range []struct {
@@ -231,6 +252,8 @@ func apply(c *Config, f file) error {
 		{"remove.after", f.Remove.After, &c.RemoveAfter},
 		{"copy.throttle", f.Copy.Throttle, &c.CopyThrottle},
 		{"held.maxAge", f.Held.MaxAge, &c.HeldMaxAge},
+		{"process.graceWindow", f.Process.GraceWindow, &c.GraceWindow},
+		{"process.livenessInterval", f.Process.LivenessInterval, &c.LivenessInterval},
 	} {
 		if d.src == "" {
 			continue

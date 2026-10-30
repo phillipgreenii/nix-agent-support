@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 )
@@ -14,7 +15,7 @@ import (
 const Name = "claude-history"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // Entry is one history.jsonl line.
 type Entry struct {
@@ -49,7 +50,25 @@ func (*Source) Match(path string) (source.Captures, bool) {
 }
 
 // Catalog lists the fields the source can produce.
-func (*Source) Catalog() map[string]source.Kind { return source.Catalog(Entry{}) }
+func (*Source) Catalog() map[string]source.Kind {
+	c := source.Catalog(Entry{})
+	c["slash_command"] = source.KindKeyword
+	return c
+}
+
+// SlashCommand returns "exit" or "clear" when display is that typed command
+// (alone or followed by arguments), else "". It is a direct read of the typed
+// text, not an interpretation of it.
+func SlashCommand(display string) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(display), " ")
+	switch first {
+	case "/exit":
+		return "exit"
+	case "/clear":
+		return "clear"
+	}
+	return ""
+}
 
 // Parse parses one history line.
 func (*Source) Parse(_ source.Captures, raw []byte) ([]source.Record, error) {
@@ -60,6 +79,7 @@ func (*Source) Parse(_ source.Captures, raw []byte) ([]source.Record, error) {
 	}
 	rec := source.Record{Type: "history", Item: source.ItemLine, Session: e.SessionID}
 	rec.Fields = source.Extract(&e, "")
+	rec.Fields = append(rec.Fields, source.Str("slash_command", source.KindKeyword, SlashCommand(e.Display))...)
 	if e.Timestamp != nil {
 		rec.Time = source.EpochTime(*e.Timestamp)
 	}

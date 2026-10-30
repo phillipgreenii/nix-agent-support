@@ -50,6 +50,29 @@ const (
 	UnknownClientLbl = "client"
 )
 
+// Metric and event names of the Process and Conversation facts.
+const (
+	MConversationEnd   = "conversation_end_total"
+	MStaleDiscovery    = "registry_stale_at_discovery_total"
+	MControlInbox      = "control_inbox_state"
+	MNoInbox           = "processes_without_control_inbox"
+	MEndFiles          = "end_reason_source_files_total"
+	MControlRequests   = "control_requests_total"
+	MStaleFifosRemoved = "stale_fifos_removed_total"
+	EvStartupStale     = "startup_stale_registries"
+	EvProcessExit      = "process_exit"
+)
+
+// ControlVerbs, ControlOutcomes, InboxStates and EndFileOutcomes are the bounded
+// label values of the control metrics; anything else is bucketed as "other".
+var (
+	ControlVerbs     = []string{"submit", "interrupt", "run", "read", "ping"}
+	ControlOutcomes  = []string{"ok", "rejected", "duplicate", "refused"}
+	InboxStates      = []string{"present", "gone", "never_loaded"}
+	EndFileOutcomes  = []string{"ingested", "removed", "invalid"}
+	boolLabelStrings = []string{"false", "true"}
+)
+
 // LagBuckets are the upper bounds in seconds of the copy-lag histogram.
 var LagBuckets = []float64{0.1, 0.5, 1, 5, 30, 300}
 
@@ -107,6 +130,29 @@ func (o *Obs) RegisterStandard() {
 		o.Reg.Add(MDroppedBytes, map[string]string{"reason": r}, 0)
 	}
 	o.Reg.Add(MIndexRebuilds, nil, 0)
+	o.Reg.Add(MStaleDiscovery, nil, 0)
+	o.Reg.Add(MStaleFifosRemoved, nil, 0)
+	for _, rp := range boolLabelStrings {
+		for _, eo := range boolLabelStrings {
+			for _, ce := range boolLabelStrings {
+				for _, ee := range boolLabelStrings {
+					o.Reg.Add(MConversationEnd, map[string]string{"registry_present": rp, "exit_observed": eo, "clear_entry": ce, "exit_entry": ee}, 0)
+				}
+			}
+		}
+	}
+	for _, out := range EndFileOutcomes {
+		o.Reg.Add(MEndFiles, map[string]string{"outcome": out}, 0)
+	}
+	for _, v := range append(append([]string(nil), ControlVerbs...), ClientOther) {
+		for _, out := range append(append([]string(nil), ControlOutcomes...), ClientOther) {
+			o.Reg.Add(MControlRequests, map[string]string{"verb": v, "outcome": out}, 0)
+		}
+	}
+	for _, st := range InboxStates {
+		o.Reg.Set(MControlInbox, map[string]string{"state": st}, 0)
+	}
+	o.Reg.Set(MNoInbox, nil, 0)
 	for _, g := range []string{
 		MHeartbeat, MStateFreeBytes, MStateUsedBytes, MCopyLagBytes, MCopyLagSeconds,
 		MCopiedFiles, MBackfillFiles, MCaughtUp, MFeedWaiters,

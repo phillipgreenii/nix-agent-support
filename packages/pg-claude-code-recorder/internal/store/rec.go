@@ -14,6 +14,7 @@ const (
 	TTomb      = "tomb"      // a deletion record (Tombstone)
 	TState     = "state"     // the file's state changed (ok, copy_mismatch)
 	TRelease   = "release"   // pinned reset entries up to Version were released
+	TProc      = "proc"      // a Process observation (Kind: discover, seen or exit)
 )
 
 // Rec is one journal record. Seq is assigned by the store when it is written.
@@ -46,4 +47,14 @@ type Rec struct {
 	Hash    uint64 `json:"hash,omitempty"`
 	Version int    `json:"version,omitempty"`
 	Epoch   int    `json:"epoch,omitempty"`
+
+	// Process observations (T is TProc). Kind is discover (Val is the host
+	// binding JSON, Reason is "stale" when the registry file named a dead pid at
+	// first discovery), seen (last seen alive at At) or exit (Reason is observed
+	// or unobserved; Val is present or absent: whether the registry file was
+	// still there at the instant of the exit).
+	Pid       int64  `json:"pid,omitempty"`
+	ProcStart string `json:"procStart,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Val       string `json:"val,omitempty"`
 }

@@ -118,6 +118,12 @@ type Status struct {
 	Degraded bool      `json:"degraded,omitempty"`
 	Backfill *Backfill `json:"backfill,omitempty"`
 	Socket   string    `json:"socket,omitempty"`
+	// CrashedRecent and SuspectedRecent count the Conversations that ended crashed,
+	// and crashed plus unknown with a stale registry file, in the last 7 days. The
+	// command derives them with the client's EndLabel (the daemon returns
+	// evidence, never a label); they are absent when it could not ask.
+	CrashedRecent   *int `json:"crashed_recent,omitempty"`
+	SuspectedRecent *int `json:"suspected_recent,omitempty"`
 	// The offline answer fills these from disk.
 	LaunchAgent string `json:"launch_agent,omitempty"`
 	LogPath     string `json:"log_path,omitempty"`

@@ -212,8 +212,77 @@ and the typed errors `ErrDown`, `ErrBehind`, `ErrBusy`, `ErrUnavailable`, `ErrBa
 cursor). The socket is `PG_CLAUDE_CODE_RECORDER_SOCKET`, else `$XDG_STATE_HOME/pg-claude-code-recorder/recorder.sock`;
 connecting has a timeout. A higher `protocol_version` than the client knows is refused (`ErrProtocol`).
 `client/clienttest` starts a real daemon in process over throwaway directories for tests of packages
-that use the client. Phase 4 adds `Conversation`, `Process`, `EndLabel` and `Crashed`.
+that use the client (`Options.Procs`-style seams: `Env.Procs` is the fake process table). `Conversation(id)`,
+`Process(pid, procStart)`, `ConversationList`, `ProcessList`, `EndLabel(evidence)`, `Ended(EndQuery)` and
+`Crashed(since)` are described under Conversation and Process facts below.
 
 The wire-contract suite is `client/contract_test.go` (in process, over the socket); the
 write-to-feed latency test is `client/latency_integration_test.go` (tag `integration`, logs its
 measurement, enforces a 3 s bound).
+
+## Conversation and Process facts, end evidence and the crash query (phase 4)
+
+The recorder stores **evidence**, never a label (ADR 0015). Each Process is a pid plus its start time
+(`procStart`); the `procs` table (written through the journal, so a rebuild replays it) holds what no
+file records: first seen, last seen alive, the exit instant, whether the registry file was still
+present at that instant, `registry_stale_at_discovery` and the host binding. Everything else is a query
+over the parsed records: every registry version and its deletion time (`session-registry`), `/exit` and
+`/clear` entries (`claude-history`'s `slash_command` field, parsed only up to the last newline, so a torn
+`/exit` counts as no entry until its newline arrives) and the control mod's end files
+(`claude-control-end`, `<controlStateDir>/ends/{session}.{ms}.json`, schema
+`claude-marketplace/pg-claude-control/schema/session-end.schema.json`).
+
+- **Exit watch**: a kqueue `NOTE_EXIT` watch on darwin (`internal/proc`), a one-second liveness poll that
+  checks the start time elsewhere. A Process is watched from the first time its registry file is seen;
+  after a restart the watch is registered again for every known Process that is still alive. Registering
+  on an already exited pid fails (ESRCH): that is the recorded fact, an exit the recorder did not observe,
+  and the Conversation is `unknown`. The presence of the registry file is one `lstat` right after the
+  event; with the **grace-window fallback** (`process.grace`, default on; `process.graceWindow`, default
+  1s) a file still present is read again after the window, because the registry-versus-exit order on a
+  real Claude is measured by a separate verification bead.
+- **Stale at discovery**: a registry file whose pid is gone, or whose start time differs from `procStart`
+  (a reused pid is dead), at the Process's _first_ discovery sets `registry_stale_at_discovery` (counter
+  `registry_stale_at_discovery_total`; the startup log event `startup_stale_registries{n}` after the first
+  sweep). A second discovery sets nothing.
+- **Host binding**, read once at the Process's start with the KERN_PROCARGS2 sysctl (not `ps`): cmux
+  surface and workspace ids, tmux socket plus pane id, otherwise `TERM_PROGRAM`.
+- **Control inbox**: `process.list` carries `control_inbox` (`<pid>.fifo` present); gauges
+  `control_inbox_state{state=present|gone|never_loaded}` and `processes_without_control_inbox`. The
+  recorder removes `<pid>.fifo` when its Process exits and sweeps at startup for FIFOs whose pid is not a
+  live Process with a matching start time (its first write into the control state directory), and removes an
+  end file once it has been ingested and a day has passed (its second). It also reads
+  `<controlStateDir>/requests.jsonl` (a read beyond the `ends/` root): `control_requests_total{verb,outcome}`
+  counts each line once (keyed by ts, id and verb; polled every `process.livenessInterval`, default 5s;
+  an unknown verb or outcome is `other`; a burst of more than 1,000 requests between two polls is
+  undercounted, because the mod keeps the last 1,000). `end_reason_source_files_total{outcome}` counts end
+  files `ingested`, `invalid` (by the schema) and `removed`; `conversation_end_total{registry_present,
+exit_observed,clear_entry,exit_entry}` counts evidence classes (never labels).
+
+Operations (the evidence list is shared): `conversation.show`, `conversation.list` (any evidence field is
+a filter, and a filter returns a superset of its label's rows), `process.show` and `process.list`.
+A Conversation is **open** while a live Process holds it (stage `live`) and **closed** otherwise (stage
+`quiet` in this build; settle owns the rest of the stage machine). A session a Process left by an
+in-process `/resume` has no end and is omitted by the crash query.
+
+**Labels** are derived by `client.EndLabel(evidence)`, first match wins: `/clear` entry with a new session
+in the registry is `cleared`; a typed `/exit` after the Process started is `exited`; an exit the recorder
+did not observe is `unknown`; the registry file still present at the exit is `crashed`; otherwise
+`closed` (normally). The mod's `end_reason` is detail only. The label table is
+`client/testdata/labels.json`, loaded by the daemon test (`internal/serve/labels_test.go`), the client test
+(`client/labels_test.go`) and the command test (`cmd/pg-claude-code-recorder/labels_test.go`); each calls
+`clienttest.Covered`, and a guard fails when a consumer stops loading every row.
+
+```text
+pg-claude-code-recorder conversations --crashed --since 1d
+pg-claude-code-recorder conversations --suspected-crash      # crashed plus unknown rows with a stale registry file
+pg-claude-code-recorder conversations --ended exited --cwd /example/work --json
+pg-claude-code-recorder processes --live
+```
+
+`/clear` probe (a first task of this phase): on 2026-10-30, 79 of 79 `/clear` entries of a real
+`history.jsonl` whose transcript was present were stored under the **old** session id (the transcript of
+that id has no record after the entry), so the history join is by the Conversation that was cleared.
+
+Tests: `go test ./...` (unit); the real-child tests (`internal/proc/real_integration_test.go`,
+`internal/serve/realchild_integration_test.go`, tag `integration`) run a real kqueue watch against a
+real child process.

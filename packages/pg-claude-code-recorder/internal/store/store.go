@@ -441,6 +441,8 @@ func apply(tx *sql.Tx, r *Rec) error {
 		_, err = tx.Exec(`UPDATE files SET state=? WHERE id=?`, r.State, r.File)
 	case TRelease:
 		_, err = tx.Exec(`UPDATE resets SET pinned=0 WHERE id<=?`, r.Version)
+	case TProc:
+		err = applyProc(tx, r)
 	default:
 		err = fmt.Errorf("unknown record type %q", r.T)
 	}

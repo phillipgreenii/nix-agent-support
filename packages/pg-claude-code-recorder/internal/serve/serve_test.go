@@ -12,11 +12,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
 type env struct {
+	procs  *proc.Fake
 	cfg    config.Config
 	claude string
 	d      *Daemon
@@ -36,7 +38,7 @@ func newEnv(t *testing.T, ctl bool) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{claude: filepath.Join(root, "claude"), log: &SyncBuffer{}}
+	e := &env{claude: filepath.Join(root, "claude"), log: &SyncBuffer{}, procs: proc.NewFake()}
 	for _, d := range []string{filepath.Join(e.claude, "projects", "example-proj"), filepath.Join(e.claude, "sessions")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -58,7 +60,7 @@ func newEnv(t *testing.T, ctl bool) *env {
 
 func (e *env) open(t *testing.T) *Daemon {
 	t.Helper()
-	d, err := Open(Options{Config: e.cfg, Logger: NewLogger(e.log), NoEvents: true, Version: "test"})
+	d, err := Open(Options{Config: e.cfg, Logger: NewLogger(e.log), NoEvents: true, Version: "test", Procs: e.procs})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,8 +22,8 @@ import (
 )
 
 // The wire-contract suite: a real daemon (store, copier, parser, feed, listener)
-// in process, one case per operation other than conversation and process (phase
-// 4) and one per error, over its Unix socket. The cases for operations that need
+// in process, one case per operation and one per error (the conversation and
+// process operations are in lifecycle_test.go), over its Unix socket. The cases for operations that need
 // no daemon state (hello, errors) go through raw HTTP so the framing is what is
 // tested, not this package's reading of it.
 
@@ -73,7 +73,7 @@ func TestHelloAnswersTheFourFactsOverTheFraming(t *testing.T) {
 		t.Fatalf("hello %d %v", code, h)
 	}
 	caps, _ := h["capabilities"].([]any)
-	if fmt.Sprint(caps) != "[coverage feed hello query raw search snapshot status]" {
+	if fmt.Sprint(caps) != "[conversation.list conversation.show coverage feed hello process.list process.show query raw search snapshot status]" {
 		t.Fatalf("capabilities %v", caps)
 	}
 	if _, ok := h["caught_up"]; !ok {

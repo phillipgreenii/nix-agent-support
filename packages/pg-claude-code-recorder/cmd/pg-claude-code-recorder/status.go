@@ -87,6 +87,7 @@ func (a *app) statusOnce(cfg config.Config, cl *client.Client, c *common, short 
 		}
 		return a.emitWireError(c.jsonOut, err, cfg.Socket), false
 	}
+	a.addRecent(&st, cl)
 	a.printStatus(st, c.jsonOut, short)
 	if st.Degraded && !c.partialOK {
 		return a.emitErrorFor(c.jsonOut, wire.ErrBehind, st.Verdict, cfg.Socket), st.CaughtUp
@@ -133,6 +134,9 @@ func (a *app) printStatus(st wire.Status, jsonOut, short bool) {
 		}
 		_, _ = fmt.Fprintf(a.out, "  caught up:    %t\n  copy lag:     %.0fs\n  parse lag:    %.0fs\n  held:         %d\n  free bytes:   %d\n  schema:       %d, protocol %d\n",
 			st.CaughtUp, st.CopyLagS, st.ParseLagS, st.Held, st.FreeBytes, st.SchemaVersion, st.ProtocolVer)
+		if st.CrashedRecent != nil && st.SuspectedRecent != nil {
+			_, _ = fmt.Fprintf(a.out, "  crashed (7d): %d, suspected (crashed or unknown with a stale registry file): %d\n", *st.CrashedRecent, *st.SuspectedRecent)
+		}
 		if b := st.Backfill; b != nil && b.Running {
 			_, _ = fmt.Fprintf(a.out, "  backfill:     %d of %d files copied, %d parsed, about %.0fs left\n", b.Copied, b.Total, b.Parsed, b.EtaS)
 		}

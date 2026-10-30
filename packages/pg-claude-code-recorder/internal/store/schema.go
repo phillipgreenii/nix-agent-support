@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS tombstones(
   at_ns INTEGER NOT NULL,
   PRIMARY KEY(file_id, at_ns)
 );
+CREATE TABLE IF NOT EXISTS procs(
+  pid INTEGER NOT NULL,
+  proc_start TEXT NOT NULL,
+  first_seen_ns INTEGER NOT NULL,
+  last_seen_ns INTEGER NOT NULL DEFAULT 0,
+  exit_ns INTEGER NOT NULL DEFAULT 0,
+  exit_kind TEXT NOT NULL DEFAULT '',
+  registry_present INTEGER NOT NULL DEFAULT 0,
+  stale INTEGER NOT NULL DEFAULT 0,
+  host TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(pid, proc_start)
+);
 CREATE TABLE IF NOT EXISTS resets(
   id INTEGER PRIMARY KEY,
   file_id INTEGER NOT NULL,

@@ -21,8 +21,10 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/exporter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/feed"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/lifecycle"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/server"
@@ -45,6 +47,8 @@ type Options struct {
 	// Rebuild forces index.db to be rebuilt from the journal (serve --rebuild,
 	// the rebuild command); it is also the way past a newer schema_version.
 	Rebuild bool
+	// Procs is the process table (the ProcessTable seam; the real one when nil).
+	Procs proc.System
 }
 
 // Daemon is the composed recorder.
@@ -62,6 +66,8 @@ type Daemon struct {
 	fe    *feed.Engine
 	srv   *server.Server
 	exp   *exporter.Server
+	eng   *lifecycle.Engine
+	tr    *lifecycle.Tracker
 	clock clock.Clock
 
 	startedAt time.Time
@@ -113,13 +119,21 @@ func Open(opt Options) (*Daemon, error) {
 		return nil, fmt.Errorf("recover copies: %w", err)
 	}
 	srcs := sources.All()
-	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes, FeedRetention: cfg.FeedRetention})
+	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, EndsDir: cfg.EndsDir(), Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes, FeedRetention: cfg.FeedRetention})
 	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), Res: d.prs, Behind: func() bool { return !d.backfillDone.Load() }}
 	d.fe = &feed.Engine{
 		Q: d.qe, Store: st, Clock: opt.Clock, Obs: o, Retention: cfg.FeedRetention, WaitMax: cfg.WaitMax,
 		MaxWaiters: cfg.WaitMaxWaiter, Behind: d.qe.Behind,
 	}
 	st.OnWrite(d.fe.Notify)
+	if opt.Procs == nil {
+		opt.Procs = proc.NewReal()
+	}
+	d.eng = &lifecycle.Engine{St: st, ControlDir: cfg.ControlStateDir, Now: opt.Clock.Now}
+	d.tr = lifecycle.NewTracker(lifecycle.TrackerConfig{
+		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
+		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow,
+	})
 	d.ckpt = newFileCheckpoint(cfg.StateDir)
 	d.w, err = watcher.New(watcher.Config{
 		Roots:         cfg.Roots(),
@@ -141,6 +155,9 @@ func Open(opt Options) (*Daemon, error) {
 
 // Obs returns the daemon's registry and logger.
 func (d *Daemon) Obs() *obs.Obs { return d.obs }
+
+// Tracker returns the Process tracker (tests drive its periodic work).
+func (d *Daemon) Tracker() *lifecycle.Tracker { return d.tr }
 
 // Parser returns the parse stage (tests drain it).
 func (d *Daemon) Parser() *parser.Parser { return d.prs }
@@ -181,6 +198,9 @@ func (d *Daemon) ingest(p string) copier.Result {
 	}
 	if res.File != 0 {
 		d.prs.Notify(res.File)
+	}
+	if src, _ := d.scope.Classify(p); src == scope.SrcRegistry {
+		d.tr.Observe(p)
 	}
 	return res
 }
@@ -244,6 +264,7 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 		}
 	}
 	d.backfillDone.Store(true)
+	d.tr.StartupDone()
 	d.obs.Reg.Set(obs.MCaughtUp, nil, 1)
 	d.obs.Event("backfill_done", "files", fmt.Sprint(len(files)))
 }
@@ -258,6 +279,10 @@ func (d *Daemon) Start() error {
 	d.srv.Register("feed", server.KindFeed, d.fe.Feed)
 	d.srv.Register("snapshot", server.KindQuery, d.fe.Snapshot)
 	d.srv.Register("raw", server.KindQuery, d.fe.Raw)
+	d.srv.Register("conversation.show", server.KindQuery, d.opConversationShow)
+	d.srv.Register("conversation.list", server.KindQuery, d.opConversationList)
+	d.srv.Register("process.show", server.KindQuery, d.opProcessShow)
+	d.srv.Register("process.list", server.KindQuery, d.opProcessList)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -278,9 +303,11 @@ func (d *Daemon) Start() error {
 		d.srv.Close()
 		return fmt.Errorf("start watcher: %w", err)
 	}
-	d.refreshing.Add(2)
+	d.tr.Startup()
+	d.refreshing.Add(3)
 	go d.refreshLoop()
 	go d.parseLoop()
+	go d.trackLoop()
 	d.obs.Event("serving", "socket", d.cfg.Socket, "claude_dir", d.cfg.ClaudeDir, "state_dir", d.cfg.StateDir,
 		"version", d.opt.Version)
 	return nil
@@ -301,6 +328,27 @@ func (d *Daemon) parseLoop() {
 			if err := d.prs.Drain(); err != nil {
 				d.obs.Log.Warn("parse_failed", "err", err.Error())
 			}
+		}
+	}
+}
+
+// trackLoop refreshes last-seen-alive and does the control state directory's
+// periodic work.
+func (d *Daemon) trackLoop() {
+	defer d.refreshing.Done()
+	every := d.cfg.LivenessInterval
+	if every <= 0 {
+		every = 5 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-t.C:
+			d.tr.Tick()
+			d.tr.Poll()
 		}
 	}
 }
@@ -352,6 +400,7 @@ func (d *Daemon) Close() error {
 	var errs []error
 	errs = append(errs, d.w.Close())
 	d.refreshing.Wait()
+	d.tr.Close()
 	errs = append(errs, d.ckpt.Flush())
 	errs = append(errs, d.st.Close())
 	return errors.Join(errs...)

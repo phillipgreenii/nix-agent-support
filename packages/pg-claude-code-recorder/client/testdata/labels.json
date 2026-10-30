@@ -1,0 +1,876 @@
+{
+  "rows": [
+    {
+      "name": "crashed",
+      "doc": "SIGKILL: the registry file is still present at the instant of the exit",
+      "session": "example-crashed",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 301,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 301,
+          "session": "example-crashed",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 301,
+          "ms": 1793375100000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": true,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "crashed",
+      "suspected": true
+    },
+    {
+      "name": "exited",
+      "doc": "a typed /exit entry after the Process started, then a clean exit",
+      "session": "example-exited",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 302,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 302,
+          "session": "example-exited",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-exited",
+          "display": "/exit",
+          "ms": 1793375050000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 302,
+          "ms": 1793375051000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": true,
+        "registry_stale_at_discovery": false
+      },
+      "label": "exited"
+    },
+    {
+      "name": "cleared",
+      "doc": "PROBE RESULT (2026-10-30, 79 of 79 /clear entries of a real history.jsonl): history.jsonl stores a /clear entry under the OLD session id; the registry then names the new one",
+      "session": "example-cleared-old",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 303,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 303,
+          "session": "example-cleared-old",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-cleared-old",
+          "display": "/clear",
+          "ms": 1793375050000
+        },
+        {
+          "do": "registry",
+          "pid": 303,
+          "session": "example-cleared-new",
+          "ms": 1793375051000,
+          "start_ms": 1793375000000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": true,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "cleared"
+    },
+    {
+      "name": "closed_normally",
+      "doc": "Ctrl-D, a closed terminal, SIGTERM and SIGHUP: the registry file is deleted before the exit and no /exit entry exists",
+      "session": "example-closed",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 304,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 304,
+          "session": "example-closed",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 304,
+          "ms": 1793375060000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "closed"
+    },
+    {
+      "name": "unknown_unobserved",
+      "doc": "the Process ended while the recorder was down: no exit evidence",
+      "session": "example-unknown",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 305,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 305,
+          "session": "example-unknown",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "delete_registry",
+          "pid": 305
+        },
+        {
+          "do": "vanish",
+          "pid": 305
+        },
+        {
+          "do": "restart"
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "unknown"
+    },
+    {
+      "name": "resumed_after_crash",
+      "doc": "the earlier Process crashed, a later Process resumed the Conversation and closed normally: judged for the latest Process, so the earlier one is not listed",
+      "session": "example-resumed",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 306,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 306,
+          "session": "example-resumed",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 306,
+          "ms": 1793375060000
+        },
+        {
+          "do": "start",
+          "pid": 316,
+          "start_ms": 1793375200000
+        },
+        {
+          "do": "registry",
+          "pid": 316,
+          "session": "example-resumed",
+          "ms": 1793375201000,
+          "start_ms": 1793375200000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 316,
+          "ms": 1793375260000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "closed"
+    },
+    {
+      "name": "in_process_resume_left",
+      "doc": "an in-process /resume: the registry stopped naming the session while the Process lives, so it has no end",
+      "session": "example-ipr-1",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 307,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 307,
+          "session": "example-ipr-1",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 307,
+          "session": "example-ipr-2",
+          "ms": 1793375050000,
+          "start_ms": 1793375000000
+        }
+      ],
+      "evidence": {
+        "ended": false,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": ""
+    },
+    {
+      "name": "in_process_resume_then_crash",
+      "doc": "an in-process /resume then a crash: judged for the Conversation the Process held at that moment",
+      "session": "example-ipr-2",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 307,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 307,
+          "session": "example-ipr-1",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 307,
+          "session": "example-ipr-2",
+          "ms": 1793375050000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 307,
+          "ms": 1793375100000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": true,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "crashed",
+      "suspected": true
+    },
+    {
+      "name": "in_process_resume_left_after_crash",
+      "doc": "the session left by the in-process /resume is still not ended after the Process crashed",
+      "session": "example-ipr-1",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 307,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 307,
+          "session": "example-ipr-1",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 307,
+          "session": "example-ipr-2",
+          "ms": 1793375050000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 307,
+          "ms": 1793375100000
+        }
+      ],
+      "evidence": {
+        "ended": false,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": ""
+    },
+    {
+      "name": "reboot_stale",
+      "doc": "a reboot or power loss: every registry file names a dead pid and no exit was observed; none crashed, all suspected",
+      "session": "example-reboot-1",
+      "steps": [
+        {
+          "do": "registry",
+          "pid": 308,
+          "session": "example-reboot-1",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 318,
+          "session": "example-reboot-2",
+          "ms": 1793375002000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 328,
+          "session": "example-reboot-3",
+          "ms": 1793375003000,
+          "start_ms": 1793375000000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": true
+      },
+      "label": "unknown",
+      "suspected": true
+    },
+    {
+      "name": "torn_exit_tail",
+      "doc": "a /exit line with no newline yet counts as no entry: the Process crashed",
+      "session": "example-torn",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 309,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 309,
+          "session": "example-torn",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history_torn",
+          "session": "example-torn",
+          "display": "/exit",
+          "ms": 1793375050000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 309,
+          "ms": 1793375060000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": true,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "crashed",
+      "suspected": true
+    },
+    {
+      "name": "torn_exit_completed",
+      "doc": "the newline of the torn /exit line arrives: crashed flips to exited",
+      "session": "example-torn-done",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 309,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 309,
+          "session": "example-torn-done",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history_torn",
+          "session": "example-torn-done",
+          "display": "/exit",
+          "ms": 1793375050000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 309,
+          "ms": 1793375060000
+        },
+        {
+          "do": "history_complete"
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": true,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": true,
+        "registry_stale_at_discovery": false
+      },
+      "label": "exited"
+    },
+    {
+      "name": "exit_entry_before_start",
+      "doc": "a /exit entry timestamped before the Process started is not this Process's",
+      "session": "example-exit-before",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 310,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 310,
+          "session": "example-exit-before",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-exit-before",
+          "display": "/exit",
+          "ms": 1793374999000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 310,
+          "ms": 1793375060000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "closed"
+    },
+    {
+      "name": "exit_entry_at_start",
+      "doc": "a /exit entry timestamped at the Process start is not after it",
+      "session": "example-exit-at",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 310,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 310,
+          "session": "example-exit-at",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-exit-at",
+          "display": "/exit",
+          "ms": 1793375000000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 310,
+          "ms": 1793375060000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "closed"
+    },
+    {
+      "name": "exit_entry_after_start",
+      "doc": "a /exit entry timestamped after the Process start counts",
+      "session": "example-exit-after",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 310,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 310,
+          "session": "example-exit-after",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-exit-after",
+          "display": "/exit",
+          "ms": 1793375000001
+        },
+        {
+          "do": "exit_clean",
+          "pid": 310,
+          "ms": 1793375060000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": true,
+        "registry_stale_at_discovery": false
+      },
+      "label": "exited"
+    },
+    {
+      "name": "clear_by_another_process",
+      "doc": "a /clear made by another Process (before this one resumed the session) is not this Process's",
+      "session": "example-clear-other",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 311,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 311,
+          "session": "example-clear-other",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-clear-other",
+          "display": "/clear",
+          "ms": 1793375050000
+        },
+        {
+          "do": "registry",
+          "pid": 311,
+          "session": "example-clear-other-next",
+          "ms": 1793375051000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 311,
+          "ms": 1793375052000
+        },
+        {
+          "do": "start",
+          "pid": 321,
+          "start_ms": 1793375200000
+        },
+        {
+          "do": "registry",
+          "pid": 321,
+          "session": "example-clear-other",
+          "ms": 1793375201000,
+          "start_ms": 1793375200000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 321,
+          "ms": 1793375260000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "closed"
+    },
+    {
+      "name": "clear_and_exit_together",
+      "doc": "a /clear and a /exit entry together: the first rule wins",
+      "session": "example-both",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 317,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 317,
+          "session": "example-both",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "history",
+          "session": "example-both",
+          "display": "/exit",
+          "ms": 1793375040000
+        },
+        {
+          "do": "history",
+          "session": "example-both",
+          "display": "/clear",
+          "ms": 1793375050000
+        },
+        {
+          "do": "registry",
+          "pid": 317,
+          "session": "example-both-next",
+          "ms": 1793375051000,
+          "start_ms": 1793375000000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": true,
+        "exit_entry": true,
+        "registry_stale_at_discovery": false
+      },
+      "label": "cleared"
+    },
+    {
+      "name": "mod_reason_with_registry_present",
+      "doc": "the mod's end reason prompt_input_exit with the registry file still present: still crashed",
+      "control": true,
+      "session": "example-mod",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 312,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 312,
+          "session": "example-mod",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "end_file",
+          "session": "example-mod",
+          "reason": "prompt_input_exit",
+          "ms": 1793375099000
+        },
+        {
+          "do": "exit_kept",
+          "pid": 312,
+          "ms": 1793375100000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": true,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "crashed",
+      "suspected": true
+    },
+    {
+      "name": "stale_reused_live_pid",
+      "doc": "the registry file names a pid that is now a different live process: dead by start time",
+      "session": "example-reused",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 313,
+          "start_ms": 1793285000000
+        },
+        {
+          "do": "registry",
+          "pid": 313,
+          "session": "example-reused",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": true
+      },
+      "label": "unknown",
+      "suspected": true
+    },
+    {
+      "name": "stale_then_resumed_closed",
+      "doc": "stale at first discovery, then resumed by another Process and closed normally: not listed by --suspected-crash",
+      "session": "example-stale-resumed",
+      "steps": [
+        {
+          "do": "registry",
+          "pid": 314,
+          "session": "example-stale-resumed",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "start",
+          "pid": 324,
+          "start_ms": 1793375200000
+        },
+        {
+          "do": "registry",
+          "pid": 324,
+          "session": "example-stale-resumed",
+          "ms": 1793375201000,
+          "start_ms": 1793375200000
+        },
+        {
+          "do": "exit_clean",
+          "pid": 324,
+          "ms": 1793375260000
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": true,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "closed"
+    },
+    {
+      "name": "stale_second_discovery",
+      "doc": "a registry file still present for a Process that ended while the recorder was down, found at the second discovery: no stale fact",
+      "session": "example-second",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 315,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 315,
+          "session": "example-second",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "vanish",
+          "pid": 315
+        },
+        {
+          "do": "restart"
+        }
+      ],
+      "evidence": {
+        "ended": true,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": "unknown"
+    },
+    {
+      "name": "open_live",
+      "doc": "a live Process holds the Conversation: open, not ended",
+      "session": "example-open",
+      "steps": [
+        {
+          "do": "start",
+          "pid": 319,
+          "start_ms": 1793375000000
+        },
+        {
+          "do": "registry",
+          "pid": 319,
+          "session": "example-open",
+          "ms": 1793375001000,
+          "start_ms": 1793375000000
+        }
+      ],
+      "evidence": {
+        "ended": false,
+        "registry_present_at_exit": false,
+        "exit_observed": false,
+        "clear_entry": false,
+        "exit_entry": false,
+        "registry_stale_at_discovery": false
+      },
+      "label": ""
+    }
+  ]
+}

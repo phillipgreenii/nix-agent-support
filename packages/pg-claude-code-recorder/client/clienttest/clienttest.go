@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/serve"
 )
 
@@ -31,9 +32,15 @@ type Env struct {
 	Project string
 	// Clock is the daemon's clock (the real one unless set before Start).
 	Daemon *serve.Daemon
-	cfg    config.Config
-	clk    clock.Clock
-	events bool
+	// Procs is the process table of the daemon (the ProcessTable seam): add live
+	// processes and fire exits by hand.
+	Procs *proc.Fake
+	// ControlDir is the control mod's state directory ("" unless Options.Control).
+	ControlDir string
+	cfg        config.Config
+	clk        clock.Clock
+	events     bool
+	real       bool
 }
 
 // Options tune Start.
@@ -46,6 +53,12 @@ type Options struct {
 	Events bool
 	// Mutate edits the config before the daemon opens.
 	Mutate func(*config.Config)
+	// Control configures a control state directory (inbox/ and ends/ exist).
+	Control bool
+	// RealProcs gives the daemon the operating system's process table (a
+	// kqueue exit watch on darwin) instead of the fake: for an integration test
+	// against a real child process.
+	RealProcs bool
 }
 
 // Start starts the daemon and registers its cleanup with t.
@@ -70,10 +83,20 @@ func Start(t *testing.T, opts ...Options) *Env {
 			t.Fatal(err)
 		}
 	}
+	e.Procs = proc.NewFake()
 	e.cfg = config.Defaults(func(string) string { return "" })
 	e.cfg.ClaudeDir, e.cfg.StateDir, e.cfg.Socket, e.cfg.CopyThrottle = e.ClaudeDir, e.StateDir, e.Socket, 0
 	if len(opts) > 0 {
-		e.clk, e.events = opts[0].Clock, opts[0].Events
+		e.clk, e.events, e.real = opts[0].Clock, opts[0].Events, opts[0].RealProcs
+		if opts[0].Control {
+			e.ControlDir = filepath.Join(root, "control")
+			e.cfg.ControlStateDir = e.ControlDir
+			for _, d := range []string{"ends", "inbox"} {
+				if err := os.MkdirAll(filepath.Join(e.ControlDir, d), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 		if opts[0].Mutate != nil {
 			opts[0].Mutate(&e.cfg)
 		}
@@ -85,7 +108,11 @@ func Start(t *testing.T, opts ...Options) *Env {
 
 func (e *Env) open() {
 	e.t.Helper()
-	d, err := serve.Open(serve.Options{Config: e.cfg, NoEvents: !e.events, Version: "test", Clock: e.clk})
+	so := serve.Options{Config: e.cfg, NoEvents: !e.events, Version: "test", Clock: e.clk}
+	if !e.real {
+		so.Procs = e.Procs
+	}
+	d, err := serve.Open(so)
 	if err != nil {
 		e.t.Fatal(err)
 	}

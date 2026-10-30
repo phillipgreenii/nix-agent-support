@@ -28,8 +28,11 @@ type Config struct {
 	Store     *store.Store
 	Sources   []source.Source
 	ClaudeDir string
-	Obs       *obs.Obs
-	Clock     clock.Clock
+	// EndsDir is the control mod's ends root, which lies outside the Claude
+	// directory; its files are named "ends/<name>" to the sources. "" when none.
+	EndsDir string
+	Obs     *obs.Obs
+	Clock   clock.Clock
 	// MaxLineBytes is parse.maxLineBytes: a longer line is a bad line.
 	MaxLineBytes int
 	// ChunkBytes bounds the bytes parsed per transaction (tests shrink it).
@@ -45,6 +48,10 @@ type Parser struct {
 	bySrc map[string]source.Source
 
 	run sync.Mutex // one parse at a time
+
+	// drain serializes Drain callers, so a Drain that finds nothing pending
+	// returns only after the Drain that took the pending files has finished them.
+	drain sync.Mutex
 
 	pmu     sync.Mutex
 	pending map[int64]bool
@@ -94,6 +101,8 @@ func (p *Parser) Wake() <-chan struct{} { return p.wake }
 
 // Drain parses every pending file now.
 func (p *Parser) Drain() error {
+	p.drain.Lock()
+	defer p.drain.Unlock()
 	p.pmu.Lock()
 	ids := make([]int64, 0, len(p.pending))
 	for id := range p.pending {
@@ -259,6 +268,11 @@ func (p *Parser) relPath(file int64) (string, bool) {
 	for _, ap := range paths {
 		if r, err := relTo(p.cfg.ClaudeDir, ap); err == nil {
 			return r, true
+		}
+		if p.cfg.EndsDir != "" {
+			if r, err := relTo(p.cfg.EndsDir, ap); err == nil {
+				return "ends/" + r, true
+			}
 		}
 	}
 	return "", false
