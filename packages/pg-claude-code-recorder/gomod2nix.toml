@@ -1,7 +1,6 @@
 schema = 3
 cachePackages = [
   'github.com/BurntSushi/toml',
-  'github.com/BurntSushi/toml/internal',
   'github.com/cespare/xxhash/v2',
   'github.com/dustin/go-humanize',
   'github.com/google/uuid',

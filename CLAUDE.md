@@ -283,6 +283,20 @@ registered by `darwin/modules/pg-keep-awake` (bead `pg2-8bgxg.5`): ONLY `alertRu
 `metricsTargets` (the keeper pushes OTel and listens on no port), no `logSources` (no jsonl event
 log) and no `dashboardProviders` (none designed). Check: `test-pg-keep-awake-darwin-module`.
 
+### pg-claude-code-recorder daemon (`phillipgreenii.programs.pg-claude-code-recorder`)
+
+The fifth HM-scoped launchd agent (docket `pg2-v77tsx`, phase 7a): `home/programs/pg-claude-code-recorder`
+renders `config.toml` (an option `a.b` is the key `b` in the table `[a]`; durations are Go strings with a `d`
+suffix for days), checks it at build time by running the REAL binary (`status --json --config` offline: exit 3
+means loaded, exit 2 means rejected; the phase-1d loader tolerates later-phase keys, so those are validated when
+their phase lands) and registers `exec <pkg>/bin/pg-claude-code-recorder serve --config <file> [--pprof]`. `instance`
+suffixes the label, agent name, log directory, config path and pprof socket for a second Claude directory.
+`controlStateDir` defaults from `pg-claude-control.stateDir` when that module is declared AND enabled (gated on
+`options.phillipgreenii.programs ? pg-claude-control`), with an assertion on a mismatch. Linux has no
+supervisor: no entry, one warning (raise `fs.inotify.max_user_watches`). Check:
+`test-pg-claude-code-recorder-hm-launchd` (`tests/pg-claude-code-recorder-hm-launchd.nix`), which also runs the
+rendered command under `env -i` against throwaway directories.
+
 ### work-report (`phillipgreenii.programs.work-report`)
 
 Reports are rendered by external generators registered in config and selected through named
