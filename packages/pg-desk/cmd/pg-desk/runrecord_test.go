@@ -31,6 +31,9 @@ func TestMain(m *testing.M) {
 	// The once-per-process dispatch check of `issue changes` would otherwise
 	// land on whichever test polls first; the one test about it opts in.
 	changesCapabilityReader = func(*gather.Gatherer) changes.Capabilityer { return nil }
+	// No test execs a real pg-router: the selection announcement is a no-op
+	// unless the test installs its own focusInject (focus_announce_test.go).
+	focusInject = func(context.Context, string) error { return nil }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

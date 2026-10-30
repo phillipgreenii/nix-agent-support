@@ -13,6 +13,13 @@ testable.
 pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--log-skips] <plan|apply> <id> [<seq>]
 ```
 
+**What triggers it.** The `pr-change` role binds `pr.changed`. Two things produce that event: a change
+of a watched PR (the connector daemon's feed), and the selection announcement of `pg-desk focus select`
+and `focus pull`, which injects one `pr.changed` event per newly selected PR so a selected PR that never
+changes again is still minted (bead `pg2-e5g9gx`; see `docs/behavior/pg-desk/focus.md`). The injected
+event's item id is `<repo>#<n>@<12 hex>`, so the delivery key is the id suffix as for any item with no
+sequence.
+
 `<seq>` is the item's change sequence as the router renders it into the role's argv; the next
 sections say what it is for. An operator running the command by hand leaves it out.
 

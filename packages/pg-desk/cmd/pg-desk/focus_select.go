@@ -247,6 +247,7 @@ func focusLockDeps(cmd *cobra.Command, env *focusEnv) focus.LockDeps {
 			return nil
 		},
 		Stderr: cmd.ErrOrStderr(), Actor: env.Actor,
+		Emit: focusAnnouncer(env.Period.Key, func() time.Time { return env.Now }),
 	}
 }
 

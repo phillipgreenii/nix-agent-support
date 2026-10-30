@@ -95,6 +95,13 @@ type LockDeps struct {
 	Hydrate   func(ctx context.Context, k Key) error
 	Stderr    io.Writer
 	Actor     string
+	// Emit, when non-nil, is called once after the annotations with the keys
+	// this lock newly inserted into the plan (never a key that was already
+	// selected, so a re-select emits nothing). It is how a selected entity
+	// that never changes again still reaches the decider: the annotation
+	// alone triggers only the issue feed. A failure is a one-line warning on
+	// Stderr and never changes the lock's outcome or exit code.
+	Emit func(ctx context.Context, keys []Key) error
 }
 
 func (d LockDeps) repo() string {
@@ -402,6 +409,15 @@ func Lock(ctx context.Context, d LockDeps, in LockInput) (LockResult, error) {
 		res.Outcome, res.ExitCode = OutcomePartial, ExitPartial
 	}
 	res.Annotations = ApplyAnnotations(ctx, d, affected, at)
+	if d.Emit != nil && len(res.Inserted) > 0 {
+		keys := make([]Key, 0, len(res.Inserted))
+		for _, ins := range res.Inserted {
+			keys = append(keys, ins.Key)
+		}
+		if err := d.Emit(ctx, keys); err != nil && d.Stderr != nil {
+			_, _ = fmt.Fprintf(d.Stderr, "WARNING: focus: selection not announced to the decider: %v\n", err)
+		}
+	}
 	for _, a := range res.Annotations {
 		if a.Outcome != AnnotationOK {
 			res.Outcome, res.ExitCode = OutcomePartial, ExitPartial

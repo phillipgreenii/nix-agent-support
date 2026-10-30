@@ -465,6 +465,19 @@ the period is closed (`6`), a malformed reply (`2`), a first lock for an earlier
 (`2`), hand-add hydration (`2`), then the writes (`3`, or `8` partial, or `0`). A malformed reply over
 a closed period is therefore `6`, and a run that is doomed by an earlier check never hydrates.
 
+**The selection announcement.** An issue row reaches the decider through the `annotation_changed`
+record its annotation appends. A PR row has no such path: the PR change feed belongs to the connector
+daemon, so a selected PR that never changes again would get no `pr.changed` event and stay unminted
+(the `unminted selections` gate of `pg-desk doctor`). After the lock commits and the annotations are
+written, `select --apply` and `pull` therefore inject one `pr.changed` event per PR row the lock
+newly inserted into the live router (`pg-router push-inject`, the binary named by
+`PG_DESK_PG_ROUTER_BIN`, default `pg-router`). The event has the shape of the item the PR source
+emits, so the `pr-change` role runs `pg-pr-change` for that PR within one router dispatch. A re-select,
+which inserts no new row, announces nothing, and the composed command is idempotent for a PR that
+already has a bead. A failed injection (no router on PATH, no running core) is one `WARNING:` line on
+stderr naming `pg-pr-change apply <id>` as the by-hand remedy; it never changes the lock's outcome or
+exit code. A preview announces nothing.
+
 **Hand-add hydration** is a separate, reported pre-step, not part of the atomic parse: a key the store
 has never gathered is hydrated first (a read of the tracker that writes the store's own entity row),
 the run is recomputed over the result and the hydrated keys are listed. A failure is a usage error
