@@ -717,13 +717,13 @@ func TestBootCore_failFastSourceGiveUpIncrementsSourceFailures(t *testing.T) {
 	}
 }
 
-// TestBootCore_rateLimitReserveFailureIncrementsSourceFailures is bead
-// pg2-hsla6's end-to-end regression for the 2026-10-01/02 episode: a
-// fail-fast pull source (no [query.failure_backoff]) whose backend answers with
-// the GraphQL rate-limit-reserve breach -- scriptout "unavailable" -- must
-// increment MetricSourceFailures with reason="rate-limited" on every failed
-// tick, while an ordinary failure of another source still counts under its own
-// reason. The alert sums `by (source)`, so both feed pg-router-source-failure-rate.
+// TestBootCore_rateLimitReserveFailureIncrementsSourceFailures was bead
+// pg2-hsla6's end-to-end regression for the 2026-10-01/02 episode and is
+// amended by bead pg2-bbz1v (operator ruling 2026-10-29): a fail-fast pull
+// source whose backend answers with the GraphQL rate-limit-reserve breach --
+// scriptout "unavailable" -- is a deliberate back-off, so every refused tick
+// increments MetricSourceBackoff and NOT MetricSourceFailures, while an
+// ordinary failure of another source still counts under its own reason.
 func TestBootCore_rateLimitReserveFailureIncrementsSourceFailures(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
@@ -765,11 +765,13 @@ func TestBootCore_rateLimitReserveFailureIncrementsSourceFailures(t *testing.T) 
 	if err := reader.Collect(ctx, &rm); err != nil {
 		t.Fatalf("collect: %v", err)
 	}
-	count := func(source, reason string) int64 {
+	// count reads one counter's datapoint for a source (and reason, when the
+	// series carries one); -1 means the series does not exist.
+	count := func(name, source, reason string) int64 {
 		got := int64(-1)
 		for _, sm := range rm.ScopeMetrics {
 			for _, m := range sm.Metrics {
-				if m.Name != metrics.MetricSourceFailures {
+				if m.Name != name {
 					continue
 				}
 				s, ok := m.Data.(metricdata.Sum[int64])
@@ -779,7 +781,7 @@ func TestBootCore_rateLimitReserveFailureIncrementsSourceFailures(t *testing.T) 
 				for _, dp := range s.DataPoints {
 					src, _ := dp.Attributes.Value(attribute.Key("source"))
 					rsn, _ := dp.Attributes.Value(attribute.Key("reason"))
-					if src.AsString() == source && rsn.AsString() == reason {
+					if src.AsString() == source && (reason == "" || rsn.AsString() == reason) {
 						got = dp.Value
 					}
 				}
@@ -787,10 +789,15 @@ func TestBootCore_rateLimitReserveFailureIncrementsSourceFailures(t *testing.T) 
 		}
 		return got
 	}
-	if got := count("pr-mine", metrics.SourceFailureRateLimited); got != 3 {
-		t.Fatalf("%s{source=pr-mine,reason=rate-limited} = %d, want 3 (one per failed tick)", metrics.MetricSourceFailures, got)
+	// Bead pg2-bbz1v: the reserve guard is a back-off, counted on its own counter
+	// and never as a source failure (so it cannot feed pg-router-source-failure-rate).
+	if got := count(metrics.MetricSourceBackoff, "pr-mine", ""); got != 3 {
+		t.Fatalf("%s{source=pr-mine} = %d, want 3 (one per refused tick)", metrics.MetricSourceBackoff, got)
 	}
-	if got := count("plain-src", metrics.SourceFailureError); got != 3 {
+	if got := count(metrics.MetricSourceFailures, "pr-mine", ""); got != -1 {
+		t.Fatalf("%s{source=pr-mine} = %d, want no series (a reserve back-off is not a failure)", metrics.MetricSourceFailures, got)
+	}
+	if got := count(metrics.MetricSourceFailures, "plain-src", metrics.SourceFailureError); got != 3 {
 		t.Fatalf("%s{source=plain-src,reason=error} = %d, want 3 (ordinary failures still count)", metrics.MetricSourceFailures, got)
 	}
 }

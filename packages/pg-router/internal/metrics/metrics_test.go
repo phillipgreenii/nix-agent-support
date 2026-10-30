@@ -400,20 +400,52 @@ func TestClassifySourceFailure(t *testing.T) {
 	}
 }
 
-// A rate-limit-reserve breach increments the source-failures counter with
-// reason="rate-limited"; an ordinary failure for the same source lands on its
-// own reason series, and both are visible to the alert's `sum by (source)`.
+// A reserve-guard back-off increments the back-off counter and NOT the
+// source-failures counter (bead pg2-bbz1v, operator ruling 2026-10-29); a
+// genuine quota-exhaustion rate limit and an ordinary failure for the same
+// source still land on their own source-failures reason series.
 func TestOnSourceFailureCarriesReason(t *testing.T) {
 	h := newHarness(t)
 	h.emitter.OnSourceFailure("pr-mine", errors.New(rateLimitReserveErr))
 	h.emitter.OnSourceFailure("pr-mine", errors.New(rateLimitReserveErr))
+	h.emitter.OnSourceFailure("pr-mine", errors.New("HTTP 403: API rate limit exceeded"))
 	h.emitter.OnSourceFailure("pr-mine", errors.New("command query [x]: exit status 1"))
-	m := findMetric(t, h.collect(t), MetricSourceFailures)
-	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureRateLimited); got != 2 {
-		t.Fatalf("source_failures{pr-mine,rate-limited} = %d, want 2", got)
+	rm := h.collect(t)
+	if got := sumFor(findMetric(t, rm, MetricSourceBackoff), "source", "pr-mine"); got != 2 {
+		t.Fatalf("source_backoff{pr-mine} = %d, want 2 (one per reserve-guard refusal)", got)
+	}
+	m := findMetric(t, rm, MetricSourceFailures)
+	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureRateLimited); got != 1 {
+		t.Fatalf("source_failures{pr-mine,rate-limited} = %d, want 1 (only the quota-exhausted one; the reserve back-off is not a failure)", got)
 	}
 	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureError); got != 1 {
 		t.Fatalf("source_failures{pr-mine,error} = %d, want 1", got)
+	}
+	if got := sumFor(m, "source", "pr-mine"); got != 2 {
+		t.Fatalf("source_failures{pr-mine} total = %d, want 2 (back-offs excluded)", got)
+	}
+}
+
+// TestIsSourceBackoff pins what counts as a back-off: only the reserve guard.
+func TestIsSourceBackoff(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"reserve guard (real shape)", errors.New(rateLimitReserveErr), true},
+		{"reserve guard, upper case", errors.New("GraphQL rate limit remaining (3) is BELOW THE CONFIGURED RESERVE (50)"), true},
+		{"quota exhausted", errors.New("HTTP 403: API rate limit exceeded"), false},
+		{"claude spend limit", errors.New(claudeSpendLimitErr), false},
+		{"plain failure", errors.New("exit status 1"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsSourceBackoff(tc.err); got != tc.want {
+				t.Fatalf("IsSourceBackoff = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

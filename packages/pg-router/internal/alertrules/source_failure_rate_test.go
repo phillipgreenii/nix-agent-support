@@ -36,6 +36,43 @@ func TestSourceFailureRateRule(t *testing.T) {
 	}
 }
 
+const wantSourceBackoffExpr = `sum by (source) (increase(pg_router_source_backoff_total[1h])) >= 3`
+
+// pg-router-source-backoff (bead pg2-bbz1v; operator ruling, Phillip, 2026-10-29: "(b),
+// except a warning level alert should happen"): a backend's deliberate reserve-guard
+// back-off is counted on its own counter, warns when sustained (3 back-offs in 1h, for
+// 30m), and is NOT a producer failure, so neither failure alert reads it and the rule
+// itself reads only the back-off counter.
+func TestSourceBackoffRule(t *testing.T) {
+	r := ruleBlock(t, "pg-router-source-backoff")
+	expr := ruleExpr(t, r)
+	if expr != wantSourceBackoffExpr {
+		t.Errorf("source-backoff expr:\n got %q\nwant %q", expr, wantSourceBackoffExpr)
+	}
+	if strings.Contains(expr, "source_failures") {
+		t.Errorf("source-backoff must not read the failure counter: %q", expr)
+	}
+	for _, need := range []string{
+		"for: 30m", "noDataState: OK", "execErrState: Error", "severity: warning", "{{ $labels.source }}",
+		"relativeTimeRange: { from: 3600, to: 0 }", "params: [0]",
+	} {
+		if !strings.Contains(r, need) {
+			t.Errorf("source-backoff rule lost %q", need)
+		}
+	}
+	// Not a failure/page rule: warning only, never critical.
+	if strings.Contains(r, "severity: critical") {
+		t.Error("source-backoff must be warning severity, not critical")
+	}
+	// Neither failure alert references the back-off counter, and the failure-rate
+	// rule still reads only the failure counter, which a back-off never increments.
+	for _, uid := range []string{"pg-router-source-failure-rate", "pg-router-source-persistent-failure"} {
+		if strings.Contains(ruleExpr(t, ruleBlock(t, uid)), "backoff") {
+			t.Errorf("%s must not read the back-off counter", uid)
+		}
+	}
+}
+
 func TestLivenessRuleCoversDeadDaemon(t *testing.T) {
 	r := ruleBlock(t, "pg-router-liveness-down")
 	// pg2-787q92 (operator ruling 2026-10-29): a sleeping host is not a down service, so the

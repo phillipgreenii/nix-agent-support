@@ -269,6 +269,15 @@ high (by source)`). The denominator counts every attempt that ran to its own end
 active in 7 sources (576 five-minute steps for `pr-team` alone); the new one in 2 (`pr-team` 183
 steps, `review-source` 1). The rule's uid, `noDataState: OK`, and severity are unchanged.
 
+**Amendment, 2026-10-29 (operator ruling, Phillip, bead `pg2-bbz1v`: "(b), except a warning level alert
+should happen").** A backend's deliberate reserve-guard back-off (error text "below the configured
+reserve") is not a producer failure. `OnSourceFailure` counts it on `source_backoff`
+(`pg_router_source_backoff_total{source}`) and NOT on `source_failures`, so it feeds neither
+`pg-router-source-failure-rate` nor `pg-router-source-persistent-failure`. It has its own
+warning-severity rule, `pg-router-source-backoff`: `sum by (source) (increase(...[1h])) >= 3`, sustained
+for 30m, `noDataState: OK`. Other rate-limited failures (quota exhausted, claude spend limit) are still
+failures.
+
 **Threshold.** `max(3 x period, 30m)`: three missed periods, with a 30-minute floor so a fast source
 (10s to 1m) needs a genuine half-hour outage. The comparison is strict, and `for: 5m` is added on top.
 Known boundary: for a 30-minute source (threshold 90m) whose observed tick spacing is about 35m, two

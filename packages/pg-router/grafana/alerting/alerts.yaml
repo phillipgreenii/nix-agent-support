@@ -1120,10 +1120,14 @@ groups:
       # timeout / interrupted / error; network is a host with no route or DNS to
       # the upstream, split out of unavailable by pg2-sot3t; a router-shutdown cancellation is not
       # counted at all, pg2-zdowv, DEC-OBS-8). This rule's `sum by (source)` deliberately sums
-      # the reason away, so a GraphQL rate-limit-reserve breach (reason=
-      # rate-limited) fires it exactly like any other failure; do not add a
-      # reason matcher here. The 2026-10-01/02 episode (~740 pr-mine/pr-team
-      # failures, zero alert) predates the pg2-jgbnp binary; see pg2-hsla6.
+      # the reason away, so every counted reason fires it alike; do not add a
+      # reason matcher here. EXCEPTION (pg2-bbz1v, operator ruling 2026-10-29): a
+      # backend's deliberate reserve-guard back-off ("below the configured reserve")
+      # is no longer counted here at all; it goes to pg_router_source_backoff_total
+      # and the pg-router-source-backoff warning below. Other rate-limited failures
+      # (quota exhausted, claude spend limit) still count. The 2026-10-01/02 episode
+      # (~740 pr-mine/pr-team failures, zero alert) predates the pg2-jgbnp binary;
+      # see pg2-hsla6.
       - uid: pg-router-source-failure-rate
         title: pg-router event source failure ratio is high (by source)
         condition: C
@@ -1154,6 +1158,49 @@ groups:
               type: threshold
               expression: B
               conditions: [{ evaluator: { type: gt, params: [0.5] } }]
+
+      # Source reserve back-off (bead pg2-bbz1v; operator ruling, Phillip, 2026-10-29:
+      # "(b), except a warning level alert should happen"). A backend's deliberate
+      # reserve guard (the GraphQL rate-limit remainder is below the configured
+      # reserve) is NOT a producer failure: the router counts it on
+      # pg_router_source_backoff_total (internal/metrics IsSourceBackoff) and NOT on
+      # pg_router_source_failures_total, so it never feeds pg-router-source-failure-rate.
+      # This rule is the one warning it gets. Threshold: at least 3 back-offs of one
+      # source in the last hour, sustained for 30m -- a single refused tick, or a short
+      # dip while the budget refills, stays quiet; a budget that stays under its reserve
+      # across several ticks for half an hour warns. Severity is warning, matching
+      # every other rule in this file. noDataState: OK because the counter is created
+      # lazily (an absent series is the healthy state, as for pg-router-source-failure-rate).
+      - uid: pg-router-source-backoff
+        title: pg-router event source is backing off at its reserve guard (by source)
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router source {{ $labels.source }} keeps being refused by its backend's reserve guard"
+          description: "Source {{ $labels.source }} was deliberately refused at least 3 times over the last hour (sustained 30 minutes) because its backend's API budget is below the configured reserve. This is a deliberate back-off, not a producer failure, so pg-router-source-failure-rate does not count it. Count = increase(pg_router_source_backoff_total[1h]). Check the backend's budget (for example pg-connector-github status) and what is spending it."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (source) (increase(pg_router_source_backoff_total[1h])) >= 3
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{ evaluator: { type: gt, params: [0] } }]
 
       # Persistent source failure (bead pg2-tv11a, DEC-OBS-4; operator approval
       # Phillip, 2026-10-05). pg-router-source-failure-rate above fires on ANY

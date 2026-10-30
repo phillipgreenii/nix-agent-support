@@ -590,14 +590,20 @@ sequenceDiagram
     reader of logs. **Every failed attempt counts once**, including the final give-up attempt of a
     source with no retries configured — so a source that fails fast on every tick (the default) is
     counted on every tick. The `reason` label is one of a closed set: `rate-limited` (the backend
-    reported an exhausted or below-reserve upstream API budget, including a `claude -p` account spend or
+    reported an exhausted upstream API budget, including a `claude -p` account spend or
     usage limit), `unavailable` and `unauthenticated`
     (the backend's own wire-level failure classes, rate limiting excluded), `timeout` (the attempt ran out
     its time budget and its child was killed), `interrupted` (a cancellation reported from inside the
     backend, not the daemon's own), and `error` (anything else). An attempt cut short because **the
     daemon itself is shutting down** is **not a source failure**: it is not counted, has no reason, and
     does not fail the pass (`DEC-OBS-8`). A watcher that only needs "is this source failing"
-    aggregates `reason` away, so no reason is invisible to it;
+    aggregates `reason` away, so no reason is invisible to it. The one exception is a backend's
+    deliberate **reserve-guard back-off** (its API budget is below the configured reserve): that is not
+    a failure and is counted on **source_backoff** instead;
+  - **source_backoff** — counter, per source: a pull-source attempt a backend's own reserve guard
+    deliberately refused (the upstream API budget is below the configured reserve). It is **not** a
+    **query failure**: it is never counted in **source_failures**, so it does not feed the failure-ratio
+    alert, and it has its own **warning**-severity alert (3 or more in 1 hour, sustained 30 minutes);
   - **deduped** — counter, per `type`: a duplicate `id` the core **accepted** only because
     de-duplication already covers it (`INV-EVT-3`), never a fresh append. It is a **separate**
     member from `ingest-event`'s own `accepted` count below, which counts both together and

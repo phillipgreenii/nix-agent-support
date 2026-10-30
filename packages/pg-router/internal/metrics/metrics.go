@@ -240,6 +240,15 @@ const (
 	// each one that will be retried after backoff, and the final give-up one
 	// (so a fail-fast source with no retries is counted too, bead pg2-jgbnp).
 	MetricSourceFailures = "pg_router_source_failures"
+	// MetricSourceBackoff counts a pull-source attempt that a backend's own
+	// deliberate reserve guard refused (IsSourceBackoff: the GraphQL rate-limit
+	// remainder is below the configured reserve), per source (bead pg2-bbz1v,
+	// operator ruling Phillip, 2026-10-29: "(b), except a warning level alert
+	// should happen"). It is NOT a producer failure: OnSourceFailure routes such an
+	// attempt HERE and not to MetricSourceFailures, so it never feeds
+	// pg-router-source-failure-rate; the warning rule pg-router-source-backoff
+	// reads this counter instead. Exposed as pg_router_source_backoff_total.
+	MetricSourceBackoff = "pg_router_source_backoff"
 	// MetricDeduped counts a duplicate event id the core absorbed because
 	// de-duplication already covers it (INV-EVT-3, bead pg2-cz31d), per type.
 	// It is a BRAND-NEW counter (not a promotion of any pre-existing field —
@@ -493,6 +502,7 @@ type Emitter struct {
 	skipped         metric.Int64Counter
 	enqueued        metric.Int64Counter
 	sourceFailures  metric.Int64Counter
+	sourceBackoff   metric.Int64Counter
 	deduped         metric.Int64Counter
 	enqueueRejected metric.Int64Counter
 	dispatchRetries metric.Int64Counter
@@ -828,6 +838,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if err != nil {
 		return nil, err
 	}
+	sourceBackoff, err := m.Int64Counter(
+		MetricSourceBackoff,
+		metric.WithUnit("{attempt}"),
+		metric.WithDescription("pull-source attempts a backend's own reserve guard deliberately refused (not a failure), per source"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	deduped, err := m.Int64Counter(
 		MetricDeduped,
 		metric.WithUnit("{event}"),
@@ -1121,6 +1139,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.skipped = skipped
 	e.enqueued = enqueued
 	e.sourceFailures = sourceFailures
+	e.sourceBackoff = sourceBackoff
 	e.deduped = deduped
 	e.enqueueRejected = enqueueRejected
 	e.dispatchRetries = dispatchRetries
@@ -1771,6 +1790,16 @@ func ClassifySourceFailure(err error) string {
 	return SourceFailureError
 }
 
+// IsSourceBackoff reports whether err is a backend's deliberate reserve-guard
+// back-off (pg-connector's "GraphQL rate limit remaining (N) is below the
+// configured reserve (M)"), as opposed to a real failure (bead pg2-bbz1v). Only
+// that guard qualifies: an exhausted quota ("API rate limit exceeded", claude's
+// spend or usage limit) is still a failure, though ClassifySourceFailure names
+// all of them rate-limited.
+func IsSourceBackoff(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "below the configured reserve")
+}
+
 // isNetworkFailure reports whether the lowercased error text says the host
 // could not reach the upstream (pg2-sot3t). The markers are deliberately the
 // narrow, unambiguous ones seen in the router's own stderr: a DNS miss ("no such
@@ -1965,8 +1994,16 @@ func (e *Emitter) OnSourceAttemptEnd(source string, elapsed time.Duration, shutd
 // backoff or is the final give-up attempt (INV-FAIL-3, register gap R21 /
 // beads pg2-00jpn, pg2-jgbnp) — the metrics half of the log lines
 // discover.go's runAndEnqueue writes at those points. The series carries the
-// ClassifySourceFailure reason of err (bead pg2-hsla6).
+// ClassifySourceFailure reason of err (bead pg2-hsla6). A backend's deliberate
+// reserve-guard back-off (IsSourceBackoff) is counted on MetricSourceBackoff
+// INSTEAD, never on this counter (bead pg2-bbz1v).
 func (e *Emitter) OnSourceFailure(source string, err error) {
+	if IsSourceBackoff(err) {
+		e.sourceBackoff.Add(context.Background(), 1, metric.WithAttributes(
+			attribute.String("source", source),
+		))
+		return
+	}
 	e.sourceFailures.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("source", source),
 		attribute.String("reason", ClassifySourceFailure(err)),
