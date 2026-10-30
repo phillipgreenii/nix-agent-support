@@ -1,0 +1,13 @@
+# Allowed identifiers for pg-claude-control (guard: scripts/check-identifier-allowlist.sh).
+# One identifier per line; case and surrounding whitespace do not matter. List ONLY
+# known-safe identifiers, with a comment saying why: never a forbidden name, never a
+# real third-party name (CLAUDE.md "Public Repository - No ZipRecruiter Disclosure").
+
+# the operator's own identity: the one exception the ruling allows.
+phillipgreenii
+phillipg@ziprecruiter.com
+
+# generic placeholder test identities (fixtures use generic example-* names).
+example-user
+# the bats fixture filler identity.
+teammate

@@ -402,6 +402,11 @@
           pg-claude-code-recorder = final.callPackage ./packages/pg-claude-code-recorder {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-claude-control (docket pg2-v77tsx, phase 8b): Pattern A (ADR 0008), the
+          # command that sends requests to a running Claude's control inbox.
+          pg-claude-control = final.callPackage ./packages/pg-claude-control {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-probe (bead pg2-pqztiu, operator ruling pg2-r9kv7 W8): Pattern A
           # (ADR 0008), stdlib only. A read-only pprof-socket GET client over a
           # fixed path allowlist plus `wait-log`; NOT a generic curl.
@@ -1852,6 +1857,7 @@
                 "pg-keep-awake"
                 "pg-probe"
                 "pg-claude-code-recorder"
+                "pg-claude-control"
                 "claude-tool-tracker"
                 "pg-wrap"
                 # pg2-rpo30t: Pattern A since its claude-transcript replace went.
@@ -6278,6 +6284,19 @@
                 pname = "pg-claude-code-recorder-go-tests";
                 src = lib.cleanSource ./packages/pg-claude-code-recorder; # matches default.nix
                 gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                testFlags = [
+                  "-v"
+                  "-timeout"
+                  "120s"
+                ];
+              };
+
+              # pg-claude-control (docket pg2-v77tsx, phase 8b) - whole-module Go test gate
+              # (unit tier; real FIFOs and files in temp dirs, ps answered by cmdruntest.Fake).
+              pg-claude-control-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-claude-control-go-tests";
+                src = lib.cleanSource ./packages/pg-claude-control; # matches default.nix
+                gomod2nixToml = ./packages/pg-claude-control/gomod2nix.toml;
                 testFlags = [
                   "-v"
                   "-timeout"
@@ -17993,6 +18012,7 @@
               pg-keep-awake
               pg-probe
               pg-claude-code-recorder
+              pg-claude-control
               claude-tool-tracker
               integrate-branch-support
               pg-desk

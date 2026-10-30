@@ -71,6 +71,12 @@ setup() {
   fill packages/work-report/docs/behavior 5 b md
   fill packages/work-report/docs/design 2 d md
 
+  # pg-claude-control: the two required files plus filler .go files.
+  fill packages/pg-claude-control/internal/x 4 f go
+  mkdir -p "$ROOT/packages/pg-claude-control/cmd/pg-claude-control"
+  printf 'package main\n' >"$ROOT/packages/pg-claude-control/cmd/pg-claude-control/main.go"
+  printf 'package main\n' >"$ROOT/packages/pg-claude-control/cmd/pg-claude-control/main_test.go"
+
   # pg-claude-code-recorder: the three required files plus filler .go files.
   fill packages/pg-claude-code-recorder/internal/platform 6 f go
   mkdir -p "$ROOT/packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder"
@@ -109,7 +115,7 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
 @test "clean fixture passes and reports what it scanned" {
   run_guard
   [ "$status" -eq 0 ]
-  [[ $output == *"OK:"*"6 module(s)"* ]]
+  [[ $output == *"OK:"*"7 module(s)"* ]]
 }
 
 @test "json shape: each identity key with a non-allowlisted value is flagged with file:line" {
@@ -264,10 +270,11 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
   plant packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/work-report/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-claude-code-recorder/internal/platform/testdata/p.json '{"login": "zzfakehandle"}'
+  plant packages/pg-claude-control/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
   run_guard
   [ "$status" -eq 1 ]
   local m
-  for m in pg-claude-code-recorder pg-connector pg-decider pg-desk pg-router-source-pg-desk work-report; do
+  for m in pg-claude-code-recorder pg-claude-control pg-connector pg-decider pg-desk pg-router-source-pg-desk work-report; do
     [[ $output == *"check-identifier-allowlist: $m: packages/$m/"* ]]
   done
 }

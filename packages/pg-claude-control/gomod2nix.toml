@@ -1,0 +1,10 @@
+schema = 3
+cachePackages = [
+  'github.com/phillipgreenii/x/cmdrun',
+  'github.com/phillipgreenii/x/cmdruntest'
+]
+
+[mod]
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261027205228-76ab0ad829aa'
+    hash = 'sha256-qzb1/GN2YpSGIo1JNrSZa3VY+Zv9ASJ7QAox4cgS2bM='
