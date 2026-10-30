@@ -5,7 +5,7 @@ _ccpool() {
   # Kept in sync by hand with the `subcommands` registry in
   # packages/ccpool/cmd/ccpool/dispatch.go (pg2-htmkq) -- see completions/_ccpool
   # for why there is no generator to derive this from.
-  local -a commands=(attach attend cancel close doctor hook list meta new reap reap-all reply result state tail trust version)
+  local -a commands=(attach attend cancel capacity close doctor emit-gauge hook list meta new reap reap-all reply result state tail trust version)
 
   if [[ $COMP_CWORD -eq 1 ]]; then
     if [[ $cur == -* ]]; then

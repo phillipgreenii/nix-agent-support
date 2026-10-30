@@ -10,13 +10,13 @@ import (
 // wantSubcommandNames is the exact set pg2-htmkq's bug report named as "the
 // real subcommand list" (originally 17 entries: attach, attend, cancel,
 // close, doctor, hook, list, meta, new, reap, reap-all, reply, result,
-// state, tail, trust, version), grown by 1 for `capacity` (ADR 0072's
+// state, tail, trust, version), grown by 1 for `emit-gauge` and by 1 for `capacity` (ADR 0072's
 // admission-control occupancy query). Any OTHER drift from this set (an
 // added/removed/renamed subcommand that forgot to update the registry) fails
 // loudly here rather than silently shipping a help listing that doesn't
 // match reality.
 var wantSubcommandNames = []string{
-	"attach", "attend", "cancel", "capacity", "close", "doctor", "hook", "list",
+	"attach", "attend", "cancel", "capacity", "close", "doctor", "emit-gauge", "hook", "list",
 	"meta", "new", "reap", "reap-all", "reply", "result", "state", "tail",
 	"trust", "version",
 }
