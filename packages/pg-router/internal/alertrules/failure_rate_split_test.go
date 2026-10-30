@@ -16,7 +16,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|dispatch-retry|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|command-busy|dispatch-retry|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -102,9 +102,10 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// handler's review-precheck
 	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
 	// the handler's session-in-flight decline (pg2-qaeb8), routine
-	// backpressure like at-capacity. Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|dispatch-retry|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, upstream-unavailable, dispatch-retry, usage-limit, launch-failed, session-in-flight and skipped-*: %q", got)
+	// backpressure like at-capacity, and the command-busy decline (pg2-6j0lr5: a
+	// runner under host load, backpressure not a failure). Nothing else.
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|command-busy|dispatch-retry|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, command-busy, origin-unavailable, triager-failure, upstream-killed, upstream-unavailable, dispatch-retry, usage-limit, launch-failed, session-in-flight and skipped-*: %q", got)
 	}
 	// docket pg2-12gr4.8: launch-failed (a ccpool session that failed before it was
 	// ready, a fault decline) is excluded in the rule's expr AND its description, and
@@ -242,7 +243,8 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"launch-failed2":             false,
 		"launch":                     false,
 		"low-disk":                   false,
-		"command-busy":               false,
+		"command-busy":               true, // pg2-6j0lr5: a busy decline is backpressure, not a failure
+		"command-busy2":              false,
 		"":                           false, // plain handler-error, dispatch-failure: keep paging
 		"capacity-unknown":           false,
 		"pool-unreadable":            false, // pg2-s3pjt: an unreadable pool is not backpressure; it must keep paging
@@ -319,7 +321,7 @@ func TestResidualExcludesUpstreamUnavailable(t *testing.T) {
 // queue as class=declined reason=dispatch-retry (DEC-RETRY-2). The failed attempt is
 // already excluded as upstream-unavailable, so the hand-back is excluded with it, or a
 // retried-and-recovered failure still pages. Only that exact reason is excluded: every
-// other declined reason (command-busy, capacity-unknown) keeps paging. The exclusion
+// other declined reason (capacity-unknown, pool-unreadable) keeps paging. The exclusion
 // matches the orchestrator's constant, not a retyped literal. The promtool fire /
 // no-fire cases live in rule-tests/pg-router-failure-rate.test.yaml.
 func TestResidualExcludesDispatchRetry(t *testing.T) {
@@ -335,7 +337,6 @@ func TestResidualExcludesDispatchRetry(t *testing.T) {
 		t.Errorf("the residual must exclude reason %q", orchestrator.DeclineDetailDispatchRetry)
 	}
 	for reason, wantExcluded := range map[string]bool{
-		"command-busy":       false,
 		"capacity-unknown":   false,
 		"dispatch-retry2":    false,
 		"pre-dispatch-retry": false,

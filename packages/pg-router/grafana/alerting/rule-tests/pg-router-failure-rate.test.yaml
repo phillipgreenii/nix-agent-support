@@ -186,8 +186,8 @@ tests:
     input_series:
       - series: pg_router_failures_total{class="declined",reason="dispatch-retry",role="pr-change",job="pg-router"}
         values: "0+1x120"
-      # A busy decline is a different reason and keeps paging.
-      - series: pg_router_failures_total{class="declined",reason="command-busy",role="pr-change",job="pg-router"}
+      # A different declined reason keeps paging.
+      - series: pg_router_failures_total{class="declined",reason="capacity-unknown",role="pr-change",job="pg-router"}
         values: "0+1x120"
     alert_rule_test:
       - eval_time: 8m
@@ -199,6 +199,58 @@ tests:
           - exp_labels:
               class: declined
               role: pr-change
+              severity: warning
+
+  # pg2-6j0lr5 (operator ruling 2026-10-29, "busy is not a failure"; precedent pg2-v3qn6
+  # at-capacity): pg-repo-runner exits 9 (command-busy decline) under host load, so every
+  # repo-verify and repo-sync tick declines. That backpressure must not page; the stalled
+  # queue is paged by pg-router-queue-stalled instead.
+  - name: a rising command-busy decline does not fire, it is excluded
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="command-busy",role="repo-verify",job="pg-router"}
+        values: "0+1x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_failure_rate)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-failure-rate
+        exp_alerts: []
+
+  - name: command-busy does not mask a real failure of the same role
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="command-busy",role="repo-verify",job="pg-router"}
+        values: "0+1x120"
+      - series: pg_router_failures_total{class="handler-error",role="repo-verify",job="pg-router"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts:
+          - exp_labels:
+              class: handler-error
+              role: repo-verify
+              severity: warning
+
+  - name: a name that only extends command-busy is not excluded
+    interval: 1m
+    input_series:
+      # The matcher is anchored: command-busy-extra is a different reason and keeps paging.
+      - series: pg_router_failures_total{class="declined",reason="command-busy-extra",role="worker",job="pg-router"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts:
+          - exp_labels:
+              class: declined
+              role: worker
               severity: warning
 
   - name: a name that only extends dispatch-retry is not excluded
