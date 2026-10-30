@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/notify"
+	"github.com/phillipgreenii/ccpool/internal/notify/notifytest"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
@@ -109,5 +111,70 @@ func TestHook_fail_notifiesUnderDefaultConfig(t *testing.T) {
 	}
 	if len(rn.events) != 1 || rn.events[0].State != "errored" || rn.events[0].Name != "a" {
 		t.Errorf("expected one errored event under default config, got %+v", rn.events)
+	}
+}
+
+// CP-2/CP-4/CP-6: through the real Desktop adapter and a fake daemon socket,
+// the hook posts exactly one banner with the contract fields.
+func TestHook_desktop_postsThroughDaemon(t *testing.T) {
+	cases := []struct {
+		name, event, payload string
+		from                 store.State
+		wantTitle, wantBody  string
+	}{
+		{"notify", "notify", `{"session_id":"csid-x","cwd":"/x","hook_event_name":"Notification","notification_type":"permission_prompt"}`, store.Working, "ccpool: a", "needs_input — /x"},
+		{"ask", "ask", askPayload, store.Working, "ccpool: a", "needs_input — /x"},
+		{"errored", "fail", `{"session_id":"csid-x","hook_event_name":"StopFailure","error":"server_error"}`, store.Working, "ccpool: a", "errored"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := notifytest.Start(t)
+			st, _ := openTestStore(t)
+			_ = st.Insert(context.Background(), store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: tc.from})
+			n := notify.FromConfig("desktop", "")
+			if err := handleHookN(tc.event, strings.NewReader(tc.payload), st, "", n, []string{"needs_input", "errored"}, nil, false, io.Discard); err != nil {
+				t.Fatalf("handleHookN: %v", err)
+			}
+			reqs := srv.Requests()
+			if len(reqs) != 1 {
+				t.Fatalf("posts = %d, want 1", len(reqs))
+			}
+			a := reqs[0].Args
+			if a["title"] != tc.wantTitle || a["body"] != tc.wantBody || a["source"] != "ccpool" || len(a) != 3 {
+				t.Errorf("args = %v", a)
+			}
+		})
+	}
+}
+
+// CP-3 and CP-1 through the daemon: no post for idle_prompt or a non-edge.
+func TestHook_desktop_noPostWithoutEdge(t *testing.T) {
+	srv := notifytest.Start(t)
+	st, _ := openTestStore(t)
+	_ = st.Insert(context.Background(), store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Idle})
+	n := notify.FromConfig("desktop", "")
+	const p = `{"session_id":"csid-x","hook_event_name":"Notification","notification_type":"idle_prompt"}`
+	if err := handleHookN("notify", strings.NewReader(p), st, "", n, []string{"needs_input"}, nil, false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(srv.Requests()); got != 0 {
+		t.Errorf("posts = %d, want 0", got)
+	}
+}
+
+// CP-7: an unreachable daemon never fails the hook and the state still moves.
+func TestHook_desktop_unreachableDaemonDoesNotFailHook(t *testing.T) {
+	t.Setenv("PG_OSX_NOTIFIER_SOCKET", filepath.Join(t.TempDir(), "absent.sock"))
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Working})
+	n := notify.Desktop{Timeout: 50 * time.Millisecond}
+	const p = `{"session_id":"csid-x","cwd":"/x","hook_event_name":"Notification","notification_type":"permission_prompt"}`
+	if err := handleHookN("notify", strings.NewReader(p), st, "", n, []string{"needs_input"}, nil, false, io.Discard); err != nil {
+		t.Fatalf("hook must not fail on an unreachable daemon: %v", err)
+	}
+	got, ok, err := st.GetByExternalID(ctx, "a")
+	if err != nil || !ok || got.State != store.NeedsInput {
+		t.Errorf("state = %v ok=%v err=%v, want needs_input", got.State, ok, err)
 	}
 }

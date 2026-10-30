@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/notify"
+	"github.com/phillipgreenii/ccpool/internal/notify/notifytest"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
@@ -270,5 +271,36 @@ func TestErrPromptNotIngested_isExported(t *testing.T) {
 	}
 	if !strings.Contains(ErrPromptNotIngested.Error(), "ingest") {
 		t.Errorf("error text = %q, want it to mention ingest", ErrPromptNotIngested.Error())
+	}
+}
+
+// CP-5/CP-9: the timeout fallback posts through the same Desktop adapter the
+// hook builds (notify.FromConfig), to the daemon socket, with the contract
+// fields and nothing else.
+func TestSend_fallbackPostsThroughDaemon(t *testing.T) {
+	srv := notifytest.Start(t)
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", CWD: "/work/a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	w := waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
+		return wait.Outcome{State: store.Working, TimedOut: true}, nil
+	})
+	s := New(Deps{
+		Tmux: &sendTmux{live: true}, Trust: &fakeTrust{}, Store: st, Wait: w,
+		Transcript: fakeTranscript{awaiting: true},
+		Notify:     notify.FromConfig("desktop", ""), NotifyOn: []string{"needs_input", "errored"},
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+		NewUUID: func() string { return "x" }, Now: func() time.Time { return time.Unix(1, 0) },
+	})
+	if _, err := s.Send(ctx, "a", "pick one", ModeRefuseIfBusy); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	reqs := srv.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("posts = %d, want 1", len(reqs))
+	}
+	a := reqs[0].Args
+	if a["title"] != "ccpool: a" || a["body"] != "needs_input — /work/a" || a["source"] != "ccpool" || len(a) != 3 {
+		t.Errorf("args = %v", a)
 	}
 }

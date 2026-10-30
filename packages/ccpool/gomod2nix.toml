@@ -4,16 +4,15 @@ cachePackages = [
   'github.com/cenkalti/backoff/v5',
   'github.com/cespare/xxhash/v2',
   'github.com/dustin/go-humanize',
-  'github.com/esiqveland/notify',
-  'github.com/gen2brain/beeep',
   'github.com/go-logr/logr',
   'github.com/go-logr/logr/funcr',
   'github.com/go-logr/stdr',
-  'github.com/godbus/dbus/v5',
   'github.com/gofrs/flock',
   'github.com/google/uuid',
   'github.com/grpc-ecosystem/grpc-gateway/v2/runtime',
   'github.com/grpc-ecosystem/grpc-gateway/v2/utilities',
+  'github.com/mattn/go-isatty',
+  'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/claude-transcript',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
@@ -117,8 +116,30 @@ cachePackages = [
   'google.golang.org/protobuf/types/known/timestamppb',
   'google.golang.org/protobuf/types/known/wrapperspb',
   'modernc.org/libc',
+  'modernc.org/libc/errno',
+  'modernc.org/libc/fcntl',
+  'modernc.org/libc/fts',
+  'modernc.org/libc/grp',
+  'modernc.org/libc/honnef.co/go/netdb',
+  'modernc.org/libc/langinfo',
+  'modernc.org/libc/limits',
+  'modernc.org/libc/netdb',
+  'modernc.org/libc/netinet/in',
+  'modernc.org/libc/poll',
+  'modernc.org/libc/pthread',
+  'modernc.org/libc/pwd',
+  'modernc.org/libc/signal',
+  'modernc.org/libc/stdio',
+  'modernc.org/libc/stdlib',
+  'modernc.org/libc/sys/socket',
+  'modernc.org/libc/sys/stat',
   'modernc.org/libc/sys/types',
+  'modernc.org/libc/termios',
+  'modernc.org/libc/time',
+  'modernc.org/libc/unistd',
+  'modernc.org/libc/utime',
   'modernc.org/libc/uuid/uuid',
+  'modernc.org/libc/wctype',
   'modernc.org/mathutil',
   'modernc.org/memory',
   'modernc.org/sqlite',
@@ -127,10 +148,6 @@ cachePackages = [
 ]
 
 [mod]
-  [mod.'git.sr.ht/~jackmordaunt/go-toast']
-    version = 'v1.1.2'
-    hash = 'sha256-xNlul602ezXiEiRP67VEECk2a4kW1n9aHWqa+8UKT4k='
-
   [mod.'github.com/BurntSushi/toml']
     version = 'v1.6.0'
     hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
@@ -147,14 +164,6 @@ cachePackages = [
     version = 'v1.0.1'
     hash = 'sha256-yuvxYYngpfVkUg9yAmG99IUVmADTQA0tMbBXe0Fq0Mc='
 
-  [mod.'github.com/esiqveland/notify']
-    version = 'v0.13.3'
-    hash = 'sha256-y+WqZAtCEZacAaqxdEEE+8gh2xhiPMpwM7IUmpE6og0='
-
-  [mod.'github.com/gen2brain/beeep']
-    version = 'v0.11.2'
-    hash = 'sha256-vP7oVTIHLx6LIUH7lpQjYyeOOJb6DeRkGykHkv7Vbks='
-
   [mod.'github.com/go-logr/logr']
     version = 'v1.4.4'
     hash = 'sha256-q9HX9aelONTLsywyLY4Wc5UYCK+wG0FbSzFWisCYiIA='
@@ -162,14 +171,6 @@ cachePackages = [
   [mod.'github.com/go-logr/stdr']
     version = 'v1.2.2'
     hash = 'sha256-rRweAP7XIb4egtT1f2gkz4sYOu7LDHmcJ5iNsJUd0sE='
-
-  [mod.'github.com/go-ole/go-ole']
-    version = 'v1.3.0'
-    hash = 'sha256-tF8t3VcV71jQ4jbPL91BwR59AKDpUAFV1waIKzkXJu8='
-
-  [mod.'github.com/godbus/dbus/v5']
-    version = 'v5.1.0'
-    hash = 'sha256-xOCMJpQK3KTmHTPn/CdqI4j0eENCtMmJDgAIoYqYOEY='
 
   [mod.'github.com/gofrs/flock']
     version = 'v0.13.0'
@@ -183,10 +184,6 @@ cachePackages = [
     version = 'v2.30.0'
     hash = 'sha256-SKvojuMn48wxg9Dd8D0BcS4PZO3OHIFOJEMYlpvgLsk='
 
-  [mod.'github.com/jackmordaunt/icns/v3']
-    version = 'v3.0.1'
-    hash = 'sha256-BBS5+lIOPn3HVBr4S15YYgvffQxy24BAOAQml4CJ2s4='
-
   [mod.'github.com/mattn/go-isatty']
     version = 'v0.0.20'
     hash = 'sha256-qhw9hWtU5wnyFyuMbKx+7RB8ckQaFQ8D+8GKPkN3HHQ='
@@ -195,10 +192,6 @@ cachePackages = [
     version = 'v1.0.0'
     hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
 
-  [mod.'github.com/nfnt/resize']
-    version = 'v0.0.0-20180221191011-83c6a9932646'
-    hash = 'sha256-yvPV+HlDOyJsiwAcVHQkmtw8DHSXyw+cXHkigXm8rAA='
-
   [mod.'github.com/phillipgreenii/x']
     version = 'v0.0.0-20260828055400-434334771eea'
     hash = 'sha256-HlFyPQs0qle76h6Ia3Qi0HhFe+Y+HR26vzlheDUYTA4='
@@ -206,18 +199,6 @@ cachePackages = [
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
     hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
-
-  [mod.'github.com/sergeymakinen/go-bmp']
-    version = 'v1.0.0'
-    hash = 'sha256-8ADMMD2M+h264VGwMxBcIBfpou/2zysdo+xtWXHf9C0='
-
-  [mod.'github.com/sergeymakinen/go-ico']
-    version = 'v1.0.0-beta.0'
-    hash = 'sha256-ljOz3cREtFSoqdVtfPo2tgk25QA90Bfn/iHJYKF9roQ='
-
-  [mod.'github.com/tadvi/systray']
-    version = 'v0.0.0-20190226123456-11a2b8fa57af'
-    hash = 'sha256-o0Z+nrd8l5A/CjJAW7lq5cpjdbaihfqiu5laLnSjJS8='
 
   [mod.'go.opentelemetry.io/auto/sdk']
     version = 'v1.2.1'
