@@ -509,9 +509,7 @@ flowchart LR
 
   subgraph FACADE["pg-connector (Facade)"]
     PGC["pg-connector umbrella"]
-    B1["conversation backend<br/>(recorder Adapter)"]
-    B2["process backend<br/>(pa-monitor Adapter)"]
-    B3["control backend<br/>(later)"]
+    B1["agentsession backend<br/>(pa-monitor Adapter, today)"]
   end
 
   subgraph CONSUMERS["Consumers"]
@@ -569,12 +567,8 @@ flowchart LR
   PRH -->|"Process: processes inside a worktree"| OS
   PROBE -->|"worker state, live, cwd"| CCP
 
-  PGC ==>|"conversation, search, activity ops"| B1
-  PGC ==>|"process, attention ops"| B2
-  PGC -.->|"control ops"| B3
-  B1 ==>|"Conversation: list, show<br/>Transcript: search, records"| REC
-  B2 ==>|"Process: status, blocker, pid, host"| PAM
-  B3 -.->|"submit, interrupt, stop"| CTLCLI
+  PGC ==>|"search, activity, attention ops<br/>(agentsession itself is retired)"| B1
+  B1 ==>|"Conversation, Process and Transcript readings"| PAM
 
   CCA ==>|"Transcript: feed and queries"| REC
   SWB -->|"Account usage: windows<br/>Process: counts"| PAM
@@ -586,16 +580,17 @@ flowchart LR
   HL -->|"launch headless<br/>Conversation: result id, cost, usage"| CLP
 ```
 
-The `ENDS` node and its arrows exist only if the end-reason ruling is yes. Two rules the diagram encodes:
+The `ENDS` node and its arrows exist because the end-reason ruling is yes (2026-10-30). The pg-connector backend shown is
+today's; Decisions item 24 retires `agentsession` and checks whether anything calls the backend's other capabilities. Two rules the diagram encodes:
 
 - **Code that runs inside Claude keeps reading hook stdin, its environment and its own
   Conversation's files directly** (operator 2026-10-28: "I want to minimize what calls claude code
   and those basically run in claude, so we probably want them to continue doing that."):
   claude-extended-tool-approver, claude-status-line, session-mode, pb, the claude-activity hooks,
   the ccpool hook and the control mod.
-- **Direct versus facade.** The Claude tooling stack (pa-monitor, ccpool, pg-router-handler-ccpool,
-  pg-ccaudit) reads the recorder directly; tools outside it go through pg-connector (agent's call,
-  see "Decisions").
+- **Direct versus facade.** Any tool may read the recorder directly, and pa-monitor, ccpool,
+  pg-router-handler-ccpool and pg-ccaudit do; the only access rule is that pg-desk uses pg-connector
+  (operator 2026-10-30, Decisions item 23).
 
 ### What is ingested
 
@@ -617,17 +612,17 @@ directory (`file-history/`, `paste-cache/`, `session-env/`, `shell-snapshots/`, 
 Every copied file is either handled by a source's parser or kept unparsed and reported as an
 unparsed kind in coverage. Sources in the first version (operator 2026-10-28):
 
-| Source                    | Files                                                                        | Mode     | Parsed into                                                                                                          |
-| ------------------------- | ---------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
-| `claude-transcript`       | `projects/{project}/{session}.jsonl` and `.../subagents/agent-{agent}.jsonl` | append   | one record per line, one child record per `message.content` item                                                     |
-| `claude-subagent-meta`    | `.../subagents/agent-{agent}.meta.json`                                      | snapshot | one record linking the subagent to its `toolUseId`                                                                   |
-| `claude-tool-result-body` | `.../tool-results/*`                                                         | snapshot | one record whose body is the full output, linked to its `tool_result` by `tool_use_id` or by the saved-to path       |
-| `claude-history`          | `history.jsonl`                                                              | append   | one record per entry                                                                                                 |
-| `session-registry`        | `sessions/{pid}.json`                                                        | snapshot | one record per version, plus a deletion record                                                                       |
-| `claude-status`           | `projects/{project}/{session}.status.jsonl`                                  | append   | one record per line                                                                                                  |
-| `session-mode`            | `projects/{project}/{session}.session-mode.json`                             | snapshot | one record per version                                                                                               |
-| `session-compaction`      | `projects/{project}/{session}.compaction.json`                               | snapshot | one record per version                                                                                               |
-| `claude-control-end`      | `<controlStateDir>/ends/{session}.{ms}.json`                                 | snapshot | one record per file: session id, end reason, time (written by the control mod; only if the end-reason ruling is yes) |
+| Source                    | Files                                                                        | Mode     | Parsed into                                                                                                    |
+| ------------------------- | ---------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `claude-transcript`       | `projects/{project}/{session}.jsonl` and `.../subagents/agent-{agent}.jsonl` | append   | one record per line, one child record per `message.content` item                                               |
+| `claude-subagent-meta`    | `.../subagents/agent-{agent}.meta.json`                                      | snapshot | one record linking the subagent to its `toolUseId`                                                             |
+| `claude-tool-result-body` | `.../tool-results/*`                                                         | snapshot | one record whose body is the full output, linked to its `tool_result` by `tool_use_id` or by the saved-to path |
+| `claude-history`          | `history.jsonl`                                                              | append   | one record per entry                                                                                           |
+| `session-registry`        | `sessions/{pid}.json`                                                        | snapshot | one record per version, plus a deletion record                                                                 |
+| `claude-status`           | `projects/{project}/{session}.status.jsonl`                                  | append   | one record per line                                                                                            |
+| `session-mode`            | `projects/{project}/{session}.session-mode.json`                             | snapshot | one record per version                                                                                         |
+| `session-compaction`      | `projects/{project}/{session}.compaction.json`                               | snapshot | one record per version                                                                                         |
+| `claude-control-end`      | `<controlStateDir>/ends/{session}.{ms}.json`                                 | snapshot | one record per file: session id, end reason, time (written by the control mod)                                 |
 
 Kept unparsed: `workflows/`, `scratchpad/`, agent-created directories, Claude Code's `.orphaned-*`
 and `.superseded-*` files, `mcp-tasks/` if it appears, project-level files such as
@@ -1186,7 +1181,7 @@ is a direct read or an observation:
   cmux, 2 tmux);
 - whether the Process has a **control inbox** (`<pid>.fifo` present), so a client can tell a Claude
   without the mod from one with it;
-- `/exit` and `/clear` entries from `history.jsonl`, and, if the end-reason ruling is yes, the **end reason** the control mod writes (below);
+- `/exit` and `/clear` entries from `history.jsonl`, and the **end reason** the control mod writes (below);
 - the last write time of each file, and each Process's Conversation history (which Processes held
   a Conversation and when, a query over the registry versions and not a stored copy).
 
@@ -1466,13 +1461,13 @@ limit, the `run` allowlist, a logged line per request, the inbox under the state
 If sender identity ever matters, a small Go socket listener can read the sender's pid and replace the
 bash listener.
 
-**End reason** (only if the end-reason ruling is yes; if it is no, drop this paragraph, the `ends/` directory, the `claude-control-end` source and the `end_reason` field, and nothing else changes). On `session.end` the mod writes `<controlStateDir>/ends/<session-id>.<unix-ms>.json` with the
+**End reason** (ruled yes, 2026-10-30). On `session.end` the mod writes `<controlStateDir>/ends/<session-id>.<unix-ms>.json` with the
 session id, the reason and the time, inside the hook's 1.5 s bound, through a temporary name and `mv`, so the recorder never ingests a torn file. The recorder ingests it as a
 snapshot source (`claude-control-end`) and joins it to the Process through the registry versions.
 Measured reasons: `prompt_input_exit` for a typed `/exit`, Ctrl-D and `run exit`; `clear` for
 `/clear`; `other` for SIGTERM and SIGHUP. A SIGKILL fires no hook, which is why the recorder's
 registry-at-exit rule exists. This reverses the earlier "no SessionEnd hook in the first version"
-(operator 2026-10-29, bead note R11), because the mod makes it nearly free; it awaits a ruling (see "Awaiting a ruling" in "Decisions").
+(operator 2026-10-29, bead note R11), because the mod makes it nearly free; the operator approved it on 2026-10-30 (Decisions item 22).
 
 **The command** is `pg-claude-control` (a placeholder name). The mod is the listener and the command
 is the one way to send, usable from any language:
@@ -1556,27 +1551,23 @@ no SwiftBar plugin in the first version (its `status` output is the surface).
 
 ### pg-connector
 
-pg-connector adopts the vocabulary (operator 2026-10-28: "pg-connector should be updated to use these
-propose terms."). Today `agentsession` (`packages/pg-connector/pkg/provider/agentsession/iface.go`,
-read-only `Show` and `List`; schema in `pkg/schema/agentsession.go:14-33`) mixes Process fields
-(pid, status, blocker, long idle, terminal host), Conversation fields (session id, cwd, name, model,
-branch, start time) and Transcript aggregates (tokens, cost). Its backend,
-`cmd/pg-connector-agentsession-pa-monitor`, serves `agentsession`, `search`, `activity` and
-`attention` by running pa-monitor. The proposal, awaiting a ruling:
+The operator ruled on 2026-10-30 (Decisions item 24) that `agentsession` is retired, not split. Today
+`agentsession` (`packages/pg-connector/pkg/provider/agentsession/iface.go`, read-only `Show` and
+`List`; schema in `pkg/schema/agentsession.go:14-33`) mixes Process, Conversation and Transcript
+fields. Its backend, `cmd/pg-connector-agentsession-pa-monitor`, serves `agentsession`, `search`,
+`activity` and `attention` by running pa-monitor, and the deployed machine configuration registers it
+for all four. The retirement bead (`pg2-b7r48a`, rescoped) works in this order:
 
-- a `conversation` capability backed by the recorder (also under `search.sources` and
-  `activity.sources`), a `process` capability and `attention` backed by pa-monitor readings over
-  recorder facts, and `agentsession` retired;
-- the behavior docs change first (`packages/pg-connector/docs/behavior/journeys.md`: `USECASE-AGENTSESSION-ATTENTION`,
-  `INV-AGS-1`, `INV-AGS-2`), and schema versions are per capability (`phillipgreenii-nix-agent-support`
-  ADR 0062's rule that schema versions are per capability);
-- a `control` capability over `pg-claude-control` later, if a tool outside the Claude stack needs it;
-  the earlier `host` capability is dropped.
+1. Find every caller of the backend's `search`, `activity` and `attention` capabilities (the
+   `agentsession` capability itself had none outside its own command, tests and the approver's allowlist rules).
+2. If nothing calls them, remove the capability, the backend, its package, its registrations and its
+   behavior-doc entries (`packages/pg-connector/docs/behavior/journeys.md`: `USECASE-AGENTSESSION-ATTENTION`,
+   `INV-AGS-1`, `INV-AGS-2`), the behavior docs first.
+3. If something calls them, apply the earlier proposal to those capabilities only: a `conversation`
+   capability backed by the recorder and a `process` capability backed by pa-monitor readings, with schema
+   versions per capability (`phillipgreenii-nix-agent-support` ADR 0062).
 
-The bead for this ("pg-connector: adopt the Conversation/Process vocabulary and split agentsession
-into conversation and process capabilities", P2, labels `agent-support`, `pg-connector`,
-`pg-claude-code-recorder`, blocked by `pg2-6z56f`) is not yet filed. The beads server failed
-repeatedly on 2026-10-28, so run `bd search "Conversation/Process vocabulary"` for a duplicate first.
+The earlier `host` and `control` capabilities are not built.
 
 ### Client migration
 
@@ -1602,7 +1593,7 @@ stays a file reader for code inside Claude. Its `SessionAlive` has no production
 check, and the recorder's Process facts replace both. `pg2-w6x9y` is closed by pa-monitor's move,
 with a re-profile (phase 1 criterion).
 
-pa-monitor and ccpool end up as policy only (agent's proposal, awaiting a ruling). pa-monitor keeps
+pa-monitor and ccpool end up as policy only (operator 2026-10-30, Decisions item 21). pa-monitor keeps
 status and blocker, nudges, auto-resume, keep-awake, account-usage peaks, OTel, the TUI and SwiftBar,
 and sends through `pg-claude-control`. ccpool keeps pool capacity, dispatch and reaping, and keeps
 tmux as the holder of a worker's terminal. Their low-level reading moves to the recorder. The
@@ -1703,32 +1694,32 @@ Reuse the patterns of `claude-transcript/sessions_test.go` and `pg-ccaudit` `ing
 2. Sources and parser for the transcript, subagent and history sources; query and search (L).
 3. The remaining sources, links, the change feed with wait, the wire contract and the cursor epoch,
    with the Go client package (M).
-4. Conversation and Process facts: registry versions, the exit watch, host binding, end evidence, and the end-file source only if the end-reason reversal is approved (M).
+4. Conversation and Process facts: registry versions, the exit watch, host binding, end evidence, the `claude-control-end` source (the mod writes the end reason, ruled 2026-10-30), and the crash query that lists Conversations whose end evidence reads as a crash, with session id, cwd and end time (M).
 5. Settle with the manifest, the check and crash recovery (M).
 6. Removal off by default, extract, `held`, `doctor` and the dry run (M).
 7. Home Manager module, LaunchAgent, signals, alerts and dashboards (M). The daemon-down and
    free-space alerts gate the documentation of `remove.enable` (phase 6's switch).
 8. Control mod, listener, `pg-claude-control` and its Home Manager wiring (M). This phase is
-   independent of phases 1 to 7 and can run in parallel; its end files feed phase 4 if the reversal is approved.
+   independent of phases 1 to 7 and can run in parallel; its end files feed phase 4, which ingests them.
 9. Client moves, each its own bead: pa-monitor (policy only; closes `pg2-w6x9y`), ccpool and the
-   pg-router handlers, ccaudit, beads-exporter; the pg-connector vocabulary bead; and the resume list
-   as a pa-monitor command (S to L each).
+   pg-router handlers, ccaudit, beads-exporter; and the retirement of pg-connector's `agentsession`
+   (S to L each). There is no resume-list command: the crash query of phase 4 replaces it.
 
-**Dependencies and acceptance.** Phase 2 needs 1, 3 needs 2, and 4 needs 1 and 3 (the end-label function in the Go client package belongs to phase 4, because it needs the Process facts). Phase 5 needs 4 (a live Process blocks settling), 6 needs 5, and 7 needs the metrics from 1 to 6; the daemon runs from a dev launch until phase 7 adds the module. Phase 8 is independent. Phase 9 needs 3 and 4. If the end-reason ruling arrives after phase 4, the `claude-control-end` source is added later as a snapshot source in its own bead.
+**Dependencies and acceptance.** Phase 2 needs 1, 3 needs 2, and 4 needs 1 and 3 (the end-label function in the Go client package belongs to phase 4, because it needs the Process facts). Phase 5 needs 4 (a live Process blocks settling), 6 needs 5, and 7 needs the metrics from 1 to 6; the daemon runs from a dev launch until phase 7 adds the module. Phase 8 is independent. Phase 9 needs 3 and 4. Phase 4 tests the `claude-control-end` source against fixture files, so it does not wait for phase 8; the real-output check is in phase 8's real-Claude tier.
 
-| Phase | Done when                                                                                                                                        |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1     | every file in the fixture tree is copied byte-exact in both copy modes, crash points recover, coverage reports lag, the CPU criterion holds      |
-| 2     | transcript, subagent and history sources parse hand-computed fixtures, and the queries and searches in "Queries and results" return their shapes |
-| 3     | the feed, the wire contract suite and the client package pass, and a re-parse emits resets in order                                              |
-| 4     | Process and Conversation facts and end evidence match the truth tables, and the real-child integration test passes                               |
-| 5     | settle passes its boundary, check-clause and crash tests in both modes, and a manifest exists for every settled Conversation                     |
-| 6     | removal, extract, `held` and `doctor` pass their tests, and a dry run changes nothing                                                            |
-| 7     | the module, the signals and the alerts are registered and pass their checks; the free-space and daemon-down alerts are live                      |
-| 8     | the mod, listener and command pass their bats and plugin checks, and the spike scenarios pass in the real-Claude tier                            |
-| 9     | each client move closes its bead with a re-profile where one is required (pa-monitor closes `pg2-w6x9y`)                                         |
+| Phase | Done when                                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | every file in the fixture tree is copied byte-exact in both copy modes, crash points recover, coverage reports lag, the CPU criterion holds                    |
+| 2     | transcript, subagent and history sources parse hand-computed fixtures, and the queries and searches in "Queries and results" return their shapes               |
+| 3     | the feed, the wire contract suite and the client package pass, and a re-parse emits resets in order                                                            |
+| 4     | Process and Conversation facts and end evidence match the truth tables, the crash query lists the crashed fixtures, and the real-child integration test passes |
+| 5     | settle passes its boundary, check-clause and crash tests in both modes, and a manifest exists for every settled Conversation                                   |
+| 6     | removal, extract, `held` and `doctor` pass their tests, and a dry run changes nothing                                                                          |
+| 7     | the module, the signals and the alerts are registered and pass their checks; the free-space and daemon-down alerts are live                                    |
+| 8     | the mod, listener and command pass their bats and plugin checks, and the spike scenarios pass in the real-Claude tier                                          |
+| 9     | each client move closes its bead with a re-profile where one is required (pa-monitor closes `pg2-w6x9y`)                                                       |
 
-**Implementation beads after approval.** Each phase is a bead, labelled `agent-support` and `pg-claude-code-recorder` (the control mod and command also `pg-claude-control`), created by plan-decompose. The lifecycle-record bead (phase 4) and its first client, the resume list as a pa-monitor command (phase 9), satisfy `pg2-ppm4h`'s done-when; the pg-connector vocabulary bead is separate. This design covers `pg2-w6x9y`'s "covers or hands back" choice by serving a change feed that clients poll with a wait, and pa-monitor's move closes it.
+**Implementation beads after approval.** Each phase is a bead, labelled `agent-support` and `pg-claude-code-recorder` (the control mod and command also `pg-claude-control`), created by plan-decompose. The lifecycle-record bead (phase 4), whose crash query replaces the resume-list command, satisfies `pg2-ppm4h`'s done-when; the `agentsession` retirement bead (`pg2-b7r48a`, rescoped) is separate. This design covers `pg2-w6x9y`'s "covers or hands back" choice by serving a change feed that clients poll with a wait, and pa-monitor's move closes it.
 
 ## Decisions
 
@@ -1810,20 +1801,22 @@ Agent's calls, for the operator to check:
 19. The quiet age reads file modification times, and removal holds a source whose bad-line or unknown-key rate exceeds `format.holdRate`.
 20. Error names are stable strings in `--json` output, because the two commands' exit-code tables are independent.
 
-Awaiting a ruling (proposed in the 2026-10-28 and 2026-10-30 sessions, not yet answered):
+21. 2026-10-30: pa-monitor and ccpool become policy only, with low-level reading moving to the recorder (the
+    command returns exit code 4 against a Claude without the mod).
+22. 2026-10-30: the mod writes the end reason in the first version, reversing the "no SessionEnd hook in v1"
+    ruling; other hook moves are follow-up beads.
+23. 2026-10-30: any tool may read the recorder directly (pa-monitor and ccpool do); the only access rule is
+    that pg-desk uses pg-connector.
+24. 2026-10-30: pg-connector's `agentsession` is retired, not split; the bead that retires it first checks
+    whether anything calls the `search`, `activity` or `attention` capabilities of its backend, and applies
+    the `conversation` and `process` split to those only if something does.
+25. 2026-10-30: there is no resume-list command; the recorder's crash query replaces it.
 
-- pa-monitor and ccpool become policy only, with low-level reading moving to the recorder (the
-  operator asked that the command return an appropriate error when run against a Claude without the
-  mod; that is built in, exit code 4).
-- pg-connector splits `agentsession` into `conversation` and `process`, with direct reads for the
-  Claude tooling stack and pg-connector for tools outside it (the operator's answer was cut off).
-- The mod writes the end reason in the first version, reversing the "no SessionEnd hook in v1"
-  ruling; other hook moves are follow-up beads.
-- The resume list as a pa-monitor command built after pa-monitor moves onto the recorder.
+Awaiting a ruling: the agent's calls above (1 to 20) are not yet confirmed.
 
 ## Design patterns used
 
-Pipes and Filters (the copier and parser stages with their own offsets), Single Writer (one writer per stage), Event Log (the feed, a transaction-log tail with a durable cursor), Tombstone (deletion records), Strangler Fig (client migration), Facade and Adapter (pg-connector and its backends), Remote Proxy (the Go client package), Command Message (a request line in the inbox), Ports (`Clock`, `ProcessTable`, `ClonePolicy`, `FreeSpace` as the test seams), and Observations versus Derived Data (the store split).
+Pipes and Filters (the copier and parser stages with their own offsets), Single Writer (one writer per stage), Event Log (the feed, a transaction-log tail with a durable cursor), Tombstone (deletion records), Strangler Fig (client migration), Facade and Adapter (pg-connector and its backends, for pg-desk and any tool that chooses it), Remote Proxy (the Go client package), Command Message (a request line in the inbox), Ports (`Clock`, `ProcessTable`, `ClonePolicy`, `FreeSpace` as the test seams), and Observations versus Derived Data (the store split).
 
 ## ADR candidates
 
