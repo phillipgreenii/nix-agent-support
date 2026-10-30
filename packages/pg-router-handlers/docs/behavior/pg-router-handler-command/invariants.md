@@ -27,7 +27,12 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   engine over the event's item fields, so item data can fill an element but can never be parsed as
   more than that one element. The rendered argv is run once: the adapter never retries it, which is
   the core's decision (`INV-FAIL-1`). An argv that cannot be rendered is a failure of the dispatch
-  before anything runs.
+  before anything runs. A command that decided and wrote work **MAY** report it: when the last
+  non-empty line of its standard output is one single-line JSON object
+  `{"actions":[{"verb":"<verb>","refs":[{"type":"bead","id":"<id>"}]}]}`, the adapter returns those
+  verbs and refs as the dispatch's actions, which the core stores uninterpreted in its log row (an action
+  with no `refs` is logged against the dispatched item). Any other output reports no actions, so a command
+  that prints nothing special is unchanged (bead `pg2-4ye8pn`).
 - **`INV-CMA-4`** <!-- uuid: 16f70908-919c-4b38-a2c9-bbdd46786f45 --> — **A busy command is a pre-accept decline, and a failed one carries its
   evidence.** A command that exits with the busy code
   makes the adapter decline the dispatch as busy (kind `busy`), which the core re-offers

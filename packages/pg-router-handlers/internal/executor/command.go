@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -41,7 +42,53 @@ type commandExecutor struct{}
 
 func (commandExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error) {
 	r := &commandRun{deps: deps}
-	return report.Result{}, r.run(ctx, d)
+	out, err := r.run(ctx, d)
+	if err != nil {
+		return report.Result{}, err
+	}
+	return resultFromStdout(out), nil
+}
+
+// resultFromStdout is the command role's action-report contract (bead
+// pg2-4ye8pn). A command that decided and wrote work MAY report it by making
+// the LAST non-empty line of its stdout one single-line JSON object
+// {"actions":[{"verb":"<verb>","refs":[{"type":"bead","id":"<id>"}]}]}. Those
+// verbs and refs become Result.Actions, which the handler JSON-encodes into the
+// reply outcome the router relays to its log row (report.FromOutcome); an
+// action with no refs is logged against the dispatched item. Any other stdout
+// (plain text, no trailing JSON, JSON without an "actions" array, an empty
+// verb) reports no actions, exactly as before, so a role that prints nothing
+// special is unchanged. The core never branches on a verb.
+func resultFromStdout(out []byte) report.Result {
+	lines := strings.Split(strings.TrimRight(string(out), " \t\r\n"), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if !strings.HasPrefix(last, "{") {
+		return report.Result{}
+	}
+	var wire struct {
+		Actions []struct {
+			Verb string `json:"verb"`
+			Refs []struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+			} `json:"refs"`
+		} `json:"actions"`
+	}
+	if json.Unmarshal([]byte(last), &wire) != nil {
+		return report.Result{}
+	}
+	var res report.Result
+	for _, a := range wire.Actions {
+		if a.Verb == "" {
+			continue
+		}
+		act := report.Action{Verb: report.Verb(a.Verb)}
+		for _, ref := range a.Refs {
+			act.Refs = append(act.Refs, report.Ref{Type: ref.Type, ID: ref.ID})
+		}
+		res.Actions = append(res.Actions, act)
+	}
+	return res
 }
 
 type commandRun struct{ deps Deps }
@@ -84,10 +131,10 @@ func commandPayloadEnv(r roles.Role, it item.Item) (env []string, baseNames []st
 // run dispatches a command role: render its argv, run it once in its own
 // process group with the payload env, success iff exit 0. No ccpool/watchdog.
 // (No built-in command role exists; this path is exercised by explicit config.)
-func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
+func (r *commandRun) run(ctx context.Context, d DispatchContext) ([]byte, error) {
 	argv, err := r.renderArgv(d.Role.Command.Argv, d)
 	if err != nil {
-		return fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
+		return nil, fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
 	}
 	// env is the payload env, baseNames the strict env's variable names (nil when
 	// the strict switch is off); dispatch_start records the argv and the names,
@@ -98,14 +145,14 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
 	// 33). A busy exit 9 is only known after the command ran: it is a decline, and
 	// leaves dispatch_start followed by the cmd layer's dispatch_decline.
 	r.emitCommandStart(d, argv, baseNames)
-	_, err = r.runPayload(ctx, argv, env)
+	out, err := r.runPayload(ctx, argv, env)
 	if err == nil {
 		emitDispatchEnd(r.deps.Log, d, "", OutcomeCompleted)
-		return nil
+		return out, nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode {
-		return fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
+		return nil, fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
 	}
 	// Exactly one outcome record follows dispatch_start (the decline above has the
 	// cmd layer's own): a cancelled context is dispatch_end "interrupted", every
@@ -115,7 +162,7 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
 	} else {
 		emitDispatchFailed(r.deps.Log, d, "", "", commandFailureText(err))
 	}
-	return fmt.Errorf("command role %q item %s: %w%s", d.Role.Name, d.Item.ID, err, stderrSuffix(err))
+	return nil, fmt.Errorf("command role %q item %s: %w%s", d.Role.Name, d.Item.ID, err, stderrSuffix(err))
 }
 
 // commandFailureText is the text a failed command payload is classified from

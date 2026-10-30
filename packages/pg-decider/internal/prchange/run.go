@@ -154,7 +154,36 @@ func (r *run) hydrateAndDecide() int {
 	if code, stop := r.hydrate(); stop {
 		return code
 	}
-	return r.decide()
+	code := r.decide()
+	r.reportActions(code)
+	return code
+}
+
+// reportActions prints the run's decided actions as the LAST line of stdout, in
+// the action-report contract of pg-router's command role (bead pg2-4ye8pn): one
+// single-line {"actions":[{"verb":"<kind>"}]} object, one entry per action the
+// apply decided, in plan order, the verb being the action's kind (review-pr,
+// resolve-conflict, anchor, ... or annotation), the same list as the run
+// record's decide.actions. It carries no refs, so the router logs each against
+// the dispatched item. It is printed only for an apply that exited 0 and had
+// actions: a plan decides nothing, a failed run reports no work, and a run with
+// nothing to do prints nothing, so every other stdout is unchanged.
+func (r *run) reportActions(code int) {
+	if r.o.Mode != ModeApply || code != ExitOK || r.rec.Decide == nil || len(r.rec.Decide.Actions) == 0 {
+		return
+	}
+	type act struct {
+		Verb string `json:"verb"`
+	}
+	acts := make([]act, 0, len(r.rec.Decide.Actions))
+	for _, a := range r.rec.Decide.Actions {
+		acts = append(acts, act{Verb: a.Kind})
+	}
+	b, err := json.Marshal(map[string][]act{"actions": acts})
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(r.o.Stdout, string(b))
 }
 
 // fail prints one failure line and returns the exit code of (stage, class).

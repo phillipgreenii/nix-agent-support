@@ -65,7 +65,14 @@ directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`
    never mint an anchor. A legacy row has version `0`, so the version is a sufficient test.
 3. **Decide.** `pg-decider plan pr <id>` for mode `plan`, `pg-decider apply pr <id>` for mode
    `apply` (with `--from-item -` when the run has a delivery key, see below). The plan the decider
-   prints is passed through on standard output.
+   prints is passed through on standard output. An `apply` that exits `0` having planned actions then
+   ends its standard output with one more line, the action report pg-router's command role reads
+   (`INV-CMA-3` of the set `pg-router-handler-command`): `{"actions":[{"verb":"review-pr"},...]}`,
+   one entry per planned action in plan order, the verb being the action's kind (`anchor`,
+   `review-pr`, `resolve-conflict`, ..., or `annotation`), the same list as the run record's
+   `decide.actions`. It carries no refs, so the router's log row records each action against the
+   dispatched item. A `plan` run, a run that fails, and an `apply` with nothing to do print no such
+   line, so the router logs an empty `actions` for them.
 4. **Record.** The run is recorded in the lane state and in the run record (see "The run record" and
    "Lane state"). A failure to record never changes the exit code: the decider has already acted.
 

@@ -190,3 +190,44 @@ func TestStderrTail_SanitizesAndRedacts(t *testing.T) {
 		t.Fatalf("empty/whitespace-only stderr must yield no tail (got %q)", got)
 	}
 }
+
+// fakeOutCmd is a query.Commander double that returns fixed stdout and exits 0.
+type fakeOutCmd struct{ out string }
+
+func (f fakeOutCmd) Run(_ context.Context, _ []string) ([]byte, error) { return []byte(f.out), nil }
+
+// TestCommandDispatch_ReportsActionsFromStdoutLastLine is the regression guard
+// for bead pg2-4ye8pn: a command role that decided and wrote work reports it as a
+// final-line {"actions":[...]} object on stdout, and those actions reach
+// Result.Actions (so the router's log row), instead of the empty Result every
+// command role used to return.
+func TestCommandDispatch_ReportsActionsFromStdoutLastLine(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		want []report.Action
+	}{
+		{
+			"verb and refs", "plan text\n{\"actions\":[{\"verb\":\"review-pr\",\"refs\":[{\"type\":\"bead\",\"id\":\"w1\"}]},{\"verb\":\"resolve-conflict\"}]}\n",
+			[]report.Action{{Verb: "review-pr", Refs: []report.Ref{{Type: "bead", ID: "w1"}}}, {Verb: "resolve-conflict"}},
+		},
+		{"no trailing newline", "{\"actions\":[{\"verb\":\"review-pr\"}]}", []report.Action{{Verb: "review-pr"}}},
+		{"plain output is no actions", "refresh: no change\nplan: nothing\n", nil},
+		{"empty stdout", "", nil},
+		{"json that is not an actions object", "{\"other\":1}\n", nil},
+		{"actions line not last is ignored", "{\"actions\":[{\"verb\":\"x\"}]}\ntrailer\n", nil},
+		{"empty verb dropped", "{\"actions\":[{\"verb\":\"\"}]}\n", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := DispatchContext{Role: commandRole(), Item: item.Item{ID: "b1"}}
+			res, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: fakeOutCmd{out: tc.out}})
+			if err != nil {
+				t.Fatalf("Dispatch: %v", err)
+			}
+			if fmt.Sprint(res.Actions) != fmt.Sprint(tc.want) {
+				t.Fatalf("Actions = %v, want %v", res.Actions, tc.want)
+			}
+		})
+	}
+}
