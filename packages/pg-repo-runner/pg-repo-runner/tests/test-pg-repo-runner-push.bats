@@ -189,13 +189,14 @@ set_hook() {
 }
 
 make_notifier() {
-  cat >"$TEST_DIR/osascript-stub" <<EOF
+  cat >"$TEST_DIR/pg-osx-notify-stub" <<EOF
 #!/usr/bin/env bash
-n=\$#
-printf '%s | %s\n' "\${@:\$((n-1)):1}" "\${@:\$n:1}" >>"$TEST_DIR/notify.log"
+if [[ -f "$TEST_DIR/notify.exit" ]]; then rc=\$(cat "$TEST_DIR/notify.exit"); [[ \$rc -eq 0 ]] || exit "\$rc"; fi
+printf '[%s]' "\$@" >>"$TEST_DIR/notify.log"
+echo >>"$TEST_DIR/notify.log"
 EOF
-  chmod +x "$TEST_DIR/osascript-stub"
-  export PG_REPO_RUNNER_OSASCRIPT_BIN="$TEST_DIR/osascript-stub"
+  chmod +x "$TEST_DIR/pg-osx-notify-stub"
+  export PG_OSX_NOTIFY_BIN="$TEST_DIR/pg-osx-notify-stub"
 }
 
 # write_verdict SHA RESULT [INPUTS]: a stored check verdict of nix-alpha, in the shape
@@ -638,9 +639,14 @@ assert_argv_clean() {
   [ "$(runner_beads nix-alpha | jq length)" -eq 1 ]
   [ "$(runner_beads nix-alpha | jq -r '.[0].metadata.kind')" = needs-relock ]
   [[ "$(runner_beads nix-alpha | jq -r '.[0].title')" == *"push blocked: needs relock"* ]]
+  # RR-5: exactly one banner, with the CLI's full argv
+  id="$(runner_beads nix-alpha | jq -r '.[0].id')"
+  [ "$(wc -l <"$TEST_DIR/notify.log" | tr -d ' ')" -eq 1 ]
+  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha needs-relock][--body][nix-alpha: push blocked: needs relock ($id)][--source][pg-repo-runner][--timeout][5s]" ]
   # a repeat is the same transition: no second bead
   sync_pass
   [ "$(runner_beads nix-alpha | jq length)" -eq 1 ]
+  [ "$(wc -l <"$TEST_DIR/notify.log" | tr -d ' ')" -eq 1 ]
   # the sibling is published (by the operator: not by the runner) and a green verdict for
   # a later tip arrives: the push goes out and the runner closes its own bead
   id="$(runner_beads nix-alpha | jq -r '.[0].id')"

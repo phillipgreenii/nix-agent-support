@@ -10,7 +10,7 @@
 # test-support/bd_fixture.bash: no dolt server, never the shared tracker), the real
 # script run as a subprocess. The stand-ins are nix (a recorder whose exit status the
 # test sets: what is pinned is what the runner does with the verdict) and the macOS
-# notifier (a recording script on PG_REPO_RUNNER_OSASCRIPT_BIN: the only stub of the
+# notifier (a recording script on PG_OSX_NOTIFY_BIN: the only stub of the
 # surfacing path). Nothing here pushes, and every repo in the fixture config has
 # push = false.
 
@@ -157,19 +157,19 @@ EOF
   export PG_REPO_RUNNER_NIX_BIN="$TEST_DIR/nix-shim"
 }
 
-# make_notifier: the recording stand-in for osascript. One line per call: the
-# arguments of the title and body (items 1 and 2 of the script's argv). It ends
-# with the status in $TEST_DIR/notify.exit.
+# make_notifier: the recording stand-in for the pg-osx-notify CLI. One line per call: every
+# argv item of the CLI call, each in [brackets]. It exits with the status in
+# $TEST_DIR/notify.exit when that file holds a non-zero value.
 make_notifier() {
   echo 0 >"$TEST_DIR/notify.exit"
-  cat >"$TEST_DIR/osascript-stub" <<EOF
+  cat >"$TEST_DIR/pg-osx-notify-stub" <<EOF
 #!/usr/bin/env bash
-n=\$#
-[[ \$(cat "$TEST_DIR/notify.exit") -eq 0 ]] || exit 1
-printf '%s | %s\n' "\${@:\$((n-1)):1}" "\${@:\$n:1}" >>"$TEST_DIR/notify.log"
+if [[ -f "$TEST_DIR/notify.exit" ]]; then rc=\$(cat "$TEST_DIR/notify.exit"); [[ \$rc -eq 0 ]] || exit "\$rc"; fi
+printf '[%s]' "\$@" >>"$TEST_DIR/notify.log"
+echo >>"$TEST_DIR/notify.log"
 EOF
-  chmod +x "$TEST_DIR/osascript-stub"
-  export PG_REPO_RUNNER_OSASCRIPT_BIN="$TEST_DIR/osascript-stub"
+  chmod +x "$TEST_DIR/pg-osx-notify-stub"
+  export PG_OSX_NOTIFY_BIN="$TEST_DIR/pg-osx-notify-stub"
 }
 
 notifications() {
@@ -231,7 +231,8 @@ assert_repos_untouched() {
   [ "$(jq -r '.metadata.sha' <<<"$b")" = "$ALPHA_SHA" ]
   [ "$(bd_fixture_show_json "$(jq -r .id <<<"$b")" | jq -r '.labels | index("agent-support") != null')" = true ]
   [ "$(notifications)" -eq 1 ]
-  grep -q "nix-alpha" "$TEST_DIR/notify.log"
+  # RR-1: the CLI's full argv, exactly: no --subtitle, --sound, --url, --id or --group
+  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha red][--body][nix-alpha: primary tip ${ALPHA_SHA:0:12} fails nix flake check ($(jq -r .id <<<"$b"))][--source][pg-repo-runner][--timeout][5s]" ]
   [ "$(record nix-alpha red | jq -r .bead)" = "$(jq -r .id <<<"$b")" ]
   assert_repos_untouched
 }
@@ -336,7 +337,7 @@ assert_repos_untouched() {
 
 # lib CODE: runs CODE with the kernel library loaded against the fixture config.
 lib() {
-  RR_OSASCRIPT_BIN="$PG_REPO_RUNNER_OSASCRIPT_BIN" run bash -c 'source "$1/pg-repo-runner.bash" && rr_init_state && rr_load_config && '"$1" _ "$SCRIPTS_DIR"
+  run bash -c 'source "$1/pg-repo-runner.bash" && rr_init_state && rr_load_config && '"$1" _ "$SCRIPTS_DIR"
 }
 
 @test "diverged files one deduplicated bead and one notification, and resolving closes it" {
@@ -422,12 +423,16 @@ lib() {
 }
 
 @test "a failed notification stays owed and is delivered exactly once on a later pass" {
-  echo 1 >"$TEST_DIR/notify.exit"
+  echo 3 >"$TEST_DIR/notify.exit"
   verify nix-alpha "$ALPHA_SHA" 1
   [ "$status" -eq 0 ]
   [ "$(bead_count nix-alpha)" -eq 1 ]
   [ "$(notifications)" -eq 0 ]
   [ "$(record nix-alpha red | jq -r .notified)" = false ]
+  # RR-8: the exit code is logged, and the pending line no longer names osascript
+  grep -q "pg-osx-notify post exited 3" "$STATE/run.log"
+  grep -q "the notification is pending (pg-osx-notify failed)" "$STATE/run.log"
+  [ -z "$(grep -i osascript "/run.log")" ]
   echo 0 >"$TEST_DIR/notify.exit"
   lib 'rr_surface_flush_repo nix-alpha'
   [ "$status" -eq 0 ]
@@ -465,6 +470,31 @@ lib() {
   [ "$(bd_fixture_count)" -eq "$before" ]
   [ "$(notifications)" -eq 0 ]
   [ ! -e "$STATE/surface" ]
+}
+
+@test "surface.notify = false marks the record notified without posting" {
+  local cfg
+  cfg="$(<"$TEST_DIR/config.toml")"
+  printf '%s\n' "${cfg//notify = true/notify = false}" >"$TEST_DIR/config.toml"
+  verify nix-alpha "$ALPHA_SHA" 1
+  [ "$status" -eq 0 ]
+  [ "$(bead_count nix-alpha)" -eq 1 ]
+  [ "$(notifications)" -eq 0 ]
+  [ "$(record nix-alpha red | jq -r .notified)" = true ]
+}
+
+@test "rr_notify passes title and body as data and always bounds the call with --timeout" {
+  lib 'rr_notify "-x \"quoted\" \$(touch '"$TEST_DIR"'/pwned)" ""'
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/pwned" ]
+  [ "$(cat "$TEST_DIR/notify.log")" = '[post][--title][-x "quoted" $(touch '"$TEST_DIR"'/pwned)][--body][][--source][pg-repo-runner][--timeout][5s]' ]
+  lib 'rr_notify "" "-y"'
+  [ "$status" -eq 0 ]
+  [ "$(tail -n1 "$TEST_DIR/notify.log")" = '[post][--title][][--body][-y][--source][pg-repo-runner][--timeout][5s]' ]
+  # a failing CLI makes rr_notify non-zero with the exit code logged
+  echo 4 >"$TEST_DIR/notify.exit"
+  lib 'rr_notify t b'
+  [ "$status" -eq 4 ]
 }
 
 @test "status lists an open transition and no repo is enabled for push" {

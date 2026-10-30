@@ -32,12 +32,11 @@ export RR_NIX_LOG_WRAPPED_BIN="${RR_NIX_LOG_WRAPPED_BIN:-}"
 # pn is an ambient runtime dependency (it is not in this flake); the workspace build
 # resolves it from the PATH of the run. PG_REPO_RUNNER_PN_BIN replaces it (a test seam).
 export RR_PN_BIN="${PG_REPO_RUNNER_PN_BIN:-${RR_PN_BIN:-pn}}"
-# bd and osascript are resolved from the ambient PATH (like every bd-calling script
+# bd is resolved from the ambient PATH (like every bd-calling script
 # here; the machine wrapper carries the tracker guards). The PG_REPO_RUNNER_* names
 # are the test seams for the failure-surfacing step: a real bd on a throwaway
-# tracker, a recording stand-in for the macOS notifier.
+# tracker. The notifier seam is PG_OSX_NOTIFY_BIN, read directly by rr_notify.
 export RR_BD_BIN="${PG_REPO_RUNNER_BD_BIN:-${RR_BD_BIN:-bd}}"
-export RR_OSASCRIPT_BIN="${PG_REPO_RUNNER_OSASCRIPT_BIN:-${RR_OSASCRIPT_BIN:-/usr/bin/osascript}}"
 
 # Exit status of a "not now" answer: pg-router re-offers the item.
 RR_EXIT_BUSY=9
@@ -193,7 +192,7 @@ Files and environment:
   PG_REPO_RUNNER_NIX_BIN   replaces the nix binary (test seam)
   PG_REPO_RUNNER_GIT_BIN   replaces the git binary (test seam)
   PG_REPO_RUNNER_BD_BIN    replaces the bd binary (default: bd on PATH)
-  PG_REPO_RUNNER_OSASCRIPT_BIN   replaces the macOS notifier (test seam)
+  PG_OSX_NOTIFY_BIN              replaces the pg-osx-notify CLI (test seam)
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
                                 (else thresholds.retry_window, else 3600)
 

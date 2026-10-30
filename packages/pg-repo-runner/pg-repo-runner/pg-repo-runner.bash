@@ -669,14 +669,20 @@ rr_bead_close_own() {
   rr_bd close "$id" --reason "$evidence" >/dev/null 2>&1 || return 1
 }
 
-# rr_notify TITLE BODY: a macOS notification. TITLE and BODY travel as argv items
-# of a FIXED AppleScript, never inside the script text, so nothing in them can be
-# run as AppleScript.
+# rr_notify TITLE BODY: a macOS banner through the pg-osx-notify CLI (the notifier
+# daemon's socket client). TITLE and BODY are argv values of the CLI, never spliced
+# into a script; the CLI cuts over-cap text itself. --timeout keeps a hung daemon from
+# blocking the runner. Returns 0 only when the CLI exits 0; on failure the exit code
+# is logged and the caller keeps the banner owed. No fallback notifier (the daemon is
+# the only path).
 rr_notify() {
-  "${RR_OSASCRIPT_BIN:-/usr/bin/osascript}" \
-    -e 'on run argv' \
-    -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
-    -e 'end run' "$1" "$2" >/dev/null 2>&1
+  local rc=0
+  "${PG_OSX_NOTIFY_BIN:-pg-osx-notify}" post --title "$1" --body "$2" \
+    --source pg-repo-runner --timeout 5s >/dev/null 2>&1 || rc=$?
+  if ((rc != 0)); then
+    rr_log "notify: pg-osx-notify post exited $rc"
+    return "$rc"
+  fi
 }
 
 # rr_surface_flush REPO KIND: finishes whatever the transition still owes, each
@@ -729,7 +735,7 @@ rr_surface_flush() {
       rec="$(rr_jq -c --arg now "$now" '.notified = true | .updatedAt = $now' <<<"$(rr_surface_load "$repo" "$kind")")"
       rr_surface_store "$repo" "$kind" "$rec" || return 0
     else
-      rr_log "surface: $repo $kind: the notification is pending (osascript failed)"
+      rr_log "surface: $repo $kind: the notification is pending (pg-osx-notify failed)"
     fi
   fi
   return 0

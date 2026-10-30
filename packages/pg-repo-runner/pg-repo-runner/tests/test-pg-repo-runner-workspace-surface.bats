@@ -70,15 +70,16 @@ teardown() {
   gfh_teardown
 }
 
-# make_notifier: the recording stand-in for osascript (one line per call).
+# make_notifier: the recording stand-in for the pg-osx-notify CLI (one line per call).
 make_notifier() {
-  cat >"$TEST_DIR/osascript-stub" <<EOF
+  cat >"$TEST_DIR/pg-osx-notify-stub" <<EOF
 #!/usr/bin/env bash
-n=\$#
-printf '%s | %s\n' "\${@:\$((n-1)):1}" "\${@:\$n:1}" >>"$TEST_DIR/notify.log"
+if [[ -f "$TEST_DIR/notify.exit" ]]; then rc=\$(cat "$TEST_DIR/notify.exit"); [[ \$rc -eq 0 ]] || exit "\$rc"; fi
+printf '[%s]' "\$@" >>"$TEST_DIR/notify.log"
+echo >>"$TEST_DIR/notify.log"
 EOF
-  chmod +x "$TEST_DIR/osascript-stub"
-  export PG_REPO_RUNNER_OSASCRIPT_BIN="$TEST_DIR/osascript-stub"
+  chmod +x "$TEST_DIR/pg-osx-notify-stub"
+  export PG_OSX_NOTIFY_BIN="$TEST_DIR/pg-osx-notify-stub"
 }
 
 notifications() {
@@ -126,6 +127,8 @@ build_with() {
   [ "$(jq -r .title <<<"$b")" = "workspace: workspace build is red at ${h:0:12}" ]
   [ "$(bd_fixture_show_json "$(jq -r .id <<<"$b")" | jq -r '.labels | index("terminal-label") != null')" = true ]
   [ "$(notifications)" -eq 1 ]
+  # RR-6: the CLI's full argv under the workspace label
+  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: workspace build-red][--body][workspace: workspace build is red at ${h:0:12} ($(jq -r .id <<<"$b"))][--source][pg-repo-runner][--timeout][5s]" ]
   [ -z "$(ws_sets)" ]
 }
 

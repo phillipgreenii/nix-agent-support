@@ -10,7 +10,7 @@
 # wrapper that execs the real git), bd (the REAL bd over an embedded throwaway
 # database, see test-support/bd_fixture.bash: never the shared tracker) and the real
 # script run as a subprocess. The only stand-in is the macOS notifier (a recording
-# script on PG_REPO_RUNNER_OSASCRIPT_BIN).
+# script on PG_OSX_NOTIFY_BIN).
 #
 # The push step has its own suite (test-pg-repo-runner-push.bats). Here, one test
 # forces `push = true` for a repo WITHOUT a green verdict to prove that the flag alone
@@ -172,13 +172,14 @@ EOF
 
 make_notifier() {
   echo 0 >"$TEST_DIR/notify.exit"
-  cat >"$TEST_DIR/osascript-stub" <<EOF
+  cat >"$TEST_DIR/pg-osx-notify-stub" <<EOF
 #!/usr/bin/env bash
-n=\$#
-printf '%s | %s\n' "\${@:\$((n-1)):1}" "\${@:\$n:1}" >>"$TEST_DIR/notify.log"
+if [[ -f "$TEST_DIR/notify.exit" ]]; then rc=\$(cat "$TEST_DIR/notify.exit"); [[ \$rc -eq 0 ]] || exit "\$rc"; fi
+printf '[%s]' "\$@" >>"$TEST_DIR/notify.log"
+echo >>"$TEST_DIR/notify.log"
 EOF
-  chmod +x "$TEST_DIR/osascript-stub"
-  export PG_REPO_RUNNER_OSASCRIPT_BIN="$TEST_DIR/osascript-stub"
+  chmod +x "$TEST_DIR/pg-osx-notify-stub"
+  export PG_OSX_NOTIFY_BIN="$TEST_DIR/pg-osx-notify-stub"
 }
 
 notifications() {
@@ -383,6 +384,8 @@ assert_no_history_rewriting() {
   [[ "$(jq -r .title <<<"$b")" == *"pn workspace rebase or /pn-workspace-sync"* ]]
   [ "$(bd_fixture_show_json "$id" | jq -r '.labels | index("agent-support") != null')" = true ]
   [ "$(notifications)" -eq 1 ]
+  # RR-4: the CLI's full argv
+  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha diverged][--body][nix-alpha: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync ($id)][--source][pg-repo-runner][--timeout][5s]" ]
   # a repeated pass is the same story: no second bead, no second notification, no ref change
   sync_pass nix-alpha
   [ "$status" -eq 0 ]

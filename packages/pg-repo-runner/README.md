@@ -191,8 +191,8 @@ Per (repo, kind) the state is a Memento, `$XDG_STATE_HOME/pg-repo-runner/surface
 
 1. The first report after a clear (or ever) is the transition: it files ONE bead (type task, priority
    1, the repo's label from `surface.repo_labels`, metadata `runner = pg-repo-runner`, `repo`, `kind`,
-   `sha`) and posts ONE macOS notification (title and body travel as argv items of a fixed AppleScript,
-   never inside the script text).
+   `sha`) and posts ONE macOS notification (through the `pg-osx-notify post` CLI: title and body travel as
+   argument values with `--source pg-repo-runner` and a `--timeout`; a failed call logs its exit code and stays owed).
 2. A repeated report while the record is open files nothing and notifies nothing. A newer red sha is
    commented on the bead.
 3. A green check at a sha that DESCENDS from the red tip (`git merge-base --is-ancestor`, a read) comments
@@ -450,21 +450,21 @@ package.
 
 ## Test seams (environment)
 
-| Variable                       | Effect                                                         |
-| ------------------------------ | -------------------------------------------------------------- |
-| `PG_REPO_RUNNER_CONFIG`        | Path of the config file.                                       |
-| `PG_REPO_RUNNER_LOADAVG`       | Replaces the 1-minute load reading (the bats suites use this). |
-| `PG_REPO_RUNNER_MAX_LOAD`      | Replaces the load threshold.                                   |
-| `PG_REPO_RUNNER_NCPU`          | Replaces the core count used as the default threshold.         |
-| `PG_REPO_RUNNER_NIX_BIN`       | Replaces the nix binary (the bats suites use it to classify).  |
-| `PG_REPO_RUNNER_GIT_BIN`       | Replaces the git binary (the sync suite records git calls).    |
-| `PG_REPO_RUNNER_PN_BIN`        | Replaces the pn binary (default: `pn` on PATH).                |
-| `PG_REPO_RUNNER_EPOCH`         | Replaces the clock, in epoch seconds (the debounce tests).     |
-| `PG_REPO_RUNNER_QUIET_WINDOW`  | Replaces the quiet window, in seconds.                         |
-| `PG_REPO_RUNNER_BD_BIN`        | Replaces the bd binary (default: `bd` on PATH).                |
-| `PG_REPO_RUNNER_OSASCRIPT_BIN` | Replaces the macOS notifier (the surfacing suite records it).  |
-| `PG_REPO_RUNNER_RETRY_WINDOW`  | Replaces the tip item's retry window, in seconds.              |
-| `XDG_STATE_HOME`               | Root of the state directory.                                   |
+| Variable                      | Effect                                                             |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `PG_REPO_RUNNER_CONFIG`       | Path of the config file.                                           |
+| `PG_REPO_RUNNER_LOADAVG`      | Replaces the 1-minute load reading (the bats suites use this).     |
+| `PG_REPO_RUNNER_MAX_LOAD`     | Replaces the load threshold.                                       |
+| `PG_REPO_RUNNER_NCPU`         | Replaces the core count used as the default threshold.             |
+| `PG_REPO_RUNNER_NIX_BIN`      | Replaces the nix binary (the bats suites use it to classify).      |
+| `PG_REPO_RUNNER_GIT_BIN`      | Replaces the git binary (the sync suite records git calls).        |
+| `PG_REPO_RUNNER_PN_BIN`       | Replaces the pn binary (default: `pn` on PATH).                    |
+| `PG_REPO_RUNNER_EPOCH`        | Replaces the clock, in epoch seconds (the debounce tests).         |
+| `PG_REPO_RUNNER_QUIET_WINDOW` | Replaces the quiet window, in seconds.                             |
+| `PG_REPO_RUNNER_BD_BIN`       | Replaces the bd binary (default: `bd` on PATH).                    |
+| `PG_OSX_NOTIFY_BIN`           | Replaces the `pg-osx-notify` CLI (the surfacing suites record it). |
+| `PG_REPO_RUNNER_RETRY_WINDOW` | Replaces the tip item's retry window, in seconds.                  |
+| `XDG_STATE_HOME`              | Root of the state directory.                                       |
 
 ## Load threshold: the first calibration sample
 
@@ -513,7 +513,7 @@ measured duration and load of the real runner checks.
 - `pg-repo-runner/tests/test-pg-repo-runner-surface.bats`: failure surfacing (F3). Real git, a real
   workspace and the REAL bd over an embedded throwaway database (`test-support/bd_fixture.bash`: no
   dolt server, never the shared tracker); the only stand-ins are nix (as above) and a recording script
-  for the macOS notifier. Proves one bead and one notification per transition, no duplicates, the
+  for the `pg-osx-notify` CLI. Proves one bead and one notification per transition, no duplicates, the
   auto-close of only the runner's own bead on a green descendant, and that every failure stays owed.
 - `pg-repo-runner/tests/test-pg-repo-runner-sync.bats`: runner A, report-only (F5). Real git against bare
   local remotes, a recording wrapper around every git call, a `pre-push` hook as a tripwire, and the REAL bd
