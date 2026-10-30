@@ -57,6 +57,7 @@ var heartbeatCmd = &cobra.Command{
 		if err := st.SetMeta(store.MetaKeyLastHeartbeat, heartbeatNow()); err != nil {
 			return fmt.Errorf("heartbeat: %w", err)
 		}
+		probeOwningSources(cmd)
 		return recordSourceFetches(cmd, st)
 	},
 }

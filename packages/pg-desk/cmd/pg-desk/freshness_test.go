@@ -23,6 +23,10 @@ func withHeartbeatLedger(t *testing.T, out string, err error) {
 	orig := heartbeatRunLedgerShow
 	t.Cleanup(func() { heartbeatRunLedgerShow = orig })
 	heartbeatRunLedgerShow = func(context.Context) ([]byte, error) { return []byte(out), err }
+	// No probe by default: tests that are about it install their own.
+	origProbe := heartbeatRunConnector
+	t.Cleanup(func() { heartbeatRunConnector = origProbe })
+	heartbeatRunConnector = func(context.Context, ...string) ([]byte, error) { return []byte(`{"backends":[]}`), nil }
 }
 
 func runHeartbeat(t *testing.T) (stderr string, err error) {

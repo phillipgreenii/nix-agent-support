@@ -89,6 +89,17 @@ whole-query origin answer and its last error, and the connector's umbrella stamp
   (INV-FRESH-6) keeps working from the stamped `last_seen`.
 - **A cache answer does not advance freshness** (INV-FRESH-2). The backend counts only a whole-query
   answer from the origin as a success.
+- **The connector stamps a key only for a forwarded call that names a query.** The daemon is now
+  the PR change feed and nothing polls it per query, so no `pr` ledger key would ever be stamped.
+  `pg-desk heartbeat` therefore PROBES before it reads the ledger: for every query of every `pr`
+  backend that owns its changes (listed by `pg-connector pr capabilities`) it makes one
+  `pg-connector pr changes --cached --no-ack --query <q>` call under the consumer name
+  `pg-desk-freshness`. That call is local (the daemon answers from its store, no origin fetch),
+  moves no cursor and delivers nothing, and the connector stamps the key from the daemon's own
+  `last_success_at`. The `pr-github` age therefore tracks the daemon's real refreshes: fresh while
+  it is healthy, stale when the daemon is down or its origin fetches fail. A failed probe is named
+  on stderr (the rest of that backend is skipped), never fails the heartbeat, and leaves the
+  recorded times to age. The whole probe is bounded to 45 seconds.
 - **pg-desk still stamps nothing of its own.** It reads the ledger and records the success, the
   error and the last poll exactly as in "Recording".
 
