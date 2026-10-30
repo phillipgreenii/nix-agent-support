@@ -9,6 +9,17 @@ type Manifest struct {
 	Method    string         `json:"method"` // clone or bytes
 	SessionID []string       `json:"session_ids"`
 	Files     []ManifestFile `json:"files"`
+	// Registry lists the registry file versions that name this session; their
+	// bytes are archived with it (the registry file itself belongs to no single
+	// Conversation and stays where it is).
+	Registry []ManifestRegistry `json:"registry_versions,omitempty"`
+}
+
+// ManifestRegistry is one stored version of a registry file.
+type ManifestRegistry struct {
+	File    int64 `json:"file"`
+	Version int   `json:"version"`
+	Size    int64 `json:"size"`
 }
 
 // ManifestFile is one file of the Conversation.

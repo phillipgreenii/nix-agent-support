@@ -814,8 +814,32 @@ func (s *Settler) hold(c *conv, fails []Failure, now time.Time, wasHeld bool) (O
 	return out, nil
 }
 
+// registryVersions returns the registry file versions whose records name the
+// session.
+func (s *Settler) registryVersions(session string) ([]store.ManifestRegistry, error) {
+	rows, err := s.st.Read().Query(`SELECT DISTINCT r.file_id, r.gen, sn.size FROM records r
+JOIN snapshots sn ON sn.file_id=r.file_id AND sn.version=r.gen
+WHERE r.session=? AND r.source='session-registry' ORDER BY r.file_id, r.gen`, session)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []store.ManifestRegistry
+	for rows.Next() {
+		var x store.ManifestRegistry
+		if err := rows.Scan(&x.File, &x.Version, &x.Size); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
 func (s *Settler) manifest(c *conv, method string, now time.Time) (store.Manifest, error) {
 	m := store.Manifest{Session: c.session, SettledAt: now.UnixNano(), Method: method}
+	if rv, err := s.registryVersions(c.session); err == nil {
+		m.Registry = rv
+	}
 	ids := map[string]bool{}
 	files := append([]store.File(nil), c.files...)
 	sort.Slice(files, func(i, j int) bool { return c.rel[files[i].ID] < c.rel[files[j].ID] })
@@ -966,6 +990,21 @@ func (s *Settler) settleBytes(c *conv, now time.Time) (bool, error) {
 				return false, err
 			}
 		}
+	}
+	// Registry versions are keyed by session and go into that session's archive;
+	// their stored bytes stay where they are (the registry file is no one's).
+	for _, rv := range m.Registry {
+		from := s.st.ArchivedTo(rv.File, rv.Version)
+		if rv.Size <= from {
+			continue
+		}
+		p, err := s.st.OpenPointer(rv.File, rv.Version)
+		if err != nil {
+			return false, err
+		}
+		closers = append(closers, p)
+		items = append(items, store.SegItem{File: rv.File, Gen: rv.Version, From: from, To: rv.Size, Src: p})
+		ranges = append(ranges, store.RangeRec{File: rv.File, Gen: rv.Version, From: from, To: rv.Size, Seg: seg})
 	}
 	if err := s.writeManifestFile(c.session, mb); err != nil {
 		return false, err
@@ -1182,7 +1221,7 @@ func (s *Settler) Recover() error {
 			}
 			seen[k] = true
 			f, ok := byID[r.File]
-			if !ok {
+			if !ok || f.Source == "session-registry" {
 				continue
 			}
 			if err := s.cfg.Copier.ReclaimLocked(f, r.Gen); err != nil {

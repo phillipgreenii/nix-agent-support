@@ -476,3 +476,32 @@ func TestGauges(t *testing.T) {
 		t.Fatal("events")
 	}
 }
+
+// Registry versions are keyed by session and go into that session's archive; the
+// registry file's own bytes stay where they are.
+func TestRegistryVersionsGoIntoTheSessionArchive(t *testing.T) {
+	e := newEnv(t, false)
+	e.seed(3, 48*time.Hour)
+	reg := `{"pid":4242,"sessionId":"` + sess + `","cwd":"/example/work","procStart":"Wed Oct 14 07:51:50 2026","status":"idle"}`
+	e.write("sessions/4242.json", reg, e.clk.Now().Add(-48*time.Hour), false)
+	e.ingest("sessions/4242.json")
+	e.tick()
+	if e.stage() != StageSettled {
+		t.Fatalf("stage %s", e.stage())
+	}
+	m, _, _ := e.st.SettledOf(sess)
+	if !strings.Contains(string(m.Manifest), `"registry_versions"`) {
+		t.Fatalf("manifest lacks registry versions: %s", m.Manifest)
+	}
+	files, _ := e.st.FilesByCurrentPath(e.path("sessions/4242.json"))
+	rs, _ := e.st.Ranges(files[0].ID, 1)
+	if len(rs) != 1 || rs[0].Session != sess {
+		t.Fatalf("ranges %+v", rs)
+	}
+	if b, err := e.st.ReadPointer(files[0].ID, 1, 0, len(reg)); err != nil || string(b) != reg {
+		t.Fatalf("archived registry bytes: %v %q", err, b)
+	}
+	if _, err := os.Stat(e.path("sessions/4242.json")); err != nil {
+		t.Fatal(err)
+	}
+}
