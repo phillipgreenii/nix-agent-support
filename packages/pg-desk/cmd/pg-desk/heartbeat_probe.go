@@ -11,10 +11,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// heartbeatProbeConsumer is the consumer name the freshness probe polls under.
-// The probe is read-only: --cached never runs a query, --no-ack never moves a
-// cursor, so the name only keys the ledger's last_seen stamp.
+// heartbeatProbeConsumer is the consumer-name prefix the freshness probe polls
+// under. The probe is read-only: --cached never runs a query, --no-ack never
+// moves a cursor, so the name only keys the ledger's last_seen stamp.
 const heartbeatProbeConsumer = "pg-desk-freshness"
+
+// heartbeatProbeConsumerFor names the consumer that probes one query. A
+// pg-connector consumer binds to ONE scope on first use and refuses another
+// (exit 3, "bound to view pr, scope mine"), so each query needs its own id;
+// sharing one left every query after the first failing.
+func heartbeatProbeConsumerFor(query string) string {
+	return heartbeatProbeConsumer + "-" + query
+}
 
 // heartbeatProbeTimeout bounds the whole probe (capabilities plus one cached
 // poll per query), so a wedged or absent daemon (whose client retries for
@@ -82,7 +90,7 @@ func probeOwningSources(cmd *cobra.Command) {
 		sort.Strings(queries)
 		for _, q := range queries {
 			if _, err := heartbeatRunConnector(ctx, "pr", "changes",
-				"--consumer", heartbeatProbeConsumer, "--cached", "--no-ack",
+				"--consumer", heartbeatProbeConsumerFor(q), "--cached", "--no-ack",
 				"--backend", b.Backend, "--query", q, "--output", "json"); err != nil {
 				// An unreachable daemon fails every query alike; skip the rest
 				// of this backend rather than wait out each retry.

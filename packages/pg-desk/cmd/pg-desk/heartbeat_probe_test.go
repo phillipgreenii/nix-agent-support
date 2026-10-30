@@ -57,8 +57,8 @@ func TestHeartbeatProbesEveryQueryOfAnOwningBackendThenReadsTheLedger(t *testing
 	// The ledger the probe's forwarded calls leave behind: the daemon's own
 	// last_success_at for each query, and the probe's last_seen.
 	withHeartbeatLedger(t, `[
- {"type":"pr","backend":"pg-connector-pr-github","query":"mine","consumers":{"pg-desk-freshness":{"last_seen":"2026-10-06T11:59:30Z"}},"refreshed_at":"2026-10-06T11:59:00Z","last_error":null},
- {"type":"pr","backend":"pg-connector-pr-github","query":"team","consumers":{"pg-desk-freshness":{"last_seen":"2026-10-06T11:59:30Z"}},"refreshed_at":"2026-10-06T11:58:00Z","last_error":null}]`, nil)
+ {"type":"pr","backend":"pg-connector-pr-github","query":"mine","consumers":{"pg-desk-freshness-mine":{"last_seen":"2026-10-06T11:59:30Z"}},"refreshed_at":"2026-10-06T11:59:00Z","last_error":null},
+ {"type":"pr","backend":"pg-connector-pr-github","query":"team","consumers":{"pg-desk-freshness-team":{"last_seen":"2026-10-06T11:59:30Z"}},"refreshed_at":"2026-10-06T11:58:00Z","last_error":null}]`, nil)
 	rec := stubConnector(t, prCapabilitiesJSON, nil)
 
 	if _, err := runHeartbeat(t); err != nil {
@@ -68,7 +68,7 @@ func TestHeartbeatProbesEveryQueryOfAnOwningBackendThenReadsTheLedger(t *testing
 	for _, c := range rec.all() {
 		if c[1] == "changes" {
 			j := strings.Join(c, " ")
-			for _, want := range []string{"--cached", "--no-ack", "--backend pg-connector-pr-github", "--consumer " + heartbeatProbeConsumer} {
+			for _, want := range []string{"--cached", "--no-ack", "--backend pg-connector-pr-github", "--consumer " + heartbeatProbeConsumerFor(c[slices.Index(c, "--query")+1])} {
 				if !strings.Contains(j, want) {
 					t.Errorf("probe %q lacks %q", j, want)
 				}
