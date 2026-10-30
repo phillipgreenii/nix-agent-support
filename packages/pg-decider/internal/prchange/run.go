@@ -398,6 +398,11 @@ func (r *run) decide() int {
 			n := len(pre.Actions)
 			r.residual = &n
 		}
+	case r.o.Mode == ModeApply && res.Code == 0 && pre != nil && rec.PlanError == "" && len(pre.Actions) == 0:
+		// A clean apply after a good pre-apply plan that listed no actions wrote
+		// nothing, so the residual is 0 by definition: skip the lookup-heavy re-plan.
+		n := 0
+		r.residual = &n
 	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == 2):
 		// The residual after an apply: a read-only plan, never a recorded run.
 		if post, msg := r.readPlan(); post != nil {

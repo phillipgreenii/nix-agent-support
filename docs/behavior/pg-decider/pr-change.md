@@ -86,7 +86,7 @@ directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`
 The command never sleeps and retries inside one run: pg-router owns every clock.
 
 Besides the decider's own run, the command makes read-only `pg-decider plan pr <id> --json` reads: one
-after a `plan` run, and one before and one after an `apply` run. They write nothing. They are where the
+after a `plan` run, and one before an `apply` run. After an `apply` run that exited 0 or 2 it reads the residual plan again, except when the plan before the apply was read cleanly, listed no actions and the apply exited 0: then the residual is 0 by definition and the second read is skipped (recorded as residual 0, no residual error). They write nothing. They are where the
 run record's planned actions, per-rule outcomes and skip reasons, and the lane state's residual and
 decisions come from.
 
