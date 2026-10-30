@@ -78,7 +78,16 @@ type env struct {
 	extra           func(*Config)
 }
 
-func newEnv(t *testing.T, cloneMode bool) *env {
+func newEnv(t *testing.T, cloneMode bool) *env { return newEnvWith(t, cloneMode, nil) }
+
+// newRemoveEnv is newEnv with remove.enable on from the first open.
+func newRemoveEnv(t *testing.T, cloneMode bool) *env {
+	return newEnvWith(t, cloneMode, func(e *env) { e.removeOn = true })
+}
+
+// newEnvWith applies pre before the first open, so a test that needs a different
+// configuration does not open (and fsync) the store twice.
+func newEnvWith(t *testing.T, cloneMode bool, pre func(*env)) *env {
 	t.Helper()
 	root := t.TempDir()
 	e := &env{
@@ -87,6 +96,9 @@ func newEnv(t *testing.T, cloneMode bool) *env {
 	}
 	if err := os.MkdirAll(filepath.Join(e.claude, "projects", "example-project"), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if pre != nil {
+		pre(e)
 	}
 	e.open()
 	t.Cleanup(func() {
@@ -104,6 +116,7 @@ func newEnv(t *testing.T, cloneMode bool) *env {
 func (e *env) open() {
 	e.t.Helper()
 	e.rec = fsx.NewRecorder(nil)
+	e.rec.SoftFullSync = true
 	e.obs = obs.New(nil)
 	st, err := store.Open(e.state, store.Options{FS: e.rec, Obs: e.obs})
 	if err != nil {

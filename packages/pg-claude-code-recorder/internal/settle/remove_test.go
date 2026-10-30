@@ -108,8 +108,7 @@ func TestRemovalOffByDefaultAndTickNeverRemoves(t *testing.T) {
 }
 
 func TestRemovalThirtyDayBoundaryBothSides(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.oldSettled(5, removeAge-time.Minute)
 	rep := e.remove(sess)
 	if len(rep.Removed) != 0 || !hasReason(e.skipReasons(rep, sess), BlockQuietAge) {
@@ -137,8 +136,7 @@ func (e *env) remove_(on bool) {
 }
 
 func TestRemovalKeepsTheDocumentedOrderAndTheBytes(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(6, removeAge+time.Hour)
 	file := e.fileID()
 	e.rec.Reset()
@@ -170,8 +168,7 @@ func TestRemovalKeepsTheDocumentedOrderAndTheBytes(t *testing.T) {
 }
 
 func TestCloneModeRemovalWritesAndVerifiesTheArchiveFromTheClone(t *testing.T) {
-	e := newEnv(t, true)
-	e.remove_(true)
+	e := newRemoveEnv(t, true)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	file := e.fileID()
 	f, _ := e.st.File(file)
@@ -193,8 +190,7 @@ func TestCloneModeRemovalWritesAndVerifiesTheArchiveFromTheClone(t *testing.T) {
 }
 
 func TestNewWritesAfterPendingReturnToQuiet(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	extra := line(9)
 	e.hooks.BeforeQuarantine = func(_, p string) {
@@ -217,8 +213,7 @@ func TestNewWritesAfterPendingReturnToQuiet(t *testing.T) {
 }
 
 func TestQuarantineWriteThroughAHeldDescriptorRestores(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	fd, err := os.OpenFile(e.path(e.transcript()), os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
@@ -246,8 +241,7 @@ func TestQuarantineWriteThroughAHeldDescriptorRestores(t *testing.T) {
 }
 
 func TestWriteBetweenRehashAndUnlinkIsACountedRace(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	fd, _ := os.OpenFile(e.path(e.transcript()), os.O_WRONLY|os.O_APPEND, 0)
 	defer func() { _ = fd.Close() }()
@@ -266,8 +260,7 @@ func TestWriteBetweenRehashAndUnlinkIsACountedRace(t *testing.T) {
 }
 
 func TestHolderFoundRestoresTheFile(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	e.holders = func(string) ([]int, error) { return []int{os.Getpid() + 1}, nil }
 	_ = e.st.Close()
@@ -284,8 +277,7 @@ func TestHolderFoundRestoresTheFile(t *testing.T) {
 func TestCrashAtEveryRemovalPointConverges(t *testing.T) {
 	for _, point := range []string{"remove.after-pending", "remove.after-rename", "remove.after-quarantined", "remove.after-unlink", "remove.before-removed", "remove.after-removed"} {
 		t.Run(point, func(t *testing.T) {
-			e := newEnv(t, false)
-			e.remove_(true)
+			e := newRemoveEnv(t, false)
 			content := e.oldSettled(6, removeAge+time.Hour)
 			file := e.fileID()
 			disarm := faults.ArmPanic(point)
@@ -309,8 +301,7 @@ func TestCrashAtEveryRemovalPointConverges(t *testing.T) {
 }
 
 func TestCrashAfterQuarantineWithANewProcessRestores(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(6, removeAge+time.Hour)
 	disarm := faults.ArmPanic("remove.after-quarantined")
 	crashed := faults.Recover(func() { _, _ = e.sett.Remove(RemoveOptions{Sessions: []string{sess}}) })
@@ -332,8 +323,7 @@ func TestCrashAfterQuarantineWithANewProcessRestores(t *testing.T) {
 }
 
 func TestOrphanInTheQuarantineIsLoggedAndKept(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.seed(3, time.Hour)
 	q := filepath.Join(e.path("projects/example-project"), scope.QuarantineDir)
 	if err := os.MkdirAll(q, 0o700); err != nil {
@@ -354,8 +344,7 @@ func TestOrphanInTheQuarantineIsLoggedAndKept(t *testing.T) {
 }
 
 func TestFileCreatedAtTheOriginalPathIsNeverOverwritten(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	e.allowQuarantine = true
 	e.holders = func(string) ([]int, error) { return []int{os.Getpid() + 1}, nil }
@@ -399,9 +388,10 @@ func (x exdevFS) Rename(a, b string) error {
 }
 
 func TestExdevRefusesRemovalAndLeavesTheFileUntouched(t *testing.T) {
-	e := newEnv(t, false)
-	e.claudeFS = func(in fsx.FS) fsx.FS { return exdevFS{in} }
-	e.remove_(true)
+	e := newEnvWith(t, false, func(e *env) {
+		e.removeOn = true
+		e.claudeFS = func(in fsx.FS) fsx.FS { return exdevFS{in} }
+	})
 	content := e.oldSettled(5, removeAge+time.Hour)
 	before, _ := lstat(e.path(e.transcript()))
 	rep := e.remove(sess)
@@ -418,8 +408,7 @@ func TestExdevRefusesRemovalAndLeavesTheFileUntouched(t *testing.T) {
 }
 
 func TestHardLinkedFileIsSkippedAndTheOtherLinkUntouched(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	other := filepath.Join(t.TempDir(), "other-link")
 	if err := os.Link(e.path(e.transcript()), other); err != nil {
@@ -435,8 +424,7 @@ func TestHardLinkedFileIsSkippedAndTheOtherLinkUntouched(t *testing.T) {
 }
 
 func TestWriteThroughAHardLinkMadeAfterTheRenameIsDetected(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	content := e.oldSettled(5, removeAge+time.Hour)
 	other := filepath.Join(t.TempDir(), "other-link")
 	extra := line(9)
@@ -468,8 +456,7 @@ func TestWriteThroughAHardLinkMadeAfterTheRenameIsDetected(t *testing.T) {
 }
 
 func TestRegistryNamingTheSessionBlocksRemoval(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.seed(3, removeAge+time.Hour)
 	reg := `{"pid":4242,"sessionId":"` + sess + `","cwd":"/example/work","procStart":"Wed Oct 14 07:51:50 2026","version":"2.1.0","status":"idle"}`
 	e.write("sessions/4242.json", reg, e.clk.Now().Add(-removeAge-time.Hour), false)
@@ -492,8 +479,7 @@ func TestRegistryNamingTheSessionBlocksRemoval(t *testing.T) {
 }
 
 func TestLiveProcessBlocksRemoval(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.oldSettled(5, removeAge+time.Hour)
 	e.live[sess] = true
 	rep := e.remove(sess)
@@ -503,8 +489,7 @@ func TestLiveProcessBlocksRemoval(t *testing.T) {
 }
 
 func TestFormatHoldKeepsFilesWhenTheParseLooksWrong(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.write(e.transcript(), line(1)+"{broken\n{broken\n{broken\n", e.clk.Now().Add(-removeAge-time.Hour), false)
 	e.ingest(e.transcript())
 	e.parseAll()
@@ -537,8 +522,7 @@ func (e *env) seedAs(id string, age time.Duration) {
 
 func TestMaxPerRunAndMaxPerHour(t *testing.T) {
 	ids := []string{"0a1b2c3d-0000-4000-8000-000000000002", "0a1b2c3d-0000-4000-8000-000000000003"}
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.reconfig(func(c *Config) { c.MaxPerRun, c.MaxPerHour = 1, 1 })
 	e.seed(3, removeAge+time.Hour)
 	for _, id := range ids {
@@ -604,8 +588,7 @@ func TestDryRunReportsSkipsWithCountsByReason(t *testing.T) {
 }
 
 func TestRemovedToQuietWhenAPathReappears(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.oldSettled(5, removeAge+time.Hour)
 	if rep := e.remove(sess); len(rep.Removed) != 1 {
 		t.Fatalf("%+v", rep)
@@ -674,8 +657,7 @@ func TestHeldListsStableColumnsAndRemedy(t *testing.T) {
 // whole removal, so the watcher's events are answered after it), and a vanished
 // original path is no tombstone while its Conversation is being removed.
 func TestQuarantinedFileCreatesNoPathRecordOrRename(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.oldSettled(5, removeAge+time.Hour)
 	file := e.fileID()
 	before, _ := e.st.PathHistory(file)

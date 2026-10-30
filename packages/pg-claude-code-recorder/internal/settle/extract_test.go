@@ -82,8 +82,7 @@ func TestExtractResetsTheQuietAge(t *testing.T) {
 }
 
 func TestExtractRefusals(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.oldSettled(5, removeAge+time.Hour)
 	if _, err := e.sett.Extract(sess, ""); !errors.Is(err, ErrTargetExists) {
 		t.Fatalf("session id exists under a project directory: %v", err)
@@ -174,8 +173,7 @@ func TestExtractCrashPointsConverge(t *testing.T) {
 }
 
 func TestExtractRestoresSubFilesAndSnapshotFiles(t *testing.T) {
-	e := newEnv(t, false)
-	e.remove_(true)
+	e := newRemoveEnv(t, false)
 	e.seed(3, removeAge+time.Hour)
 	meta := `{"agentType":"example"}`
 	rel := "projects/example-project/" + sess + "/subagents/agent-1.meta.json"

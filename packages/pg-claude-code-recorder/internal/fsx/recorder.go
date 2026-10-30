@@ -21,6 +21,11 @@ func (e Event) String() string { return e.Op + " " + e.Path }
 // so the SQLite commit appears in the same sequence.
 type Recorder struct {
 	Inner FS
+	// SoftFullSync makes FullSync and FullSyncDir record their event but flush with
+	// a plain fsync. A test sets it: F_FULLFSYNC flushes the drive's cache and
+	// costs tens of milliseconds a call, which adds up over a package of tests,
+	// and the tests assert the ORDER of the flushes, not the drive's behavior.
+	SoftFullSync bool
 
 	mu     sync.Mutex
 	events []Event
@@ -100,6 +105,9 @@ func (r *Recorder) SyncDir(dir string) error {
 // FullSyncDir records and performs a directory flush with F_FULLFSYNC.
 func (r *Recorder) FullSyncDir(dir string) error {
 	r.add("fullsyncdir", dir)
+	if r.SoftFullSync {
+		return r.Inner.SyncDir(dir)
+	}
 	return FullSyncDir(r.Inner, dir)
 }
 
@@ -111,6 +119,9 @@ type recFile struct {
 // FullSync records and performs a flush with F_FULLFSYNC.
 func (f *recFile) FullSync() error {
 	f.r.add("fullsync", f.Name())
+	if f.r.SoftFullSync {
+		return f.File.Sync()
+	}
 	return FullSync(f.File)
 }
 
