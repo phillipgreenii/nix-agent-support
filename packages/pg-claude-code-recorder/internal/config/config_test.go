@@ -85,3 +85,19 @@ func TestParseDuration(t *testing.T) {
 		t.Error("xd accepted")
 	}
 }
+
+// The grace-window fallback is off by default (pg2-8wt1uz measured the registry
+// file deleted before the exit on every clean path) and stays an option.
+func TestGraceWindowFallbackIsOffByDefaultAndCanBeEnabled(t *testing.T) {
+	if Defaults(env(nil)).GraceEnable {
+		t.Fatal("process.grace must default to off")
+	}
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte("[process]\ngrace = true\ngraceWindow = \"2s\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p, true, env(map[string]string{"HOME": "/h"}))
+	if err != nil || !c.GraceEnable || c.GraceWindow != 2*time.Second {
+		t.Fatalf("%v %+v", err, c)
+	}
+}
