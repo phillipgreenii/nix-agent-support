@@ -70,7 +70,9 @@ func i64(n int64) *int64 { return &n }
 func TestAnApplyRunRecordsEveryStageTiming(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)}
 	s := hydrated().
-		onSeq("pg-decider plan pr acme/api#7 --json", ok(planEmpty), ok(planEmpty)).
+		// The pre-plan lists work, so the residual is read (an empty pre-plan
+		// followed by a clean apply skips the residual read).
+		onSeq("pg-decider plan pr acme/api#7 --json", ok(planWithWork), ok(planEmpty)).
 		on("pg-decider apply", exit(0, "", timedApplyCounters+"\n"))
 	o, _, errb := opts(t, ModeApply, s)
 	o.Clock = clock.now
