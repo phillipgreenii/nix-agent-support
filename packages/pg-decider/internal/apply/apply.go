@@ -35,6 +35,7 @@ type runner struct {
 	anchor     anchorState
 	anchorID   string
 	ruleBroken map[string]bool // a rule with a failed or skipped action so far
+	swept      map[string]bool // children the terminal sweep already closed (nil: sweep not run)
 }
 
 // Run executes in.Actions in order and reports every outcome to in.Hooks.
@@ -127,6 +128,12 @@ func (r *runner) step(ctx context.Context, a action.Action) Event {
 		}
 		if isReviewRefresh(a) {
 			return r.refreshReview(ctx, a, finish)
+		}
+		if isTerminalClose(a) {
+			r.sweepAnchorChildren(ctx, a)
+			if a.Target != nil && r.swept[*a.Target] {
+				return finish(OutcomeApplied, *a.Target, nil) // the sweep closed it
+			}
 		}
 		return r.write(ctx, a, finish)
 	case action.OpAnnotate:
