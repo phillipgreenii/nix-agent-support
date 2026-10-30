@@ -10,12 +10,17 @@
 
 bats_require_minimum_version 1.5.0
 
-load ../../test-support/bd_fixture.bash
+# SCRIPTS_DIR / TEST_SUPPORT: injected by the nix check, or computed relative
+# to this test for a local `bats tests/` run.
+if [[ -z ${SCRIPTS_DIR:-} ]]; then
+  SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+fi
+if [[ -z ${TEST_SUPPORT:-} ]]; then
+  TEST_SUPPORT="$(cd "${SCRIPTS_DIR}/../test-support" && pwd)"
+fi
+load "$TEST_SUPPORT/bd_fixture"
 
 setup() {
-  if [[ -z ${SCRIPTS_DIR:-} ]]; then
-    SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
-  fi
   scrub_git_env
   scrub_bd_env
   TDIR="$(mktemp -d)"
@@ -32,7 +37,7 @@ source "${SCRIPTS_DIR}/pg-decider-backfill-pr-metadata.sh"
 WRAPPER
   chmod +x "$TDIR/run"
   RUN="$TDIR/run"
-  cd "" || return 1
+  cd "$TDIR" || return 1
 }
 
 teardown() {
