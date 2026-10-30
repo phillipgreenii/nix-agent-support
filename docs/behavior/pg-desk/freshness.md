@@ -119,6 +119,10 @@ whole-query origin answer and its last error, and the connector's umbrella stamp
 - **`pg_desk_source_age_seconds{source}`** on `/metrics` (a gauge, seconds; `source` is the backend
   name). A source with no recorded success exports NO series: it is never exported as `0`, which
   would read as freshly fetched. `pg-desk freshness` reports such a source as unknown and stale.
+- **`pg_desk_sources_stale`** on `/metrics` (a gauge, a count): the number of sources in the report
+  that are stale, including a source that never succeeded. Retired and abandoned ghost rows are not
+  in the report, so they are not counted. `pg_desk_dashboard_stale` keeps its pipeline-liveness
+  meaning (`INV-FRESH-5`).
 
 Consumers decide how to show it: the menu bar and the My Work dashboard show a row only for a stale
 source (those are separate beads in the repos that own them). Staleness is never an attention item
@@ -180,6 +184,6 @@ anything.
 
 `pg-desk freshness` emits nothing over OpenTelemetry or Prometheus and has no structured-log
 contract; on failure it prints ordinary CLI error text on stderr. `serve` exports
-`pg_desk_source_age_seconds` (see [`serve.md`](serve.md)). No alert rule is shipped on it: the menu
-bar and My Work indicators already surface it, and a Grafana rule is a one-line follow-up if one is
-wanted.
+`pg_desk_source_age_seconds` and `pg_desk_sources_stale` (see [`serve.md`](serve.md)). The Grafana
+rule `pg-desk-sources-stale` alerts on `pg_desk_sources_stale >= 1` for 10 minutes, suppressed
+during a pg-router `SYSTEM_PAUSE` gate.

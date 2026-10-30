@@ -63,6 +63,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 			Stale:        payload.Stale,
 			DroppedCount: payload.DroppedCount,
 			SourceAges:   sourceAges(payload.Sources),
+			SourcesStale: sourcesStale(payload.Sources),
 		}, nil
 	}
 
@@ -201,6 +202,18 @@ func sourceAges(rows []freshness.Row) []metrics.SourceAge {
 		}
 	}
 	return out
+}
+
+// sourcesStale counts the report's stale rows, including a never-succeeded
+// source (which sourceAges omits).
+func sourcesStale(rows []freshness.Row) int {
+	n := 0
+	for _, r := range rows {
+		if r.Stale {
+			n++
+		}
+	}
+	return n
 }
 
 // focusHealthTTL is how old the cached focus health may get before a scrape

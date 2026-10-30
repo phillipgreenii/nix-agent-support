@@ -59,6 +59,14 @@ const (
 	// recorded success exports NO series: it is never exported as 0, which
 	// would read as freshly fetched.
 	MetricSourceAge = "pg_desk_source_age_seconds"
+	// MetricSourcesStale is the COUNT of sources in the freshness report that
+	// are stale (INV-FRESH-4: a source with no recorded success counts). It is
+	// separate from MetricDashboardStale, whose meaning (heartbeat liveness)
+	// is pinned by INV-FRESH-5, and exists because MetricSourceAge exports no
+	// series for a never-succeeded source, so an age rule cannot see one.
+	// Retired and abandoned ghost rows are already out of the report, so they
+	// are not counted.
+	MetricSourcesStale = "pg_desk_sources_stale"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -73,6 +81,9 @@ type Snapshot struct {
 	// SourceAges backs MetricSourceAge: one entry per source with a known
 	// age; sources with an unknown age are omitted.
 	SourceAges []SourceAge
+	// SourcesStale backs MetricSourcesStale: how many reported sources are
+	// stale.
+	SourcesStale int
 }
 
 // SourceAge is one source's age for MetricSourceAge.
@@ -132,7 +143,7 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) error {
 			val: func(s Snapshot) int64 { return int64(s.DroppedCount) },
 		},
 	}
-	instruments := make([]metric.Observable, 0, len(gauges)+1)
+	instruments := make([]metric.Observable, 0, len(gauges)+2)
 	for _, g := range gauges {
 		inst, err := m.Int64ObservableGauge(g.name, metric.WithDescription(g.desc))
 		if err != nil {
@@ -148,7 +159,14 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) error {
 	if err != nil {
 		return err
 	}
-	instruments = append(instruments, sourceAge)
+	sourcesStale, err := m.Int64ObservableGauge(
+		MetricSourcesStale,
+		metric.WithDescription("number of sources in the freshness report that are stale (older than their stale-after bound, or never succeeded); data staleness, NOT pipeline liveness (see pg_desk_dashboard_stale); retired and abandoned ghost rows are not in the report and not counted"),
+	)
+	if err != nil {
+		return err
+	}
+	instruments = append(instruments, sourceAge, sourcesStale)
 	if _, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		snap, err := snapshotFn()
 		if err != nil {
@@ -157,6 +175,7 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) error {
 		for _, g := range gauges {
 			o.ObserveInt64(g.inst, g.val(snap))
 		}
+		o.ObserveInt64(sourcesStale, int64(snap.SourcesStale))
 		for _, s := range snap.SourceAges {
 			o.ObserveInt64(sourceAge, int64(s.Seconds), metric.WithAttributes(attribute.String("source", s.Source)))
 		}

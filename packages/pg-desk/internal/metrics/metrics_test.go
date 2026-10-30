@@ -156,6 +156,21 @@ func TestSourceAgeIsPerSourceAndOmitsUnknown(t *testing.T) {
 	}
 }
 
+// TestSourcesStaleIsACountSeparateFromDashboardStale pins
+// pg_desk_sources_stale: it reports the snapshot's stale-source count, and
+// pg_desk_dashboard_stale stays pipeline liveness (INV-FRESH-5).
+func TestSourcesStaleIsACountSeparateFromDashboardStale(t *testing.T) {
+	h := newHarness(t)
+	h.snap = Snapshot{SourcesStale: 3}
+	rm := h.collect(t)
+	if got := gaugeValue(t, findMetric(t, rm, MetricSourcesStale)); got != 3 {
+		t.Fatalf("MetricSourcesStale = %d, want 3", got)
+	}
+	if got := gaugeValue(t, findMetric(t, rm, MetricDashboardStale)); got != 0 {
+		t.Fatalf("MetricDashboardStale = %d, want 0 (a stale source must not touch it)", got)
+	}
+}
+
 // TestSnapshotComputedOncePerCollection guards bead pg2-jj0ym: the snapshot
 // behind the gauges (a full BuildPayload plus store reads) MUST run once per
 // scrape, not once per gauge. Nine redundant runs on a single-connection store

@@ -15,7 +15,8 @@
 # unprocessed backlog that never drains. They are PIPELINE LIVENESS (the age
 # of meta.last_heartbeat, i.e. whether the desk-heartbeat role is still
 # running), NOT data age; the age of each source's last successful origin
-# fetch is pg_desk_source_age_seconds{source}, on which no rule is shipped.
+# fetch is pg_desk_source_age_seconds{source}; data staleness is alerted by
+# pg-desk-sources-stale on pg_desk_sources_stale (count of stale sources).
 #
 # Folder "pg-desk" converges by TITLE with the existing pg-desk dashboards'
 # own dashboardProviders folder (phillipgreenii-nix-support-apps
@@ -135,6 +136,56 @@ groups:
               editorMode: code
               instant: true
               expr: pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gte
+                    params: [1]
+
+      # Per-source DATA staleness (pg2-107lla). pg-desk-sync-stale above reads
+      # only pipeline liveness (INV-FRESH-5), so it stayed quiet while 4 of 6
+      # sources were stale. pg_desk_sources_stale is the count of stale rows in
+      # the freshness report (a source older than its stale-after bound, OR a
+      # live source that never succeeded: pg_desk_source_age_seconds exports no
+      # series for that one, so an age rule could not see it). Retired and
+      # abandoned ghost rows leave the report (INV-FRESH-6), so they are not
+      # counted. Same SYSTEM_PAUSE suppression as pg-desk-sync-stale (a pause
+      # stops the connector polls, so sources age by design); noDataState: OK
+      # for the same reasons (absence is covered by the liveness rule).
+      - uid: pg-desk-sources-stale
+        title: pg-desk has stale sources
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "One or more pg-desk sources have been stale for over 10 minutes"
+          description: "pg_desk_sources_stale has reported at least 1 for over 10 minutes -- a source has no successful origin fetch within its stale-after bound, or has never succeeded. See pg_desk_source_age_seconds{source} for ages (a never-succeeded source has no series) and `pg-desk freshness` for the per-source report. Retired/abandoned ghost rows are not counted. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_desk_sources_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:

@@ -551,6 +551,9 @@ func TestMetricsSourceAgeSeriesPerKnownSource(t *testing.T) {
 		`pg_desk_source_age_seconds{source="pg-connector-pr-github"} 120`,
 		`pg_desk_source_age_seconds{source="pg-connector-issue-jira"} 2400`,
 		"pg_desk_dashboard_stale 0",
+		// issue-jira (40m old) and thread-slack (never succeeded, no age
+		// series) are stale; pr-github is fresh.
+		"pg_desk_sources_stale 2",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q; full body:\n%s", want, body)
@@ -558,5 +561,43 @@ func TestMetricsSourceAgeSeriesPerKnownSource(t *testing.T) {
 	}
 	if strings.Contains(body, "thread-slack") {
 		t.Errorf("a source with no recorded success exported a series:\n%s", body)
+	}
+}
+
+// TestMetricsSourcesStaleIgnoresRetiredGhostRows pins pg_desk_sources_stale:
+// a retired backend whose only rows are abandoned leaves the report and is not
+// counted, while the live fresh backend keeps it at 0 (and never-succeeded live
+// sources count, see TestMetricsSourceAgeSeriesPerKnownSource).
+func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
+	s := store.OpenForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
+	})
+	now := time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC)
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
+	at := func(d time.Duration) *time.Time { u := now.Add(d); return &u }
+	ghost := -freshness.AbandonedAfter - time.Hour
+	seen := func(r freshness.LedgerRow, d time.Duration) freshness.LedgerRow {
+		r.Consumers = map[string]freshness.LedgerConsumer{"pg-router": {LastSeen: at(d)}}
+		return r
+	}
+	if err := freshness.Update(s, []freshness.LedgerRow{
+		seen(freshness.LedgerRow{Type: "pr", Backend: "pg-connector-pr-github", Query: "mine"}, ghost),
+		seen(freshness.LedgerRow{Type: "pr", Backend: "pg-connector-github", Query: "mine", RefreshedAt: at(-time.Minute)}, -time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setClock(t, now)
+	cfg := testConfig()
+	cfg.Freshness.RetiredSources = []string{"pr-github"}
+	handler, err := NewHandler(s, cfg)
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if body := rr.Body.String(); !strings.Contains(body, "pg_desk_sources_stale 0") {
+		t.Errorf("body missing pg_desk_sources_stale 0:\n%s", body)
 	}
 }
