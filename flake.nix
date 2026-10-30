@@ -11537,6 +11537,10 @@
                     };
                     changeLogRetention = "21d";
                     consumerStaleAfter = "3d";
+                    freshness.retiredSources = [
+                      "example-retired-a"
+                      "example-retired-b"
+                    ];
                   };
                   # A single key set renders only its own block: the other
                   # entity types, and the unset siblings, stay absent.
@@ -11789,13 +11793,14 @@
                   grep -qF 'const AttentionTiesDefault = "severity descending, then group size descending, then entity id"' ${./packages/pg-desk/internal/config/config.go}
                   # Entity-change-flow keys: none rendered by default.
                   d=${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
-                  ! grep -qE '^(watch|sweep|hydration|change_log_retention|consumer_stale_after):' "$d"
+                  ! grep -qE '^(watch|sweep|hydration|change_log_retention|consumer_stale_after|freshness):' "$d"
+                  ! grep -q 'retired_sources' "$d"
                   ! grep -q 'max_per_poll' "$d"
                   # Rendered under the loader's key names when set.
                   w=${hmChangeFlow.xdg.configFile."pg-desk/config.yaml".source}
                   grep -q '^watch:' "$w"
-                  sed -n '/^  pr:/,/^  [a-z]/p' "$w" | grep -q 'example-pr-query-a'
-                  sed -n '/^  pr:/,/^  [a-z]/p' "$w" | grep -q 'example-pr-query-b'
+                  # watch.pr.queries is retired (P9a-3): accepted, renders nothing.
+                  ! grep -q 'example-pr-query' "$w"
                   sed -n '/^  issue:/,/^  [a-z]/p' "$w" | grep -q 'example-issue-query'
                   sed -n '/^  thread:/,/^[a-z]/p' "$w" | grep -q 'example-thread-query'
                   grep -q '^    active_window: 5d$' "$w"
@@ -11808,12 +11813,16 @@
                   grep -q '^  read_issue_deps: true$' "$w"
                   grep -q '^change_log_retention: 21d$' "$w"
                   grep -q '^consumer_stale_after: 3d$' "$w"
+                  grep -q '^freshness:' "$w"
+                  sed -n '/^freshness:/,/^[a-z]/p' "$w" | grep -q '^  retired_sources:$'
+                  grep -q '^  - example-retired-a$' "$w"
+                  grep -q '^  - example-retired-b$' "$w"
                   # A partial setting renders only its own block.
                   p=${hmChangeFlowPartial.xdg.configFile."pg-desk/config.yaml".source}
                   grep -q '^watch:' "$p"
                   grep -q '^  issue:' "$p"
                   ! grep -qE '^  (pr|thread):' "$p"
-                  ! grep -qE '^(sweep|hydration|change_log_retention|consumer_stale_after):' "$p"
+                  ! grep -qE '^(sweep|hydration|change_log_retention|consumer_stale_after|freshness):' "$p"
                   ! grep -q 'active_window' "$p"
 
                   # pr_lane.mode (PR lane refactor, P0b): rendered unconditionally,

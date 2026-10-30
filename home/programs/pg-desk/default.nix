@@ -220,6 +220,12 @@ let
   // lib.optionalAttrs (cfg.consumerStaleAfter != null) {
     consumer_stale_after = cfg.consumerStaleAfter;
   }
+  # freshness (bead pg2-b80quo): only retired_sources is typed; the block is
+  # rendered only when the list is non-empty, so config.yaml stays
+  # byte-identical otherwise.
+  // lib.optionalAttrs (cfg.freshness.retiredSources != [ ]) {
+    freshness.retired_sources = cfg.freshness.retiredSources;
+  }
   // lib.optionalAttrs (renderedAttention != null && renderedAttention != { }) {
     attention = renderedAttention;
   };
@@ -714,6 +720,20 @@ in
         config.yaml's consumer_stale_after (a duration such as "7d"): how long
         a change_log consumer may go without advancing before it is treated as
         stale. Null uses the store's own default.
+      '';
+    };
+
+    freshness.retiredSources = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "example-retired-backend" ];
+      description = ''
+        config.yaml's freshness.retired_sources: backend names (the full name
+        or the name without its "pg-connector-" prefix) that were deliberately
+        retired. A listed backend whose every ledger row is abandoned leaves
+        the freshness report; one that anything still polls keeps reporting,
+        so a wrongly listed backend that is merely down still reads stale.
+        Empty renders no freshness block.
       '';
     };
 
