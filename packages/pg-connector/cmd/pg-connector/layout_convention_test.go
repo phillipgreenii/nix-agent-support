@@ -77,7 +77,7 @@ func isPackageMain(path string) bool {
 // import-path text (layout_convention_test.go); or (c) any OTHER nesting
 // depth under cmd/<binary>/ whose .go file itself declares "package main" —
 // a standalone one-shot tool binary nested deeper than cmd/<binary>/ itself
-// (e.g. the former cmd/pg-connector-pr-github/migrate-disposition/main.go,
+// (e.g. the former the removed pg-connector-pr-github/migrate-disposition/main.go,
 // ADR 0063's cutover tool, deleted by bead pg2-2j5ac.28.7 once its one-shot
 // migration had run) is, by the same reasoning as (a), never importable by a
 // sibling backend: Go's compiler refuses to import a package main from
@@ -88,7 +88,7 @@ func isPackageMain(path string) bool {
 // branches only so the depth-0 case need not pay for a file read.
 //
 // Any OTHER non-internal, non-main subdirectory under a backend's own
-// cmd/<binary>/ — e.g. cmd/pg-connector-pr-github/util/ exporting a helper
+// cmd/<binary>/ — e.g. the removed pg-connector-pr-github/util/ exporting a helper
 // — is a real gap: Go's internal/ visibility rule is the ONLY mechanism
 // this module relies on to stop one backend importing another's private
 // code, and a plain (non-internal, non-main) package underneath a
@@ -151,7 +151,7 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 			if isPackageMain(path) {
 				// A standalone one-shot tool's own package main, nested
 				// deeper than cmd/<binary>/ itself (e.g. the former
-				// cmd/pg-connector-pr-github/migrate-disposition/main.go)
+				// the removed pg-connector-pr-github/migrate-disposition/main.go)
 				// — never importable by a sibling backend regardless of
 				// nesting depth, for the same reason depth-0
 				// cmd/<binary>/main.go is fine (see this function's own
@@ -253,7 +253,7 @@ func TestBackendLayoutConvention_RejectsNonInternalCmdPackage(t *testing.T) {
 // TestBackendLayoutConvention_AllowsNestedPackageMainTool proves
 // evaluateLayoutConvention's case (c) (see its own doc comment): a
 // standalone one-shot tool nested deeper than cmd/<binary>/ itself — e.g.
-// this module's former cmd/pg-connector-pr-github/migrate-disposition/
+// this module's former the removed pg-connector-pr-github/migrate-disposition/
 // main.go (deleted by bead pg2-2j5ac.28.7) — is allowed when its .go file
 // actually declares "package main" (never importable by a sibling backend,
 // exactly like depth-0 cmd/<binary>/main.go), while a non-main package at

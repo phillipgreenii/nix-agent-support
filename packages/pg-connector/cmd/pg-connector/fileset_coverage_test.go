@@ -194,12 +194,6 @@ func evaluateFilesetCoverage(moduleRoot string) ([]string, error) {
 			continue
 		}
 		name := e.Name()
-		// The old pr/ci GitHub backends lost their nix packages in Phase 6b
-		// (pg2-z5fax.10.4); their Go sources go in the go-removal packet
-		// (pg2-z5fax.10.5), which MUST delete this skip with them.
-		if name == "pg-connector-pr-github" || name == "pg-connector-ci-github-actions" {
-			continue
-		}
 		nixSrc, err := os.ReadFile(filepath.Join(moduleRoot, name+".nix"))
 		if err != nil {
 			violations = append(violations, fmt.Sprintf("cmd/%s has no %s.nix beside go.mod", name, name))

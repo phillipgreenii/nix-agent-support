@@ -16,7 +16,7 @@ import (
 	"testing"
 )
 
-// Relocated from cmd/pg-connector-pr-github/internal/github/chokepoint_test.go
+// Relocated from the removed pg-connector-pr-github/internal/github/chokepoint_test.go
 // (bead pg2-lh3c4's acceptance criteria): TestGHExecChokePoint
 // and its sibling TestNoGHStackMutatingArgv (stack_readonly_test.go, same
 // package) already walked the WHOLE module from inside one backend's own
@@ -83,10 +83,6 @@ type ghChokeFile struct{ funcs map[string]bool }
 // allowance the other two pairs carry would let a second exec of the
 // configured binary slip into the same file unseen.
 var ghChokePoints = map[string]ghChokeFile{
-	filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "ghexec.go"):         {},
-	filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "token.go"):          {},
-	filepath.Join("cmd", "pg-connector-ci-github-actions", "internal", "github", "ghexec.go"): {},
-	filepath.Join("cmd", "pg-connector-ci-github-actions", "internal", "github", "token.go"):  {},
 	filepath.Join("cmd", "pg-connector-github", "internal", "github", "ghexec.go"): {
 		funcs: map[string]bool{"cliGHRunner.command": true},
 	},

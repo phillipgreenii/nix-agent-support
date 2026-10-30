@@ -13,7 +13,7 @@ import (
 
 // ToSchemaPR assembles the show answer's schema.PR from the stored summary,
 // detail and conversation groups, with the field semantics of the old backend's
-// toSchemaPR (cmd/pg-connector-pr-github/internal/provider.go):
+// toSchemaPR (the removed pg-connector-pr-github/internal/provider.go):
 //
 //   - summary supplies the identity, title, body, branches, author, URL, draft
 //     flag, labels, head and base commits, mergeable, review decision, updatedAt

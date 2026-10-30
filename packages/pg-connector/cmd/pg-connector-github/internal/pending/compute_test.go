@@ -14,7 +14,7 @@ import (
 )
 
 // These tests are the old backend's review_pending tests
-// (cmd/pg-connector-pr-github/internal/review_pending_test.go) re-run against
+// (the removed pg-connector-pr-github/internal/review_pending_test.go) re-run against
 // stored data: the data is encoded and decoded through the stored form before
 // Compute reads it.
 

@@ -557,7 +557,7 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 // pjira's own state string; this method's caller
 // (pkg/provider/issue.NewDispatchTable) only needs CheckAuth to be nil vs
 // non-nil and reads .Error() for Detail, so no scriptout sentinel wrapping
-// is needed here (mirroring cmd/pg-connector-pr-github's own
+// is needed here (mirroring the removed pg-connector-pr-github's own
 // CheckAuth-delegates-to-gh precedent).
 func (b *Backend) CheckAuth(ctx context.Context) error {
 	out, err := b.runner.Run(ctx, "auth-status")

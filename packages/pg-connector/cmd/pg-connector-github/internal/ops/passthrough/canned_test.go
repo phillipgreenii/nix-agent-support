@@ -7,7 +7,7 @@ import (
 
 // cannedGH answers the gh invocations of the golden scenario with fixed output
 // (generic names: owner/repo "o/r", the viewer "phillipgreenii"). The same function was run
-// against the old backend (cmd/pg-connector-pr-github) to produce testdata/golden_*.json,
+// against the old backend (the removed pg-connector-pr-github) to produce testdata/golden_*.json,
 // so the golden files state what the old backend answers for this gh output.
 //
 // reply is the stdout, ok false means the invocation is not part of the scenario.

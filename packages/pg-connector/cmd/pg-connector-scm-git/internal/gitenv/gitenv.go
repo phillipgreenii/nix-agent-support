@@ -6,7 +6,7 @@
 // discovery consults the ENVIRONMENT first, so a leaked
 // GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE outranks `-C`/cmd.Dir. This is a
 // live, previously-hit defect class in this exact module tree — see this
-// module's own cmd/pg-connector-pr-github/internal/gitenv (the sibling
+// module's own the removed pg-connector-pr-github/internal/gitenv (the sibling
 // Tier-2 backend packet's identical package, ported from pg-pr) for the
 // full mechanism write-up and provenance. It matters MORE here than there:
 // every one of this backend's own git invocations is a direct exec (there
@@ -17,8 +17,8 @@
 //
 // This package is its own copy, not an import of the sibling backend's:
 // Go's internal/ visibility is per-import-path, so
-// cmd/pg-connector-pr-github/internal/gitenv is importable only from
-// within cmd/pg-connector-pr-github/... — this backend's own
+// the removed pg-connector-pr-github/internal/gitenv is importable only from
+// within the removed pg-connector-pr-github/... — this backend's own
 // cmd/pg-connector-scm-git/internal/gitenv is the independent,
 // compiler-enforced boundary the design's own layout convention expects
 // each backend to have (layout_convention_test.go).

@@ -263,7 +263,7 @@ This cluster records S4, S5, S6, S7, S19, S22, S27, S28.
 - **S19** — Add a stable backend id (`node_id`) to pg-connector's `schema.PR`; deciders key
   dedup/adoption matching on it when present. Derived, from a precedent already in the GitHub
   backend, 2026-09-29. Why: the GitHub backend already fetches `NodeID` for comments and reviews
-  (`packages/pg-connector/cmd/pg-connector-pr-github/internal/github/github.go`); extending the same
+  (`packages/pg-connector/the removed pg-connector-pr-github/internal/github/github.go`); extending the same
   field to the PR object itself is a small, precedented addition, and a stable id survives a repo
   rename or transfer where `<repo>#<n>` does not.
 - **S22** — pg-router binds match by exact string equality; there is no `pr.*` wildcard. Fact

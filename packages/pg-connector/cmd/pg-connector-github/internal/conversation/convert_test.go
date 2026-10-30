@@ -10,7 +10,7 @@ import (
 )
 
 // The tests of this file are copies of the old backend's Show tests
-// (cmd/pg-connector-pr-github/internal/provider_test.go: TestBackend_Show_MapsGHDataToSchemaPR,
+// (the removed pg-connector-pr-github/internal/provider_test.go: TestBackend_Show_MapsGHDataToSchemaPR,
 // TestBackend_Show_CarriesReviewThreadIDFlagsAndConnectionReports,
 // TestBackend_Show_ReviewsCarryCommitOID), reduced to the conversation part of
 // what Show builds and run against contentOf, the copy of its conversion.

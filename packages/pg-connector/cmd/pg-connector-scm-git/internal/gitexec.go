@@ -1,6 +1,6 @@
 // gitexec.go: this backend's own thin git-exec wrapper — the same
 // small-command-exec-wrapper-with-a-fake-runner-seam shape
-// cmd/pg-connector-pr-github/internal/github's CLI/ghexec.go establishes
+// the removed pg-connector-pr-github/internal/github's CLI/ghexec.go establishes
 // for this module, applied to plain `git` instead of `gh`. Unlike that
 // GitHub wrapper, this one resolves and injects no credential: local git
 // plumbing has no remote credentials concept at all, so there is nothing

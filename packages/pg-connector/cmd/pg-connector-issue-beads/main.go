@@ -41,7 +41,7 @@ import (
 )
 
 // Version is stamped at build time (mkGoApp's default versionPath,
-// mirroring pg-connector-pr-github's own cmd/pg-connector-pr-github
+// mirroring pg-connector-pr-github's own the removed pg-connector-pr-github
 // convention).
 var Version = "dev"
 

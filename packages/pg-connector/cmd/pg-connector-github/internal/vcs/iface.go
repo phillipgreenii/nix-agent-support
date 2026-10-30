@@ -2,7 +2,7 @@
 // carried over so internal/github's ported Provider still type-checks
 // against the same interface shape it always has , without
 // packages/pg-connector's go.mod depending on the retired PR tool. Nothing
-// outside cmd/pg-connector-pr-github ever sees this package: the backend's
+// outside the removed pg-connector-pr-github ever sees this package: the backend's
 // own pr.Provider glue (internal/provider.go) talks to internal/github's
 // concrete *Provider type directly, not through this interface.
 package vcs

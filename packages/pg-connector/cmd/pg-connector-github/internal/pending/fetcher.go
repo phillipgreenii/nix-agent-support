@@ -7,7 +7,7 @@
 //   - Fetcher is the groups.Fetcher; its stored content is the JSON of
 //     github.PendingReviewData (Decode reads it back).
 //   - Compute builds the review_pending op's result from the stored data with
-//     the old backend's rules (cmd/pg-connector-pr-github/internal/review_pending.go).
+//     the old backend's rules (the removed pg-connector-pr-github/internal/review_pending.go).
 //   - SidecarView and RegisterFlushes make the group's identity-scoped data
 //     flush when the viewer changes.
 package pending

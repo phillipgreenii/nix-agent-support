@@ -149,7 +149,7 @@ type CIRun struct {
 	// always reports Stale false with AsOf set to that live call's own
 	// completion time — pg2-681xo's own doc comment on schema.PR.Stale
 	// noted this was true of every ci/issue/scm backend as of that bead.
-	// pg-connector-ci-github-actions (cmd/pg-connector-ci-github-actions)
+	// pg-connector-ci-github-actions (the removed pg-connector-ci-github-actions)
 	// briefly added a real cache for this purpose (bead pg2-4aoeg) but bead
 	// pg2-2j5ac.28.7 deleted it outright (statelessness, D3) — this
 	// backend's ListRuns always reports Stale false again, so a live

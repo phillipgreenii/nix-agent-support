@@ -75,7 +75,7 @@ func TestHandlers_DecodeArgumentsAsTheOldBackendDid(t *testing.T) {
 
 var asOfRe = regexp.MustCompile(`"as_of": ?"[^"]*"`)
 
-// The golden files were produced by running the OLD backend (cmd/pg-connector-pr-github)
+// The golden files were produced by running the OLD backend (the removed pg-connector-pr-github)
 // over the same canned gh output (cannedGH); the daemon's answers equal them,
 // apart from the read time.
 func TestGolden_AnswersEqualTheOldBackends(t *testing.T) {

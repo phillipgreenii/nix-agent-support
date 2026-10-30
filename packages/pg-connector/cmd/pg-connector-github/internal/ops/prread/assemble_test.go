@@ -27,7 +27,7 @@ func withoutAnnotations(m map[string]any) map[string]any {
 }
 
 // TestShowEqualsTheOldBackendsAnswer: the golden answer was produced once by
-// running the old backend's Show (cmd/pg-connector-pr-github/internal) in a
+// running the old backend's Show (the removed pg-connector-pr-github/internal) in a
 // throwaway test over the same canned data (generic names), as_of and stale
 // blanked; the daemon's show over the equivalent stored groups equals it apart
 // from the added annotations.

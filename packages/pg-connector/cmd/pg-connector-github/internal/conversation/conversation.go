@@ -10,7 +10,7 @@
 // The stored content is already in wire shape (schema.PRComment,
 // schema.PRReview, schema.PRConnections), so the `show` op copies it into
 // schema.PR. The conversion rules are copied from the old backend
-// (cmd/pg-connector-pr-github/internal/provider.go: toSchemaPR's comment and
+// (the removed pg-connector-pr-github/internal/provider.go: toSchemaPR's comment and
 // review loops, toSchemaComment, toSchemaConnectionReport) because the new
 // binary cannot import that package; convert_test.go carries copies of the old
 // tests.

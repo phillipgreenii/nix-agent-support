@@ -1,7 +1,7 @@
 // Package review is the pr instance's review_submit op, run through the daemon:
 // the write that puts a request's content into the acting identity's PENDING
 // review. It never deletes, replaces or submits anything. It is the old backend's
-// Backend.SubmitReview (cmd/pg-connector-pr-github/internal/review_submit.go)
+// Backend.SubmitReview (the removed pg-connector-pr-github/internal/review_submit.go)
 // copied with its behavior, result shape, caps and error messages unchanged, and
 // run under the daemon's write rules.
 //

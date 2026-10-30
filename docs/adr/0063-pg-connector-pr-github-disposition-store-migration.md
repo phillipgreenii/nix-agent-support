@@ -21,7 +21,7 @@ node id) or, when that was never captured, `external_id`. `pg-pr feedback dispos
 only writer; `pg-pr feedback list <repo> <pr>`/`feedback show <id>` are its readers, both already
 supporting `--json`.
 
-`packages/pg-connector`'s `pg-connector-pr-github` backend (`cmd/pg-connector-pr-github/internal`)
+`packages/pg-connector`'s `pg-connector-pr-github` backend (`the removed pg-connector-pr-github/internal`)
 has its own, independent JSON-file store (`store.go`) recording the same kind of fact — a per-PR,
 per-comment disposition — under a different shape: keyed by `formatPRID(repo, number)` (a plain
 `"<owner>/<repo>#<number>"` string, no foreign key), with dispositions in a
@@ -57,7 +57,7 @@ one-shot maintenance operation run once at the cutover step, not a permanently-m
    `packages/pg-pr` or its SQLite schema — the same self-contained-module rule `store.go`'s own
    design decision already rests on.
 2. **Field mapping**, implemented as `internal.ImportLegacyDispositions` in
-   `cmd/pg-connector-pr-github/internal/migrate.go`:
+   `the removed pg-connector-pr-github/internal/migrate.go`:
    - Only rows whose `Kind` is `code-comment-thread` or `pr-comments` carry a disposition this
      store has a slot for (its `Dispositions` map is keyed by a single GitHub comment/thread id;
      `ci-failure`/`review-request`/`jira-link`/`self-review` rows have no such id and are out of

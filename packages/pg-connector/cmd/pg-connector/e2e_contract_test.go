@@ -655,7 +655,7 @@ func assertGHBackendsHealthy(t *testing.T, sources []SourceResult) {
 // ---------------------------------------------------------------------
 // pr (pg-connector-pr-github): show — every op this backend's own
 // capabilities response declares
-// (cmd/pg-connector-pr-github/main.go's newDispatchTable) — against a
+// (the removed pg-connector-pr-github/main.go's newDispatchTable) — against a
 // real, caller-chosen PR/repo (requireGHRepoAndPR). categorize/
 // feedback-set were retired by bead pg2-2j5ac.28.7 (statelessness, D3;
 // category/disposition are re-derived by pg-desk rather than persisted by
@@ -706,7 +706,7 @@ func TestContract_PRGithub_RealGH_Show(t *testing.T) {
 // ---------------------------------------------------------------------
 // ci (pg-connector-ci-github-actions): list, logs, rerun-failed — every
 // op this backend's own capabilities response declares
-// (cmd/pg-connector-ci-github-actions/main.go's newDispatchTable) —
+// (the removed pg-connector-ci-github-actions/main.go's newDispatchTable) —
 // against the same real, caller-chosen PR/repo.
 // ---------------------------------------------------------------------
 

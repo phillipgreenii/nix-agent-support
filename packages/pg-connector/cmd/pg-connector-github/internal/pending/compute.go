@@ -13,7 +13,7 @@ import (
 
 // Compute builds the review_pending op's result from the stored data of a
 // pending group, by the old backend's rules (PendingReview in
-// cmd/pg-connector-pr-github/internal/review_pending.go), read from stored
+// the removed pg-connector-pr-github/internal/review_pending.go), read from stored
 // data instead of a live read.
 //
 // The described review is the pending review with the lowest database id

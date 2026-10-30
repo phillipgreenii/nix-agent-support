@@ -3,7 +3,7 @@
 // "carries over the retired PR tool's existing GitHub logic unchanged" decision), re-homed
 // here so packages/pg-connector's go.mod need not depend on the retired PR tool.
 // This package is compiler-enforced invisible outside
-// cmd/pg-connector-pr-github (it lives under that binary's own internal/
+// the removed pg-connector-pr-github (it lives under that binary's own internal/
 // tree).
 //
 // It implements the read paths pkg/provider/pr's Provider needs (GetPR,

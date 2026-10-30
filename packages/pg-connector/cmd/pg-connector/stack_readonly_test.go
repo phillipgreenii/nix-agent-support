@@ -13,7 +13,7 @@ import (
 )
 
 // Relocated from
-// cmd/pg-connector-pr-github/internal/github/stack_readonly_test.go (bead
+// the removed pg-connector-pr-github/internal/github/stack_readonly_test.go (bead
 // pg2-lh3c4's acceptance criteria) alongside its sibling
 // TestGHExecChokePoint (chokepoint_test.go, same package, same reason: both
 // walked the whole module from inside one backend's own test package,
@@ -42,7 +42,7 @@ var stackMutatingVerbs = map[string]bool{
 
 // TestNoGHStackMutatingArgv is the mechanical half of pg-connector's
 // read-only promise for stacked-PR identification (bead pg2-4dz88.3.8):
-// pg-connector may IDENTIFY a native GitHub stack (cmd/pg-connector-pr-github's
+// pg-connector may IDENTIFY a native GitHub stack (the removed pg-connector-pr-github's
 // internal/api.PR StackID/StackPosition/StackSize/StackUpstreamHeadRefName/
 // StackDownstreamHeadRefName fields) but must never author, link, or unstack
 // one. It
@@ -168,7 +168,7 @@ func TestNoGHStackMutatingArgv(t *testing.T) {
 	}
 	if len(offenders) > 0 {
 		t.Fatalf("pg-connector must never author, link, or unstack a native GitHub stack "+
-			"(it may only IDENTIFY one -- see cmd/pg-connector-pr-github/internal/api.PR's "+
+			"(it may only IDENTIFY one -- see the removed pg-connector-pr-github/internal/api.PR's "+
 			"Stack* fields), but found:\n  %s\n\n"+
 			"Both `gh stack link` and `gh stack unstack <number>` are remote-first, "+
 			"API-driven verbs the vendored gh-stack skill documents as reachable "+

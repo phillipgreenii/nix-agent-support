@@ -20,7 +20,7 @@ import (
 // pg-connector or to another pg-connector-<type>-<backend> binary. Modeled
 // directly on this module's existing chokepoint-test convention (see this
 // same package's chokepoint_test.go, relocated here from
-// cmd/pg-connector-pr-github/internal/github by bead pg2-lh3c4 — ghExecRE)
+// the removed pg-connector-pr-github/internal/github by bead pg2-lh3c4 — ghExecRE)
 // — same line-based scanning, same "binary is a string literal in
 // the call" shape. Like that precedent, this is line-based: a call whose
 // arguments span multiple source lines would not be matched. Every actual
@@ -38,7 +38,7 @@ var pgConnectorExecRE = regexp.MustCompile(`exec\.Command(?:Context)?\(\s*(?:[\w
 // enforcement is exactly this: "a mechanical grep for exec.Command/os.exec
 // naming pg-connector or another pg-connector-<type>-<backend> binary
 // outside a backend's own tests would catch a regression." bead pg2-0vwcc
-// fixed the one known offender (cmd/pg-connector-ci-github-actions's
+// fixed the one known offender (the removed pg-connector-ci-github-actions's
 // resolver.go) with a direct in-process resolver and a regression test for
 // that ONE call site; this function is the module-wide backstop that
 // catches a FUTURE occurrence anywhere in the module, not just at that one

@@ -196,7 +196,7 @@ type PR struct {
 	// itself). Always populated (not omitempty), matching PR's other plain
 	// boolean facts (Draft, Merged) — false is itself informative.
 	//
-	// The current GitHub backend (cmd/pg-connector-pr-github) always
+	// The current GitHub backend (the removed pg-connector-pr-github) always
 	// performs a live GitHub read for every PR fact on every Show call —
 	// its own local Store holds only this backend's category/disposition
 	// writes, never a cached copy of GitHub's PR facts — so it always
