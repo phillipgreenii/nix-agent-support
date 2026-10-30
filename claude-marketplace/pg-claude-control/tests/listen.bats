@@ -10,13 +10,14 @@ setup() {
   OUT="$STATE.out"
   ERR="$STATE.err"
   PIDF="$STATE.pid"
+  OUT2="$STATE.second"
   PARENT=""
 }
 
 teardown() {
   [ -n "$PARENT" ] && kill -9 "$PARENT" 2>/dev/null || true
   [ -f "$PIDF" ] && kill -9 "$(cat "$PIDF")" 2>/dev/null || true
-  rm -rf "$STATE" "$OUT" "$ERR" "$PIDF"
+  rm -rf "$STATE" "$OUT" "$ERR" "$PIDF" "$OUT2"
 }
 
 # Starts the listener as a child of a throwaway bash (its $PPID), which stays alive until killed.
@@ -133,15 +134,14 @@ mode_of() { ls -ld "$1" | cut -c1-10; }
     bash "$1" >"$2" 2>"$3" & first=$!
     for _ in $(seq 1 50); do [ -p "$5"/inbox/$$.fifo ] && break; sleep 0.1; done
     kill -9 $first
-    bash "$1" >"$2.second" 2>"$3" & echo $! >"$4"
-    wait' _ "$LISTEN" "$OUT" "$ERR" "$PIDF" "$STATE") &
+    bash "$1" >"${6:?second output path required}" 2>"$3" & echo $! >"$4"
+    wait' _ "$LISTEN" "$OUT" "$ERR" "$PIDF" "$STATE" "$OUT2") &
   PARENT=$!
   FIFO="$STATE/inbox/$PARENT.fifo"
   wait_for 6 test -s "$PIDF"
   wait_for 4 test -p "$FIFO"
   printf 'ping second\n' >"$FIFO"
-  wait_for 3 grep -qx 'ping second' "$OUT.second"
-  rm -f "$OUT.second"
+  wait_for 3 grep -qx 'ping second' "$OUT2"
 }
 
 # bats test_tags=slow
