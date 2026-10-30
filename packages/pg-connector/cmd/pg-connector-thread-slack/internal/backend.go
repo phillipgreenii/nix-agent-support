@@ -490,20 +490,22 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Thread, error) {
 }
 
 // List implements thread.Provider.List via claude -p (see this file's own
-// package doc comment). Every reply unconditionally carries
-// Truncated:true [design: 4.5, 8, D23] — this backend has no reliable way
-// to confirm the Slack MCP returned the complete match set, so it never
-// computes a conditional value the way
-// cmd/pg-connector-issue-jira/internal.Backend.List does. Cursor is
-// always nil (no incremental-listing backend at this phase, mirroring
-// issue.Provider.List's own no-cursor shape). Each expression's matches
-// are unioned, deduplicated by thread id (design's "run each, union
-// results deduplicated by id" rule) — an item with an empty id is
-// silently skipped rather than failing the whole call (and so is any item
-// whose id is not canonical and cannot be repaired — see canonicalThreadID),
-// mirroring
-// cmd/pg-connector-issue-jira/internal.Backend.List's identical
-// leniency for a malformed individual search-result element.
+// package doc comment). Truncated is always false (bead pg2-j68zgj; this
+// reverses design D23's unconditional Truncated:true): the list prompt asks
+// for exactly one bounded Slack search per modifier and forbids further
+// result pages, so the reply IS the whole answer to the configured query. A
+// Truncated:true reply made the umbrella record last_error "truncated" and
+// never a refreshed_at (INV-LEDGER-FRESH-3), so the source showed no success
+// ever. A failed or undecodable call returns an error and is never reported
+// as a whole-query answer. Cursor is always nil (no incremental-listing
+// backend at this phase, mirroring issue.Provider.List's own no-cursor
+// shape). Each expression's matches are unioned, deduplicated by thread id
+// (design's "run each, union results deduplicated by id" rule) — an item
+// with an empty id is silently skipped rather than failing the whole call
+// (and so is any item whose id is not canonical and cannot be repaired —
+// see canonicalThreadID), mirroring
+// cmd/pg-connector-issue-jira/internal.Backend.List's identical leniency for
+// a malformed individual search-result element.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.ThreadListResult, error) {
 	seen := make(map[string]bool)
 	entities := make([]schema.Thread, 0)
@@ -545,7 +547,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		ids = append(ids, e.ID)
 	}
 	eventlog.RecordItems(ctx, len(ids))
-	res := &schema.ThreadListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: true}
+	res := &schema.ThreadListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}
 	if idsOnly {
 		res.Entities = nil
 	}

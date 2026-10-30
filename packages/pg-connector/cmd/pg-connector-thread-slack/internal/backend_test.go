@@ -170,7 +170,7 @@ func TestBackend_Show_MissingRequiredFieldIsUnavailable(t *testing.T) {
 // List
 // ----------------------------------------------------------------------
 
-func TestBackend_List_TruncatedAlwaysTrue_CursorAlwaysNil(t *testing.T) {
+func TestBackend_List_WholeQueryAnswer_NotTruncated_CursorAlwaysNil(t *testing.T) {
 	b := New(&fakeRunner{handle: func(prompt string) (string, error) {
 		return envelope(`{"items":[]}`), nil
 	}})
@@ -178,8 +178,8 @@ func TestBackend_List_TruncatedAlwaysTrue_CursorAlwaysNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if !got.Truncated {
-		t.Fatal("Truncated must be unconditionally true for this backend (design D23)")
+	if got.Truncated {
+		t.Fatal("Truncated must be false: a bounded one-search reply is the whole-query answer, and a true value keeps refreshed_at null (pg2-j68zgj)")
 	}
 	if got.Cursor != nil {
 		t.Fatalf("Cursor = %v, want nil (no incremental-listing backend at this phase)", got.Cursor)

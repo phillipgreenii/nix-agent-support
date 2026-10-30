@@ -472,3 +472,41 @@ func TestRun_ThreadChanges_ForwardsBackendConfig(t *testing.T) {
 		t.Fatalf("kinds = %+v, want 1 added thread", kinds)
 	}
 }
+
+// TestRun_ThreadChanges_WholeQueryListStampsLedgerRefreshedAt: the thread
+// feed's ledger is stamped by a successful list (pg2-j68zgj). A whole-query
+// answer (truncated:false, the shape pg-connector-thread-slack now returns)
+// records refreshed_at; a truncated answer records last_error "truncated" and
+// no refreshed_at (INV-LEDGER-FRESH-3), which is what kept the Slack source
+// stale with no success ever.
+func TestRun_ThreadChanges_WholeQueryListStampsLedgerRefreshedAt(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		truncated string
+		wantStamp bool
+	}{
+		{"whole-query", "false", true},
+		{"truncated", "true", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			backend := "backend-thread-stamp-" + tc.name
+			writeConfigGatedFakeBackend(t, backend, threadBackendBlockMarker,
+				`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"thread-1","channel":"C123","reply_count":1,"as_of":"2026-09-19T00:00:00Z","stale":false}],"present_ids":["thread-1"],"cursor":null,"truncated":`+tc.truncated+`}}`)
+			writeThreadConfigWithBackendBlock(t, backend)
+			if stdout, _, code := executePr(t, []string{"thread", "changes", "--query", "involving-me", "--consumer", "pg-router"}); code != 0 {
+				t.Fatalf("thread changes: exit %d; stdout=%s", code, stdout)
+			}
+			l := mustLoadLedger(t, LedgerKey{Type: "thread", Backend: backend, Query: "involving-me"})
+			if tc.wantStamp {
+				if l.RefreshedAt == nil || l.LastError != nil {
+					t.Fatalf("refreshed_at=%v last_error=%+v, want stamped and no error", l.RefreshedAt, l.LastError)
+				}
+				return
+			}
+			if l.RefreshedAt != nil || l.LastError == nil || l.LastError.Code != ledgerErrorTruncated {
+				t.Fatalf("refreshed_at=%v last_error=%+v, want no stamp and truncated", l.RefreshedAt, l.LastError)
+			}
+		})
+	}
+}

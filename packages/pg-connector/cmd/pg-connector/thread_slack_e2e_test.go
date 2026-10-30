@@ -349,6 +349,10 @@ func TestThreadSlackE2E_ConfiguredClaudeThroughRealBinaries(t *testing.T) {
 	if len(ledger.Entries) != 2 {
 		t.Fatalf("ledger has %d entries, want 2: %s", len(ledger.Entries), raw)
 	}
+	// pg2-j68zgj: a successful list stamps refreshed_at and records no error.
+	if ledger.RefreshedAt == nil || ledger.LastError != nil {
+		t.Fatalf("after a successful list refreshed_at=%v last_error=%+v, want stamped and no error: %s", ledger.RefreshedAt, ledger.LastError, raw)
+	}
 	for _, id := range wantIDs {
 		if e, ok := ledger.Entries[id]; !ok || e.RemovedAtVersion != nil {
 			t.Fatalf("ledger entry %q missing or tombstoned: %s", id, raw)
