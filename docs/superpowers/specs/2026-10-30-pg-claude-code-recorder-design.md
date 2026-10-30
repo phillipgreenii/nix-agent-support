@@ -70,7 +70,7 @@ erDiagram
   }
 ```
 
-**Conversation states** (operator 2026-10-30: "open/close with resumablel property"):
+**Conversation states** (operator 2026-10-29, bead note R10: "open/close with resumablel property"):
 
 - **open**: a live Process holds it.
 - **closed**: no live Process holds it; the end evidence says how it ended.
@@ -81,8 +81,19 @@ erDiagram
 "Active" is retired: it meant either the Process's status "working" or "a transcript was written
 recently". "Alive" is a Process word.
 
+**Lifecycle stage** is how the recorder handles a Conversation's copies. It is separate from open and closed, and `conversation.show` returns both:
+
+| Stage             | Meaning                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `live`            | open: a live Process holds the Conversation                                                        |
+| `quiet`           | closed, and less than `settle.after` since the recorder saw its last byte; a write resets that age |
+| `held`            | a check failed; shown in coverage; never settled or removed until the check passes                 |
+| `settled`         | closed, quiet for `settle.after`, check passed, copies settled                                     |
+| `removal_pending` | removal is committed and its deletes are not all done                                              |
+| `removed`         | the Claude files are gone; an extract or a reappearing path returns it to `quiet`                  |
+
 **How a Conversation ended.** The recorder stores evidence, and a client derives the label
-(operator 2026-10-30: "five labels look good. we can start with the proposed crash detection and
+(operator 2026-10-29, bead note R11: "five labels look good. we can start with the proposed crash detection and
 iterate later if not sufficent."):
 
 | Evidence                                                                        | Label           |
@@ -98,6 +109,14 @@ closing the terminal each deleted the registry file and its `.key` file and left
 typed `/exit` did the same with an entry; SIGKILL left both files behind, and they were gone within
 76 seconds (what removed them, and when, was not observed), which is why the recorder checks the
 file at the moment the Process exits and does not rescan for a leftover.
+
+The label is derived from registry and history evidence alone, so it does not depend on the control mod; the mod's `end_reason` is extra detail. Precedence, first match wins:
+
+1. The recorder was not watching the Process across its end: **unknown**.
+2. The registry file was still present when the Process exited: **crashed**.
+3. A `/clear` entry, or the registry file now names a new session id: **cleared**.
+4. A typed `/exit` entry for the session: **exited**.
+5. Otherwise: **closed normally** (Ctrl-D, a closed terminal, SIGTERM and SIGHUP all land here; the mod's reasons `prompt_input_exit` without a `/exit` entry and `other` both map to it).
 
 ## Intent
 
@@ -169,7 +188,7 @@ What that fixes today:
 ## Anti-goals
 
 - **Claude Code MUST NOT depend on the recorder.** If the recorder is stopped, crashed or behind,
-  every Claude Code run MUST behave exactly as it does today.
+  every Claude Code run MUST behave exactly as it does today. With `remove.enable` false (the default) that holds without exception; once removal is enabled, resuming a removed Conversation needs an `extract`, and so the recorder.
 - **Claude Code MUST NOT depend on the control mod.** A mod that fails to load, crashes or is
   disabled MUST leave Claude Code working; only control through it is lost.
 - **Control MUST NOT depend on the recorder.** A recorder outage MUST NOT stop a tool from
@@ -186,8 +205,8 @@ What that fixes today:
   operator's own in code, tests, fixtures or docs. Each Go module carrying fixtures is covered by
   the `identifier-allowlist` hook (`scripts/check-identifier-allowlist.sh`; a new module needs a
   `MODULES` row and an allowlist file).
-- Pure Go for the recorder. SQLite through `modernc.org/sqlite`, already used by ccaudit, pa-monitor
-  and ccpool at different versions (pa-monitor 1.61.0, ccpool 1.59.0, ccaudit 1.52.0). The recorder
+- Pure Go for the recorder, except one darwin-only cgo file for FSEvents and the darwin system calls (`getattrlistbulk`, `clonefile`, the kqueue exit watch). Linux builds with `CGO_ENABLED=0` and uses inotify, `FICLONE` where the filesystem supports it, a plain directory walk for sweeps, and `pidfd_open` for Process exit (a one-second liveness poll that checks the start time where `pidfd_open` is unavailable); a cross-compile guard (`GOOS=linux CGO_ENABLED=0 go vet ./...`, the `pg-connector` precedent) keeps Linux building. SQLite through `modernc.org/sqlite`, already used by ccaudit, pa-monitor
+  and ccpool at different versions (pa-monitor, pg-connector and pg-desk 1.61.0, work-report 1.59.0, ccpool and pg-ccaudit 1.52.0). The recorder
   takes 1.61.0, whose bundled SQLite 3.54.1 has FTS5 with `contentless_delete`, its trigram
   tokenizer and JSON functions, and lets Go register SQL functions, but it cannot load C
   extensions. Go modules are built with gomod2nix.
@@ -203,13 +222,14 @@ What that fixes today:
   through a temporary file and a rename, so every version has a new inode. A workspace-move script
   in the private deployment flake renames whole `projects/<slug>` directories, so nothing may be
   keyed by path alone.
+- The control mod's state directory (`controlStateDir`, default `$XDG_STATE_HOME/pg-claude-control`) holds the inbox and the end files. It is a second watched root: the recorder reads only `ends/` from it and checks `inbox/<pid>.fifo` for presence.
 - `~/.claude/sessions/<pid>.<hash>.key` files (mode 0600) sit beside every registry file and are
   probably secrets.
 - The control mod uses Claude Code's mod API as of 2.1.310. `claude plugin validate` refuses a `$`
   passed to a helper declared inside `register()`, so mod helpers MUST be top-level functions. The
   macOS `PATH` on this machine resolves `stat` to GNU coreutils (`stat -f %i` fails), so scripts MUST
   use `test -ef` and not BSD `stat` flags.
-- The daemon follows the workspace's Go daemon conventions (opt-in pprof endpoint: `docs/go-daemons.md`
+- The daemon follows the workspace's Go daemon conventions (the pprof endpoint the daemon offers and the module turns on by default: `docs/go-daemons.md`
   in `phillipg-nix-repo-base`) and registers its LaunchAgent the HM-scoped way pa-monitor does
   (`phillipgreenii.programs.launchdServices.userAgents`).
 - Tests follow the global rules: deterministic behavior is tested against the real tool in a
@@ -356,7 +376,7 @@ cursor.
    needs a remote proxy anyway; a library needs one implementation per language; and an owner
    record has no home when "the Host keeps no store". Putting it in the recorder would make control
    depend on the recorder.
-2. A `pg-host` command over those Adapters (operator 2026-10-30: "instead of a library, what about a
+2. A `pg-host` command over those Adapters (operator 2026-10-29: "instead of a library, what about a
    client which could be used by both and be independent of the language"). Dropped once the mod
    made the Adapters unnecessary. The language-independent command idea survives as
    `pg-claude-control`.
@@ -384,8 +404,7 @@ darwin, on the pid) and, at that instant, whether the registry file is still pre
 (working, blocked, idle, hung, the blocker) stay in pa-monitor (operator 2026-10-28; the 2026-10-28
 ruling on direct reads, Decisions item 14, still holds). Measured 2026-10-29 on darwin: `NOTE_EXIT` fired for SIGKILL and SIGTERM on children
 (about 1 ms), for a normal exit (1.01 s) and for SIGKILL on a process that was not a child (about
-11 ms); registering a watch on a live `claude` that was not a child worked; registering on an already
-exited pid failed with `ESRCH`.
+11 ms); registering a watch on a live `claude` that was not a child worked; registering on an already exited pid failed with `ESRCH`. The presence check is one `lstat` taken immediately after the event. In the spike Claude had deleted its registry file before the Process was gone, but a slow deletion would read as a crash, so the real-Claude tier measures the order.
 
 ## Design
 
@@ -606,7 +625,7 @@ unparsed kind in coverage. Sources in the first version (operator 2026-10-28):
 | `claude-status`           | `projects/{project}/{session}.status.jsonl`                                  | append   | one record per line                                                                                            |
 | `session-mode`            | `projects/{project}/{session}.session-mode.json`                             | snapshot | one record per version                                                                                         |
 | `session-compaction`      | `projects/{project}/{session}.compaction.json`                               | snapshot | one record per version                                                                                         |
-| `claude-control-end`      | `<state>/pg-claude-control/ends/{session}.{ms}.json`                         | snapshot | one record per file: session id, end reason, time (written by the control mod)                                 |
+| `claude-control-end`      | `<controlStateDir>/ends/{session}.{ms}.json`                                 | snapshot | one record per file: session id, end reason, time (written by the control mod)                                 |
 
 Kept unparsed: `workflows/`, `scratchpad/`, agent-created directories, Claude Code's `.orphaned-*`
 and `.superseded-*` files, `mcp-tasks/` if it appears, project-level files such as
@@ -688,11 +707,9 @@ every event as a hint:
 - After downtime the watcher replays FSEvents only when the gap is under about 10 minutes and the
   volume UUID is unchanged (measured history retention was about 20 minutes, and an old event id
   returned partial data silently). Otherwise it sweeps with `getattrlistbulk` (0.82 s of CPU over
-  13,013 directories). It also sweeps when FSEvents reports `MustScanSubDirs` and every 15 to 30
-  minutes as a safety net. For comparison, pa-monitor's current pattern costs 1.14 s of CPU per 5 s.
+  13,013 directories). It also sweeps when FSEvents reports `MustScanSubDirs` and every `sweep.interval` (default 15 minutes) as a safety net. For comparison, pa-monitor's current pattern costs 1.14 s of CPU per 5 s.
 - The watcher sits behind two test seams, `Wake(path)` and `Rescan()`.
-- Phase 1 has an acceptance criterion from the review of `pg2-w6x9y`: the recorder's steady-state
-  CPU MUST be at or below pa-monitor's post-fix numbers, measured with the same pprof recipe.
+- Phase 1 has an acceptance criterion from the review of `pg2-w6x9y`: with no client attached, the recorder's steady-state CPU MUST stay at or below 5% of one core averaged over 10 minutes on the real tree, and MUST NOT exceed pa-monitor's post-fix figure recorded on `pg2-w6x9y`. The builder re-measures both on the same host and under comparable load with the pprof recipe in that bead. The 1.14 s of CPU per 5 s above is pa-monitor's pre-fix pattern (1.14 / 5 = 0.228, about 23% of a core), not the target.
 
 ### Copier
 
@@ -703,8 +720,7 @@ It copies in one of two modes, chosen by a probe at start (operator 2026-10-28):
   `st_dev`) and the volume reports the clone capability (`VOL_CAP_INT_CLONE` valid and set). The
   copier uses `clonefile` with `CLONE_NOFOLLOW` (the default follows symbolic links) to a temporary
   name, then renames. A clone costs no space until the original diverges, and a deleted original
-  leaves the clone intact (verified). `du` counts a clone at full size, so the recorder reports its
-  private size with `ATTR_CMNEXT_PRIVATESIZE`.
+  leaves the clone intact (verified). `du` counts a clone at full size, so the recorder reports its private size with `ATTR_CMNEXT_PRIVATESIZE`. A clone seeds the managed copy, and every later append is added to the copy as bytes, as in byte mode. The copy offset after a clone is the clone's size (an `fstat` of the clone right after the clone call, fsynced), and the tail check compares the clone's last bytes with the original at that position. If the original grew meanwhile, the next read starts at that offset, so "copy exactly the bytes read" holds from the clone onward. Settle re-clones (below).
 - **Byte mode**, otherwise: append the new bytes, and compress once the Conversation has been quiet
   for a day. `ENOTSUP` and `EXDEV` select byte mode and are logged at info level with the method and
   the reason. Any other errno is a fault. Byte mode is not an error.
@@ -713,16 +729,14 @@ For every changed file the copier MUST:
 
 1. Check identity. A file's identity is its device, inode and birth time. An append file also MUST
    have grown, and the last 4,096 bytes of the copy (or the whole copy if shorter) MUST match the
-   file at the same position; the recorder stores that tail's xxhash64 and its bytes in the index,
-   because after settling the tail no longer sits in a copy file.
+   file at the same position; the recorder stores that tail's xxhash64 in the index and its bytes in a small sidecar file per file id (4,096 B x 47,000 files = 192,512,000 B, about 190 MB, kept out of the database), because after settling the tail no longer sits in a copy file.
 2. For an append source, read from the copy offset, copy exactly the bytes read and fsync, then
    commit the new copy offset. The copier MUST NOT use a size observed after the read as the new
    offset, so a file appended during the copy loses nothing and duplicates nothing. A trailing
    partial line is copied at once (so a line cut off by a crash is still kept) and parsed only
    when its newline arrives.
 3. For a snapshot source, read the whole file, hash it, and store the bytes as a new version with
-   the time seen if the hash is new. A snapshot source is keyed by path and content hash, not by
-   inode: `session-mode` and compaction files get a new inode on every write, and
+   the time seen if the hash is new. A snapshot source is keyed by path and content hash (the registry's key is pid, `procStart` and content hash, because pids are reused), not by inode: `session-mode` and compaction files get a new inode on every write, and
    `sessions/<pid>.json` is rewritten in place, so the copier re-reads it until the JSON is valid. A
    file that disappears gets a deletion record (Tombstone).
 4. When the same inode was rewritten in place (the file is shorter, or the stored tail no longer
@@ -792,8 +806,7 @@ names.
 The state directory defaults to `$XDG_DATA_HOME/pg-claude-code-recorder` and holds:
 
 - **copies**, named by a stable file id and generation, not by Claude path (paths change). A copy is
-  a clone or an uncompressed byte copy while its Conversation is active or within a day of its last
-  write; after that it is a settled clone or lives in the Conversation's archive. A Conversation
+  a clone or an uncompressed byte copy while its Conversation is open or within a day of its last write; after that it is a settled clone or lives in the Conversation's archive. A Conversation
   that wakes up continues with an uncompressed tail after the settled part;
 - **`index.db`**, SQLite in WAL mode with `schema_version`, holding files and their paths over time,
   offsets, generations, records with their typed fields and their pointers (file, generation,
@@ -855,10 +868,12 @@ list of capabilities.
 `all`, `any` and `not`. ccaudit's coarse filter (below) is two feed subscriptions, each with its own
 cursor.
 
+**Field names.** A query field is the snake_case form of a struct field's JSON key, with dots for nesting (`usage.output_tokens`, `session_id`); the Go struct tags fix it, and the excerpt in "Sources in Go" shows the file's own key names. `from` names a record set: `records` is every record type, narrowed with `type`. A source MAY declare a derived field computed from one direct read, such as `body_length` (the byte length of a body); it is not an interpretation. `hello` lists the capabilities the daemon supports, drawn from the operation names above.
+
 **Cursor.** A cursor is the string `<epoch>:<sequence>`, opaque to clients and totally ordered within
 an epoch. A reset is a sequenced entry. A filtered feed returns `next_cursor` even when nothing
 matched, so a client advances past commits that do not concern it. A cursor older than the
-retention floor (default 14 days of sequence; agent's call) or from an old epoch is answered with
+retention floor (`feed.retention`, default 14 days of commit time; agent's call) or from an old epoch is answered with
 the error `cursor_expired` and the cursor to resync from. Delivery is at least once, and clients
 de-duplicate by record id (file id, generation, offset, item index).
 
@@ -1036,6 +1051,7 @@ into one of the five labels, so the labels can change without a daemon change):
 {
   "session_id": "example-session-1",
   "state": "closed",
+  "stage": "settled",
   "resumable": true,
   "files": 4,
   "first_seen": "2026-10-29T20:35:27Z",
@@ -1128,11 +1144,18 @@ description of the Conversation states. Exit code 1 is reserved for unexpected e
 | 7    | cursor expired                             |
 
 Subcommands: `status`, `coverage`, `conversations`, `processes`, `query`, `search`, `feed`, `raw`,
-`snapshot`, `held`, `where <session>` (live, settled, archived or removed, with the archive path and
-manifest entry), `find <session-id|bead-id|text>`, `extract`, `doctor` and `serve`. `status` prints
+`snapshot`, `held`, `where <session>` (its stage, with the archive path and manifest entry), `find <session-id|text>` (a bead id is a text search; the recorder knows nothing about beads), `extract`, `remove`, `doctor` and `serve`. `status` prints
 the health verdict in one sentence: healthy means copy lag and parse lag under 60 seconds, no
-Conversation held longer than 3 days, and free space above `minFreeBytes` (defaults are the agent's
-calls).
+Conversation held longer than 3 days, and free space above `minFreeBytes` (defaults are the agent's calls).
+
+Notes on the subcommands that carry policy:
+
+| Subcommand | Behavior                                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `held`     | lists held Conversations with reason codes; `--retry` re-runs the check now instead of waiting for `held.recheck`                                                     |
+| `remove`   | `--dry-run` prints what would go and how many GB and removes nothing; a real run is capped by `remove.maxPerRun` and `remove.maxPerHour` and needs `remove.enable`    |
+| `doctor`   | compares every copy with its Claude file by full hash, checks the journal against the index and settled archives against their manifests, and exits 5 on any mismatch |
+| `extract`  | the rules in "Settle, removal and extract"; `--to <dir>` writes elsewhere and never touches the Claude directory                                                      |
 
 ### Conversation and Process facts
 
@@ -1176,8 +1199,7 @@ the 2026-10-28 draft and is renamed "settle" ("settle is fine"):
   written for a day (`settle.after`, default 24 h). The stage exists to waste no space. In clone
   mode it re-clones each file from the Claude original once the check shows the bytes are identical,
   which re-shares the blocks that diverged. In byte mode it compresses the copies into the
-  Conversation's archive. Always on. In clone mode, once Claude's originals are gone, the recorder
-  compresses the clone into the archive (agent's call, told to the operator and open to a veto).
+  Conversation's archive. Always on. Removal needs an archive of every file in both modes: in clone mode the removal sequence first compresses the clone into the Conversation's archive and verifies it, so a clone alone never stands in for the archive (agent's call, told to the operator and open to a veto).
 - **Remove** the Conversation's files from the Claude directory once it has been quiet for the
   removal age (`remove.after`, default 30 days). Off by default (`remove.enable = false`) until
   pa-monitor `sessions` and ccpool resume have moved to the recorder, because both expect old files
@@ -1189,16 +1211,20 @@ takes an injected clock (see "Testing").
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Live: registry file present or recent writes
+  [*] --> Live: a process holds it
   Live --> Quiet: process gone
-  Quiet --> Live: new writes or a new process
+  Quiet --> Live: a new process
+  Quiet --> Quiet: a write resets the age
   Quiet --> Settled: quiet for a day and the check passes
   Quiet --> Held: the check fails
+  Settled --> Quiet: new writes
+  Settled --> Live: a new process
+  Settled --> RemovalPending: quiet for 30 days, check passes, removal enabled
+  Settled --> Held: the pre-removal check fails
   Held --> Quiet: after a fix and re-parse
-  Settled --> Live: new writes or a new process
-  Settled --> Removed: quiet for 30 days, check passes, removal enabled
-  Removed --> Live: a removed path reappears or an extract
-  Removed --> [*]
+  RemovalPending --> Removed: all deletes done
+  RemovalPending --> Quiet: a file has new writes
+  Removed --> Quiet: a removed path reappears or an extract
 ```
 
 The check MUST pass for every file of the Conversation before each stage, and each clause is an
@@ -1216,19 +1242,14 @@ Settling runs in this order so a crash at any point loses nothing:
    records in those ranges now point into the archive.
 3. Delete the uncompressed copy bytes the archive covers.
 
-A settled Conversation that gets new writes goes back to Live. Each written file continues its copy
+A settled Conversation that gets new writes goes back to Quiet. Each written file continues its copy
 as an uncompressed tail after the settled part (same file id and generation, offsets carry on), and
 the next quiet day settles the tail as another segment.
 
-Removal runs in this order:
-
-1. Re-run the check against the Claude files.
-2. Commit "removal pending", listing each file with its inode, size and hash.
-3. Delete the files from the Claude directory (after a `fullfsync` of the copy).
-4. Commit "removed".
+Removal runs in this order: 1. Re-run the check against the Claude files and, in clone mode, write and verify the archive from the clone. 2. Commit "removal pending", listing each file with its inode, size and hash. 3. Delete the files from the Claude directory (after a `fullfsync` of the copy). 4. Commit "removed".
 
 A restart that finds a pending removal re-checks each listed file: an unchanged file is deleted; a
-file with new writes sends the Conversation back to Live and continues its copy. Empty project and
+file with new writes sends the Conversation back to Quiet and continues its copy. Empty project and
 session directories left behind by a removal are tidied after the last file goes.
 
 Each archive carries a manifest listing every file: its original path relative to the Claude
@@ -1265,7 +1286,7 @@ covers it if the tier cannot run it.
 | Parser bug or crash                             | Copying continues; fix the parser and re-parse from the copy                                                     |
 | Claude Code adds a field                        | Unknown-key counts in coverage; update the struct and re-parse                                                   |
 | Project directory renamed                       | Copies continue by inode and birth time; only the recorded path changes                                          |
-| Conversation written again after settling       | Back to Live; the copy continues as an uncompressed tail                                                         |
+| Conversation written again after settling       | Back to Quiet; the copy continues as an uncompressed tail                                                        |
 | Claude writes to a file as it is removed        | Writes after the delete are lost; every write before it was copied; counted as a removal race                    |
 | FSEvents gap after downtime                     | A `getattrlistbulk` sweep covers it                                                                              |
 | State directory full                            | Low-space mode (below); nothing is deleted from the Claude directory; coverage and an alert report it            |
@@ -1283,11 +1304,11 @@ following the HM flag; the daemon-down rule uses `noDataState: Alerting` and is 
 while the daemon is deployed, with a `deleteRules`-only twin otherwise (the `pg-connector-github`
 precedent); every new rule uid is added to `pg-router-probe`'s `registeredRuleUIDs`.
 
-| Kind   | Names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Metric | copy lag (bytes, seconds); parse lag; bad lines by source; unknown keys by source and type; unknown kinds; Conversations by state (live, quiet, held, settled, removed); oldest held age; bytes pending settle; removal backlog (Conversations, bytes); state directory free and used bytes; last successful sweep time (heartbeat); feed waiters; private size of clones; Processes without a control inbox; **dropped bytes by reason**: inferred-missed snapshot versions, files that vanished with copy offset below the last observed size, generation restarts, removal races, copies trimmed on start |
-| Log    | `session_held{reason}`, `archive_written`, `removal_pending`, `removed`, `generation_started` (warn), `parser_reset`, `copy_trimmed_on_start`, `state_dir_low`, `copy_method{method,reason}`, `process_exit{registry_present}`                                                                                                                                                                                                                                                                                                                                                                               |
-| Alert  | daemon down; copy lag; parse stuck; a Conversation held longer than N days; state directory under the free-space floor; an unknown-key burst; removal backlog                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Kind   | Names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metric | copy lag (bytes, seconds); parse lag; bad lines by source; unknown keys by source and type; unknown kinds; Conversations by stage (live, quiet, held, settled, removal_pending, removed); oldest held age; bytes pending settle; removal backlog (Conversations, bytes); state directory free and used bytes; last successful sweep time (heartbeat); feed waiters; private size of clones; Processes without a control inbox; **dropped bytes by reason**: inferred-missed snapshot versions, files that vanished with copy offset below the last observed size, generation restarts, removal races, copies trimmed on start |
+| Log    | `session_held{reason}`, `archive_written`, `removal_pending`, `removed`, `generation_started` (warn), `parser_reset`, `copy_trimmed_on_start`, `state_dir_low`, `copy_method{method,reason}`, `process_exit{registry_present}`                                                                                                                                                                                                                                                                                                                                                                                                |
+| Alert  | daemon down; copy lag; parse stuck; a Conversation held longer than N days; state directory under the free-space floor; an unknown-key burst; removal backlog                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **Phase gate.** The daemon-down and free-space alerts MUST ship before `remove.enable` is documented
 as safe to turn on. The daemon writes JSONL logs to its state directory with a size cap and
@@ -1295,7 +1316,7 @@ rotation (`manageLogs` defaults to on).
 
 ### Operating it
 
-- **First run** against about 21 GB and about 40,000 files: copy newest first; settle as it goes, so
+- **First run** against about 21 GB and about 47,000 files (the sum of the inventory counts): copy newest first; settle as it goes, so
   21 GB of byte copies never exist at once (in clone mode the copies cost almost nothing); throttle
   so the laptop stays usable; `status` shows copied and parsed counts and an estimate; a "caught up"
   marker is readable by clients, and a new feed subscriber starts from `snapshot`, not from the first
@@ -1374,8 +1395,7 @@ agent's call).
 
 **Delivery is at most once.** There is no acknowledgement, and bytes unread in the FIFO's 64 KB
 buffer when the listener dies are lost. The `id` lets the mod drop a repeat of the last 256 ids, so a
-tool can retry safely (the repeat check is designed, not built or tested). A tool learns the effect
-from the recorder's feed. A request that returns an answer (`read`) carries `reply=<path>` in a
+tool can retry safely (the repeat check is designed, not built or tested). A tool learns the effect from the recorder's feed. Confirmation is optional: a caller that must confirm reads the feed, or, with the recorder down, its own Conversation's transcript. A request that returns an answer (`read`) carries `reply=<path>` in a
 private directory of the caller's; the mod writes the JSON result to a temporary file and renames it
 to that path. That round trip is untested; the spike showed only that a mod can write files.
 
@@ -1404,14 +1424,13 @@ limit, the `run` allowlist, a logged line per request, the inbox under the state
 If sender identity ever matters, a small Go socket listener can read the sender's pid and replace the
 bash listener.
 
-**End reason.** On `session.end` the mod writes `<state>/ends/<session-id>.<unix-ms>.json` with the
+**End reason.** On `session.end` the mod writes `<controlStateDir>/ends/<session-id>.<unix-ms>.json` with the
 session id, the reason and the time, inside the hook's 1.5 s bound. The recorder ingests it as a
 snapshot source (`claude-control-end`) and joins it to the Process through the registry versions.
 Measured reasons: `prompt_input_exit` for a typed `/exit`, Ctrl-D and `run exit`; `clear` for
 `/clear`; `other` for SIGTERM and SIGHUP. A SIGKILL fires no hook, which is why the recorder's
 registry-at-exit rule exists. This reverses the earlier "no SessionEnd hook in the first version"
-(operator 2026-10-30, Decisions item 18), because the mod makes it nearly free; it awaits confirmation (see
-"Decisions").
+(operator 2026-10-29, bead note R11), because the mod makes it nearly free; it awaits a ruling (see "Awaiting a ruling" in "Decisions").
 
 **The command** is `pg-claude-control` (a placeholder name). The mod is the listener and the command
 is the one way to send, usable from any language:
@@ -1424,18 +1443,18 @@ pg-claude-control stop      <target> [--signal]
 pg-claude-control read      <target> --json
 ```
 
-A `<target>` is a pid, a session id or a name, resolved through the registry file
-`sessions/<pid>.json`. Exit code 1 is reserved for unexpected errors; each specific failure has a
+A `<target>` is a pid, a session id or a name, resolved through the registry file `sessions/<pid>.json`. A bare number is a pid, a UUID-shaped string is a session id, and anything else is a name; `pid:`, `session:` and `name:` prefixes force one reading. A name or session id that matches several Processes is exit code 7. Before any write or signal the command re-reads the registry and checks that the pid's start time still equals `procStart`, and otherwise exits 3, so a reused pid never receives a request or a SIGTERM. The command opens the FIFO non-blocking, which is how exit codes 4 and 5 are told apart. Exit code 1 is reserved for unexpected errors; each specific failure has a
 distinct code:
 
-| Code | Meaning                                                                       | Message shape                                                                             |
-| ---- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 0    | The line was written (not that the command took effect)                       |                                                                                           |
-| 2    | Usage error                                                                   | the usual usage text                                                                      |
-| 3    | No such Claude process: not in the registry, or already dead                  | `pid 4242 is not a running Claude`                                                        |
-| 4    | **The Claude has no control mod**: its registry entry exists, no `<pid>.fifo` | `Claude pid 4242 (session 9806c833…) has no control mod; restart it with the mod enabled` |
-| 5    | The mod is not accepting: no reader on the FIFO, or its buffer is full        | `Claude pid 4242 is not reading its inbox`                                                |
-| 6    | Refused by the mod (a command outside the allowlist; needs a reply)           | the mod's reason                                                                          |
+| Code | Meaning                                                                                                         | Message shape                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 0    | The line was written (not that the command took effect)                                                         |                                                                                           |
+| 2    | Usage error                                                                                                     | the usual usage text                                                                      |
+| 3    | No such Claude process: not in the registry, or already dead                                                    | `pid 4242 is not a running Claude`                                                        |
+| 4    | **The Claude has no control mod**: its registry entry exists, no `<pid>.fifo`                                   | `Claude pid 4242 (session 9806c833…) has no control mod; restart it with the mod enabled` |
+| 5    | The mod is not accepting: no reader on the FIFO, or its buffer is full                                          | `Claude pid 4242 is not reading its inbox`                                                |
+| 6    | Refused by the mod; returned only for a request that carries a reply path (`read`, or any verb given `--reply`) | the mod's reason                                                                          |
+| 7    | Ambiguous target: a name or session id matches several Processes                                                | the candidates, one per line                                                              |
 
 `--wait 10s` covers the short window after a launch before the mod has created its FIFO. `stop` is
 the one command that works without the mod: for exit code 4 its message suggests `--signal`, an
@@ -1458,21 +1477,27 @@ here only by event names; none has been read closely.
 
 `phillipgreenii.programs.pg-claude-code-recorder` (`home/programs/pg-claude-code-recorder`):
 
-| Option                 | Default                                  | Meaning                                                                                   |
-| ---------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `enable`               | `false`                                  | install the package and the command                                                       |
-| `daemon.enable`        | `false`                                  | register the LaunchAgent (opt in per host, as pa-monitor does)                            |
-| `pprof.enable`         | `true`                                   | the workspace's opt-in profiling endpoint (required by `docs/go-daemons.md`)              |
-| `claudeDir`            | `CLAUDE_CONFIG_DIR`, else `~/.claude`    | the Claude directory                                                                      |
-| `stateDir`             | `$XDG_DATA_HOME/pg-claude-code-recorder` | copies, index, journal, archives, socket                                                  |
-| `blockList.extra`      | `[]`                                     | block-list additions                                                                      |
-| `settle.after`         | `24h`                                    | quiet time before settling                                                                |
-| `remove.enable`        | `false`                                  | removal from the Claude directory                                                         |
-| `remove.after`         | `30d`                                    | quiet time before removal                                                                 |
-| `minFreeBytes`         | builder's choice                         | free-space floor for low-space mode                                                       |
-| `observability.enable` | follows the system option                | metrics, log source, alert rules, dashboard (in `darwin/modules/pg-claude-code-recorder`) |
-| `settings`             | `{}`                                     | extra daemon keys merged into the rendered config                                         |
-| `configFile`           | read-only                                | the rendered, build-time-checked config                                                   |
+| Option                                  | Default                                  | Meaning                                                                                   |
+| --------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `enable`                                | `false`                                  | install the package and the command                                                       |
+| `daemon.enable`                         | `false`                                  | register the LaunchAgent (opt in per host, as pa-monitor does)                            |
+| `pprof.enable`                          | `true`                                   | the workspace's profiling endpoint (on by default, per `docs/go-daemons.md`)              |
+| `claudeDir`                             | `CLAUDE_CONFIG_DIR`, else `~/.claude`    | the Claude directory                                                                      |
+| `stateDir`                              | `$XDG_DATA_HOME/pg-claude-code-recorder` | copies, index, journal, archives, socket                                                  |
+| `blockList.extra`                       | `[]`                                     | block-list additions                                                                      |
+| `settle.after`                          | `24h`                                    | quiet time before settling                                                                |
+| `remove.enable`                         | `false`                                  | removal from the Claude directory                                                         |
+| `remove.after`                          | `30d`                                    | quiet time before removal                                                                 |
+| `minFreeBytes`                          | 20 GiB                                   | free-space floor for low-space mode                                                       |
+| `sweep.interval`                        | `15m`                                    | backstop sweep of the Claude directory                                                    |
+| `feed.retention`                        | `14d`                                    | how long feed entries (and resets) are kept, by commit time                               |
+| `wait.max`, `wait.maxWaiters`           | `60s`, `256`                             | longest wait and waiter limit                                                             |
+| `held.recheck`, `held.alertAfter`       | `1h`, `3d`                               | re-check interval and the age that raises the alert                                       |
+| `remove.maxPerRun`, `remove.maxPerHour` | `50`, `200`                              | caps on removal, so a backlog is spread out                                               |
+| `controlStateDir`                       | `$XDG_STATE_HOME/pg-claude-control`      | the control mod's inbox and end files (a second watched root)                             |
+| `observability.enable`                  | follows the system option                | metrics, log source, alert rules, dashboard (in `darwin/modules/pg-claude-code-recorder`) |
+| `settings`                              | `{}`                                     | extra daemon keys merged into the rendered config                                         |
+| `configFile`                            | read-only                                | the rendered, build-time-checked config                                                   |
 
 `phillipgreenii.programs.pg-claude-control`: `enable` (defaults to the `claude-code` module's flag, so
 the plugin and the command it needs are on together; the repo's default-enabled-plugin parity check
@@ -1544,8 +1569,7 @@ bd fields alone.
 
 Mutation testing is not part of this plan. The tiers:
 
-- **Unit** (the commit and land gate): real SQLite, real files, real inodes and FSEvents under a
-  fixture `CLAUDE_CONFIG_DIR` in a temporary directory, the real `bash` for the listener, and no
+- **Unit** (the commit and land gate): real SQLite, real files and real inodes under a fixture `CLAUDE_CONFIG_DIR` in a temporary directory, the real `bash` for the listener, and no
   mock of any of them. Milliseconds per test, a package in seconds.
 - **Integration** (`//go:build integration`, its own nix check `pg-claude-code-recorder-integration-tests`,
   and a guard `TestUnitTierHasNoIntegrationTests`): the daemon over its socket, the real binary, a
@@ -1594,17 +1618,14 @@ Reuse the patterns of `claude-transcript/sessions_test.go` and `pg-ccaudit` `ing
   fake clock), the reset ordering, a cursor across a re-parse and beyond the head, and an
   `ErrCursorExpired` answer.
 - Settle and removal: the boundaries above; a live pid blocks; each check clause fails on its own;
-  a crash after each step converges with no byte lost; removal is off by default; a Conversation with
-  new writes after "pending" returns to Live; files belonging to no Conversation are never removed.
+  a crash after each step converges with no byte lost; removal is off by default; a Conversation with new writes after "pending" returns to Quiet; files belonging to no Conversation are never removed.
   A safety test snapshots the fixture Claude directory (paths, sizes, modification times, inodes)
   before and after a full run with the defaults, and proves nothing was deleted or modified.
 - Process facts: registry versions and the deletion time; `/exit` from history; a dead pid whose
   start time matches and a reused pid whose start time differs; `ESRCH` on registering a watch; the
   five end labels from evidence.
-- Watcher: a missed event recovered by `Rescan()`, and a real FSEvents burst of 1,000 appends ending
-  with copy offset equal to file size, polled to a deadline and never slept.
-- Listener and command: the `listen.sh` cases measured in the spike (heal, replace, burst, stale file,
-  parent-death cleanup) as automated tests against the real bash in a temporary directory, and the
+- Watcher: a missed event recovered by `Rescan()` through the seams. The real FSEvents burst of 1,000 appends (copy offset equal to file size, polled to a deadline and never slept) is in the integration tier.
+- Listener and command: the `listen.sh` cases measured in the spike as automated tests against the real bash in a temporary directory: reading a line and the burst of 200 are unit tests; heal, replace, stale file and parent-death cleanup wait for the one-second health check and run in the integration tier; and the
   command's exit codes 3, 4 and 5 against real files and FIFOs. `claude plugin validate` runs on the
   mod in a check.
 - Guards: the identifier allowlist (`MODULES` row and an allowlist file) and the tier split.
@@ -1617,18 +1638,17 @@ no copy byte was lost; the Claude directory is unchanged unless removal is enabl
 ## Suggested phases
 
 1. Watcher (FSEvents), copier with clone and byte modes, store, observations journal, coverage and
-   the command's `status` and `coverage`; no parsing (M). Acceptance: the steady-state CPU criterion.
+   the command's `status` and `coverage`; no parsing (M). Acceptance: the CPU criterion in "Watcher".
 2. Sources and parser for the transcript, subagent and history sources; query and search (L).
 3. The remaining sources, links, the change feed with wait, the wire contract and the cursor epoch,
    with the Go client package (M).
-4. Conversation and Process facts: registry versions, the exit watch, host binding, end evidence and
-   the end-file source (M).
+4. Conversation and Process facts: registry versions, the exit watch, host binding, end evidence, and the end-file source only if the end-reason reversal is approved (M).
 5. Settle with the manifest, the check and crash recovery (M).
 6. Removal off by default, extract, `held`, `doctor` and the dry run (M).
 7. Home Manager module, LaunchAgent, signals, alerts and dashboards (M). The daemon-down and
    free-space alerts gate the documentation of `remove.enable` (phase 6's switch).
 8. Control mod, listener, `pg-claude-control` and its Home Manager wiring (M). This phase is
-   independent of phases 1 to 7 and can run in parallel; its end files feed phase 4.
+   independent of phases 1 to 7 and can run in parallel; its end files feed phase 4 if the reversal is approved.
 9. Client moves, each its own bead: pa-monitor (policy only; closes `pg2-w6x9y`), ccpool and the
    pg-router handlers, ccaudit, beads-exporter; the pg-connector vocabulary bead; and the resume list
    as a pa-monitor command (S to L each).
@@ -1673,12 +1693,12 @@ Operator rulings (Phillip; verbatim text is on `pg2-6z56f`):
     inside Claude Code keeps reading hook stdin, its environment and its own Conversation's files; the
     target data-flow diagram; one daemon owns Transcript, Conversation and Process facts and is named
     `pg-claude-code-recorder`.
-17. 2026-10-30: a Conversation is open or closed, and resumable is a derived property.
-18. 2026-10-30: a Conversation records evidence of how it ended and clients derive the label; the five
+17. 2026-10-29 (bead R10): a Conversation is open or closed, and resumable is a derived property.
+18. 2026-10-29 (bead R11): a Conversation records evidence of how it ended and clients derive the label; the five
     labels and the "registry present at exit" crash rule stand; process history is a query.
-19. 2026-10-30: the recorder's Process scope is start, exit with registry state, and host binding;
+19. 2026-10-29 (bead R12): the recorder's Process scope is start, exit with registry state, and host binding;
     interpretations stay in pa-monitor.
-20. 2026-10-30: control of a running Claude goes through the mod and a command; no host adapter and no
+20. 2026-10-30 (bead R13): control of a running Claude goes through the mod and a command; no host adapter and no
     `pg-host`; stop is `run exit` with SIGTERM as the fallback; sender identity does not matter; the
     cmux sidebar leaves this tooling.
 
@@ -1705,7 +1725,7 @@ Agent's calls, for the operator to check:
     "healthy" thresholds (60 s lag, 3 days held).
 13. `run` is limited to an allowlist (`exit`, `clear`, `compact`); requests carry an `id` that the mod
     de-duplicates; `read` replies through a file.
-14. In clone mode, once Claude's originals are gone, the recorder compresses the clone into the archive.
+14. In clone mode, removal first writes and verifies an archive from the clone, so removal never relies on a clone alone.
 
 Awaiting a ruling (proposed in the 2026-10-28 and 2026-10-30 sessions, not yet answered):
 
@@ -1720,9 +1740,8 @@ Awaiting a ruling (proposed in the 2026-10-28 and 2026-10-30 sessions, not yet a
 
 ## Left to the builder
 
-- The database schema, copy file naming, chunk and fsync batching, and the sweep interval.
-- The wire framing, the query and feed request syntax inside the contract above, and the cursor
-  encoding behind `<epoch>:<sequence>`.
+- The database schema, copy file naming, and chunk and fsync batching.
+- The wire framing, the protocol version scheme (one integer that rises on a breaking change, the `protocolVersion` precedent in `packages/pg-connector/README.md`), the request syntax inside the contract above, and the cursor encoding behind `<epoch>:<sequence>`.
 - The archive file format and its one default compression, as long as it holds the manifest and every
   file byte-exact, can be read back by byte range, and can grow by segments. Tuning comes later.
 - Metric and log names, and the Linux supervision choice (unsupervised unless a unit is added).
