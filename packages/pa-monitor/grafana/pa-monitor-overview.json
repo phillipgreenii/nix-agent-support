@@ -20,6 +20,8 @@
           "uid": "prometheus"
         },
         "query": "label_values(pa_monitor_sessions_count, workspace_scope)",
+        "refresh": 2,
+        "allValue": ".*",
         "includeAll": true,
         "multi": true,
         "current": {
@@ -36,6 +38,8 @@
           "uid": "prometheus"
         },
         "query": "label_values(pa_monitor_sessions_count, plan_tier)",
+        "refresh": 2,
+        "allValue": ".*",
         "includeAll": true,
         "multi": true,
         "current": {
@@ -52,7 +56,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 0,
         "w": 24,
         "h": 1
       },
@@ -84,6 +88,7 @@
       "id": 102,
       "title": "Sessions errored (current)",
       "type": "stat",
+      "description": "Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero); see Authentication and Daemon connection for liveness.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -96,7 +101,7 @@
       },
       "targets": [
         {
-          "expr": "sum(pa_monitor_sessions_errored)",
+          "expr": "(sum(pa_monitor_sessions_errored)) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
           "legendFormat": "errored",
           "refId": "A"
         }
@@ -123,6 +128,7 @@
       "id": 103,
       "title": "Caffeinated",
       "type": "stat",
+      "description": "Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -182,6 +188,7 @@
       "id": 104,
       "title": "Auto Nudge",
       "type": "stat",
+      "description": "Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -249,7 +256,7 @@
       "gridPos": {
         "x": 0,
         "y": 8,
-        "w": 8,
+        "w": 12,
         "h": 7
       },
       "targets": [
@@ -270,30 +277,6 @@
       }
     },
     {
-      "id": 19,
-      "title": "Session state mix (now)",
-      "type": "piechart",
-      "description": "Current (instant) distribution of sessions across working | blocked | idle. Companion to the 'Sessions by state' time series.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 8,
-        "w": 8,
-        "h": 7
-      },
-      "targets": [
-        {
-          "expr": "sum by (state) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
-          "legendFormat": "{{state}}",
-          "instant": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
       "id": 32,
       "title": "Blocked by reason",
       "type": "timeseries",
@@ -303,9 +286,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 8,
-        "w": 8,
+        "w": 12,
         "h": 7
       },
       "targets": [
@@ -349,14 +332,14 @@
           "legendFormat": "__auto"
         },
         {
-          "expr": "pa_monitor_session_tokens",
+          "expr": "max by (session_id) (pa_monitor_session_tokens)",
           "format": "table",
           "instant": true,
           "refId": "B",
           "legendFormat": "__auto"
         },
         {
-          "expr": "pa_monitor_session_cost_usd",
+          "expr": "max by (session_id) (pa_monitor_session_cost_usd)",
           "format": "table",
           "instant": true,
           "refId": "C",
@@ -563,7 +546,7 @@
     },
     {
       "id": 2,
-      "title": "5h block usage vs cap",
+      "title": "5h block cost and usage",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -575,24 +558,51 @@
         "w": 12,
         "h": 7
       },
-      "description": "Cap-hit events appear in the 'Block limit hits (1d)' stat below and as a discrete event in 'API errors observed' when the daemon escalates a rate_limit kind. The timeseries itself plots cost_usd, which plateaus when the cap is reached.",
+      "description": "Cost (left axis, USD) and usage percentage (right axis, percent of cap) of the current 5h block, one series per plan_tier. Cap-hit events appear in the 'Block limit hits (range)' stat below and as a discrete event in 'API errors observed' when the daemon escalates a rate_limit kind. Not filtered by $scope.",
       "targets": [
         {
-          "expr": "sum by (block_id, plan_tier) (pa_monitor_block_cost_usd{plan_tier=~\"$plan_tier\"})",
-          "legendFormat": "{{block_id}} ({{plan_tier}})",
+          "expr": "max by (plan_tier) (pa_monitor_block_cost_usd{plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{plan_tier}} cost",
           "refId": "A"
+        },
+        {
+          "expr": "max by (plan_tier) (pa_monitor_block_usage_percentage{plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{plan_tier}} usage",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "min": 0
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 3,
-      "title": "Weekly usage vs cap",
+      "title": "Weekly cost and usage",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -604,25 +614,53 @@
         "w": 12,
         "h": 7
       },
-      "description": "Cap-hit events appear in the 'Week limit hits (7d)' stat below. The timeseries plots cost_usd, which plateaus when the weekly cap is reached.",
+      "description": "Cost (left axis, USD) and usage percentage (right axis, percent of cap) of the current week, one series per plan_tier. Cap-hit events appear in the 'Week limit hits (range)' stat below. Not filtered by $scope.",
       "targets": [
         {
-          "expr": "sum by (week_id, plan_tier) (pa_monitor_week_cost_usd{plan_tier=~\"$plan_tier\"})",
-          "legendFormat": "{{week_id}} ({{plan_tier}})",
+          "expr": "max by (plan_tier) (pa_monitor_week_cost_usd{plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{plan_tier}} cost",
           "refId": "A"
+        },
+        {
+          "expr": "max by (plan_tier) (pa_monitor_week_usage_percentage{plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{plan_tier}} usage",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "min": 0
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 4,
-      "title": "Block limit hits (1d)",
+      "title": "Block limit hits (range)",
       "type": "stat",
+      "description": "Block cap hits over the selected time range. Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -635,15 +673,17 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(pa_monitor_block_usage_limit_hits_total[1d]))",
+          "expr": "sum(increase(pa_monitor_block_usage_limit_hits_total[$__range]))",
+          "instant": true,
           "refId": "A"
         }
       ]
     },
     {
       "id": 5,
-      "title": "Week limit hits (7d)",
+      "title": "Week limit hits (range)",
       "type": "stat",
+      "description": "Weekly cap hits over the selected time range. Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -656,7 +696,8 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(pa_monitor_week_usage_limit_hits_total[7d]))",
+          "expr": "sum(increase(pa_monitor_week_usage_limit_hits_total[$__range]))",
+          "instant": true,
           "refId": "A"
         }
       ]
@@ -677,6 +718,7 @@
       "id": 9,
       "title": "API errors observed",
       "type": "timeseries",
+      "description": "API errors observed per interval, by kind. Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -689,14 +731,16 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (rate(pa_monitor_session_api_error_observed_total[5m]))",
+          "expr": "sum by (kind) (increase(pa_monitor_session_api_error_observed_total[$__rate_interval]))",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "unit": "short",
           "custom": {
+            "drawStyle": "bars",
             "stacking": {
               "mode": "normal"
             }
@@ -708,6 +752,7 @@
       "id": 10,
       "title": "Sessions currently errored (terminal)",
       "type": "timeseries",
+      "description": "Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -730,7 +775,7 @@
       "id": 7,
       "title": "Nudges sent by error_kind",
       "type": "timeseries",
-      "description": "Excludes empty error_kind (manual / non-error-triggered nudges) so the panel only renders error-driven activity.",
+      "description": "Excludes empty error_kind (manual / non-error-triggered nudges) so the panel only renders error-driven activity. Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -743,16 +788,22 @@
       },
       "targets": [
         {
-          "expr": "sum by (error_kind) (rate(pa_monitor_signal_sends_total{error_kind!=\"\"}[5m]))",
+          "expr": "sum by (error_kind) (rate(pa_monitor_signal_sends_total{error_kind!=\"\"}[$__rate_interval]))",
           "legendFormat": "{{error_kind}}",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no nudges (auto-resume disabled)"
+        }
+      }
     },
     {
       "id": 13,
       "title": "Nudges sent by source",
       "type": "timeseries",
+      "description": "Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -765,13 +816,14 @@
       },
       "targets": [
         {
-          "expr": "sum by (sources) (rate(pa_monitor_signal_sends_total[5m]))",
+          "expr": "sum by (sources) (rate(pa_monitor_signal_sends_total[$__rate_interval]))",
           "legendFormat": "{{sources}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "no nudges (auto-resume disabled)",
           "custom": {
             "stacking": {
               "mode": "normal"
@@ -784,7 +836,7 @@
       "id": 11,
       "title": "Stuck (blocked: usage_limit/error)",
       "type": "stat",
-      "description": "Sessions blocked on a machine-recoverable condition (blocker usage_limit or error). Pair with 'Auto-resume deferred' to tell 'broken' apart from 'deliberately waiting on a window reset'. Replaces the old kind=~unknown|server_error filter, which never matched rate_limit.",
+      "description": "Sessions blocked on a machine-recoverable condition (blocker usage_limit or error). Pair with 'Auto-resume deferred' to tell 'broken' apart from 'deliberately waiting on a window reset'. Replaces the old kind=~unknown|server_error filter, which never matched rate_limit. Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -797,15 +849,16 @@
       },
       "targets": [
         {
-          "expr": "sum(pa_monitor_sessions_count{state=\"blocked\", blocker=~\"usage_limit|error\"})",
+          "expr": "(sum(pa_monitor_sessions_count{state=\"blocked\", blocker=~\"usage_limit|error\"})) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
           "refId": "A"
         }
       ]
     },
     {
       "id": 12,
-      "title": "Nudges suppressed (1h)",
+      "title": "Nudges suppressed (range)",
       "type": "stat",
+      "description": "Nudges suppressed over the selected time range. Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -818,15 +871,17 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(pa_monitor_nudge_suppressed_total[1h]))",
+          "expr": "(sum(increase(pa_monitor_nudge_suppressed_total[$__range]))) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
+          "instant": true,
           "refId": "A"
         }
       ]
     },
     {
       "id": 15,
-      "title": "Caffeinate grace expirations (1h)",
+      "title": "Caffeinate grace expirations (range)",
       "type": "stat",
+      "description": "Caffeinate grace expirations over the selected time range. Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -839,7 +894,8 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(pa_monitor_caffeinate_grace_expirations_total[1h]))",
+          "expr": "(sum(increase(pa_monitor_caffeinate_grace_expirations_total[$__range]))) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
+          "instant": true,
           "legendFormat": "expirations",
           "refId": "A"
         }
@@ -849,7 +905,7 @@
       "id": 33,
       "title": "Auto-resume deferred (waiting on window)",
       "type": "stat",
-      "description": "Sessions where auto-resume is deliberately WAITING for a rate-limit window reset (pa_monitor_nudge_deferred, cause=window_pending). Distinguishes 'deliberately waiting' from 'broken' — a non-zero value explains why blocked/usage_limit sessions are not being nudged yet.",
+      "description": "Sessions where auto-resume is deliberately WAITING for a rate-limit window reset (pa_monitor_nudge_deferred, cause=window_pending). Distinguishes 'deliberately waiting' from 'broken' — a non-zero value explains why blocked/usage_limit sessions are not being nudged yet. Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -862,8 +918,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (cause) (pa_monitor_nudge_deferred)",
-          "legendFormat": "{{cause}}",
+          "expr": "(sum(pa_monitor_nudge_deferred)) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
+          "legendFormat": "deferred",
           "refId": "A"
         }
       ]
@@ -871,7 +927,8 @@
     {
       "id": 16,
       "title": "Nudge funnel (counts over range)",
-      "type": "timeseries",
+      "type": "bargauge",
+      "description": "Nudge counts over the selected time range: queued, sent, suppressed, send failed, dropped (no bridge). Not filtered by $scope/$plan_tier. Dropped (no bridge) reads 0 only while the daemon is exporting (liveness-gated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -886,30 +943,51 @@
         {
           "expr": "sum(increase(pa_monitor_nudge_queued_total[$__range]))",
           "legendFormat": "queued",
+          "instant": true,
           "refId": "A"
         },
         {
           "expr": "sum(increase(pa_monitor_signal_sends_total[$__range]))",
           "legendFormat": "sent",
+          "instant": true,
           "refId": "B"
         },
         {
           "expr": "sum(increase(pa_monitor_nudge_suppressed_total[$__range]))",
           "legendFormat": "suppressed",
+          "instant": true,
           "refId": "C"
         },
         {
           "expr": "sum(increase(pa_monitor_signal_send_failures_total[$__range]))",
           "legendFormat": "send failed",
+          "instant": true,
           "refId": "D"
+        },
+        {
+          "expr": "(sum(increase(pa_monitor_nudge_dropped_no_bridge_total[$__range]))) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
+          "legendFormat": "dropped (no bridge)",
+          "instant": true,
+          "refId": "E"
         }
-      ]
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no nudges (auto-resume disabled)"
+        }
+      }
     },
     {
       "id": 106,
-      "title": "Nudge send failures (1h)",
+      "title": "Nudge send failures (range)",
       "type": "stat",
-      "description": "Signaler.Send errors (e.g. cmux delivery failed) — a non-zero value means an auto-resume nudge was generated but never delivered.",
+      "description": "Signaler.Send errors (e.g. cmux delivery failed) over the selected time range — a non-zero value means an auto-resume nudge was generated but never delivered. Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -922,11 +1000,17 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(pa_monitor_signal_send_failures_total[1h]))",
+          "expr": "(sum(increase(pa_monitor_signal_send_failures_total[$__range]))) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
           "legendFormat": "send failures",
+          "instant": true,
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no nudges (auto-resume disabled)"
+        }
+      }
     },
     {
       "id": 17,
@@ -1019,7 +1103,7 @@
       "id": 22,
       "title": "Caffeinate rounds (by cause)",
       "type": "timeseries",
-      "description": "Caffeinate activations (pa_monitor_caffeinate_rounds_total) split by cause — a round is one off→on transition of the caffeinate manager (manual toggle vs agents_active).",
+      "description": "Caffeinate activations (pa_monitor_caffeinate_rounds_total) split by cause — a round is one off→on transition of the caffeinate manager (manual toggle vs agents_active). Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1032,7 +1116,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (cause) (increase(pa_monitor_caffeinate_rounds_total[5m]))",
+          "expr": "sum by (cause) (increase(pa_monitor_caffeinate_rounds_total[$__rate_interval]))",
           "legendFormat": "{{cause}}",
           "refId": "A"
         }
@@ -1040,9 +1124,9 @@
     },
     {
       "id": 23,
-      "title": "Context-limit hits (by model, 1h)",
+      "title": "Context-limit hits (by model, range)",
       "type": "timeseries",
-      "description": "Sessions that hit the model context window — Claude Code 'prompt is too long' (invalid_request) errors, counted via pa_monitor_session_context_limit_hits_total and split by model.",
+      "description": "Sessions that hit the model context window — Claude Code 'prompt is too long' (invalid_request) errors, counted via pa_monitor_session_context_limit_hits_total and split by model. Not filtered by $scope/$plan_tier. A liveness-gated zero series appears only while the daemon is exporting.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1055,7 +1139,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (model) (increase(pa_monitor_session_context_limit_hits_total[1h]))",
+          "expr": "(sum by (model) (increase(pa_monitor_session_context_limit_hits_total[$__range]))) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -1115,19 +1199,20 @@
       "id": 105,
       "type": "stat",
       "title": "Authentication",
+      "description": "Not filtered by $scope/$plan_tier. Reads 0 only while the daemon is exporting (liveness-gated zero); see Daemon connection for liveness.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 1,
         "w": 12,
         "h": 3
       },
       "targets": [
         {
-          "expr": "sum(pa_monitor_sessions_errored{kind=\"authentication_failed\", is_terminal=\"true\"}) or vector(0)",
+          "expr": "(sum(pa_monitor_sessions_errored{kind=\"authentication_failed\", is_terminal=\"true\"})) or (vector(0) and on() (max(pa_monitor_sessions_count) >= 0))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -1181,13 +1266,14 @@
       "id": 107,
       "type": "stat",
       "title": "Daemon connection",
+      "description": "Not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 1,
         "w": 12,
         "h": 3
       },
@@ -1262,9 +1348,9 @@
     },
     {
       "id": 201,
-      "title": "Poll tick duration (p95) — emit only",
+      "title": "Poll tick duration (p95)",
       "type": "timeseries",
-      "description": "p95 duration of the EMIT tick only (Load DerivedState + burn-rate sample + label pipeline + aggregate.Build + DB persist + gRPC publish + nudge), in milliseconds — the corpus Scan no longer runs here (it moved to the producer goroutine). A sharp drop across the Phase-3 rollout is the near-idle proof. Account-global metric — not filtered by $scope/$plan_tier.",
+      "description": "p95 duration of the EMIT tick only (Load DerivedState + burn-rate sample + label pipeline + aggregate.Build + DB persist + gRPC publish + nudge), in milliseconds — the corpus Scan no longer runs here (it moved to the producer goroutine). Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1277,7 +1363,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pa_monitor_poll_tick_duration_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pa_monitor_poll_tick_duration_bucket[$__rate_interval])))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -1305,7 +1391,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,phase) (rate(pa_monitor_poll_phase_duration_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le,phase) (rate(pa_monitor_poll_phase_duration_bucket[$__rate_interval])))",
           "legendFormat": "{{phase}}",
           "refId": "A"
         }
@@ -1333,7 +1419,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,mode) (rate(pa_monitor_transcript_scan_duration_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le,mode) (rate(pa_monitor_transcript_scan_duration_bucket[$__rate_interval])))",
           "legendFormat": "{{mode}}",
           "refId": "A"
         }
@@ -1361,12 +1447,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (mode) (rate(pa_monitor_transcript_scan_files_total[5m]))",
+          "expr": "sum by (mode) (rate(pa_monitor_transcript_scan_files_total[$__rate_interval]))",
           "legendFormat": "{{mode}} files/sec",
           "refId": "A"
         },
         {
-          "expr": "sum by (mode) (rate(pa_monitor_transcript_scan_bytes_total[5m]))",
+          "expr": "sum by (mode) (rate(pa_monitor_transcript_scan_bytes_total[$__rate_interval]))",
           "legendFormat": "{{mode}} bytes/sec",
           "refId": "B"
         }
@@ -1436,7 +1522,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,kind) (rate(pa_monitor_subprocess_duration_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le,kind) (rate(pa_monitor_subprocess_duration_bucket[$__rate_interval])))",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
@@ -1464,7 +1550,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (rate(pa_monitor_subprocess_spawns_total{kind!=\"git_branch\"}[5m]))",
+          "expr": "sum by (kind) (rate(pa_monitor_subprocess_spawns_total{kind!=\"git_branch\"}[$__rate_interval]))",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
@@ -1486,7 +1572,7 @@
       "id": 211,
       "title": "gRPC server call duration (p95, seconds)",
       "type": "timeseries",
-      "description": "p95 gRPC server call duration in SECONDS (distinct from the millisecond pa_monitor panels above) — emitted by otelgrpc v0.69.0 under the new semconv as rpc.server.call.duration. Account-global metric — not filtered by $scope/$plan_tier. Values are in seconds; the collector does NOT append a unit suffix, so the Prometheus series is rpc_server_call_duration (verified live against the otelcol→Prometheus stack, pg2-k1zcd).",
+      "description": "p95 gRPC server call duration in SECONDS (distinct from the millisecond pa_monitor panels above) — emitted by otelgrpc v0.69.0 under the new semconv as rpc.server.call.duration. Account-global metric — not filtered by $scope/$plan_tier. Streaming methods (BridgeChannel, WatchState) are excluded because their duration is the stream lifetime. Values are in seconds; the collector does NOT append a unit suffix, so the Prometheus series is rpc_server_call_duration (verified live against the otelcol→Prometheus stack, pg2-k1zcd).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1499,7 +1585,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,rpc_method) (rate(rpc_server_call_duration_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le,rpc_method) (rate(rpc_server_call_duration_bucket{rpc_method!~\".*/(BridgeChannel|WatchState)\"}[$__rate_interval])))",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -1527,7 +1613,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (rpc_response_status_code) (rate(rpc_server_call_duration_count[5m]))",
+          "expr": "sum by (rpc_response_status_code) (rate(rpc_server_call_duration_count[$__rate_interval]))",
           "legendFormat": "{{rpc_response_status_code}}",
           "refId": "A"
         }
@@ -1562,7 +1648,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,signal) (rate(pa_monitor_otel_export_duration_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le,signal) (rate(pa_monitor_otel_export_duration_bucket[$__rate_interval])))",
           "legendFormat": "{{signal}}",
           "refId": "A"
         }
@@ -1590,11 +1676,36 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome, signal) (rate(pa_monitor_otel_export_attempts_total[5m]))",
+          "expr": "sum by (outcome, signal) (rate(pa_monitor_otel_export_attempts_total[$__rate_interval]))",
           "legendFormat": "{{signal}} {{outcome}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum by (signal) (rate(pa_monitor_otel_export_attempts_total{outcome=\"failure\"}[$__rate_interval])) / sum by (signal) (rate(pa_monitor_otel_export_attempts_total[$__rate_interval]))",
+          "legendFormat": "{{signal}} failure ratio",
+          "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "id": 223,
