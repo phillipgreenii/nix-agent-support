@@ -5207,6 +5207,7 @@
                   }
                   ''
                     export HOME="$TMPDIR"
+                    export BATS_TEST_TIMEOUT=60
                     export PGCC_LISTEN=${src}/claude-marketplace/pg-claude-control/scripts/listen.sh
                     bats --verbose-run ${src}/claude-marketplace/pg-claude-control/tests/listen.bats
                     touch $out

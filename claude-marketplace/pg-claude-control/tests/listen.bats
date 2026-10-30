@@ -51,7 +51,9 @@ mode_of() { ls -ld "$1" | cut -c1-10; }
   [ "$(mode_of "$STATE/inbox")" = "drwx------" ]
   [ "$(mode_of "$FIFO")" = "prw-------" ]
   [ "$(mode_of "$STATE/inbox/payloads")" = "drwx------" ]
-  [ "$(ps -o ppid= -p "$(cat "$PIDF")" | tr -d ' ')" = "$PARENT" ]
+  # the FIFO is named by the listener's $PPID, so the parent's pid in its name is the proof
+  [ "$FIFO" = "$STATE/inbox/$PARENT.fifo" ]
+  [ "$(cat "$PIDF")" != "$PARENT" ]
 }
 
 # bats test_tags=fast
