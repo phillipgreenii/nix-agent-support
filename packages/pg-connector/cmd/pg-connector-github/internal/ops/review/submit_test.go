@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,6 +14,8 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/github"
 	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
+	pgstore "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -337,30 +338,53 @@ func (f *fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) er
 	return nil
 }
 
-// submitFixture is the review_submit handler over a fakeHost with a sidecar and
-// lock in a temp directory and a fake engine.
+// submitFixture is the review_submit handler over a fakeHost with a sidecar in a
+// temp store and a fake engine.
 type submitFixture struct {
 	t      *testing.T
 	host   *fakeHost
 	gh     *fakeGH
 	eng    *fakeEngine
 	handle scriptout.OpHandler
-	store  pgposted.Store
-	lock   pgposted.Locker
+	store  *sidecar.Store
+	db     *pgstore.Store
+}
+
+// newSidecar opens a fresh temp store and the posted-review sidecar over it.
+func newSidecar(t *testing.T) (*sidecar.Store, *pgstore.Store) {
+	t.Helper()
+	db, _, err := pgstore.Open(filepath.Join(t.TempDir(), "store.sqlite"), pgstore.Options{Synchronous: "OFF"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s, err := sidecar.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, db
+}
+
+// sidecarRows is the number of records in the sidecar.
+func (f *submitFixture) sidecarRows() int {
+	f.t.Helper()
+	var n int
+	if err := f.db.DB().QueryRow(`SELECT count(*) FROM posted_review`).Scan(&n); err != nil {
+		f.t.Fatal(err)
+	}
+	return n
 }
 
 func newSubmitFixture(t *testing.T) *submitFixture {
 	t.Helper()
-	root := t.TempDir()
 	f := &submitFixture{
-		t:     t,
-		host:  newFakeHost(headA),
-		eng:   &fakeEngine{},
-		store: pgposted.Store{Dir: filepath.Join(root, "posted")},
-		lock:  pgposted.Locker{Dir: filepath.Join(root, "locks"), Wait: 100 * time.Millisecond, Poll: 5 * time.Millisecond},
+		t:    t,
+		host: newFakeHost(headA),
+		eng:  &fakeEngine{},
 	}
+	f.store, f.db = newSidecar(t)
 	f.gh = &fakeGH{host: f.host}
-	f.handle = Handler(Deps{Engine: f.eng, Provider: f.gh, Store: f.store, Locker: f.lock})
+	f.handle = Handler(Deps{Engine: f.eng, Provider: f.gh, Store: f.store})
 	return f
 }
 
@@ -398,7 +422,7 @@ func (f *submitFixture) mustSubmit(req pr.ReviewSubmitRequest) pr.ReviewSubmitRe
 
 func (f *submitFixture) sidecar() pgposted.State {
 	f.t.Helper()
-	st, err := f.store.Load("foo", "bar", 42)
+	st, err := f.store.Load(context.Background(), "foo", "bar", 42)
 	if err != nil {
 		f.t.Fatalf("load sidecar: %v", err)
 	}
@@ -499,7 +523,7 @@ func TestSubmitNoChangeCreatesNoReview(t *testing.T) {
 	fp := pointFP("main.go", 12, "rename x")
 	st := pgposted.State{}
 	st.AddFingerprints(fp)
-	if err := f.store.Save("foo", "bar", 42, st); err != nil {
+	if err := f.store.Save(context.Background(), "foo", "bar", 42, st); err != nil {
 		t.Fatal(err)
 	}
 	// The sidecar remembers the comment, the host holds nothing: the operator
@@ -639,7 +663,7 @@ func TestSubmitBodyDispositions(t *testing.T) {
 			if c.sidecar {
 				st := pgposted.State{}
 				st.AddBodyHead(headA)
-				if err := f.store.Save("foo", "bar", 42, st); err != nil {
+				if err := f.store.Save(context.Background(), "foo", "bar", 42, st); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -910,8 +934,8 @@ func TestSubmitHeadMismatchUnderLockWritesNothing(t *testing.T) {
 		}
 	}
 	f.untouched()
-	if _, statErr := os.Stat(filepath.Join(f.store.Dir)); statErr == nil {
-		t.Errorf("the sidecar must not be created by a refused run")
+	if n := f.sidecarRows(); n != 0 {
+		t.Errorf("a refused run must record nothing, the sidecar has %d rows", n)
 	}
 }
 
@@ -1155,10 +1179,8 @@ func TestSubmitFailedReReadRecordsNothing(t *testing.T) {
 	if !strings.Contains(err.Error(), "could not be confirmed") {
 		t.Errorf("err = %q", err)
 	}
-	if _, statErr := os.Stat(f.store.Dir); statErr == nil {
-		if st := f.sidecar(); len(st.Fingerprints) != 0 || len(st.BodyHeads) != 0 || st.LastAppend != nil {
-			t.Fatalf("no entry may be written: %+v", st)
-		}
+	if st := f.sidecar(); len(st.Fingerprints) != 0 || len(st.BodyHeads) != 0 || st.LastAppend != nil {
+		t.Fatalf("no entry may be written: %+v", st)
 	}
 }
 
@@ -1184,7 +1206,7 @@ func TestSubmitDismissedCommentIsNotWrittenAgain(t *testing.T) {
 	fp := pointFP("main.go", 3, "x")
 	st := pgposted.State{}
 	st.AddFingerprints(fp)
-	if err := f.store.Save("foo", "bar", 42, st); err != nil {
+	if err := f.store.Save(context.Background(), "foo", "bar", 42, st); err != nil {
 		t.Fatal(err)
 	}
 	res := f.mustSubmit(req("", point("main.go", 3, "x"), point("main.go", 9, "y")))
@@ -1196,30 +1218,7 @@ func TestSubmitDismissedCommentIsNotWrittenAgain(t *testing.T) {
 	}
 }
 
-func TestSubmitLockIsHeldForTheRun(t *testing.T) {
-	f := newSubmitFixture(t)
-	held, err := f.lock.Acquire("foo", "bar", 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.submit(req("", point("main.go", 3, "x")))
-	isCode(t, err, scriptout.ErrUnavailable)
-	if f.host.reads != 0 {
-		t.Errorf("nothing may be read without the lock; reads = %d", f.host.reads)
-	}
-	if err := held.Release(); err != nil {
-		t.Fatal(err)
-	}
-	f.mustSubmit(req("", point("main.go", 3, "x")))
-	// The lock is released after the run: a second acquire succeeds at once.
-	k, err := f.lock.Acquire("foo", "bar", 42)
-	if err != nil {
-		t.Fatalf("the lock must be released after the run: %v", err)
-	}
-	_ = k.Release()
-}
-
-func TestSubmitWithoutAStateDirectoryIsUnavailable(t *testing.T) {
+func TestSubmitWithoutASidecarIsUnavailable(t *testing.T) {
 	gh := &fakeGH{host: newFakeHost(headA)}
 	h := Handler(Deps{Engine: &fakeEngine{}, Provider: gh})
 	_, err := callHandler(t, h, context.Background(), req("", point("main.go", 3, "x")))
@@ -1228,17 +1227,12 @@ func TestSubmitWithoutAStateDirectoryIsUnavailable(t *testing.T) {
 
 func TestSubmitCorruptSidecarWritesNothing(t *testing.T) {
 	f := newSubmitFixture(t)
-	path, err := f.store.Path("foo", "bar", 42)
-	if err != nil {
+	if _, err := f.db.DB().Exec(
+		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('foo', 'bar', 42, '{not json', 1)`,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.submit(req("", point("main.go", 3, "x")))
+	_, err := f.submit(req("", point("main.go", 3, "x")))
 	isCode(t, err, scriptout.ErrUnavailable)
 	f.untouched()
 }
@@ -1246,14 +1240,12 @@ func TestSubmitCorruptSidecarWritesNothing(t *testing.T) {
 // TestSubmitSidecarSaveFailureIsAnError: the content reached the host but the
 // sidecar could not be saved; the retry converges through the markers.
 func TestSubmitSidecarSaveFailureIsAnError(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("directory permissions do not bind root")
-	}
 	f := newSubmitFixture(t)
-	if err := os.MkdirAll(f.store.Dir, 0o500); err != nil {
+	// Reads still work; every insert is refused, as a full disk would.
+	if _, err := f.db.DB().Exec(`CREATE TRIGGER refuse_posted BEFORE INSERT ON posted_review
+		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(f.store.Dir, 0o700) })
 	_, err := f.submit(req("", point("main.go", 3, "x")))
 	isCode(t, err, scriptout.ErrUnavailable)
 	if !strings.Contains(err.Error(), "sidecar") {
@@ -1263,7 +1255,7 @@ func TestSubmitSidecarSaveFailureIsAnError(t *testing.T) {
 		t.Fatalf("the content did reach the host: %+v", f.host.pending)
 	}
 	// Once the sidecar is writable again the identical request converges.
-	if err := os.Chmod(f.store.Dir, 0o700); err != nil {
+	if _, err := f.db.DB().Exec(`DROP TRIGGER refuse_posted`); err != nil {
 		t.Fatal(err)
 	}
 	res := f.mustSubmit(req("", point("main.go", 3, "x")))

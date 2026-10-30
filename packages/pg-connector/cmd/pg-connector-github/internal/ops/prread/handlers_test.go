@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,9 +16,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/pending"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/prfacts"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -423,8 +426,16 @@ func equalJSON(t *testing.T, a, b any) bool {
 }
 
 func TestReviewPendingTakesLastAppendFromTheSidecarView(t *testing.T) {
-	store := posted.Store{Dir: t.TempDir()}
-	if err := store.Save("octo", "widgets", 42, posted.State{LastAppend: &posted.LastAppend{At: "2026-10-13T11:00:00Z", Added: 2, Head: "head0"}}); err != nil {
+	st, _, err := store.Open(filepath.Join(t.TempDir(), "state.sqlite3"), store.Options{Synchronous: "OFF"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	store, err := sidecar.Open(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(context.Background(), "octo", "widgets", 42, posted.State{LastAppend: &posted.LastAppend{At: "2026-10-13T11:00:00Z", Added: 2, Head: "head0"}}); err != nil {
 		t.Fatal(err)
 	}
 	eng := &fakeEngine{res: pendingResult(t, cannedSummary(), storedPending(t))}

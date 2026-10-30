@@ -5,6 +5,7 @@ package serve_test
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,9 +69,10 @@ func submitArgs() map[string]any {
 	}
 }
 
-// writeOpts is the daemon of a write test: the state home named by the daemon's
-// own XDG_STATE_HOME (the old backend's lookup), a fast scheduler poll and a
-// summary kept fresh for an hour.
+// writeOpts is the daemon of a write test: the legacy home named by the daemon's
+// own XDG_STATE_HOME (where the one-time import looks for the old backend's
+// files; none exist here), a fast scheduler poll and a summary kept fresh for an
+// hour.
 func writeOpts(stateHome string) servetest.Options {
 	return servetest.Options{
 		Before: seedWrites,
@@ -79,10 +81,33 @@ func writeOpts(stateHome string) servetest.Options {
 	}
 }
 
-// sidecarPath is where the old backend keeps the posted-review record of prW
-// under XDG_STATE_HOME.
-func sidecarStore(stateHome string) posted.Store {
-	return posted.Store{Dir: filepath.Join(stateHome, "pg-connector-pr-github", "posted")}
+// openStoreRW opens the daemon's store file for writing, alongside the running
+// daemon (WAL mode, a busy timeout).
+func openStoreRW(t *testing.T, d *servetest.Daemon) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+d.StorePath()+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// sidecarRecord reads the posted-review record of owner/repo#n from the
+// daemon's store, as the sidecar's Load does: ok is false when there is no row.
+func sidecarRecord(t *testing.T, d *servetest.Daemon, owner, repo string, n int) (st posted.State, raw string, ok bool) {
+	t.Helper()
+	err := d.OpenStore(t).QueryRow(`SELECT state FROM posted_review WHERE owner = ? AND repo = ? AND number = ?`, owner, repo, n).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return posted.State{}, "", false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		t.Fatalf("record %s: %v", raw, err)
+	}
+	return st, raw, true
 }
 
 func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPendingOnceAndReplaysAsNoChange(t *testing.T) {
@@ -147,19 +172,11 @@ func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPending
 		}
 	}
 
-	// The sidecar is where the old backend keeps it, under its file name, and
-	// records the comment's fingerprint and the append.
-	store := sidecarStore(stateHome)
-	path, err := store.Path("example-org", "widget", 21)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(stateHome, "pg-connector-pr-github", "posted", "example-org__widget__21.json"); path != want {
-		t.Fatalf("sidecar path = %s, want %s", path, want)
-	}
-	st, err := store.Load("example-org", "widget", 21)
-	if err != nil {
-		t.Fatalf("the sidecar is not readable: %v", err)
+	// The sidecar is a row of the daemon's store (posted_review) and records the
+	// comment's fingerprint and the append.
+	st, _, found := sidecarRecord(t, d, "example-org", "widget", 21)
+	if !found {
+		t.Fatal("the sidecar record is not in the store's posted_review table")
 	}
 	if len(st.Fingerprints) != 1 || st.Fingerprints[0] != commentFingerprint() || st.LastAppend == nil || st.LastAppend.Added != 1 {
 		t.Errorf("sidecar = %+v", st)
@@ -219,90 +236,16 @@ func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPending
 	}
 }
 
-func TestWrites_ASecondProcessHoldingTheSidecarLockDelaysTheWriteThenLetsItRun(t *testing.T) {
-	stateHome := t.TempDir()
-	d := servetest.NewDaemon(t, writeOpts(stateHome))
-	d.Start(t)
-	settlePRs(t, d, 4)
-
-	locker := posted.Locker{Dir: filepath.Join(stateHome, "pg-connector-pr-github", "locks"), Wait: 5 * time.Second, Poll: 20 * time.Millisecond}
-	lock, err := locker.Acquire("example-org", "widget", 21)
-	if err != nil {
-		t.Fatal(err)
-	}
-	released := false
-	defer func() {
-		if !released {
-			_ = lock.Release()
-		}
-	}()
-
-	// Within a short deadline the wait ends as unavailable, naming the lock, and
-	// nothing reached the host.
-	start := time.Now()
-	e := callErr(t, d, "pr", "review_submit", submitArgs(), 1500*time.Millisecond)
-	if e == nil || e.Code != "unavailable" || !strings.Contains(e.Message, "lock") {
-		t.Fatalf("a held lock within a short deadline: %+v, want unavailable naming the lock", e)
-	}
-	if took := time.Since(start); took > 4*time.Second {
-		t.Errorf("the lock wait ended after %s with a 1.5 s deadline", took)
-	}
-	if got := d.Shim.CountKind("create_review") + d.Shim.CountStdin("write_items"); got != 0 {
-		t.Errorf("a refused write reached the host (%d writes)", got)
-	}
-
-	// With time to wait, the call is delayed until the other process lets go,
-	// and then runs.
-	type outcome struct {
-		resp scriptout.Response
-		err  error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		resp, err := d.Call("pr", req("review_submit", submitArgs()), 30*time.Second)
-		done <- outcome{resp, err}
-	}()
-	select {
-	case o := <-done:
-		t.Fatalf("the write finished while the lock was held: %+v %v", o.resp, o.err)
-	case <-time.After(800 * time.Millisecond):
-	}
-	if got := d.Shim.CountKind("create_review"); got != 0 {
-		t.Fatalf("a write ran under a held lock")
-	}
-	released = true
-	if err := lock.Release(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case o := <-done:
-		if o.err != nil || o.resp.Error != nil {
-			t.Fatalf("after the release: %+v %v", o.resp.Error, o.err)
-		}
-		if res := decode[pr.ReviewSubmitResult](t, o.resp.Result); res.Status != pr.StatusPosted {
-			t.Errorf("after the release: %+v", res)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("the write did not run after the lock was released")
-	}
-}
-
 func TestWrites_ACorruptSidecarRefusesTheWriteAndIsNeverReplaced(t *testing.T) {
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
 	settlePRs(t, d, 4)
 
-	store := sidecarStore(stateHome)
-	path, err := store.Path("example-org", "widget", 21)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	const garbage = "{ this is not json"
-	if err := os.WriteFile(path, []byte(garbage), 0o600); err != nil {
+	if _, err := openStoreRW(t, d).Exec(
+		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('example-org', 'widget', 21, ?, 1)`, garbage,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,8 +256,9 @@ func TestWrites_ACorruptSidecarRefusesTheWriteAndIsNeverReplaced(t *testing.T) {
 	if got := d.Shim.CountKind("create_review") + d.Shim.CountStdin("write_items"); got != 0 {
 		t.Errorf("a refused write reached the host (%d writes)", got)
 	}
-	if raw, err := os.ReadFile(path); err != nil || string(raw) != garbage {
-		t.Errorf("the corrupt sidecar was replaced or removed: %q (%v)", raw, err)
+	var raw string
+	if err := d.OpenStore(t).QueryRow(`SELECT state FROM posted_review WHERE owner = 'example-org' AND repo = 'widget' AND number = 21`).Scan(&raw); err != nil || raw != garbage {
+		t.Errorf("the corrupt record was replaced or removed: %q (%v)", raw, err)
 	}
 	// review_pending is local bookkeeping's reader: a corrupt sidecar only hides
 	// last_append, it never fails the read.
@@ -324,30 +268,81 @@ func TestWrites_ACorruptSidecarRefusesTheWriteAndIsNeverReplaced(t *testing.T) {
 	}
 }
 
-func TestWrites_ReviewSubmitWithoutAStateHomeAnswersUnavailableAndTheDaemonRuns(t *testing.T) {
-	// No XDG_STATE_HOME, HOME or posted_state_dir in the daemon's environment.
+func TestWrites_ALegacyImportThatCannotRunLeavesTheDaemonRunningWithNoMarkerAndWritesWork(t *testing.T) {
+	// No PG_CONNECTOR_PR_GITHUB_STATE_DIR, XDG_STATE_HOME or HOME in the daemon's
+	// environment: the import has no legacy home to read.
 	d := servetest.NewDaemon(t, servetest.Options{Before: seedWrites})
 	d.Start(t)
 	settlePRs(t, d, 4)
-	e := callErr(t, d, "pr", "review_submit", submitArgs(), 20*time.Second)
-	if e == nil || e.Code != "unavailable" {
-		t.Fatalf("with no state home review_submit must answer unavailable: %+v", e)
-	}
-	if got := d.Shim.CountKind("create_review") + d.Shim.CountStdin("write_items"); got != 0 {
-		t.Errorf("a refused write reached the host (%d writes)", got)
-	}
 	var logged bool
 	for _, l := range d.DaemonLog(t) {
-		if l["change"] == "sidecar_unavailable" {
+		if l["change"] == "sidecar_import_failed" {
 			logged = true
 		}
 	}
 	if !logged {
-		t.Error("the missing state home must be in the structured log")
+		t.Error("a failed import must be in the structured log")
 	}
-	// The reads are unaffected.
-	callOK(t, d, "pr", "review_pending", map[string]any{"id": prW.Ref()})
+	var n int
+	if err := d.OpenStore(t).QueryRow(`SELECT count(*) FROM store_meta WHERE key = 'posted_import_v1'`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("a failed import wrote a marker: count %d (%v)", n, err)
+	}
+	// The daemon runs and the write path works: the record goes to the store.
+	res := decode[pr.ReviewSubmitResult](t, callOK(t, d, "pr", "review_submit", submitArgs()))
+	if res.Status != pr.StatusPosted {
+		t.Fatalf("review_submit with no legacy home = %+v, want posted", res)
+	}
+	if st, _, found := sidecarRecord(t, d, "example-org", "widget", 21); !found || len(st.Fingerprints) != 1 {
+		t.Errorf("sidecar = %+v found=%v", st, found)
+	}
 	callOK(t, d, "pr", "show", map[string]any{"id": prA.Ref()})
+}
+
+// The live check of the start-up import: a daemon started with the legacy home
+// named by its own environment brings the old backend's file into the store,
+// and the review-submit path reads it (a comment the legacy record holds as
+// posted, which is nowhere on the host, is classified dismissed and never
+// written).
+func TestWrites_ALegacySidecarFileIsImportedAtStartAndReadByReviewSubmit(t *testing.T) {
+	legacy := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(legacy, "posted"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(legacy, "posted", "example-org__widget__21.json")
+	body := `{"version":1,"fingerprints":["` + commentFingerprint() + `"],"body_heads":[]}`
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := servetest.NewDaemon(t, servetest.Options{Before: seedWrites, Hooks: "poll_interval=50ms"})
+	d.SetEnv("PG_CONNECTOR_PR_GITHUB_STATE_DIR", legacy)
+	d.Start(t)
+	settlePRs(t, d, 4)
+
+	if _, raw, found := sidecarRecord(t, d, "example-org", "widget", 21); !found || raw != body {
+		t.Fatalf("the legacy record was not imported as-is: %q found=%v", raw, found)
+	}
+	res := decode[pr.ReviewSubmitResult](t, callOK(t, d, "pr", "review_submit", submitArgs()))
+	if res.Dismissed != 1 || res.Added != 0 || res.Status != pr.StatusNoChange {
+		t.Errorf("review_submit = %+v, want the imported record to dismiss the comment (nothing added)", res)
+	}
+	if got := d.Shim.CountKind("create_review") + d.Shim.CountStdin("write_items"); got != 0 {
+		t.Errorf("a dismissed comment reached the host (%d writes)", got)
+	}
+	if b, err := os.ReadFile(file); err != nil || string(b) != body {
+		t.Errorf("the legacy file changed: %q (%v)", b, err)
+	}
+
+	// A restart does not import again: a record deleted by hand stays deleted.
+	if _, err := openStoreRW(t, d).Exec(`DELETE FROM posted_review`); err != nil {
+		t.Fatal(err)
+	}
+	if code := servetest.StopDaemon(t, d); code != 0 {
+		t.Fatalf("stop exit = %d; output: %s", code, d.Stderr())
+	}
+	d.Start(t)
+	if _, _, found := sidecarRecord(t, d, "example-org", "widget", 21); found {
+		t.Error("a second start re-imported the legacy file")
+	}
 }
 
 func TestWrites_SamePRWritesSerializeDifferentPRsRunInParallelAndTheWaitStaysInsideTheDeadline(t *testing.T) {
@@ -444,8 +439,8 @@ func TestWrites_ADaemonKilledMidWriteAndTheRequestRetriedLeavesNoDuplicateCommen
 		return err == nil && strings.Contains(string(raw), "pg-fp:"+commentFingerprint())
 	})
 	// The killed run recorded nothing in the sidecar.
-	if st, err := sidecarStore(stateHome).Load("example-org", "widget", 21); err != nil || len(st.Fingerprints) != 0 {
-		t.Fatalf("a killed run's sidecar = %+v (%v), want nothing recorded", st, err)
+	if st, _, found := sidecarRecord(t, d, "example-org", "widget", 21); found && len(st.Fingerprints) != 0 {
+		t.Fatalf("a killed run's sidecar = %+v, want nothing recorded", st)
 	}
 
 	// The retry finds the comment by its marker and writes nothing.
@@ -505,8 +500,8 @@ func TestWrites_SIGTERMDuringAnInFlightWriteWaitsForItToFinishBeforeExit(t *test
 	}
 	// The record of the finished write is on disk, and a second serve starts
 	// cleanly on the same state directory.
-	if st, err := sidecarStore(stateHome).Load("example-org", "widget", 21); err != nil || len(st.Fingerprints) != 1 {
-		t.Errorf("sidecar after the drain = %+v (%v)", st, err)
+	if st, _, found := sidecarRecord(t, d, "example-org", "widget", 21); !found || len(st.Fingerprints) != 1 {
+		t.Errorf("sidecar after the drain = %+v found=%v", st, found)
 	}
 	d.Start(t)
 	callOK(t, d, "pr", "review_pending", map[string]any{"id": prW.Ref()})

@@ -3,8 +3,6 @@
 package serve_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -268,13 +266,9 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedDataAndHidesOlderAppends(
 	if before.Review == nil || before.Review.LastAppend == nil {
 		t.Fatalf("fixture: review_pending shows the last append: %+v", before)
 	}
-	sidecar, err := sidecarStore(stateHome).Path("example-org", "widget", 21)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sidecarBefore, err := os.ReadFile(sidecar)
-	if err != nil {
-		t.Fatal(err)
+	_, sidecarBefore, found := sidecarRecord(t, d, "example-org", "widget", 21)
+	if !found {
+		t.Fatal("fixture: no sidecar record")
 	}
 	mineFetched := func() int64 {
 		var at int64
@@ -303,12 +297,8 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedDataAndHidesOlderAppends(
 	if after.Review != nil && after.Review.LastAppend != nil {
 		t.Errorf("the previous viewer's last_append is still reported: %+v", after.Review.LastAppend)
 	}
-	// The sidecar files are never touched by the flush: they are the source of
-	// truth the old binary shares.
-	if raw, err := os.ReadFile(sidecar); err != nil || string(raw) != string(sidecarBefore) {
-		t.Errorf("the sidecar changed on a viewer change: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(stateHome, "pg-connector-pr-github", "posted")); err != nil {
-		t.Errorf("the sidecar directory is gone: %v", err)
+	// The sidecar record is never touched by the flush.
+	if _, raw, found := sidecarRecord(t, d, "example-org", "widget", 21); !found || raw != sidecarBefore {
+		t.Errorf("the sidecar changed on a viewer change: %q found=%v", raw, found)
 	}
 }

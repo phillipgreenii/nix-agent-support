@@ -1,14 +1,9 @@
 package review
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -25,13 +20,14 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	pgstore "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // This file tests what the daemon adds around the copied backend: the handler's
-// contract, the write rules (serialization, the sidecar's cross-process lock,
+// contract, the write rules (serialization,
 // idempotent retries), the spend class and the invalidation of the pending group.
 
 func TestHandlerIsTheReviewSubmitOpOfThePRSchema(t *testing.T) {
@@ -136,11 +132,8 @@ func TestARunCutShortAndReplayedWritesOnlyWhatIsMissing(t *testing.T) {
 func TestADaemonKilledBeforeTheSidecarWasSavedLeavesNoDuplicateOnRetry(t *testing.T) {
 	f := newSubmitFixture(t)
 	f.mustSubmit(fiveComments())
-	path, err := f.store.Path("foo", "bar", 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(path); err != nil { // the record the killed process never wrote
+	// The record the killed process never wrote.
+	if _, err := f.db.DB().Exec(`DELETE FROM posted_review WHERE owner = 'foo' AND repo = 'bar' AND number = 42`); err != nil {
 		t.Fatal(err)
 	}
 	f.host.creates, f.host.updates, f.host.writes = nil, nil, nil
@@ -156,79 +149,54 @@ func TestADaemonKilledBeforeTheSidecarWasSavedLeavesNoDuplicateOnRetry(t *testin
 
 // ---- Sidecar: path, format, corruption ----
 
-func TestTheSidecarStaysAtTheOldPathAndTheOldLoaderReadsIt(t *testing.T) {
-	home := t.TempDir()
-	store, locker, err := sidecar.Open(nil, func(k string) string {
-		if k == pgposted.EnvStateDir {
-			return home
-		}
-		return ""
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestTheSidecarRecordLivesInTheStoreTable(t *testing.T) {
+	store, db := newSidecar(t)
 	host := newFakeHost(headA)
-	h := Handler(Deps{Engine: &fakeEngine{}, Provider: &fakeGH{host: host}, Store: store, Locker: locker})
+	h := Handler(Deps{Engine: &fakeEngine{}, Provider: &fakeGH{host: host}, Store: store})
 	res, err := callHandler(t, h, context.Background(), req("overall", point("main.go", 12, "rename x")))
 	if err != nil || res.Status != pr.StatusPosted {
 		t.Fatalf("result = %+v, %v", res, err)
 	}
-	want := filepath.Join(home, "posted", "foo__bar__42.json")
-	raw, err := os.ReadFile(want)
-	if err != nil {
-		t.Fatalf("the record is not at the old name: %v", err)
+	var raw string
+	if err := db.DB().QueryRow(`SELECT state FROM posted_review WHERE owner = 'foo' AND repo = 'bar' AND number = 42`).Scan(&raw); err != nil {
+		t.Fatalf("the record is not in posted_review: %v", err)
 	}
-	if !bytes.Contains(raw, []byte(pointFP("main.go", 12, "rename x"))) {
+	if !strings.Contains(raw, pointFP("main.go", 12, "rename x")) {
 		t.Errorf("record %s does not carry the fingerprint", raw)
 	}
-	// A loader built the way the old binary builds its own reads the record.
-	st, err := pgposted.Store{Dir: filepath.Join(home, "posted")}.Load("foo", "bar", 42)
+	st, err := store.Load(context.Background(), "foo", "bar", 42)
 	if err != nil || !st.Has(pointFP("main.go", 12, "rename x")) || st.LastAppend == nil || len(st.BodyHeads) != 1 {
-		t.Fatalf("old-format load = %+v, %v", st, err)
+		t.Fatalf("load = %+v, %v", st, err)
 	}
-	// The lock lives at its old name too, and is free after the run.
-	if _, err := os.Stat(filepath.Join(home, "locks", "foo__bar__42.lock")); err != nil {
-		t.Errorf("lock file: %v", err)
-	}
-	k, err := locker.Acquire("foo", "bar", 42)
-	if err != nil {
-		t.Fatalf("the lock must be released after the run: %v", err)
-	}
-	_ = k.Release()
 }
 
 // A corrupt sidecar stays a refusal: the message names it, nothing is written to
 // the host and the file is left exactly as it was.
 func TestACorruptSidecarIsRefusedAndLeftUntouched(t *testing.T) {
 	f := newSubmitFixture(t)
-	path, err := f.store.Path("foo", "bar", 42)
-	if err != nil {
+	const garbage = "{not json"
+	if _, err := f.db.DB().Exec(
+		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('foo', 'bar', 42, ?, 1)`, garbage,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	garbage := []byte("{not json")
-	if err := os.WriteFile(path, garbage, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.submit(req("", point("main.go", 3, "x")))
+	_, err := f.submit(req("", point("main.go", 3, "x")))
 	isCode(t, err, scriptout.ErrUnavailable)
 	if !strings.Contains(err.Error(), "posted-sidecar") || !strings.Contains(err.Error(), "nothing was written") ||
 		!strings.Contains(err.Error(), pgposted.ErrCorrupt.Error()) {
 		t.Errorf("err = %q, want the sidecar refusal naming the corruption", err)
 	}
 	f.untouched()
-	got, rerr := os.ReadFile(path)
-	if rerr != nil || !bytes.Equal(got, garbage) {
-		t.Errorf("the corrupt file was changed: %q, %v", got, rerr)
+	var got string
+	if rerr := f.db.DB().QueryRow(`SELECT state FROM posted_review WHERE owner = 'foo' AND repo = 'bar' AND number = 42`).Scan(&got); rerr != nil || got != garbage {
+		t.Errorf("the corrupt row was changed: %q, %v", got, rerr)
 	}
 	if len(f.eng.invalidations()) != 0 {
 		t.Errorf("a refused call invalidated %v", f.eng.invalidations())
 	}
 }
 
-// ---- Serialization: in the daemon and across processes ----
+// ---- Serialization inside the daemon ----
 
 // routedGH answers each PR from its own fake host and lets a test hook the
 // first lookup of a run.
@@ -314,21 +282,19 @@ type engineFixture struct {
 	rig    *groupsvctest.Rig
 	gh     *routedGH
 	handle scriptout.OpHandler
-	store  pgposted.Store
-	lock   pgposted.Locker
+	store  *sidecar.Store
+	db     *pgstore.Store
 }
 
 func newEngineFixture(t *testing.T) *engineFixture {
 	t.Helper()
-	root := t.TempDir()
 	e := &engineFixture{
-		t:     t,
-		rig:   groupsvctest.NewRig(t, groupsvctest.RigOptions{}),
-		gh:    &routedGH{},
-		store: pgposted.Store{Dir: filepath.Join(root, "posted")},
-		lock:  pgposted.Locker{Dir: filepath.Join(root, "locks"), Wait: 2 * time.Second, Poll: 5 * time.Millisecond},
+		t:   t,
+		rig: groupsvctest.NewRig(t, groupsvctest.RigOptions{}),
+		gh:  &routedGH{},
 	}
-	e.handle = Handler(Deps{Engine: e.rig.Svc, Provider: e.gh, Store: e.store, Locker: e.lock, Clock: e.rig.Clock})
+	e.store, e.db = newSidecar(t)
+	e.handle = Handler(Deps{Engine: e.rig.Svc, Provider: e.gh, Store: e.store, Clock: e.rig.Clock})
 	return e
 }
 
@@ -450,116 +416,6 @@ func TestWritesToOnePRNeverOverlapAndWritesToDifferentPRsRunInParallel(t *testin
 	})
 }
 
-// The child of the cross-process tests: this test binary re-executed as a
-// second process that holds the per-PR lock. flock(2) already excludes two open
-// file descriptions inside one process; the lock is the one the OLD binary takes
-// on the same file, so only another process shows the exclusion across them.
-const (
-	holderDirEnv   = "REVIEW_TEST_HOLDER_LOCK_DIR"
-	holderReadyEnv = "REVIEW_TEST_HOLDER_READY"
-)
-
-func TestHelperHoldsPRLock(t *testing.T) {
-	dir, ready := os.Getenv(holderDirEnv), os.Getenv(holderReadyEnv)
-	if dir == "" || ready == "" {
-		t.Skip("helper process only")
-	}
-	lock, err := pgposted.Locker{Dir: dir}.Acquire("foo", "bar", 42)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "holder: acquire:", err)
-		os.Exit(3)
-	}
-	if err := os.WriteFile(ready, []byte("locked"), 0o600); err != nil {
-		fmt.Fprintln(os.Stderr, "holder: ready file:", err)
-		os.Exit(4)
-	}
-	_, _ = io.Copy(io.Discard, os.Stdin) // held until the parent closes stdin
-	_ = lock.Release()
-	os.Exit(0)
-}
-
-// startHolder starts the child holding the lock of foo/bar#42 under dir and
-// returns once it does; release lets it go.
-func startHolder(t *testing.T, dir string) (release func()) {
-	t.Helper()
-	ready := filepath.Join(t.TempDir(), "ready")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperHoldsPRLock$")
-	cmd.Env = append(os.Environ(), holderDirEnv+"="+dir, holderReadyEnv+"="+ready)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	var once sync.Once
-	release = func() {
-		once.Do(func() {
-			_ = stdin.Close()
-			_ = cmd.Wait()
-		})
-	}
-	t.Cleanup(release)
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if _, err := os.Stat(ready); err == nil {
-			return release
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the holder process never took the lock: %s", stderr.String())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func TestASecondProcessHoldingTheSidecarLock(t *testing.T) {
-	t.Run("waits and then runs", func(t *testing.T) {
-		f := newSubmitFixture(t)
-		f.handle = Handler(Deps{Engine: f.eng, Provider: f.gh, Store: f.store, Locker: pgposted.Locker{Dir: f.lock.Dir, Wait: 10 * time.Second, Poll: 5 * time.Millisecond}})
-		release := startHolder(t, f.lock.Dir)
-		go func() {
-			time.Sleep(200 * time.Millisecond)
-			release()
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		start := time.Now()
-		res, err := f.submitCtx(ctx, req("", point("main.go", 3, "x")))
-		if err != nil || res.Status != pr.StatusPosted {
-			t.Fatalf("result = %+v, %v", res, err)
-		}
-		if time.Since(start) < 150*time.Millisecond {
-			t.Errorf("the call ran after %v: it did not wait for the other process", time.Since(start))
-		}
-	})
-
-	t.Run("gives up inside the deadline", func(t *testing.T) {
-		f := newSubmitFixture(t)
-		// A locker whose own wait is long: only the request's deadline can end it.
-		f.handle = Handler(Deps{Engine: f.eng, Provider: f.gh, Store: f.store, Locker: pgposted.Locker{Dir: f.lock.Dir, Wait: time.Minute, Poll: 5 * time.Millisecond}})
-		startHolder(t, f.lock.Dir)
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		defer cancel()
-		start := time.Now()
-		_, err := f.submitCtx(ctx, req("", point("main.go", 3, "x")))
-		isCode(t, err, scriptout.ErrUnavailable)
-		if !strings.Contains(err.Error(), "per-PR lock") {
-			t.Errorf("err = %q, want the lock refusal", err)
-		}
-		if elapsed := time.Since(start); elapsed > 5*time.Second {
-			t.Errorf("gave up after %v, want it inside the 300ms deadline", elapsed)
-		}
-		if f.host.reads != 0 {
-			t.Errorf("nothing may be read without the lock; reads = %d", f.host.reads)
-		}
-		if len(f.eng.invalidations()) != 0 {
-			t.Errorf("a refused call invalidated %v", f.eng.invalidations())
-		}
-	})
-}
-
 // ---- Invalidation and supersession ----
 
 func TestOnlyASuccessfulWriteInvalidatesThePendingGroup(t *testing.T) {
@@ -648,15 +504,13 @@ func (h *hookLog) count() int {
 func newEngineWithPR(t *testing.T) *engineWithPR {
 	t.Helper()
 	hooks := &hookLog{}
-	root := t.TempDir()
 	e := &engineFixture{
-		t:     t,
-		rig:   groupsvctest.NewRig(t, groupsvctest.RigOptions{OnGroupRefreshed: hooks.fire}),
-		gh:    &routedGH{},
-		store: pgposted.Store{Dir: filepath.Join(root, "posted")},
-		lock:  pgposted.Locker{Dir: filepath.Join(root, "locks"), Wait: 2 * time.Second, Poll: 5 * time.Millisecond},
+		t:   t,
+		rig: groupsvctest.NewRig(t, groupsvctest.RigOptions{OnGroupRefreshed: hooks.fire}),
+		gh:  &routedGH{},
 	}
-	e.handle = Handler(Deps{Engine: e.rig.Svc, Provider: e.gh, Store: e.store, Locker: e.lock, Clock: e.rig.Clock})
+	e.store, e.db = newSidecar(t)
+	e.handle = Handler(Deps{Engine: e.rig.Svc, Provider: e.gh, Store: e.store, Clock: e.rig.Clock})
 	w := &engineWithPR{engineFixture: e, hooks: hooks}
 	e.rig.Origin.Set("PR_1", groupsvctest.PR{Repo: "foo/bar", Number: 42, State: "OPEN", HeadRefOid: headA, BaseRefOid: baseTip, HeadRefName: "feature"})
 	e.rig.SeedSummary("PR_1", e.rig.Clock.Now())
@@ -869,7 +723,7 @@ func meteredFixture(t *testing.T, inner *fakeInner) (*submitFixture, *governor.G
 	}
 	runner := &metered.Runner{Inner: inner, Governor: gov, Feed: ratefeed.New(gov, inner, clock)}
 	f := newSubmitFixture(t)
-	f.handle = Handler(Deps{Engine: f.eng, Provider: metered.NewProvider(runner), Store: f.store, Locker: f.lock})
+	f.handle = Handler(Deps{Engine: f.eng, Provider: metered.NewProvider(runner), Store: f.store})
 	return f, gov, &events
 }
 

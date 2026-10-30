@@ -12,7 +12,7 @@ import (
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
@@ -26,6 +26,7 @@ var builtinMigrations = []Migration{
 	{Version: 6, Name: "consumer cursor per consumer", Apply: migrateV6},
 	{Version: 7, Name: "entity closed-at", Apply: migrateV7},
 	{Version: 8, Name: "alias folded-ref index", Apply: migrateV8},
+	{Version: 9, Name: "posted_review", Apply: migrateV9},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -411,6 +412,33 @@ func migrateV8(tx *sql.Tx, report func(string)) error {
 	report("indexing the alias table by folded reference")
 	if _, err := tx.Exec(schemaV8); err != nil {
 		return fmt.Errorf("create version 8 schema: %w", err)
+	}
+	return nil
+}
+
+// schemaV9 adds the daemon's posted-review sidecar: the per-PR record of which
+// review comments the daemon posted.
+//
+//   - posted_review: one row per (owner, repo, number). state is the daemon's
+//     posted.State as JSON, stored verbatim (the store never reads it);
+//     updated_at is Unix milliseconds of the last Save. The accessors live in
+//     the daemon's own sidecar package, which reads and writes the table
+//     through DB().
+const schemaV9 = `
+CREATE TABLE posted_review (
+    owner      TEXT    NOT NULL,
+    repo       TEXT    NOT NULL,
+    number     INTEGER NOT NULL,
+    state      TEXT    NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, repo, number)
+) WITHOUT ROWID;
+`
+
+func migrateV9(tx *sql.Tx, report func(string)) error {
+	report("creating the posted-review table")
+	if _, err := tx.Exec(schemaV9); err != nil {
+		return fmt.Errorf("create version 9 schema: %w", err)
 	}
 	return nil
 }

@@ -59,11 +59,9 @@ const reexecReason = "re-executes the test binary (os.Args[0]) as a helper proce
 // An entry that no longer matches a re-exec call fails the guard, so the list can
 // only shrink.
 var unitReexecAllowed = map[string]string{
-	"pkg/connectord/store/store_test.go":                            "crash-recovery test kills a re-executed writer mid-transaction; the dead process is the subject, the file also holds unit migration tests",
-	"cmd/pg-connector-github/internal/logs/rotation_test.go":        "cross-process rotation test: concurrent client processes are the subject, the file also holds unit rotation tests",
-	"cmd/pg-connector-issue-jira/internal/logs/rotation_test.go":    "cross-process rotation test: concurrent client processes are the subject, the file also holds unit rotation tests",
-	"cmd/pg-connector-github/internal/sidecar/lock_process_test.go": "cross-process sidecar lock tests: a second process holding the lock is the subject",
-	"cmd/pg-connector-github/internal/ops/review/daemon_test.go":    "cross-process sidecar lock test: a second process holding the lock is the subject, the file also holds unit tests",
+	"pkg/connectord/store/store_test.go":                         "crash-recovery test kills a re-executed writer mid-transaction; the dead process is the subject, the file also holds unit migration tests",
+	"cmd/pg-connector-github/internal/logs/rotation_test.go":     "cross-process rotation test: concurrent client processes are the subject, the file also holds unit rotation tests",
+	"cmd/pg-connector-issue-jira/internal/logs/rotation_test.go": "cross-process rotation test: concurrent client processes are the subject, the file also holds unit rotation tests",
 }
 
 // goMetaSubcommands are `go` invocations that only query metadata, never build.

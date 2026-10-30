@@ -115,13 +115,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/review"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/status"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/pending"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/prfacts"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/revalidate"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/runs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar/legacyimport"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
@@ -462,16 +462,23 @@ func (d *daemon) start(ctx context.Context) error {
 		return fmt.Errorf("query runner: %w", err)
 	}
 
-	// The posted-review sidecar, from the daemon's own environment. Without a
-	// state home the daemon runs on: review_submit answers unavailable and
-	// review_pending reports no last_append (both structs' zero values mean
-	// unconfigured).
-	pstore, plocker, serr := sidecar.Open(cfg, os.Getenv)
+	// The posted-review sidecar, a table of the daemon's own store. The legacy
+	// records of the old backend are imported once, here at start and before the
+	// write ops register, from the daemon's own environment. An import failure
+	// is logged loudly and the daemon runs on: no marker is written, so the next
+	// start retries.
+	pstore, serr := sidecar.Open(st)
 	if serr != nil {
 		d.log.Log("sidecar_unavailable", "error", serr.Error())
-		pstore, plocker = posted.Store{}, posted.Locker{}
+		pstore = nil
 	}
-	view := &pending.SidecarView{Store: pstore}
+	if pstore != nil {
+		d.importLegacySidecar(st)
+	}
+	view := &pending.SidecarView{}
+	if pstore != nil {
+		view.Store = pstore
+	}
 
 	// The metered runner and the Provider over it: every origin call of the
 	// groups and of the pass-through and write ops is admitted, limited and
@@ -601,7 +608,7 @@ func (d *daemon) start(ctx context.Context) error {
 		d.rt.Register("pr", op, h)
 	}
 	d.rt.Register("pr", review.OpName, review.Handler(review.Deps{
-		Engine: engine, Provider: prov, Store: pstore, Locker: plocker,
+		Engine: engine, Provider: prov, Store: pstore,
 	}))
 	for op, h := range passthrough.Handlers(passthrough.Deps{GH: prov}) {
 		d.rt.Register("pr", op, h)
@@ -689,6 +696,24 @@ func cutQueryKey(key string) (name, args string, adhoc bool) {
 
 // openStore opens the store with the gate showing the migration's progress, and
 // logs what Open did. A newer schema is a refusal.
+// importLegacySidecar brings the old backend's posted-review files into the
+// store, once (guarded by a store_meta marker). It reads the legacy home from the
+// daemon's own environment. A failure is logged loudly and does not stop the
+// daemon; no marker is written, so the next start retries.
+func (d *daemon) importLegacySidecar(st *store.Store) {
+	home := legacyimport.HomeFromEnv(os.Getenv)
+	res, err := legacyimport.Import(context.Background(), st, home)
+	if err != nil {
+		d.log.Log("sidecar_import_failed", "error", err.Error(), "legacy_home", home,
+			"note", "the legacy posted-review records were NOT imported; the next start retries")
+		fmt.Fprintf(os.Stderr, "pg-connector-github: ERROR: legacy posted-review import failed (the daemon continues, the next start retries): %v\n", err)
+		return
+	}
+	if !res.AlreadyDone {
+		d.log.Log("sidecar_imported", "legacy_home", home, "imported", res.Imported, "existing", res.Existing, "skipped", res.Skipped)
+	}
+}
+
 func (d *daemon) openStore() error {
 	path := filepath.Join(d.cfg.StateDir, config.StoreFileName)
 	prog := store.NewProgress()

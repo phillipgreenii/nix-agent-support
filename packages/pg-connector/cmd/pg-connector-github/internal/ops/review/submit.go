@@ -10,17 +10,12 @@
 // The handler parses and validates the request (the old validations and
 // messages), then calls Engine.SerializeWrite with the WHOLE remainder of the run,
 // so two writes to one PR never overlap inside the daemon while writes to
-// different PRs run in parallel. Inside it takes the posted-review sidecar's
-// cross-process flock (the old backend's lock file, at its current path, so a
-// rollback to the old binary and an operator editing a record by hand both stay
-// safe), runs the old steps (read the live head and every pending review, classify
-// every comment by its hidden fingerprint, create or append in failure-isolated
-// batches, re-read to decide what landed, record what landed in the sidecar) and
-// releases the lock before the closure returns.
-//
-// The lock wait is the locker's own wait cut to the request context's remaining
-// time, so a PR held by another process makes the call unavailable inside the
-// caller's deadline instead of outliving it.
+// different PRs run in parallel. Inside it runs the old steps (read the live head
+// and every pending review, classify every comment by its hidden fingerprint,
+// create or append in failure-isolated batches, re-read to decide what landed,
+// record what landed in the sidecar). There is no cross-process lock: the daemon
+// is single-instance (daemon.lock), the sidecar is a table of the daemon's own
+// store, and no sqlite transaction is held across the GitHub write.
 //
 // # Reads and spend
 //
@@ -57,7 +52,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
@@ -65,6 +59,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/metered"
 	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
@@ -160,11 +155,9 @@ var _ Provider = (*github.Provider)(nil)
 type Deps struct {
 	Engine   Engine
 	Provider Provider
-	// Store and Locker are the posted-review sidecar, from sidecar.Open at daemon
-	// start. The zero Locker has no directory, in which case the op answers
-	// unavailable rather than writing without the lock (as the old backend does).
-	Store  pgposted.Store
-	Locker pgposted.Locker
+	// Store is the posted-review sidecar, from sidecar.Open at daemon start; nil
+	// means unconfigured, in which case the op answers unavailable.
+	Store *sidecar.Store
 	// Clock is the time source for the result's as_of; nil means the system clock.
 	Clock governor.Clock
 }
@@ -188,7 +181,7 @@ func (h *handler) handle(ctx context.Context, args json.RawMessage) (any, error)
 	if err := scriptout.Decode(args, &a); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode review_submit args: "+err.Error())
 	}
-	if h.deps.Engine == nil || h.deps.Provider == nil {
+	if h.deps.Engine == nil || h.deps.Provider == nil || h.deps.Store == nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "review_submit: the daemon has no review writer wired")
 	}
 	res, err := h.submit(ctx, a)
@@ -259,17 +252,9 @@ func (h *handler) submit(ctx context.Context, req pr.ReviewSubmitRequest) (pr.Re
 	return res, runErr
 }
 
-// locked is the run under the in-daemon lock: it takes the sidecar's
-// cross-process lock, runs the old steps (starting over a bounded number of times
-// when the host changed under it) and releases the lock before returning.
+// locked is the run under the in-daemon lock: it runs the old steps, starting
+// over a bounded number of times when the host changed under it.
 func (h *handler) locked(ctx context.Context, run *submitRun) (pr.ReviewSubmitResult, error) {
-	lock, err := h.acquire(ctx, run)
-	if err != nil {
-		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrUnavailable,
-			fmt.Sprintf("review_submit: could not take the per-PR lock for %s: %v", run.req.ID, err))
-	}
-	defer func() { _ = lock.Release() }()
-
 	for range maxSubmitAttempts {
 		res, again, err := run.once(ctx)
 		if !again {
@@ -278,26 +263,6 @@ func (h *handler) locked(ctx context.Context, run *submitRun) (pr.ReviewSubmitRe
 	}
 	return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrUnavailable,
 		fmt.Sprintf("review_submit: the pending reviews of %s kept changing during the run; retry", run.req.ID))
-}
-
-// acquire takes the sidecar's cross-process lock, waiting no longer than the
-// request context allows: the locker's own wait cut to ctx's remaining time. The
-// locker is a value, so the copy's Wait is set without touching the shared one.
-func (h *handler) acquire(ctx context.Context, run *submitRun) (*pgposted.Lock, error) {
-	l := h.deps.Locker
-	wait := l.Wait
-	if wait <= 0 {
-		wait = pgposted.LockWait
-	}
-	if dl, ok := ctx.Deadline(); ok {
-		remaining := time.Until(dl)
-		if remaining <= 0 {
-			return nil, fmt.Errorf("%w: the request's deadline passed before the lock was tried", pgposted.ErrUnavailable)
-		}
-		wait = min(wait, remaining)
-	}
-	l.Wait = wait
-	return l.Acquire(run.owner, run.name, run.number)
 }
 
 // parsePRID parses the op's id convention "<owner>/<repo>#<number>" into repo and

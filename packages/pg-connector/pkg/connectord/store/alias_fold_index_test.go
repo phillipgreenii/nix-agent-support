@@ -53,13 +53,13 @@ func assertNoAliasScan(t *testing.T, plan string) {
 	}
 }
 
-func TestLadderRung8IsNamedAndLast(t *testing.T) {
+func TestLadderRung8IsNamed(t *testing.T) {
 	ladder := BuiltinMigrations()
-	if len(ladder) != aliasFoldVersion || SchemaVersion != aliasFoldVersion {
-		t.Fatalf("the ladder has %d rungs and SchemaVersion = %d, want %d of each", len(ladder), SchemaVersion, aliasFoldVersion)
+	if len(ladder) < aliasFoldVersion || SchemaVersion < aliasFoldVersion {
+		t.Fatalf("the ladder has %d rungs and SchemaVersion = %d, want at least %d of each", len(ladder), SchemaVersion, aliasFoldVersion)
 	}
-	if last := ladder[aliasFoldVersion-1]; last.Version != aliasFoldVersion || last.Name != "alias folded-ref index" {
-		t.Errorf("last rung = %d %q, want %d %q", last.Version, last.Name, aliasFoldVersion, "alias folded-ref index")
+	if rung := ladder[aliasFoldVersion-1]; rung.Version != aliasFoldVersion || rung.Name != "alias folded-ref index" {
+		t.Errorf("rung 8 = %d %q, want %d %q", rung.Version, rung.Name, aliasFoldVersion, "alias folded-ref index")
 	}
 	if want := "CREATE INDEX alias_ref_fold ON alias (lower(ref));"; !strings.Contains(schemaV8, want) {
 		t.Errorf("schemaV8 lacks %q", want)

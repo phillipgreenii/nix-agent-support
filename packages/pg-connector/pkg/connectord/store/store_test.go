@@ -33,7 +33,7 @@ func dbPath(t *testing.T) string {
 // currentTables is the table set of the current schema version, sorted as
 // tableNames returns it. A migration that adds a table changes this list.
 var currentTables = []string{
-	"alias", "budget", "change_log", "consumer", "entity", "entity_group", "job", "pending_change", "query", "store_meta",
+	"alias", "budget", "change_log", "consumer", "entity", "entity_group", "job", "pending_change", "posted_review", "query", "store_meta",
 }
 
 func mustOpen(t *testing.T, path string, opts Options) (*Store, Result) {
@@ -172,8 +172,9 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 			"kind", "id", "kinds", "fields", "awaited", "head_sha", "base_sha", "origin", "origin_updated_at",
 			"detected_at", "deadline",
 		},
-		"consumer":   {"consumer", "feed_view", "scope", "acked_seq", "seen_at"},
-		"store_meta": {"key", "value"},
+		"consumer":      {"consumer", "feed_view", "scope", "acked_seq", "seen_at"},
+		"posted_review": {"owner", "repo", "number", "state", "updated_at"},
+		"store_meta":    {"key", "value"},
 	}
 	for table, cols := range wantCols {
 		got := columnNames(t, s, table)

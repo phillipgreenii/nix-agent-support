@@ -74,6 +74,10 @@ func TestGenerateFixture(t *testing.T) {
 		`INSERT INTO consumer (consumer, feed_view, scope, acked_seq, seen_at)
 		 VALUES ('sample-consumer', 'pr', 'open-prs', 1, 1760000004000)`,
 		`INSERT INTO store_meta (key, value) VALUES ('moved_aside_at', '1760000005000')`,
+		// The posted-review table (version 9); the daemon's sidecar package owns
+		// the accessors, so the state is an opaque JSON text here.
+		`INSERT INTO posted_review (owner, repo, number, state, updated_at)
+		 VALUES ('org', 'repo', 1, '{"version":1,"fingerprints":["0123456789abcdef"],"body_heads":[]}', 1760000008000)`,
 	} {
 		if _, err := s.DB().Exec(q); err != nil {
 			t.Fatal(err)

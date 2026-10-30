@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -197,8 +196,8 @@ func TestSubmitEarlierHeadNotInTheCommitListIsInvalid(t *testing.T) {
 	if f.host.compareReads != 0 {
 		t.Errorf("no comparison is read for a sha that is not a commit: %d", f.host.compareReads)
 	}
-	if _, statErr := os.Stat(f.store.Dir); statErr == nil {
-		t.Errorf("the sidecar must not be created by a refused run")
+	if n := f.sidecarRows(); n != 0 {
+		t.Errorf("a refused run must record nothing, the sidecar has %d rows", n)
 	}
 }
 
@@ -267,8 +266,8 @@ func TestSubmitEarlierHeadReadFailuresWriteNothing(t *testing.T) {
 			_, err := f.submit(req("overall", point("main.go", 22, "x")))
 			isCode(t, err, scriptout.ErrUnavailable)
 			f.untouched()
-			if _, statErr := os.Stat(f.store.Dir); statErr == nil {
-				t.Errorf("the sidecar must not be created by a refused run")
+			if n := f.sidecarRows(); n != 0 {
+				t.Errorf("a refused run must record nothing, the sidecar has %d rows", n)
 			}
 		})
 	}
@@ -546,24 +545,10 @@ func TestSubmitEarlierHeadSurvivesAForcePushBetweenLookupAndWrite(t *testing.T) 
 	})
 }
 
-// TestSubmitEarlierHeadHoldsThePerPRLock: another holder of the per-PR lock
-// stops the run before any read, and a concurrent submit waits behind the one
-// that is inside the history and comparison reads.
+// TestSubmitEarlierHeadHoldsThePerPRLock: a concurrent submit waits behind the
+// one that is inside the history and comparison reads, and no sqlite transaction
+// is held across those reads (another PR's record is writable meanwhile).
 func TestSubmitEarlierHeadHoldsThePerPRLock(t *testing.T) {
-	t.Run("held elsewhere", func(t *testing.T) {
-		f := movedFixture(t)
-		held, err := f.lock.Acquire("foo", "bar", 42)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = f.submit(req("", point("main.go", 22, "x")))
-		isCode(t, err, scriptout.ErrUnavailable)
-		if f.host.reads != 0 || f.host.historyReads != 0 || f.host.compareReads != 0 {
-			t.Errorf("nothing may be read without the lock: %d %d %d", f.host.reads, f.host.historyReads, f.host.compareReads)
-		}
-		_ = held.Release()
-		f.mustSubmit(req("", point("main.go", 22, "x")))
-	})
 	t.Run("two concurrent submits", func(t *testing.T) {
 		f := movedFixture(t)
 		entered, release := make(chan struct{}), make(chan struct{})
@@ -582,8 +567,14 @@ func TestSubmitEarlierHeadHoldsThePerPRLock(t *testing.T) {
 			first <- outcome{res, err}
 		}()
 		<-entered
-		// The first run is inside the comparison read, holding the lock: the
-		// second waits in the daemon for it and gives up at its deadline.
+		// The first run is inside the comparison read, holding the in-daemon lock
+		// of the PR: the store is free meanwhile (no transaction spans the host
+		// read), and the second waits in the daemon and gives up at its deadline.
+		other, cancelOther := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancelOther()
+		if err := f.store.Save(other, "foo", "bar", 43, pgposted.State{Fingerprints: []string{"0123456789abcdef"}}); err != nil {
+			t.Fatalf("the store was busy during the host read: %v", err)
+		}
 		short, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		_, err := f.submitCtx(short, req("", point("main.go", 22, "x")))

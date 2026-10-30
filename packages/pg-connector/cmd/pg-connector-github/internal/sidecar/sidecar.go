@@ -1,84 +1,106 @@
-// Package sidecar resolves the posted-review sidecar for the daemon: the
-// posted.Store and posted.Locker that the write path (review_submit) and the
-// pending group use.
+// Package sidecar is the daemon's posted-review sidecar: the per-PR record of
+// which review comments review_submit posted, kept in the daemon's own sqlite
+// store (table posted_review, schema version 9).
 //
-// The sidecar is the old pg-connector-pr-github backend's own state, and it
-// stays exactly where that backend keeps it. Until the cleanup phase it is the
-// single source of truth for which review comments were posted, so a rollback to
-// the old binary sees every review posted since cutover and the operator can
-// still delete a record by hand. Its files and its cross-process flock keep the
-// old names and locations under one state home:
+// One row per (owner, repo, number); state is the posted.State JSON verbatim and
+// updated_at is Unix milliseconds. The Store has Load and Save only. There is
+// no cross-process lock: Engine.SerializeWrite serializes writes to one PR
+// inside the daemon, the daemon.lock file keeps the daemon single-instance, and
+// no sqlite transaction is held across the GitHub write (the store has one
+// pooled connection), so a crash holds nothing.
 //
-//	<state home>/posted/<owner>__<repo>__<n>.json   the per-PR sidecar
-//	<state home>/locks/<owner>__<repo>__<n>.lock    the per-PR flock
+// A corrupt row stays a refusal: Load wraps posted.ErrCorrupt and leaves the row
+// where it is. The operator deletes a record by hand with a raw SQL DELETE on
+// store.sqlite:
 //
-// A corrupt sidecar file stays a refusal: Store.Load wraps posted.ErrCorrupt and
-// leaves the file where it is.
+//	DELETE FROM posted_review WHERE owner = ? AND repo = ? AND number = ?
 //
-// The state home is, in order:
-//
-//  1. pr.posted_state_dir of the daemon's config (config.SettingPostedStateDir);
-//  2. PG_CONNECTOR_PR_GITHUB_STATE_DIR;
-//  3. $XDG_STATE_HOME/pg-connector-pr-github;
-//  4. $HOME/.local/state/pg-connector-pr-github.
-//
-// Steps 2 to 4 are the old backend's own derivation (posted.StateHomeFromEnv).
-// They read the DAEMON's environment, and only through the getenv that Open is
-// given: a daemon MUST NOT read the environment of a client's call, so the one
-// getenv ever passed is the daemon's own (os.Getenv, at start). Nothing in this
-// package reads the process environment itself.
+// The records of the old pg-connector-pr-github backend are brought in once at
+// daemon start by package legacyimport, the only code that names the old state
+// directory.
 package sidecar
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
-// ErrNoStateHome is wrapped by the error Open returns when neither the setting
-// nor the daemon's environment names a state home. The daemon refuses to start
-// the write path then, instead of writing the sidecar somewhere the old backend
-// would not look.
-var ErrNoStateHome = errors.New("sidecar: no state home could be determined")
+// Store reads and writes the posted_review table of the daemon's store.
+type Store struct {
+	db  *sql.DB
+	now func() time.Time
+}
 
-// Open resolves the sidecar's state home and returns the Store at
-// <state home>/posted and the Locker at <state home>/locks (with the old
-// backend's 60-second bounded wait). It resolves only: no directory is created
-// until the first Save or Acquire, exactly as with the old backend.
-//
-// cfg is the loaded daemon config, whose pr.posted_state_dir (validated as an
-// absolute path by config.Load) wins when set; a nil cfg is the same as an unset
-// setting. getenv is the daemon's own environment, consulted only while the
-// setting is unset; a nil getenv reads an empty environment. When no home can be
-// determined, the error wraps ErrNoStateHome and names pr.posted_state_dir.
-func Open(cfg *config.Config, getenv func(string) string) (posted.Store, posted.Locker, error) {
-	if getenv == nil {
-		getenv = func(string) string { return "" }
+// Open returns the sidecar over st. A nil st is an error.
+func Open(st *store.Store) (*Store, error) {
+	if st == nil {
+		return nil, errors.New("sidecar: no store")
 	}
-	home := ""
-	if cfg != nil {
-		home = cfg.PR.PostedStateDir
+	return &Store{db: st.DB(), now: time.Now}, nil
+}
+
+func checkKey(owner, repo string, pr int) error {
+	if owner == "" || repo == "" {
+		return fmt.Errorf("sidecar: %q/%q is not an owner/name", owner, repo)
 	}
-	if home == "" {
-		home = posted.StateHomeFromEnv(getenv)
+	if pr <= 0 {
+		return fmt.Errorf("sidecar: PR number %d is not positive", pr)
 	}
-	if home == "" {
-		return posted.Store{}, posted.Locker{}, fmt.Errorf(
-			"%w: set %s (an absolute path), or provide %s, XDG_STATE_HOME or HOME in the daemon's own environment",
-			ErrNoStateHome, config.SettingPostedStateDir, posted.EnvStateDir,
-		)
+	return nil
+}
+
+// Load reads a PR's record. A missing row is an empty State, not an error. A row
+// whose state does not decode returns an error wrapping posted.ErrCorrupt and
+// the row stays.
+func (s *Store) Load(ctx context.Context, owner, repo string, pr int) (posted.State, error) {
+	if err := checkKey(owner, repo, pr); err != nil {
+		return posted.State{}, err
 	}
-	// Build both through the copied package's own constructors with the home
-	// pinned as its override variable, so the layout (<home>/posted,
-	// <home>/locks, the lock wait) is defined once, in the one place the sync
-	// guard keeps identical to the old backend's.
-	pinned := func(name string) string {
-		if name == posted.EnvStateDir {
-			return home
-		}
-		return ""
+	var text string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT state FROM posted_review WHERE owner = ? AND repo = ? AND number = ?`, owner, repo, pr).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return posted.State{Version: posted.StateVersion}, nil
 	}
-	return posted.StoreFromEnv(pinned), posted.LockerFromEnv(pinned), nil
+	if err != nil {
+		return posted.State{}, fmt.Errorf("sidecar: read record: %w", err)
+	}
+	var st posted.State
+	if err := json.Unmarshal([]byte(text), &st); err != nil {
+		return posted.State{}, fmt.Errorf("%w: %s/%s#%d: %v", posted.ErrCorrupt, owner, repo, pr, err)
+	}
+	return st, nil
+}
+
+// Save replaces a PR's record. Callers write an entry only for fingerprints
+// confirmed by the post-write re-read.
+func (s *Store) Save(ctx context.Context, owner, repo string, pr int, st posted.State) error {
+	if err := checkKey(owner, repo, pr); err != nil {
+		return err
+	}
+	st.Version = posted.StateVersion
+	if st.Fingerprints == nil {
+		st.Fingerprints = []string{}
+	}
+	if st.BodyHeads == nil {
+		st.BodyHeads = []string{}
+	}
+	data, err := json.Marshal(st)
+	if err != nil {
+		return fmt.Errorf("sidecar: marshal record: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (owner, repo, number) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+		owner, repo, pr, string(data), s.now().UnixMilli()); err != nil {
+		return fmt.Errorf("sidecar: write record: %w", err)
+	}
+	return nil
 }

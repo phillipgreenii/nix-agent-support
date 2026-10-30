@@ -40,21 +40,22 @@ type systemClock struct{}
 
 func (systemClock) Now() time.Time { return time.Now() }
 
-// SidecarLoader reads one PR's posted-review sidecar; posted.Store satisfies it.
+// SidecarLoader reads one PR's posted-review sidecar; *sidecar.Store satisfies
+// it.
 type SidecarLoader interface {
-	Load(owner, repo string, pr int) (posted.State, error)
+	Load(ctx context.Context, owner, repo string, pr int) (posted.State, error)
 }
 
-var _ SidecarLoader = posted.Store{}
+// loadTimeout bounds one sidecar read made on behalf of the pending group.
+const loadTimeout = 10 * time.Second
 
 // SidecarView is the daemon's view of the posted-review sidecar for the acting
 // identity. The sidecar is per PR and carries no viewer, so after an identity
 // change the entries recorded before the change are not reported: Last hides a
 // last_append whose at is earlier than the time of the last identity change.
-// The sidecar FILES are the single source of truth (the old binary shares them)
-// and are never modified or deleted by this type or by a flush.
+// The sidecar records are never modified or deleted by this type or by a flush.
 type SidecarView struct {
-	// Store reads the sidecar files.
+	// Store reads the sidecar records.
 	Store SidecarLoader
 
 	mu      sync.Mutex
@@ -83,7 +84,11 @@ func (v *SidecarView) Last(repo string, number int) *pr.LastAppend {
 	if !ok {
 		return nil
 	}
-	st, err := v.Store.Load(owner, name, number)
+	// The view has no request context (the pending group computes its rows
+	// without one), so the read runs under its own bound.
+	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	defer cancel()
+	st, err := v.Store.Load(ctx, owner, name, number)
 	if err != nil || st.LastAppend == nil {
 		return nil
 	}

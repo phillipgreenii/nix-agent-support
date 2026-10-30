@@ -9,15 +9,16 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/github"
 	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// submitRun is one review_submit call, holding the per-PR lock.
+// submitRun is one review_submit call, run under the per-PR in-daemon write lock.
 type submitRun struct {
 	gh       Provider
-	store    pgposted.Store
+	store    *sidecar.Store
 	clock    governor.Clock
 	req      pr.ReviewSubmitRequest
 	repo     string
@@ -99,7 +100,7 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 	if moved && r.bodyText != "" {
 		r.sectionText = r.bodyText + "\n\n" + savedAtLine(head, live)
 	}
-	st, err := r.store.Load(r.owner, r.name, r.number)
+	st, err := r.store.Load(ctx, r.owner, r.name, r.number)
 	if err != nil {
 		return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
 			fmt.Sprintf("review_submit: the posted-sidecar for %s could not be read (%v); nothing was written", r.req.ID, err))
@@ -298,7 +299,9 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 			st.AddBodyHead(head)
 		}
 		st.LastAppend = &pgposted.LastAppend{At: now, Added: len(confirmed), Head: head}
-		if err := r.store.Save(r.owner, r.name, r.number, st); err != nil {
+		// The content is already on the host and the request's own time may be used
+		// up: the record of it is bookkeeping that must not be lost to the deadline.
+		if err := r.store.Save(context.WithoutCancel(ctx), r.owner, r.name, r.number, st); err != nil {
 			return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
 				fmt.Sprintf("review_submit: content was written to %s but the posted-sidecar could not be saved (%v); retry the identical request, which converges through the markers", finalRev.ID, err))
 		}

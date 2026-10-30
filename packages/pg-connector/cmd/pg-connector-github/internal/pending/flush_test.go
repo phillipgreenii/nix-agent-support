@@ -1,12 +1,11 @@
 package pending
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/identity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 )
@@ -121,13 +121,37 @@ func (g *viewerGH) set(login string) {
 	g.login = login
 }
 
-func readFile(t *testing.T, path string) []byte {
+// openSidecar returns the posted-review sidecar over st.
+func openSidecar(t *testing.T, st *store.Store) *sidecar.Store {
 	t.Helper()
-	b, err := os.ReadFile(path)
+	s, err := sidecar.Open(st)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return b
+	return s
+}
+
+// sidecarRows returns every posted_review row of st as "owner/repo#n state at".
+func sidecarRows(t *testing.T, st *store.Store) []string {
+	t.Helper()
+	rows, err := st.DB().Query(`SELECT owner, repo, number, state, updated_at FROM posted_review ORDER BY owner, repo, number`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var owner, repo, state string
+		var n, at int64
+		if err := rows.Scan(&owner, &repo, &n, &state, &at); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fmt.Sprintf("%s/%s#%d %s %d", owner, repo, n, state, at))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func TestAViewerChangeRunsBothFlushesOnce(t *testing.T) {
@@ -135,19 +159,19 @@ func TestAViewerChangeRunsBothFlushesOnce(t *testing.T) {
 	st := openStore(t)
 	seed(t, st, "PR_1", "PR_2")
 
-	dir := t.TempDir()
-	sidecars := posted.Store{Dir: dir}
+	sidecars := openSidecar(t, st)
 	before := pr.LastAppend{At: t0.Add(-time.Hour).Format(time.RFC3339), Added: 2, Head: "head0"}
-	if err := sidecars.Save("foo", "bar", 1, posted.State{LastAppend: &posted.LastAppend{At: before.At, Added: before.Added, Head: before.Head}}); err != nil {
+	if err := sidecars.Save(ctx, "foo", "bar", 1, posted.State{LastAppend: &posted.LastAppend{At: before.At, Added: before.Added, Head: before.Head}}); err != nil {
 		t.Fatal(err)
 	}
 	after := pr.LastAppend{At: t0.Add(5 * time.Minute).Format(time.RFC3339), Added: 3, Head: "head1"}
-	if err := sidecars.Save("foo", "bar", 2, posted.State{LastAppend: &posted.LastAppend{At: after.At, Added: after.Added, Head: after.Head}}); err != nil {
+	if err := sidecars.Save(ctx, "foo", "bar", 2, posted.State{LastAppend: &posted.LastAppend{At: after.At, Added: after.Added, Head: after.Head}}); err != nil {
 		t.Fatal(err)
 	}
-	path1, _ := sidecars.Path("foo", "bar", 1)
-	path2, _ := sidecars.Path("foo", "bar", 2)
-	files := map[string][]byte{path1: readFile(t, path1), path2: readFile(t, path2)}
+	rowsBefore := sidecarRows(t, st)
+	if len(rowsBefore) != 2 {
+		t.Fatalf("seeded rows = %v", rowsBefore)
+	}
 
 	clock := &fakeClock{now: t0}
 	gh := &viewerGH{login: "octo-one"}
@@ -192,11 +216,9 @@ func TestAViewerChangeRunsBothFlushesOnce(t *testing.T) {
 		t.Errorf("a refresh without a change flushed again: %s", got)
 	}
 
-	// The sidecar files are byte-identical: a flush never touches them.
-	for path, want := range files {
-		if got := readFile(t, path); !bytes.Equal(got, want) {
-			t.Errorf("%s changed:\n%s\nwas:\n%s", path, got, want)
-		}
+	// The sidecar rows are identical: a flush never touches them.
+	if got := sidecarRows(t, st); !slices.Equal(got, rowsBefore) {
+		t.Errorf("sidecar rows changed:\n%v\nwas:\n%v", got, rowsBefore)
 	}
 }
 
@@ -225,7 +247,7 @@ func TestAFailingFlushStaysPendingAndTheNextRefreshRetriesIt(t *testing.T) {
 	clock := &fakeClock{now: t0}
 	gh := &viewerGH{login: "octo-one"}
 	tr := identity.New(identity.Options{GH: gh, Clock: clock})
-	view := &SidecarView{Store: posted.Store{Dir: t.TempDir()}}
+	view := &SidecarView{Store: openSidecar(t, st)}
 	RegisterFlushes(tr, &flakyStore{FlushStore: st, fails: 1}, view, clock)
 
 	if err := tr.Refresh(ctx); err != nil {
@@ -251,13 +273,14 @@ func TestSidecarViewDegradesToNoLastAppend(t *testing.T) {
 	if nilView.Last("foo/bar", 1) != nil || (&SidecarView{}).Last("foo/bar", 1) != nil {
 		t.Error("an unconfigured view reported a last_append")
 	}
-	dir := t.TempDir()
-	v := &SidecarView{Store: posted.Store{Dir: dir}}
+	st := openStore(t)
+	v := &SidecarView{Store: openSidecar(t, st)}
 	if v.Last("foo/bar", 1) != nil || v.Last("nope", 1) != nil || v.Last("foo/bar", 0) != nil {
 		t.Error("a missing sidecar, a bad repo or a bad number reported a last_append")
 	}
-	path, _ := posted.Store{Dir: dir}.Path("foo", "bar", 1)
-	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+	if _, err := st.DB().Exec(
+		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('foo', 'bar', 1, 'not json', 1)`,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if v.Last("foo/bar", 1) != nil {
@@ -266,9 +289,8 @@ func TestSidecarViewDegradesToNoLastAppend(t *testing.T) {
 }
 
 func TestSidecarViewHidesAnAppendWithAnUnreadableTimeOnceTheIdentityChanged(t *testing.T) {
-	dir := t.TempDir()
-	s := posted.Store{Dir: dir}
-	if err := s.Save("foo", "bar", 1, posted.State{LastAppend: &posted.LastAppend{At: "yesterday", Added: 1, Head: "h"}}); err != nil {
+	s := openSidecar(t, openStore(t))
+	if err := s.Save(context.Background(), "foo", "bar", 1, posted.State{LastAppend: &posted.LastAppend{At: "yesterday", Added: 1, Head: "h"}}); err != nil {
 		t.Fatal(err)
 	}
 	v := &SidecarView{Store: s}
