@@ -432,7 +432,7 @@ lib() {
   # RR-8: the exit code is logged, and the pending line no longer names osascript
   grep -q "pg-osx-notify post exited 3" "$STATE/run.log"
   grep -q "the notification is pending (pg-osx-notify failed)" "$STATE/run.log"
-  [ -z "$(grep -i osascript "/run.log")" ]
+  [ -z "$(grep -i osascript "$STATE/run.log")" ]
   echo 0 >"$TEST_DIR/notify.exit"
   lib 'rr_surface_flush_repo nix-alpha'
   [ "$status" -eq 0 ]
