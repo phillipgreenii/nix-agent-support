@@ -27,6 +27,10 @@
 #   D7  every expr, with the Grafana variables $__rate_interval, $__interval, $__range and any
 #       other $variable replaced by 5m, parses under promtool check rules
 #
+#   D8  every occurrence of a gauge name (catalog type gauge) sits directly inside max(...),
+#       max by (...) (...), min or avg, so a restart overlap (several series per label set, one
+#       per service_version) cannot be double counted by a bare selector or a sum
+#
 # Panels are collected recursively, so a panel nested under a row counts.
 #
 # Exit codes: 0 clean (self-test: the real inputs pass and every mutant fails with exactly its
@@ -129,6 +133,14 @@ lint() {
   rule D6 'every target needs the datasource {"type": "prometheus", "uid": "prometheus"}' \
     "$defs"'[panels | .targets[]?] | length > 0
      and all(.[]; .datasource == {"type": "prometheus", "uid": "prometheus"})' "$d"
+
+  rule D8 'a gauge is selected bare or under sum or count: wrap it in max, max by, min or avg' \
+    --argjson cat "$cat" \
+    "$defs"'($cat | map(select(.type == "gauge") | .name)) as $gauges
+     | exprs | length > 0 and all(.[]; . as $e
+       | all($gauges[]; . as $n
+           | ([$e | scan("(?<![a-z0-9_])" + $n + "(?![a-z0-9_])")] | length)
+             == ([$e | scan("(max|min|avg)(\\s+by\\s*\\([^)]*\\))?\\s*\\(\\s*" + $n + "(?![a-z0-9_])(\\{[^}]*\\})?\\s*\\)")] | length)))' "$d"
 
   # D7: wrap each expr as a recording rule in a JSON (YAML) rules file and let promtool parse it.
   rules="$(mktemp -d)/rules.yaml"
@@ -244,9 +256,10 @@ mutate empty-description D5 '(.panels[] | select(.id == 3) | .description) = ""'
 mutate target-loki D6 '(.panels[] | select(.id == 4) | .targets[0].datasource) = {"type": "loki", "uid": "loki"}'
 mutate target-no-datasource D6 'del(.panels[] | select(.id == 5) | .targets[0].datasource)'
 
+mutate gauge-under-sum D8 "$(set_expr 4 'sum by (class) (pg_connector_github_queue_depth)')"
 mutate bad-promql D7 "$(set_expr 4 'sum by (class (pg_connector_github_queue_depth)')"
 
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "OK: the dashboard passes D1-D7 and $mutants mutants were each rejected by exactly the intended rule."
+echo "OK: the dashboard passes D1-D8 and $mutants mutants were each rejected by exactly the intended rule."

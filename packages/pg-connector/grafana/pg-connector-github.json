@@ -19,7 +19,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Budget against the cap",
-      "description": "GraphQL points remaining in the current window (budget_remaining, bucket graphql), the trailing-hour spend (the sum of budget_spent increases over 1h) and the cap line. The cap line is the literal 4000, because the daemon's graphql_points_per_hour is daemon configuration that a dashboard cannot read: 4000 stands for the CUTOVER value of graphql_points_per_hour (the module default; the shadow run used 1500) and is the same literal as the gt threshold of the alert rule pg-conn-github-spend-over-cap. A deployment that sets a different cap MUST change this literal and that rule's literal together.",
+      "description": "GraphQL points remaining in the current window (budget_remaining, bucket graphql), the trailing-hour spend (the sum of budget_spent increases over 1h) and the cap line. The cap line is the literal 4000, because the daemon's graphql_points_per_hour is daemon configuration that a dashboard cannot read: 4000 stands for the CUTOVER value of graphql_points_per_hour (the module default; the shadow run used 1500) and is the same literal as the gt threshold of the alert rule pg-conn-github-spend-over-cap. A deployment that sets a different cap MUST change this literal and that rule's literal together. window: fixed - trailing hour",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -37,7 +37,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_connector_github_budget_remaining{bucket=\"graphql\"}",
+          "expr": "max by (bucket) (pg_connector_github_budget_remaining{bucket=\"graphql\"})",
           "range": true,
           "legendFormat": "remaining"
         },
@@ -49,7 +49,7 @@
           },
           "expr": "sum(increase(pg_connector_github_budget_spent{bucket=\"graphql\"}[1h]))",
           "range": true,
-          "legendFormat": "spent, trailing hour"
+          "legendFormat": "spent, trailing 1h"
         },
         {
           "refId": "C",
@@ -60,6 +60,16 @@
           "expr": "vector(4000)",
           "range": true,
           "legendFormat": "cap (shadow-run literal)"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (bucket) (pg_connector_github_budget_remaining)",
+          "range": true,
+          "legendFormat": "remaining, all buckets: {{bucket}}"
         }
       ],
       "options": {
@@ -112,7 +122,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Spend by purpose and group: by purpose",
-      "description": "Points or requests spent over the trailing hour, per budget bucket and purpose (interactive, write, query, refresh, settle, fill, passthrough). GraphQL is in points, the REST buckets in requests.",
+      "description": "Points or requests spent over the trailing hour, per budget bucket and purpose (interactive, write, query, refresh, settle, fill, passthrough). GraphQL is in points, the REST buckets in requests. window: fixed - trailing hour",
       "gridPos": {
         "x": 0,
         "y": 9,
@@ -152,7 +162,11 @@
           },
           "custom": {
             "lineWidth": 1,
-            "fillOpacity": 0
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -162,7 +176,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Spend by purpose and group: by group",
-      "description": "Points or requests spent over the trailing hour, per budget bucket and the connector's own group (none when the spend belongs to no group).",
+      "description": "Points or requests spent over the trailing hour, per budget bucket and the connector's own group (none when the spend belongs to no group). window: fixed - trailing hour",
       "gridPos": {
         "x": 12,
         "y": 9,
@@ -202,7 +216,11 @@
           },
           "custom": {
             "lineWidth": 1,
-            "fillOpacity": 0
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -230,7 +248,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (class) (pg_connector_github_queue_depth)",
+          "expr": "max by (class) (pg_connector_github_queue_depth)",
           "range": true,
           "legendFormat": "{{class}}"
         }
@@ -380,7 +398,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (served_from) (increase(pg_connector_github_request_duration_count[$__rate_interval])) / scalar(sum(increase(pg_connector_github_request_duration_count[$__rate_interval])))",
+          "expr": "sum by (served_from) (rate(pg_connector_github_request_duration_count{served_from!=\"none\"}[$__rate_interval])) / ignoring(served_from) group_left sum(rate(pg_connector_github_request_duration_count{served_from!=\"none\"}[$__rate_interval]))",
           "range": true,
           "legendFormat": "{{served_from}}"
         }
@@ -402,10 +420,12 @@
           },
           "custom": {
             "lineWidth": 1,
-            "fillOpacity": 0
-          },
-          "min": 0,
-          "max": 1
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "percent",
+              "group": "A"
+            }
+          }
         },
         "overrides": []
       }
@@ -414,7 +434,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Detection delay",
-      "description": "How long after a change on GitHub the daemon detected it, by kind: the median, the 90th percentile and the 99th percentile of the detection delay histogram. The shadow-run criterion is stated on the p90 series.",
+      "description": "How long after a change on GitHub the daemon detected it, by kind: the median, the 90th percentile and the 99th percentile of the detection delay histogram. The shadow-run criterion is stated on the p90 series. window: fixed - sparse events",
       "gridPos": {
         "x": 0,
         "y": 33,
@@ -432,7 +452,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, kind) (rate(pg_connector_github_change_detection_delay_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, kind) (rate(pg_connector_github_change_detection_delay_seconds_bucket[1h])))",
           "range": true,
           "legendFormat": "p50 {{kind}}"
         },
@@ -442,7 +462,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.9, sum by (le, kind) (rate(pg_connector_github_change_detection_delay_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.9, sum by (le, kind) (rate(pg_connector_github_change_detection_delay_seconds_bucket[1h])))",
           "range": true,
           "legendFormat": "p90 {{kind}}"
         },
@@ -452,7 +472,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, kind) (rate(pg_connector_github_change_detection_delay_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, kind) (rate(pg_connector_github_change_detection_delay_seconds_bucket[1h])))",
           "range": true,
           "legendFormat": "p99 {{kind}}"
         }
@@ -474,7 +494,8 @@
           },
           "custom": {
             "lineWidth": 1,
-            "fillOpacity": 0
+            "fillOpacity": 0,
+            "spanNulls": true
           }
         },
         "overrides": []
@@ -502,7 +523,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (result) (increase(pg_connector_github_change_settle[$__rate_interval]))",
+          "expr": "sum by (result) (rate(pg_connector_github_change_settle[$__rate_interval]))",
           "range": true,
           "legendFormat": "{{result}}"
         }
@@ -518,7 +539,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "ops",
           "color": {
             "mode": "palette-classic"
           },
@@ -552,7 +573,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pg_connector_github_change_settle_pending",
+          "expr": "max(pg_connector_github_change_settle_pending)",
           "range": true,
           "legendFormat": "pending rows"
         }
@@ -702,7 +723,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (class) (pg_connector_github_tracked_entities)",
+          "expr": "max by (class) (pg_connector_github_tracked_entities)",
           "range": true,
           "legendFormat": "{{class}}"
         },
@@ -712,7 +733,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(pg_connector_github_tracked_entities{class=~\"members|other_open\"})",
+          "expr": "sum(max by (class) (pg_connector_github_tracked_entities{class=~\"members|other_open\"}))",
           "range": true,
           "legendFormat": "tracked (members + other_open)"
         },
@@ -772,7 +793,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(pg_connector_github_watched_entities)",
+          "expr": "max(pg_connector_github_watched_entities)",
           "range": true,
           "legendFormat": "watched"
         }
@@ -822,7 +843,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (class) (pg_connector_github_governor_backlog)",
+          "expr": "max by (class) (pg_connector_github_governor_backlog)",
           "range": true,
           "legendFormat": "{{class}}"
         }
@@ -845,6 +866,150 @@
           "custom": {
             "lineWidth": 1,
             "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Daemon up",
+      "description": "Whether the daemon is up (daemon_up, max across the restart overlap): UP when 1, DOWN when 0 or when the series is absent.",
+      "gridPos": {
+        "x": 0,
+        "y": 74,
+        "w": 12,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_connector_github_daemon_up)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "Daemon up"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "DOWN",
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Governor paused",
+      "description": "Whether the governor is paused (governor_paused, max across buckets and reasons): PAUSED when 1, running when 0 or absent.",
+      "gridPos": {
+        "x": 12,
+        "y": 74,
+        "w": 12,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_connector_github_governor_paused)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "Governor paused"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "running",
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "running",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PAUSED",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
