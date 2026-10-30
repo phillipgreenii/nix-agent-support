@@ -76,3 +76,30 @@ func cleanGitEnv() []string {
 	}
 	return env
 }
+
+// TestGitHelperIgnoresAmbientGitDir guards pg2-r76ugu: a hook run exports
+// GIT_DIR/GIT_WORK_TREE, and a fixture git command that honoured them would
+// write core.worktree into the enclosing repository.
+func TestGitHelperIgnoresAmbientGitDir(t *testing.T) {
+	decoy := t.TempDir()
+	git(t, decoy, "init", "-q", "-b", "main")
+	cfg := filepath.Join(decoy, ".git", "config")
+	before, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", decoy)
+	fixture := t.TempDir()
+	git(t, fixture, "init", "-q", "-b", "main")
+	after, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("decoy repo config changed:\n%s\n--- was ---\n%s", after, before)
+	}
+	if _, err := os.Stat(filepath.Join(fixture, ".git")); err != nil {
+		t.Errorf("fixture repo not created in its own dir: %v", err)
+	}
+}

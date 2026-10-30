@@ -253,13 +253,7 @@ func TestIngestMapsWorktreeToMainRepoName(t *testing.T) {
 		{"commit", "-q", "--allow-empty", "-m", "init"},
 		{"worktree", "add", "-q", "-b", "feat", filepath.Join(root, "wt", "feature")},
 	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = mainDir
-		cmd.Env = append(gitFixtureEnv(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@localhost", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@localhost")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		gitFixture(t, mainDir, args...)
 	}
 	a := newApp(t)
 	a.fullCall("w1", "main-call", mainDir, 1700000000000)
@@ -361,6 +355,18 @@ func TestIngestUsageAndMissingDirectory(t *testing.T) {
 	}
 }
 
+// gitFixture runs git in dir with a scrubbed environment.
+func gitFixture(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(gitFixtureEnv(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@localhost", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@localhost")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
 // gitFixtureEnv is the environment without any GIT_* variable: a test run
 // inside a git hook inherits GIT_DIR and GIT_INDEX_FILE, which would point its
 // fixture git commands at the enclosing repository.
@@ -372,4 +378,31 @@ func gitFixtureEnv() []string {
 		}
 	}
 	return env
+}
+
+// TestGitFixtureIgnoresAmbientGitDir guards pg2-r76ugu: a hook run exports
+// GIT_DIR/GIT_WORK_TREE, and a fixture git command that honoured them would
+// write core.worktree into the enclosing repository.
+func TestGitFixtureIgnoresAmbientGitDir(t *testing.T) {
+	decoy := t.TempDir()
+	gitFixture(t, decoy, "init", "-q", "-b", "main")
+	cfg := filepath.Join(decoy, ".git", "config")
+	before, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", decoy)
+	fixture := t.TempDir()
+	gitFixture(t, fixture, "init", "-q", "-b", "main")
+	after, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("decoy repo config changed:\n%s\n--- was ---\n%s", after, before)
+	}
+	if _, err := os.Stat(filepath.Join(fixture, ".git")); err != nil {
+		t.Errorf("fixture repo not created in its own dir: %v", err)
+	}
 }
