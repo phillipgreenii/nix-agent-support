@@ -170,35 +170,15 @@
           # pg2-z5fax) — one more mkGoApp call over the SAME packages/pg-connector
           # module (shared src + gomod2nixToml), from
           # packages/pg-connector/pg-connector-github.nix. The old pr/ci GitHub
-          # backends below stay for rollback until Phase 6b.
+          # backends were removed in Phase 6b.
           pg-connector-github = final.callPackage ./packages/pg-connector/pg-connector-github.nix {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-connector-pr-github: the pr capability's Tier-2 GitHub backend
-          # (bead pg2-2j5ac.4) — a second mkGoApp call over the SAME
-          # packages/pg-connector module (shared src + gomod2nixToml) as the
-          # pg-connector entry immediately above, building the standalone
-          # scriptout-only binary from packages/pg-connector/pg-connector-pr-github.nix.
-          pg-connector-pr-github = final.callPackage ./packages/pg-connector/pg-connector-pr-github.nix {
-            inherit (goBuilders) mkGoApp;
-          };
-          # pg-connector-ci-github-actions: the ci capability's Tier-2
-          # GitHub Actions backend (bead pg2-2j5ac.10) — another mkGoApp
-          # call over the SAME packages/pg-connector module (shared src +
-          # gomod2nixToml) as the pg-connector/pg-connector-pr-github
-          # entries immediately above, building the standalone
-          # scriptout-only binary from
-          # packages/pg-connector/pg-connector-ci-github-actions.nix.
-          pg-connector-ci-github-actions =
-            final.callPackage ./packages/pg-connector/pg-connector-ci-github-actions.nix
-              {
-                inherit (goBuilders) mkGoApp;
-              };
           # pg-connector-issue-beads: the issue capability's Tier-2 backend
           # for this workspace's own bd tracker (bead pg2-2j5ac.8) — a
           # further mkGoApp call over the SAME packages/pg-connector module
-          # (shared src + gomod2nixToml) as pg-connector/pg-connector-pr-github
-          # above, building the standalone scriptout-only binary from
+          # (shared src + gomod2nixToml) as the pg-connector
+          # entry above, building the standalone scriptout-only binary from
           # packages/pg-connector/pg-connector-issue-beads.nix.
           pg-connector-issue-beads = final.callPackage ./packages/pg-connector/pg-connector-issue-beads.nix {
             inherit (goBuilders) mkGoApp;
@@ -216,8 +196,7 @@
           # pg-connector-scm-git: the scm capability's local-git Tier-2
           # backend (bead pg2-2j5ac.6) — another mkGoApp call over the SAME
           # packages/pg-connector module (shared src + gomod2nixToml) as the
-          # pg-connector, pg-connector-pr-github, pg-connector-ci-github-actions,
-          # and pg-connector-issue-beads entries above, building the
+          # pg-connector and pg-connector-issue-beads entries above, building the
           # standalone scriptout-only binary from
           # packages/pg-connector/pg-connector-scm-git.nix.
           pg-connector-scm-git = final.callPackage ./packages/pg-connector/pg-connector-scm-git.nix {
@@ -3318,120 +3297,11 @@
                 assert lib.length (lib.filter (a: !a.assertion) noUser.assertions) == 2;
                 pkgs.runCommand "test-darwin-primary-user-modules-ok" { } "touch $out";
 
-              # darwin/modules/pg-connector-pr-github (bead pg2-ph0o4): registers the
-              # backend's own event log as a Loki log source, from its own nix
-              # module rather than through pg-connector's config. Its three LogQL
-              # alert rules are retired (bead pg2-4pfrkm): the module registers the
-              # deleteRules-only file pr-github-alerts-delete.yaml instead. Same stub technique as test-pg-rescue-darwin-module above: a
-              # stub of the observability surface that mirrors the REAL logSources
-              # submodule's defaults (path from the attribute name, serviceName =
-              # name, format jsonl, errorAlert.enable) so the assertions prove the
-              # module leaves `path`/`serviceName` at their defaults -- which the Go
-              # side (eventlog.Path) and the alert selectors depend on -- and that it
-              # switches the generic error-rate alert off. The runCommand then
-              # checks the delete file: apiVersion 1, no groups, exactly the three
-              # retired uids once each with orgId 1.
-              test-pg-connector-pr-github-darwin-module =
-                let
-                  logSourceSubmodule =
-                    { name, config, ... }:
-                    {
-                      options = {
-                        path = lib.mkOption {
-                          type = lib.types.str;
-                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
-                        };
-                        serviceName = lib.mkOption {
-                          type = lib.types.str;
-                          default = name;
-                        };
-                        format = lib.mkOption {
-                          type = lib.types.enum [
-                            "jsonl"
-                            "raw"
-                          ];
-                          default = "jsonl";
-                        };
-                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
-                      };
-                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
-                    };
-                  evalDarwin =
-                    obsEnable:
-                    (lib.evalModules {
-                      specialArgs = { inherit pkgs lib; };
-                      modules = [
-                        ./darwin/modules/pg-connector-pr-github/default.nix
-                        {
-                          options.phillipgreenii.observability = {
-                            enable = lib.mkOption {
-                              type = lib.types.bool;
-                              default = false;
-                            };
-                            logSources = lib.mkOption {
-                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
-                              default = { };
-                            };
-                            alertRuleFiles = lib.mkOption {
-                              type = lib.types.listOf lib.types.path;
-                              default = [ ];
-                            };
-                          };
-                          config.phillipgreenii.observability.enable = obsEnable;
-                        }
-                      ];
-                    }).config.phillipgreenii.observability;
-                  enabled = evalDarwin true;
-                  disabled = evalDarwin false;
-                  src = enabled.logSources.pg-connector-pr-github;
-                  alertsFile = ./packages/pg-connector/grafana/alerting/pr-github-alerts-delete.yaml;
-                in
-                assert disabled.logSources == { };
-                assert disabled.alertRuleFiles == [ ];
-                assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-pr-github/*.jsonl";
-                assert src.serviceName == "pg-connector-pr-github";
-                assert src.format == "jsonl";
-                assert src.errorAlert.enable == false;
-                assert enabled.alertRuleFiles == [ alertsFile ];
-                pkgs.runCommand "test-pg-connector-pr-github-darwin-module-ok"
-                  {
-                    nativeBuildInputs = [
-                      pkgs.yq-go
-                      pkgs.gnugrep
-                      pkgs.jq
-                    ];
-                    glob = src.path;
-                    alerts = alertsFile;
-                  }
-                  ''
-                    export HOME="$TMPDIR"
-                    fail() { echo "FAIL: $*" >&2; exit 1; }
-
-                    # The default glob selects events.jsonl and not the rotated
-                    # copy or the rotation lock.
-                    state="$TMPDIR/state/pg-connector-pr-github"
-                    mkdir -p "$state"
-                    touch "$state/events.jsonl" "$state/events.jsonl.1" "$state/events.jsonl.lock"
-                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
-                    # shellcheck disable=SC2086 # the glob must expand
-                    matched="$(ls -d $pattern 2>/dev/null || true)"
-                    [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
-
-                    # Delete file structure: no rules left, only the three retired uids.
-                    [ "$(yq '.apiVersion' "$alerts")" = 1 ] || fail "apiVersion is not 1"
-                    [ "$(yq '.groups // "none"' "$alerts")" = none ] || fail "the delete file must have no groups key"
-                    got="$(yq '.deleteRules[].uid' "$alerts" | sort)"
-                    want="$(printf '%s\n' pg-conn-pr-github-quota-low pg-conn-pr-github-unauthenticated pg-conn-pr-github-unavailable)"
-                    [ "$got" = "$want" ] || fail "deleteRules uids are not exactly the three retired ones: $got"
-                    [ "$(yq '[.deleteRules[] | select(.orgId == 1)] | length' "$alerts")" = 3 ] || fail "a deleteRules entry lacks orgId 1"
-                    touch $out
-                  '';
-
               # darwin/modules/pg-connector-github (bead pg2-z5fax.6.5, docket
               # pg2-z5fax.6): registers the pg-connector-github daemon's three log
               # files, its alert rules file and its dashboard with the observability
-              # stack. Same technique as test-pg-connector-pr-github-darwin-module
-              # above: evaluate the module against a stub of the observability
+              # stack. Same technique as the other
+              # test-pg-connector-*-darwin-module checks: evaluate the module against a stub of the observability
               # surface that mirrors the REAL logSources submodule's defaults (and
               # dashboardProviders), once enabled and once disabled, then check the
               # evaluated values. The runCommand expands each entry's glob the way
@@ -3627,7 +3497,6 @@
 
                     # darwin/default.nix imports the module (and still the old one).
                     grep -q '\./modules/pg-connector-github$' "$darwinDefault" || fail "darwin/default.nix does not import the module"
-                    grep -q '\./modules/pg-connector-pr-github$' "$darwinDefault" || fail "darwin/default.nix lost the pr-github module"
                     touch $out
                   '';
 
@@ -3907,7 +3776,7 @@
                   '';
 
               # darwin/modules/pg-connector-thread-slack (bead pg2-kjdfi): the Slack
-              # sibling of test-pg-connector-pr-github-darwin-module above --
+              # sibling of the other test-pg-connector-*-darwin-module checks --
               # registers the backend's own event log as a Loki log source and its
               # LogQL alert rules from its own nix module rather than through
               # pg-connector's config. Same stub technique (a stub of the
@@ -4052,7 +3921,7 @@
                   '';
 
               # darwin/modules/pg-connector-issue-jira (bead pg2-ltddq): the Jira
-              # sibling of test-pg-connector-{pr-github,thread-slack}-darwin-module
+              # sibling of test-pg-connector-thread-slack-darwin-module
               # above -- registers the backend's own event log as a Loki log source
               # and its LogQL alert rules from its own nix module rather than
               # through pg-connector's config. Same stub technique (a stub of the
@@ -7755,23 +7624,8 @@
               # schemaVersions entry, and that "capabilities" itself is
               # listed in ops (proving the dispatch table actually built and
               # registered handlers, not just that the process didn't crash).
-              test-pg-connector-pr-github-capabilities =
-                pkgs.runCommand "pg-connector-pr-github-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
-                  ''
-                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-pr-github}/bin/pg-connector-pr-github)
-                    echo "$resp" | jq -e '
-                      .protocolVersion == 1
-                      and (.schemaVersions.pr | type) == "number"
-                      and (.ops | index("capabilities")) != null
-                    ' >/dev/null || {
-                      echo "FAIL: pg-connector-pr-github capabilities response malformed: $resp" >&2
-                      exit 1
-                    }
-                    touch $out
-                  '';
-
               # The daemon-backed GitHub connector (program pg2-z5fax): the same
-              # smoke as the pr check above, through the pr client mode. The
+              # smoke as the other backends' capabilities checks, through the pr client mode. The
               # capabilities answer is compiled in and needs no daemon, but the
               # binary loads and validates --config first, so the golden example
               # config is passed.
@@ -7806,21 +7660,6 @@
                       and (.ops | index("list")) != null
                     ' >/dev/null || {
                       echo "FAIL: pg-connector-issue-jira client-mode capabilities response malformed: $resp" >&2
-                      exit 1
-                    }
-                    touch $out
-                  '';
-
-              test-pg-connector-ci-github-actions-capabilities =
-                pkgs.runCommand "pg-connector-ci-github-actions-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
-                  ''
-                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-ci-github-actions}/bin/pg-connector-ci-github-actions)
-                    echo "$resp" | jq -e '
-                      .protocolVersion == 1
-                      and (.schemaVersions.ci | type) == "number"
-                      and (.ops | index("capabilities")) != null
-                    ' >/dev/null || {
-                      echo "FAIL: pg-connector-ci-github-actions capabilities response malformed: $resp" >&2
                       exit 1
                     }
                     touch $out
@@ -16701,7 +16540,6 @@
                       ([.connector.pr[0], .connector.ci[0], .search.sources[0], .activity.sources[0], .attention.sources[1]]
                         | map(.command[2]) | unique | length) == 1
                     ' ${rendered.github.enabledRegistry} >/dev/null
-                    yq -e '.backends."pg-connector-pr-github".config_hash == .backends."pg-connector-ci-github-actions".config_hash' ${rendered.github.enabledRegistry} >/dev/null
                     # live trigger of the rendered wiring: run each rewritten argv the
                     # way the umbrella would, with the real daemon binary, and
                     # require the answer a real client mode gives
@@ -17596,8 +17434,6 @@
               pa-monitor-decorator-scope
               pg-connector
               pg-connector-github
-              pg-connector-pr-github
-              pg-connector-ci-github-actions
               pg-connector-issue-beads
               pg-connector-issue-jira
               pg-connector-scm-git
@@ -17832,7 +17668,7 @@
             # regression check. Each case skips gracefully when the real tool
             # it needs (bd/git/gh) is genuinely absent from PATH.
             #
-            # The pr-github/ci-github-actions cases need a real, caller-chosen
+            # The pr/ci cases need a real, caller-chosen
             # GitHub PR/repo to target -- there is no fixed one (2026-09-07
             # operator ruling on pg2-qp50z: no default, no real value ever
             # committed to this public repo) -- so invoking this with `gh` on

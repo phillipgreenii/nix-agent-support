@@ -318,7 +318,7 @@ view` metadata read is built by gh, whose query cannot select `rateLimit`, so a 
 excludes that one read and is a lower bound.
 The retired rules file `pr-github-alerts.yaml` (auth failure, sustained `unavailable`, budget under
 `rate_reserve_points`) is gone (bead `pg2-4pfrkm`): the stream ended at the daemon cutover, and
-`pr-github-alerts-delete.yaml` removes the provisioned rules. The daemon path is covered by
+the deleteRules file that removed the provisioned rules was deleted in Phase 6b. The daemon path is covered by
 `pg-conn-github-unavailable-ratio` in `pg-connector-github-alerts.yaml`. Writing the log is best effort and
 never changes an op's result.
 

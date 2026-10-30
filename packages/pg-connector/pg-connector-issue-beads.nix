@@ -8,7 +8,7 @@ mkGoApp {
   pname = "pg-connector-issue-beads";
 
   # Shares the SAME Go module as ./default.nix's cmd/pg-connector build and
-  # ./pg-connector-pr-github.nix's sibling backend — one go.mod, one
+  # ./pg-connector-github.nix's sibling backend — one go.mod, one
   # gomod2nix.toml, N mkGoApp calls building N different binaries out of
   # it; this packet does not create a second Go module (layout_convention_test.go).
   #
@@ -58,17 +58,17 @@ mkGoApp {
   subPackages = [ "cmd/pg-connector-issue-beads" ];
 
   # This package exports its version as `main.Version` (capitalised),
-  # mirroring default.nix's and pg-connector-pr-github.nix's own convention.
+  # mirroring default.nix's and pg-connector-github.nix's own convention.
   versionPath = "main.Version";
 
-  # No help2man/completions postInstall (matches pg-connector-pr-github.nix):
+  # No help2man/completions postInstall (matches pg-connector-github.nix):
   # this binary speaks only the scriptout wire protocol and has no
   # independent CLI identity a human types directly, so there is no --help
   # output to generate a man page from and no subcommands to complete
   # (actors.md's ACTOR-BACKEND).
   #
   # No wrapProgram for `bd`: this backend execs `bd` on PATH at runtime,
-  # matching pg-connector-pr-github.nix's identical decision for `gh` — `bd`
+  # matching pg-connector-github.nix's identical decision for `gh` — `bd`
   # is provisioned once, separately, wherever this workspace's home-manager
   # profile installs it, not per-consumer here.
 

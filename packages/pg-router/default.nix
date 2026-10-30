@@ -23,8 +23,6 @@
   # callPackage against the matching `final.pg-connector-*` overlay entry,
   # same as `pg-connector` above.
   pg-connector-github,
-  pg-connector-pr-github,
-  pg-connector-ci-github-actions,
   pg-connector-issue-beads,
   pg-connector-issue-jira,
   pg-connector-scm-git,
@@ -123,14 +121,13 @@ mkGoApp {
   #             pg-connector-issue-beads: exec: \"pg-connector-issue-beads\":
   #             executable file not found in $PATH"}` — so EVERY producer
   #             tick still failed, including the GitHub-backed sources
-  #             (pr-mine/pr-team/pr-sweep need pg-connector-pr-github), not
+  #             (pr-mine/pr-team/pr-sweep need pg-connector-github), not
   #             just the bd-backed ones pg2-sh024 already fixed.
   #
   # `gh` is deliberately ABSENT from this list (bead pg2-bygev, superseding
-  # pg2-szilb's now-reverted addition here): pg-connector-pr-github and
-  # pg-connector-ci-github-actions themselves exec `gh` as a nested
-  # subprocess, but each now wraps ITS OWN binary with `gh` on its own PATH
-  # (see their own default.nix files) rather than relying on every caller —
+  # pg2-szilb's now-reverted addition here): the GitHub connector
+  # backends exec `gh` as a nested subprocess, but each wraps ITS OWN binary
+  # with `gh` on its own PATH (see their own package .nix files) rather than relying on every caller —
   # this wrapper included — to carry `gh` on its behalf. That fixes the
   # dependency at its actual point of use instead of at each caller, and it
   # keeps this wrapper from ever needing to know about `gh` at all, so the
@@ -144,8 +141,6 @@ mkGoApp {
         jq
         pg-connector
         pg-connector-github
-        pg-connector-pr-github
-        pg-connector-ci-github-actions
         pg-connector-issue-beads
         pg-connector-issue-jira
         pg-connector-scm-git

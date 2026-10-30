@@ -80,14 +80,14 @@ let
   # wrapper (packages/pg-router/default.nix) already threads ccpool/bd/jq/
   # pg-connector/pg-connector-*'s own bin dirs onto PATH (bead pg2-sh024),
   # but deliberately does NOT and MUST NOT wrap in `gh` there: per
-  # packages/pg-connector/pg-connector-pr-github.nix's own comment and the
+  # packages/pg-connector/pg-connector-github.nix's own comment and the
   # pg2-n75tk boundary ("Core must not know how another tool is configured"),
   # `gh` is provisioned once, generically, by this machine's home-manager
   # profile — exactly where an interactive shell already finds it — not
   # per-consumer inside pg-router's or pg-connector's own wrapProgram. This
   # gives the daemon's own process the SAME profile bin dir an interactive
   # shell has, so the nested exec chain (pg-router -> pg-router-source-pg-
-  # connector -> pg-connector -> pg-connector-pr-github -> `gh`, each hop an
+  # connector -> pg-connector -> pg-connector-github -> `gh`, each hop an
   # ambient-$PATH exec inheriting its parent's env unmodified) can resolve
   # `gh` the same way it resolves any other profile-provisioned CLI a future
   # backend might need — naming no specific tool here, only the profile

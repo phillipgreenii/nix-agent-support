@@ -17,7 +17,7 @@ in
   # observability ruling, 2026-10-02): the Slack thread backend owns its event
   # log and its alert rules, and they are registered HERE, in the backend's
   # own nix module -- NOT through pg-connector's config, which stays unbound
-  # to OTel. Sibling of darwin/modules/pg-connector-pr-github.
+  # to OTel. Sibling of darwin/modules/pg-connector-github.
   #
   # Gated on `obs.enable` alone: registration is a no-op on a machine without
   # the observability stack, and harmless when the backend is installed but

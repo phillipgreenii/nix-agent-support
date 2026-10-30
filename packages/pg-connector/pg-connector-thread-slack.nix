@@ -69,7 +69,7 @@ mkGoApp {
   #
   # No wrapProgram for `claude`: it is provisioned separately on this
   # machine's own PATH, matching pg-connector-issue-jira.nix's identical
-  # decision for `pjira` and pg-connector-pr-github.nix's identical decision
+  # decision for `pjira` and pg-connector-github.nix's identical decision
   # for `gh`. The binary is installed once, wherever this workspace's own
   # home-manager profile puts it, not per-consumer here.
   #

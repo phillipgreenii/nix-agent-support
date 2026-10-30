@@ -406,7 +406,7 @@ func TestPath(t *testing.T) {
 }
 
 func TestPath_DefaultMatchesRegisteredLogSourceGlob(t *testing.T) {
-	// darwin/modules/pg-connector-pr-github registers the attribute name
+	// darwin/modules/pg-connector-github registers the attribute name
 	// ServiceName with the default glob ${XDG_STATE_HOME}/<name>/*.jsonl.
 	got := Path(env(map[string]string{"XDG_STATE_HOME": "/s"}))
 	want := filepath.Join("/s", ServiceName)

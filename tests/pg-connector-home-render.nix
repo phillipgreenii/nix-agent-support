@@ -433,10 +433,6 @@ let
     enabledStamped = stamped ghEnabled;
     enabledInstallsDaemon = installsDaemon ghEnabled;
     enabledNoWarning = ghEnabled.config.warnings == [ ];
-    # the old backends stay installed (rollback)
-    enabledKeepsOldPackages =
-      builtins.elem pkgs.pg-connector-pr-github.name (pkgNames ghEnabled)
-      && builtins.elem pkgs.pg-connector-ci-github-actions.name (pkgNames ghEnabled);
     # the queries and the other block keys survive the stamp
     enabledBlockKeepsKeys =
       (rc ghEnabled).backends."pg-connector-pr-github".queries.mine == "is:pr is:open author:@me"
@@ -849,8 +845,6 @@ let
   # and the file to edit. `pg-connector-github` is not listed: it is the
   # optional daemon, pinned separately below.
   expectedBackendNames = [
-    "pg-connector-pr-github"
-    "pg-connector-ci-github-actions"
     "pg-connector-issue-beads"
     "pg-connector-issue-jira"
     "pg-connector-scm-git"

@@ -18,7 +18,7 @@ in
   # observability ruling, 2026-10-02): the Jira issue backend owns its event
   # log and its alert rules, and they are registered HERE, in the backend's
   # own nix module -- NOT through pg-connector's config, which stays unbound
-  # to OTel. Sibling of darwin/modules/pg-connector-pr-github and
+  # to OTel. Sibling of darwin/modules/pg-connector-github and
   # darwin/modules/pg-connector-thread-slack.
   #
   # Gated on `obs.enable` alone: registration is a no-op on a machine without

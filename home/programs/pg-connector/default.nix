@@ -35,8 +35,6 @@ let
   # only thing that notices a backend dropped from here.
   backendPackages = lib.unique (
     [
-      pkgs.pg-connector-pr-github
-      pkgs.pg-connector-ci-github-actions
       pkgs.pg-connector-issue-beads
       pkgs.pg-connector-issue-jira
       pkgs.pg-connector-scm-git
@@ -1221,8 +1219,8 @@ in
       warnings =
         lib.optional (gh.enable && !rewriteRegistry) (
           "phillipgreenii.programs.pg-connector.github.enable is set with supervisor = \"none\" and allowUnsupervised = false: "
-          + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten and the old "
-          + "pg-connector-pr-github and pg-connector-ci-github-actions backends stay registered, because nothing on this host "
+          + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten. The old "
+          + "pg-connector-pr-github and pg-connector-ci-github-actions backends are no longer installed (only their instance names remain as config keys), and nothing on this host "
           + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
         )
         ++ lib.optional (jr.enable && jr.registry.rewrite && !rewriteJira) (

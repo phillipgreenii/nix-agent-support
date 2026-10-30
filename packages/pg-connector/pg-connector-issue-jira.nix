@@ -39,12 +39,12 @@ mkGoApp {
   versionPath = "main.Version";
 
   # No help2man/completions postInstall (matches pg-connector-issue-beads.nix
-  # and pg-connector-pr-github.nix): this binary speaks only the scriptout
+  # and pg-connector-github.nix): this binary speaks only the scriptout
   # wire protocol and has no independent CLI identity a human types directly.
   #
   # No wrapProgram for the generic Jira CLI this backend execs (pjira, from
   # phillipg-nix-repo-base): it is provisioned separately on PATH, matching
-  # pg-connector-pr-github.nix's identical decision for `gh` and
+  # pg-connector-github.nix's identical decision for `gh` and
   # pg-connector-issue-beads.nix's identical decision for `bd` — the binary is
   # installed once, wherever this workspace's own home-manager profile puts
   # it, not per-consumer here.

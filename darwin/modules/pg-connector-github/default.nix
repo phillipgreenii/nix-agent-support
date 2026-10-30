@@ -24,9 +24,8 @@ in
   # Phase 4a of the pg-connector-github daemon program (docket pg2-z5fax.6,
   # design: docs/superpowers/specs/2026-10-09-pg-connector-github-daemon-design.md,
   # "Observability" and "Nix packaging"): registers the daemon's log files, its
-  # alert rules and its dashboard with the observability stack. This module sits
-  # BESIDE darwin/modules/pg-connector-pr-github, which stays untouched until
-  # Phase 6b so a rollback is still observed; the two share no attribute name.
+  # alert rules and its dashboard with the observability stack. The old
+  # pr-github module was removed in Phase 6b.
   #
   # The module is a no-op on a machine without the observability stack. The log
   # sources and the dashboard are harmless while the daemon is not installed
@@ -98,7 +97,7 @@ in
       # Group pg-connector-github, folder pg-connector: Prometheus rules over the
       # daemon's own metrics and two Loki rules over its logs (store-aside, and
       # unavailable-ratio over events.jsonl). pr-github-alerts.yaml is gone (its
-      # rules are retired, pr-github-alerts-delete.yaml belongs to the old module). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
+      # rules are retired, their deleteRules file was removed in Phase 6b). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
       # which lists every firing Grafana alert. Listed only while the daemon is
       # deployed (see the header comment); otherwise the deleteRules file below.
       alertRuleFiles =

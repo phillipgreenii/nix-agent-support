@@ -8,7 +8,7 @@ mkGoApp {
   pname = "pg-connector-scm-git";
 
   # Shares the SAME Go module as ./default.nix's cmd/pg-connector build and
-  # ./pg-connector-pr-github.nix's cmd/pg-connector-pr-github build — one
+  # ./pg-connector-github.nix's cmd/pg-connector-pr-github build — one
   # go.mod, one gomod2nix.toml, N mkGoApp calls building N different
   # binaries out of it; this packet does not create a second Go module
   # (layout_convention_test.go).
@@ -52,7 +52,7 @@ mkGoApp {
   subPackages = [ "cmd/pg-connector-scm-git" ];
 
   # This package exports its version as `main.Version` (capitalised),
-  # mirroring default.nix's and pg-connector-pr-github.nix's own
+  # mirroring default.nix's and pg-connector-github.nix's own
   # cmd/pg-connector*/main.go convention.
   versionPath = "main.Version";
 
@@ -65,7 +65,7 @@ mkGoApp {
   # No wrapProgram for `git`: this backend execs `git` on PATH at runtime —
   # `git` is provisioned once, separately, wherever this workspace's
   # home-manager profile installs it, not per-consumer here, mirroring
-  # pg-connector-pr-github.nix's own no-wrapProgram-for-gh rationale.
+  # pg-connector-github.nix's own no-wrapProgram-for-gh rationale.
 
   meta = with lib; {
     description = "pg-connector's scm capability Tier-2 backend for local git — a scriptout-only binary with no independent CLI identity";

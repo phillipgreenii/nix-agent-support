@@ -10,8 +10,8 @@
 # catalogue check, which covers pg_connector_github_* names only).
 #
 # This file is registered by the darwin module darwin/modules/pg-connector-github, not by
-# this file. The old backend's rules (pr-github-alerts.yaml) are retired (pg2-4pfrkm); its
-# deleteRules twin pr-github-alerts-delete.yaml remains.
+# this file. The old backend's rules (pr-github-alerts.yaml) are retired (pg2-4pfrkm); the deleteRules
+# file that removed them was itself removed in Phase 6b.
 #
 # Metric names are the Prometheus names the OpenTelemetry collector produces
 # (dots to underscores, no _total, no unit suffix) and every one of them is

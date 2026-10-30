@@ -14,7 +14,7 @@
 // Ownership (OBS-1/OBS-3): the path is this backend's own, resolved from
 // the environment here -- NOT from pg-connector's config -- and the
 // registration of the file as a Loki log source plus its alert rules live in
-// this repo's nix module (darwin/modules/pg-connector-pr-github), not in
+// this repo's nix module (darwin/modules/pg-connector-github), not in
 // pg-connector. pg-connector stays unbound to OTel.
 //
 // Failure policy: writing the event log is strictly best effort. A failed
@@ -39,7 +39,7 @@ import (
 )
 
 // ServiceName is this backend's Loki service_name (the logSources attribute
-// name in darwin/modules/pg-connector-pr-github, whose default glob is
+// name in darwin/modules/pg-connector-github, whose default glob is
 // ${XDG_STATE_HOME}/<name>/*.jsonl) and the directory under the state home
 // that holds the log.
 const ServiceName = "pg-connector-pr-github"

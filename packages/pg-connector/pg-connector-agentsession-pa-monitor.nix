@@ -66,7 +66,7 @@ mkGoApp {
   # No wrapProgram for `pa-monitor`: this backend execs `pa-monitor` on
   # PATH at runtime (cmd/pg-connector-agentsession-pa-monitor/internal/runner.go),
   # matching pg-connector-issue-beads.nix's identical decision for `bd` and
-  # pg-connector-pr-github.nix's identical decision for `gh` -- `pa-monitor`
+  # pg-connector-github.nix's identical decision for `gh` -- `pa-monitor`
   # is provisioned once, separately, wherever this workspace's home-manager
   # profile installs it, not per-consumer here.
 
