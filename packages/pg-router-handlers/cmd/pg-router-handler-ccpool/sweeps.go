@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
@@ -35,9 +36,17 @@ func runSweeps(ctx context.Context, who string, role roles.Role, cfg config.Conf
 	if role.CCPool == nil {
 		return
 	}
+	// Per-pass timing (pg2-fx5x0l.1): behavior-neutral measurement of what each
+	// pass costs at dispatch time.
+	timed := func(pass string, found int, start time.Time) {
+		recordSweepPass(who, role.Name, pass, found, time.Since(start), deps)
+	}
 	// Opportunistic reconciliation (pg2-hrppg): reuses deps.CC/deps.BD (the role's
 	// own pool runner) rather than constructing a second pair.
-	if closed := reconcileClosedBeadSessions(ctx, deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
+	t0 := time.Now()
+	closed := reconcileClosedBeadSessions(ctx, deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
+	timed("closed_bead_reconcile", closed, t0)
+	if closed > 0 {
 		slog.Info(who+": reconciled sessions with closed beads", "closed", closed)
 	}
 	// Default-pool pass (pg2-wqi3e): a role with its own pool (or a process
@@ -48,7 +57,10 @@ func runSweeps(ctx context.Context, who string, role roles.Role, cfg config.Conf
 	// closed (stalesession.go). Skipped when the role's own pool already IS the
 	// default pool, which the unguarded pass above has just swept.
 	if role.CCPool.PoolDir != "" || os.Getenv("CCPOOL_POOL") != "" {
-		if closed := reconcileDefaultPool(ctx, cfg); closed > 0 {
+		t0 := time.Now()
+		closed := reconcileDefaultPool(ctx, cfg)
+		timed("default_pool", closed, t0)
+		if closed > 0 {
 			slog.Info(who+": reconciled stale default-pool sessions with closed beads", "closed", closed)
 		}
 	}
@@ -56,26 +68,51 @@ func runSweeps(ctx context.Context, who string, role roles.Role, cfg config.Conf
 	// sessions of THIS role whose handler died (expired supervision lease), scoped
 	// to the role's own pool runner. In a dispatch it runs before the executor's
 	// capacity check, so a reclaimed orphan frees its slot for that very dispatch.
-	if reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, orphanEnv{
+	t0 = time.Now()
+	reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, orphanEnv{
 		open:    worktree.GitOpener,
 		quiet:   newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil),
 		lockDir: deps.LockDir,
-	}); reclaimed+stopped > 0 {
+	})
+	timed("orphan_reconcile", reclaimed+stopped, t0)
+	if reclaimed+stopped > 0 {
 		slog.Info(who+": reconciled orphaned sessions", "reclaimed", reclaimed, "hard_stopped", stopped)
 	}
 	// Worktree-keyed sweep (pg2-ganjb, INV-CCH-19): reclaim per-bead worktrees no
 	// session row can lead to. After the orphan reconcile, so a worktree that
 	// reconcile just released is not double-handled.
-	if swept := sweepLeakedWorktrees(ctx, role, deps, orphanEnv{
+	t0 = time.Now()
+	swept := sweepLeakedWorktrees(ctx, role, deps, orphanEnv{
 		open:    worktree.GitOpener,
 		cwds:    processCWDs,
 		lockDir: deps.LockDir,
-	}); swept > 0 {
+	})
+	timed("worktree_sweep", swept, t0)
+	if swept > 0 {
 		slog.Info(who+": reclaimed leaked worktrees", "reclaimed", swept)
 	}
 	// Lock-file GC (pg2-bjhoq): bound the handler lock directory. After the
 	// worktree sweep, so the locks it just used count as freshly used.
-	if n := sweepStaleLocks(deps); n > 0 {
+	t0 = time.Now()
+	n := sweepStaleLocks(deps)
+	timed("lock_gc", n, t0)
+	if n > 0 {
 		slog.Info(who+": removed stale lock files", "removed", n)
+	}
+}
+
+// recordSweepPass logs one sweep pass's wall time and appends a sweep_pass row to
+// events.jsonl (role, pass, elapsed_ms, found; who says dispatch vs postStartup).
+// Best effort and behavior-neutral: a nil or failing event log is ignored.
+func recordSweepPass(who, role, pass string, found int, elapsed time.Duration, deps executor.Deps) {
+	slog.Info("sweeps done", "who", who, "role", role, "pass", pass, "elapsed", elapsed, "found", found)
+	if deps.Log != nil {
+		_ = deps.Log.Emit("info", "sweep_pass", "sweep pass timed", map[string]any{
+			"who":        who,
+			"role":       role,
+			"pass":       pass,
+			"elapsed_ms": elapsed.Milliseconds(),
+			"found":      found,
+		})
 	}
 }
