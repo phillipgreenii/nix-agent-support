@@ -98,7 +98,7 @@ The `zm-scripts` package is built in the flake overlay (where `self` is availabl
 | Example              | Path                                            | Pattern                                                 |
 | -------------------- | ----------------------------------------------- | ------------------------------------------------------- |
 | Simplest             | `support-apps/packages/nix-tools/check-flakes/` | Single script, completions, tldr, tests                 |
-| Library + scripts    | `support-apps/packages/claude-activity/`        | Shared lib + 3 scripts + wrapper pattern                |
+| Library + script     | `agent-support/packages/session-mode/`          | Script backed by a shared lib (session-mode-lib)        |
 | Flake overlay wiring | `personal/home/programs/cmux/scripts.nix`       | Build at overlay, consume in home-manager               |
 | Config injection     | `your-flake/modules/your-module/`               | 11 scripts, library, JSON config, composition           |
 | Most complex         | `your-flake/modules/your-complex-module/`       | 14 scripts, library, exported + local config, git hooks |

@@ -1219,8 +1219,8 @@ pgwf_escalation_normalize_question() {
 # sha256(trigger + normalized question text), verbatim [design: ## State
 # model -> Axis 2, "[rev7] Fingerprint dedupe"]. Freedom boundary (this
 # packet's own Contract): sha256sum (coreutils), with a `shasum` fallback
-# for macOS -- same precedent as packages/claude-activity/lib/claude-
-# activity-lib.bash's get_session_id.
+# for macOS (a removed sibling session-id helper did the same in
+# its get_session_id).
 pgwf_escalation_fingerprint() {
   local trigger="$1" question="$2" normalized combined
   normalized="$(pgwf_escalation_normalize_question "$question")"

@@ -495,8 +495,8 @@ Verified against Claude Code 2.1.186:
   The established pattern instead (bead `pg2-sikj3`): the plugin's skill/hook invokes a BARE
   command, and the binary rides `home.packages` co-gated on `claude.enable` (precedent:
   claude-extended-tool-approver). No workspace plugin uses `bin/`.
-- **Default-Enabled Plugin ⇒ Default-Enabled Binary invariant** (observed broken 2026-10-05,
-  `claude-activity`): a plugin's `defaultEnabled: true` in its `.claude-plugin/plugin.json`
+- **Default-Enabled Plugin ⇒ Default-Enabled Binary invariant** (observed broken 2026-10-05):
+  a plugin's `defaultEnabled: true` in its `.claude-plugin/plugin.json`
   registers it — via `homeModules.default`'s unconditional `marketplaces.nixProvided` plus
   `home/programs/claude-marketplaces/default.nix`'s `enabledPlugins` resolution — on EVERY
   consumer that enables `phillipgreenii.programs.claude-code`, independent of the binary-installing
@@ -504,11 +504,11 @@ Verified against Claude Code 2.1.186:
   default). Plugin registration and `home.packages` binary installation are therefore TWO
   SEPARATE axes that can drift silently: the plugin's hooks fire on every `claude-code` consumer,
   but the bare command they invoke is only on PATH where a human remembered to ALSO flip the
-  matching program's `enable` flag. `claude-activity` is the confirmed-broken case (its `Stop`
-  hook fired with the binary absent, producing a silent per-turn "command not found" error on a
-  machine that never set this flag); `claude-extended-tool-approver` is exposed by the identical
-  mechanism but happened not to break only because its consuming machine's config explicitly set
-  the flag — see the next bullet for that pattern.
+  matching program's `enable` flag. A default-enabled plugin whose `Stop` hook fired with the
+  binary absent produced a silent per-turn "command not found" error on a machine that never set
+  this flag (2026-10-05); `claude-extended-tool-approver` is exposed by the identical mechanism
+  but does not break only because its consuming machine's config explicitly sets the flag — see
+  the next bullet for that pattern.
 - **The required fix shape is per-consumer, not per-module.** This repo's own binary-install
   gating (`home.packages` co-gated on `claude-code.enable && cfg.enable`, previous bullet) is
   already correct and is NOT what drifts — the gap is always in the CONSUMING machine/account
@@ -524,7 +524,7 @@ Verified against Claude Code 2.1.186:
   in `flake.nix` fails for any `defaultEnabled: true` plugin whose `hooks/hooks.json` invokes a
   bare PATH command unless the plugin is mapped (`pluginProgram`) to its `home/programs/<x>`
   module AND that module's `enable` is not a plain `mkEnableOption`, or the plugin is listed in
-  `knownConsumerCutover` (today `claude-activity` and `claude-extended-tool-approver`, whose
+  `knownConsumerCutover` (today `claude-extended-tool-approver`, whose
   consumers carry a named cutover block). A new default-enabled bare-command plugin therefore
   MUST either default its program's `enable` to `claude-code.enable` (as `session-mode` does) or
   be added to `knownConsumerCutover` deliberately. The check carries its own negative fixtures.

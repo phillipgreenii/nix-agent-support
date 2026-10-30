@@ -25,11 +25,6 @@
       "description": "Claude skill: diagnose a rogue/looping beads dolt sql-server and find the process that keeps starting it."
     },
     {
-      "name": "claude-activity",
-      "source": "./claude-activity",
-      "description": "Claude Code activity tracking via hooks"
-    },
-    {
       "name": "claude-extended-tool-approver",
       "source": "./claude-extended-tool-approver",
       "description": "Pre-tool permission hook with rule-based evaluation"

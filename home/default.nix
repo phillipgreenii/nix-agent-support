@@ -16,8 +16,6 @@
     ./programs/tuicr
     ./programs/neovim-claude
     ./programs/cmux-claude
-    ./programs/agent-activity
-    ./programs/claude-activity
     ./programs/claude-tool-tracker
     ./programs/pa-monitor
     ./programs/ccpool
@@ -50,8 +48,6 @@
     ./programs/wsplan
     ./programs/beads
     ./programs/serena
-    ./programs/pw-reset-agents
-    ./programs/pw-agent-activity
     # Relocated from nix-personal (Plan 5): agent tooling belongs here.
     ./programs/perles
     ./programs/rtk

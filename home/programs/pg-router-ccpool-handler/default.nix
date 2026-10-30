@@ -79,8 +79,8 @@ let
   # `wrap` is ONE entry (an argv array: env, then PATH=<pathDirs>, then one
   # NAME=value per OTel variable), so a consumer may append its own entries after
   # it. Its PATH holds claude, every bare command the enabled plugins' hooks
-  # invoke (ccpool, claude-extended-tool-approver, session-mode, claude-work-start,
-  # claude-work-end; the nix check test-claude-baseline-hook-commands derives and
+  # invoke (ccpool, claude-extended-tool-approver, session-mode; the nix check
+  # test-claude-baseline-hook-commands derives and
   # asserts that list from the hooks.json files) and the prompts' tools (gh, bd,
   # jq, git, nix, pg-connector, pn), then the system directories (/usr/bin:/bin:
   # /usr/sbin:/sbin). Scope (bead pg2-hou7i): only what the GENERIC allowed tools
@@ -168,7 +168,6 @@ let
         pkgs.ccpool
         claudeBaselineCeta
         pkgs.session-mode
-        pkgs.claude-activity
         pkgs.pg-connector
         pkgs.gh
         pkgs.jq

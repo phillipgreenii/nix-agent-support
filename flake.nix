@@ -489,32 +489,6 @@
           pa-monitor-decorator-scope = final.callPackage ./packages/pa-monitor-decorator-scope {
             inherit (goBuilders) mkGoApp;
           };
-          claude-activity =
-            let
-              result = import ./packages/claude-activity {
-                pkgs = final;
-                inherit bashBuilders;
-              };
-            in
-            final.symlinkJoin {
-              name = "claude-activity-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
-              paths = result.packages;
-            };
-          agent-activity =
-            let
-              result = import ./packages/agent-activity {
-                pkgs = final;
-                inherit bashBuilders;
-                inherit (final) claude-activity;
-              };
-            in
-            final.symlinkJoin {
-              name = "agent-activity-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
-              paths = result.packages;
-              postBuild = ''
-                ln -s agent-activity-api $out/bin/agent-activity
-              '';
-            };
           git-tools =
             let
               result = import ./packages/git-tools {
@@ -548,39 +522,12 @@
               name = "integrate-branch-support-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
-          # pw-reset-agents / pw-agent-activity: thin `agent-activity-api`
-          # wrappers, built with mkBashScript like every other bash command here
-          # (bead pg2-05lkx). They were `writeShellScriptBin` one-liners, which
-          # gave them no --help, no --version, no tests, and -- the defect that
-          # actually bit -- no resolved `agent-activity-api`: the delegate was
-          # picked up from whatever happened to be on PATH, so the commands
-          # worked in a login shell and failed under launchd / `env -i` / a
-          # ccpool-spawned session. `agent-activity` is threaded in as a real
-          # runtimeDeps entry.
-          #
-          # Unlike the aggregates above these take `result.<name>.script`
-          # directly rather than symlinkJoin-ing `result.packages`: each package
-          # holds exactly ONE script whose name equals the package's, so the
-          # join would only discard the script derivation's own pname/version
-          # (`0.0.0-<srcDigest>`, ADR 0011-visible) and meta.mainProgram.
-          pw-reset-agents =
-            (import ./packages/pw-reset-agents {
-              pkgs = final;
-              inherit bashBuilders;
-              inherit (final) agent-activity;
-            }).pw-reset-agents.script;
-          pw-agent-activity =
-            (import ./packages/pw-agent-activity {
-              pkgs = final;
-              inherit bashBuilders;
-              inherit (final) agent-activity;
-            }).pw-agent-activity.script;
           # pg-disk-reclaimer: data-driven disk-space-reclaim CLI (epic
           # pg2-txxyj; this task, pg2-txxyj.1, is scaffold-only -- no real
           # subcommand logic yet). Single mkBashScript tool, so it takes
           # `result.pg-disk-reclaimer.script` directly rather than
-          # symlinkJoin-ing `result.packages`, matching pw-reset-agents /
-          # pw-agent-activity above (same rationale: symlinkJoin would
+          # symlinkJoin-ing `result.packages`, matching the other single-script
+          # tools above (same rationale: symlinkJoin would
           # discard the script derivation's own pname/version and
           # meta.mainProgram, and this package holds exactly one script).
           pg-disk-reclaimer =
@@ -592,7 +539,7 @@
           # MANUAL/non-drain gap next to integrate-branch-support (`pb drain
           # isolate` owns the automated /drain-beads path). Single
           # mkBashScript tool, so -- same rationale as pg-disk-reclaimer /
-          # pw-reset-agents / pw-agent-activity above -- it takes
+          # pg-disk-reclaimer above -- it takes
           # `result.wtnew.script` directly rather than symlinkJoin-ing
           # `result.packages`.
           wtnew =
@@ -605,7 +552,7 @@
           # counterpart to wtnew above -- lsof liveness guard, fsmonitor
           # stop, worktree remove, plain branch -d, prune. Single
           # mkBashScript tool, so -- same rationale as wtnew/pg-disk-
-          # reclaimer/pw-reset-agents/pw-agent-activity above -- it takes
+          # reclaimer above -- it takes
           # `result.wtdone.script` directly rather than symlinkJoin-ing
           # `result.packages`.
           wtdone =
@@ -747,8 +694,8 @@
           # ...), consumed by the pb marketplace's commands, its SessionEnd
           # hook, and the claude-status-line segment. Single mkBashScript
           # tool (backed by its own session-mode-lib), so -- same rationale
-          # as wtnew/wtdone/pg-disk-reclaimer/pw-reset-agents/
-          # pw-agent-activity above -- it takes `result.session-mode.script`
+          # as wtnew/wtdone/pg-disk-reclaimer above -- it takes
+          # `result.session-mode.script`
           # directly rather than symlinkJoin-ing `result.packages`.
           session-mode =
             (import ./packages/session-mode {
@@ -4872,8 +4819,8 @@
               # Skill / Plugin Delivery"). A plugin with `defaultEnabled: true`
               # registers its hooks on EVERY claude-code consumer, while the
               # program module that installs the binary the hook invokes (a BARE
-              # PATH command) may default `enable = false` -- the claude-activity
-              # breakage (2026-10-05, silent "command not found" every turn).
+              # PATH command) may default `enable = false` -- a
+              # default-enabled plugin broke this way (2026-10-05, silent "command not found" every turn).
               # The check fails for any default-enabled plugin whose
               # hooks.json has a bare command unless (a) the plugin is mapped to
               # its program module below and (b) that module's `enable` is not a
@@ -4895,7 +4842,6 @@
                   # plugin name -> program module dir under home/programs that
                   # installs the binary its hooks invoke.
                   pluginProgram = pkgs.writeText "plugin-program-map" ''
-                    claude-activity claude-activity
                     claude-extended-tool-approver claude-extended-tool-approver
                     claude-tool-tracker claude-tool-tracker
                     pb session-mode
@@ -4903,7 +4849,6 @@
                   # Modules that default `enable = false` today; consumers carry
                   # a cutover block (homelab monorepod home-module.nix).
                   knownConsumerCutover = pkgs.writeText "known-consumer-cutover" ''
-                    claude-activity
                     claude-extended-tool-approver
                   '';
                 in
@@ -5110,7 +5055,7 @@
 
                   # The baseline resolves the commands the design names, whatever
                   # the scan finds.
-                  for c in claude ccpool claude-extended-tool-approver session-mode claude-work-start claude-work-end gh bd jq git nix pg-connector; do
+                  for c in claude ccpool claude-extended-tool-approver session-mode gh bd jq git nix pg-connector; do
                     resolves "$c" ${pathDirsFile} || { echo "FAIL: baseline PATH lacks '$c'" >&2; exit 1; }
                   done
 
@@ -5118,7 +5063,7 @@
                   scan "${surface}/claude-marketplace" "${surface}/packages/ccpool/ccpool-plugin" ${pathDirsFile} 2>pos.log \
                     || { cat pos.log >&2; echo "FAIL: the real tree has an unresolved bare hook command" >&2; exit 1; }
                   cat pos.log >&2
-                  for c in ccpool claude-work-start claude-work-end claude-extended-tool-approver session-mode; do
+                  for c in ccpool claude-extended-tool-approver session-mode; do
                     grep -qx "ok: $c" pos.log || { echo "FAIL: scan never saw '$c'" >&2; exit 1; }
                   done
 
@@ -17306,24 +17251,8 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
-            # test-pw-agent-activity / test-pw-reset-agents (bead pg2-05lkx).
-            # Same one-line idiom as integrate-branch-support above: the overlay attrs
-            # take only the script derivation, so without these the two suites
-            # -- including the real-binary argument contract that catches an
-            # agent-activity-api subcommand drifting away from the wrapper --
-            # would run in no gate at all.
-            // (import ./packages/pw-agent-activity {
-              inherit pkgs;
-              bashBuilders = pkgs._agentSupportBashBuilders;
-              inherit (pkgs) agent-activity;
-            }).checks
-            // (import ./packages/pw-reset-agents {
-              inherit pkgs;
-              bashBuilders = pkgs._agentSupportBashBuilders;
-              inherit (pkgs) agent-activity;
-            }).checks
             # test-pg-disk-reclaimer (bead pg2-txxyj.1). Same one-line idiom
-            # as pw-reset-agents/pw-agent-activity above: the overlay attr
+            # as integrate-branch-support above: the overlay attr
             # takes only the script derivation, so without this the suite
             # would run in no gate at all.
             // (import ./packages/pg-disk-reclaimer {
@@ -17524,16 +17453,6 @@
               work-report
               claude-hook-router
               plugin-conformance-check
-              ;
-            # The two agent-activity-api wrappers, re-exported for the same
-            # reason codeburn is: they are overlay-only attrs, so without this
-            # `nix build .#pw-agent-activity` cannot resolve them and the
-            # stripped-PATH behaviour of the shipped artifact is not directly
-            # buildable (bead pg2-05lkx). `nix flake check` builds `checks.*`,
-            # not `packages.*`, so this adds no flake-check cost.
-            inherit (pkgs)
-              pw-agent-activity
-              pw-reset-agents
               ;
             # pg-disk-reclaimer is likewise an overlay-only attr (single
             # mkBashScript tool holding just the script derivation) --
