@@ -375,6 +375,42 @@ Each is done in the chunk named, and its result is written back into this docume
 4. `dontAsk` and `bypassPermissions` rows of section 6 (chunk 2).
 5. No corrupt or interleaved lines over the shadow days (chunk 4, from ingest's skipped counts).
 
+Results of live checks 1 to 4 (measured 2026-10-30 on the first shadow-mode laptop, by
+`claude-tool-tracker ingest` over its real events directory and queries of the published views,
+plus headless `claude -p` sessions; check 5 is not part of this run):
+
+1. 2026-10-30, confirmed. `ceta.verdict` is written by CETA's own `PreToolUse` process with the
+   `tool_use_id` of the input it received. Of 9344 calls with a `tracker.call_start`, 9319 also
+   have a `ceta.verdict` under the same session and `tool_use_id` (a join of `tracker.call_start`
+   and `ceta.verdict` on both ids, so equal ids). The other 25 are all calls CETA wrote nothing for
+   (18 sessions; 18 of the 25 are subagent calls: Edit, Write, Bash, `EnterWorktree`, `Monitor`);
+   none is a mismatch of ids.
+2. 2026-10-30, not observed. No `tracker.denied` event and no `denial_reason` exists among 12813
+   calls, and no call has `settled_by` `classifier` with a `refused` settlement: all 1086
+   classifier-settled calls (permission mode `auto`, verdict `ask`, no deciding hook) ran. Three
+   headless `auto` sessions with deliberately risky commands did not produce one (the command was
+   allowed, the model declined to issue it, or CETA refused it first), so the shape of a classifier
+   refusal, in the mod's events and in `tracker.denied`, is still open and needs a real refusal
+   (a later shadow day will show it). Section 6's `classifier` rows stay as written.
+3. 2026-10-30, measured. `duration_ms` (from `tracker.post_tool`) covers the tool's run only and
+   excludes the wait for an answer. Asked and approved calls (a person answered; three calls in
+   `auto`, CETA ask): `duration_ms` 163, 1200 and 2633 ms against 1309776, 3464 and 149033 ms from
+   `tracker.call_start` to `tracker.call_end`. These three calls have no `tracker.running` event,
+   so `running_ts` to `call_end_ts` could not be taken for them. Unasked calls (CETA approve, 750
+   interactive calls with a `tracker.running`): `call_end_ts` minus `running_ts` exceeds `duration_ms`
+   by a median of 22 ms (554 of 750 within 0 to 1000 ms), the hook and delivery overhead after the
+   tool ends. The `tool_calls.duration_ms` note in `views.md` ("excludes permission-prompt and hook
+   time") is right.
+4. 2026-10-30, `dontAsk` observed, `bypassPermissions` partly observed. `dontAsk`: 199 calls
+   with verdict `ask`, no deciding hook and CETA `abstain` were `settled_by` `mode`, settlement
+   `refused`, as the row says; they end with `result` `error` (not `refused`) and the error text
+   "Permission ... denied ... don't ask mode", and ingest sets `failed_timing` to 1 for all 199.
+   `bypassPermissions`: one headless session ran a Bash call and recorded permission mode
+   `bypassPermissions` with verdict `allow`, deciding hook `PreToolUse`, CETA `approve`, so it was
+   `settled_by` `ceta`; the row "`allow`, no deciding hook, `bypassPermissions` gives `mode`"
+   was not reached, because CETA decides first while it is installed, so the `mode` case stays
+   unobserved (it needs a call CETA abstains on).
+
 ## 11. Chunks
 
 Each chunk lands on its own; sizes are t-shirt sizes.
