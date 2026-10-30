@@ -263,22 +263,28 @@ func TestSweep_examinedCapBoundsGitWorkPerPass(t *testing.T) {
 	}
 }
 
+// The deadline's expiry is driven by cancelling the context at a known point
+// rather than by wall-clock time, so a loaded host cannot change the outcome.
+// The wiring of Cfg.SweepDeadline itself is covered by the already-expired test
+// below.
 func TestSweep_deadlineExpiryReturnsPartialResultWithoutError(t *testing.T) {
 	h := newSweepHarness(t)
-	h.deps.Cfg.SweepDeadline = 200 * time.Millisecond
+	h.deps.Cfg.SweepDeadline = time.Hour
 	p1 := h.leak("zr-1")
 	p2 := h.leak("zr-2")
 	inner := h.env.open
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var calls atomic.Int64
-	h.env.open = func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
+	h.env.open = func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
 		// Calls 1-2 open zr-1 and the repo root, 3 is zr-1's anchor-branch delete:
-		// stall there so the deadline passes before zr-2 is examined.
+		// the deadline passes there, so zr-2 must not be examined.
 		if calls.Add(1) == 3 {
-			time.Sleep(300 * time.Millisecond)
+			cancel()
 		}
 		return inner(context.Background(), dir)
 	}
-	if got := h.sweep(); got != 1 {
+	if got := sweepLeakedWorktrees(ctx, h.role, h.deps, h.env); got != 1 {
 		t.Fatalf("removed %d, want 1 (the first worktree, before the deadline)", got)
 	}
 	if h.exists(p1) || !h.exists(p2) {
