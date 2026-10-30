@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 func TestClassifyError(t *testing.T) {
@@ -82,7 +83,15 @@ func TestPipelineRunInterpretOnly_FailureIsStageTagged(t *testing.T) {
 	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
 		return gather.Facts{}, nil
 	}), &out)
-	err := p.RunInterpretOnly(context.Background(), "pr", "never-gathered", gather.ChangeChanged)
+	// A never-gathered entity is a quiet no-op now (pg2-4i9ywp); a malformed
+	// stored-facts row is the load_facts failure this test pins.
+	if err := p.store.UpsertEntity(store.Entity{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: "bad-facts",
+		Facts: "{not json", ContentHash: "fixture",
+	}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+	err := p.RunInterpretOnly(context.Background(), "pr", "bad-facts", gather.ChangeChanged)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

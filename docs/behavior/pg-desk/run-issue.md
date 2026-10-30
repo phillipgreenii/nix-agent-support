@@ -95,6 +95,12 @@ Given the triggering bead's id, `run issue`:
    gather, and never the sync stage: this path only re-derives interpretation from data that is
    already current, on the theory that the linked issue changed, not the PR itself.
 
+   A PR the store has never gathered (typically a newly linked PR that the daemon-backed PR feed has
+   not stored yet) is a quiet no-op: exit `0` and one `noop` run record, never a `load_facts` error.
+   `run issue` MUST NOT gather it itself, because gathering PR facts belongs to the daemon-backed PR
+   feed and `run pr` is gone; the feed interprets the PR when it stores it. (Decision, bead
+   `pg2-4i9ywp`; pinned by `TestPipelineRunInterpretOnly_NeverGathered`.)
+
 A bead whose title and metadata match none of the known shapes (nor the title-adopted fallback) is
 a clear, non-panicking error — `run issue` does not guess.
 

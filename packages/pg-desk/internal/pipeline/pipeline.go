@@ -188,9 +188,11 @@ type runLogLine struct {
 // "added/changed/removed/sweep all resolve the SAME triggering bead's
 // linked PR the same way"].
 //
+// An entity with no stored facts (never gathered) is a quiet no-op: nil
+// error, one "noop" run record (see the decision comment in the body).
+//
 // Returns a non-nil error (never a panic) when change is not one of the
-// four valid kinds, when the entity has never been gathered (no stored
-// facts to re-interpret), or on an interpret/store failure — matching
+// four valid kinds, or on a load/interpret/store failure — matching
 // Run's own exit-code contract (see the package doc comment): nil on
 // success or a degraded-but-completed run, non-nil otherwise, never
 // os.Exit, never a raw pg-connector code.
@@ -212,9 +214,16 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 		return fmt.Errorf("pipeline: interpret-only get entity %s %s: %w", entityType, entityID, err)
 	}
 	if !found {
-		noEntityErr := TagStage(StageLoadFacts, fmt.Errorf("pipeline: interpret-only %s %s: no stored entity facts (never gathered)", entityType, entityID))
-		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", noEntityErr, runStart)
-		return noEntityErr
+		// Decision (bead pg2-4i9ywp): a never-gathered entity is a quiet
+		// "noop", not a load_facts error. PR facts are gathered by the
+		// daemon-backed PR feed (outside this repo; `run pr` and the sync
+		// stage are gone), so an issue event can legitimately arrive for a
+		// newly linked PR before that feed has stored it. There is nothing to
+		// re-interpret yet, and the feed's own gather interprets the PR when
+		// it lands. Gathering here instead would resurrect the retired
+		// gather-from-run-issue path (Gatherer.Gather is the feed's job).
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "noop", "", nil, runStart)
+		return nil
 	}
 
 	var facts gather.Facts

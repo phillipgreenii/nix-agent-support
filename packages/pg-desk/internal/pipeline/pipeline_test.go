@@ -126,8 +126,9 @@ func TestPipelineRunInterpretOnly_Success(t *testing.T) {
 }
 
 // TestPipelineRunInterpretOnly_NeverGathered proves an entity with no
-// stored facts (never gathered) is a clear, non-panicking error rather
-// than a nil-Facts crash.
+// stored facts (never gathered, e.g. a newly linked PR the daemon feed has
+// not stored yet) is a quiet "noop" against the real store: nil error, no
+// load_facts error line, no gather, no row written (bead pg2-4i9ywp).
 func TestPipelineRunInterpretOnly_NeverGathered(t *testing.T) {
 	var out bytes.Buffer
 	cg := &countingGatherer{inner: gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
@@ -135,12 +136,18 @@ func TestPipelineRunInterpretOnly_NeverGathered(t *testing.T) {
 	})}
 	p := newTestPipeline(t, cg, &out)
 
-	err := p.RunInterpretOnly(context.Background(), "pr", "no-such-entity", gather.ChangeChanged)
-	if err == nil {
-		t.Fatal("RunInterpretOnly: expected an error for an entity with no stored facts")
+	err := p.RunInterpretOnly(context.Background(), "pr", "no-such-entity", gather.ChangeAdded)
+	if err != nil {
+		t.Fatalf("RunInterpretOnly: never-gathered entity must be a quiet no-op, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "never gathered") {
-		t.Fatalf("RunInterpretOnly error = %v, want it to name the missing-facts case", err)
+	if strings.Contains(out.String(), `"outcome":"error"`) || strings.Contains(out.String(), "load_facts") {
+		t.Fatalf("no error/load_facts line expected, got: %s", out.String())
+	}
+	if !strings.Contains(out.String(), `"outcome":"noop"`) || !strings.Contains(out.String(), `"path":"interpret_only"`) {
+		t.Fatalf("expected one interpret_only noop record, got: %s", out.String())
+	}
+	if _, found, _ := p.store.GetEntity(p.repo(), "pr", "no-such-entity"); found {
+		t.Fatal("a no-op must not write an entity row")
 	}
 	if cg.calls != 0 {
 		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
