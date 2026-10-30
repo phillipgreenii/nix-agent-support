@@ -113,8 +113,8 @@ type DecideRecord struct {
 	// failed-closed lookup; a plan run reports no counters line, so no duration).
 	LookupMs    *int64 `json:"lookup_ms,omitempty"`
 	LookupItems *int64 `json:"lookup_items,omitempty"`
-	// PrePlanMs is the read-only `plan --json` (apply: before the apply; plan: the
-	// one the record is built from). ApplyMs is the decider's own call (the apply,
+	// PrePlanMs is the read-only `plan --json` the plan-mode record is built from (an
+	// apply has none: its own `--json` result is the plan). ApplyMs is the decider's own call (the apply,
 	// or in plan mode the plan). ResidualMs is the read-only plan after an apply.
 	PrePlanMs  *int64 `json:"pre_plan_ms,omitempty"`
 	ApplyMs    *int64 `json:"apply_ms,omitempty"`

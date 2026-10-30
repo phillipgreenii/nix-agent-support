@@ -37,7 +37,7 @@ func stubSeams(t *testing.T, planRC, applyRC int) *seamCalls {
 		c.planView = viewFromContext(ctx)
 		return planRC
 	}
-	applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, it *item.Routed) int {
+	applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, it *item.Routed, asJSON bool) int {
 		c.calls++
 		c.applyTyp, c.applyID, c.applyItem = typ, id, it
 		c.applyView = viewFromContext(ctx)

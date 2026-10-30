@@ -200,8 +200,8 @@ func TestPRChangeRealTools(t *testing.T) {
 			t.Fatalf("exit %d:\n%s", res.code, res.stderr)
 		}
 		contains(t, "refresh line", res.stdout, "no change")
-		if got := r.deciderRuns(); len(got) != 1 || got[0] != "apply pr "+id8 {
-			t.Fatalf("decider runs = %q, want exactly [apply pr %s]", got, id8)
+		if got := r.deciderRuns(); len(got) != 1 || got[0] != "apply pr "+id8+" --json" {
+			t.Fatalf("decider runs = %q, want exactly [apply pr %s --json]", got, id8)
 		}
 		// The router's retry-window form of the id is the same PR.
 		res = r.change("plan", id8+"@0123456789ab")

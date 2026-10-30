@@ -37,7 +37,7 @@ func TestApplyReportsDecidedActionsOnTheLastStdoutLine(t *testing.T) {
 				on("pg-desk pr refresh", ok("refreshed pr acme/api#7: no change (version 3)\n")).
 				on("pg-desk pr show", ok(hydratedView(3, false, ""))).
 				on("pg-decider plan pr acme/api#7 --json", ok(c.plan)).
-				on("pg-decider apply pr acme/api#7", ok("applied\n")).
+				on("pg-decider apply pr acme/api#7", ok(c.plan)).
 				on("pg-decider plan pr acme/api#7", ok("the plan\n"))
 			o, out, errb := opts(t, c.mode, s)
 			if got := Run(context.Background(), o); got != ExitOK {

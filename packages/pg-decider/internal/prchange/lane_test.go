@@ -59,7 +59,7 @@ func laneCalls(t *testing.T, s *script) []laneInput {
 // `plan --json` reads), with their standard input.
 func deciderCalls(s *script) (calls, inputs []string) {
 	for i, c := range s.calls {
-		if strings.HasPrefix(c, "pg-decider ") && !strings.HasSuffix(c, " --json") {
+		if strings.HasPrefix(c, "pg-decider ") && !(strings.HasPrefix(c, "pg-decider plan pr ") && strings.HasSuffix(c, " --json")) {
 			calls, inputs = append(calls, c), append(inputs, s.inputs[i])
 		}
 	}
@@ -92,18 +92,18 @@ func TestApplyPassesFromItemOnStdinWithTheDeliveryKey(t *testing.T) {
 		wantKey          int64
 		wantArgs         string // the decider's argv after the program name
 	}{
-		{"the change sequence", "17", testID, 17, "apply pr acme/api#7 --from-item -"},
-		{"a sequence in exponent form (10^7)", "1e+07", testID, 10000000, "apply pr acme/api#7 --from-item -"},
-		{"a missing sequence takes the id suffix", "<no value>", testID + "@0123456789ab", 0x0123456789ab, "apply pr acme/api#7 --from-item -"},
-		{"an empty sequence takes the id suffix", "", testID + "@00000000ffff", 0xffff, "apply pr acme/api#7 --from-item -"},
-		{"the sequence wins over the suffix", "9", testID + "@0123456789ab", 9, "apply pr acme/api#7 --from-item -"},
-		{"a bare id and no sequence passes no --from-item", "", testID, 0, "apply pr acme/api#7"},
-		{"a sequence of 0 and a bare id passes no --from-item", "0", testID, 0, "apply pr acme/api#7"},
-		{"a suffix of zeros passes no --from-item", "<no value>", testID + "@000000000000", 0, "apply pr acme/api#7"},
+		{"the change sequence", "17", testID, 17, "apply pr acme/api#7 --json --from-item -"},
+		{"a sequence in exponent form (10^7)", "1e+07", testID, 10000000, "apply pr acme/api#7 --json --from-item -"},
+		{"a missing sequence takes the id suffix", "<no value>", testID + "@0123456789ab", 0x0123456789ab, "apply pr acme/api#7 --json --from-item -"},
+		{"an empty sequence takes the id suffix", "", testID + "@00000000ffff", 0xffff, "apply pr acme/api#7 --json --from-item -"},
+		{"the sequence wins over the suffix", "9", testID + "@0123456789ab", 9, "apply pr acme/api#7 --json --from-item -"},
+		{"a bare id and no sequence passes no --from-item", "", testID, 0, "apply pr acme/api#7 --json"},
+		{"a sequence of 0 and a bare id passes no --from-item", "0", testID, 0, "apply pr acme/api#7 --json"},
+		{"a suffix of zeros passes no --from-item", "<no value>", testID + "@000000000000", 0, "apply pr acme/api#7 --json"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s := hydrated().on("pg-decider plan pr", ok(planEmpty)).on("pg-decider apply", ok(""))
+			s := hydrated().on("pg-decider plan pr", ok(planEmpty)).on("pg-decider apply", ok(planEmpty))
 			o, _, errb := opts(t, ModeApply, s)
 			o.Seq, o.RawID = c.seq, c.rawID
 			if got := Run(context.Background(), o); got != ExitOK {
@@ -171,8 +171,8 @@ func TestAGarbageSequenceIsAUsageErrorBeforeAnyWork(t *testing.T) {
 // it makes afterwards is the residual of that run, never a run of its own.
 func TestApplyRecordsOneRunAndPersistsTheResidualAfterTheApply(t *testing.T) {
 	s := hydrated().
-		onSeq("pg-decider plan pr acme/api#7 --json", ok(planWithWork), ok(`{"actions":[{"op":"create","kind":"review-pr","target":null,"fields":{},"rule":"review.head-advanced"}],"skipped":[]}`)).
-		on("pg-decider apply", exit(2, "", applyCounters+"\nrule review.head-advanced failed\n"))
+		on("pg-decider plan pr acme/api#7 --json", ok(`{"actions":[{"op":"create","kind":"review-pr","target":null,"fields":{},"rule":"review.head-advanced"}],"skipped":[]}`)).
+		on("pg-decider apply", exit(2, planWithWork, applyCounters+"\nrule review.head-advanced failed\n"))
 	o, _, _ := opts(t, ModeApply, s)
 	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
 	o.Seq = "17"

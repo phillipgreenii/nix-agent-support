@@ -362,6 +362,11 @@ func (r *run) checkView() (int, bool) {
 // and a run with no key passes none (counting every run is then correct).
 func (r *run) deciderCall() Call {
 	c := Call{Name: "pg-decider", Args: []string{r.o.Mode, "pr", r.id}}
+	if r.o.Mode == ModeApply {
+		// --json makes the apply print the plan it applied, which is the run
+		// record's plan (no separate pre-apply plan call).
+		c.Args = append(c.Args, "--json")
+	}
 	if r.o.Mode == ModeApply && r.key.Has() {
 		c.Args = append(c.Args, "--from-item", "-")
 		c.Stdin = []byte(RoutedItemJSON(r.o.RawID, r.id, r.key))
@@ -392,6 +397,20 @@ func (r *run) readPlan() (*action.PlanResult, string) {
 	return p, ""
 }
 
+// appliedPlan reads the plan the apply printed (`apply --json`). The error text
+// is non-empty when there is none: the apply failed outright (any exit but 0 and
+// 2) or its output is not readable JSON.
+func (r *run) appliedPlan(res Result) (*action.PlanResult, string) {
+	if res.Code != 0 && res.Code != 2 {
+		return nil, fmt.Sprintf("pg-decider apply --json exited %d: %s", res.Code, firstLine(string(res.Stderr)))
+	}
+	p, err := parsePlanJSON(string(res.Stdout))
+	if err != nil {
+		return nil, "the plan is not readable JSON: " + err.Error()
+	}
+	return p, ""
+}
+
 // decide runs the decider and maps its exit, then fills in what the run record
 // and the lane state need: the plan (the actions and skips, read-only), the
 // decider's apply counters, and the residual after the run.
@@ -399,14 +418,7 @@ func (r *run) decide() int {
 	rec := &DecideRecord{Rules: []RuleOutcome{}, Actions: []PlannedAction{}, ByKind: map[string]int{}}
 	r.rec.Decide = rec
 
-	// In apply mode the plan is read BEFORE the apply: it says which operation
-	// each action has, which the apply counters (per rule) do not.
 	var pre *action.PlanResult
-	if r.o.Mode == ModeApply {
-		prePlanStart := r.o.Clock()
-		pre, rec.PlanError = r.readPlan()
-		rec.PrePlanMs = r.ms(prePlanStart)
-	}
 	deciderStart := r.o.Clock()
 	res := r.call(r.deciderCall())
 	rec.ApplyMs = r.ms(deciderStart)
@@ -414,6 +426,11 @@ func (r *run) decide() int {
 	rec.ExitCode = res.Code
 	if res.StartErr != nil || signaled(res) {
 		return code
+	}
+	if r.o.Mode == ModeApply {
+		// The apply's own --json result is the plan it applied: it says which
+		// operation each action has, which the apply counters (per rule) do not.
+		pre, rec.PlanError = r.appliedPlan(res)
 	}
 
 	switch {
@@ -427,7 +444,7 @@ func (r *run) decide() int {
 			r.residual = &n
 		}
 	case r.o.Mode == ModeApply && res.Code == 0 && pre != nil && rec.PlanError == "" && len(pre.Actions) == 0:
-		// A clean apply after a good pre-apply plan that listed no actions wrote
+		// A clean apply whose own plan listed no actions wrote
 		// nothing, so the residual is 0 by definition: skip the lookup-heavy re-plan.
 		n := 0
 		r.residual = &n
@@ -507,7 +524,9 @@ func (r *run) mapDecide(res Result) int {
 	for _, l := range counters {
 		fmt.Fprintln(r.o.Stderr, l)
 	}
-	if len(res.Stdout) > 0 {
+	// An apply's stdout is its --json plan, which the run record consumes; only a
+	// plan's own output is the command's stdout.
+	if len(res.Stdout) > 0 && r.o.Mode != ModeApply {
 		r.o.Stdout.Write(res.Stdout)
 	}
 	switch {

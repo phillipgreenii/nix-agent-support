@@ -39,16 +39,15 @@ func runApplyForResidual(t *testing.T, s *script) (int, RunRecord) {
 	return code, recs[0]
 }
 
-func TestNoActionApplyMakesTwoDeciderInvocationsAndRecordsResidualZero(t *testing.T) {
+func TestNoActionApplyMakesOneDeciderInvocationAndRecordsResidualZero(t *testing.T) {
 	s := hydrated().
-		on("pg-decider plan pr acme/api#7 --json", ok(planEmpty)).
-		on("pg-decider apply", exit(0, "", ""))
+		on("pg-decider apply", exit(0, planEmpty, ""))
 	code, rec := runApplyForResidual(t, s)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if got := deciderInvocations(s); got != 2 {
-		t.Fatalf("%d decider invocations %v, want 2 (pre-plan, apply)", got, s.calls)
+	if got := deciderInvocations(s); got != 1 {
+		t.Fatalf("%d decider invocations %v, want 1 (the apply)", got, s.calls)
 	}
 	if rec.Residual == nil || *rec.Residual != 0 || rec.ResidualError != "" {
 		t.Fatalf("residual = %v, error %q; want 0 and none", rec.Residual, rec.ResidualError)
@@ -58,50 +57,87 @@ func TestNoActionApplyMakesTwoDeciderInvocationsAndRecordsResidualZero(t *testin
 	}
 }
 
-func TestActionApplyMakesThreeDeciderInvocations(t *testing.T) {
+func TestActionApplyMakesTwoDeciderInvocationsAndNoPrePlanCall(t *testing.T) {
 	s := hydrated().
-		onSeq("pg-decider plan pr acme/api#7 --json", ok(planWithWork), ok(planEmpty)).
-		on("pg-decider apply", exit(0, "", applyCounters+"\n"))
+		on("pg-decider plan pr acme/api#7 --json", ok(planEmpty)).
+		on("pg-decider apply", exit(0, planWithWork, applyCounters+"\n"))
 	code, rec := runApplyForResidual(t, s)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if got := deciderInvocations(s); got != 3 {
-		t.Fatalf("%d decider invocations %v, want 3", got, s.calls)
+	if got := deciderInvocations(s); got != 2 {
+		t.Fatalf("%d decider invocations %v, want 2 (apply, residual plan)", got, s.calls)
+	}
+	var order []string
+	for _, c := range s.calls {
+		if strings.HasPrefix(c, "pg-decider ") {
+			order = append(order, strings.Fields(c)[1])
+		}
+	}
+	if strings.Join(order, ",") != "apply,plan" {
+		t.Fatalf("decider call order %v, want apply then the residual plan", order)
 	}
 	if rec.Residual == nil || *rec.Residual != 0 {
 		t.Fatalf("residual = %v, want 0 from the post-apply plan", rec.Residual)
 	}
+	// The plan the record carries is the apply's own.
+	if rec.Decide == nil || len(rec.Decide.Actions) != 3 || rec.Decide.Actions[0].Op != "create" || rec.Decide.PlanError != "" || rec.Decide.PrePlanMs != nil {
+		t.Fatalf("decide = %+v", rec.Decide)
+	}
 }
 
-func TestFailedPrePlanStillReadsTheResidual(t *testing.T) {
+// An apply whose result is not readable JSON sets the PlanError the pre-apply
+// call used to set, and the residual is still read.
+func TestUnreadableApplyResultSetsPlanErrorAndStillReadsTheResidual(t *testing.T) {
 	s := hydrated().
-		onSeq("pg-decider plan pr acme/api#7 --json", exit(1, "", "boom"), ok(planWithWork)).
-		on("pg-decider apply", exit(0, "", ""))
+		on("pg-decider plan pr acme/api#7 --json", ok(planWithWork)).
+		on("pg-decider apply", exit(0, "not json", ""))
 	code, rec := runApplyForResidual(t, s)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if got := planCalls(s); got != 2 {
-		t.Fatalf("%d plan reads, want 2", got)
+	if got := planCalls(s); got != 1 {
+		t.Fatalf("%d plan reads, want 1 (the residual)", got)
 	}
-	if rec.Decide == nil || rec.Decide.PlanError == "" {
-		t.Fatalf("no PlanError recorded: %+v", rec.Decide)
+	if rec.Decide == nil || !strings.HasPrefix(rec.Decide.PlanError, "the plan is not readable JSON") {
+		t.Fatalf("PlanError = %+v", rec.Decide)
+	}
+	if rec.Decide.ExitCode != 0 || len(rec.Decide.Actions) != 0 {
+		t.Fatalf("decide = %+v", rec.Decide)
 	}
 	if rec.Residual == nil || *rec.Residual != 3 {
 		t.Fatalf("residual = %v, want 3 from the post-apply plan", rec.Residual)
 	}
 }
 
-func TestApplyExit2StillReadsTheResidual(t *testing.T) {
+// Partial failure: the plan the failed apply printed is still the record's plan,
+// and the residual is read.
+func TestApplyExit2UsesItsOwnPlanAndStillReadsTheResidual(t *testing.T) {
 	s := hydrated().
-		onSeq("pg-decider plan pr acme/api#7 --json", ok(planEmpty), ok(planWithWork)).
-		on("pg-decider apply", exit(2, "", "rule x failed\n"))
+		on("pg-decider plan pr acme/api#7 --json", ok(planWithWork)).
+		on("pg-decider apply", exit(2, planEmpty, "rule x failed\n"))
 	_, rec := runApplyForResidual(t, s)
-	if got := planCalls(s); got != 2 {
-		t.Fatalf("%d plan reads, want 2", got)
+	if got := planCalls(s); got != 1 {
+		t.Fatalf("%d plan reads, want 1", got)
+	}
+	if rec.Decide == nil || rec.Decide.PlanError != "" {
+		t.Fatalf("decide = %+v", rec.Decide)
 	}
 	if rec.Residual == nil || *rec.Residual != 3 {
 		t.Fatalf("residual = %v, want 3", rec.Residual)
+	}
+}
+
+// An apply that fails outright (no plan printed) records a PlanError and reads
+// no residual.
+func TestApplyThatFailsOutrightRecordsAPlanError(t *testing.T) {
+	s := hydrated().
+		on("pg-decider apply", exit(4, "", "lookup untrusted\n"))
+	_, rec := runApplyForResidual(t, s)
+	if rec.Decide == nil || !strings.Contains(rec.Decide.PlanError, "exited 4") {
+		t.Fatalf("decide = %+v", rec.Decide)
+	}
+	if planCalls(s) != 0 {
+		t.Fatalf("a plan was read: %v", s.calls)
 	}
 }

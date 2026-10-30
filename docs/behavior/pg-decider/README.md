@@ -22,7 +22,7 @@ Three tools cooperate, and each owns one concern:
 ```mermaid
 flowchart LR
     D[("pg-desk: snapshot, annotations, decorations")] -->|"change record"| R["pg-router"]
-    R -->|"routed item"| A["pg-decider apply --from-item"]
+    R -->|"routed item"| A["pg-decider apply --json --from-item"]
     A -->|"pg-desk TYPE show ID --json"| D
     A -->|"work-item writes via pg-connector"| T[("agent tracker")]
     A -->|"annotate, force-review --clear"| D

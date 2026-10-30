@@ -473,10 +473,16 @@ func (r *rig) created() int {
 // deciderRuns is the decider runs that decide (plan or apply). The read-only
 // `plan --json` reads the command makes for its run record are listed apart, by
 // deciderPlanReads.
+// isPlanRead reports whether a decider log line is a read-only `plan pr <id>
+// --json` (an apply's own `--json` is a run, not a read).
+func isPlanRead(l string) bool {
+	return strings.HasPrefix(l, "plan ") && strings.HasSuffix(l, " --json")
+}
+
 func (r *rig) deciderRuns() []string {
 	var out []string
 	for _, l := range r.deciderLog() {
-		if !strings.HasSuffix(l, " --json") {
+		if !isPlanRead(l) {
 			out = append(out, l)
 		}
 	}
@@ -486,7 +492,7 @@ func (r *rig) deciderRuns() []string {
 func (r *rig) deciderPlanReads() []string {
 	var out []string
 	for _, l := range r.deciderLog() {
-		if strings.HasSuffix(l, " --json") {
+		if isPlanRead(l) {
 			out = append(out, l)
 		}
 	}

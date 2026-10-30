@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/failure"
 	"github.com/phillipgreenii/pg-decider/internal/item"
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
+	"github.com/phillipgreenii/pg-decider/internal/plan"
 	"github.com/phillipgreenii/pg-decider/internal/rules"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
@@ -54,8 +55,10 @@ var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []a
 // view was freshly read (retrieve it with viewFromContext); it is nil
 // without --from-item. apply never decides from the item's kind: it computes
 // the actions from the view with the decide core and executes them. It
-// returns the process exit code.
-var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, it *item.Routed) int {
+// returns the process exit code. With asJSON it prints the plan it applied
+// (the same object `plan --json` prints) on out once the run has finished, on
+// exit 0 and on exit 2 alike; a run that fails before applying prints nothing.
+var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, it *item.Routed, asJSON bool) int {
 	v := viewFromContext(ctx)
 	if v == nil {
 		fmt.Fprintf(errOut, "pg-decider: no %s view of %s to apply\n", typ, id)
@@ -87,9 +90,9 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 		return exitcode.LookupUntrusted
 	}
 	vd := lk.Augment(v)
-	plan := arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(vd), decideFn(vd, typ, cfg)), vd, cfg)
+	planned := arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(vd), decideFn(vd, typ, cfg)), vd, cfg)
 	res := apply.Run(ctx, apply.Input{
-		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, plan.Skipped, lk),
+		Type: typ, ID: id, View: v, Actions: planned.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, planned.Skipped, lk),
 		Env:    apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut},
 		Lookup: lk,
 	})
@@ -98,11 +101,20 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 			fmt.Fprintf(errOut, "pg-decider: %s %s (rule %s): %s: %v\n", ev.Action.Op, ev.WorkItemID, ev.Action.Rule, ev.Outcome, ev.Err)
 		}
 	}
+	if asJSON {
+		if err := plan.JSONWithLookup(out, planned, lookupFigures(lk)); err != nil {
+			fmt.Fprintf(errOut, "pg-decider: cannot print the applied plan: %v\n", err)
+			if res.ExitCode == exitcode.OK {
+				return exitcode.Failure
+			}
+		}
+	}
 	return res.ExitCode
 }
 
 func newApplyCmd() *cobra.Command {
 	var fromItem string
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "apply <type> <id>",
 		Short: "Apply the actions the decider calls for on an entity",
@@ -111,7 +123,9 @@ func newApplyCmd() *cobra.Command {
 			"calls for. --from-item names the routed pg-router item that triggered the run\n" +
 			"(a file path, or - for stdin); it only identifies the trigger and never\n" +
 			"decides what is applied. Exit 0 when all actions are applied or none are\n" +
-			"needed, 2 when some failed, 3 when the view is unreadable (nothing applied).",
+			"needed, 2 when some failed, 3 when the view is unreadable (nothing applied).\n" +
+			"--json prints the plan that was applied (the same object `plan --json` prints)\n" +
+			"on stdout when the run finished, on exit 0 and on exit 2.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			typ, id := args[0], args[1]
@@ -129,12 +143,13 @@ func newApplyCmd() *cobra.Command {
 			if !ok {
 				return errExit{exitcode.ViewUnreadable}
 			}
-			if code := applyFn(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), typ, id, it); code != exitcode.OK {
+			if code := applyFn(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), typ, id, it, asJSON); code != exitcode.OK {
 				return errExit{code}
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&fromItem, "from-item", "", "routed pg-router item that triggered this run: a file path, or - for stdin")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the plan that was applied as JSON on stdout")
 	return cmd
 }

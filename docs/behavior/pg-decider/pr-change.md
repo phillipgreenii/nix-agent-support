@@ -71,8 +71,9 @@ directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`
    decider, when the view's version is `0` or the view is marked stale, so an unhydrated view can
    never mint an anchor. A legacy row has version `0`, so the version is a sufficient test.
 3. **Decide.** `pg-decider plan pr <id>` for mode `plan`, `pg-decider apply pr <id>` for mode
-   `apply` (with `--from-item -` when the run has a delivery key, see below). The plan the decider
-   prints is passed through on standard output. An `apply` that exits `0` having planned actions then
+   `apply --json` (with `--from-item -` when the run has a delivery key, see below). The plan the
+   decider prints for mode `plan` is passed through on standard output; an `apply`'s `--json` plan is
+   read by the command (the run record's plan) and not printed. An `apply` that exits `0` having planned actions then
    ends its standard output with one more line, the action report pg-router's command role reads
    (`INV-CMA-3` of the set `pg-router-handler-command`): `{"actions":[{"verb":"review-pr"},...]}`,
    one entry per planned action in plan order, the verb being the action's kind (`anchor`,
@@ -86,9 +87,16 @@ directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`
 The command never sleeps and retries inside one run: pg-router owns every clock.
 
 Besides the decider's own run, the command makes read-only `pg-decider plan pr <id> --json` reads: one
-after a `plan` run, and one before an `apply` run. After an `apply` run that exited 0 or 2 it reads the residual plan again, except when the plan before the apply was read cleanly, listed no actions and the apply exited 0: then the residual is 0 by definition and the second read is skipped (recorded as residual 0, no residual error). They write nothing. They are where the
-run record's planned actions, per-rule outcomes and skip reasons, and the lane state's residual and
-decisions come from.
+after a `plan` run, and one after an `apply` run that exited 0 or 2 (the residual plan, a plan made
+after the writes). An `apply` makes no read before it: the plan it printed with `--json` is the plan
+the run record's planned actions, per-rule outcomes and skip reasons, and the lane state's
+decisions come from. The residual read is skipped when the apply's own plan was read cleanly, listed
+no actions and the apply exited 0: then the residual is 0 by definition (recorded as residual 0, no
+residual error); an apply that exited 2, or whose result was not readable JSON, still reads the
+residual. A no-action `apply` therefore makes one decider invocation and an `apply` with actions
+two. The reads write nothing. An `apply` that exited 0 or 2 whose `--json` result is not readable
+sets `plan_error` as an unreadable plan did, and one that failed outright (any other exit) sets it
+to that exit.
 
 ## The delivery key
 

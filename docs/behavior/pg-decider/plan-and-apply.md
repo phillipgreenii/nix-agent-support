@@ -5,7 +5,7 @@ composite view; only `apply` writes.
 
 ```text
 pg-decider plan  <type> <id> [--json]
-pg-decider apply <type> <id> [--from-item <path|->]
+pg-decider apply <type> <id> [--from-item <path|->] [--json]
 ```
 
 `<type>` is `pr`, `issue` or `thread`; `pr` and `issue` have deciders (the focus rule registers for
@@ -169,7 +169,15 @@ work:` line includes the items the listing added.
 ## `pg-decider apply`
 
 `apply` re-reads the view, decides, and executes the actions in order. Nothing is printed on
-stdout; diagnostics go to stderr.
+stdout unless `--json` is given; diagnostics go to stderr.
+
+`--json` prints, once the run has finished, the plan the run applied: the same object `plan --json`
+prints (`actions`, each with its `op`, `kind`, `rule` and `facts`, and `skipped`, the rules that
+produced no action and why; for a `pr` also `lookup_items` and `lookup_ceiling`). It is printed on
+exit `0` and on exit `2` (a partial failure), so a caller learns what was attempted. A run that
+fails before it applies anything (exit `1`, `3` or `4`) prints nothing. The run counters line on
+stderr is unchanged. The composed command reads the plan from this result rather than from a
+separate `plan --json` call before the apply, which cannot differ from what the apply saw.
 
 ### The routed item
 

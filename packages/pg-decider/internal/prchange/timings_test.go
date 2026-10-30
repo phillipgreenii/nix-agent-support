@@ -70,10 +70,10 @@ func i64(n int64) *int64 { return &n }
 func TestAnApplyRunRecordsEveryStageTiming(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)}
 	s := hydrated().
-		// The pre-plan lists work, so the residual is read (an empty pre-plan
+		// The apply's own plan lists work, so the residual is read (an empty plan
 		// followed by a clean apply skips the residual read).
-		onSeq("pg-decider plan pr acme/api#7 --json", ok(planWithWork), ok(planEmpty)).
-		on("pg-decider apply", exit(0, "", timedApplyCounters+"\n"))
+		on("pg-decider plan pr acme/api#7 --json", ok(planEmpty)).
+		on("pg-decider apply", exit(0, planWithWork, timedApplyCounters+"\n"))
 	o, _, errb := opts(t, ModeApply, s)
 	o.Clock = clock.now
 	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
@@ -88,17 +88,18 @@ func TestAnApplyRunRecordsEveryStageTiming(t *testing.T) {
 	}
 	_, rec := readRecord(t, o.RunRecordPath)
 
-	wantTimings := TimingsRecord{LockWaitMs: i64(0), HydrateMs: i64(1200), ViewReadMs: i64(80), DecideMs: i64(4600)}
-	if rec.Timings == nil || *rec.Timings.LockWaitMs != 0 || *rec.Timings.HydrateMs != 1200 || *rec.Timings.ViewReadMs != 80 || *rec.Timings.DecideMs != 4600 {
+	wantTimings := TimingsRecord{LockWaitMs: i64(0), HydrateMs: i64(1200), ViewReadMs: i64(80), DecideMs: i64(4300)}
+	if rec.Timings == nil || *rec.Timings.LockWaitMs != 0 || *rec.Timings.HydrateMs != 1200 || *rec.Timings.ViewReadMs != 80 || *rec.Timings.DecideMs != 4300 {
 		t.Errorf("timings = %s, want %s", mustJSON(rec.Timings), mustJSON(wantTimings))
 	}
 	d := rec.Decide
 	if d == nil {
 		t.Fatal("no decide record")
 	}
-	// pre-plan 300, apply 4000, residual 300: the decide stage is their sum.
-	if *d.PrePlanMs != 300 || *d.ApplyMs != 4000 || *d.ResidualMs != 300 {
-		t.Errorf("decide stages pre=%v apply=%v residual=%v", *d.PrePlanMs, *d.ApplyMs, *d.ResidualMs)
+	// apply 4000, residual 300: the decide stage is their sum; an apply makes no
+	// pre-plan call.
+	if d.PrePlanMs != nil || *d.ApplyMs != 4000 || *d.ResidualMs != 300 {
+		t.Errorf("decide stages pre=%v apply=%v residual=%v", d.PrePlanMs, *d.ApplyMs, *d.ResidualMs)
 	}
 	if d.LookupMs == nil || *d.LookupMs != 250 || d.LookupItems == nil || *d.LookupItems != 40 {
 		t.Errorf("lookup = %v ms, %v items; want 250 and 40", d.LookupMs, d.LookupItems)
@@ -187,8 +188,7 @@ func TestAFailedRefreshRecordsOnlyLockAndHydrate(t *testing.T) {
 func TestOldReadersToleratTheTimingMembers(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)}
 	s := hydrated().
-		on("pg-decider plan pr acme/api#7 --json", ok(planEmpty)).
-		on("pg-decider apply", exit(0, "", timedApplyCounters+"\n"))
+		on("pg-decider apply", exit(0, planEmpty, timedApplyCounters+"\n"))
 	o, _, errb := opts(t, ModeApply, s)
 	o.Clock = clock.now
 	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
