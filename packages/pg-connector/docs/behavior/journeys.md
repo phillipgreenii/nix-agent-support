@@ -84,10 +84,6 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   through the umbrella knowing that nothing in the stack, whatever its name, can delete a message,
   and that mail does not add items to the attention feed on its own. _(→ `USECASE-MAIL-READ`;
   `INV-MAIL-1`, `INV-MAIL-3`, `INV-MAIL-4`.)_
-- **`STORY-OP-16`** <!-- uuid: 895b3086-1c35-47ba-936e-6f90af01f637 --> — see which of my agent
-  sessions are waiting on me, most urgent first, without being shown the same account-wide usage
-  cap that an alert already raises. _(→ `USECASE-AGENTSESSION-ATTENTION`; `INV-AGS-1`,
-  `INV-AGS-2`.)_
 
 ## Journey
 
@@ -668,24 +664,6 @@ flowchart TD
     run --> att{"is the operation list_attention?"}
     att -->|"yes"| empty["answer an empty successful list (INV-MAIL-4)"]
 ```
-
-### `USECASE-AGENTSESSION-ATTENTION` — see which agent sessions need a person, without repeating an alert <!-- uuid: 6f77845a-c61b-4a16-9c1f-39899d822da1 -->
-
-**Actor:** `ACTOR-OP` (typically a consumer reading `attention list`).
-**Level:** user-goal.
-**Preconditions:** an `agentsession` backend that answers `list_attention` is registered under
-`attention.sources`.
-**Intent:** learn which agent sessions are waiting on a person, and how urgently, without the same
-account-wide fact appearing twice.
-_Requires:_ `INV-AGS-1`, `INV-AGS-2`, `INV-ATTN-URL-1`, `INV-CONOBS-4`.
-
-**Flow.** The backend reports one `agentsession` item per session that needs a person and no other:
-a blocked session is `high` when it waits on human input or authentication and `medium` for a usage
-limit or any other blocker, and a session flagged long-idle is `low`. Each item's id is the session
-id and it carries no `url` (`INV-AGS-1`, `INV-ATTN-URL-1`). The backend does not report that the
-account's 5-hour or weekly usage cap was hit, because an alert already raises that fact and reaches
-the same consumer through the `alert` backend (`INV-AGS-2`, `INV-CONOBS-4`); a single session
-blocked on a usage limit is a per-session fact no alert covers and is still reported.
 
 ### `USECASE-BACKEND-OBSERVABILITY` — keep a backend's own health out of attention and in its own telemetry <!-- uuid: a4bd8e4a-e378-496e-8d6b-42bfd7f119b8 -->
 

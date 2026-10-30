@@ -1,7 +1,6 @@
 // search.go: a naive, unindexed per-call scan of one transcript's text
 // content for a substring query, optionally bounded by time — the
-// concrete backing for pg-connector's agentsession search.Provider
-// implementation. Deliberately no index: an efficient/cross-history
+// concrete backing for pa-monitor's search verb. Deliberately no index: an efficient/cross-history
 // search is explicitly deferred (design decision, 2026-09-18). The time
 // bound narrows the scan; it does not index it.
 package claudetranscript

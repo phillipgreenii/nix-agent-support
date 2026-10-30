@@ -342,3 +342,7 @@ none of them well, and a future backend is free to pick whatever chain fits its 
 - Amended by ADR 0090 (draft, 2026-10-10), which lifts the uniformity statement ("every Tier-2
   backend stays uniformly simple and stateless", Decision item 10): a connector MAY be stateful and
   MAY run one daemon per upstream rate-limit domain, and a backend's own local store (Decision item 6) is the governing rule.
+- Amended by ADR 0115 (bead `pg2-qlpkl7`, 2026-10-30), which retires the `agentsession` capability
+  and its `pg-connector-agentsession-pa-monitor` backend: the capability list in this ADR no longer
+  includes `agentsession`, and the capability was removed from the umbrella, the schema registry and
+  the home module.

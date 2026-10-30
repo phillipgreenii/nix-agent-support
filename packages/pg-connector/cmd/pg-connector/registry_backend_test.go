@@ -30,14 +30,13 @@ connector:
   scm: `+inst+`
   thread: [`+inst+`]
   calendar: [`+inst+`]
-  agentsession: [`+inst+`]
   alert: [`+inst+`]
   mail: [`+inst+`]
 attention: {sources: [`+inst+`]}
 search: {sources: [`+inst+`]}
 activity: {sources: [`+inst+`]}
 `)
-	for _, typ := range []string{"pr", "issue", "ci", "thread", "calendar", "agentsession", "alert", "mail"} {
+	for _, typ := range []string{"pr", "issue", "ci", "thread", "calendar", "alert", "mail"} {
 		got, err := reg.List(typ)
 		if err != nil {
 			t.Fatalf("List(%s): %v", typ, err)

@@ -814,30 +814,6 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
     reports `not_found` for is passed through as `not_found`. One Message-ID filed under several
     configured mailboxes is merged to one entry, the earliest-configured mailbox winning.
 
-## Agent session attention
-
-> Operator ruling (Phillip, 2026-10-02, bead `pg2-m482k`): "any pg-connector listing which returns
-> the same thing as an alert, then we should remove that." Realized for `agentsession` by bead
-> `pg2-psftz` in `pg-connector-agentsession-pa-monitor`'s `list_attention`; the rules below bind
-> every `agentsession` backend that answers `list_attention`.
-
-- **`INV-AGS-1`** <!-- uuid: 75fc5422-35c3-47bb-870d-1a9528ad2a20 --> — An `agentsession` backend
-  MUST report, in its `list_attention` result, one item of `type` `agentsession` per session that
-  needs a person: a session whose status is `blocked` MUST be reported (severity `high` for the
-  blocker reasons `human_input` and `human_authn`; `medium` for `usage_limit` and for any other
-  blocker reason, including `error`), and a session flagged long-idle MUST be reported at `low`. A
-  session that is neither blocked nor long-idle MUST NOT be reported. The item `id` is the session
-  id, and the item carries no `url` (`INV-ATTN-URL-1`: an agent session has no page).
-- **`INV-AGS-2`** <!-- uuid: 3c1f7e0a-9d52-4b8e-a6f4-2e8b5d90c417 --> — An `agentsession` backend
-  MUST NOT report the account-level 5-hour block or 7-day week usage-cap being hit as an attention
-  item (no `agentsession-usage-limit` type), however the cap state reads. Those facts are already
-  raised by Grafana alerts (`pa-monitor-5h-usage-limit-hit`, `pa-monitor-weekly-usage-limit-hit`),
-  which reach the same consumer through the `alert` backend's `list_attention` (`INV-ALERT-7`), so
-  a second item would show the same fact twice. This is the general rule the operator ruling above
-  states: a listing that returns the same thing as an alert is removed. It does not apply to a
-  `usage_limit`-blocked SESSION, which is a per-session fact no alert covers (`INV-AGS-1`), and no
-  alert covers long-idle sessions either.
-
 ## Attention content and connector observability
 
 > Operator ruling (Phillip, 2026-10-02, bead `pg2-m482k`): "attention should be based on
@@ -870,7 +846,7 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
 - **`INV-CONOBS-4`** <!-- uuid: 667c798d-6b1c-43f4-ad95-fddba5888626 --> — An attention listing that duplicates an alert MUST be
   removed: when an alert already raises a fact, a source's `list_attention` MUST NOT report the
   same fact again. The `alert` backend's own `list_attention` (`INV-ALERT-7`) is the one path by
-  which an alert reaches attention. `INV-AGS-2` is this rule applied to agent-session usage caps.
+  which an alert reaches attention.
 
 ## Review head handling
 

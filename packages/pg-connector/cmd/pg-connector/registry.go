@@ -532,14 +532,12 @@ func sourcesList(key string, sources []yaml.Node) ([]string, error) {
 // "calendar" was appended by this docket's own CLI verb group packet
 // (pg2-o2dmu.3) — both list-valued like pr/issue/ci, never single-valued
 // like scm (matching pg2-2j5ac.40.3's own precedent, same file, same
-// list). "agentsession" was appended by the agentsession connector
-// docket's own Tier-1 CLI verb group packet (pg2-eezd1.7) — same
-// list-valued precedent as thread/calendar's own additions above. "mail"
+// list). "mail"
 // was appended by the mail Tier-2 docket's own CLI verb group packet
 // (pg2-qc5uc.8) — a NEW capability (phillipgreenii-nix-agent-support ADR
 // 0062, "Decision" item 10), list-valued like thread/calendar, never
 // single-valued like scm.
-var entityTypes = []string{"pr", "issue", "ci", "scm", "thread", "calendar", "agentsession", "alert", "mail"}
+var entityTypes = []string{"pr", "issue", "ci", "scm", "thread", "calendar", "alert", "mail"}
 
 // AllBackends returns every backend name registered under any
 // connector.<type> entry, across both list-valued and single-valued types.

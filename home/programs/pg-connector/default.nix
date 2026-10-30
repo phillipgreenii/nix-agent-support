@@ -42,7 +42,6 @@ let
       pkgs.pg-connector-thread-slack
       pkgs.pg-connector-calendar-osx-bridge
       pkgs.pg-connector-calendar-task-focus
-      pkgs.pg-connector-agentsession-pa-monitor
       pkgs.pg-connector-alert-grafana
       pkgs.pg-connector-mail-osx-bridge
     ]
@@ -349,12 +348,7 @@ let
       # calendar names hardcoded here) -- the real registration lives in the
       # consuming machine flake (phillipg-nix-ziprecruiter).
       calendar = if cfg.connector.calendar == [ ] then null else cfg.connector.calendar;
-      # agentsession (docket pg2-eezd1): mirrors thread/calendar's identical
-      # empty-list-omission pattern above -- registry.go's
-      # validateBackendList rejects an explicit `connector.agentsession: []`
-      # the same way.
-      agentsession = if cfg.connector.agentsession == [ ] then null else cfg.connector.agentsession;
-      # alert (bead pg2-9tql6): mirrors thread/calendar/agentsession's
+      # alert (bead pg2-9tql6): mirrors thread/calendar's
       # identical empty-list-omission pattern above -- registry.go's
       # validateBackendList rejects an explicit `connector.alert: []` the
       # same way.
@@ -544,19 +538,6 @@ in
             type = lib.types.listOf backendEntry;
             default = [ ];
             description = "Registered `calendar` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
-          };
-          # agentsession (docket pg2-eezd1): a WHOLLY NEW capability,
-          # mirroring thread's exact shape (list-of-str, default [ ])
-          # rather than scm's single-valued one. Without this field, a
-          # machine config setting
-          # `connector.agentsession = [ "pg-connector-agentsession-pa-monitor" ]`
-          # is a hard Nix eval error ("option does not exist"). Default
-          # stays [ ] here (this repo is a public flake) -- the real
-          # registration lives in the consuming machine flake(s).
-          agentsession = lib.mkOption {
-            type = lib.types.listOf backendEntry;
-            default = [ ];
-            description = "Registered `agentsession` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           # alert (bead pg2-9tql6): a WHOLLY NEW capability, mirroring
           # thread's exact shape (list-of-str, default [ ]). Without this
@@ -1195,10 +1176,7 @@ in
       # osx-bridge joins in turn (docket pg2-o2dmu): installed
       # unconditionally, independent of whether connector.calendar is itself
       # populated -- mirrors every other Tier-2 backend's own
-      # always-installed convention. pg-connector-agentsession-pa-monitor
-      # joins in turn (docket pg2-eezd1): also always-installed, independent
-      # of whether connector.agentsession is itself populated -- it answers
-      # the attention and search capabilities too, not only agentsession.
+      # always-installed convention.
       # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
       # always-installed, independent of whether connector.alert is itself
       # populated -- it answers the attention capability too.

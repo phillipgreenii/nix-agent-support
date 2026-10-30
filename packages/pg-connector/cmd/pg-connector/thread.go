@@ -33,7 +33,7 @@
 //
 //   - show is a plain id-keyed targeted op via DispatchTargeted (the
 //     Tier-1 multi-instance try-each resolution policy), mirroring
-//     agentsession.go's newAgentSessionShowCmd exactly — NOT
+//     issue.go's show exactly — NOT
 //     cache_dispatch.go's dispatchShowWithCache umbrella-entity-cache
 //     fallback that issue.go's/pr.go's own show uses. Reason: thread has
 //     exactly one Tier-2 backend today (pg-connector-thread-slack),
@@ -219,7 +219,7 @@ func humanizeThreadListOutcome(o threadListOutcome) string {
 }
 
 // reportThreadTargetedOutcome writes resp's outcome to stdout, mirroring
-// reportIssueTargetedOutcome's/reportAgentSessionTargetedOutcome's own
+// reportIssueTargetedOutcome's own
 // thin wrapper around output.go's writeTargetedResult.
 func reportThreadTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
 	return writeTargetedResult(cmd, resp, err, humanize)

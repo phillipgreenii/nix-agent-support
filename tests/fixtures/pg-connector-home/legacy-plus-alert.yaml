@@ -16,8 +16,6 @@ backends:
     example_key: example-value
 configSchemaVersion: 2
 connector:
-  agentsession:
-    - pg-connector-agentsession-pa-monitor
   alert:
     - pg-connector-alert-grafana
   calendar:

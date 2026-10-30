@@ -31,7 +31,7 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   "Cross-cutting capabilities"), which are capabilities but NOT entity types — neither is tied to
   one kind of external record.
 - **Entity type** — a capability tied to one kind of external record: one of `pr`, `issue`, `ci`,
-  `scm`, or `alert` in this set's extent (`thread`/`calendar`/`mail`/`agentsession` are likewise entity
+  `scm`, or `alert` in this set's extent (`thread`/`calendar`/`mail` are likewise entity
   types). Every entity type is also a capability; `attention`/`search` are the
   two capabilities that are not entity types.
 - **`pr`** — a pull/merge request: identity and review/feedback state. Carries no

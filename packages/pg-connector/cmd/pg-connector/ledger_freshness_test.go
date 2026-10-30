@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,7 +310,7 @@ func TestRun_LedgerShow_ExposesRefreshedAtAndLastError(t *testing.T) {
 
 	// Raw JSON: refreshed_at is present as null (never omitted) so a
 	// consumer can tell "unknown" from "field missing".
-	if !contains(stdout, `"refreshed_at": null`) && !contains(stdout, `"refreshed_at":null`) {
+	if !strings.Contains(stdout, `"refreshed_at": null`) && !strings.Contains(stdout, `"refreshed_at":null`) {
 		t.Fatalf("ledger show JSON lacks an explicit refreshed_at null for a never-succeeded key: %s", stdout)
 	}
 }
@@ -326,7 +327,7 @@ func TestRun_LedgerShow_HumanOutput_ShowsFreshness(t *testing.T) {
 		t.Fatalf("exit code = %d; stdout=%s", code, stdout)
 	}
 	for _, want := range []string{"refreshed_at=2026-10-06T12:00:00Z", "last_error=unavailable@2026-10-06T12:01:00Z"} {
-		if !contains(stdout, want) {
+		if !strings.Contains(stdout, want) {
 			t.Fatalf("human output missing %q:\n%s", want, stdout)
 		}
 	}

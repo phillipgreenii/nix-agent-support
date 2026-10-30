@@ -31,8 +31,7 @@ func writeThreadConfigFor(t *testing.T, backend string) {
 // TestNewThreadCmd_HasShowListAndChangesOnly is this packet's own
 // acceptance criterion: newThreadCmd() has exactly show/list/changes
 // subcommands — no create/comment/transition/update/close/deps (thread is
-// read-only) — mirroring TestNewAgentSessionCmd_HasShowAndListOnly's
-// identical shape for its own read-only capability. "changes" joined
+// read-only). "changes" joined
 // show/list in bead pg2-955py (this file's own writeThreadConfigFor doc
 // comment and TestRun_ThreadChanges_Wired in changes_test.go cover it):
 // it is a non-mutating delta-report over the same "list" wire op, so its

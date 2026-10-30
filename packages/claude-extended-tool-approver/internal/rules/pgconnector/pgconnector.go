@@ -97,7 +97,7 @@ import (
 // "Bash(pg-connector issue show:*)", "...comment:*)", "...update:*)",
 // "...close:*)". Deliberately NOT "create"/"list"/"transition"/"deps"/
 // "changes" (issue.go's other verb-group members) or any OTHER pg-connector
-// resource (pr/ci/scm/thread/calendar/agentsession/attention/search/ledger/
+// resource (pr/ci/scm/thread/calendar/attention/search/ledger/
 // cache/auth/config) — none of those are in the grant this bead's fix mirrors,
 // and approving beyond it would widen auto-approval past what the config
 // (and the operator ruling that produced it, bead pg2-s9zh5) actually
@@ -131,7 +131,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		resource, subcmd, _ := pgConnectorCommandPath(pc.Args)
 		if resource != "issue" {
 			// Every other pg-connector resource (pr, ci, scm, thread, calendar,
-			// agentsession, attention, search, ledger, cache, auth, config) — and
+			// attention, search, ledger, cache, auth, config) — and
 			// an unrecognized/no resource at all — is out of scope for this bead's
 			// grant. Leave unclaimed rather than guess.
 			continue

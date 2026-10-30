@@ -71,10 +71,8 @@ func getStateOrExit(ctx context.Context, client *rpcclient.Client) (*pb.DaemonSt
 }
 
 // sessionJSON is the --json wire shape for one session — reused verbatim
-// by `info --json` for a session selector, and unmarshaled verbatim
-// (re-declared) by pg-connector-agentsession-pa-monitor. Field names here
-// are the wire contract; changing one is a breaking change for both
-// consumers.
+// by `info --json` for a session selector. Field names here are the wire
+// contract; changing one is a breaking change for its consumers.
 type sessionJSON struct {
 	SessionID     string  `json:"session_id"`
 	Pid           *int    `json:"pid,omitempty"`

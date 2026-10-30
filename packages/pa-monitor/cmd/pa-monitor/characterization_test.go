@@ -131,9 +131,8 @@ func TestRunStatusTextOutputCharacterization(t *testing.T) {
 // sessions) UNCONDITIONALLY, before the jsonMode gate later in the
 // function — so `pa-monitor status --json` emitted human text followed by
 // a JSON object on stdout instead of a clean JSON document, breaking any
-// consumer that expects valid JSON on stdout (confirmed live:
-// packages/pg-connector-agentsession-pa-monitor's real-daemon contract
-// test failed to decode it).
+// consumer that expects valid JSON on stdout (confirmed live: a
+// real-daemon contract test of a former pa-monitor client failed to decode it).
 //
 // json.Unmarshal runs against the FULL captured stdout, not a substring —
 // a substring-based JSON extraction (e.g. finding the first '{') would have

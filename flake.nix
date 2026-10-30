@@ -281,20 +281,6 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
-          # pg-connector-agentsession-pa-monitor: the agentsession
-          # capability's Tier-2 pa-monitor backend (docket pg2-eezd1) —
-          # another mkGoApp call over the SAME packages/pg-connector module
-          # (shared src + gomod2nixToml) as every sibling backend entry
-          # above, building the standalone scriptout-only binary from
-          # packages/pg-connector/pg-connector-agentsession-pa-monitor.nix.
-          # This backend also answers the attention and search
-          # capabilities (Tasks 8/9/10) — its own .nix file's src fileset
-          # names all three provider subpackages.
-          pg-connector-agentsession-pa-monitor =
-            final.callPackage ./packages/pg-connector/pg-connector-agentsession-pa-monitor.nix
-              {
-                inherit (goBuilders) mkGoApp;
-              };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -16542,7 +16528,7 @@
               # compares the generated shared config file against goldens in
               # tests/fixtures/pg-connector-home/. `legacy.yaml` was generated
               # from the module BEFORE the alert options existed, so it pins
-              # the pre-existing thread/calendar/agentsession/attention
+              # the pre-existing thread/calendar/attention
               # rendering; `alert-grafana.yaml` is the Grafana sample from the
               # alert-entity design. The comparison is semantic (yq-normalised
               # JSON, keys sorted) rather than textual because prettier
@@ -17590,7 +17576,6 @@
               pg-connector-calendar-osx-bridge
               pg-connector-calendar-task-focus
               pg-connector-mail-osx-bridge
-              pg-connector-agentsession-pa-monitor
               pg-connector-alert-grafana
               pg-ccaudit
               pg-router-source-pg-connector

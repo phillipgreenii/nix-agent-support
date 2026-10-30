@@ -93,7 +93,6 @@ let
       scm = "pg-connector-scm-git";
       thread = [ "pg-connector-thread-slack" ];
       calendar = [ "pg-connector-calendar-osx-bridge" ];
-      agentsession = [ "pg-connector-agentsession-pa-monitor" ];
     };
     attention = {
       sources = [
@@ -852,7 +851,6 @@ let
     "pg-connector-thread-slack"
     "pg-connector-calendar-osx-bridge"
     "pg-connector-calendar-task-focus"
-    "pg-connector-agentsession-pa-monitor"
     "pg-connector-alert-grafana"
     "pg-connector-mail-osx-bridge"
   ];

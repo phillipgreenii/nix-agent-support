@@ -884,7 +884,7 @@ var hasSubcommands = map[string]bool{
 	"helm": true, "terraform": true, "aws": true, "gcloud": true,
 	"bd": true,
 	// pg-connector (pg2-r848s): the first-party umbrella connector CLI's own
-	// resource/verb groups (issue, pr, ci, scm, thread, calendar, agentsession,
+	// resource/verb groups (issue, pr, ci, scm, thread, calendar,
 	// attention, search, ledger, cache, auth, config — root.go's AddCommand
 	// list) are exactly the "$command $subcommand" shape this map exists for,
 	// so `pg-connector issue --help` (and `pg-connector help issue`, etc.) is

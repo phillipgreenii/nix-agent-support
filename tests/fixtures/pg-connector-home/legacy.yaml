@@ -7,8 +7,6 @@ backends:
     example_key: example-value
 configSchemaVersion: 2
 connector:
-  agentsession:
-    - pg-connector-agentsession-pa-monitor
   calendar:
     - pg-connector-calendar-osx-bridge
   ci:
