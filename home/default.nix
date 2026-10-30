@@ -39,6 +39,7 @@
     ./programs/pg-task-focus
     ./programs/pg-keep-awake
     ./programs/pg-claude-code-recorder
+    ./programs/pg-claude-control
     ./programs/pg-repo-runner
     ./programs/pg-probe
     ./programs/pg-ccaudit

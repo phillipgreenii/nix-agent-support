@@ -5016,6 +5016,7 @@
                     claude-extended-tool-approver claude-extended-tool-approver
                     claude-tool-tracker claude-tool-tracker
                     pb session-mode
+                    pg-claude-control pg-claude-control
                   '';
                   # Modules that default `enable = false` today; consumers carry
                   # a cutover block (homelab monorepod home-module.nix).
@@ -16562,6 +16563,69 @@
                     [ "$rc" = 0 ] || { echo "SIGTERM exit = $rc" >&2; cat "$w/daemon.out" >&2; exit 1; }
                     touch $out
                   '';
+
+              # pg-claude-control HM module (docket pg2-v77tsx, phase 8c): the eval cases live
+              # in tests/pg-claude-control-hm-plugin.nix (stubbed home-manager options and a
+              # stub of the claude-code enable flag). This check then confirms the rendered
+              # values are the very environment variables the control mod and the command
+              # read (the shared mechanism), so a user-set stateDir and run.allow reach both.
+              test-pg-claude-control-hm-plugin =
+                let
+                  r = import ./tests/pg-claude-control-hm-plugin.nix { inherit lib pkgs; };
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace/pg-claude-control
+                      ./packages/pg-claude-control
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-pg-claude-control-hm-plugin"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-claude-control module eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    test -x ${r.live.package}/bin/pg-claude-control
+                    mod=${src}/claude-marketplace/pg-claude-control/hooks/register.ts
+                    cmd=${src}/packages/pg-claude-control/cmd/pg-claude-control/registry.go
+                    for v in PG_CLAUDE_CONTROL_STATE_DIR PG_CLAUDE_CONTROL_RUN_ALLOW; do
+                      grep -q "$v" "$mod" || { echo "FAIL: the mod does not read $v" >&2; exit 1; }
+                      grep -q "$v" "$cmd" || { echo "FAIL: the command does not read $v" >&2; exit 1; }
+                    done
+                    # the rendered (user-set) values, as the shared mechanism carries them
+                    [ ${lib.escapeShellArg r.live.stateDir} = /example/control ]
+                    [ ${lib.escapeShellArg r.live.runAllow} = exit,clear ]
+                    touch $out
+                  '';
+
+              # pg-claude-control plugin validation (docket pg2-v77tsx, phase 8c): runs the real
+              # `claude plugin validate` on the control mod, outside the Go unit gate. A failed
+              # validation fails the check; warnings and advice do not (the command's own verdict).
+              pg-claude-control-plugin-validate =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/pg-claude-control;
+                  };
+                  claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+                in
+                pkgs.runCommand "pg-claude-control-plugin-validate" { nativeBuildInputs = [ claude ]; } ''
+                  export HOME="$TMPDIR/home"
+                  mkdir -p "$HOME"
+                  export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                  cp -r ${src}/claude-marketplace/pg-claude-control plugin
+                  chmod -R u+w plugin
+                  claude plugin validate plugin | tee validate.log
+                  grep -q "Validation passed" validate.log
+                  touch $out
+                '';
 
               # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
               # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the
