@@ -409,7 +409,7 @@ darwin, on the pid) and, at that instant, whether the registry file is still pre
 (working, blocked, idle, hung, the blocker) stay in pa-monitor (operator 2026-10-28; the 2026-10-28
 ruling on direct reads, item 14 of the operator rulings in Decisions, still holds). Measured 2026-10-29 on darwin: `NOTE_EXIT` fired for SIGKILL and SIGTERM on children
 (about 1 ms), for a normal exit (1.01 s) and for SIGKILL on a process that was not a child (about
-11 ms); registering a watch on a live `claude` that was not a child worked; registering on an already exited pid failed with `ESRCH`. The presence check is one `lstat` taken immediately after the event. In the spike Claude had deleted its registry file before the Process was gone, but a slow deletion would read as a crash, so the real-Claude tier measures the order.
+11 ms); registering a watch on a live `claude` that was not a child worked; registering on an already exited pid failed with `ESRCH`. The presence check is one `lstat` taken immediately after the event. In the spike Claude had deleted its registry file before the Process was gone, but a slow deletion would read as a crash, so the order was measured (2026-10-30, pg2-8wt1uz: deleted 0.8 to 1.9 s before the exit on every measured clean path; 3 runs per path, one Claude version, one machine).
 
 ## Design
 
@@ -1255,7 +1255,12 @@ closed normally, unknown, resumed-then-crashed (the earlier Process is not liste
 before, at and after the Process start, a `/clear` made by another Process, and a mod reason
 `prompt_input_exit` with the registry present (still `crashed`). The order in which Claude deletes
 the registry file and exits (Open questions) is measured in the real-Claude tier before the
-`crashed` label is trusted; if deletion is slow, the recorder reads the registry after a grace window.
+`crashed` label is trusted. Measured 2026-10-30 (bead pg2-8wt1uz): on `/exit`, Ctrl-D, SIGTERM, SIGHUP and a
+closed terminal, Claude deletes the registry file (and its `.key`) 0.8 to 1.9 s BEFORE the pid exits, in 15 of 15 runs,
+so the file is absent at `NOTE_EXIT`; only SIGKILL leaves it, and a later Claude startup (not a timer) sweeps the
+leftover. The evidence rule "the registry file was still present when the Process exited" therefore separates a crash
+from a clean exit on every measured path, and the grace-window fallback (`process.grace`; re-read the registry after
+`process.graceWindow`) is OFF by default and kept as an option. Caveats: 3 runs per path, one Claude version, one machine.
 
 ### Settle, removal and extract
 
@@ -1820,7 +1825,7 @@ Reuse the patterns of `claude-transcript/sessions_test.go` and `pg-ccaudit` `ing
    pg-router handlers, ccaudit, beads-exporter; and the retirement of pg-connector's `agentsession`
    (S to L each). There is no resume-list command: the crash query of phase 4 replaces it.
 
-**Dependencies and acceptance.** Phase 2 needs 1, 3 needs 2, and 4 needs 1 and 3 (the end-label function in the Go client package belongs to phase 4, because it needs the Process facts). Phase 5 needs 4 (a live Process blocks settling), 6 needs 5, and 7 needs the metrics from 1 to 6 (7a, the module, needs only 1a to 1d; 7b needs 7a; 7c needs 7a, 7b and the metrics of 1 to 6); the daemon runs from a dev launch until phase 7 adds the module. Phase 8 is independent. Phase 9 needs 3 and 4 for the client moves; the `agentsession` retirement beads need only their own discovery bead (and the recorder's `conversation` data only if pg-desk needs it). Phase 3's wire contract suite covers the operations other than `conversation` and `process`; phase 4 extends it with those two. The registry-versus-exit order is measured in a `human` verification bead that phase 4's crash query depends on for being trusted; until it passes, the grace-window fallback is the default. Phase 4 tests the `claude-control-end` source against fixture files, so it does not wait for phase 8; the real-output check is in phase 8's real-Claude tier.
+**Dependencies and acceptance.** Phase 2 needs 1, 3 needs 2, and 4 needs 1 and 3 (the end-label function in the Go client package belongs to phase 4, because it needs the Process facts). Phase 5 needs 4 (a live Process blocks settling), 6 needs 5, and 7 needs the metrics from 1 to 6 (7a, the module, needs only 1a to 1d; 7b needs 7a; 7c needs 7a, 7b and the metrics of 1 to 6); the daemon runs from a dev launch until phase 7 adds the module. Phase 8 is independent. Phase 9 needs 3 and 4 for the client moves; the `agentsession` retirement beads need only their own discovery bead (and the recorder's `conversation` data only if pg-desk needs it). Phase 3's wire contract suite covers the operations other than `conversation` and `process`; phase 4 extends it with those two. The registry-versus-exit order is measured in a `human` verification bead that phase 4's crash query depends on for being trusted; it passed (bead pg2-8wt1uz, 2026-10-30), so the grace-window fallback is off by default and kept as an option. Phase 4 tests the `claude-control-end` source against fixture files, so it does not wait for phase 8; the real-output check is in phase 8's real-Claude tier.
 
 | Phase | Done when                                                                                                                                                                              |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1982,7 +1987,7 @@ The 2026-10-30 six-dimension review found these; each is a requirement on the ph
   lives), so the crash query omits it and a fixture covers it; precedence rules 1 to 5 are unchanged. The end file has a JSON schema with a `reason` enum and is written once per
   `session.end`; the recorder removes an end file after ingesting it and a day; a `/clear` end file joins the old
   session. The reasons `resume` and `logout` are unmeasured: the real-Claude tier measures them. The registry-versus-exit order is
-  measured before `crashed` is trusted. A first task of the phase probes whether `history.jsonl` stores a `/clear`
+  measured before `crashed` is trusted (done 2026-10-30, pg2-8wt1uz: the file is deleted before the exit on every measured clean path; the grace window is off by default). A first task of the phase probes whether `history.jsonl` stores a `/clear`
   entry under the old or the new session id.
 - **Phases 2 and 3 (sources and client).** Phase 2 delivers the transcript, subagent transcript and history sources;
   phase 3 delivers meta, tool-result-body, registry, status, session-mode and compaction, and the client package's

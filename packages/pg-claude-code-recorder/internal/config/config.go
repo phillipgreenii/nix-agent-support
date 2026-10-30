@@ -62,8 +62,10 @@ type Config struct {
 	ParseMaxLineBytes int
 	// GraceEnable is process.grace: when the registry file is still present at a
 	// Process's exit, read it again after GraceWindow before deciding it was
-	// present (the grace-window fallback for a slow deletion; on by default until
-	// the registry-versus-exit order is measured on real Claude).
+	// present (the grace-window fallback for a slow deletion; off by default:
+	// pg2-8wt1uz measured the registry file deleted 0.8 to 1.9 s before the pid
+	// exits on every clean path, 3 runs per path, one claude version, one machine;
+	// only SIGKILL leaves it, swept by a later claude startup, not on a timer).
 	GraceEnable bool
 	// GraceWindow is process.graceWindow.
 	GraceWindow time.Duration
@@ -190,7 +192,7 @@ func Defaults(getenv func(string) string) Config {
 		HeldMaxAge:        3 * 24 * time.Hour,
 		ParseMaxLineBytes: 64 << 20,
 		Clients:           DefaultClients(),
-		GraceEnable:       true,
+		GraceEnable:       false,
 		GraceWindow:       time.Second,
 		LivenessInterval:  5 * time.Second,
 	}

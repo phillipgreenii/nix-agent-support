@@ -237,9 +237,12 @@ over the parsed records: every registry version and its deletion time (`session-
   after a restart the watch is registered again for every known Process that is still alive. Registering
   on an already exited pid fails (ESRCH): that is the recorded fact, an exit the recorder did not observe,
   and the Conversation is `unknown`. The presence of the registry file is one `lstat` right after the
-  event; with the **grace-window fallback** (`process.grace`, default on; `process.graceWindow`, default
-  1s) a file still present is read again after the window, because the registry-versus-exit order on a
-  real Claude is measured by a separate verification bead.
+  event; the **grace-window fallback** (`process.grace`, default off; `process.graceWindow`, default
+  1s, used only when it is on) reads a file still present again after the window. It is off because the
+  registry-versus-exit order was measured (pg2-8wt1uz, 2026-10-30): on `/exit`, Ctrl-D, SIGTERM, SIGHUP and a
+  closed terminal Claude deletes the file 0.8 to 1.9 s before the pid exits (15 of 15 runs; 3 runs per path, one
+  Claude version, one machine), and only SIGKILL leaves it, removed by a later Claude startup, not on a timer. The
+  option stays for a Claude version where the order changes.
 - **Stale at discovery**: a registry file whose pid is gone, or whose start time differs from `procStart`
   (a reused pid is dead), at the Process's _first_ discovery sets `registry_stale_at_discovery` (counter
   `registry_stale_at_discovery_total`; the startup log event `startup_stale_registries{n}` after the first
