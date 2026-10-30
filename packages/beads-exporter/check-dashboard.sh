@@ -23,6 +23,9 @@
 #   B10 the data-age tile is titled "(worst db)" and says totals exclude a stale db
 #   B11 the stranded-claim additions: the red judgement tile, the By-db column, the
 #       oldest-claim tile and the Loki "Which beads" panel over event=stranded_claim
+#   B12 every target over an age-gauge family (beads_oldest_*, beads_queue_oldest_*,
+#       beads_oldest_stranded_*) sits in a panel with fieldConfig.defaults.noValue set: the
+#       exporter omits those gauges when empty, so the panel would otherwise read "No data"
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -102,6 +105,10 @@ lint() {
           and (.targets[0].expr | contains("event=\"stranded_claim\"") and contains("db=~\"$db\""))))
      and ([.. | objects | select(has("gridPos") and .title == "By db" and .type == "table")] | .[0].transformations
       | any(.id == "organize" and .options.renameByName["Value #M"] == "No live owner"))' "$d"
+  rule B12 "a panel querying beads_oldest_*, beads_queue_oldest_* or beads_oldest_stranded_* has no fieldConfig.defaults.noValue (the exporter omits those gauges when empty)" \
+    '[.. | objects | select(has("gridPos") and has("targets"))
+       | select([.targets[].expr // empty | select(test("beads_(queue_)?oldest_"))] | length > 0)]
+     | length > 0 and all((.fieldConfig.defaults.noValue // "") | length > 0)' "$d"
   return "$status"
 }
 
@@ -190,5 +197,8 @@ mutate which-beads-no-db-filter B11 '(.. | objects | select(has("gridPos") and .
 mutate oldest-tile-missing B11 '(.. | objects | select(has("gridPos") and .title == "Oldest no-live-owner claim") | .title) = "Oldest claim"'
 mutate stranded-count-not-sum B7 "$(set_expr 32 'max(beads_stranded_claims{db=~"$db"})')"
 mutate oldest-claim-not-min B7 "$(set_expr 33 'time() - max(beads_oldest_stranded_claim_timestamp_seconds{db=~"$db"})')"
+mutate oldest-candidate-no-novalue B12 'del(.. | objects | select(has("gridPos") and .id == 14) | .fieldConfig.defaults.noValue)'
+mutate oldest-state-no-novalue B12 'del(.. | objects | select(has("gridPos") and .id == 18) | .fieldConfig.defaults.noValue)'
+mutate oldest-claim-no-novalue B12 'del(.. | objects | select(has("gridPos") and .id == 33) | .fieldConfig.defaults.noValue)'
 
-echo "OK: the Beads dashboard passes B1-B11 and $mutants mutants were each rejected by the intended rule."
+echo "OK: the Beads dashboard passes B1-B12 and $mutants mutants were each rejected by the intended rule."

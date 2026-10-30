@@ -580,7 +580,7 @@
       "id": 10,
       "type": "stat",
       "title": "Epics stalling /drain-beads",
-      "description": "Per database: the termination queue minus the claim queue, shown only while the claim queue is empty. A positive value means /drain-beads cannot finish because only epics remain: close finished epics or decompose them. Orange from 1.",
+      "description": "Per database: the termination queue minus the claim queue, shown only while the claim queue is empty. A positive value means /drain-beads cannot finish because only epics remain: close finished epics or decompose them. Orange from 1. Formula: sum by (db) of the drain-termination queue minus sum by (db) of the drain-claim queue, kept only for databases where the drain-claim queue is 0.",
       "gridPos": {
         "x": 10,
         "y": 6,
@@ -629,7 +629,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "none stalling (or exporter down)"
         },
         "overrides": []
       }
@@ -845,7 +846,8 @@
               }
             ]
           },
-          "min": 0
+          "min": 0,
+          "noValue": "none (or exporter down)"
         },
         "overrides": []
       }
@@ -1303,7 +1305,8 @@
               }
             ]
           },
-          "min": 0
+          "min": 0,
+          "noValue": "none (or exporter down)"
         },
         "overrides": [
           {
@@ -2135,7 +2138,7 @@
           "id": 29,
           "type": "timeseries",
           "title": "Errors by pass and reason",
-          "description": "Collection failures per pass and closed reason, as the increase over the interval. stale_issues_jsonl means a stale issues.jsonl file blocks that database; the alert text says how to clear it.",
+          "description": "Collection failures per pass and closed reason, as the increase over the interval. stale_issues_jsonl means a stale issues.jsonl file blocks that database; the alert text says how to clear it. Only series with a nonzero increase are drawn.",
           "gridPos": {
             "x": 15,
             "y": 101,
@@ -2153,7 +2156,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum by (db, pass, reason) (increase(beads_exporter_collect_errors_total{db=~\"$db\"}[$__rate_interval]))",
+              "expr": "sum by (db, pass, reason) (increase(beads_exporter_collect_errors_total{db=~\"$db\"}[$__rate_interval])) > 0",
               "range": true,
               "legendFormat": "{{db}} / {{pass}} / {{reason}}"
             }
@@ -2175,7 +2178,8 @@
               },
               "custom": {
                 "lineWidth": 1,
-                "fillOpacity": 0
+                "fillOpacity": 0,
+                "drawStyle": "bars"
               }
             },
             "overrides": []
@@ -2343,7 +2347,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "dtdurations",
-          "noValue": "none",
+          "noValue": "none (or exporter down)",
           "color": {
             "mode": "fixed",
             "fixedColor": "text"
