@@ -54,6 +54,9 @@ type DerivedState struct {
 	// Block is the current 5h block priced at GeneratedAt (Monitor.Block); nil
 	// when no active block.
 	Block *usage.Block
+	// Offline is true when the recorder was not answering for this batch (no
+	// sessions are known; CostProbeErr is session.ErrDaemonOffline).
+	Offline bool
 	// CostProbed / CostProbeErr mirror Monitor.CostProbed.
 	CostProbed   bool
 	CostProbeErr error

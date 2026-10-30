@@ -20,7 +20,7 @@ import (
 // the producer goroutine + DerivedState arrive in phase 3.
 type Monitor struct {
 	claudeHome string
-	disc       *session.Discoverer
+	disc       session.Discovery
 	rec        Recorder
 
 	titles *titleCache
@@ -56,7 +56,7 @@ type Monitor struct {
 }
 
 // New constructs a Monitor over claudeHome using disc for session discovery.
-func New(claudeHome string, disc *session.Discoverer) *Monitor {
+func New(claudeHome string, disc session.Discovery) *Monitor {
 	return &Monitor{
 		claudeHome: claudeHome,
 		disc:       disc,
@@ -224,8 +224,8 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 	// without these it would wait for the slow-tier rescan. Order is irrelevant
 	// (the ChangeSource stats into a map).
 	watch := make([]string, 0, 2*len(newTopo)+len(activeStatusPaths)+1)
-	if m.disc.SessionsDir != "" {
-		watch = append(watch, m.disc.SessionsDir)
+	if dd, ok := m.disc.(interface{ Dir() string }); ok && dd.Dir() != "" {
+		watch = append(watch, dd.Dir())
 	}
 	for _, s := range sessions {
 		if s.RegistryPath != "" {

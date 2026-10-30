@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -179,6 +180,20 @@ func (pr *Producer) Load() *DerivedState { return pr.ref.Load() }
 // status derivation, or DB writes (those stay on the emit tick, buildTree).
 func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState, error) {
 	sessions, err := pr.Monitor.Scan(now)
+	if errors.Is(err, session.ErrDaemonOffline) {
+		// The recorder is not answering: publish an empty state that says so
+		// ("daemon offline") instead of keeping a stale one or reading Claude's
+		// files. Control through pg-claude-control is unaffected.
+		return &DerivedState{
+			GeneratedAt:  now,
+			Projections:  map[string]SessionProjection{},
+			PRByDir:      map[string]*session.PRInfo{},
+			RepoLabels:   map[string]string{},
+			CostProbed:   true,
+			CostProbeErr: err,
+			Offline:      true,
+		}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

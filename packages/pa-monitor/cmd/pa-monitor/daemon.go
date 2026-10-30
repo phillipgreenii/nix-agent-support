@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
+
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/account"
@@ -25,6 +27,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/labels/detectors"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
@@ -307,7 +310,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		opts.Poller = p
 		opts.BlockTracker = blockTr
 		opts.WeekTracker = weekTr
-		opts.SessionsDir = p.SessionsDir
+		opts.Registry = p.Registry
 		// WeeklyEvery gates how often the daemon reads the (folded) weekly cost
 		// projection + upserts it: ~1/12 ticks (~1 minute at 5s), preserving the
 		// pre-fold cadence. The value itself comes from the corpus Monitor's
@@ -387,6 +390,10 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 	home, _ := os.UserHomeDir()
 	claudeHome := filepath.Join(home, ".claude")
 
+	// The recorder is the one source of registrations and liveness: no
+	// ~/.claude/sessions read and no pid probe, and no fallback to them.
+	facts := recorderfacts.New(client.Options{Name: "pa-monitor-daemon"})
+
 	// Bound the file-backed PR cache (15m found-TTL) and time the gh spawn inside
 	// LookupFn so the pr_lookup subprocess metric fires ONLY on a real fetch
 	// (miss/expiry), not on a cache hit — the single-cache, no-double-caching PR
@@ -403,9 +410,8 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 	cache.PRPrune = prCache.Prune
 
 	p := &poller.Poller{
-		SessionsDir:        session.DefaultSessionsDir(),
+		Registry:           facts,
 		ClaudeHome:         claudeHome,
-		PidAlive:           session.DefaultPidAlive,
 		PlanTier:           cfg.PlanTier,
 		BlockCapUSD:        acct.BlockCap(),
 		WorkingThreshold:   cfg.WorkingThreshold,
@@ -430,9 +436,8 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 	// cache (session-id keyed, WhilePIDAlive), so `ps -E` runs once per session,
 	// not once per tick.
 	mon := corpus.New(claudeHome, &session.Discoverer{
-		SessionsDir: session.DefaultSessionsDir(),
-		PidAlive:    session.DefaultPidAlive,
-		ReadEnv:     cache.Env,
+		Registry: facts,
+		ReadEnv:  cache.Env,
 	})
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())

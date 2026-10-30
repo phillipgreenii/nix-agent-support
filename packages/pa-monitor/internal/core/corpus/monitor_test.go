@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
@@ -27,7 +28,7 @@ func writeSessionRecord(t *testing.T, sessionsDir string, pid int, sessID, cwd, 
 	}
 }
 
-func newMonitorWithObservers(home string, disc *session.Discoverer) (*Monitor, *SessionSnapshotObserver, *SubagentErrorObserver) {
+func newMonitorWithObservers(home string, disc session.Discovery) (*Monitor, *SessionSnapshotObserver, *SubagentErrorObserver) {
 	m := New(home, disc)
 	so := NewSessionSnapshotObserver()
 	seo := NewSubagentErrorObserver()
@@ -53,7 +54,7 @@ func TestScan_PopulatesProjectionsAndTopology(t *testing.T) {
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1500, 0),
 		apiErrorLine("server_error", "boom", "2026-07-20T10:00:00Z"))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorWithObservers(home, disc)
 
 	sessions, err := m.Scan(time.Unix(2000, 0))
@@ -97,7 +98,7 @@ func TestScan_DeadPidSessionEnriched(t *testing.T) {
 	writeSessionRecord(t, sessionsDir, 222, "dead1", cwd, "")
 	writeTranscript(t, dir, "dead1.jsonl", time.Unix(1000, 0), assistantLine("claude-y", 10, 7))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return false }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return false }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorWithObservers(home, disc)
 	sessions, err := m.Scan(time.Unix(2000, 0))
 	if err != nil || len(sessions) != 1 {
@@ -129,7 +130,7 @@ func TestScan_PrunesVanishedSessionState(t *testing.T) {
 	writeTranscript(t, subagentsDirFor(t, mainA), "agent-1.jsonl", time.Unix(1000, 0), apiErrorLine("server_error", "x", "2026-07-20T10:00:00Z"))
 	writeTranscript(t, subagentsDirFor(t, mainB), "agent-1.jsonl", time.Unix(1000, 0), apiErrorLine("server_error", "x", "2026-07-20T10:00:00Z"))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorWithObservers(home, disc)
 	if _, err := m.Scan(time.Unix(2000, 0)); err != nil {
 		t.Fatal(err)
@@ -166,7 +167,7 @@ func TestScan_WatchPathsIncludeRegistryFiles(t *testing.T) {
 	writeSessionRecord(t, sessionsDir, 111, "sw", "/tmp/w", "")
 	main := writeTranscript(t, dir, "sw.jsonl", time.Unix(1000, 0), assistantLine("m", 1, 1))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorWithObservers(home, disc)
 	if _, err := m.Scan(time.Unix(2000, 0)); err != nil {
 		t.Fatal(err)

@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
 	"time"
 
+	ct "github.com/phillipgreenii/claude-transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
@@ -80,11 +81,58 @@ func upsertTestSessions(t *testing.T, ws *service.WriteService, ids ...string) {
 	}
 }
 
+// dirRegistry is a stand-in Registry that names the sessions whose
+// <pid>.json file sits in dir (the shape the recorder's Process facts have for a
+// Claude that is running); the sweeper itself never reads Claude's files.
+type dirRegistry struct{ dir string }
+
+func (d dirRegistry) Registrations(context.Context) ([]*session.Session, error) {
+	entries, err := os.ReadDir(d.dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []*session.Session
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		r, err := ct.ReadSessionFile(filepath.Join(d.dir, e.Name()))
+		if err != nil || r.SessionID == "" {
+			continue
+		}
+		out = append(out, &session.Session{SessionID: r.SessionID, PID: r.PID})
+	}
+	return out, nil
+}
+
+// offlineRegistry is a recorder that is not answering.
+type offlineRegistry struct{}
+
+func (offlineRegistry) Registrations(context.Context) ([]*session.Session, error) {
+	return nil, session.ErrDaemonOffline
+}
+
 func runSweep(t *testing.T, ws *service.WriteService, dir string) {
+	t.Helper()
+	runSweepWith(t, ws, dirRegistry{dir})
+}
+
+// TestGCSweeper_RecorderOfflineKeepsEveryRow: with no recorder answering the
+// sweep deletes nothing and does not fall back to reading Claude's files.
+func TestGCSweeper_RecorderOfflineKeepsEveryRow(t *testing.T) {
+	ws, ss := openTestWriteService(t)
+	upsertTestSessions(t, ws, "sess-a")
+	runSweepWith(t, ws, offlineRegistry{})
+	if !alive(t, ss, "sess-a") {
+		t.Error("sess-a was soft-deleted while the recorder was offline")
+	}
+}
+
+func runSweepWith(t *testing.T, ws *service.WriteService, reg session.Registry) {
 	t.Helper()
 	ctx := context.Background()
 	sweeper := &GCSweeper{
-		SessionsDir:     dir,
+		Registry:        reg,
 		WriteService:    ws,
 		Interval:        time.Hour,
 		HardDeleteAfter: 24 * time.Hour,
@@ -166,85 +214,5 @@ func TestGCSweeper_FilenameStemIsNotASessionID(t *testing.T) {
 	}
 	if alive(t, ss, "4242") {
 		t.Error(`row "4242" (the pid): want soft-deleted, got alive; filenames must not be treated as session ids`)
-	}
-}
-
-// TestGCSweeper_MissingDirIsNoop verifies that RunOnce returns nil and does
-// not crash or touch any rows when SessionsDir does not exist.
-func TestGCSweeper_MissingDirIsNoop(t *testing.T) {
-	ctx := context.Background()
-	ws, _ := openTestWriteService(t)
-
-	sweeper := &GCSweeper{
-		SessionsDir:     "/tmp/pamon-gc-nonexistent-dir-for-test",
-		WriteService:    ws,
-		HardDeleteAfter: 24 * time.Hour,
-	}
-	if err := sweeper.RunOnce(ctx); err != nil {
-		t.Fatalf("RunOnce on missing dir: %v", err)
-	}
-}
-
-// TestListSessionFiles_ReturnsSessionIDsNotPIDs verifies the keep set is
-// derived from the sessionId field inside each <pid>.json, not the filename,
-// and that sidecars, non-registry files, empty/malformed registry files and
-// directories contribute nothing.
-func TestListSessionFiles_ReturnsSessionIDsNotPIDs(t *testing.T) {
-	dir := t.TempDir()
-	writeRegistryFile(t, dir, 111, "sess-a")
-	writeRegistryFile(t, dir, 222, "sess-b")
-	for name, body := range map[string]string{
-		"333.json":    `not json`,              // malformed: skipped like Discover
-		"444.json":    `{"pid":444}`,           // no sessionId: nothing to keep
-		"ignored.txt": `{"sessionId":"txt"}`,   // not a registry file
-		"555.jsonl":   `{"sessionId":"jsonl"}`, // not a registry file
-		"sub.json":    "",                      // replaced by a directory below
-	} {
-		if name == "sub.json" {
-			if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			continue
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	ids, err := listSessionFiles(dir)
-	if err != nil {
-		t.Fatalf("listSessionFiles: %v", err)
-	}
-	sort.Strings(ids)
-	want := []string{"sess-a", "sess-b"}
-	if fmt.Sprint(ids) != fmt.Sprint(want) {
-		t.Errorf("listSessionFiles = %v, want %v", ids, want)
-	}
-}
-
-// TestListSessionFiles_IgnoresStatusSiblings proves session-adjacent siblings
-// (ADR 0021 §2; pg2-gzrn2; pg2-thkh0.5) never contribute ids, even when they
-// are valid JSON carrying a sessionId. A genuine <pid>.json still yields its
-// session id.
-func TestListSessionFiles_IgnoresStatusSiblings(t *testing.T) {
-	dir := t.TempDir()
-	writeRegistryFile(t, dir, 777, "real-1")
-	for _, name := range []string{
-		"sess-1.status.jsonl",      // rate_limits sibling
-		"sess-1.status.last",       // hash sidecar
-		"sess-1.session-mode.json", // session-mode record
-		"sess-1.compaction.json",   // compaction marker
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"sessionId":"phantom"}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	ids, err := listSessionFiles(dir)
-	if err != nil {
-		t.Fatalf("listSessionFiles: %v", err)
-	}
-	if fmt.Sprint(ids) != fmt.Sprint([]string{"real-1"}) {
-		t.Errorf("listSessionFiles = %v, want [real-1]", ids)
 	}
 }

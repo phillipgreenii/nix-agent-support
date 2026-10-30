@@ -8753,6 +8753,7 @@
                   fileset = lib.fileset.unions [
                     ./packages/pa-monitor
                     ./packages/claude-transcript
+                    ./packages/pg-claude-code-recorder
                   ];
                 };
                 modRoot = "pa-monitor";

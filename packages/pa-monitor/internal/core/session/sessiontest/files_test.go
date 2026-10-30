@@ -1,10 +1,12 @@
-package session
+package sessiontest
 
 import (
 	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
 
 func writeFile(path, body string) error {
@@ -25,7 +27,7 @@ func TestDiscoverReadsFilesAndKeepsDeadPids(t *testing.T) {
 	mustWrite(t, dir, "b.json", `{"pid":200,"sessionId":"b","cwd":"/p"}`)
 	mustWrite(t, dir, "c.json", `{"pid":300,"sessionId":"c","cwd":"/p"}`)
 
-	d := Discoverer{
+	d := FileDiscoverer{
 		SessionsDir: dir,
 		PidAlive: func(pid int) bool {
 			return pid == 100 || pid == 300
@@ -38,7 +40,7 @@ func TestDiscoverReadsFilesAndKeepsDeadPids(t *testing.T) {
 	if len(out) != 3 {
 		t.Fatalf("got %d sessions, want 3 (no dead-PID filter)", len(out))
 	}
-	byID := map[string]*Session{}
+	byID := map[string]*session.Session{}
 	for _, s := range out {
 		byID[s.SessionID] = s
 	}
@@ -61,7 +63,7 @@ func TestDiscoverSkipsMalformedFiles(t *testing.T) {
 	if err := writeFile(dir+"/2.json", `{not json`); err != nil {
 		t.Fatal(err)
 	}
-	d := &Discoverer{
+	d := &FileDiscoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
 	}
@@ -83,7 +85,7 @@ func TestDiscover_PopulatesEnvViaInjectedReader(t *testing.T) {
 		42: {"TMUX": "/tmp/tmux-501/default,1,0", "CMUX_WORKSPACE_ID": "ws1"},
 	}
 	var gotSID string
-	d := &Discoverer{
+	d := &FileDiscoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
 		ReadEnv: func(sessionID string, pid int) (map[string]string, error) {
@@ -114,7 +116,7 @@ func TestDiscover_EmptyEnvOnReaderFailure(t *testing.T) {
 	if err := writeFile(dir+"/1.json", `{"pid":42,"sessionId":"s1"}`); err != nil {
 		t.Fatal(err)
 	}
-	d := &Discoverer{
+	d := &FileDiscoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
 		ReadEnv: func(_ string, _ int) (map[string]string, error) {
@@ -147,7 +149,7 @@ func TestDiscoverRejectsReusedPidWithMismatchingProcStart(t *testing.T) {
 	mustWrite(t, dir, "match.json", fmt.Sprintf(`{"pid":%d,"sessionId":"match","cwd":"/p","procStart":"Wed Oct 14 07:51:51 2026"}`, pid))
 	mustWrite(t, dir, "legacy.json", fmt.Sprintf(`{"pid":%d,"sessionId":"legacy","cwd":"/p"}`, pid))
 
-	d := Discoverer{
+	d := FileDiscoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
 		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },
@@ -162,7 +164,7 @@ func TestDiscoverRejectsReusedPidWithMismatchingProcStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	byID := map[string]*Session{}
+	byID := map[string]*session.Session{}
 	for _, s := range out {
 		byID[s.SessionID] = s
 	}
@@ -182,7 +184,7 @@ func TestDiscoverRejectsReusedPidWithMismatchingProcStart(t *testing.T) {
 func TestDiscoverProcStartReaderErrorFailsOpen(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, dir, "r.json", `{"pid":7,"sessionId":"r","cwd":"/p","procStart":"Mon Jan  1 00:00:00 2001"}`)
-	d := Discoverer{
+	d := FileDiscoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
 		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },

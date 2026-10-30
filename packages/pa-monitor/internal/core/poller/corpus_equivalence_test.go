@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
@@ -137,7 +137,7 @@ func buildEquivalenceCorpus(t *testing.T) (sessionsDir, home string, pidAlive fu
 // the only corpus reader; the source-level equivalence vs the native pricer /
 // sibling limits source lives in corpus_pricing_equivalence_test.go.
 func newMonitorPoller(sessionsDir, home string, pidAlive func(int) bool, now time.Time) *Poller {
-	mon := corpus.New(home, &session.Discoverer{SessionsDir: sessionsDir, PidAlive: pidAlive})
+	mon := corpus.New(home, &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: pidAlive})
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())
 	mon.Register(corpus.NewUsagePricingObserver(eqPrices))

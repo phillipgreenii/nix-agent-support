@@ -2,11 +2,9 @@ package daemon
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"errors"
 	"time"
 
-	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 )
@@ -15,10 +13,10 @@ import (
 // orphaned rows, and hard-deletes rows that have been soft-deleted past the
 // retention cutoff. It also drives orphan cleanup for blocks and weeks.
 type GCSweeper struct {
-	// SessionsDir is the directory where Claude Code writes <pid>.json registry
-	// files. The sweeper reads each file's sessionId field to determine which
-	// sessions are still alive.
-	SessionsDir string
+	// Registry names which sessions still exist: the recorder's Process facts.
+	// While the recorder is offline the sweep keeps every row (it never reads
+	// Claude's files instead).
+	Registry session.Registry
 	// WriteService receives all mutations.
 	WriteService *service.WriteService
 	// Interval is how often RunOnce is called by Run. Defaults to 1h.
@@ -36,11 +34,11 @@ type GCSweeper struct {
 //  4. Hard-delete blocks/weeks soft-deleted before now-HardDeleteAfter.
 func (g *GCSweeper) RunOnce(ctx context.Context) error {
 	// --- Stage 1: file reconciliation ---
-	keepIDs, err := listSessionFiles(g.SessionsDir)
+	keepIDs, err := g.keepIDs(ctx)
 	if err != nil {
-		// Directory missing or unreadable: keep all rows alive rather than
-		// mass-deleting. Return nil so the sweeper doesn't crash.
-		if os.IsNotExist(err) {
+		// Recorder offline: keep all rows alive rather than mass-deleting.
+		// Return nil so the sweeper doesn't crash.
+		if errors.Is(err, session.ErrDaemonOffline) {
 			return nil
 		}
 		return err
@@ -111,38 +109,18 @@ func (g *GCSweeper) Run(ctx context.Context) {
 	}
 }
 
-// listSessionFiles lists dir and returns the session IDs named by the
-// sessionId field inside each Claude Code registry file. Registry files are
-// named <pid>.json (not <sessionId>.json), so the filename MUST NOT be used as
-// the session id: doing so soft-deleted every row on every sweep (pg2-4g02s).
-//
-// It mirrors session.Discoverer.Discover: only *.json files are read, via
-// ct.ReadSessionFile; malformed files and files without a sessionId are
-// skipped. Status-line / session-mode / compaction siblings
-// (session.IsStatusSiblingFile, ADR 0021 §2) are skipped even though they may
-// be valid JSON, and <pid>.<hash>.key sidecars are ignored by extension.
-// Returns an empty slice (not error) when the directory holds no registry
-// files. Returns the os.ReadDir error (os.ErrNotExist if the directory is
-// missing) so the caller can distinguish "no sessions" from "dir gone".
-func listSessionFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+// keepIDs returns the session ids the recorder knows a Process for (alive or
+// not): the rows the sweep keeps alive. Rows with no Process are soft-deleted.
+func (g *GCSweeper) keepIDs(ctx context.Context) ([]string, error) {
+	rows, err := g.Registry.Registrations(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.SessionID != "" {
+			ids = append(ids, r.SessionID)
 		}
-		name := e.Name()
-		if session.IsStatusSiblingFile(name) || filepath.Ext(name) != ".json" {
-			continue
-		}
-		r, err := ct.ReadSessionFile(filepath.Join(dir, name))
-		if err != nil || r.SessionID == "" {
-			continue
-		}
-		ids = append(ids, r.SessionID)
 	}
 	return ids, nil
 }

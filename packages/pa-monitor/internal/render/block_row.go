@@ -46,6 +46,8 @@ func BlockRow(tree *aggregate.Tree, opts BlockRowOpts) string {
 		now = time.Now()
 	}
 	switch {
+	case tree.CostProbeErr != nil && IsDaemonOffline(tree.CostProbeErr):
+		return "daemon offline"
 	case !tree.CostProbed:
 		return "5h loading…"
 	case tree.CostProbeErr != nil:

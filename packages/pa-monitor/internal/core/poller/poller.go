@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
@@ -36,6 +37,12 @@ type PhaseRecorder interface {
 const stalePauseGrace = 5 * time.Minute
 
 type Poller struct {
+	// Registry is where discovery reads the live registrations and liveness from
+	// (the recorder's Process facts). It is REQUIRED in production; only a bare
+	// unit-test Poller with no Monitor and no Registry falls back to the
+	// file-reading fixture discoverer (SessionsDir, PidAlive).
+	Registry session.Registry
+	// SessionsDir and PidAlive feed ONLY that test fixture; the daemon never sets them.
 	SessionsDir string
 	ClaudeHome  string
 	PidAlive    func(int) bool
@@ -134,7 +141,11 @@ func (p *Poller) ensureProducer() *Producer {
 		return p.producer
 	}
 	if p.Monitor == nil {
-		m := corpus.New(p.ClaudeHome, &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive})
+		var disc session.Discovery = &sessiontest.FileDiscoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive}
+		if p.Registry != nil {
+			disc = &session.Discoverer{Registry: p.Registry}
+		}
+		m := corpus.New(p.ClaudeHome, disc)
 		m.Register(corpus.NewSessionSnapshotObserver())
 		m.Register(corpus.NewSubagentErrorObserver())
 		m.Register(corpus.NewUsagePricingObserver(usage.PriceTable{}))

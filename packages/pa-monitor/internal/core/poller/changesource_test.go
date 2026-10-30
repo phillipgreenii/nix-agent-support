@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
 )
 
 // TestTwoTierChangeSource_FastDetectsSizeChange: the fast tier returns as soon as
@@ -86,7 +86,7 @@ func TestTwoTierChangeSource_RegistryOnlyChangeFiresFastTier(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	disc := &session.Discoverer{
+	disc := &sessiontest.FileDiscoverer{
 		SessionsDir: sessionsDir,
 		PidAlive:    func(int) bool { return true },
 		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },

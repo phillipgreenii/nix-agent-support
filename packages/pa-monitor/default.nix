@@ -23,6 +23,7 @@ mkGoApp {
     fileset = lib.fileset.unions [
       ./.
       ../claude-transcript
+      ../pg-claude-code-recorder
     ];
   };
   modRoot = "pa-monitor";

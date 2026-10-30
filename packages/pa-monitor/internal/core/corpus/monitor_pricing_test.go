@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
@@ -20,7 +21,7 @@ func assistantLineTS(model string, in, out int, ts time.Time) string {
 		ts.Format(time.RFC3339Nano), model, in, out)
 }
 
-func newMonitorAllObservers(home string, disc *session.Discoverer, prices usage.PriceTable) (*Monitor, *UsagePricingObserver, *LimitsObserver) {
+func newMonitorAllObservers(home string, disc session.Discovery, prices usage.PriceTable) (*Monitor, *UsagePricingObserver, *LimitsObserver) {
 	m := New(home, disc)
 	m.Register(NewSessionSnapshotObserver())
 	m.Register(NewSubagentErrorObserver())
@@ -57,7 +58,7 @@ func TestScan_PopulatesPricingAndLimits(t *testing.T) {
 	dirOther := projectDir(t, home, "/tmp/other")
 	writeTranscript(t, dirOther, "orphan.jsonl", now, assistantLineTS("m", 200, 30, now.Add(-2*time.Hour)))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
 	if _, err := m.Scan(now); err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -94,7 +95,7 @@ func TestScan_ActiveTranscriptFoldedOnceFeedsBoth(t *testing.T) {
 	writeSessionRecord(t, sessionsDir, 111, "s1", "/tmp/proj", "")
 	writeTranscript(t, dir, "s1.jsonl", now, assistantLineTS("m", 100, 50, now.Add(-1*time.Hour)))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
 	if _, err := m.Scan(now); err != nil {
 		t.Fatal(err)
@@ -131,7 +132,7 @@ func TestScan_PrunesVanishedPricingAndStatus(t *testing.T) {
 	writeStatus(t, filepath.Join(dir, "a.status.jsonl"), fmt.Sprintf(`{"ts":%d,"five_hour_pct":10,"five_hour_resets_at":%d}`+"\n", now.Unix(), now.Add(3*time.Hour).Unix()), now)
 	writeStatus(t, statusB, fmt.Sprintf(`{"ts":%d,"five_hour_pct":20,"five_hour_resets_at":%d}`+"\n", now.Unix(), now.Add(3*time.Hour).Unix()), now)
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, po, lo := newMonitorAllObservers(home, disc, pricingFixture())
 	if _, err := m.Scan(now); err != nil {
 		t.Fatal(err)
@@ -176,7 +177,7 @@ func TestScan_PricingWindowDropsAncient(t *testing.T) {
 	writeTranscript(t, projectDir(t, home, "/w/new"), "new.jsonl", now,
 		assistantLineTS("m", 100, 50, now.Add(-1*time.Hour)))
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
 	if _, err := m.Scan(now); err != nil {
 		t.Fatal(err)
@@ -212,7 +213,7 @@ func TestScan_CostProbeErrOnCorruptTranscript(t *testing.T) {
 	oversized := strings.Repeat("x", 16*1024*1024+10)
 	writeTranscript(t, dir, "big.jsonl", now, oversized)
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
 	if _, err := m.Scan(now); err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -239,7 +240,7 @@ func TestScan_SteadyStatePricingAndStatus(t *testing.T) {
 	writeTranscript(t, dir, "s1.jsonl", now, assistantLineTS("m", 100, 50, now.Add(-1*time.Hour)))
 	writeStatus(t, filepath.Join(dir, "s1.status.jsonl"), fmt.Sprintf(`{"ts":%d,"five_hour_pct":42,"five_hour_resets_at":%d}`+"\n", now.Unix(), now.Add(3*time.Hour).Unix()), now)
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
 
 	if _, err := m.Scan(now); err != nil { // cold

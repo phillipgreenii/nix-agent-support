@@ -71,8 +71,8 @@ func TestBuildRunOptions_WiringNotNil(t *testing.T) {
 	if opts.ReadService == nil {
 		t.Error("opts.ReadService is nil — sharedState.snapshot() would return nil and all gRPC clients (CLI / TUI) would see an empty DaemonState")
 	}
-	if opts.SessionsDir == "" {
-		t.Error("opts.SessionsDir is empty — the hourly GC sweeper goroutine cannot reconcile session .json files with the DB")
+	if opts.Registry == nil {
+		t.Error("opts.Registry is nil — the hourly GC sweeper goroutine cannot reconcile the recorder's sessions with the DB")
 	}
 	// The corpus Monitor is now mandatory: Snapshot requires it, so a buildPoller
 	// that dropped the wiring would crash on the first tick (exercised by the

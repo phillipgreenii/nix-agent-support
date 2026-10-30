@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
 )
 
 // TestScan_SteadyStateNoRework is the phase-1a perf guard. On an UNCHANGED
@@ -36,7 +36,7 @@ func TestScan_SteadyStateNoRework(t *testing.T) {
 			apiErrorLine("server_error", "boom", "2026-07-20T10:00:00Z"))
 	}
 
-	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
 	m, _, _ := newMonitorWithObservers(home, disc)
 
 	// Cold scan: real work happens.

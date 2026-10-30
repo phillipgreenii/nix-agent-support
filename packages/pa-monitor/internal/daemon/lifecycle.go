@@ -244,10 +244,11 @@ type RunOptions struct {
 	// adapter to resolve session string ids to surrogate row ids before
 	// persisting nudge events.
 	DB *sql.DB
-	// SessionsDir is the directory where Claude Code writes .json session files.
-	// When non-empty alongside WriteService, an hourly GC sweeper goroutine is
-	// started to reconcile files with the DB and hard-delete stale rows.
-	SessionsDir string
+	// Registry is where the GC sweeper reads which sessions still exist (the
+	// recorder's Process facts). When non-nil alongside WriteService, an hourly GC
+	// sweeper goroutine is started to reconcile them with the DB and hard-delete
+	// stale rows.
+	Registry session.Registry
 	// BridgeSnapshotInterval and BridgeStaleAfter are the timing-derived
 	// connection windows (see internal/timing): the per-bridge snapshot push
 	// cadence and the registry stale cutoff. Zero selects timing defaults, so a
@@ -382,9 +383,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 
 	// Launch the hourly GC sweeper when a WriteService and a sessions directory
 	// are both available.
-	if opts.WriteService != nil && opts.SessionsDir != "" {
+	if opts.WriteService != nil && opts.Registry != nil {
 		sweeper := &GCSweeper{
-			SessionsDir:     opts.SessionsDir,
+			Registry:        opts.Registry,
 			WriteService:    opts.WriteService,
 			Interval:        time.Hour,
 			HardDeleteAfter: 24 * time.Hour,
