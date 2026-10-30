@@ -6,9 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -16,6 +14,7 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/contracttest"
 	"github.com/phillipgreenii/pg-rescue/internal/inproc"
 	"github.com/phillipgreenii/pg-rescue/internal/notify"
+	"github.com/phillipgreenii/pg-rescue/internal/notifyclient/fakedaemon"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
@@ -38,28 +37,15 @@ func TestMain(m *testing.M) {
 	os.Exit(testenv.Run(m))
 }
 
-// fakeOSAScript puts a fake osascript first on PATH. It records its argv,
-// NUL-separated, in the returned file (so an argument holding any character
-// round-trips exactly), then behaves as the FAKE_OSASCRIPT_* variables say.
-// It never posts a notification.
-func fakeOSAScript(t *testing.T) (env []string, argvFile string) {
+// fakeNotifier starts a fake notifier socket server and returns the env that
+// points the handler at it. It never posts a banner.
+func fakeNotifier(t *testing.T, o fakedaemon.Options) (env []string, srv *fakedaemon.Server) {
 	t.Helper()
-	dir := t.TempDir()
-	argvFile = filepath.Join(dir, "argv")
-	script := `#!/bin/sh
-if [ -n "$FAKE_OSASCRIPT_PIDFILE" ]; then echo $$ > "$FAKE_OSASCRIPT_PIDFILE"; fi
-printf '%s\0' "$@" > "$FAKE_OSASCRIPT_ARGV"
-if [ -n "$FAKE_OSASCRIPT_HANG" ]; then exec sleep 30; fi
-if [ -n "$FAKE_OSASCRIPT_FAIL" ]; then echo "execution error: boom" >&2; exit "$FAKE_OSASCRIPT_FAIL"; fi
-exit 0
-`
-	if err := os.WriteFile(filepath.Join(dir, "osascript"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	if o.Reply == "" && !o.Hang {
+		o.Reply = fakedaemon.OKReply
 	}
-	return []string{
-		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"FAKE_OSASCRIPT_ARGV=" + argvFile,
-	}, argvFile
+	srv = fakedaemon.Start(t, o)
+	return []string{"PG_OSX_NOTIFIER_SOCKET=" + srv.Path}, srv
 }
 
 // handlerArgv is the argv that runs the real main as a process.
@@ -73,34 +59,24 @@ func runHandler(t *testing.T, fixture string, env []string, args ...string) cont
 	return inproc.Run(t, run, args, fixture, env)
 }
 
-func recordedArgv(t *testing.T, file string) []string {
+// onlyPost asserts the fake daemon got exactly one request, a notify/post
+// carrying title, body, sound and source only (never id, group, level,
+// subtitle or url), and returns title, body and sound.
+func onlyPost(t *testing.T, srv *fakedaemon.Server) (title, body, sound string) {
 	t.Helper()
-	b, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("the fake osascript was never run: %v", err)
+	reqs := srv.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the fake daemon got %d requests, want 1", len(reqs))
 	}
-	parts := strings.Split(string(b), "\x00")
-	return parts[:len(parts)-1] // the trailing NUL leaves one empty element
-}
-
-// valuesOf checks that osascript got the fixed script and returns the three
-// values after "--": title, body, sound.
-func valuesOf(t *testing.T, argv []string) (title, body, sound string) {
-	t.Helper()
-	var want []string
-	for _, line := range notify.Script {
-		want = append(want, "-e", line)
+	r := fakedaemon.Decode(t, reqs[0])
+	if r.ProtocolVersion != 1 || r.Service != "notify" || r.Op != "post" {
+		t.Errorf("envelope = %+v", r)
 	}
-	want = append(want, "--")
-	if len(argv) != len(want)+3 {
-		t.Fatalf("osascript argv has %d items, want %d: %q", len(argv), len(want)+3, argv)
+	if len(r.Args) != 4 || r.Args["source"] != "pg-rescue" {
+		t.Errorf("args = %v, want exactly title, body, sound and source=pg-rescue", r.Args)
 	}
-	for i := range want {
-		if argv[i] != want[i] {
-			t.Fatalf("osascript argv[%d] = %q, want the fixed script text %q", i, argv[i], want[i])
-		}
-	}
-	return argv[len(want)], argv[len(want)+1], argv[len(want)+2]
+	str := func(k string) string { v, _ := r.Args[k].(string); return v }
+	return str("title"), str("body"), str("sound")
 }
 
 // withSummary writes a copy of the three-prior-attempts report whose first
@@ -135,16 +111,16 @@ func assertDeclined(t *testing.T, res contracttest.Result) {
 	}
 }
 
+// RS-1
 func TestDefaultTemplatesPostOneNotificationAndDecline(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
 	for _, fixture := range []string{"first-attempt", "three-prior-attempts", "stdin-mode"} {
 		t.Run(fixture, func(t *testing.T) {
-			_ = os.Remove(argvFile)
+			env, srv := fakeNotifier(t, fakedaemon.Options{})
 			res := runHandler(t, contracttest.Fixture(fixture), env)
 			assertDeclined(t, res)
-			title, body, sound := valuesOf(t, recordedArgv(t, argvFile))
-			if sound != "" {
-				t.Errorf("sound = %q, want empty when --sound is not given", sound)
+			title, body, sound := onlyPost(t, srv)
+			if sound != "none" {
+				t.Errorf("sound = %q, want none when --sound is not given", sound)
 			}
 			switch fixture {
 			case "three-prior-attempts":
@@ -163,22 +139,24 @@ func TestDefaultTemplatesPostOneNotificationAndDecline(t *testing.T) {
 	}
 }
 
+// RS-2
 func TestInlineTemplates(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
+	env, srv := fakeNotifier(t, fakedaemon.Options{})
 	res := runHandler(
 		t, contracttest.Fixture("three-prior-attempts"), env,
 		"--title-template", "T {{.Repo}} exit={{.Exit}}",
 		"--body-template", "B {{.Host}} {{.Context}}",
 	)
 	assertDeclined(t, res)
-	title, body, _ := valuesOf(t, recordedArgv(t, argvFile))
+	title, body, _ := onlyPost(t, srv)
 	if title != "T repo exit=1" || body != "B phillipg-mbp-02 sync-projects: rebase repo onto origin" {
 		t.Errorf("title=%q body=%q", title, body)
 	}
 }
 
+// RS-2
 func TestFileTemplates(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
+	env, srv := fakeNotifier(t, fakedaemon.Options{})
 	dir := t.TempDir()
 	// A file normally ends with a newline; it must not reach the notification.
 	titleFile := filepath.Join(dir, "title.tmpl")
@@ -192,49 +170,59 @@ func TestFileTemplates(t *testing.T) {
 	res := runHandler(t, contracttest.Fixture("three-prior-attempts"), env,
 		"--title-template-file", titleFile, "--body-template-file", bodyFile)
 	assertDeclined(t, res)
-	title, body, _ := valuesOf(t, recordedArgv(t, argvFile))
+	title, body, _ := onlyPost(t, srv)
 	if title != "file title 1" || body != "file body Resolved the conflict markers and continued the rebase" {
 		t.Errorf("title=%q body=%q", title, body)
 	}
 }
 
-func TestSoundIsAnArgvItem(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
+// RS-3: the sound is a request field; empty (not given) means none.
+func TestSoundIsARequestField(t *testing.T) {
+	env, srv := fakeNotifier(t, fakedaemon.Options{})
 	res := runHandler(t, contracttest.Fixture("first-attempt"), env, "--sound", "Glass")
 	assertDeclined(t, res)
-	argv := recordedArgv(t, argvFile)
-	if _, _, sound := valuesOf(t, argv); sound != "Glass" || argv[len(argv)-1] != "Glass" {
-		t.Errorf("sound item = %q; argv = %q", sound, argv)
+	if _, _, sound := onlyPost(t, srv); sound != "Glass" {
+		t.Errorf("sound = %q, want Glass", sound)
 	}
-	for _, a := range argv[:len(argv)-3] {
-		if strings.Contains(a, "Glass") {
-			t.Errorf("the sound name leaked into the script text: %q", a)
-		}
+	env, srv = fakeNotifier(t, fakedaemon.Options{})
+	res = runHandler(t, contracttest.Fixture("first-attempt"), env, "--sound", "")
+	assertDeclined(t, res)
+	if _, _, sound := onlyPost(t, srv); sound != "none" {
+		t.Errorf("an empty --sound sent %q, want none", sound)
 	}
 }
 
-// The injection test: AppleScript and shell metacharacters in a summary must
-// arrive as one argv item, unchanged, and the script text must stay the fixed
-// constant (valuesOf checks that).
-func TestHostileSummaryReachesOsascriptAsArgvUnchanged(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
+// RS-4: AppleScript and shell metacharacters in a summary arrive unchanged.
+func TestHostileSummaryReachesTheDaemonUnchanged(t *testing.T) {
+	env, srv := fakeNotifier(t, fakedaemon.Options{})
 	hostile := `done" & (do shell script "touch /tmp/pwned") & "\ and do shell script "id" -- -e 'x'`
 	res := runHandler(t, withSummary(t, hostile), env,
 		"--body-template", "{{.LastSummary}}", "--title-template", "{{.LastSummary}}")
 	assertDeclined(t, res)
-	title, body, _ := valuesOf(t, recordedArgv(t, argvFile))
+	title, body, _ := onlyPost(t, srv)
 	if body != hostile || title != hostile {
 		t.Errorf("hostile summary altered:\n title=%q\n body =%q\n want  %q", title, body, hostile)
 	}
 }
 
-func TestControlCharactersStrippedAndLengthCapped(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
+// RS-5: a title that starts with "-" is data.
+func TestTitleStartingWithDashIsData(t *testing.T) {
+	env, srv := fakeNotifier(t, fakedaemon.Options{})
+	res := runHandler(t, contracttest.Fixture("first-attempt"), env, "--title-template=-e --sound x")
+	assertDeclined(t, res)
+	if title, _, _ := onlyPost(t, srv); title != "-e --sound x" {
+		t.Errorf("title = %q", title)
+	}
+}
 
+// RS-6: control characters are stripped and the daemon's BYTE caps are met on
+// a rune boundary (title 256 B, body 2048 B).
+func TestControlCharactersStrippedAndByteLengthCapped(t *testing.T) {
+	env, srv := fakeNotifier(t, fakedaemon.Options{})
 	res := runHandler(t, withSummary(t, "a\x00b\x07c\x1b[31md\ne\x7ff\u0085g"), env,
 		"--body-template", "{{.LastSummary}}", "--sound", "Gl\x07ass")
 	assertDeclined(t, res)
-	_, body, sound := valuesOf(t, recordedArgv(t, argvFile))
+	_, body, sound := onlyPost(t, srv)
 	if body != "abc[31md efg" {
 		t.Errorf("body = %q, want control characters stripped and the newline turned into a space", body)
 	}
@@ -242,42 +230,58 @@ func TestControlCharactersStrippedAndLengthCapped(t *testing.T) {
 		t.Errorf("sound = %q, want control characters stripped from it too", sound)
 	}
 
-	long := strings.Repeat("x", 500)
-	res = runHandler(t, withSummary(t, strings.Repeat("é", 300)), env,
-		"--title-template", long, "--body-template", "{{.LastSummary}}", "--sound", long)
+	// 200 runes of 3 bytes each is 600 B: over the title cap, and a cut at 256
+	// would split a rune, so it must land on 85 runes (255 B).
+	env, srv = fakeNotifier(t, fakedaemon.Options{})
+	res = runHandler(t, withSummary(t, strings.Repeat("é", 1500)), env,
+		"--title-template", strings.Repeat("日", 200), "--body-template", "{{.LastSummary}}")
 	assertDeclined(t, res)
-	title, body, sound := valuesOf(t, recordedArgv(t, argvFile))
-	if title != strings.Repeat("x", 200) || sound != strings.Repeat("x", 200) {
-		t.Errorf("title/sound lengths = %d/%d, want 200", len(title), len(sound))
+	title, body, _ := onlyPost(t, srv)
+	if title != strings.Repeat("日", 85) {
+		t.Errorf("title has %d bytes: %q", len(title), title)
 	}
-	if body != strings.Repeat("é", 200) {
-		t.Errorf("body has %d bytes; want 200 characters", len(body))
+	if body != strings.Repeat("é", 1024) {
+		t.Errorf("body has %d bytes, want 2048 bytes of whole runes", len(body))
+	}
+	// Exactly at the caps: nothing is cut.
+	env, srv = fakeNotifier(t, fakedaemon.Options{})
+	res = runHandler(t, contracttest.Fixture("first-attempt"), env,
+		"--title-template", strings.Repeat("x", 256), "--body-template", strings.Repeat("y", 2048), "--sound", strings.Repeat("s", 64))
+	assertDeclined(t, res)
+	title, body, sound = onlyPost(t, srv)
+	if len(title) != 256 || len(body) != 2048 || len(sound) != 64 {
+		t.Errorf("lengths = %d/%d/%d, want 256/2048/64", len(title), len(body), len(sound))
 	}
 }
 
+// RS-7: a failed post exits 1, never 2, whatever code the daemon replies with.
 func TestPostFailureExits1(t *testing.T) {
-	env, _ := fakeOSAScript(t)
-	res := runHandler(t, contracttest.Fixture("first-attempt"), append(env, "FAKE_OSASCRIPT_FAIL=1"))
-	if res.Exit != 1 || res.Stdout != "" || !strings.Contains(res.Stderr, "boom") {
-		t.Errorf("exit=%d stdout=%q stderr=%q; want exit 1, empty stdout, osascript's message on stderr", res.Exit, res.Stdout, res.Stderr)
+	for _, code := range []string{"unauthenticated", "invalid_argument", "unavailable", "unknown_op", "not_found", "version_mismatch"} {
+		env, _ := fakeNotifier(t, fakedaemon.Options{
+			Reply: `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"` + code + `","message":"boom"}}`,
+		})
+		res := runHandler(t, contracttest.Fixture("first-attempt"), env)
+		if res.Exit != 1 || res.Stdout != "" || !strings.Contains(res.Stderr, code) {
+			t.Errorf("%s: exit=%d stdout=%q stderr=%q; want exit 1, empty stdout, the daemon's code on stderr", code, res.Exit, res.Stdout, res.Stderr)
+		}
 	}
-	// An osascript that itself exits 2 is still a failure to post, not "declined".
-	res = runHandler(t, contracttest.Fixture("first-attempt"), append(env, "FAKE_OSASCRIPT_FAIL=2"))
-	if res.Exit != 1 {
-		t.Errorf("osascript exit 2 gave handler exit %d, want 1", res.Exit)
-	}
-}
-
-func TestMissingOsascriptExits1(t *testing.T) {
-	empty := t.TempDir()
-	res := runHandler(t, contracttest.Fixture("first-attempt"), []string{"PATH=" + empty})
-	if res.Exit != 1 || !strings.Contains(res.Stderr, "osascript") {
-		t.Errorf("exit=%d stderr=%q", res.Exit, res.Stderr)
+	env, _ := fakeNotifier(t, fakedaemon.Options{Reply: "not json"})
+	if res := runHandler(t, contracttest.Fixture("first-attempt"), env); res.Exit != 1 || res.Stdout != "" {
+		t.Errorf("a garbled reply gave exit %d, want 1", res.Exit)
 	}
 }
 
+// RS-8: a daemon that is not running exits 1; nothing falls back.
+func TestDaemonNotRunningExits1(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "none.sock")
+	res := runHandler(t, contracttest.Fixture("first-attempt"), []string{"PG_OSX_NOTIFIER_SOCKET=" + missing})
+	if res.Exit != 1 || res.Stdout != "" || !strings.Contains(res.Stderr, "notifier unreachable") {
+		t.Errorf("exit=%d stdout=%q stderr=%q", res.Exit, res.Stdout, res.Stderr)
+	}
+}
+
+// RS-9
 func TestBadInputExits1NeverDeclined(t *testing.T) {
-	env, argvFile := fakeOSAScript(t)
 	fixture := contracttest.Fixture("first-attempt")
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "nope")
@@ -297,13 +301,37 @@ func TestBadInputExits1NeverDeclined(t *testing.T) {
 		"no report":                   {fixture: fixture, extra: []string{"PG_RESCUE_REPORT=" + missing}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_ = os.Remove(argvFile)
-			res := runHandler(t, tc.fixture, append(append([]string(nil), env...), tc.extra...), tc.args...)
+			env, srv := fakeNotifier(t, fakedaemon.Options{})
+			res := runHandler(t, tc.fixture, append(env, tc.extra...), tc.args...)
 			if res.Exit != 1 || res.Stdout != "" || res.Stderr == "" {
 				t.Errorf("exit=%d stdout=%q stderr=%q; want exit 1 with a message on stderr", res.Exit, res.Stdout, res.Stderr)
 			}
-			if _, err := os.Stat(argvFile); err == nil {
-				t.Error("a notification was posted despite the error")
+			if n := len(srv.Requests()); n != 0 {
+				t.Errorf("%d notification(s) posted despite the error", n)
+			}
+		})
+	}
+}
+
+// RS-15: a title that is empty after trimming, and a --sound outside
+// [A-Za-z0-9 _-] or over 64 bytes, exit 1 (never 2) with nothing posted.
+func TestContractViolationsExit1AndPostNothing(t *testing.T) {
+	for name, args := range map[string][]string{
+		"empty title":        {"--title-template", ""},
+		"blank title":        {"--title-template", " \t "},
+		"title of controls":  {"--title-template", "\x01\x02"},
+		"sound with a slash": {"--sound", "../etc/passwd"},
+		"sound with a dot":   {"--sound", "Glass.aiff"},
+		"sound 65 bytes":     {"--sound", strings.Repeat("s", 65)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env, srv := fakeNotifier(t, fakedaemon.Options{})
+			res := runHandler(t, contracttest.Fixture("first-attempt"), env, args...)
+			if res.Exit != 1 || res.Stdout != "" || res.Stderr == "" {
+				t.Errorf("exit=%d stdout=%q stderr=%q; want exit 1", res.Exit, res.Stdout, res.Stderr)
+			}
+			if n := len(srv.Requests()); n != 0 {
+				t.Errorf("%d notification(s) posted", n)
 			}
 		})
 	}
@@ -336,17 +364,18 @@ func TestPrintedDefaultsAreTheDefaults(t *testing.T) {
 	}
 }
 
-// A real orphan: a short-lived shell (the wrapper) starts the real handler, as
-// a process, against a fake osascript that hangs, waits until osascript is
-// running, then exits. The handler must notice, kill osascript and go away.
-func TestOrphanedHandlerKillsOsascriptAndExits(t *testing.T) {
-	env, _ := fakeOSAScript(t)
-	pidFile := filepath.Join(t.TempDir(), "osascript.pid")
+// RS-11: a real orphan. A short-lived shell (the wrapper) starts the real
+// handler, as a process, against a fake daemon that holds its reply; the
+// wrapper exits once the daemon has the request. The handler must notice, close
+// the in-flight connection (the daemon sees it close) and go away.
+func TestOrphanedHandlerClosesTheInFlightPostAndExits(t *testing.T) {
+	env, srv := fakeNotifier(t, fakedaemon.Options{Hang: true})
+	goFile := filepath.Join(t.TempDir(), "go")
 	const wrapper = `"$@" </dev/null >/dev/null 2>&1 &
 handler=$!
 i=0
-while [ ! -s "$FAKE_OSASCRIPT_PIDFILE" ] && [ "$i" -lt 1500 ]; do sleep 0.01; i=$((i + 1)); done
-if [ -s "$FAKE_OSASCRIPT_PIDFILE" ]; then exit 0; fi
+while [ ! -e "$WRAPPER_GO" ] && [ "$i" -lt 1500 ]; do sleep 0.01; i=$((i + 1)); done
+if [ -e "$WRAPPER_GO" ]; then exit 0; fi
 kill "$handler"
 exit 3`
 	cmd := exec.Command("/bin/sh", append([]string{"-c", wrapper, "wrapper"}, handlerArgv()...)...)
@@ -354,42 +383,25 @@ exit 3`
 	cmd.Env = append(
 		cmd.Env,
 		"GO_WANT_HELPER_PROCESS=1",
-		"FAKE_OSASCRIPT_HANG=1",
-		"FAKE_OSASCRIPT_PIDFILE="+pidFile,
+		"WRAPPER_GO="+goFile,
 		"PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"),
 	)
+	go func() {
+		deadline := time.Now().Add(14 * time.Second)
+		for len(srv.Requests()) == 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = os.WriteFile(goFile, nil, 0o600)
+	}()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("wrapper failed: %v\n%s", err, out)
 	}
-	b, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatal(err)
+	if len(srv.Requests()) == 0 {
+		t.Fatal("the fake daemon never received the post")
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid <= 0 {
-		t.Fatalf("bad osascript pid %q", b)
+	select {
+	case <-srv.Closed():
+	case <-time.After(15 * time.Second):
+		t.Error("the handler did not close its in-flight connection after it was orphaned")
 	}
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if gone(pid) {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Error("the fake osascript is still running after its handler was orphaned")
-}
-
-// gone reports whether pid has exited; a zombie nothing has reaped counts.
-func gone(pid int) bool {
-	if err := syscall.Kill(pid, 0); err != nil {
-		return true
-	}
-	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if err != nil {
-		return false // no /proc (macOS): kill(0) succeeded, so it is alive
-	}
-	i := strings.LastIndexByte(string(stat), ')')
-	return i >= 0 && i+2 < len(stat) && stat[i+2] == 'Z'
 }

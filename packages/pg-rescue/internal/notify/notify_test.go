@@ -2,53 +2,50 @@ package notify
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/phillipgreenii/pg-rescue/internal/notifyclient/fakedaemon"
 	"github.com/phillipgreenii/pg-rescue/internal/orphan"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
 )
 
 func TestSanitize(t *testing.T) {
-	for name, tc := range map[string]struct{ in, want string }{
-		"plain":                   {"hello world", "hello world"},
-		"empty":                   {"", ""},
-		"quotes and backslash":    {`a "b" \ c`, `a "b" \ c`},
-		"newline tab to space":    {"a\nb\tc\r\nd", "a b c  d"},
-		"line separators":         {"a b c", "a b c"},
-		"C0 removed":              {"a\x00b\x01c\x1bd", "abcd"},
-		"DEL and C1 removed":      {"a\x7fb\u0085c\u009fd", "abcd"},
-		"surrounding space":       {"  \n x \t ", "x"},
-		"invalid utf8":            {"a\xffb", "a�b"},
-		"unicode kept":            {"héllo 日本語 \U0001F600", "héllo 日本語 \U0001F600"},
-		"emoji sequence kept":     {"\U0001F468\u200d\U0001F469", "\U0001F468\u200d\U0001F469"},
-		"exactly at the cap":      {strings.Repeat("x", 200), strings.Repeat("x", 200)},
-		"one over the cap":        {strings.Repeat("x", 201), strings.Repeat("x", 200)},
-		"cap counts characters":   {strings.Repeat("日", 250), strings.Repeat("日", 200)},
-		"cap after stripping":     {strings.Repeat("\x01", 500) + "ok", "ok"},
-		"cut never ends in space": {strings.Repeat("x", 199) + " yyy", strings.Repeat("x", 199)},
+	for name, tc := range map[string]struct {
+		in   string
+		max  int
+		want string
+	}{
+		"plain":                   {"hello world", 256, "hello world"},
+		"empty":                   {"", 256, ""},
+		"quotes and backslash":    {`a "b" \ c`, 256, `a "b" \ c`},
+		"newline tab to space":    {"a\nb\tc\r\nd", 256, "a b c  d"},
+		"line separators":         {"a\u2028b\u2029c", 256, "a b c"},
+		"C0 removed":              {"a\x00b\x01c\x1bd", 256, "abcd"},
+		"DEL and C1 removed":      {"a\x7fb\u0085c\u009fd", 256, "abcd"},
+		"surrounding space":       {"  \n x \t ", 256, "x"},
+		"invalid utf8":            {"a\xffb", 256, "a\ufffdb"},
+		"unicode kept":            {"héllo 日本語 \U0001F600", 256, "héllo 日本語 \U0001F600"},
+		"emoji sequence kept":     {"\U0001F468\u200d\U0001F469", 256, "\U0001F468\u200d\U0001F469"},
+		"exactly at the cap":      {strings.Repeat("x", 256), 256, strings.Repeat("x", 256)},
+		"one over the cap":        {strings.Repeat("x", 257), 256, strings.Repeat("x", 256)},
+		"multibyte at the cap":    {strings.Repeat("é", 128), 256, strings.Repeat("é", 128)},
+		"multibyte over the cap":  {strings.Repeat("é", 129), 256, strings.Repeat("é", 128)},
+		"cut never splits a rune": {"a" + strings.Repeat("日", 100), 256, "a" + strings.Repeat("日", 85)},
+		"200 runes exceed 256 B":  {strings.Repeat("日", 200), 256, strings.Repeat("日", 85)},
+		"cap after stripping":     {strings.Repeat("\x01", 500) + "ok", 256, "ok"},
+		"cut never ends in space": {strings.Repeat("x", 255) + " yyy", 256, strings.Repeat("x", 255)},
 	} {
-		if got := Sanitize(tc.in); got != tc.want {
-			t.Errorf("%s: Sanitize(%q) = %q, want %q", name, tc.in, got, tc.want)
+		if got := Sanitize(tc.in, tc.max); got != tc.want {
+			t.Errorf("%s: Sanitize(%q, %d) = %q, want %q", name, tc.in, tc.max, got, tc.want)
 		}
-	}
-}
-
-func TestScriptIsFixedAndReadsEveryValueFromArgv(t *testing.T) {
-	text := strings.Join(Script, "\n")
-	for _, want := range []string{"item 1 of argv", "item 2 of argv", "item 3 of argv", "on run argv", "end run"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("script lacks %q", want)
-		}
-	}
-	for _, bad := range []string{"%", "{{", "do shell script"} {
-		if strings.Contains(text, bad) {
-			t.Errorf("script contains %q: it must be fixed text with no placeholders", bad)
+		if got := Sanitize(tc.in, tc.max); len(got) > tc.max || !utf8.ValidString(got) {
+			t.Errorf("%s: %q breaks the byte cap or UTF-8", name, got)
 		}
 	}
 }
@@ -66,23 +63,21 @@ func (e *exitLog) snapshot() []int {
 	return append([]int(nil), e.codes...)
 }
 
-// When the wrapper is gone, the handler kills the osascript it is waiting on
-// and exits through the orphan helper (orphan.ExitCode).
-func TestOrphanKillsOsascriptAndExitsViaTheHelper(t *testing.T) {
-	dir := t.TempDir()
-	started := filepath.Join(dir, "started")
-	script := "#!/bin/sh\n: > '" + started + "'\nexec sleep 30\n"
-	if err := os.WriteFile(filepath.Join(dir, "osascript"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("PG_RESCUE_REPORT", filepath.Join("..", "..", "testdata", "reports", "first-attempt.json"))
+// When the wrapper is gone, the in-flight connection is closed (the fake
+// daemon sees EOF while it still holds its reply) and the handler exits
+// through the orphan helper (orphan.ExitCode) without waiting for the reply.
+func TestOrphanClosesTheInFlightPostAndExitsViaTheHelper(t *testing.T) {
+	srv := fakedaemon.Start(t, fakedaemon.Options{Hang: true})
+	report := filepath.Join("..", "..", "testdata", "reports", "first-attempt.json")
 
 	var ppid atomic.Int64
 	ppid.Store(100)
 	exits := &exitLog{}
 	rt := Runtime{
 		Tmpl: tmpldata.DefaultEnv(),
+		Getenv: func(k string) string {
+			return map[string]string{"PG_RESCUE_REPORT": report, "PG_OSX_NOTIFIER_SOCKET": srv.Path}[k]
+		},
 		Watch: func(cleanup func()) func() {
 			return orphan.WatchWith(orphan.Options{
 				Interval: 10 * time.Millisecond,
@@ -98,32 +93,56 @@ func TestOrphanKillsOsascriptAndExitsViaTheHelper(t *testing.T) {
 	go func() { done <- Run(rt, nil, &stdout, &stderr) }()
 
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(started); err == nil {
-			break
-		}
+	for len(srv.Requests()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := os.Stat(started); err != nil {
-		t.Fatal("the fake osascript never started")
+	if len(srv.Requests()) == 0 {
+		t.Fatal("the fake daemon never received the post")
 	}
 	ppid.Store(1) // the wrapper is gone
 
 	select {
 	case code := <-done:
-		// osascript was killed, so Run reports a failed post. In production the
-		// helper's os.Exit has already ended the process before this return.
+		// The post was cancelled, so Run reports a failed post. In production
+		// the helper's os.Exit has already ended the process before this return.
 		if code != ExitFailed {
-			t.Errorf("Run = %d after its osascript was killed, want %d", code, ExitFailed)
+			t.Errorf("Run = %d after its post was cancelled, want %d", code, ExitFailed)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return after the orphan cleanup: osascript was not killed")
+		t.Fatal("Run did not return after the orphan cleanup: the post was not cancelled")
+	}
+	select {
+	case <-srv.Closed():
+	case <-time.After(5 * time.Second):
+		t.Error("the fake daemon never saw the connection close while holding its reply")
 	}
 	if got := exits.snapshot(); len(got) != 1 || got[0] != orphan.ExitCode {
 		t.Errorf("orphan exit codes = %v, want [%d]", got, orphan.ExitCode)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+// RS-12: a daemon that never replies is bounded by the client deadline (the
+// test injects a short one) and the handler exits 1, not 2.
+func TestAHungDaemonIsBoundedAndExits1(t *testing.T) {
+	srv := fakedaemon.Start(t, fakedaemon.Options{Hang: true})
+	rt := Runtime{
+		Tmpl:        tmpldata.DefaultEnv(),
+		PostTimeout: 150 * time.Millisecond,
+		Getenv: func(k string) string {
+			return map[string]string{
+				"PG_RESCUE_REPORT":       filepath.Join("..", "..", "testdata", "reports", "first-attempt.json"),
+				"PG_OSX_NOTIFIER_SOCKET": srv.Path,
+			}[k]
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	code := Run(rt, nil, &stdout, &stderr)
+	if code != ExitFailed || stdout.Len() != 0 || time.Since(start) > 5*time.Second {
+		t.Errorf("code=%d stdout=%q after %v stderr=%q", code, stdout.String(), time.Since(start), stderr.String())
 	}
 }
 

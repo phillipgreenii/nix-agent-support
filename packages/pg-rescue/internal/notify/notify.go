@@ -3,27 +3,28 @@
 // (exit 2) so the chain continues, and exits 1 if the notification cannot be
 // posted.
 //
-// Security: the title, body and sound name come from templates over untrusted
-// text (command output, an earlier handler's summary). They are handed to a
-// FIXED AppleScript as argv items, never interpolated into script text, so
-// nothing they contain can be run as AppleScript or as `do shell script`.
+// The notification is posted over the pg-osx-notifier daemon's Unix socket
+// as a JSON request; the title, body and sound name come from templates over
+// untrusted text (command output, an earlier handler's summary) and travel as
+// JSON string values, never as script text. History: this handler used to run
+// a fixed AppleScript through osascript; when the daemon is unreachable it now
+// logs and drops, with no fallback.
 package notify
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"sync"
+	"regexp"
 	"time"
 
 	"github.com/spf13/pflag"
 
 	"github.com/phillipgreenii/pg-rescue/internal/contract"
+	"github.com/phillipgreenii/pg-rescue/internal/notifyclient"
 	"github.com/phillipgreenii/pg-rescue/internal/orphan"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
@@ -43,24 +44,16 @@ const (
 	DefaultBodyTemplate  = "{{.Repo}}: {{.LastSummary}}"
 )
 
-// Script is the AppleScript, line by line, passed to osascript with -e. It is
-// a constant: no value is ever formatted into it. Item 1 of argv is the title,
-// item 2 the body and item 3 the sound name (empty for none).
-var Script = []string{
-	"on run argv",
-	"set theTitle to item 1 of argv",
-	"set theBody to item 2 of argv",
-	"set theSound to item 3 of argv",
-	"if theSound is \"\" then",
-	"display notification theBody with title theTitle",
-	"else",
-	"display notification theBody with title theTitle sound name theSound",
-	"end if",
-	"end run",
-}
+// Field caps of the daemon's contract, in bytes. The handler cuts before
+// sending, because the daemon rejects over-cap input.
+const (
+	maxTitleBytes = 256
+	maxBodyBytes  = 2048
+	maxSoundBytes = 64
+)
 
-// postTimeout bounds one osascript run.
-const postTimeout = 30 * time.Second
+// soundName is the form of a sound name the daemon accepts.
+var soundName = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,64}$`)
 
 const usage = `usage: pg-rescue-notify [--title-template TEXT | --title-template-file F]
                         [--body-template TEXT | --body-template-file F] [--sound NAME]
@@ -75,13 +68,15 @@ declines (exit 2), so the chain continues. Exits 1 if posting fails.
 // real process.
 type Runtime struct {
 	// Watch starts the orphan watch (orphan.Watch in production). cleanup
-	// kills the in-flight osascript. It returns the stop function.
+	// cancels the in-flight post. It returns the stop function.
 	Watch func(cleanup func()) (stop func())
 	// Tmpl feeds tmpldata.New.
 	Tmpl tmpldata.Env
 	// Getenv reads the handler's environment (PG_RESCUE_REPORT); os.Getenv
-	// when nil. osascript is still found on the process PATH.
+	// when nil. It also feeds the socket discovery rule.
 	Getenv func(string) string
+	// PostTimeout bounds one post; the contract's 7 s when zero.
+	PostTimeout time.Duration
 }
 
 // DefaultRuntime is backed by the real process.
@@ -171,13 +166,27 @@ func Run(rt Runtime, args []string, stdout, stderr io.Writer) int {
 		return failf(stderr, "%v", err)
 	}
 
-	p := &poster{}
+	title, body = Sanitize(title, maxTitleBytes), Sanitize(body, maxBodyBytes)
+	sound := Sanitize(o.sound, 1<<20) // never cut: an over-cap sound is refused below
+	if title == "" {
+		return failf(stderr, "the title is empty after trimming; nothing posted")
+	}
+	if sound != "" && !soundName.MatchString(sound) {
+		return failf(stderr, "--sound %q is not 1 to 64 bytes of [A-Za-z0-9 _-]; nothing posted", sound)
+	}
+	if sound == "" {
+		sound = "none"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	stop := func() {}
 	if rt.Watch != nil {
-		stop = rt.Watch(p.kill)
+		stop = rt.Watch(cancel)
 	}
 	defer stop()
-	if err := p.post(Sanitize(title), Sanitize(body), Sanitize(o.sound)); err != nil {
+	client := notifyclient.Client{Getenv: getenv, Timeout: rt.PostTimeout}
+	if err := client.Post(ctx, title, body, sound); err != nil {
 		return failf(stderr, "cannot post the notification: %v", err)
 	}
 
@@ -237,64 +246,4 @@ func loadData(rt Runtime, path string) (tmpldata.Data, error) {
 		return tmpldata.Data{}, fmt.Errorf("unknown report schema_version %d (this handler knows %d)", r.SchemaVersion, report.SchemaVersion)
 	}
 	return tmpldata.New(&r, rt.Tmpl)
-}
-
-// poster runs osascript and lets the orphan watch kill it.
-type poster struct {
-	mu  sync.Mutex
-	cmd *exec.Cmd
-}
-
-func (p *poster) kill() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
-	}
-}
-
-// post runs the fixed script with the three values as argv. The `--` ends
-// osascript's own option parsing, so a title that starts with "-" is still
-// data. The values are already sanitized by the caller.
-func (p *poster) post(title, body, sound string) error {
-	path, err := exec.LookPath("osascript")
-	if err != nil {
-		return fmt.Errorf("osascript not found on PATH (macOS only): %w", err)
-	}
-	args := make([]string, 0, 2*len(Script)+4)
-	for _, line := range Script {
-		args = append(args, "-e", line)
-	}
-	args = append(args, "--", title, body, sound)
-
-	ctx, cancel := context.WithTimeout(context.Background(), postTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Stdin = nil // /dev/null
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out // never our stdout: that carries the result
-	cmd.WaitDelay = time.Second
-
-	p.mu.Lock()
-	if err := cmd.Start(); err != nil {
-		p.mu.Unlock()
-		return err
-	}
-	p.cmd = cmd
-	p.mu.Unlock()
-
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("osascript timed out after %s", postTimeout)
-		}
-		return fmt.Errorf("osascript: %v: %s", err, bytes.TrimSpace(clip(out.Bytes(), 500)))
-	}
-	return nil
-}
-
-func clip(b []byte, n int) []byte {
-	if len(b) > n {
-		return b[:n]
-	}
-	return b
 }

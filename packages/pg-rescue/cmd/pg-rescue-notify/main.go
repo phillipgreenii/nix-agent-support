@@ -16,8 +16,8 @@ func main() {
 
 // run is main without the process: the handler's arguments, its environment
 // (KEY=VALUE entries) and its streams in, its exit code out. The tests call it
-// in process; the handler reads no standard input. Like every handler it finds
-// osascript on the process PATH.
+// in process; the handler reads no standard input. It posts to the notifier
+// daemon's socket (history: it used to run osascript).
 func run(args, env []string, _ io.Reader, stdout, stderr io.Writer) int {
 	rt := notify.DefaultRuntime()
 	rt.Getenv = environ.Getenv(env)

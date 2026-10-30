@@ -7289,8 +7289,8 @@
               # injected Executor standing in for "spawn the command". bash and
               # git are on PATH for the later beads' fake-handler and real-git
               # fixtures; this bead's tests do not exec either yet.
-              # pg-rescue-notify's tests (bead pg2-nwffx) put a fake osascript
-              # (a /bin/sh script) first on PATH; they never post a real one.
+              # pg-rescue-notify's tests dial a fake notifier socket in a temp
+              # directory; they never post a real banner.
               # The runner's end-to-end tests (bead pg2-qt5ex) re-exec the test
               # binary itself as the fake command, handler and verify
               # (GO_WANT_HELPER_PROCESS), and use /bin/sh for --verify.
