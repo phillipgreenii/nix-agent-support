@@ -257,7 +257,7 @@ mutate target-loki D6 '(.panels[] | select(.id == 4) | .targets[0].datasource) =
 mutate target-no-datasource D6 'del(.panels[] | select(.id == 5) | .targets[0].datasource)'
 
 mutate gauge-under-sum D8 "$(set_expr 4 'sum by (class) (pg_connector_github_queue_depth)')"
-mutate bad-promql D7 "$(set_expr 4 'sum by (class (pg_connector_github_queue_depth)')"
+mutate bad-promql D7 "$(set_expr 4 'max by (class) (pg_connector_github_queue_depth))')"
 
 if [ "$fail" -ne 0 ]; then
   exit 1
