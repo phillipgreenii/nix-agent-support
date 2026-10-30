@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# Real-bd throwaway-database fixture for handoff-create's bats suites (bead
-# pg2-2xfbi). Replicates the approach of the sibling repo's daily-focus
-# bd_fixture.bash (per-module copy, not a cross-repo dependency).
+# Real-bd throwaway-database helpers for the pg-decider-backfill-pr-metadata
+# bats suite (bead pg2-eclw3j.5). A per-module trimmed copy of handoff-create's
+# fixture (per-module copy, not a cross-repo dependency).
 #
 # ISOLATION INVARIANTS (machine invariant; every one is asserted, not assumed):
 #   - the database lives in a fresh temp dir and is bd EMBEDDED mode
@@ -87,10 +87,6 @@ bd_fixture_assert_isolated() {
   }
 }
 
-# Registers (or clears) the custom `handoff` type in the throwaway database.
-bd_fixture_register_handoff_type() { bd -C "$TDIR" config set types.custom handoff >/dev/null; }
-bd_fixture_unregister_types() { bd -C "$TDIR" config set types.custom "" >/dev/null; }
-
 # bd_fixture_show_json <id>: the normalized single issue object, whichever
 # envelope this bd build/env emits (J-1 prelude).
 bd_fixture_show_json() {
@@ -102,30 +98,4 @@ bd_fixture_show_json() {
 bd_fixture_count() {
   bd -C "$TDIR" list --status all -n 0 --json |
     jq '(if type=="object" and has("data") then .data else . end) | length'
-}
-
-# bd_call_log_install [fail-create-message]: puts a `bd` shim first on PATH
-# that logs every call's argv (one line per call) to $BD_CALL_LOG, then execs
-# the real bd. With an argument, a `create` call instead prints that message
-# on stderr and exits 1 (a create failure other than an unregistered type).
-bd_call_log_install() {
-  local real_bd
-  real_bd="$(command -v bd)"
-  BD_SHIM_DIR="$(mktemp -d)"
-  BD_CALL_LOG="$BD_SHIM_DIR/calls.log"
-  export BD_CALL_LOG BD_SHIM_FAIL_CREATE="${1:-}"
-  cat >"$BD_SHIM_DIR/bd" <<SHIM
-#!/usr/bin/env bash
-printf '%s\n' "\${*//\$'\n'/\\\\n}" >>"$BD_CALL_LOG"
-for a in "\$@"; do
-  if [ "\$a" = create ] && [ -n "\$BD_SHIM_FAIL_CREATE" ]; then
-    echo "\$BD_SHIM_FAIL_CREATE" >&2
-    exit 1
-  fi
-done
-exec "$real_bd" "\$@"
-SHIM
-  chmod +x "$BD_SHIM_DIR/bd"
-  PATH="$BD_SHIM_DIR:$PATH"
-  export PATH
 }
