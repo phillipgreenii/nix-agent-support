@@ -594,3 +594,18 @@ func TestEnsure_registeredWorktreeWithFloxLogsIsReusedNotReaped(t *testing.T) {
 	mustExist(t, logFile)
 	mustExist(t, filepath.Join(path, ".git"))
 }
+
+// pg2-89dkcs: an empty worktreeDir is a real failed dispatch (nothing can be
+// created), not noise; it must fail fast with a clear sentinel and never reach
+// the opener or CreateWorktree (previously: "mkdir worktree dir: mkdir : no
+// such file or directory").
+func TestEnsure_emptyWorktreeDirFailsClearly(t *testing.T) {
+	o := newRecOpener(nil)
+	_, err := Ensure(context.Background(), o.Open, "", "/repo", "zr-9")
+	if !errors.Is(err, ErrNoWorktreeDir) {
+		t.Fatalf("err = %v, want ErrNoWorktreeDir", err)
+	}
+	if len(o.calls) != 0 || len(o.wtm.calls) != 0 {
+		t.Errorf("must not touch git: opens=%v creates=%v", o.calls, o.wtm.calls)
+	}
+}

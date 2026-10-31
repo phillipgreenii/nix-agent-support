@@ -45,6 +45,14 @@ type Opener func(ctx context.Context, dir string) (gitclient.WorktreeManager, er
 // ccpool.go, the one production caller of this duplicated package today).
 var ErrLowDisk = errors.New("worktree: low disk space")
 
+// ErrNoWorktreeDir is returned by Ensure when worktreeDir is empty (the role
+// config / Config.WorktreeDir was never set). pg2-89dkcs: before this guard
+// the empty dir surfaced as the cryptic "mkdir worktree dir: mkdir : no such
+// file or directory" (os.MkdirAll("") always fails) and, being a genuine
+// failed dispatch (no worktree, so the session never starts), repeated
+// thousands of times with no hint at the cause.
+var ErrNoWorktreeDir = errors.New("worktree: worktree dir is not configured (Config.WorktreeDir is empty)")
+
 // diskFullMarkers are the case-insensitive stderr substrings known to
 // accompany a disk-full git failure on the two platforms this pool actually
 // runs on (Linux prod, Darwin dev): "no space left on device" is ENOSPC's own
@@ -113,6 +121,9 @@ func isDiskFull(err error) bool {
 // for the strict shape check and why this lives here rather than only in
 // cleanup.
 func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID string) (string, error) {
+	if worktreeDir == "" {
+		return "", fmt.Errorf("isolation for %s: %w", beadID, ErrNoWorktreeDir)
+	}
 	path := filepath.Join(worktreeDir, beadID)
 	// Reuse: if the path is already a worktree root, keep it. A path that does
 	// not exist yet is never an existing worktree — treat that the same as the
