@@ -13,6 +13,12 @@ cachePackages = [
   'github.com/mattn/go-isatty',
   'github.com/munnerz/goautoneg',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema',
@@ -306,11 +312,11 @@ cachePackages = [
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261019180522-ce908d29299b'
-    hash = 'sha256-qUTuVBTbGwE/GeuuO+2s0/PCEWi9vLt+HJQ9x0AQjRg='
+    version = 'v0.0.0-20261026165753-2ffab32bce7e'
+    hash = 'sha256-sRRg7QCSi0XQZELYEcMA/ElQcFM+CcHeaVOCMgoWcqQ='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261019180522-ce908d29299b'
+    version = 'v0.0.0-20261026165753-2ffab32bce7e'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
