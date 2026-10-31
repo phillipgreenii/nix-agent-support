@@ -10,7 +10,7 @@ import (
 const (
 	wantJanitorStaleExpr    = `(time() - max(last_over_time(ccpool_janitor_last_success_timestamp_seconds[7d]))) > 1800`
 	wantJanitorDeadlineExpr = `(min_over_time(ccpool_janitor_deadline_hit[35m]) == 1) and (count_over_time(ccpool_janitor_deadline_hit[35m]) >= 3)`
-	wantJanitorIdleExpr     = `((min_over_time(ccpool_janitor_pass_errors[35m]) > 0) and (count_over_time(ccpool_janitor_pass_errors[35m]) >= 3)) or ((count(count_over_time(ccpool_janitor_reclaimed[6h]) >= 3)) and on() (sum(max_over_time(ccpool_janitor_reclaimed[6h])) == 0) and on() (max(min_over_time(ccpool_pool_capacity{dim="free"}[6h])) == 0))`
+	wantJanitorIdleExpr     = `((min_over_time(ccpool_janitor_pass_errors[35m]) > 0) and (count_over_time(ccpool_janitor_pass_errors[35m]) >= 3)) or ((count(count_over_time(ccpool_janitor_reclaimed[6h]) >= 30)) and on() (sum(max_over_time(ccpool_janitor_reclaimed[6h])) == 0) and on() (max(min_over_time(ccpool_pool_capacity{dim="free"}[6h])) == 0))`
 )
 
 func TestCcpoolJanitorRules(t *testing.T) {

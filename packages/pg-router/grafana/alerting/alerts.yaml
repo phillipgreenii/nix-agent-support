@@ -1940,7 +1940,7 @@ groups:
           severity: warning
         annotations:
           summary: "the ccpool handler's janitor keeps failing a pass, or runs without reclaiming anything while a pool is full"
-          description: "Either a janitor pass reported errors on every run of the last 35 minutes (ccpool_janitor_pass_errors, label pass), or the janitor ran at least 3 times in 6 hours, reclaimed nothing in any pass (ccpool_janitor_reclaimed) and a ccpool pool had no free slot throughout (ccpool_pool_capacity dim=free). First check the janitor's log for `janitor: pass failed` lines, then `ccpool --pool <pool> list --json` for idle, errored or orphaned rows holding slots, then run the janitor by hand. A full pool of sessions that are really working also reclaims nothing, so the second case can be a false alarm."
+          description: "Either a janitor pass reported errors on every run of the last 35 minutes (ccpool_janitor_pass_errors, label pass), or the janitor ran at least 30 times in 6 hours, reclaimed nothing in any pass (ccpool_janitor_reclaimed) and a ccpool pool had no free slot throughout (ccpool_pool_capacity dim=free). First check the janitor's log for `janitor: pass failed` lines, then `ccpool --pool <pool> list --json` for idle, errored or orphaned rows holding slots, then run the janitor by hand. A full pool of sessions that are really working also reclaims nothing, so the second case can be a false alarm."
         data:
           - refId: A
             relativeTimeRange:
@@ -1951,7 +1951,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: ((min_over_time(ccpool_janitor_pass_errors[35m]) > 0) and (count_over_time(ccpool_janitor_pass_errors[35m]) >= 3)) or ((count(count_over_time(ccpool_janitor_reclaimed[6h]) >= 3)) and on() (sum(max_over_time(ccpool_janitor_reclaimed[6h])) == 0) and on() (max(min_over_time(ccpool_pool_capacity{dim="free"}[6h])) == 0))
+              expr: ((min_over_time(ccpool_janitor_pass_errors[35m]) > 0) and (count_over_time(ccpool_janitor_pass_errors[35m]) >= 3)) or ((count(count_over_time(ccpool_janitor_reclaimed[6h]) >= 30)) and on() (sum(max_over_time(ccpool_janitor_reclaimed[6h])) == 0) and on() (max(min_over_time(ccpool_pool_capacity{dim="free"}[6h])) == 0))
           - refId: B
             datasourceUid: __expr__
             model:
