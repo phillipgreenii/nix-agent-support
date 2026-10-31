@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -374,5 +375,54 @@ func TestConfig_inlineSweepsDefaultsOnAndLoads(t *testing.T) {
 	os.WriteFile(p, []byte(`{}`), 0o644)
 	if c, err := rolefile.LoadConfig(p); err != nil || !c.InlineSweeps {
 		t.Errorf("LoadConfig {}: %v, InlineSweeps=%v, want true", err, c.InlineSweeps)
+	}
+}
+
+// pg2-tjxs0y: a role whose own share expires ends the run as deadline even when
+// the whole run is far inside its deadline (live rows at about 90 s of 240 s).
+// The row says WHICH role was cut (roles_cut), so that case is told apart from a
+// run that really reached its deadline (roles_skipped, or every role cut).
+func TestJanitor_shareOverrunIsDeadlineAndNamesTheCutRole(t *testing.T) {
+	f := newJanitorFixture(t, [2]string{"a", ""}, [2]string{"b", ""})
+	f.opts.deadline = 200 * time.Millisecond // each role's share starts at 100ms
+	rec := &recorder{}
+	p := rec.passes()
+	inner := p.orphan
+	p.orphan = func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
+		inner(ctx, role, cfg, deps)
+		if role.Name == "a" {
+			<-ctx.Done() // overruns its share, not the run's deadline
+		}
+		return 0
+	}
+	if code, out := f.run(p); code != conformance.ExitOK || !strings.Contains(out, "outcome=deadline") {
+		t.Fatalf("exit %d out %q", code, out)
+	}
+	ev := f.events()
+	if len(ev) != 1 {
+		t.Fatalf("events = %v", ev)
+	}
+	if got := ev[0]["roles_cut"]; !reflect.DeepEqual(got, []any{"a"}) {
+		t.Errorf("roles_cut = %v, want [a]", got)
+	}
+	if got := ev[0]["roles_skipped"]; got != nil {
+		t.Errorf("roles_skipped = %v, want none: every role ran", got)
+	}
+}
+
+// A run in which every pass finishes inside its share is completed, names no cut
+// role, and skips none.
+func TestJanitor_runInsideEveryShareIsCompletedWithNoCutRole(t *testing.T) {
+	f := newJanitorFixture(t, [2]string{"a", ""}, [2]string{"b", ""})
+	rec := &recorder{}
+	if code, out := f.run(rec.passes()); code != conformance.ExitOK || !strings.Contains(out, "outcome=completed") {
+		t.Fatalf("exit %d out %q", code, out)
+	}
+	ev := f.events()
+	if len(ev) != 1 || ev[0]["outcome"] != janitorCompleted {
+		t.Fatalf("events = %v", ev)
+	}
+	if ev[0]["roles_cut"] != nil || ev[0]["roles_skipped"] != nil {
+		t.Errorf("cut %v skipped %v, want neither", ev[0]["roles_cut"], ev[0]["roles_skipped"])
 	}
 }

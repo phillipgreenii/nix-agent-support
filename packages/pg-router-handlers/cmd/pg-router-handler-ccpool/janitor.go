@@ -218,10 +218,15 @@ type passStat struct {
 
 // janitorRun is the state of one run, and the source of its record.
 type janitorRun struct {
-	passes  janitorPasses
-	stats   map[string]*passStat
-	cutOff  bool
-	skipped []string
+	passes janitorPasses
+	stats  map[string]*passStat
+	cutOff bool
+	// cutRoles names the roles whose own share of the deadline expired during
+	// a pass (bead pg2-tjxs0y). The run as a whole may still be well inside its
+	// deadline, so this separates a role cut at its share from a run that
+	// really reached its deadline.
+	cutRoles []string
+	skipped  []string
 }
 
 // runPass runs one pass under ctx, timing it and recording its count and error
@@ -251,6 +256,9 @@ func (j *janitorRun) runPass(ctx context.Context, name, role string, deps execut
 	}
 	if ctx.Err() != nil {
 		j.cutOff = true
+		if n := len(j.cutRoles); n == 0 || j.cutRoles[n-1] != role {
+			j.cutRoles = append(j.cutRoles, role)
+		}
 	}
 	recordSweepPass("janitor", role, name, n, elapsed, deps)
 	if n > 0 {
@@ -357,6 +365,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		"passes":        run.stats,
 		"reclaimed":     reclaimed,
 		"roles_skipped": run.skipped,
+		"roles_cut":     run.cutRoles,
 	}
 	_ = log.Emit("info", janitorRunEvent, "janitor run "+outcome, fields)
 	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats)

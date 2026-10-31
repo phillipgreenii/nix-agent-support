@@ -1328,6 +1328,9 @@ changes a core gate or `INV-LIFE-2`.
     scheduled, and each role gets a share of it, with the role the run starts on rotated between
     runs, so one slow role or one slow worktree cannot starve the others on every run. A run that
     reaches its deadline returns what it did and ends as a success; the outcome is in its record.
+    A role whose own share expires mid-pass also ends the run as the deadline outcome even when the
+    whole run is well inside its deadline, and the record names those roles (`roles_cut`), apart from
+    the roles never reached (`roles_skipped`).
     Each pass is best effort: a pass that fails does not stop the others.
   - **Observable.** Every run records one event naming the run's outcome (completed, skipped
     because another run was active, or deadline reached), each pass's elapsed time and the count of
