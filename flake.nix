@@ -1709,6 +1709,14 @@
 
           checks =
             let
+              # Rows + check builder for the single-boolean tie tests (tc-2k1o8).
+              pnTies = import ./tests/pn-single-boolean-ties.nix {
+                inherit lib pkgs;
+                capabilityFramework = phillipgreenii-nix-base.homeModules.capability-framework;
+                capabilities = import ./home/capabilities {
+                  inherit (phillipgreenii-nix-base.lib) mkCapability mkBundle;
+                };
+              };
               # Build the claude-settings framework scripts the same way the
               # home module does: activation-lib from repo-base's lib/activation,
               # then the 3 scripts via scripts.nix. The bats tests run separately
@@ -13544,356 +13552,21 @@
                 assert lib.any (p: p.name == "wayfinder-beads" && p.defaultEnabled) mkt.passthru.plugins;
                 pkgs.runCommand "wayfinder-beads-pairing-ok" { } "touch $out";
 
-              # Durable eval test (pg2-sikj3) for the integrate-branch-support enable
-              # DEFAULT: the CLI (the detector the integrate-branch plugin's dispatcher
-              # invokes as a bare PATH command) must ship exactly when the integrate-branch
-              # PLUGIN is enabled, so skill + detector can't drift apart (the "CLI not on
-              # PATH after apply" incident). Mirrors the mock-marketplace approach of
-              # test-claude-marketplaces; reads ONLY the resolved `enable` so cfg.package is
-              # never forced.
-              test-integrate-branch-support-enable-default =
-                let
-                  mockMarketplace = pkgs.runCommand "mock-ib-marketplace" {
-                    passthru = {
-                      marketplaceName = "mock-agent-support-marketplace-local";
-                      plugins = [
-                        {
-                          name = "integrate-branch";
-                          version = "0.1.0+aaaaaaaa";
-                          key = "integrate-branch@mock-agent-support-marketplace-local";
-                          defaultEnabled = true;
-                        }
-                      ];
-                    };
-                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
-
-                  evalEnable =
-                    cfg:
-                    (lib.evalModules {
-                      specialArgs = { inherit pkgs lib; };
-                      modules = [
-                        ./home/programs/integrate-branch-support/default.nix
-                        (
-                          { lib, ... }:
-                          {
-                            # Stubs for the config surface the module reads/writes; the
-                            # real options live in claude-code / claude-marketplaces /
-                            # home-manager, not pulled in here.
-                            options = {
-                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
-                              phillipgreenii.programs.claude-code.marketplaces = {
-                                nixProvided = lib.mkOption {
-                                  type = lib.types.listOf lib.types.package;
-                                  default = [ ];
-                                };
-                                enabled = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
-                                };
-                                overrides = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
-                                };
-                              };
-                              home.packages = lib.mkOption {
-                                type = lib.types.listOf lib.types.package;
-                                default = [ ];
-                              };
-                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
-                              programs.tldr.customPages = lib.mkOption {
-                                type = lib.types.attrsOf lib.types.anything;
-                                default = { };
-                              };
-                            };
-                          }
-                        )
-                        cfg
-                      ];
-                    }).config.phillipgreenii.programs.integrate-branch-support.enable;
-
-                  # claude on + integrate-branch plugin present (defaultEnabled) => on.
-                  onDefault = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                  };
-                  # plugin explicitly overridden off => off, even with claude on.
-                  overriddenOff = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                      marketplaces.overrides."integrate-branch@mock-agent-support-marketplace-local" = false;
-                    };
-                  };
-                  # claude disabled => off, even though plugin metadata is present.
-                  claudeOff = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = false;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                  };
-                  # explicit opt-in still wins upward.
-                  explicitOn = evalEnable {
-                    phillipgreenii.programs.claude-code.enable = false;
-                    phillipgreenii.programs.integrate-branch-support.enable = true;
-                  };
-                in
-                assert onDefault == true;
-                assert overriddenOff == false;
-                assert claudeOff == false;
-                assert explicitOn == true;
-                pkgs.runCommand "integrate-branch-support-enable-default-ok" { } "touch $out";
-
-              # Durable eval test (pg2-xs5cj) for the pnwf enable DEFAULT: the pnwf CLI
-              # (the deterministic helper the pn-workspace-rules plugin's workforest
-              # stage-skills + /pn-workspace-sync invoke as a bare PATH command) must ship
-              # exactly when the pn-workspace-rules PLUGIN is enabled, so skills + helper
-              # can't drift apart. Mirrors test-integrate-branch-support-enable-default;
-              # reads ONLY the resolved `enable` so cfg.package (pkgs.pnwf) is never forced
-              # — which is why this test needs no repo-base package present.
-              test-pnwf-enable-default =
-                let
-                  mockMarketplace = pkgs.runCommand "mock-pnwf-marketplace" {
-                    passthru = {
-                      marketplaceName = "mock-pnwf-marketplace-local";
-                      plugins = [
-                        {
-                          name = "pn-workspace-rules";
-                          version = "0.1.0+aaaaaaaa";
-                          key = "pn-workspace-rules@mock-pnwf-marketplace-local";
-                          defaultEnabled = true;
-                        }
-                      ];
-                    };
-                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
-
-                  evalEnable =
-                    cfg:
-                    (lib.evalModules {
-                      # Inject a stub `pnwf` so the module's `pkgs ? pnwf` availability
-                      # term is satisfied — this test exercises the PLUGIN-ENABLED
-                      # resolution logic, not the package-availability guard (the check's
-                      # real pkgs may lack pnwf when the locked repo-base predates it).
-                      specialArgs = {
-                        pkgs = pkgs // {
-                          pnwf = pkgs.hello;
-                        };
-                        inherit lib;
-                      };
-                      modules = [
-                        ./home/programs/pnwf/default.nix
-                        (
-                          { lib, ... }:
-                          {
-                            # Stubs for the config surface the module reads/writes; the
-                            # real options live in claude-code / claude-marketplaces /
-                            # home-manager, not pulled in here.
-                            options = {
-                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
-                              phillipgreenii.programs.claude-code.marketplaces = {
-                                nixProvided = lib.mkOption {
-                                  type = lib.types.listOf lib.types.package;
-                                  default = [ ];
-                                };
-                                enabled = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
-                                };
-                                overrides = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
-                                };
-                              };
-                              home.packages = lib.mkOption {
-                                type = lib.types.listOf lib.types.package;
-                                default = [ ];
-                              };
-                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
-                              programs.tldr.customPages = lib.mkOption {
-                                type = lib.types.attrsOf lib.types.anything;
-                                default = { };
-                              };
-                            };
-                          }
-                        )
-                        cfg
-                      ];
-                    }).config.phillipgreenii.programs.pnwf.enable;
-
-                  # claude on + pn-workspace-rules plugin present (defaultEnabled) => on.
-                  onDefault = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                  };
-                  # plugin explicitly overridden off => off, even with claude on.
-                  overriddenOff = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                      marketplaces.overrides."pn-workspace-rules@mock-pnwf-marketplace-local" = false;
-                    };
-                  };
-                  # claude disabled => off, even though plugin metadata is present.
-                  claudeOff = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = false;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                  };
-                  # explicit opt-in still wins upward.
-                  explicitOn = evalEnable {
-                    phillipgreenii.programs.claude-code.enable = false;
-                    phillipgreenii.programs.pnwf.enable = true;
-                  };
-                in
-                assert onDefault == true;
-                assert overriddenOff == false;
-                assert claudeOff == false;
-                assert explicitOn == true;
-                pkgs.runCommand "pnwf-enable-default-ok" { } "touch $out";
-
-              # Durable eval test (pg2-a3zez) for the wsplan enable DEFAULT. `wsplan` is
-              # pnwf's sibling command out of the same repo-base module (modules/pnwf) and
-              # is Stage A of the workforest `land`, so it must ship exactly when pnwf
-              # does — expressed by READING pnwf's resolved feature flag instead of
-              # re-deriving the marketplace/plugin condition a third time. Rows 1-4 pin
-              # that inheritance (including the veto direction, which a copied expression
-              # would NOT have); row 5 pins the availability guard that keeps this flake
-              # evaluating on a repo-base rev carrying pnwf but not yet wsplan — the state
-              # of this flake's own lock, hence the guard's real workload, not a
-              # hypothetical; row 6 pins the explicit opt-in. Like the pnwf test it reads
-              # ONLY the resolved `enable`, so cfg.package (pkgs.wsplan) is never forced
-              # and the check needs no repo-base package present.
-              test-wsplan-enable-default =
-                let
-                  mockMarketplace = pkgs.runCommand "mock-wsplan-marketplace" {
-                    passthru = {
-                      marketplaceName = "mock-wsplan-marketplace-local";
-                      plugins = [
-                        {
-                          name = "pn-workspace-rules";
-                          version = "0.1.0+aaaaaaaa";
-                          key = "pn-workspace-rules@mock-wsplan-marketplace-local";
-                          defaultEnabled = true;
-                        }
-                      ];
-                    };
-                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
-
-                  # pkgs is a PARAMETER here (unlike the pnwf test, which stubs a fixed
-                  # one) because the availability row must express wsplan's ABSENCE: under
-                  # `pn workspace flake-check` the overlay genuinely provides pkgs.wsplan,
-                  # so only removeAttrs — never `pkgs // { … }` — can model the old-rev
-                  # case. The real pnwf module is imported, not a stub of its flag: the
-                  # behaviour under test IS the inheritance from it.
-                  evalEnableWith =
-                    evalPkgs: cfg:
-                    (lib.evalModules {
-                      specialArgs = {
-                        pkgs = evalPkgs;
-                        inherit lib;
-                      };
-                      modules = [
-                        ./home/programs/pnwf/default.nix
-                        ./home/programs/wsplan/default.nix
-                        (
-                          { lib, ... }:
-                          {
-                            # Stubs for the config surface the modules read/write; the real
-                            # options live in claude-code / claude-marketplaces /
-                            # home-manager, not pulled in here.
-                            options = {
-                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
-                              phillipgreenii.programs.claude-code.marketplaces = {
-                                nixProvided = lib.mkOption {
-                                  type = lib.types.listOf lib.types.package;
-                                  default = [ ];
-                                };
-                                enabled = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
-                                };
-                                overrides = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
-                                };
-                              };
-                              home.packages = lib.mkOption {
-                                type = lib.types.listOf lib.types.package;
-                                default = [ ];
-                              };
-                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
-                              programs.tldr.customPages = lib.mkOption {
-                                type = lib.types.attrsOf lib.types.anything;
-                                default = { };
-                              };
-                            };
-                          }
-                        )
-                        cfg
-                      ];
-                    }).config.phillipgreenii.programs.wsplan.enable;
-
-                  bothAvailable = pkgs // {
-                    pnwf = pkgs.hello;
-                    wsplan = pkgs.hello;
-                  };
-                  evalEnable = evalEnableWith bothAvailable;
-                  pluginOn = {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                  };
-
-                  # 1. claude on + pn-workspace-rules plugin present (defaultEnabled) => on.
-                  onDefault = evalEnable pluginOn;
-                  # 2. plugin explicitly overridden off => off, even with claude on.
-                  overriddenOff = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                      marketplaces.overrides."pn-workspace-rules@mock-wsplan-marketplace-local" = false;
-                    };
-                  };
-                  # 3. claude disabled => off, even though plugin metadata is present.
-                  claudeOff = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = false;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                  };
-                  # 4. a machine vetoing the sibling pnwf vetoes wsplan with it. Spelled
-                  # out rather than `pluginOn // { … }`: `//` is shallow, so it would
-                  # REPLACE the whole `phillipgreenii` attr and silently turn claude off
-                  # too, making the row pass for the wrong reason.
-                  pnwfVetoed = evalEnable {
-                    phillipgreenii.programs.claude-code = {
-                      enable = true;
-                      marketplaces.nixProvided = [ mockMarketplace ];
-                    };
-                    phillipgreenii.programs.pnwf.enable = false;
-                  };
-                  # 5. repo-base rev carries pnwf but not wsplan => off, no eval error.
-                  wsplanAbsent = evalEnableWith (builtins.removeAttrs (pkgs // { pnwf = pkgs.hello; }) [
-                    "wsplan"
-                  ]) pluginOn;
-                  # 6. explicit opt-in still wins upward.
-                  explicitOn = evalEnable {
-                    phillipgreenii.programs.claude-code.enable = false;
-                    phillipgreenii.programs.wsplan.enable = true;
-                  };
-                in
-                assert onDefault == true;
-                assert overriddenOff == false;
-                assert claudeOff == false;
-                assert pnwfVetoed == false;
-                assert wsplanAbsent == false;
-                assert explicitOn == true;
-                pkgs.runCommand "wsplan-enable-default-ok" { } "touch $out";
+              # Durable eval tests for the single-boolean ties (bead tc-2k1o8, epic
+              # tc-ys2l8 D3/D4). pnwf and wsplan default from phillipgreenii.pn.enable
+              # (nix-repo-base's home/pn module); the pn-workspace-rules plugin follows
+              # pnwf through the ONE override pnwf owns; integrate-branch-support is a
+              # git landing detector, not a pn tool, so it defaults from claude-code and
+              # owns its own plugin override; the agent-support bundle enables pn via the
+              # hand-written pn-workspace capability. The rows live in
+              # tests/pn-single-boolean-ties.nix, which evaluates the REAL
+              # claude-marketplaces module so an enable/override cycle fails here, and
+              # reads plugin state as registered (settings.enabledPlugins). Each check
+              # fails listing every false row. Eval-only: no package is forced.
+              test-integrate-branch-support-enable-default = pnTies.checkFor "integrate-branch-support";
+              test-pnwf-enable-default = pnTies.checkFor "pnwf";
+              test-wsplan-enable-default = pnTies.checkFor "wsplan";
+              test-pn-single-boolean-ties = pnTies.checkFor "ties";
 
               # Durable eval test (pg2-t76k8) for the CETA base read-only roots:
               # when claude-code + ceta are enabled, the module must contribute the
@@ -18619,7 +18292,13 @@
                 };
             in
             {
-              imports = [ ./home ];
+              # `phillipgreenii.pn.enable` (the single pn boolean pnwf/wsplan follow and the
+              # `pn-workspace` capability sets) is declared by nix-repo-base. Consumers MUST
+              # NOT also import repo-base homeModules.pn (double declaration).
+              imports = [
+                ./home
+                inputs.phillipgreenii-nix-base.homeModules.pn
+              ];
               # Everything this module contributes sits under ONE `config` attrset. The
               # module system forbids a bare top-level `_module` alongside an explicit
               # `config`, so `_module.args` has to live under `config` too — and statix

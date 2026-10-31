@@ -15,22 +15,15 @@ let
   # command-not-found (bead pg2-a3zez; the same "CLI not on PATH after apply" gap
   # pnwf closed for itself in pg2-xs5cj and integrate-branch-support in pg2-sikj3).
   #
-  # Both commands are built by the SAME repo-base module (modules/pnwf) and serve
-  # the SAME plugin work-cycle, so the enable trigger is deliberately not a second
-  # copy of pnwf's marketplace-resolution expression — it READS pnwf's resolved
-  # FEATURE flag. Consequences, all intended:
-  #   * the plugin condition (claude-code enabled AND the pn-workspace-rules plugin
-  #     enabled) is resolved in exactly ONE place, so the two helpers cannot drift
-  #     apart as that resolution changes;
-  #   * a machine that vetoes `pnwf.enable` vetoes wsplan too — correct, because
-  #     wsplan is Stage A of the very work-cycle pnwf implements (and pnwf is in
-  #     wsplan's own runtimeDeps closure);
-  #   * an explicit `wsplan.enable = true` still wins upward for a machine that
-  #     wants only the emitter.
-  # Reading a `programs.*` FEATURE flag is the sanctioned direction (the light
-  # capability model forbids gating on `capabilities.*`/`bundles.*`, not on
-  # features). Like pnwf and integrate-branch-support, wsplan therefore needs NO
-  # capability leaf and no per-machine enable.
+  # Both commands are built by the SAME repo-base module (modules/pnwf), serve the
+  # SAME plugin work-cycle, and are tools of `pn`, so the enable default follows the
+  # single machine-chosen boolean `phillipgreenii.pn.enable` (bead tc-2k1o8, epic
+  # tc-ys2l8 D3), exactly as pnwf's does. It reads neither pnwf's flag nor the
+  # plugin's resolved state (that was the reverse of the wanted direction). The
+  # pn-workspace-rules plugin override key is owned by pnwf alone; wsplan sets no
+  # override. An explicit `wsplan.enable = true` still wins upward for a machine that
+  # wants only the emitter. Like pnwf, wsplan needs NO capability leaf: the
+  # `pn-workspace` capability enables the pn boolean they follow.
   #
   # The `pkgs ? wsplan` term is the availability guard, and it is NOT redundant
   # with pnwf's own: `wsplan` is BUILT IN phillipg-nix-repo-base and threaded into
@@ -38,24 +31,22 @@ let
   # repo-base builds AND only from a repo-base rev that carries it. `wsplan` landed
   # AFTER `pnwf`, so "pnwf present, wsplan absent" is a live state of this flake's
   # own lock, not a hypothetical.
-  pnwfEnable = config.phillipgreenii.programs.pnwf.enable;
 in
 {
   options.phillipgreenii.programs.wsplan = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = pnwfEnable && (pkgs ? wsplan);
-      defaultText = lib.literalExpression "config.phillipgreenii.programs.pnwf.enable && (pkgs ? wsplan)";
+      default = config.phillipgreenii.pn.enable && (pkgs ? wsplan);
+      defaultText = lib.literalExpression "config.phillipgreenii.pn.enable && (pkgs ? wsplan)";
       example = true;
       description = ''
         Install the `wsplan` CLI (the read-only land-plan emitter the
         pn-workspace-rules plugin's land-workforest skill invokes as a bare PATH
-        command for Stage A of `land`). Defaults to whatever its sibling `pnwf`
-        resolved to — i.e. on exactly when the pn-workspace-rules plugin itself is
-        enabled — so the two helpers of one work-cycle ship together with no
-        separate per-machine enable, and the plugin-enabled resolution lives in one
-        place rather than being duplicated here. Set false to opt out even when
-        `pnwf` is enabled; set true to install it where `pnwf` is not.
+        command for Stage A of `land`). Defaults on exactly when
+        `phillipgreenii.pn.enable` is on, like its sibling `pnwf`, so the two
+        helpers of one work-cycle ship together under the one machine-chosen pn
+        boolean. Set false to opt out even when pn is on; set true to install it
+        where pn is not.
 
         The extra `pkgs ? wsplan` term is the availability guard: `wsplan` is built
         in phillipg-nix-repo-base and threaded in via this flake's system-guarded

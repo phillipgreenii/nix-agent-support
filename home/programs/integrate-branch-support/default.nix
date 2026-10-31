@@ -13,50 +13,47 @@ let
   # landing flow (Tier R R-9) is dead — the "CLI not on PATH after apply" incident
   # pg2-sikj3 fixes.
   #
-  # So default `enable` to whether the integrate-branch PLUGIN is enabled, mirroring
-  # claude-marketplaces' own resolution (override-by-key -> override-by-name -> plugin
-  # defaultEnabled) over the active nix-provided marketplaces. Leaf options are read
-  # directly (never the whole `claude` attrset) to avoid the freeform/unmatchedDefns
-  # recursion that module documents. The `claudeEnable &&` guard matters: `nixProvided`
-  # carries plugin metadata even on hosts where Claude is disabled, so without it the
-  # CLI could install where the plugin never registers.
-  claudeEnable = config.phillipgreenii.programs.claude-code.enable;
-  mcfg = config.phillipgreenii.programs.claude-code.marketplaces;
-  activeMarketplaces = lib.filter (m: mcfg.enabled.${m.marketplaceName} or true) mcfg.nixProvided;
-  pluginEnabled =
-    name:
-    lib.any (
-      m:
-      lib.any (
-        p: p.name == name && (mcfg.overrides.${p.key} or mcfg.overrides.${p.name} or p.defaultEnabled)
-      ) m.plugins
-    ) activeMarketplaces;
+  # It is a git landing detector, NOT a pn tool (bead tc-2k1o8, epic tc-ys2l8), so its
+  # own default is `claude-code.enable`, independent of `phillipgreenii.pn.enable`.
+  # The plugin follows this option: this module is the ONE owner of the
+  # `marketplaces.overrides."integrate-branch@<mkt>"` key and sets it from `cfg.enable`
+  # UNCONDITIONALLY (outside any mkIf, so it forces the plugin OFF when the detector is
+  # off). It MUST NOT read the overrides or the plugin's resolved enable back: that is
+  # the cycle (default -> overrides -> default) the former `pluginEnabled` read risked.
 in
 {
   options.phillipgreenii.programs.integrate-branch-support = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = claudeEnable && pluginEnabled "integrate-branch";
-      defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-code.enable && <integrate-branch plugin enabled>";
+      default = config.phillipgreenii.programs.claude-code.enable;
+      defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-code.enable";
       example = true;
       description = ''
         Install the integrate-branch-support CLI (the detector the integrate-branch
         plugin's dispatcher skill invokes as a bare PATH command). Defaults on exactly
-        when the integrate-branch plugin itself is enabled, so the detector and the
-        plugin's skills ship together with no separate per-machine enable — closing the
-        "CLI not on PATH after apply" gap (pg2-sikj3). Set false to opt out even when
-        the plugin is enabled.
+        when claude-code is enabled, and the integrate-branch plugin is tied to THIS
+        option (see the override below), so the detector and the plugin's skills ship
+        together with no separate per-machine enable — closing the "CLI not on PATH
+        after apply" gap (pg2-sikj3). Set false to opt out; that also turns the
+        plugin off.
       '';
     };
     package = lib.mkPackageOption pkgs "integrate-branch-support" { };
   };
 
-  config = lib.mkIf cfg.enable {
-    home.packages = [ cfg.package ];
+  config = lib.mkMerge [
+    {
+      # Sole owner of this override key; unconditional so it tracks cfg.enable both ways.
+      phillipgreenii.programs.claude-code.marketplaces.overrides."integrate-branch@phillipgreenii-nix-agent-support-marketplace-local" =
+        cfg.enable;
+    }
+    (lib.mkIf cfg.enable {
+      home.packages = [ cfg.package ];
 
-    programs.tldr.customPages.integrate-branch-support = lib.mkIf config.programs.tldr.enable {
-      platform = "common";
-      source = "${cfg.package}/share/tldr/pages.common/integrate-branch-support.md";
-    };
-  };
+      programs.tldr.customPages.integrate-branch-support = lib.mkIf config.programs.tldr.enable {
+        platform = "common";
+        source = "${cfg.package}/share/tldr/pages.common/integrate-branch-support.md";
+      };
+    })
+  ];
 }

@@ -14,6 +14,9 @@ let
   featureStubs =
     { lib, ... }:
     {
+      # Declared by nix-repo-base's home/pn module in the real composition; the
+      # hand-written pn-workspace capability sets it (tc-2k1o8).
+      options.phillipgreenii.pn.enable = lib.mkEnableOption "pn (stub)";
       options.phillipgreenii.programs = lib.mkOption {
         default = { };
         type = lib.types.attrsOf (lib.types.submodule { options.enable = lib.mkEnableOption "stub"; });

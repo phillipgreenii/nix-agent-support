@@ -46,7 +46,7 @@
     ./programs/integrate-branch-support
     ./programs/pnwf
     # wsplan: pnwf's sibling command from the same repo-base module (Stage A of
-    # the workforest `land`); its enable default follows ./programs/pnwf's.
+    # the workforest `land`); its enable default follows phillipgreenii.pn.enable, like ./programs/pnwf.
     ./programs/wsplan
     ./programs/beads
     ./programs/serena

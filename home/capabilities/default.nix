@@ -10,115 +10,134 @@
 # part of the generic dev-machine set.
 { mkCapability, mkBundle }:
 {
-  imports =
-    (map mkCapability [
-      # claude-code turns on the binary/suite AND ceta (the PreToolUse approver),
-      # which is default-ON wherever claude-code is; a consumer (monorepod) vetoes
-      # ceta until the hook-support->ceta gate migration (tc-jizbz).
+  imports = [
+    # pn-workspace: HAND-WRITTEN (tc-2k1o8). mkCapability's featureEnable only sets
+    # `programs.<f>.enable`, and the single pn boolean `phillipgreenii.pn.enable`
+    # (declared by nix-repo-base's home/pn module, imported by homeModules.default)
+    # is not under `programs.*`. Same `capabilities.pn-workspace.enable` option shape
+    # as a mkCapability leaf; sets the boolean at mkDefault true (additive-only: no
+    # mkDefault false, so overlapping bundles cannot collide). pnwf, wsplan and the
+    # pn-workspace-rules plugin follow that boolean.
+    (
+      { config, lib, ... }:
       {
-        name = "claude-code";
-        features = [
-          "claude-code"
-          "claude-extended-tool-approver"
-        ];
+        options.phillipgreenii.capabilities.pn-workspace.enable =
+          lib.mkEnableOption "pn workspace tooling (pn, pnwf, wsplan, pn-workspace-rules plugin)";
+        config = lib.mkIf config.phillipgreenii.capabilities.pn-workspace.enable {
+          phillipgreenii.pn.enable = lib.mkDefault true;
+        };
       }
-      # codeburn is a SEPARATE opt-in token/cost tracker leaf, not in any bundle.
-      # Inert on darwin (the capabilities/isHuman layer is NixOS-only); the darwin machine enables
-      # it via a plain `phillipgreenii.programs.codeburn.enable = true`.
-      {
-        name = "codeburn";
-        features = [ "codeburn" ];
-      }
-      # perles is a human-only TUI for beads. (gc-dolt-maintenance was removed from
-      # this repo on main; the beads leaf no longer references it.)
-      {
-        name = "beads";
-        features = [ "beads" ];
-        humanFeatures = [ "perles" ];
-      }
-      {
-        name = "serena";
-        features = [ "serena" ];
-      }
-      {
-        name = "ollama";
-        features = [ "ollama" ];
-      }
-      {
-        name = "opencode";
-        features = [ "opencode" ];
-      }
-      {
-        name = "rtk";
-        features = [ "rtk" ];
-      }
-      # Git-worktree drain-beads workflow helpers. wtdone is a hard dependency
-      # of the ff-merge-to-main landing handler's cleanup step (used by every
-      # agent-support account doing drain-beads-style work), so it rides in
-      # the agent-support bundle below rather than a standalone opt-in leaf.
-      {
-        name = "worktree-tools";
-        features = [
-          "wtnew"
-          "wtdone"
-        ];
-      }
-      # Git helper CLIs — human git work. (The pr-tools feature was retired with
-      # the PR tool's removal, bead pg2-ijsep; the capability name is kept so any
-      # consumer setting `capabilities.pr-tools` keeps evaluating.)
-      {
-        name = "pr-tools";
-        humanFeatures = [
-          "git-tools"
-        ];
-      }
-      # pb (phillip-beads: writes/resolves pn:applied gates that hold beads
-      # work packets until dependent changes are live-verified) is drain-beads
-      # infrastructure used by every agent-support account doing drain-beads-
-      # style work, not human-only PR tooling — it was previously misfiled
-      # under the `pr-tools` humanFeatures above, but `pr-tools` is an orphaned
-      # capability with no `mkBundle` consumer, so no machine ever enabled it
-      # and `pb` was missing from agent/subagent PATH (tc-9fea). Mirrors the
-      # worktree-tools rationale below: it rides in the agent-support bundle
-      # rather than a standalone opt-in leaf.
-      {
-        name = "pb";
-        features = [ "pb" ];
-      }
-      # tuicr — (H) code-review TUI (Plan 5 §5 catalog). Human-only, so its
-      # feature flag is set only for human accounts.
-      {
-        name = "tuicr";
-        humanFeatures = [ "tuicr" ];
-      }
-      # Multi-agent orchestration/fleet management.
-      {
-        name = "claude-fleet";
-        features = [
-          "ccpool"
-          "pg-router"
-          "pa-monitor"
-          "pg-keep-awake"
-          "agentsview"
-        ];
-      }
-    ])
-    ++ (map mkBundle [
-      {
-        name = "agent-support";
-        capabilities = [
-          "claude-code"
-          "beads"
-          "worktree-tools"
-          "pb"
-        ];
-      }
-      {
-        name = "local-agent-support";
-        capabilities = [
-          "ollama"
-          "opencode"
-        ];
-      }
-    ]);
+    )
+  ]
+  ++ (map mkCapability [
+    # claude-code turns on the binary/suite AND ceta (the PreToolUse approver),
+    # which is default-ON wherever claude-code is; a consumer (monorepod) vetoes
+    # ceta until the hook-support->ceta gate migration (tc-jizbz).
+    {
+      name = "claude-code";
+      features = [
+        "claude-code"
+        "claude-extended-tool-approver"
+      ];
+    }
+    # codeburn is a SEPARATE opt-in token/cost tracker leaf, not in any bundle.
+    # Inert on darwin (the capabilities/isHuman layer is NixOS-only); the darwin machine enables
+    # it via a plain `phillipgreenii.programs.codeburn.enable = true`.
+    {
+      name = "codeburn";
+      features = [ "codeburn" ];
+    }
+    # perles is a human-only TUI for beads. (gc-dolt-maintenance was removed from
+    # this repo on main; the beads leaf no longer references it.)
+    {
+      name = "beads";
+      features = [ "beads" ];
+      humanFeatures = [ "perles" ];
+    }
+    {
+      name = "serena";
+      features = [ "serena" ];
+    }
+    {
+      name = "ollama";
+      features = [ "ollama" ];
+    }
+    {
+      name = "opencode";
+      features = [ "opencode" ];
+    }
+    {
+      name = "rtk";
+      features = [ "rtk" ];
+    }
+    # Git-worktree drain-beads workflow helpers. wtdone is a hard dependency
+    # of the ff-merge-to-main landing handler's cleanup step (used by every
+    # agent-support account doing drain-beads-style work), so it rides in
+    # the agent-support bundle below rather than a standalone opt-in leaf.
+    {
+      name = "worktree-tools";
+      features = [
+        "wtnew"
+        "wtdone"
+      ];
+    }
+    # Git helper CLIs — human git work. (The pr-tools feature was retired with
+    # the PR tool's removal, bead pg2-ijsep; the capability name is kept so any
+    # consumer setting `capabilities.pr-tools` keeps evaluating.)
+    {
+      name = "pr-tools";
+      humanFeatures = [
+        "git-tools"
+      ];
+    }
+    # pb (phillip-beads: writes/resolves pn:applied gates that hold beads
+    # work packets until dependent changes are live-verified) is drain-beads
+    # infrastructure used by every agent-support account doing drain-beads-
+    # style work, not human-only PR tooling — it was previously misfiled
+    # under the `pr-tools` humanFeatures above, but `pr-tools` is an orphaned
+    # capability with no `mkBundle` consumer, so no machine ever enabled it
+    # and `pb` was missing from agent/subagent PATH (tc-9fea). Mirrors the
+    # worktree-tools rationale below: it rides in the agent-support bundle
+    # rather than a standalone opt-in leaf.
+    {
+      name = "pb";
+      features = [ "pb" ];
+    }
+    # tuicr — (H) code-review TUI (Plan 5 §5 catalog). Human-only, so its
+    # feature flag is set only for human accounts.
+    {
+      name = "tuicr";
+      humanFeatures = [ "tuicr" ];
+    }
+    # Multi-agent orchestration/fleet management.
+    {
+      name = "claude-fleet";
+      features = [
+        "ccpool"
+        "pg-router"
+        "pa-monitor"
+        "pg-keep-awake"
+        "agentsview"
+      ];
+    }
+  ])
+  ++ (map mkBundle [
+    {
+      name = "agent-support";
+      capabilities = [
+        "claude-code"
+        "beads"
+        "worktree-tools"
+        "pb"
+        "pn-workspace"
+      ];
+    }
+    {
+      name = "local-agent-support";
+      capabilities = [
+        "ollama"
+        "opencode"
+      ];
+    }
+  ]);
 }
