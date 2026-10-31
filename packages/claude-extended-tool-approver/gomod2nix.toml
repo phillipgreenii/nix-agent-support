@@ -2,16 +2,41 @@ schema = 3
 cachePackages = [
   'github.com/dustin/go-humanize',
   'github.com/google/uuid',
+  'github.com/mattn/go-isatty',
+  'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
   'github.com/remyoudompheng/bigfft',
   'github.com/spf13/cobra',
   'github.com/spf13/pflag',
+  'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'modernc.org/libc',
+  'modernc.org/libc/errno',
+  'modernc.org/libc/fcntl',
+  'modernc.org/libc/fts',
+  'modernc.org/libc/grp',
+  'modernc.org/libc/honnef.co/go/netdb',
+  'modernc.org/libc/langinfo',
+  'modernc.org/libc/limits',
+  'modernc.org/libc/netdb',
+  'modernc.org/libc/netinet/in',
+  'modernc.org/libc/poll',
+  'modernc.org/libc/pthread',
+  'modernc.org/libc/pwd',
+  'modernc.org/libc/signal',
+  'modernc.org/libc/stdio',
+  'modernc.org/libc/stdlib',
+  'modernc.org/libc/sys/socket',
+  'modernc.org/libc/sys/stat',
   'modernc.org/libc/sys/types',
+  'modernc.org/libc/termios',
+  'modernc.org/libc/time',
+  'modernc.org/libc/unistd',
+  'modernc.org/libc/utime',
   'modernc.org/libc/uuid/uuid',
+  'modernc.org/libc/wctype',
   'modernc.org/mathutil',
   'modernc.org/memory',
   'modernc.org/sqlite',
@@ -45,8 +70,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261025231613-3cae4f469680'
-    hash = 'sha256-2HS3YqxQzHT1ho7BKi4g4CZ27JNhGCguKDgHsXqVVjw='
+    version = 'v0.0.0-20261031153131-4d4b0696f49b'
+    hash = 'sha256-h5SfSB/VPuDdKyEMtAP/m1Up3ChvNC1jCz7/lN3fVUY='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -77,8 +102,8 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.61.0'
-    hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='
+    version = 'v1.61.1'
+    hash = 'sha256-cmbPRIFECMBD0ZIc8FdjCLXRYT1TAHffxW1kVBPMo68='
 
   [mod.'mvdan.cc/sh/v3']
     version = 'v3.14.1'
