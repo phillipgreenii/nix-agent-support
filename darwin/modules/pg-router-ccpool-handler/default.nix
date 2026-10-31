@@ -243,6 +243,10 @@ in
         serviceConfig = {
           StartInterval = janitorCfg.intervalSeconds;
           Nice = 10;
+          # pg2-e55tqh: the janitor's `ccpool emit-gauge` exports over OTLP from the
+          # inherited OTEL_* env and is a silent no-op without it; the helper
+          # merges this into its own PG_LAUNCHD_WRAPPER variable, not over it.
+          EnvironmentVariables = emitterEnv;
           StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/janitor-launchd-stderr.log";
           StandardOutPath = "${stateHome}/pg-router-ccpool-handler/janitor-launchd-stdout.log";
         };

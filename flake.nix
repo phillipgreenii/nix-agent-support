@@ -9784,6 +9784,7 @@
                                   default =
                                     { serviceName, protocol }:
                                     {
+                                      OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317";
                                       OTEL_SERVICE_NAME = serviceName;
                                       OTEL_EXPORTER_OTLP_PROTOCOL = protocol;
                                     };
@@ -10820,6 +10821,13 @@
                 assert janitorAgent.healthCheck == false;
                 assert janitorAgent.serviceConfig.StartInterval == 600;
                 assert janitorAgent.serviceConfig.Nice == 10;
+                # pg2-e55tqh: `ccpool emit-gauge` is a silent no-op without OTEL_*, so
+                # the janitor LaunchAgent MUST carry the same emitter env as -pool-metrics.
+                assert
+                  janitorAgent.serviceConfig.EnvironmentVariables.OTEL_EXPORTER_OTLP_ENDPOINT
+                  == "http://127.0.0.1:4317";
+                assert janitorAgent.serviceConfig.EnvironmentVariables.OTEL_SERVICE_NAME == "ccpool";
+                assert janitorAgent.serviceConfig.EnvironmentVariables.OTEL_EXPORTER_OTLP_PROTOCOL == "grpc";
                 assert lib.hasInfix (builtins.unsafeDiscardStringContext "${
                   janitorScriptFixture
                 }") janitorAgent.script;
