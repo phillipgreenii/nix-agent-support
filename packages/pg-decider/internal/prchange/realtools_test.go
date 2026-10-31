@@ -341,8 +341,16 @@ func TestPRChangeRealTools(t *testing.T) {
 				t.Errorf("%v: exit %d:\n%s", args, res.code, res.stderr)
 			}
 		}
-		if len(r.calls("pr ")) != 0 || len(r.deciderRuns()) != 0 {
-			t.Errorf("a refused argument list refreshed or decided a PR: %v %v", r.calls("pr "), r.deciderRuns())
+		// pg-desk's heartbeat probe asks the connector `pr capabilities` on any
+		// start; that read-only probe is not a refresh or a decide.
+		var prCalls []string
+		for _, c := range r.calls("pr ") {
+			if !strings.HasPrefix(c, "pr capabilities") {
+				prCalls = append(prCalls, c)
+			}
+		}
+		if len(prCalls) != 0 || len(r.deciderRuns()) != 0 {
+			t.Errorf("a refused argument list refreshed or decided a PR: %v %v", prCalls, r.deciderRuns())
 		}
 	})
 
