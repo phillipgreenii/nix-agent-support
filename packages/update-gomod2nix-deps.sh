@@ -48,6 +48,18 @@ cd "${PKG_DIR}"
 echo "==> Tidying Go modules..."
 go mod tidy
 
+# The nix build below is driven by gomod2nix.toml, not go.mod/go.sum, so it can
+# pass while a plain `go build` (what hooks and developers run) fails, e.g. on a
+# go.sum that lacks an entry for an indirect import (pg2-lkhaon). Assert the
+# plain build here, before regenerating, and name the module on failure.
+echo ""
+echo "==> Verifying plain go build ./... (module ${PKG_NAME})..."
+if ! go build ./...; then
+  echo "" >&2
+  echo "✗ go build ./... failed in module '${PKG_NAME}' (${PKG_DIR}); go.mod/go.sum are incomplete or the code does not compile. Fix before regenerating gomod2nix.toml." >&2
+  exit 1
+fi
+
 echo ""
 echo "==> Regenerating gomod2nix.toml (--with-deps, gomod2nix ${GOMOD2NIX_REV})..."
 nix run "github:nix-community/gomod2nix/${GOMOD2NIX_REV}" -- generate --with-deps
