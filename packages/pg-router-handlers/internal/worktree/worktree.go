@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/x/gitclient"
 )
@@ -130,8 +131,17 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 	// intended not-a-repository signal. Any OTHER error is a real failure (e.g.
 	// a canceled context) and must propagate rather than be swallowed into an
 	// attempted create.
-	if _, err := open(ctx, path); err == nil {
-		return path, nil
+	if reuse, err := open(ctx, path); err == nil {
+		// pg2-f6lxmp: a worktree whose admin dir holds a stale zero-byte index.lock
+		// is a killed checkout; reusing it hands the session a half-written tree.
+		admin, ok := adminDir(path)
+		if !ok || !HasStaleIndexLock(admin, time.Now(), StaleIndexLockAge) {
+			return path, nil
+		}
+		if err := discardInterrupted(ctx, open, reuse, path, repoRoot, beadID); err != nil {
+			return "", err
+		}
+		// fall through: create afresh
 	} else if !errors.Is(err, gitclient.ErrNotARepository) && !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("probe worktree %s: %w", path, err)
 	}
@@ -263,4 +273,64 @@ func isFloxHusk(path string) bool {
 func isRealDir(p string) bool {
 	info, err := os.Lstat(p)
 	return err == nil && info.IsDir()
+}
+
+// StaleIndexLockAge is how old a zero-byte index.lock must be before it counts as
+// the residue of a killed checkout rather than a git command still running.
+const StaleIndexLockAge = 10 * time.Minute
+
+// ErrInterruptedCheckout is returned by Ensure when an existing bead worktree is
+// an interrupted checkout but cannot be proven free of unique commits, so it is
+// neither reused nor discarded.
+var ErrInterruptedCheckout = errors.New("worktree: interrupted checkout (stale index.lock) with unique commits")
+
+// HasStaleIndexLock reports whether admin (a worktree's git admin directory)
+// holds a zero-byte index.lock last modified at least minAge before now. A
+// non-empty lock, or one too young, is treated as possibly live.
+func HasStaleIndexLock(admin string, now time.Time, minAge time.Duration) bool {
+	info, err := os.Lstat(filepath.Join(admin, "index.lock"))
+	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 {
+		return false
+	}
+	return now.Sub(info.ModTime()) >= minAge
+}
+
+// adminDir resolves a linked worktree's admin directory from its .git file.
+func adminDir(path string) (string, bool) {
+	raw, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		return "", false
+	}
+	line := strings.TrimSpace(string(raw))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	admin := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(admin) {
+		admin = filepath.Join(path, admin)
+	}
+	return filepath.Clean(admin), true
+}
+
+// discardInterrupted force-removes an interrupted-checkout worktree so Ensure can
+// recreate it, only when its branch holds no commit repoRoot's HEAD lacks.
+func discardInterrupted(ctx context.Context, open Opener, wt gitclient.WorktreeManager, path, repoRoot, beadID string) error {
+	branch := "pg-router/" + beadID
+	root, err := open(ctx, repoRoot)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", repoRoot, err)
+	}
+	refs, ok := root.(gitclient.RefReader)
+	if !ok {
+		return fmt.Errorf("%s: %w", path, ErrInterruptedCheckout)
+	}
+	if ahead, err := refs.CommitsAhead(ctx, "HEAD", branch); err != nil || ahead > 0 {
+		return fmt.Errorf("%s: %w", path, ErrInterruptedCheckout)
+	}
+	slog.Warn("worktree: discarding interrupted checkout (stale index.lock)", "path", path)
+	if err := wt.RemoveWorktree(ctx, path, true); err != nil {
+		return fmt.Errorf("remove interrupted worktree %s: %w", path, err)
+	}
+	return nil
 }

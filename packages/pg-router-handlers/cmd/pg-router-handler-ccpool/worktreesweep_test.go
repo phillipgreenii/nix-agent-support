@@ -727,3 +727,130 @@ func TestSweepStaleLocks(t *testing.T) {
 		t.Errorf("no LockDir: removed %d", n)
 	}
 }
+
+// Interrupted checkout (pg2-f6lxmp), real git: a zero-byte index.lock in the
+// worktree's admin directory plus a half-written tree (stray files and a deleted
+// tracked file) is the residue of a killed checkout, not edits.
+
+// interrupt turns a leaked worktree into an interrupted checkout: a half-written
+// tree and a zero-byte index.lock aged by lockAge in the admin directory.
+func (h *sweepHarness) interrupt(path string, lockAge time.Duration) string {
+	h.t.Helper()
+	for _, n := range []string{"half-a.txt", "half-b.txt", "half-c.txt"} {
+		if err := os.WriteFile(filepath.Join(path, n), []byte("partial"), 0o644); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	admin, ok := worktreeAdminDir(path)
+	if !ok {
+		h.t.Fatal("cannot resolve the worktree admin dir")
+	}
+	lock := filepath.Join(admin, "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		h.t.Fatal(err)
+	}
+	old := h.nowFixed.Add(-lockAge)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		h.t.Fatal(err)
+	}
+	return lock
+}
+
+func TestSweep_interruptedCheckoutIsReclaimedDespiteStatusEntries(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	h.interrupt(path, time.Hour)
+	if got := h.sweep(); got != 1 {
+		t.Fatalf("removed %d, want the interrupted checkout reclaimed", got)
+	}
+	if h.exists(path) || h.branchExists("zr-k") {
+		t.Errorf("worktree and anchor branch must be gone; worktree=%v branch=%v", h.exists(path), h.branchExists("zr-k"))
+	}
+}
+
+func TestSweep_ordinaryDirtyWorktreeWithLiveOwnerIsKept(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	if err := os.WriteFile(filepath.Join(path, "wip.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.env.cwds = func(context.Context) ([]string, error) { return []string{path}, nil }
+	if got := h.sweep(); got != 0 {
+		t.Errorf("removed %d, want the dirty worktree with a live owner kept", got)
+	}
+	h.wantKept(path, "zr-k")
+}
+
+func TestSweep_interruptedCheckoutWithLiveOwnerIsKept(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	h.interrupt(path, time.Hour)
+	h.env.cwds = func(context.Context) ([]string, error) { return []string{path}, nil }
+	if got := h.sweep(); got != 0 {
+		t.Errorf("removed %d, want a worktree a live process uses kept", got)
+	}
+	h.wantKept(path, "zr-k")
+}
+
+func TestSweep_youngOrNonEmptyIndexLockIsNotInterrupted(t *testing.T) {
+	cases := []struct {
+		name string
+		prep func(h *sweepHarness, path string)
+	}{
+		{"young lock", func(h *sweepHarness, p string) { h.interrupt(p, time.Second) }},
+		{"non-empty lock", func(h *sweepHarness, p string) {
+			lock := h.interrupt(p, time.Hour)
+			if err := os.WriteFile(lock, []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			old := h.nowFixed.Add(-time.Hour)
+			_ = os.Chtimes(lock, old, old)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newSweepHarness(t)
+			path := h.leak("zr-k")
+			tc.prep(h, path)
+			if got := h.sweep(); got != 0 {
+				t.Errorf("removed %d, want the dirty worktree kept", got)
+			}
+			h.wantKept(path, "zr-k")
+		})
+	}
+}
+
+func TestSweep_interruptedCheckoutWithUniqueCommitsIsKept(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	h.git(path, "commit", "-q", "--allow-empty", "-m", "worker commit")
+	h.interrupt(path, time.Hour)
+	if got := h.sweep(); got != 0 {
+		t.Errorf("removed %d, want unique commits protected", got)
+	}
+	h.wantKept(path, "zr-k")
+}
+
+// Ensure must not reuse an interrupted checkout: it discards it and creates a
+// fresh, clean worktree.
+func TestEnsure_doesNotReuseInterruptedCheckout(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	lock := h.interrupt(path, time.Hour)
+	got, err := worktree.Ensure(context.Background(), h.opener, h.wtDir, h.repo, "zr-k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != path {
+		t.Fatalf("path %s, want %s", got, path)
+	}
+	if h.exists(filepath.Join(path, "half-a.txt")) {
+		t.Error("the half-written tree must not survive")
+	}
+	if h.exists(lock) {
+		t.Error("the stale lock must be gone")
+	}
+	if out := h.git(path, "status", "--porcelain"); strings.TrimSpace(out) != "" {
+		t.Errorf("fresh worktree should be clean, got %q", out)
+	}
+}

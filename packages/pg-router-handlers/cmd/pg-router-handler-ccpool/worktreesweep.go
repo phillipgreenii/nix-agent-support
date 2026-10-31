@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
+	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 )
 
 // Worktree-keyed sweep (bead pg2-ganjb, INV-CCH-19).
@@ -40,7 +41,10 @@ import (
 //     directory or by pgrouter.bead), read again under the lock;
 //   - no live process anywhere has it as its working directory (bead pg2-e5yw3,
 //     processCWDs), probed again under the lock; a failed probe keeps it;
-//   - its working tree is clean (so nothing uncommitted is lost) and the branch
+//   - its working tree is clean (so nothing uncommitted is lost), unless it is an
+//     interrupted checkout (a zero-byte index.lock in its admin directory older than
+//     the grace window, pg2-f6lxmp; then its status entries are the half-finished
+//     checkout and it is removed with force), and the branch
 //     holds no commit the canonical clone's HEAD lacks (so no work is lost); an
 //     unreadable status or count keeps it;
 //   - nobody holds the per-bead worktree lock (sessionlock.WorktreeKey): every
@@ -349,7 +353,15 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 		slog.Warn("worktree sweep: status unreadable; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
 		return false, didGit
 	}
-	if len(dirty) > 0 {
+	// Interrupted checkout (pg2-f6lxmp): a zero-byte index.lock older than the grace
+	// window, with every guard above proving no owner, means a checkout died
+	// half-way; its "dirt" is the unfinished checkout, not edits, so it is not kept.
+	interrupted := len(dirty) > 0 && worktree.HasStaleIndexLock(c.admin, now, worktreeSweepGrace(deps))
+	if interrupted {
+		slog.Warn("worktree sweep: interrupted checkout (stale zero-byte index.lock); reclaiming despite status entries",
+			"bead", c.bead, "worktree", c.path, "entries", len(dirty))
+	}
+	if len(dirty) > 0 && !interrupted {
 		slog.Warn("worktree sweep: worktree has uncommitted changes; keeping it", "bead", c.bead, "worktree", c.path, "entries", len(dirty))
 		keepRemember(env.lockDir, c, sig, now, deps.Cfg.WorktreeKeepRecheck)
 		return false, didGit
@@ -376,7 +388,7 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 		return false, didGit
 	}
 
-	if err := wm.RemoveWorktree(ctx, c.path, false); err != nil {
+	if err := wm.RemoveWorktree(ctx, c.path, interrupted); err != nil {
 		slog.Warn("worktree sweep: removal refused; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
 		return false, didGit
 	}

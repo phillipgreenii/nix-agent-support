@@ -414,8 +414,14 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     whichever role, pool or handler owns that process; a process listing that cannot be read keeps
     every worktree;
   - its working tree is clean, and its branch holds no commit the canonical clone's `HEAD` lacks;
-    an unreadable status or commit count keeps it, and so does a git refusal (the removal is never
-    forced);
+    an unreadable status or commit count keeps it, and so does a git refusal. The one exception is
+    an interrupted checkout: a worktree whose git admin directory holds a zero-byte index lock file
+    older than the grace window is the residue of a checkout that died half-way, so its status
+    entries are not edits; once every other guard holds (no row, no live process, no lock, no
+    unique commit) it MUST be removed with force. A lock file that is not empty, or is younger than
+    the grace window, MUST NOT be treated as an interrupted checkout. A dispatch MUST NOT reuse
+    such a worktree either: it discards it (with the same no-unique-commit proof) and creates a
+    fresh one;
   - no live dispatch holds the per-bead worktree lock. Every dispatch of a role with worktree
     isolation MUST hold that lock, shared, from before it creates the worktree until it returns;
     the operating system drops it when its holder dies, so a killed handler stops protecting its
