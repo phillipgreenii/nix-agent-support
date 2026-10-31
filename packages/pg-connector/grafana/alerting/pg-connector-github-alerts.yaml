@@ -42,21 +42,41 @@ groups:
     folder: pg-connector
     interval: 1m
     rules:
-      # Daemon up. daemon_up is the daemon's OWN single liveness gauge, so
-      # noDataState is Alerting (the pg-router-liveness-down polarity): once the
-      # daemon is supposed to run, an absent series means the daemon, or its
-      # export, is gone, which is exactly what this rule exists to catch.
+      # Daemon up. daemon_up is the daemon's OWN single liveness gauge. pg2-nxukx8
+      # (operator ruling, Phillip, 2026-10-29, on pg2-qhmtvg: "a sleeping host MUST
+      # NOT read as the service being down"; same shape as pg-router-liveness-down,
+      # pg2-787q92 and pg2-onqsvn): noDataState is OK and the query is VALUE-BASED,
+      # gated on the host being awake. The daemon PUSHES its gauge through the OTel
+      # collector (no scrape target, so no `up` series to fall back on): while the Mac
+      # sleeps the daemon is suspended, the series goes stale and the old
+      # noDataState: Alerting rule paged across every sleep. A crashed daemon shows up
+      # only as an ABSENT gauge, so the expression turns "absent" into a sample of 0:
+      #   (min(daemon_up) < 1 or absent(daemon_up) - 1) and on() <awake>
+      # <awake> is the three-branch gate of pg-router-liveness-down (see its comment
+      # in packages/pg-router/grafana/alerting/alerts.yaml): host-activity's full-wake
+      # timestamp is newer than its last-sleep timestamp, or no sleep was ever
+      # recorded, or both gauges are absent while host_power_transitions_total is
+      # present (host-activity alive with no transition history). host-activity's
+      # series age out while the host sleeps, so the whole expression is empty
+      # (NoData -> OK, Pending resets) asleep, and a dark wake leaves last-sleep
+      # newer than the last full wake. A real 0 or an absent gauge with the host
+      # awake still yields a sample below 1 for the whole `for`, so it pages.
+      # `for: 2m` stays: the daemon exports every 30 s (telemetry DefaultInterval), so
+      # four pushes fit between the wake that opens the gate and the end of the window.
+      # Backup for a host with no host-activity: launchd-health's "daemon not running"
+      # rule for com.phillipg.pg-connector-github-daemon. Cases:
+      # rule-tests/pg-conn-github-daemon-down.test.yaml.
       - uid: pg-conn-github-daemon-down
         title: pg-connector-github daemon is down
         condition: C
         for: 2m
-        noDataState: Alerting
+        noDataState: OK
         execErrState: Error
         labels:
           severity: critical
         annotations:
           summary: "pg-connector-github daemon has been down for over 2 minutes"
-          description: "pg_connector_github_daemon_up has reported 0, or gone missing from Prometheus entirely, for over 2 minutes: the daemon is not running or is not exporting. Every pg-connector pr/ci call is answered unavailable meanwhile. Check the launchd entry for pg-connector-github and read daemon.log.jsonl in its state directory."
+          description: "pg_connector_github_daemon_up has reported 0, or gone missing from Prometheus entirely, for over 2 minutes while the host was awake: the daemon is not running or is not exporting. A sleeping host is deliberately not counted (pg2-nxukx8). Every pg-connector pr/ci call is answered unavailable meanwhile. Check the launchd entry for pg-connector-github and read daemon.log.jsonl in its state directory."
         data:
           - refId: A
             relativeTimeRange:
@@ -67,7 +87,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: min(pg_connector_github_daemon_up)
+              expr: '(min(pg_connector_github_daemon_up) < 1 or absent(pg_connector_github_daemon_up) - 1) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))'
           - refId: B
             datasourceUid: __expr__
             model:

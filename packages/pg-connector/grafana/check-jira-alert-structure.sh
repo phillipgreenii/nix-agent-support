@@ -17,7 +17,8 @@
 #       rule has a non-empty for
 #   S4  the Prometheus rules use datasourceUid prometheus (instant: true), the four Loki rules use
 #       loki with queryType: instant
-#   S5  daemon-down has noDataState Alerting, every other rule OK
+#   S5  every rule has noDataState OK; daemon-down is value-based (pg2-nxukx8): absent() plus the
+#       host-awake gate
 #   S6  every pg_connector_issue_jira_* token of an expression is a catalogued name (a histogram's
 #       _bucket/_sum/_count stripped first)
 #   S7  each Loki expression selects {service_name="pg-connector-issue-jira-daemon"}, names its
@@ -143,11 +144,18 @@ lint() {
   fi
 
   # S5
-  bad="$(jq -r --arg down "$down_uid" '
+  bad="$(jq -r '
     .groups[]?.rules[]? |
-    select(.noDataState != (if .uid == $down then "Alerting" else "OK" end)) | .uid' <<<"$json")"
+    select(.noDataState != "OK") | .uid' <<<"$json")"
   if [ -n "$bad" ]; then
-    echo "RULE-S5: wrong noDataState (daemon-down Alerting, all others OK): $(printf '%s' "$bad" | tr '\n' ' ')" >&2
+    echo "RULE-S5: wrong noDataState (every rule OK, pg2-nxukx8): $(printf '%s' "$bad" | tr '\n' ' ')" >&2
+    status=1
+  fi
+  bad="$(jq -r --arg down "$down_uid" '
+    .groups[]?.rules[]? | select(.uid == $down) | .data[0].model.expr
+    | select((contains("absent(pg_connector_issue_jira_daemon_up)") and contains("host_power_last_wake_timestamp_seconds") and contains("host_power_transitions_total")) | not)' <<<"$json")"
+  if [ -n "$bad" ]; then
+    echo "RULE-S5: daemon-down expression lacks the absent() branch or the host-awake gate" >&2
     status=1
   fi
 
@@ -312,10 +320,12 @@ mutant S4 "a Prometheus rule on the Loki datasource" \
   "($(rule_of pg-conn-jira-consumer-stuck) | .data[0].datasourceUid) = \"loki\"" ""
 mutant S4 "a Loki rule with the boolean Prometheus instant" \
   "($(rule_of pg-conn-jira-auth-failing) | .data[0].model.queryType) = \"range\"" ""
-mutant S5 "a rule other than daemon-down at noDataState Alerting" \
+mutant S5 "a rule at noDataState Alerting" \
   "($(rule_of pg-conn-jira-settle-holding) | .noDataState) = \"Alerting\"" ""
-mutant S5 "daemon-down at noDataState OK" \
-  "($(rule_of pg-conn-jira-daemon-down) | .noDataState) = \"OK\"" ""
+mutant S5 "daemon-down at noDataState Alerting" \
+  "($(rule_of pg-conn-jira-daemon-down) | .noDataState) = \"Alerting\"" ""
+mutant S5 "daemon-down without the absent() branch" \
+  "($(rule_of pg-conn-jira-daemon-down) | .data[0].model.expr) |= sub(\"absent[(]pg_connector_issue_jira_daemon_up[)]\"; \"vector(1)\")" ""
 mutant S6 "an expression name missing from the catalog" "" \
   '/^pg_connector_issue_jira_tracked_entities /d'
 mutant S7 "a Loki expression that no longer names store_refused" \
