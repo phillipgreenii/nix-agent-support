@@ -196,8 +196,8 @@ cachePackages = [
     hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
 
   [mod.'github.com/grpc-ecosystem/grpc-gateway/v2']
-    version = 'v2.32.0'
-    hash = 'sha256-FNRmZp1/LJ1c+KTUYNXdDzzFmIJoGaR3tqS96w5bjvg='
+    version = 'v2.33.0'
+    hash = 'sha256-WvVvp0wWqIZE4qi3lUOb+VTt1urJAEnjQp7dvRkg2Hg='
 
   [mod.'github.com/inconshreveable/mousetrap']
     version = 'v1.1.0'
@@ -216,8 +216,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261027205228-76ab0ad829aa'
-    hash = 'sha256-qzb1/GN2YpSGIo1JNrSZa3VY+Zv9ASJ7QAox4cgS2bM='
+    version = 'v0.0.0-20261031153131-4d4b0696f49b'
+    hash = 'sha256-h5SfSB/VPuDdKyEMtAP/m1Up3ChvNC1jCz7/lN3fVUY='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'
@@ -300,8 +300,8 @@ cachePackages = [
     hash = 'sha256-M8SCpLO073LypQdj2INMAixdbTRvw0b5Hzw0lIJMc0M='
 
   [mod.'golang.org/x/net']
-    version = 'v0.61.0'
-    hash = 'sha256-yCy7Bik5cvIVfX7G08rVYhkVDuro3sPk3iicVz4j/kA='
+    version = 'v0.62.0'
+    hash = 'sha256-BX+i/MyhVigz/sDRJNGydfkimaeAHAFtrRN//eXuZFY='
 
   [mod.'golang.org/x/sys']
     version = 'v0.49.0'
@@ -320,8 +320,8 @@ cachePackages = [
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
-    version = 'v1.84.0'
-    hash = 'sha256-gUDleBLGxwuzhA0emDRNAr1GnPlMfjgpkOX9u/0WsOk='
+    version = 'v1.85.0'
+    hash = 'sha256-sxkCMSO1ZctKJ2W4vmNJtchvqRzO4dJergLqmP0SbA8='
 
   [mod.'google.golang.org/protobuf']
     version = 'v1.36.12'
@@ -344,5 +344,5 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.61.0'
-    hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='
+    version = 'v1.61.1'
+    hash = 'sha256-cmbPRIFECMBD0ZIc8FdjCLXRYT1TAHffxW1kVBPMo68='
