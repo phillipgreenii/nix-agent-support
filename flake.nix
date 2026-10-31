@@ -267,6 +267,14 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-alert-pagerduty: the alert capability's PagerDuty
+          # Tier-2 backend (bead pg2-t79bc), the same shape as the Grafana
+          # entry above (shared Go module, filtered per-binary fileset).
+          pg-connector-alert-pagerduty =
+            final.callPackage ./packages/pg-connector/pg-connector-alert-pagerduty.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           # pg-connector-calendar-task-focus: the calendar AND attention
           # capabilities' Tier-2 backend for the pg-task-focus daemon (bead
           # pg2-t7me1.4) — another mkGoApp call over the SAME
@@ -18315,6 +18323,7 @@
               pg-connector-calendar-task-focus
               pg-connector-mail-osx-bridge
               pg-connector-alert-grafana
+              pg-connector-alert-pagerduty
               pg-ccaudit
               pg-router-source-pg-connector
               pg-router-source-pg-desk
