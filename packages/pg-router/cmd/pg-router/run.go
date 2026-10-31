@@ -145,7 +145,7 @@ func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelF
 	drainCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if !q.WaitForInFlightDrainExcept(drainCtx, inFlightDrainPollInterval, survives) {
-		slog.Warn("shutdown: in-flight dispatch(es) did not finish before the drain timeout; cancelling them",
+		slog.Info("shutdown: in-flight dispatch(es) did not finish before the drain timeout; cancelling them (cut offers are re-offered by the next daemon)",
 			"timeout", timeout, "sessionsInFlight", q.SessionsInFlight())
 	}
 	cancelDispatch()

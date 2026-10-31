@@ -145,3 +145,47 @@ func TestDispatchMeta_OmitsZeroInstants(t *testing.T) {
 		t.Fatalf("fields = %v", fields)
 	}
 }
+
+// A retried transient attempt is logged at info with attempt/will_retry (bead
+// pg2-974a9m); only the attempt that exhausts the retries is a warn. The
+// failed-dispatch and retry metric feeds are unchanged: one retry, one failure.
+func TestDispatchRow_RetriedAttemptIsInfoExhaustedIsWarn(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.Handler = &seqHandler{errs: []error{killedErr, killedErr}}
+	o.Log = lw
+	robs := &fakeRetryObserver{}
+	fobs := &fakeDispatchFailedObserver{}
+	o.DispatchRetryObserver = robs
+	o.DispatchFailedObserver = fobs
+	l := o.NewListener(context.Background(), roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}, MaxDispatchRetries: 1})
+	evt := retryEvent("e1")
+
+	if res := l.Offer(eventqueue.Offering{ID: "dsp-1", Event: evt}); res.Accepted {
+		t.Fatalf("first attempt should be handed back for retry: %+v", res)
+	}
+	if res := l.Offer(eventqueue.Offering{ID: "dsp-2", Event: evt}); !res.Accepted {
+		t.Fatalf("second attempt should settle: %+v", res)
+	}
+
+	rows := dispatchRows(t, logPath)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %v, want 2", rows)
+	}
+	if rows[0]["level"] != "info" || rows[0]["attempt"] != float64(1) || rows[0]["will_retry"] != true || rows[0]["error"] == nil {
+		t.Fatalf("retried attempt row = %v, want info attempt=1 will_retry=true with error", rows[0])
+	}
+	if rows[1]["level"] != "warn" || rows[1]["attempt"] != float64(2) || rows[1]["will_retry"] != false {
+		t.Fatalf("exhausted attempt row = %v, want warn attempt=2 will_retry=false", rows[1])
+	}
+	if n := len(robs.snapshot()); n != 1 {
+		t.Fatalf("retry observer calls = %d, want 1", n)
+	}
+	if n := len(fobs.calls); n != 1 {
+		t.Fatalf("failed-dispatch observer calls = %d, want 1 (only the exhausting attempt)", n)
+	}
+}

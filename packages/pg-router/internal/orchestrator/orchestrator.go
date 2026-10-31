@@ -334,8 +334,14 @@ func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.
 // ADDITIVE: every key the row already carried is unchanged, so an existing
 // reader (a Loki pipeline, a jq one-liner) is unaffected.
 func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result, dispatchErr error, meta dispatchMeta) {
-	if dispatchErr != nil {
-		slog.Warn("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions, "err", dispatchErr)
+	// A failed attempt that will be re-run (meta.WillRetry) is not a terminal
+	// failure: it logs at INFO, and WARN is kept for failures with no retry
+	// left (bead pg2-974a9m). Metrics are untouched; they are fed elsewhere.
+	failedTerminal := dispatchErr != nil && !meta.WillRetry
+	if failedTerminal {
+		slog.Warn("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions, "err", dispatchErr, "attempt", meta.Attempt, "will_retry", meta.WillRetry)
+	} else if dispatchErr != nil {
+		slog.Info("dispatch result: attempt failed, will retry", "role", role.Name, "bead", beadID, "err", dispatchErr, "attempt", meta.Attempt, "will_retry", true)
 	} else {
 		slog.Info("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions)
 	}
@@ -345,8 +351,10 @@ func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID str
 		fields["bead"] = beadID
 		meta.addTo(fields)
 		level := "info"
-		if dispatchErr != nil {
+		if failedTerminal {
 			level = "warn"
+		}
+		if dispatchErr != nil {
 			fields["error"] = dispatchErr.Error()
 		}
 		if err := o.Log.Emit(level, "dispatch", "dispatch result", fields); err != nil {
@@ -372,6 +380,11 @@ type dispatchMeta struct {
 	// in-flight instant). Duration is the handler run's wall time.
 	EnqueuedAt, StartedAt time.Time
 	Duration              time.Duration
+	// Attempt is the 1-based dispatch attempt for this event (0: not tracked,
+	// omitted from the row); WillRetry reports that a failed attempt is being
+	// handed back for a re-run (bead pg2-974a9m).
+	Attempt   int
+	WillRetry bool
 }
 
 func newDispatchMeta(evt eventqueue.Event, started time.Time, d time.Duration) dispatchMeta {
@@ -381,6 +394,10 @@ func newDispatchMeta(evt eventqueue.Event, started time.Time, d time.Duration) d
 // addTo merges the metadata into a row's fields. Zero instants are omitted
 // rather than written as year-1 timestamps; duration_ms is whole milliseconds.
 func (m dispatchMeta) addTo(fields map[string]any) {
+	if m.Attempt > 0 {
+		fields["attempt"] = m.Attempt
+		fields["will_retry"] = m.WillRetry
+	}
 	if m.EventType != "" {
 		fields["event_type"] = m.EventType
 	}

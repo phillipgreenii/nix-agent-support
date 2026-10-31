@@ -506,6 +506,12 @@ event. Four changes make the split computable from live data:
   They are additive: every key a row already carried is unchanged, and a zero instant is omitted
   rather than written as year one. The same fields appear on the `run-role` row and on a transiently
   failed attempt that is handed back for retry.
+- **Retried attempts are not warnings** (bead `pg2-974a9m`). A queue-driven dispatch row also carries
+  `attempt` (1-based) and `will_retry`. A failed attempt that is handed back for a re-run
+  (`will_retry=true`) is logged at INFO, both on the event log and on the process log; WARN is kept
+  for a failure with no retry left (`will_retry=false`). The `error` field is present on both. The
+  failure and retry metrics are unchanged. The shutdown line "in-flight dispatch(es) did not finish
+  before the drain timeout" is INFO: the cut offers are re-offered by the next daemon.
 - **`queue.jsonl`** accept records carry `at` (settle) and `startedAt`, evict records carry `at` and a
   `reason` (`retired`, `all-accepted`, `reemit`). Compaction used to drop an evicted event's whole record
   set, and it runs at every start, so about three hours of history survived. It now folds each departed

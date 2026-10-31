@@ -520,11 +520,16 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 			l.progressObs.OnRoleSucceeded(l.role.Name)
 		}
 	}
+	// attempt is 1-based: the re-runs already scheduled for this event plus this
+	// one (bead pg2-974a9m). Read before shouldRetry consumes a retry.
+	meta.Attempt = l.retries.used(evt.ID) + 1
 	if err != nil && l.shouldRetry(evt, err) {
 		// A transient failure with retries left: hand the event back as a
 		// pre-accept decline so the queue re-offers it at the role's
 		// RetryBackoff cadence (bead pg2-yu5y2). emitResult still logs the
-		// failed attempt; the event is NOT accepted, so it is not settled.
+		// failed attempt (at INFO with will_retry=true, bead pg2-974a9m: it is
+		// not a terminal failure); the event is NOT accepted, so it is not settled.
+		meta.WillRetry = true
 		l.o.emitResult(l.ctx, l.role, d.Item.ID, report.Result{}, err, meta)
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
 	}

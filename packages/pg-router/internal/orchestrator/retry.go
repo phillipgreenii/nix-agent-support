@@ -66,6 +66,13 @@ func (r *retryLedger) take(eventID string, max int) bool {
 	return true
 }
 
+// used reports how many re-runs have been reserved for eventID so far.
+func (r *retryLedger) used(eventID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counts[eventID]
+}
+
 func (r *retryLedger) forget(eventID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
