@@ -241,6 +241,15 @@ failure of a role after a restart is not counted. The rule is registered with `p
 model test is `internal/alertrules/event_dispatch_failed_test.go` and its promtool cases are
 `grafana/alerting/rule-tests/pg-router-event-dispatch-failed.test.yaml`.
 
+**Added** (bead `pg2-87pjb1`): `pg-router-pr-dispatch-failed` pages (warning, `for: 10m`) on
+`sum by (type, role) (increase(pg_router_dispatch_failed_total{type="pr.changed"}[1h])) >= 3`, a
+terminal `pr.changed` dispatch failure after retries. It is deliberately NOT registered with
+`pg-router-probe` at first (as `pg-router-triager-failures` is not; the note is in the probe's
+`registeredRuleUIDs` comment), so a firing instance files no bead until it is added there. Tests:
+`internal/alertrules/pr_dispatch_failed_test.go` and
+`grafana/alerting/rule-tests/pg-router-pr-dispatch-failed.test.yaml`. Action: check the pg-decider
+work-item lookup backend (beads dolt health) and host load.
+
 ### `DEC-OBS-4` — a source is persistently failing when it has not succeeded for max(3 x its period, 30m); a pause is not a failure <!-- uuid: 91571075-a2d2-4e39-8e31-4ce6e7f020c9 -->
 
 **Decided** (operator approval, Phillip, 2026-10-05; bead `pg2-tv11a`). The core exports two gauges per

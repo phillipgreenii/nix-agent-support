@@ -1,0 +1,65 @@
+# promtool unit tests for the pg-router-pr-dispatch-failed alert (bead pg2-87pjb1): three or
+# more pr.changed dispatches ended failed within an hour. Run by the flake check
+# test-pg-router-alert-rules, which wraps the rule's refId A as `alert: <uid>` with
+# `expr: (<A>) > 0`, `for: 10m` and labels (severity: warning).
+#
+# Time model: 30s series, rules evaluate every minute. A counter stepping 0 to 3 at 10m makes
+# increase(...[1h]) >= 3 from 10m to about 70m: Pending from about 10m, Firing from about 20m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: three failed pr.changed dispatches fire after for, labelled with type and role
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="pr.changed",role="pr-role",job="pg-router"}
+        values: "0x20 3x280"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts:
+          - exp_labels:
+              type: pr.changed
+              role: pr-role
+              severity: warning
+      - eval_time: 85m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts: []
+
+  - name: two failures stay quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="pr.changed",role="pr-role",job="pg-router"}
+        values: "0x20 2x280"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts: []
+
+  - name: issue.changed failures do not count
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="issue.changed",role="decider",job="pg-router"}
+        values: "0x20 5x280"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts: []
+
+  - name: a flat counter stays quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_dispatch_failed_total{type="pr.changed",role="pr-role",job="pg-router"}
+        values: "9x300"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-pr-dispatch-failed
+        exp_alerts: []

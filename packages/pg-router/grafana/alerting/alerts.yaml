@@ -968,6 +968,51 @@ groups:
                     type: gt
                     params: [0]
 
+      # Terminal pr.changed dispatch failure (pg2-87pjb1, found in the 2026-10-30
+      # pg-router dashboard-warning investigation): a pr.changed dispatch ended
+      # failed after its retries were exhausted, three or more times in an hour
+      # (a single one is tolerated, unlike issue.changed above). Deliberately NOT
+      # registered with pg-router-probe at first (see its registeredRuleUIDs doc).
+      - uid: pg-router-pr-dispatch-failed
+        title: pg-router pr.changed dispatches ended failed repeatedly (by role)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router role {{ $labels.role }} had 3 or more pr.changed dispatches end failed in the last hour"
+          description: 'sum by (type, role) (increase(pg_router_dispatch_failed_total{type="pr.changed"}[1h])) >= 3 for type {{ $labels.type }} role {{ $labels.role }} -- pr.changed dispatches ended failed after the role''s retries were exhausted (or the event expired), so those PRs wait for their next change. Check the pg-decider work-item lookup backend (beads dolt health) and host load. The handler error text and the eventlog name the PR. The first failure of a role after a pg-router restart is not counted (increase() takes a new series'' first sample as its baseline).'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (type, role) (increase(pg_router_dispatch_failed_total{type="pr.changed"}[1h])) >= 3
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # Triager failures (pg2-u2yub, operator-extracted from pg2-68005's triager
       # follow-ups): an escalation-triage role's handler failures are counted
       # by internal/metrics OnHandlerFailure as class=handler-error,

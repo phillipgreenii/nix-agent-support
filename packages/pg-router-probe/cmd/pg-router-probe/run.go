@@ -170,6 +170,10 @@ import (
 // crash-share and removal-stuck. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
+// pg-router-pr-dispatch-failed (pg2-87pjb1: three or more pr.changed dispatches
+// ended failed in an hour) is likewise NOT registered at first; add it here and to
+// TestRegisteredRuleUIDsTrackAlertRules once it has proven quiet.
+//
 // pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
 // probe files escalated beads/dispatches triagers, so probing triager failures
 // could feed a loop (operator decision pending).
