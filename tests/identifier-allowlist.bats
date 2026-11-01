@@ -36,6 +36,29 @@ fill() {
   printf '{"login": "teammate"}\n' | tee "${paths[@]}" >/dev/null
 }
 
+# Perf: the fixture is ~500 files plus a commit. Building it in every test's
+# setup() cost ~0.9s of the ~1.3s setup per test (33 tests); it is now built ONCE
+# per file, in a throwaway gfh repo inside a subshell (so the harness's environment
+# reset never leaks into the file-level process), and each test copies the finished
+# repository (.git included; a plain repo holds no absolute paths) over a fresh
+# gfh_setup repo.
+fixture_template() { printf '%s\n' "$BATS_FILE_TMPDIR/fixture-template"; }
+
+setup_file() {
+  command -v rg >/dev/null || {
+    echo "rg (ripgrep with PCRE2) is required on PATH" >&2
+    return 1
+  }
+  (
+    set -e
+    gfh_setup "$SUITE"
+    ROOT="$GFH_REPO"
+    build_fixture
+    cp -a "$ROOT" "$(fixture_template)"
+    gfh_teardown
+  )
+}
+
 setup() {
   command -v rg >/dev/null || {
     echo "rg (ripgrep with PCRE2) is required on PATH" >&2
@@ -43,7 +66,13 @@ setup() {
   }
   gfh_setup "$SUITE"
   ROOT="$GFH_REPO"
+  rm -rf "$ROOT"
+  cp -a "$(fixture_template)" "$ROOT"
+}
 
+# build_fixture: populate the gfh repo at $ROOT with the mirrored modules and
+# commit it. Expects ROOT to name an initialised gfh repository.
+build_fixture() {
   mkdir -p "$ROOT/scripts"
   cp -R "$REAL_ALLOWLISTS" "$ROOT/scripts/identifier-allowlists"
 
