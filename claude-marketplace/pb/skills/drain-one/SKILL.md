@@ -126,8 +126,9 @@ and the container's own priority, then:
    referenced paths; step 4 passes them through as pointers.
    If the bead is a handoff bead (type `handoff`; the `beads-lifecycle:handoff-bead`
    skill is the sole definition and says what counts) — do NOT ISOLATE or
-   DELEGATE it: invoke that skill, follow its unattended handling (absorb and
-   close) with your actor ID, then return to the caller with outcome `closed`.
+   DELEGATE it: invoke that skill, follow its handling (absorb and close, no
+   operator prompt) with your actor ID, then return to the caller with outcome
+   `closed`; only a not-spent `human` handoff is released unchanged (`released`).
 
 3. **ISOLATE** off local main (never work a primary branch directly):
    - Single repo → ONE call:
@@ -271,5 +272,6 @@ blocker). Then return to the caller with outcome `released` (`closed` after CLOS
 ## CLOSE-WITH-ABSORPTION-TRACE (a handoff bead)
 
 Reached from UNDERSTAND for a handoff bead: invoke the `beads-lifecycle:handoff-bead` skill,
-follow its unattended handling to the close with your actor ID, then return to the caller with outcome `closed`. The skill
+follow its handling to the close with your actor ID (no operator prompt), then return to the caller with outcome `closed`
+(a not-spent `human` handoff is released unchanged instead, outcome `released`). The skill
 is the sole contract; this command does not restate it.

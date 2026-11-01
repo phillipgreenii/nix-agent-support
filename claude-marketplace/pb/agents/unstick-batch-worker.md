@@ -83,8 +83,9 @@ already cached in `WORKDIR/probes/gate-check.json`.
      `skipped — claimed by <assignee> (B-6)`.
    - You MAY claim a bead only to run a verification that you will close or release in this
      same turn (B-1..B-5).
-2. **Handoff beads:** for type `handoff`, follow `beads-lifecycle:handoff-bead`. A `human`
-   handoff is left alone (skipped).
+2. **Handoff beads:** for type `handoff`, follow `beads-lifecycle:handoff-bead` (you are
+   unattended): a resolved handoff is absorbed and closed without asking. A `human` handoff is
+   closed only when the skill finds it SPENT; otherwise it is left alone (skipped).
 3. **Blocked:** is every blocker open AND truly a must-finish-first?
    - Remove or fix edges that are wrong: irrelevant, reversed, a parent blocked by its own
      child (D-9), or pointing at a superseded or dead gate.

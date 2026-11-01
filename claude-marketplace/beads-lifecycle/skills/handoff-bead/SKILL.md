@@ -3,9 +3,10 @@ name: handoff-bead
 description: >-
   Use when a bead you are about to read, claim, work, or close is of type `handoff` (or is
   unmistakably a handoff of a previous session), and before creating a handoff bead at the end of a
-  session. Defines what a handoff bead is, how to handle one (offer to close it when interactive;
-  absorb it with a traced ABSORBED comment and close it when running unattended, except a handoff
-  labelled `human`, which is left for the operator), and how to create one (the `handoff-create`
+  session. Defines what a handoff bead is, how to handle one (any agent, interactive or unattended,
+  that reads or claims a RESOLVED handoff absorbs it with a traced ABSORBED comment and closes it
+  WITHOUT asking the operator; the one thing left alone is an unconsumed `human`-labelled handoff
+  an unattended session finds, whose work is still live), and how to create one (the `handoff-create`
   script: type `handoff`, `handed_off_from_session` metadata, `human` iff a human is in the
   session, task fallback when the type is not registered). This skill is the sole contract for
   handoff beads. Do NOT use to convert a bead to or from `handoff` (a triage agent's job), or for
@@ -72,6 +73,41 @@ agent."
 - The caller MUST decide which; `handoff-create` has no default. When unsure whether a human is
   present, ask the human if there is one to ask; with no human to ask, it is unattended.
 
+What `human` protects, after the 2026-11-01 ruling below: ONLY an UNCONSUMED attended handoff
+against an UNATTENDED reader. The claim loops keep that protection structurally (`/drain-beads`
+claims with `--exclude-label human`; `/unblock-human-beads` claims with `--exclude-type handoff`,
+so neither queue pulls an attended handoff), and Handling step 3 keeps it for any unattended
+session that reaches one anyway. It does not protect a handoff from an interactive session, and it
+never keeps a RESOLVED handoff open.
+
+Operator ruling (Phillip Green II, 2026-11-01), verbatim: "close any resolved handoff. I'm tired of
+answering this question, have a subagent research the instructions/plugins/skills around handoff
+bead such that it will be closed when complete (or absorbed) without asking." This SUPERSEDES the
+earlier handling rules that (a) an interactive session MUST close a handoff only if the operator
+says yes, and (b) an unattended session MUST NOT absorb or close any `human` handoff. Neither
+survives. The 2026-10-02 ruling above survives only as the unconsumed-attended-handoff protection
+in Handling step 3, which "resolved" (next section) is defined to respect.
+
+## Resolved
+
+The operator's word is "resolved", defined mechanically so no agent has to ask. A handoff is
+**RESOLVED** when, after the re-probe in Handling step 1, EVERY item in its body is accounted for
+durably, by one of:
+
+- **traced**: it names a bead id that `bd show` finds, or a label that indexes the cluster
+  (`bd list --label <label>`); or
+- **done**: its premise probes done (the commit is pushed, the bead is closed, the file exists)
+  per the **F-3** probes, reading the OUTPUT, not the exit status.
+
+An item that is neither is live work with no home. An absorber files it as its own bead first
+(Handling step 3, procedure item 2), which makes it traced, so the test passes once the filing is
+done. The one reader that MUST NOT file is an unattended session looking at a `human` handoff; it
+applies the stricter **SPENT** test instead.
+
+A handoff is **SPENT** when it is resolved AND no item is still live: every item is done, or
+traces only to beads that probe `closed` (a label counts only if `bd list --label <label>` shows no
+open member). A spent handoff has nothing left to resume, so it is closed whatever its label.
+
 ## Handling
 
 1. **Read it.** It points at a previous session's work. The metadata session id is there if looking
@@ -80,23 +116,35 @@ agent."
    MUST be re-probed with the matching **F-3** probe in
    `references/premise-freshness-probes.md` of the `beads-lifecycle` skill, reading the OUTPUT
    rather than the exit status.
-2. **Interactive (in conversation with the operator):** summarise it, and offer to close it once
-   everything it points at lives in a bead or label. It MUST be closed only if the operator says
-   yes. A handoff labelled `human` is exactly the one the operator left to continue with an agent:
-   offer to resume from it, and offer the close only once it has been consumed.
-3. **Unattended (a claim loop such as `/drain-beads`, or a dispatched session): absorb it.** No
-   isolation is created and no operator prompt is made.
+2. **Interactive (a human is in the session): absorb it, do not ask.** Whatever its label (`human`
+   included), the operator's session IS the consumer, so there is nothing to protect it from. Tell
+   the operator in one line what it points at (and the source session id for look-back), then run
+   the absorb procedure of step 3 and close. The close MUST NOT be offered as a question and the
+   operator's answer MUST NOT be awaited. If the operator was resuming from it, do that work from
+   the beads the trace names.
+3. **Absorb it (any agent): trace, comment, close.** No isolation is created and no operator
+   prompt is made. This applies to a claim loop such as `/drain-beads`, a dispatched session, and
+   (step 2) an interactive one.
 
-   **EXCEPTION: a handoff labelled `human` is NOT absorbed unattended.** It was created ATTENDED
-   (see "Attended and unattended handoffs"); it exists so the operator can continue with an agent,
-   so an unattended session MUST leave it untouched: no ABSORBED comment, no close, no isolation,
-   no retype, no label change, no demotion or deferral. If the session holds a claim on it, release
-   it per **B-1**/**B-2** (`--status open --assignee ""` in one call) and change nothing else. It
-   is left for the interactive offer (step 2). `/unblock-human-beads` does not claim handoffs at
-   all (its claim query excludes type `handoff`), so a `human` handoff is not worked by either
-   queue.
+   **GUARD: an UNATTENDED session looking at a handoff labelled `human`.** That handoff was
+   created ATTENDED so the operator can continue it with an agent (the 2026-10-02 ruling), so an
+   unattended session MUST NOT consume it while its work is live. Decide read-only first:
+   re-probe the state claims and trace every item WITHOUT filing or writing anything.
+   - **SPENT** (see "Resolved"): absorb and close it with the procedure below, without asking.
+     The work the operator meant to resume is done, so there is nothing left to protect.
+   - **Not spent** (any item still live, traces nowhere, or cannot be probed; an ambiguous probe
+     counts as not spent): LEAVE it untouched: no ABSORBED comment, no new bead, no close, no
+     isolation, no retype, no label change, no demotion or deferral. If the session holds a claim
+     on it, release it per **B-1**/**B-2** (`--status open --assignee ""` in one call) and change
+     nothing else. It waits for the operator's next interactive session, which absorbs it under
+     step 2.
 
-   For a handoff with NO `human` label:
+   Neither queue pulls an attended handoff in the first place: `/drain-beads` claims with
+   `--exclude-label human` and `/unblock-human-beads` excludes type `handoff`. The guard covers
+   the other unattended paths (a dispatched session handed one by id, the `/unstick-beads`
+   worker, an untyped but unmistakable handoff).
+
+   Absorb procedure (every case except a not-spent `human` handoff read unattended):
    1. TRACE every item in the body to where it durably lives: a bead id, or a label that indexes
       the cluster (`bd list --label <label>`, which outperforms any hand-copied member list).
    2. An item that traces NOWHERE is live work. File it as its own bead first

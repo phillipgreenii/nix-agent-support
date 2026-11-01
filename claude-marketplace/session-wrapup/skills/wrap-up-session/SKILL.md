@@ -525,7 +525,8 @@ auto-session-wrapped ...` and the bead carries **no** `human` label (a drain age
 
 ### Lifecycle: the P0 is one-shot
 
-The handoff bead is a **one-shot pointer, not a standing record**: whoever consumes it closes it,
+The handoff bead is a **one-shot pointer, not a standing record**: whoever consumes it closes it
+without asking the operator (operator ruling, 2026-11-01, recorded in `beads-lifecycle:handoff-bead`),
 and it MUST NOT record a push obligation (**U-1**/**U-2**; see phase 7). The retirement condition
 and the absorb-and-close procedure are the contract of `beads-lifecycle:handoff-bead`, not
 restated here.
@@ -603,8 +604,8 @@ handed_off_from_session=<this-session-id>` and the first body line `Handoff from
   single P0 handoff bead (linking the rest). Skip the P0 only when nothing carries over at all. When
   unsure, write it.
 - **Retire the P0 you consumed.** A handoff bead is one-shot: when you consume one, follow
-  `beads-lifecycle:handoff-bead` (it owns the absorb-and-close procedure and its trace) rather than
-  leaving it at P0 or demoting it. See "Lifecycle: the P0 is one-shot".
+  `beads-lifecycle:handoff-bead` (it owns the absorb-and-close procedure and its trace) and close it
+  without asking the operator, rather than leaving it at P0 or demoting it. See "Lifecycle: the P0 is one-shot".
 - **No-beads repos use the markdown handoff doc.** Everywhere these rules say "file/close/update a
   bead" or "leave a P0," a no-beads repo does the markdown-handoff-doc equivalent (see "Markdown
   handoff doc (no-beads repos)"). The intent — one durable, committed front door, updated in place

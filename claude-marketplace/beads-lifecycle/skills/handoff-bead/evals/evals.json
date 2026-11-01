@@ -36,9 +36,9 @@
     },
     {
       "id": 1,
-      "name": "typed-handoff-interactive-offered-not-closed",
+      "name": "typed-handoff-interactive-absorbed-without-asking",
       "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are in an INTERACTIVE conversation with the operator, who says: \"what is pg2-hand2?\" It is issue_type handoff, metadata {\"handed_off_from_session\":\"9c1d-bbbb\"}, title \"Handoff: wrap up the ccpool env injection\", body \"Handoff from session 9c1d-bbbb\\nCarry-over: ccpool env injection is tracked in pg2-bbb22 (open); label ccpool indexes the rest. First step: bd show pg2-bbb22.\" Respond to the operator.",
-      "expected_output": "Summarises the handoff, mentions the source session id for look-back, and OFFERS to close it once everything it points at lives in a bead or label. Does NOT close it, comment ABSORBED:, or run any mutating command unless the operator says yes.",
+      "expected_output": "Summarises the handoff in one line, mentions the source session id for look-back, and WITHOUT asking: traces pg2-bbb22 and the ccpool label, writes ONE ABSORBED: comment naming them, and closes the bead with --actor. Never offers the close as a question or waits for an answer.",
       "files": [],
       "assertions": [
         {
@@ -46,11 +46,11 @@
           "discriminating": false
         },
         {
-          "text": "Offers to close the bead rather than closing it",
+          "text": "Closes the bead (bd comment ABSORBED: then bd close with --actor) in the same turn, without asking the operator whether to close it",
           "discriminating": true
         },
         {
-          "text": "Runs no bd close / bd comment / bd update (no ABSORBED: trace) before the operator answers",
+          "text": "The ABSORBED: comment names pg2-bbb22 and the ccpool label as where the items live",
           "discriminating": true
         },
         {
@@ -115,17 +115,17 @@
     },
     {
       "id": 4,
-      "name": "attended-human-handoff-left-alone-unattended-offered-interactive",
+      "name": "attended-human-handoff-unattended-left-when-live-interactive-absorbed",
       "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. The bead is pg2-hand5: issue_type handoff, labels [\"human\"], metadata {\"handed_off_from_session\":\"5d2e-dddd\"}, title \"Handoff: continue the ccpool env injection review\", body \"Handoff from session 5d2e-dddd\\nCarry-over: review of the env injection is tracked in pg2-ddd44 (open); label ccpool indexes the rest; 1 unpushed commit on main (recorded state claim). First step: bd show pg2-ddd44.\" It was created while the operator was working with an agent who asked for the handoff. TWO independent situations. (A) You are an UNATTENDED dispatched worker (actor id \"sess-9999-drain\") that holds a claim on pg2-hand5 and has been told to disposition it. Say exactly what you do and do not do. (B) You are in an INTERACTIVE conversation and the operator says: \"start a new session; what did I leave in pg2-hand5?\". Respond to the operator.",
-      "expected_output": "(A) Recognises the human label as an attended handoff and applies the skill exception: does NOT absorb it - no ABSORBED comment, no trace, no close, no isolation, no retype, no label change, no demotion or deferral; releases its own claim with status open and the assignee cleared in a single bd update and changes nothing else, leaving it for the interactive offer. (B) Interactive: summarises the handoff, re-probes the unpushed-commit state claim instead of trusting it, mentions the source session id for look-back, offers to resume from it, and offers to close it only once consumed; does not close it or comment ABSORBED: before the operator says yes.",
+      "expected_output": "(A) Recognises the human label as an attended handoff and applies the GUARD: pg2-ddd44 is still open, so it is NOT spent; it reads and probes only, does NOT absorb it - no ABSORBED comment, no new bead, no close, no isolation, no retype, no label change, no demotion or deferral; releases its own claim with status open and the assignee cleared in a single bd update and changes nothing else. (B) Interactive: summarises the handoff, re-probes the unpushed-commit state claim instead of trusting it, mentions the source session id for look-back, then WITHOUT asking traces the items, writes ONE ABSORBED: comment and closes it; the operator's resume work continues from pg2-ddd44.",
       "files": [],
       "assertions": [
         {
-          "text": "(A) Leaves the human-labelled handoff alone: writes no ABSORBED: comment and does not close it",
+          "text": "(A) Leaves the human-labelled handoff alone: writes no ABSORBED: comment and does not close it, because pg2-ddd44 is still open (not spent)",
           "discriminating": true
         },
         {
-          "text": "(A) Does not isolate, retype, relabel, demote, or defer the bead",
+          "text": "(A) Does not isolate, retype, relabel, demote, defer, or file a new bead for the handoff",
           "discriminating": true
         },
         {
@@ -133,11 +133,11 @@
           "discriminating": true
         },
         {
-          "text": "(A) Does not prompt the operator and gives the reason: it was created attended so the operator can continue with an agent",
+          "text": "(A) Does not prompt the operator and gives the reason: it was created attended and its work is still live",
           "discriminating": false
         },
         {
-          "text": "(B) Offers to resume from the handoff and offers (does not perform) the close once everything it points at lives in a bead or label",
+          "text": "(B) Closes the handoff without asking: one ABSORBED: comment naming pg2-ddd44 and the ccpool label, then bd close with --actor, even though it carries the human label",
           "discriminating": true
         },
         {
@@ -145,7 +145,32 @@
           "discriminating": true
         },
         {
-          "text": "(B) Runs no bd close / bd comment / bd update before the operator answers, and mentions the source session id 5d2e-dddd for look-back",
+          "text": "(B) Does not offer the close as a question, and mentions the source session id 5d2e-dddd for look-back",
+          "discriminating": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "attended-human-handoff-unattended-spent-closed",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are an UNATTENDED dispatched worker (actor id \"sess-4242-drain\") that holds a claim on pg2-hand6: issue_type handoff, labels [\"human\"], metadata {\"handed_off_from_session\":\"6e3f-eeee\"}, title \"Handoff: finish the cache decoupling\", body \"Handoff from session 6e3f-eeee\\nCarry-over: cache decoupling is tracked in pg2-eee55; docs follow-up in pg2-eee66. First step: bd show pg2-eee55.\" Your probes show: bd show pg2-eee55 => status closed; bd show pg2-eee66 => status closed. Disposition this bead.",
+      "expected_output": "Recognises the human label (attended handoff) and applies the GUARD, finds it SPENT (both beads it points at are closed), so it absorbs and closes it WITHOUT asking: ONE ABSORBED: comment naming pg2-eee55 and pg2-eee66 with the probe output verbatim, then bd close with --actor. Does not leave it and does not prompt the operator.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Decides read-only first that the handoff is spent because every bead it points at probes closed",
+          "discriminating": true
+        },
+        {
+          "text": "Writes exactly one ABSORBED: comment naming pg2-eee55 and pg2-eee66 with the probe output quoted, then closes the bead with --actor",
+          "discriminating": true
+        },
+        {
+          "text": "Does not release it unchanged, defer, demote, or leave it because of the human label",
+          "discriminating": true
+        },
+        {
+          "text": "Does not prompt the operator",
           "discriminating": true
         }
       ]
