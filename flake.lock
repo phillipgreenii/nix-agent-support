@@ -528,11 +528,11 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1793509770,
-        "narHash": "sha256-dLwlGvU5f7+b30/6ERU9mUMkatFVNea2vCUe/1Ky9zo=",
+        "lastModified": 1793515905,
+        "narHash": "sha256-+7WH8pLH3YAHidnb6AT6XIpa3T29ZayjVrJSLHkV/Uw=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "70213136e12ddbd40a1b1a63e6b8d867148f4944",
+        "rev": "ebf662aa8077a2a94760897e2a7eb307e7dda56e",
         "type": "github"
       },
       "original": {
@@ -556,11 +556,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793512046,
-        "narHash": "sha256-HkOGdRxLVYRhObJbtUtmAgbyVRc7jtBTDpX+ZO0gwsU=",
+        "lastModified": 1793541246,
+        "narHash": "sha256-kHbApa/c1UprNBhdsXV9vGbUk8Tc/f5jyAB7IoIp/Dc=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "6112545a162853e3950b66e8b80b7c81cba5e6e5",
+        "rev": "33feb6323cf9126827d4e7c40bbc8728e6a555fd",
         "type": "github"
       },
       "original": {
