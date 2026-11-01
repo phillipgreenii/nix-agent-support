@@ -1,11 +1,11 @@
 // SUBSTITUTIONCLEARED+PROVENANCEEXHAUSTION ABSTAIN SUITE (pg2-g4jet, operator ruling
 // 2026-08-28): for a command-substitution body cmdparse's static allowlist CLEARS
-// (`seq`, `mktemp`, and any other body no rule models standalone), COMMAND position
+// (`seq` and any other body no rule models standalone), COMMAND position
 // (`echo $(BODY)`) no longer floors to Ask via engine.commandSubstitutionFloor —
 // engine.foldSubstitutionScan's `case cmdparse.SubstitutionCleared:` branch that did
 // that (pg2-whumr, ADR 0048) is removed. The operator's ruling was that recursion has
 // genuinely no opinion — positive or negative — on this cohort in EITHER the use-site
-// (`echo $(mktemp -d)`) or the assignment (`x=$(mktemp -d)`) form, and at execution
+// (`echo $(seq 1 3)`) or the assignment (`x=$(seq 1 3)`) form, and at execution
 // time the two forms are identical (run the command once, capture its output), so
 // there is no basis for them to diverge: command position must now abstain too,
 // matching the bare assignment-only leaf's existing abstain (which, for a
@@ -69,7 +69,7 @@ func TestPg2G4jet_SubstitutionClearedExhaustionAbstainsInCommandPosition(t *test
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
 
-	for _, body := range []string{"mktemp -d", "seq 1 3"} {
+	for _, body := range []string{"seq 1 3"} {
 		t.Run(body, func(t *testing.T) {
 			cmdV := eng.EvaluateHook(provenanceInput(projectRoot, commandPositionCmd(body)))
 			assignV := eng.EvaluateHook(provenanceInput(projectRoot, assignmentOnlyCmd(body)))
@@ -84,6 +84,35 @@ func TestPg2G4jet_SubstitutionClearedExhaustionAbstainsInCommandPosition(t *test
 			if cmdV.Decision != assignV.Decision {
 				t.Errorf("body %q: command position %s != assignment-only position %s; pg2-g4jet's whole point was to align the two, not just each individually",
 					body, cmdV.Decision, assignV.Decision)
+			}
+		})
+	}
+}
+
+// TestPg2G4jet_MktempBodyApprovesInCommandPositionOnlyInsideTempRoot records that
+// `mktemp` LEFT the abstaining cohort above: pg2-b1lir W6 (operator ruling pg2-r9kv7,
+// 2026-10-27, nix-agent-support 3353dcdfc) made safe-commands approve mktemp when it
+// can only create inside a writable temp root. A recursed body that safe-commands
+// approves is no longer one "no rule models standalone", so `echo $(mktemp -d)`
+// approves via recursion: INTENDED, not a regression (this test was stale, tc-glwdg).
+// The abstain is kept for a mktemp that could create outside a temp root: the
+// approval is the safe-commands rule's own, not a widening of the substitution
+// allowlist. (The bare assignment form `x=$(mktemp -d)` is deliberately not asserted
+// here: it is governed by the separate pg2-mtnmb assignment-only floor.)
+func TestPg2G4jet_MktempBodyApprovesInCommandPositionOnlyInsideTempRoot(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	for body, want := range map[string]hookio.Decision{
+		"mktemp -d":                  hookio.Approve,
+		"mktemp -d /etc/x.XXXXXX":    hookio.NoOpinion,
+		"mktemp -d -p /etc x.XXXXXX": hookio.NoOpinion,
+	} {
+		t.Run(body, func(t *testing.T) {
+			got := eng.EvaluateHook(provenanceInput(projectRoot, commandPositionCmd(body)))
+			if got.Decision != want {
+				t.Errorf("%q = %s (%s: %s); want %s", commandPositionCmd(body), got.Decision, got.Module, got.Reason, want)
 			}
 		})
 	}
