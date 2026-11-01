@@ -97,3 +97,15 @@ field, so `cwd` is the only signal; a non-isolated session in a linked worktree 
 compaction for guard-hostile commands. Rewrites of other commands, and every rewrite outside a
 linked worktree, are unchanged. Implemented in `internal/inputproc/isolation.go` and applied in
 `handlePreToolUse`; guarded by a real-rtk integration test.
+
+## Amendment 2026-11-01 (tc-h3mrb): the pg-wi-flow identity stamp skips abstained compound commands
+
+The Consequences' "hypothetical identity-stamping processor" is now real: `pg-wi-flow-identity`
+stamps `PG_WI_FLOW_IDENT`, and it is skipped whenever ceta abstains. Two shapes abstain although
+the `pg-wi-flow` leaf is approved: a heredoc fed to `pg-wi-flow`'s own stdin (`heredocFloor` has no
+carve-out for it) and a function definition plus its call (the call `f` has no rule). The
+processor itself stamps both shapes; the gate is the cause. This Decision is NOT widened (no fresh
+measurement is possible offline). The remedy is operational: the `pg-wi-flow` refusal hint and the
+reviewer and worker agent text tell callers to keep each `pg-wi-flow` command a simple call.
+`cmd/claude-extended-tool-approver/pgwiflow_identity_integration_test.go` pins the behaviour, so a
+future widening fails it and prompts a revision of that text.

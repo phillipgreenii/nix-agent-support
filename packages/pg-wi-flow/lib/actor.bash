@@ -49,9 +49,12 @@ pgwf_compose_actor() {
 # /pg-wi-flow:drain loop is the TOP-LEVEL interactive Claude Code session:
 # one more level of subagent nesting (e.g. /drain launched from inside a
 # dispatched subagent) leaves the worker with no Agent tool to dispatch
-# reviewer leaves, and PG_WI_FLOW_IDENT unset (tc-9ddu3.2.11 dry run).
+# reviewer leaves, and PG_WI_FLOW_IDENT unset (tc-9ddu3.2.11 dry run). The
+# other cause (tc-h3mrb): ceta runs input processors only on an Approve/Ask
+# verdict (docs/adr/0070), and it abstains on a heredoc fed to pg-wi-flow or a
+# function definition, so such a compound command is never stamped.
 pgwf_identity_hint() {
-  printf '%s' "pg-wi-flow must run from a TOP-LEVEL interactive Claude Code session (the /pg-wi-flow:drain loop is that session); a dispatcher/worker started from inside another dispatched subagent has no PG_WI_FLOW_IDENT and no Agent tool. Re-run /pg-wi-flow:drain from a top-level session (outside Claude Code, pass --actor NAME instead)."
+  printf '%s' "PG_WI_FLOW_IDENT is stamped by the ceta hook only onto a Bash call it approves, so a command with a heredoc or a shell function definition (ceta abstains on those) arrives unstamped even in a top-level session: run pg-wi-flow as its own simple command (pass JSON with --json FILE or a pipe, not a heredoc). Otherwise pg-wi-flow must run from a TOP-LEVEL interactive Claude Code session (the /pg-wi-flow:drain loop is that session); a dispatcher/worker started from inside another dispatched subagent has no PG_WI_FLOW_IDENT and no Agent tool. Re-run /pg-wi-flow:drain from a top-level session (outside Claude Code, pass --actor NAME instead)."
 }
 
 # pgwf_require_identity -- fail-fast precondition for the verbs that reserve

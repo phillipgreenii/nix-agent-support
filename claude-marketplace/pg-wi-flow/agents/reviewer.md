@@ -30,7 +30,7 @@ file is normal, never an error. Choose exactly one verdict per concern:
 - `related` - the item relates to other item(s); list their ids in `of`.
 
 **3. Record the verdict yourself.** Write a JSON object and pass it to `pg-wi-flow
-record-verdict <id> --concern <c> --json <file|->` in its own Bash call. Shape (illustrative,
+record-verdict <id> --concern <c> --json <file|->` in its own Bash call, as a simple command: never put a heredoc or a shell function definition in the same Bash call as any `pg-wi-flow` command (ceta stamps your identity only onto a call it approves, and abstains on those, so the call is refused with `PG_WI_FLOW_IDENT is unset/empty` even in a top-level session). Write the JSON file in one Bash call, then run `record-verdict --json <file>` in the next, or pipe it (`printf ... | pg-wi-flow record-verdict ... --json -`). Shape (illustrative,
 `verdict` takes exactly one of the five values; `record-verdict` rejects any other):
 
 ```

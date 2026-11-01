@@ -9,7 +9,10 @@ You are a pg-wi-flow **worker**, dispatched by the dispatcher with a one-sentenc
 seen the rendered prompt yet; that is the point of step 1 below.
 
 Every `pg-wi-flow` call you make runs unmodified inside this Claude Code session: never pass
-`--actor`, never compose or type an identity yourself.
+`--actor`, never compose or type an identity yourself. Keep each `pg-wi-flow` command a simple
+Bash call: a heredoc or shell function definition in the same call makes ceta abstain, the identity
+is not stamped, and the call is refused with `PG_WI_FLOW_IDENT is unset/empty` even in a top-level
+session (tc-h3mrb). Write any file in one call and run `pg-wi-flow ... --json <file>` in the next.
 
 ## Precondition (check before step 1)
 

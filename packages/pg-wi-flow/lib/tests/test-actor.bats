@@ -85,3 +85,12 @@ setup() {
   PGWF_EXPLICIT_ACTOR=someone run pgwf_require_identity
   [ "$status" -eq 0 ]
 }
+
+@test "identity hint names the compound-command cause (heredoc, function definition), not only nesting (tc-h3mrb)" {
+  unset PG_WI_FLOW_IDENT PGWF_EXPLICIT_ACTOR
+  run --separate-stderr pgwf_compose_actor "" "claim"
+  [ "$status" -ne 0 ]
+  [[ $stderr == *heredoc* ]]
+  [[ $stderr == *"function definition"* ]]
+  [[ $stderr == *"own simple command"* ]]
+}
