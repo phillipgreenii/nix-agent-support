@@ -313,13 +313,38 @@ pgwf_tracker_claim_or_transfer() {
   bd update "$id" --assignee "$actor" --force --actor "$actor" --json >/dev/null 2>&1
 }
 
-# pgwf_tracker_release ID ACTOR -- releases ID with the assignee cleared in
-# the SAME `bd update` call as the status change [design: ## Components,
-# "Invariants enforced inside the CLI"; workspace B-1/B-2 restated as a
-# CLI-enforced invariant].
+# pgwf_tracker_release ID ACTOR [IDENT] -- releases ID with the assignee
+# cleared in the SAME `bd update` call as the status change [design: ##
+# Components, "Invariants enforced inside the CLI"; workspace B-1/B-2
+# restated as a CLI-enforced invariant].
+#
+# bd refuses to reassign an in_progress item held by ANOTHER actor ("cannot
+# reassign ... held by ..."). The dispatcher's release after a worker ended
+# without releasing (e.g. after an escalation) is exactly that case: the
+# worker's actor differs from the dispatcher's in the agent-type segment
+# only. So, like pgwf_tracker_claim_or_transfer, when the plain release is
+# refused and the current assignee was composed under the SAME run (assignee
+# starts with "<session8>-", IDENT's leading segment), the release is retried
+# with --force. A claim held by a different session (or an empty IDENT) is
+# never forced: the refusal stands and bd's message goes to stderr.
 pgwf_tracker_release() {
-  local id="$1" actor="$2"
-  bd update "$id" --status open --assignee "" --actor "$actor" --json
+  local id="$1" actor="$2" session="${3:-}" out
+  session="${session%%-*}"
+  if out="$(bd update "$id" --status open --assignee "" --actor "$actor" --json 2>&1)"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  if [[ -n $session ]]; then
+    local item assignee
+    item="$(pgwf_tracker_show_json "$id" 2>/dev/null)" || item=""
+    assignee="$(jq -r '.assignee // .owner // empty' <<<"$item" 2>/dev/null)" || assignee=""
+    if [[ $assignee == "$session"-* ]]; then
+      bd update "$id" --status open --assignee "" --force --actor "$actor" --json
+      return $?
+    fi
+  fi
+  printf '%s\n' "$out" >&2
+  return 1
 }
 
 # pgwf_tracker_any_children ID -- `bd children ID --json`'s data array,

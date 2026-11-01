@@ -63,3 +63,25 @@ setup() {
   [ -z "$output" ]
   [ -n "$stderr" ]
 }
+
+@test "pgwf_require_identity: refuses with the top-level-session hint when neither --actor nor PG_WI_FLOW_IDENT is available" {
+  unset PG_WI_FLOW_IDENT PGWF_EXPLICIT_ACTOR
+  run --separate-stderr pgwf_require_identity
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ $stderr == *PG_WI_FLOW_IDENT* ]]
+  [[ $stderr == *"top-level"* ]]
+}
+
+@test "pgwf_require_identity: passes with PG_WI_FLOW_IDENT" {
+  export PG_WI_FLOW_IDENT="abcdefgh-main-main"
+  unset PGWF_EXPLICIT_ACTOR
+  run pgwf_require_identity
+  [ "$status" -eq 0 ]
+}
+
+@test "pgwf_require_identity: passes with an explicit actor" {
+  unset PG_WI_FLOW_IDENT
+  PGWF_EXPLICIT_ACTOR=someone run pgwf_require_identity
+  [ "$status" -eq 0 ]
+}

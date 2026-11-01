@@ -31,7 +31,7 @@ pgwf_compose_actor() {
   fi
 
   if [[ -z ${PG_WI_FLOW_IDENT:-} ]]; then
-    echo "pg-wi-flow: no actor available (PG_WI_FLOW_IDENT is unset/empty and no --actor was given); refusing to act without an actor" >&2
+    echo "pg-wi-flow: no actor available (PG_WI_FLOW_IDENT is unset/empty and no --actor was given); refusing to act without an actor. $(pgwf_identity_hint)" >&2
     return 1
   fi
 
@@ -41,4 +41,28 @@ pgwf_compose_actor() {
   fi
 
   printf '%s-%s\n' "$PG_WI_FLOW_IDENT" "$stage"
+}
+
+# pgwf_identity_hint -- the one-line remedy appended to every "no identity"
+# refusal and to the fail-fast preflight below. pg-wi-flow's agents (dispatcher,
+# worker, resolver) can only run with an identity AND the Agent tool when the
+# /pg-wi-flow:drain loop is the TOP-LEVEL interactive Claude Code session:
+# one more level of subagent nesting (e.g. /drain launched from inside a
+# dispatched subagent) leaves the worker with no Agent tool to dispatch
+# reviewer leaves, and PG_WI_FLOW_IDENT unset (tc-9ddu3.2.11 dry run).
+pgwf_identity_hint() {
+  printf '%s' "pg-wi-flow must run from a TOP-LEVEL interactive Claude Code session (the /pg-wi-flow:drain loop is that session); a dispatcher/worker started from inside another dispatched subagent has no PG_WI_FLOW_IDENT and no Agent tool. Re-run /pg-wi-flow:drain from a top-level session (outside Claude Code, pass --actor NAME instead)."
+}
+
+# pgwf_require_identity -- fail-fast precondition for the verbs that reserve
+# or hand off work (next, claim, release): succeeds when an explicit actor was
+# given (PGWF_EXPLICIT_ACTOR) or PG_WI_FLOW_IDENT is set; otherwise prints an
+# actionable one-line reason to stderr and returns non-zero BEFORE any bd
+# call, so an empty queue (`none`) can no longer mask a missing identity.
+pgwf_require_identity() {
+  if [[ -n ${PGWF_EXPLICIT_ACTOR:-} || -n ${PG_WI_FLOW_IDENT:-} ]]; then
+    return 0
+  fi
+  echo "pg-wi-flow: PG_WI_FLOW_IDENT is unset/empty and no --actor was given; refusing to act. $(pgwf_identity_hint)" >&2
+  return 1
 }

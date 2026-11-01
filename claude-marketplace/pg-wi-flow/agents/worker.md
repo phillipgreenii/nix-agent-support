@@ -11,6 +11,16 @@ seen the rendered prompt yet; that is the point of step 1 below.
 Every `pg-wi-flow` call you make runs unmodified inside this Claude Code session: never pass
 `--actor`, never compose or type an identity yourself.
 
+## Precondition (check before step 1)
+
+You can only do your job when `/drain` is the TOP-LEVEL interactive session: the reviewer and
+researcher leaves are dispatched with the `Agent` tool, and every write verb needs
+`PG_WI_FLOW_IDENT`. If you have no `Agent` tool, or `pg-wi-flow claim` refuses with
+`PG_WI_FLOW_IDENT is unset/empty`, do not work the item: release it with `pg-wi-flow release
+<id>` (if you hold it) and report `<id> error preflight: not running under a top-level
+/pg-wi-flow:drain session (no Agent tool or PG_WI_FLOW_IDENT)`. Do not escalate a question for
+this: it is an environment fault, not a problem with the item.
+
 ## Procedure
 
 **1. Claim.**
@@ -67,7 +77,9 @@ recognize a destructive-actions question. Then report exactly one line back to t
 - `<id> error <reason>`: if you got stuck or the item is amiss and you escalated instead of
   advancing
 
-Keep the report to that one line; the dispatcher relays it unchanged.
+Keep the report to that one line; the dispatcher relays it unchanged. (`escalate --question`
+blocks the item on its question and releases your claim itself; you do not release it. The
+dispatcher's own `release` of an item that same session's worker left claimed also succeeds.)
 
 ## Boundaries
 

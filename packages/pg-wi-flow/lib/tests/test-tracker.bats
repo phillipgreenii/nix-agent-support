@@ -297,6 +297,30 @@ show_fixture() {
   [[ "$line" == *"--assignee "* ]]
 }
 
+@test "pgwf_tracker_release: refused for an item held by the SAME session's worker -> retried with --force" {
+  export MOCK_BD_HELD_IDS="tc-1"
+  show_fixture tc-1 '{"id":"tc-1","assignee":"abcd1234-a1-worker-work"}'
+  run pgwf_tracker_release tc-1 abcd1234-main-dispatcher-work abcd1234-main-dispatcher
+  [ "$status" -eq 0 ]
+  grep -q -- "--force --actor abcd1234-main-dispatcher-work" "$MOCK_BD_LOG"
+}
+
+@test "pgwf_tracker_release: refused for an item held by a FOREIGN session -> not forced, fails" {
+  export MOCK_BD_HELD_IDS="tc-1"
+  show_fixture tc-1 '{"id":"tc-1","assignee":"ffff0000-a1-worker-work"}'
+  run pgwf_tracker_release tc-1 abcd1234-main-dispatcher-work abcd1234-main-dispatcher
+  [ "$status" -ne 0 ]
+  ! grep -q -- "--force" "$MOCK_BD_LOG"
+}
+
+@test "pgwf_tracker_release: refused with no IDENT -> not forced, fails" {
+  export MOCK_BD_HELD_IDS="tc-1"
+  show_fixture tc-1 '{"id":"tc-1","assignee":"abcd1234-a1-worker-work"}'
+  run pgwf_tracker_release tc-1 some-actor
+  [ "$status" -ne 0 ]
+  ! grep -q -- "--force" "$MOCK_BD_LOG"
+}
+
 # --- pgwf_advance_stage: the internal stage-write primitive ---
 
 @test "pgwf_advance_stage: removes the old stage label and adds the new one in one call" {

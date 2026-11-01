@@ -13,6 +13,22 @@ Every `pg-wi-flow` call you make here runs unmodified inside this session: never
 `--actor`, never compose or type an identity yourself — the CLI derives it from your own
 session automatically.
 
+## Precondition: run from a TOP-LEVEL interactive session
+
+`/drain` MUST be run from a **top-level interactive Claude Code session** — the session you are
+typing in IS the loop. It MUST NOT be launched from inside a dispatched subagent (a drain
+worker, an implementer, any `Agent`-tool child): the chain loop → dispatcher → worker → reviewer
+needs the `Agent` tool at every level, and one extra level of nesting leaves the worker with no
+`Agent` tool (it cannot dispatch reviewer leaves) and no `PG_WI_FLOW_IDENT` (the ceta identity
+stamp is missing, so `record-verdict`, `claim` and every other write verb refuse to act).
+Observed in the tc-9ddu3.2.11 dry run.
+
+Before the first iteration, check both: you have the `Agent` tool, and
+`pg-wi-flow list --stale --reserved-hours 2` (Step 0 below) runs without a
+`PG_WI_FLOW_IDENT is unset/empty` refusal. If either fails, STOP and tell the operator to
+re-run `/drain` from a top-level session; do not dispatch anything. The CLI's `next`, `claim`
+and `release` verbs fail fast with the same message when the identity is missing.
+
 ## Flag surface [design: `## Components` → "/drain" section, verbatim]
 
 `/drain [<id> | --id <id>] [--attended | --unattended] [--stage <s>]... [--concurrency <n>] [--questions]`

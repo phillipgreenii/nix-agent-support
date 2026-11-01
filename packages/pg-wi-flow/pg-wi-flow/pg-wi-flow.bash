@@ -329,6 +329,7 @@ pgwf_next_claim_id() {
 # filters"] -- --stage is accepted but ignored in that mode, matching the
 # design's "ignoring the other filters" rule for a fixed-id run.
 pgwf_cmd_next() {
+  pgwf_require_identity || return 1
   local -a stage_args=()
   local target_id="" attended=0
   while [[ $# -gt 0 ]]; do
@@ -428,6 +429,7 @@ pgwf_cmd_next() {
 # worker agents parse, packet P6) still recovers cleanly from the combined
 # output.
 pgwf_cmd_claim() {
+  pgwf_require_identity || return 1
   local id="$1"
   if [[ -z $id ]]; then
     echo "pg-wi-flow: claim: missing ID" >&2
@@ -456,6 +458,7 @@ pgwf_cmd_claim() {
 # pgwf_cmd_release ID -- releases with the assignee cleared in ONE call
 # [design: ## Components write-verb table row for release].
 pgwf_cmd_release() {
+  pgwf_require_identity || return 1
   local id="$1"
   if [[ -z $id ]]; then
     echo "pg-wi-flow: release: missing ID" >&2
@@ -467,7 +470,7 @@ pgwf_cmd_release() {
   stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
   actor="$(pgwf_current_actor "$stage")" || return 1
 
-  pgwf_tracker_release "$id" "$actor" >/dev/null
+  pgwf_tracker_release "$id" "$actor" "${PG_WI_FLOW_IDENT:-}" >/dev/null
 }
 
 # pgwf_stamp_top_level_workflow CONFIG_JSON ID ACTOR -- stamps ID's
@@ -487,6 +490,12 @@ pgwf_stamp_top_level_workflow() {
   fi
 }
 
+# NEVER --remove-label the label that is also being --add-label'ed in the same
+# `bd update` (annotate does not): bd applies the removal after the add, so
+# re-annotating an item with the kind/component it already carries would
+# strip the label entirely (tc-9ddu3.2.11 dry run; real-bd guard in
+# test-pg-wi-flow-defects-real-bd.bats).
+#
 # pgwf_prefixed_labels_to_remove ITEM_JSON PREFIX -- ITEM_JSON's existing
 # PREFIX-prefixed labels (kind:/component:, both single-valued per ##
 # State model -> Axis 3), one per line -- what annotate's --kind/
@@ -578,7 +587,7 @@ pgwf_cmd_annotate() {
     local kind_prefix l
     kind_prefix="$(pgwf_config_label "$config_json" kind_prefix 'kind:')"
     while IFS= read -r l; do
-      [[ -n $l ]] && update_args+=(--remove-label "$l")
+      [[ -n $l && $l != "${kind_prefix}${kind}" ]] && update_args+=(--remove-label "$l")
     done < <(pgwf_prefixed_labels_to_remove "$item_json" "$kind_prefix")
     update_args+=(--add-label "${kind_prefix}${kind}")
   fi
@@ -587,7 +596,7 @@ pgwf_cmd_annotate() {
     local component_prefix l
     component_prefix="$(pgwf_config_label "$config_json" component_prefix 'component:')"
     while IFS= read -r l; do
-      [[ -n $l ]] && update_args+=(--remove-label "$l")
+      [[ -n $l && $l != "${component_prefix}${component}" ]] && update_args+=(--remove-label "$l")
     done < <(pgwf_prefixed_labels_to_remove "$item_json" "$component_prefix")
     update_args+=(--add-label "${component_prefix}${component}")
   fi
@@ -1403,6 +1412,29 @@ pgwf_cmd_escalate() {
     fi
     pgwf_tracker_add_dependency "$id" "$new_id" "$actor" >/dev/null || return 1
   done
+
+  # The item is now blocked by its question(s), so it is out of `bd ready`
+  # and this run has nothing left to do with it: drop the claim HERE rather
+  # than leaving it to the dispatcher, whose release is refused by bd when the
+  # worker's actor differs ("cannot reassign ... held by"; tc-9ddu3.2.11 dry
+  # run). The blocking edges above are written FIRST (D-5), so the released
+  # item is never momentarily ready.
+  pgwf_release_if_session_holds "$id" "$actor"
+}
+
+# pgwf_release_if_session_holds ID ACTOR -- releases ID (assignee cleared in
+# the same call) when it is currently claimed by THIS run (assignee starts
+# with "<session8>-", PG_WI_FLOW_IDENT's leading segment). A no-op when the
+# item is unclaimed, held by another session, or there is no identity.
+pgwf_release_if_session_holds() {
+  local id="$1" actor="$2" session item assignee
+  session="${PG_WI_FLOW_IDENT:-}"
+  session="${session%%-*}"
+  [[ -n $session ]] || return 0
+  item="$(pgwf_tracker_show_json "$id" 2>/dev/null)" || return 0
+  assignee="$(jq -r '.assignee // .owner // empty' <<<"$item")" || return 0
+  [[ $assignee == "$session"-* ]] || return 0
+  pgwf_tracker_release "$id" "$actor" "$PG_WI_FLOW_IDENT" >/dev/null
 }
 
 # pgwf_cmd_resolve ID (--decision D --rationale R | --answer A | --abandon
@@ -1531,7 +1563,7 @@ pgwf_cmd_resolve() {
   if [[ $is_legacy_human -eq 1 ]]; then
     if [[ $have_answer -eq 1 ]]; then
       pgwf_tracker_update "$id" "$actor" --append-notes "$answer" --remove-label "$human_label" >/dev/null || return 1
-      pgwf_tracker_release "$id" "$actor" >/dev/null
+      pgwf_tracker_release "$id" "$actor" "${PG_WI_FLOW_IDENT:-}" >/dev/null
       return $?
     elif [[ $have_abandon -eq 1 ]]; then
       pgwf_tracker_close "$id" "resolve --abandon --reason-code $reason_code" "$actor" >/dev/null

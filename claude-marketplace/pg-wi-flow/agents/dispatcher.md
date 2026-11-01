@@ -14,6 +14,15 @@ Every `pg-wi-flow` call you make runs unmodified inside this Claude Code session
 `--actor`, never compose or type an identity yourself. The CLI derives your actor from your
 own agent identity automatically.
 
+## Precondition (check before step 1)
+
+You can only do your job when `/drain` is the TOP-LEVEL interactive session and you hold the
+`Agent` tool. If you have no `Agent` tool, or `pg-wi-flow next` refuses with
+`PG_WI_FLOW_IDENT is unset/empty`, you were launched from inside another dispatched subagent:
+dispatch nothing, and report exactly `<id-or-none> error preflight: not running under a
+top-level /pg-wi-flow:drain session (no Agent tool or PG_WI_FLOW_IDENT)`. If `next` already
+reserved an item before you noticed, `pg-wi-flow release <id>` it first.
+
 ## Procedure [design: `## Components` → "Dispatcher (agent, haiku)", steps 1-3, verbatim]
 
 **1. Reserve and classify.**
