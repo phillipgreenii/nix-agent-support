@@ -67,6 +67,12 @@ type CheckResult struct {
 	StaleActions []StaleAction `json:"stale_actions"`
 }
 
+// gateLookback is how far before a gate's creation the no-baseline fallback scan
+// reaches (tc-6fw03). The gated commit exists when the gate is created, normally
+// minutes to days earlier; a month is generous without scanning a whole history
+// (a full `git log -p` of this repo is ~150 MB held in memory).
+const gateLookback = 30 * 24 * time.Hour
+
 func parseAwaitID(s string) (wsid, repo, patchID string, ok bool) {
 	parts := strings.SplitN(s, ":", 3)
 	if len(parts) != 3 {
@@ -158,6 +164,37 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			if err != nil {
 				result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
 				continue
+			}
+			// NO USABLE BASELINE (tc-6fw03). The last-N form above is anchored to
+			// NOW (applied_ref), not to the gate, so it only finds a gated commit that
+			// is still within N commits of the tip. A gate whose baseline is empty
+			// (created while the repo had no recorded applied_ref, so "" was stored)
+			// or no longer an ancestor has no other lower bound: once later commits
+			// bury the gated one beyond N it was never found, aged past --stale-after
+			// and was converted to human although an apply had built it
+			// (tc-ugd1k: 2427 commits behind, an ancestor of applied_ref and
+			// locked_rev). The gated commit existed when the gate was created, so
+			// widen the miss with a scan anchored to the GATE: everything committed
+			// since gateLookback before created_at. Hits go through the same
+			// condition 2 as any other, so a lock-built repo whose lock lacks the
+			// commit still stays Blocked. A commit older than the lookback is still
+			// missed; --last-n is the operator override for that.
+			if !baseIsAncestor {
+				if _, found := set[patchID]; !found {
+					if ts, perr := time.Parse(time.RFC3339, g.CreatedAt); perr == nil {
+						since := ts.Add(-gateLookback).UTC().Format(time.RFC3339)
+						wider, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, fmt.Sprintf("--since=%s %s", since, repo.AppliedRef))
+						if err != nil {
+							result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
+							continue
+						}
+						for id, shas := range wider {
+							if _, seen := set[id]; !seen {
+								set[id] = shas
+							}
+						}
+					}
+				}
 			}
 			// PRE-BASELINE GATED COMMIT (pg2-k7dai). The baseline..applied_ref scan
 			// above assumes the gated commit lands AFTER the baseline. A RE-GATE

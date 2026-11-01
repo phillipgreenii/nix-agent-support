@@ -89,7 +89,10 @@ the `pn:applied` gates whose `wsid` matches, and for each repo with a non-empty
 `applied_ref` chooses a scan range: `baseline..applied_ref` when the baseline is an
 ancestor of `applied_ref`, else the last `--last-n` commits (default 100). It scans
 that range with `git log -p | git patch-id --stable` and **resolves in the gate's own
-DB** every gate whose patch-id is now present.
+DB** every gate whose patch-id is now present. When the baseline is empty or not an
+ancestor and the last-N scan misses, the scan is widened to the commits made since 30
+days before the gate's `created_at`, because the last-N window is anchored to the tip
+and not to the gate (bead `tc-6fw03`).
 
 - **Dirty repos** are scanned leniently (committed history only) by default; `--strict`
   skips them.

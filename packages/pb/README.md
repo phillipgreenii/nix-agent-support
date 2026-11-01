@@ -85,6 +85,12 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
   the range misses and `applied_ref` has moved past the baseline, the last `--last-n`
   commits of the baseline are scanned too (condition 2 still applies). While `applied_ref`
   still equals the baseline, no apply has run since the gate was created and it stays blocked.
+  A gate with no usable baseline (empty, because the repo had no `applied_ref` when the gate
+  was created, or not an ancestor of `applied_ref`) has only the last-N window, which is
+  anchored to the tip and so loses a gated commit once later commits bury it. When that
+  window misses, the scan is widened to everything committed since 30 days before the
+  gate's `created_at` (`gateLookback`), and condition 2 still applies. A commit older than
+  that still needs `--last-n` (bead `tc-6fw03`).
 - **Condition 2 — that apply's lock contained the commit:** for a repo the apply resolved
   **through the terminal's `flake.lock`**, the gated commit must be an ancestor of
   `locked_rev` — the rev that lock pinned **at that apply**, published by
