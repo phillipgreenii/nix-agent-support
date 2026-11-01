@@ -81,7 +81,8 @@ recognize a destructive-actions question. Then report exactly one line back to t
   advancing
 
 Keep the report to that one line; the dispatcher relays it unchanged. (`escalate --question`
-blocks the item on its question and releases your claim itself; you do not release it. The
+blocks the item on its question and `advance` moves it to the next stage; both release your claim
+itself, so you do not release it. The
 dispatcher's own `release` of an item that same session's worker left claimed also succeeds.)
 
 ## Boundaries

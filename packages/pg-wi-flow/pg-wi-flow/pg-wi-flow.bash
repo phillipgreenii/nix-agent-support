@@ -781,8 +781,8 @@ pgwf_cmd_round() {
 # writer, shared with `next`'s childless-container case and create-child's
 # --stage), and adds `container` if ID has any children [design: ##
 # Configuration C-2; ## Components table, advance row; ## State model ->
-# Axis 1, "advance is the ONLY writer of stage labels"]. NEVER creates a
-# land bead.
+# Axis 1, "advance is the ONLY writer of stage labels"]. Releases THIS run's
+# claim afterwards (pgwf_release_if_session_holds). NEVER creates a land bead.
 pgwf_cmd_advance() {
   local id="${1:-}"
   if [[ -z $id ]]; then
@@ -841,6 +841,13 @@ pgwf_cmd_advance() {
   if [[ "$(jq 'length' <<<"$children")" -gt 0 ]] && ! pgwf_tracker_has_label "$id" container; then
     pgwf_tracker_update "$id" "$actor" --add-label container >/dev/null
   fi
+
+  # The stage is finished: drop the caller's claim HERE (like escalate does)
+  # so the item is open and unclaimed for the NEXT stage's worker via `next`,
+  # instead of staying reserved at a stage nobody is working until the /drain
+  # stale-reservation sweep (tc-n3tzb). Written LAST, after the stage label
+  # and container label, so the released item is never visible half-moved.
+  pgwf_release_if_session_holds "$id" "$actor"
 }
 
 # pgwf_cmd_create_child PARENT --title T [--kind K] [--stage S]

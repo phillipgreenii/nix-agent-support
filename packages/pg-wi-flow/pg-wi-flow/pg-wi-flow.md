@@ -43,7 +43,7 @@
 
 `pg-wi-flow round {{item-id}}`
 
-- Move an item to another stage:
+- Move an item to another stage (also releases this session's claim, leaving it open for the next stage's worker):
 
 `pg-wi-flow advance {{item-id}} --to {{implement}}`
 

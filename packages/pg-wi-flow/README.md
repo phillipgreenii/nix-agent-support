@@ -54,7 +54,7 @@ inside Claude Code; an explicit `--actor` override only outside it).
   `ready`.
 - **`advance ID --to STAGE [--reason TEXT]`** -- validates the target stage exists in `ID`'s
   workflow (a move to a lower-order stage requires `--reason`), swaps the stage label, and adds
-  the container label if `ID` has any children. Never creates a land bead.
+  the container label if `ID` has any children, then releases this session's claim on `ID` (assignee cleared, status open) so `next` can hand it to the new stage's worker; a claim held by another session is left alone. Never creates a land bead.
 - **`create-child PARENT --title T [--kind K] [--stage S] [--blocked-by ID]... [--description T]`**
   -- new child at the workflow's entry stage (or `--stage`, validated against the child's
   inherited workflow). `PARENT` gains the container label in the same call and stays open. Each
