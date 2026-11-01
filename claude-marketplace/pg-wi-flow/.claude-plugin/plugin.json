@@ -2,5 +2,7 @@
   "name": "pg-wi-flow",
   "description": "The /drain skill and the five agents (dispatcher, worker, resolver, reviewer, researcher) that drive the pg-wi-flow CLI's work-item loop.",
   "version": "0.1.0",
-  "defaultEnabled": true
+  "defaultEnabled": true,
+  "requires": ["pg-wi-flow"],
+  "uses": ["beads"]
 }

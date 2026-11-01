@@ -2,5 +2,7 @@
   "name": "claude-extended-tool-approver",
   "description": "Pre-tool permission hook with rule-based evaluation",
   "version": "1.0.0",
-  "defaultEnabled": true
+  "defaultEnabled": true,
+  "requires": ["claude-extended-tool-approver"],
+  "uses": ["beads", "pb", "pg-ccaudit"]
 }

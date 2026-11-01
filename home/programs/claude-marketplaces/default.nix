@@ -8,7 +8,7 @@
 # Each entry in `nixProvided` is a built marketplace derivation carrying
 #   passthru = {
 #     marketplaceName;                                   # e.g. "<repo>-marketplace-local"
-#     plugins = [ { name; version; key = "<name>@<mkt>"; defaultEnabled; } … ];
+#     plugins = [ { name; version; key = "<name>@<mkt>"; defaultEnabled; requires; uses; } … ];
 #   };
 # We read identity + plugin facts off that passthru INLINE here. The canonical pure
 # helper is `mkClaudeMarketplaceBuilders.mkDirectoryMarketplaceSettings` (in
@@ -38,8 +38,22 @@ let
   # Marketplaces this consumer keeps enabled (absent toggle ⇒ true).
   activeMarketplaces = lib.filter (m: mcfg.enabled.${m.marketplaceName} or true) mcfg.nixProvided;
 
-  # Resolve a plugin's enabled state: override-by-key → override-by-name → defaultEnabled.
-  resolveEnabled = p: mcfg.overrides.${p.key} or mcfg.overrides.${p.name} or p.defaultEnabled;
+  # Fail-closed `requires` gate (bead tc-u7kqs, epic tc-ys2l8 AS-1b). A plugin's
+  # plugin.json `requires` lists feature ids (the `<f>` in
+  # `phillipgreenii.programs.<f>`) whose binaries it needs; the builder exports them
+  # as `passthru.plugins.*.requires` (default [ ]; `or [ ]` also tolerates a
+  # hand-built passthru that has no such key). Every required feature MUST be on.
+  # The read is `.enable or false`, NEVER a bare `.enable`: a feature whose option
+  # is not declared on this machine reads as OFF (fail closed), and `mkIf` over an
+  # undeclared option would error instead (verified, epic tc-ys2l8 U2).
+  requiresMet =
+    p: lib.all (f: config.phillipgreenii.programs.${f}.enable or false) (p.requires or [ ]);
+
+  # Resolve a plugin's enabled state: every required feature on AND
+  # (override-by-key → override-by-name → defaultEnabled). A true override can NOT
+  # turn on a plugin whose required binary is absent.
+  resolveEnabled =
+    p: requiresMet p && (mcfg.overrides.${p.key} or mcfg.overrides.${p.name} or p.defaultEnabled);
 
   # Build the dynamic-keyed attrsets via listToAttrs / concatMap as WHOLE VALUES
   # rather than with literal `.${configDerivedName}` attribute paths in the config
@@ -100,7 +114,10 @@ in
       example = lib.literalExpression ''{ "pn-workspace-rules@phillipg-nix-repo-base-marketplace-local" = false; }'';
       description = ''
         Per-plugin enable override. Key is `"<plugin>@<marketplace>"` or the bare
-        `"<plugin>"` name. Resolution: override → plugin `defaultEnabled`.
+        `"<plugin>"` name. Resolution: every feature in the plugin's `requires`
+        MUST be on (`phillipgreenii.programs.<f>.enable or false`), AND
+        (override → plugin `defaultEnabled`). An override cannot enable a plugin
+        whose required feature is off.
       '';
     };
   };

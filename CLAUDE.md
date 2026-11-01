@@ -543,16 +543,26 @@ Verified against Claude Code 2.1.186:
   `claude-code` for a plugin with `defaultEnabled: true` whose hooks/skills invoke a bare PATH
   command MUST add (or verify it already has) an equivalent named cutover block for that plugin's
   program, not a bare, uncommented `phillipgreenii.programs.<x>.enable = true`.
-- **Mechanical check** (bead `tc-mxc0v`): `checks.<system>.test-claude-plugin-binary-default-parity`
-  in `flake.nix` fails for any `defaultEnabled: true` plugin whose `hooks/hooks.json` invokes a
-  bare PATH command unless the plugin is mapped (`pluginProgram`) to its `home/programs/<x>`
-  module AND that module's `enable` is not a plain `mkEnableOption`, or the plugin is listed in
-  `knownConsumerCutover` (today `claude-extended-tool-approver`, whose
-  consumers carry a named cutover block). A new default-enabled bare-command plugin therefore
-  MUST either default its program's `enable` to `claude-code.enable` (as `session-mode` does) or
-  be added to `knownConsumerCutover` deliberately. The check carries its own negative fixtures.
-  The check cannot prove a consumer machine enabled the program: after `pn workspace apply`,
-  still run `which <bare-command>` for a cutover-listed plugin.
+- **Fail-closed `requires`** (bead `tc-u7kqs`, epic `tc-ys2l8`): a plugin's plugin.json `requires`
+  lists feature ids (`phillipgreenii.programs.<f>`) whose binaries it needs, and `uses` the soft
+  ones; the marketplace builder exports both in passthru. `home/programs/claude-marketplaces`
+  enables a plugin only when EVERY required feature is on (read as
+  `config.phillipgreenii.programs.<f>.enable or false`, so an undeclared feature reads off) AND
+  (override or `defaultEnabled`); an override cannot enable a plugin whose required feature is off.
+  Effect on a machine that does not enable the feature (for example cb00): the pb, beads family,
+  pg-ccaudit and ceta plugins turn off. A machine MUST set the feature enables directly (the
+  `cetaCutover`-style block) or those plugins go off. `bash-lsp` and `pg-go-mutate` declare no
+  `requires` because no `programs.<f>` feature owns `bash-language-server` or `pg-go-mutate`
+  (owner `-` in the check's `binaryOwners`).
+- **Mechanical check** (beads `tc-mxc0v`, `tc-u7kqs`): `checks.<system>.test-claude-plugin-binary-default-parity`
+  in `flake.nix` fails when a plugin's hooks.json or `lspServers` invokes a bare command that is
+  not in the closed `binaryOwners` list, when an owned command's feature is not in `requires`,
+  when skill/command/agent markdown (a HEURISTIC word match) mentions an owned binary whose
+  feature is in neither `requires` nor `uses`, or when a `requires` feature has no
+  `home/programs/<f>/default.nix`. A new bare-command plugin MUST add its command to
+  `binaryOwners` and annotate `requires`. The check carries its own negative fixtures. It cannot
+  prove a consumer machine enabled the program: after `pn workspace apply`, still run
+  `which <bare-command>`.
 
 ---
 

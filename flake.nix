@@ -5334,22 +5334,25 @@
                   touch $out
                 '';
 
-              # Default-enabled plugin => default-enabled binary parity (bead
-              # tc-mxc0v; invariant documented in CLAUDE.md "Claude Code Rule /
-              # Skill / Plugin Delivery"). A plugin with `defaultEnabled: true`
-              # registers its hooks on EVERY claude-code consumer, while the
-              # program module that installs the binary the hook invokes (a BARE
-              # PATH command) may default `enable = false` -- a
-              # default-enabled plugin broke this way (2026-10-05, silent "command not found" every turn).
-              # The check fails for any default-enabled plugin whose
-              # hooks.json has a bare command unless (a) the plugin is mapped to
-              # its program module below and (b) that module's `enable` is not a
-              # plain `mkEnableOption` (false default). Plugins whose module
-              # DOES default false are tolerated only via the explicit
-              # `knownConsumerCutover` list (each must have a named cutover block
-              # in the consuming machine config); a new plugin is not tolerated.
-              # A built-in negative test runs the same scan over synthetic
-              # violating trees and requires it to FAIL.
+              # Plugin => required-feature tie (beads tc-mxc0v, rewritten by tc-u7kqs).
+              # `home/programs/claude-marketplaces` now enables a plugin only when every
+              # feature in its plugin.json `requires` is on
+              # (`phillipgreenii.programs.<f>.enable or false`, fail CLOSED), so the old
+              # "default-enabled plugin vs default-false program module" parity
+              # (hard-coded pluginProgram / knownConsumerCutover) is replaced by a check
+              # that each plugin DECLARES the features of the binaries it invokes:
+              #   - hooks.json hook commands and plugin.json `lspServers` commands
+              #     (bare PATH commands) MUST each be in the closed `binaryOwners` list
+              #     and, when owned by a feature, that feature MUST be in `requires`;
+              #   - skill/command/agent markdown (HEURISTIC: a word-boundary match of an
+              #     owned binary name) MUST list the owning feature in `requires` or `uses`;
+              #   - every `requires` feature MUST have a home/programs/<f>/default.nix
+              #     (an undeclared option reads as off, i.e. the plugin would never load).
+              # An owner of `-` marks a binary NOT provided by a `programs.<f>` feature in
+              # this repo (ambient / provided elsewhere); it is deliberately exempt, and a
+              # new bare command is NOT tolerated until added to the list. Built-in
+              # negative fixtures run the same scan over synthetic violating trees and
+              # require it to FAIL.
               test-claude-plugin-binary-default-parity =
                 let
                   surface = lib.fileset.toSource {
@@ -5359,88 +5362,131 @@
                       ./home/programs
                     ];
                   };
-                  # plugin name -> program module dir under home/programs that
-                  # installs the binary its hooks invoke.
-                  pluginProgram = pkgs.writeText "plugin-program-map" ''
+                  # command -> owning home/programs feature ("-" = not owned by a
+                  # programs.<f> feature: pn comes from repo-base's phillipgreenii.pn,
+                  # pg-go-mutate from phillipgreenii.pg-go-mutate, bash-language-server
+                  # from no module in this repo).
+                  # NOTE pg-claude-control: owned by feature pg-claude-control, but that
+                  # plugin.json is NOT yet annotated -- touching the plugin dir triggers the
+                  # commit-time bats gate, whose listen.bats "stale FIFO" test fails on a
+                  # pristine checkout here. Follow-up: annotate requires, then flip its owner.
+                  binaryOwners = pkgs.writeText "binary-owners" ''
+                    bd beads
+                    pb pb
+                    session-mode session-mode
+                    pg-ccaudit pg-ccaudit
+                    handoff-create handoff-create
+                    integrate-branch-support integrate-branch-support
                     claude-extended-tool-approver claude-extended-tool-approver
                     claude-tool-tracker claude-tool-tracker
-                    pb session-mode
-                    pg-claude-control pg-claude-control
-                  '';
-                  # Modules that default `enable = false` today; consumers carry
-                  # a cutover block (homelab monorepod home-module.nix).
-                  knownConsumerCutover = pkgs.writeText "known-consumer-cutover" ''
-                    claude-extended-tool-approver
+                    pg-claude-control -
+                    pg-wi-flow pg-wi-flow
+                    pn -
+                    pg-hooks -
+                    pg-repo-runner -
+                    pg-go-mutate -
+                    bash-language-server -
                   '';
                 in
                 pkgs.runCommand "test-claude-plugin-binary-default-parity" { nativeBuildInputs = [ pkgs.jq ]; } ''
-                  # scan <marketplace-dir> <programs-dir>; violations to stderr,
-                  # exit status = violation count (0 = ok).
-                  scan() {
-                    local mkt="$1" progs="$2" bad=0 scanned=0 pj name hooks cmds c prog
-                    for pj in "$mkt"/*/.claude-plugin/plugin.json; do
-                      [ -f "$pj" ] || continue
-                      name="$(basename "$(dirname "$(dirname "$pj")")")"
-                      [ "$(jq -r '.defaultEnabled // false' "$pj")" = true ] || continue
-                      hooks="$mkt/$name/hooks/hooks.json"
-                      [ -f "$hooks" ] || continue
-                      # bare = first word has no '/' and no '$' (not a path / plugin-root ref)
-                      cmds="$(jq -r '[.. | objects | select(.type? == "command") | .command | split(" ")[0]] | unique[]' "$hooks")"
-                      for c in $cmds; do
-                        case "$c" in */*|*'$'*) continue ;; esac
-                        scanned=$((scanned + 1))
-                        prog="$(awk -v n="$name" '$1 == n { print $2 }' ${pluginProgram})"
-                        if [ -z "$prog" ]; then
-                          echo "FAIL: default-enabled plugin '$name' invokes bare command '$c' but has no entry in pluginProgram (map it to the home/programs module that installs it)" >&2
-                          bad=$((bad + 1)); continue
-                        fi
-                        if [ ! -f "$progs/$prog/default.nix" ]; then
-                          echo "FAIL: plugin '$name': home/programs/$prog/default.nix missing" >&2
-                          bad=$((bad + 1)); continue
-                        fi
-                        if grep -qE '^[[:space:]]*enable = lib\.mkEnableOption' "$progs/$prog/default.nix"; then
-                          if ! grep -qxF "$name" ${knownConsumerCutover}; then
-                            echo "FAIL: plugin '$name' is defaultEnabled and invokes bare '$c', but home/programs/$prog enable defaults to false (mkEnableOption); default it to claude-code.enable or list it in knownConsumerCutover with a consumer cutover block" >&2
-                            bad=$((bad + 1))
-                          fi
-                        fi
-                      done
-                    done
-                    echo "scanned $scanned bare hook command(s)" >&2
-                    [ "$scanned" -gt 0 ] || { echo "FAIL: scan found no bare hook commands -- scan is broken" >&2; return 99; }
-                    return "$bad"
-                  }
+                                    # scan <marketplace-dir> <programs-dir>; violations to stderr,
+                                    # exit status = violation count (0 = ok).
+                                    scan() {
+                                      local mkt="$1" progs="$2" bad=0 scanned=0 pj name hooks cmds c f own reqs uses
+                                      for pj in "$mkt"/*/.claude-plugin/plugin.json; do
+                                        [ -f "$pj" ] || continue
+                                        name="$(basename "$(dirname "$(dirname "$pj")")")"
+                                        reqs="$(jq -r '(.requires // [])[]' "$pj")"
+                                        uses="$(jq -r '(.uses // [])[]' "$pj")"
+                                        for f in $reqs; do
+                                          if [ ! -f "$progs/$f/default.nix" ]; then
+                                            echo "FAIL: plugin '$name' requires feature '$f' but home/programs/$f/default.nix is missing (the plugin would never load)" >&2
+                                            bad=$((bad + 1))
+                                          fi
+                                        done
+                                        cmds=""
+                                        hooks="$mkt/$name/hooks/hooks.json"
+                                        if [ -f "$hooks" ]; then
+                                          cmds="$cmds $(jq -r '[.. | objects | select(.type? == "command") | .command | split(" ")[0]] | unique[]' "$hooks")"
+                                        fi
+                                        cmds="$cmds $(jq -r '[(.lspServers // {})[] | .command | split(" ")[0]] | unique[]' "$pj")"
+                                        for c in $cmds; do
+                                          # bare = no '/' and no '$' (not a path / plugin-root ref)
+                                          case "$c" in */*|*'$'*) continue ;; esac
+                                          scanned=$((scanned + 1))
+                                          own="$(awk -v n="$c" '$1 == n { print $2 }' ${binaryOwners})"
+                                          if [ -z "$own" ]; then
+                                            echo "FAIL: plugin '$name' invokes bare command '$c' which is not in binaryOwners (add it, owned by its home/programs feature or '-')" >&2
+                                            bad=$((bad + 1))
+                                          elif [ "$own" != "-" ] && ! grep -qxF "$own" <<<"$reqs"; then
+                                            echo "FAIL: plugin '$name' invokes '$c' (owned by feature '$own') but its plugin.json requires does not list '$own'" >&2
+                                            bad=$((bad + 1))
+                                          fi
+                                        done
+                                        while read -r c own; do
+                                          [ "$own" != "-" ] || continue
+                                          if grep -rqE --include='*.md' "(^|[[:space:]\`(])$c([[:space:]\`).,:;]|\$)" "$mkt/$name"; then
+                                            if ! grep -qxF "$own" <<<"$reqs
+                  $uses"; then
+                                              echo "FAIL: plugin '$name' markdown mentions '$c' (owned by feature '$own') but plugin.json lists '$own' in neither requires nor uses" >&2
+                                              bad=$((bad + 1))
+                                            fi
+                                          fi
+                                        done < ${binaryOwners}
+                                      done
+                                      echo "scanned $scanned bare hook/lsp command(s)" >&2
+                                      [ "$scanned" -gt 0 ] || { echo "FAIL: scan found no bare commands -- scan is broken" >&2; return 99; }
+                                      return "$bad"
+                                    }
 
-                  # Positive: the current tree passes.
-                  scan "${surface}/claude-marketplace" "${surface}/home/programs"
+                                    # Positive: the current tree passes.
+                                    scan "${surface}/claude-marketplace" "${surface}/home/programs"
 
-                  # Negative 1: unmapped default-enabled plugin with a bare hook.
-                  fx="$PWD/fixture"
-                  mkdir -p "$fx/mkt/newplug/.claude-plugin" "$fx/mkt/newplug/hooks" "$fx/progs/newplug"
-                  echo '{"name":"newplug","defaultEnabled":true}' > "$fx/mkt/newplug/.claude-plugin/plugin.json"
-                  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"newplug-bin"}]}]}}' > "$fx/mkt/newplug/hooks/hooks.json"
-                  echo 'enable = lib.mkEnableOption "x";' > "$fx/progs/newplug/default.nix"
-                  if scan "$fx/mkt" "$fx/progs" 2>neg.log; then
-                    echo "FAIL: negative fixture (unmapped violating plugin) was NOT flagged" >&2
-                    exit 1
-                  fi
-                  grep -q "no entry in pluginProgram" neg.log
+                                    # mkfx <plugin> <plugin.json> <hooks-command|none> <markdown-body|none> <feature-dir|none>
+                                    fx="$PWD/fixture"
+                                    mkfx() {
+                                      rm -rf "$fx"
+                                      mkdir -p "$fx/mkt/$1/.claude-plugin" "$fx/mkt/$1/skills" "$fx/progs"
+                                      echo "$2" > "$fx/mkt/$1/.claude-plugin/plugin.json"
+                                      if [ "$3" != none ]; then
+                                        mkdir -p "$fx/mkt/$1/hooks"
+                                        echo "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$3\"}]}]}}" > "$fx/mkt/$1/hooks/hooks.json"
+                                      fi
+                                      if [ "$4" != none ]; then echo "$4" > "$fx/mkt/$1/skills/s.md"; fi
+                                      if [ "$5" != none ]; then mkdir -p "$fx/progs/$5"; echo 'x' > "$fx/progs/$5/default.nix"; fi
+                                    }
+                                    # negfx <log> <expected-substring> -- run scan over the fixture, require FAIL.
+                                    negfx() {
+                                      if scan "$fx/mkt" "$fx/progs" 2>"$1"; then
+                                        echo "FAIL: negative fixture ($2) was NOT flagged" >&2
+                                        exit 1
+                                      fi
+                                      grep -q "$2" "$1" || { echo "FAIL: negative fixture did not report '$2'" >&2; cat "$1" >&2; exit 1; }
+                                    }
 
-                  # Negative 2: mapped plugin whose module defaults enable=false
-                  # and is not in the cutover list.
-                  rm -rf "$fx"
-                  mkdir -p "$fx/mkt/pb/.claude-plugin" "$fx/mkt/pb/hooks" "$fx/progs/session-mode"
-                  echo '{"name":"pb","defaultEnabled":true}' > "$fx/mkt/pb/.claude-plugin/plugin.json"
-                  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"session-mode x"}]}]}}' > "$fx/mkt/pb/hooks/hooks.json"
-                  echo 'enable = lib.mkEnableOption "x";' > "$fx/progs/session-mode/default.nix"
-                  if scan "$fx/mkt" "$fx/progs" 2>neg2.log; then
-                    echo "FAIL: negative fixture (default-false module) was NOT flagged" >&2
-                    exit 1
-                  fi
-                  grep -q "enable defaults to false" neg2.log
+                                    # Negative 1: bare hook command not in the closed binaryOwners list.
+                                    mkfx newplug '{"name":"newplug"}' newplug-bin none none
+                                    negfx neg1.log "not in binaryOwners"
 
-                  echo "ok: current tree passes; violating fixtures are flagged"
-                  touch $out
+                                    # Negative 2: owned hook command, requires does not list the owner.
+                                    mkfx pb '{"name":"pb"}' "session-mode x" none session-mode
+                                    negfx neg2.log "does not list"
+
+                                    # Negative 3: lspServers command not in binaryOwners.
+                                    mkfx lsp '{"name":"lsp","lspServers":{"x":{"command":"mystery-ls"}}}' none none none
+                                    negfx neg3.log "not in binaryOwners"
+
+                                    # Negative 4: markdown mentions an owned binary, feature in neither
+                                    # requires nor uses (a hook command keeps the scan alive).
+                                    mkfx md '{"name":"md"}' "pb x" 'run `bd list` first' beads
+                                    negfx neg4.log "neither requires nor uses"
+
+                                    # Negative 5: requires names a feature with no program module.
+                                    mkfx req '{"name":"req","requires":["nope"]}' "pb x" none none
+                                    negfx neg5.log "default.nix is missing"
+
+                                    echo "ok: current tree passes; violating fixtures are flagged"
+                                    touch $out
                 '';
 
               # test-claude-tool-tracker-mod (docket pg2-aj5iq8, packet T5): runs the
@@ -13952,6 +13998,26 @@
                           key = "off-plugin@mock-repo-marketplace-local";
                           defaultEnabled = false;
                         }
+                        # requires: fail-closed on every listed feature (tc-u7kqs).
+                        {
+                          name = "gated-plugin";
+                          version = "1.0.0+cccccccc";
+                          key = "gated-plugin@mock-repo-marketplace-local";
+                          defaultEnabled = true;
+                          requires = [
+                            "feat-on"
+                            "feat-off"
+                          ];
+                          uses = [ ];
+                        }
+                        {
+                          name = "undeclared-plugin";
+                          version = "1.0.0+dddddddd";
+                          key = "undeclared-plugin@mock-repo-marketplace-local";
+                          defaultEnabled = true;
+                          requires = [ "feat-undeclared" ];
+                          uses = [ ];
+                        }
                       ];
                     };
                   } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
@@ -13969,19 +14035,33 @@
                             # and contributes to (the real options live in
                             # claude/claude-settings, not pulled in here).
                             options = {
-                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
-                              phillipgreenii.programs.claude-code.settings = {
-                                extraKnownMarketplaces = lib.mkOption {
-                                  type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
-                                  default = { };
+                              # Feature stubs for the `requires` gate; `feat-undeclared`
+                              # is deliberately NOT declared (reads as off).
+                              phillipgreenii.programs = {
+                                claude-code = {
+                                  enable = lib.mkEnableOption "claude (stub)";
+                                  settings = {
+                                    extraKnownMarketplaces = lib.mkOption {
+                                      type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                                      default = { };
+                                    };
+                                    enabledPlugins = lib.mkOption {
+                                      type = lib.types.attrsOf lib.types.bool;
+                                      default = { };
+                                    };
+                                    plugins = lib.mkOption {
+                                      type = lib.types.listOf lib.types.str;
+                                      default = [ ];
+                                    };
+                                  };
                                 };
-                                enabledPlugins = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.bool;
-                                  default = { };
+                                feat-on.enable = lib.mkOption {
+                                  type = lib.types.bool;
+                                  default = true;
                                 };
-                                plugins = lib.mkOption {
-                                  type = lib.types.listOf lib.types.str;
-                                  default = [ ];
+                                feat-off.enable = lib.mkOption {
+                                  type = lib.types.bool;
+                                  default = false;
                                 };
                               };
                               home.homeDirectory = lib.mkOption {
@@ -13998,6 +14078,17 @@
                         cfg
                       ];
                     }).config;
+
+                  # All required features on, plus an override that tries to force
+                  # the undeclared-feature plugin on (it must stay off).
+                  featOn = evalCfg {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                      marketplaces.overrides."undeclared-plugin@mock-repo-marketplace-local" = true;
+                    };
+                    phillipgreenii.programs.feat-off.enable = true;
+                  };
 
                   # Baseline: registered, claude enabled, no overrides.
                   base = evalCfg {
@@ -14037,6 +14128,17 @@
                 # enabledPlugins resolved from defaultEnabled.
                 assert baseSettings.enabledPlugins."on-plugin@mock-repo-marketplace-local" == true;
                 assert baseSettings.enabledPlugins."off-plugin@mock-repo-marketplace-local" == false;
+                # requires: any required feature off => plugin off (fail closed), an
+                # undeclared required feature reads as off without erroring, and all
+                # features on => defaultEnabled applies. An override cannot bypass it.
+                assert baseSettings.enabledPlugins."gated-plugin@mock-repo-marketplace-local" == false;
+                assert baseSettings.enabledPlugins."undeclared-plugin@mock-repo-marketplace-local" == false;
+                assert
+                  featOn.phillipgreenii.programs.claude-code.settings.enabledPlugins."gated-plugin@mock-repo-marketplace-local"
+                  == true;
+                assert
+                  featOn.phillipgreenii.programs.claude-code.settings.enabledPlugins."undeclared-plugin@mock-repo-marketplace-local"
+                  == false;
                 # plugins lists all keys regardless of enable state.
                 assert lib.elem "on-plugin@mock-repo-marketplace-local" baseSettings.plugins;
                 assert lib.elem "off-plugin@mock-repo-marketplace-local" baseSettings.plugins;
