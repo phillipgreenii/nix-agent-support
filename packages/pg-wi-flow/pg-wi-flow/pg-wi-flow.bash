@@ -1437,6 +1437,27 @@ pgwf_release_if_session_holds() {
   pgwf_tracker_release "$id" "$actor" "$PG_WI_FLOW_IDENT" >/dev/null
 }
 
+# pgwf_record_answer_on_parents QID ACTOR TEXT -- surfaces an answered
+# question on every item it blocks (tc-5as4k): appends TEXT to the parent's
+# notes and to its wi_answers metadata (rendered as `answers:`), and stamps
+# wi_answered_round with the parent's current round so
+# pgwf_context_must_escalate grants one more review round instead of
+# re-escalating the same question at the iteration bound.
+pgwf_record_answer_on_parents() {
+  local qid="$1" actor="$2" text="$3" parents parent_id parent_json prior round
+  parents="$(pgwf_tracker_blocks "$qid")" || return 1
+  while IFS= read -r parent_id; do
+    [[ -z $parent_id ]] && continue
+    parent_json="$(pgwf_tracker_show_json "$parent_id")" || return 1
+    prior="$(jq -r '.metadata.wi_answers // empty' <<<"$parent_json")"
+    round="$(jq -r '.metadata.wi_round // 0' <<<"$parent_json")"
+    pgwf_tracker_update "$parent_id" "$actor" \
+      --append-notes "$text" \
+      --set-metadata "wi_answers=${prior:+$prior | }${text}" \
+      --set-metadata "wi_answered_round=${round}" >/dev/null || return 1
+  done < <(jq -r '.[].id' <<<"$parents")
+}
+
 # pgwf_cmd_resolve ID (--decision D --rationale R | --answer A | --abandon
 # --reason-code r | --defer d) -- the four fixed outcomes, verbatim
 # [design: ## State model -> Axis 2, resolve outcomes paragraph;
@@ -1598,6 +1619,7 @@ pgwf_cmd_resolve() {
 
   if [[ $have_decision -eq 1 ]]; then
     pgwf_tracker_update "$id" "$actor" --append-notes "decision: ${decision}; rationale: ${rationale}" >/dev/null || return 1
+    pgwf_record_answer_on_parents "$id" "$actor" "${id} decision: ${decision}; rationale: ${rationale}" || return 1
     # A destructive-actions question approved with NO authorizing doc files
     # a kind:docs follow-up under every parent it blocked, so the next
     # occurrence of the same action has a doc to cite. The question is
@@ -1624,6 +1646,7 @@ pgwf_cmd_resolve() {
 
   if [[ $have_answer -eq 1 ]]; then
     pgwf_tracker_update "$id" "$actor" --append-notes "answer: ${answer}" >/dev/null || return 1
+    pgwf_record_answer_on_parents "$id" "$actor" "${id} answer: ${answer}" || return 1
     pgwf_tracker_close "$id" "$answer" "$actor" >/dev/null
     return $?
   fi

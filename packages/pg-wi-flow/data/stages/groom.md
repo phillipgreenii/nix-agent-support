@@ -51,6 +51,9 @@ Each reviewer records its own verdict directly, in its own Bash call, with
    back to step 1.
 4. On `WI_MUST_ESCALATE=true`: run `pg-wi-flow escalate <id> --question "<why>" --trigger q:stall` with the last
    verdicts attached. Consult `pg-wi-flow escalate --help` for the exact syntax.
+   When the render shows an `answers:` line, an operator already answered the question that stalled
+   this item: `WI_MUST_ESCALATE` is then false for exactly one more review round. Apply the
+   recorded answer, run the reviewers again and `round` again; do not re-escalate the same question.
 5. When a concern's verdict was blocked and you escalate because of it, run
    `pg-wi-flow escalate <id> --question "<why>" --trigger <q:...> --concern <that concern's name>` so a destructive-actions block is
    recognizable to `resolve`.

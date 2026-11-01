@@ -249,12 +249,17 @@ dep_fixture() {
 
 @test "resolve --answer: clears the attention label and closes; parent is not touched" {
   show_fixture tc-q2 '{"id":"tc-q2","labels":["question","escalated","q:info"],"metadata":{}}'
+  show_fixture tc-parent3 '{"id":"tc-parent3","labels":[],"metadata":{"wi_round":"2"}}'
   dep_fixture tc-q2 up '[{"id":"tc-parent3","status":"open"}]'
   run pgwf_cmd_resolve tc-q2 --answer "it is fine"
   [ "$status" -eq 0 ]
   line="$(grep '^update tc-q2' "$MOCK_BD_LOG")"
   [[ "$line" == *"--remove-label escalated"* ]]
   grep -q -- "^close tc-q2 --reason it is fine" "$MOCK_BD_LOG"
+  # the answer is surfaced on the parent and grants one more round (tc-5as4k)
+  pline="$(grep '^update tc-parent3' "$MOCK_BD_LOG")"
+  [[ "$pline" == *"wi_answered_round=2"* ]]
+  [[ "$pline" == *"it is fine"* ]]
   ! grep -q '^close tc-parent3' "$MOCK_BD_LOG"
 }
 
@@ -378,6 +383,7 @@ dep_fixture() {
 
 @test "resolve --decision on a question with no recorded concern files no follow-up" {
   show_fixture tc-qd3 '{"id":"tc-qd3","labels":["question","escalated","q:info"],"metadata":{}}'
+  show_fixture tc-parentD '{"id":"tc-parentD","labels":[],"metadata":{}}'
   dep_fixture tc-qd3 up '[{"id":"tc-parentD","status":"open"}]'
   run pgwf_cmd_resolve tc-qd3 --decision "go ahead" --rationale "cleanup"
   [ "$status" -eq 0 ]

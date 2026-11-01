@@ -470,14 +470,22 @@ pgwf_context_round() {
   jq -r '.metadata.wi_round // 0' <<<"$item_json"
 }
 
-# pgwf_context_must_escalate CONFIG_JSON ROUND -- "true" when ROUND has
-# reached config.iteration_bound [design: ## The flow -> "Per-stage loop",
-# step 2: "When the counter reaches iteration_bound without ready, the CLI
-# prints WI_MUST_ESCALATE=true"], else "false".
+# pgwf_context_must_escalate CONFIG_JSON ROUND [ANSWERED_ROUND] -- "true"
+# when ROUND has reached config.iteration_bound [design: ## The flow ->
+# "Per-stage loop", step 2: "When the counter reaches iteration_bound
+# without ready, the CLI prints WI_MUST_ESCALATE=true"], else "false".
+# ANSWERED_ROUND is metadata.wi_answered_round, stamped by resolve
+# --answer/--decision with the parent's round when its blocker was answered:
+# while ROUND still equals it, the operator has just settled the question
+# that stalled the loop, so exactly one more review round is allowed
+# (tc-5as4k). Once that round runs, ROUND moves past it and the bound
+# applies again.
 pgwf_context_must_escalate() {
-  local config_json="$1" round="$2" bound
+  local config_json="$1" round="$2" answered_round="${3:-}" bound
   bound="$(pgwf_config_iteration_bound "$config_json")"
-  if [[ $round -ge $bound ]]; then
+  if [[ -n $answered_round && $round -eq $answered_round ]]; then
+    printf 'false\n'
+  elif [[ $round -ge $bound ]]; then
     printf 'true\n'
   else
     printf 'false\n'
@@ -509,7 +517,7 @@ pgwf_context_facts() {
   local parent worktree premise stale round must_escalate legacy_human type title description
   local classification_stage kinds_rendered topics_rendered topics_nl
   local instructions_ref escalation_ref checklist_text_val
-  local duplicates related docs siblings blocked_parents same_fp questions concern_names_nl
+  local duplicates related docs siblings blocked_parents same_fp questions concern_names_nl answers
 
   item_json="$(pgwf_tracker_show_json "$id")" || return 1
   class="$(pgwf_context_class "$config_json" "$item_json")"
@@ -535,7 +543,9 @@ pgwf_context_facts() {
   fi
 
   round="$(pgwf_context_round "$item_json")"
-  must_escalate="$(pgwf_context_must_escalate "$config_json" "$round")"
+  must_escalate="$(pgwf_context_must_escalate "$config_json" "$round" \
+    "$(jq -r '.metadata.wi_answered_round // empty' <<<"$item_json")")"
+  answers="$(jq -r '.metadata.wi_answers // empty' <<<"$item_json")"
   legacy_human=false
   [[ $class == legacy-human ]] && legacy_human=true
 
@@ -610,23 +620,24 @@ pgwf_context_facts() {
   # in, JSON text out); together with the already-JSON array/object
   # pieces, everything is slurped into one array via stdin and reshaped
   # into a single object below -- content flows through pipes, never argv.
-  local title_json description_json premise_json checklist_json content_json
+  local title_json description_json premise_json checklist_json answers_json content_json
   title_json="$(printf '%s' "$title" | jq -Rs '.')"
   description_json="$(printf '%s' "$description" | jq -Rs '.')"
   premise_json="$(printf '%s' "$premise" | jq -Rs '.')"
   checklist_json="$(printf '%s' "$checklist_text_val" | jq -Rs '.')"
+  answers_json="$(printf '%s' "$answers" | jq -Rs '.')"
   content_json="$(
     printf '%s\n' \
       "$title_json" "$description_json" "$premise_json" "$checklist_json" \
       "$concerns_json" "$skipped_json" \
       "$duplicates" "$related" "$docs" \
-      "$siblings" "$blocked_parents" "$same_fp" "$questions" |
+      "$siblings" "$blocked_parents" "$same_fp" "$questions" "$answers_json" |
       jq -cs '{
         title: .[0], description: .[1], premise: .[2], checklist: .[3],
         concerns: .[4], skipped_concerns: .[5],
         duplicates: .[6], related: .[7], applicable_docs: .[8],
         siblings: .[9], blocked_parents: .[10], same_fingerprint: .[11],
-        questions: .[12]
+        questions: .[12], answers: .[13]
       }'
   )"
 
@@ -648,7 +659,7 @@ pgwf_context_facts() {
       checklist: $content.checklist, concerns: $content.concerns, skipped_concerns: $content.skipped_concerns,
       duplicates: $content.duplicates, related: $content.related, applicable_docs: $content.applicable_docs,
       siblings: $content.siblings, blocked_parents: $content.blocked_parents, same_fingerprint: $content.same_fingerprint,
-      questions: $content.questions, title: $content.title, description: $content.description, lessons: $lessons, review_mode: $review_mode
+      questions: $content.questions, answers: $content.answers, title: $content.title, description: $content.description, lessons: $lessons, review_mode: $review_mode
     }'
 }
 
@@ -841,6 +852,12 @@ pgwf_context_format_render() {
   fi
   if pgwf_context_include "$config_json" questions; then
     printf 'questions: %s\n' "$(pgwf_context_join_list "$(jq -c '.questions' <<<"$f")")"
+  fi
+  # Operator answers to this item's closed questions (resolve --answer/
+  # --decision): structural, never gated by render.include, so a settled
+  # decision always reaches the next worker (tc-5as4k).
+  if [[ -n "$(jq -r '.answers' <<<"$f")" ]]; then
+    printf 'answers: %s\n' "$(jq -r '.answers' <<<"$f")"
   fi
 }
 
