@@ -132,3 +132,56 @@ func (c Client) ScanPatchIDCommits(ctx context.Context, repoPath, revRange strin
 	}
 	return byID, nil
 }
+
+// CommitInfo identifies a commit by what git preserves across a rebase: the author
+// date and the subject (a rebase rewrites the committer date and the sha, never the
+// author date).
+type CommitInfo struct {
+	SHA        string
+	AuthorDate string // %aI, strict ISO 8601 with the author's own UTC offset
+	Subject    string // %s
+}
+
+const commitInfoFormat = "--format=%H%x00%aI%x00%s"
+
+// parseCommitInfo parses one `git log --format=%H%x00%aI%x00%s` line.
+func parseCommitInfo(line string) (CommitInfo, bool) {
+	parts := strings.SplitN(line, "\x00", 3)
+	if len(parts) != 3 || parts[0] == "" {
+		return CommitInfo{}, false
+	}
+	return CommitInfo{SHA: parts[0], AuthorDate: parts[1], Subject: parts[2]}, true
+}
+
+// CommitInfoOf returns the sha, author date and subject of commitish.
+func (c Client) CommitInfoOf(ctx context.Context, repoPath, commitish string) (CommitInfo, error) {
+	res, err := c.R.Run(ctx, "git", []string{"-C", repoPath, "log", "-1", commitInfoFormat, commitish, "--"}, run.Options{})
+	if err != nil {
+		return CommitInfo{}, fmt.Errorf("git log -1 %s: %w", commitish, err)
+	}
+	ci, ok := parseCommitInfo(strings.TrimSpace(res.Stdout))
+	if !ok {
+		return CommitInfo{}, fmt.Errorf("git log -1 %s: unparseable output", commitish)
+	}
+	return ci, nil
+}
+
+// FindByAuthorDateSubject returns the SHAs of the non-merge commits in revRange
+// (split on spaces, as in ScanPatchIDCommits) whose author date AND subject both
+// equal the given values.
+func (c Client) FindByAuthorDateSubject(ctx context.Context, repoPath, revRange, authorDate, subject string) ([]string, error) {
+	args := []string{"-C", repoPath, "log", "--no-merges", commitInfoFormat}
+	args = append(args, strings.Fields(revRange)...)
+	args = append(args, "--")
+	res, err := c.R.Run(ctx, "git", args, run.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("git log %s: %w", revRange, err)
+	}
+	var shas []string
+	for line := range strings.SplitSeq(res.Stdout, "\n") {
+		if ci, ok := parseCommitInfo(strings.TrimRight(line, "\r")); ok && ci.AuthorDate == authorDate && ci.Subject == subject {
+			shas = append(shas, ci.SHA)
+		}
+	}
+	return shas, nil
+}

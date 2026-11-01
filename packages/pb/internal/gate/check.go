@@ -73,6 +73,14 @@ type CheckResult struct {
 // (a full `git log -p` of this repo is ~150 MB held in memory).
 const gateLookback = 30 * 24 * time.Hour
 
+// Gate metadata keys written by `pb gate create` (tc-xr6lj) and read by the
+// author-date+subject fallback in Check. gated_sha is informational only.
+const (
+	metaGatedSHA        = "gated_sha"
+	metaGatedAuthorDate = "gated_author_date"
+	metaGatedSubject    = "gated_subject"
+)
+
 func parseAwaitID(s string) (wsid, repo, patchID string, ok bool) {
 	parts := strings.SplitN(s, ":", 3)
 	if len(parts) != 3 {
@@ -160,6 +168,7 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			if baseIsAncestor {
 				rng = base + ".." + repo.AppliedRef
 			}
+			scanned := []string{rng} // every range merged into set, for the date+subject fallback
 			set, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, rng)
 			if err != nil {
 				result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
@@ -183,11 +192,13 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 				if _, found := set[patchID]; !found {
 					if ts, perr := time.Parse(time.RFC3339, g.CreatedAt); perr == nil {
 						since := ts.Add(-gateLookback).UTC().Format(time.RFC3339)
-						wider, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, fmt.Sprintf("--since=%s %s", since, repo.AppliedRef))
+						widerRng := fmt.Sprintf("--since=%s %s", since, repo.AppliedRef)
+						wider, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, widerRng)
 						if err != nil {
 							result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
 							continue
 						}
+						scanned = append(scanned, widerRng)
 						for id, shas := range wider {
 							if _, seen := set[id]; !seen {
 								set[id] = shas
@@ -214,11 +225,13 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			// stays blocked.
 			if baseIsAncestor && base != repo.AppliedRef {
 				if _, found := set[patchID]; !found {
-					below, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, fmt.Sprintf("-n %d %s", p.LastN, base))
+					belowRng := fmt.Sprintf("-n %d %s", p.LastN, base)
+					below, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, belowRng)
 					if err != nil {
 						result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
 						continue
 					}
+					scanned = append(scanned, belowRng)
 					for id, shas := range below {
 						if _, seen := set[id]; !seen {
 							set[id] = shas
@@ -233,6 +246,39 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			if gatedCommits, found := set[patchID]; found {
 				d.resolveOrBlock(ctx, db.Dir, g.ID, repoName, repo, gatedCommits, p, stale, &result)
 				continue
+			}
+			// AUTHOR-DATE + SUBJECT FALLBACK (tc-xr6lj). A patch-id survives a clean
+			// rebase but NOT one that changes hunk context (the ff-merge flow's
+			// `pull --rebase` onto a main that edited neighbouring lines), which
+			// orphans the gated commit's patch-id for good (gate tc-m3483). When
+			// `pb gate create` recorded the gated commit's author date and subject,
+			// look for a commit in the scanned ranges carrying both: git preserves the
+			// author date across a rebase, and requiring the subject too (and the
+			// exact date, to the second plus offset) keeps a different commit with the
+			// same subject from matching. Chosen over a stored-sha reachability check
+			// because the original sha is orphaned and may be gc'd, so reachability
+			// cannot be evaluated, and a reflog/rebase mapping is not durable. Hits
+			// go through the SAME condition 2 as a patch-id hit. Gates without the
+			// recorded fields (legacy) skip this and behave exactly as before.
+			if date, subj := g.Metadata[metaGatedAuthorDate], g.Metadata[metaGatedSubject]; date != "" && subj != "" {
+				var matches []string
+				var scanErr error
+				for _, r := range scanned {
+					shas, err := d.PatchID.FindByAuthorDateSubject(ctx, repo.Path, r, date, subj)
+					if err != nil {
+						scanErr = err
+						break
+					}
+					matches = append(matches, shas...)
+				}
+				if scanErr != nil {
+					result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + scanErr.Error()})
+					continue
+				}
+				if len(matches) > 0 {
+					d.resolveOrBlock(ctx, db.Dir, g.ID, repoName, repo, matches, p, stale, &result)
+					continue
+				}
 			}
 			// RAW-SHA REPAIR (tc-htcum): `pb gate create` / `attach-verified-child`
 			// always key a gate on a git patch-id, which survives a rebase. A gate

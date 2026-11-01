@@ -109,6 +109,19 @@ func Create(ctx context.Context, d CreateDeps, p CreateParams) (CreateResult, er
 		if err := d.BD.SetMetadata(ctx, dbDir, gid, "applied_baseline", repo.AppliedRef); err != nil {
 			return result, fmt.Errorf("gate %s created but baseline write failed: %w", gid, err)
 		}
+		// Record the commit's identity for the author-date+subject fallback in
+		// Check (tc-xr6lj): a patch-id is orphaned by a context-changing rebase,
+		// the author date and subject are not. Best-effort: if git cannot say, the
+		// gate is simply created as a legacy (patch-id only) gate.
+		if ci, err := d.PatchID.CommitInfoOf(ctx, repo.Path, cish); err == nil {
+			for _, kv := range [][2]string{
+				{metaGatedSHA, ci.SHA}, {metaGatedAuthorDate, ci.AuthorDate}, {metaGatedSubject, ci.Subject},
+			} {
+				if err := d.BD.SetMetadata(ctx, dbDir, gid, kv[0], kv[1]); err != nil {
+					return result, fmt.Errorf("gate %s created but %s write failed: %w", gid, kv[0], err)
+				}
+			}
+		}
 		result.Gates = append(result.Gates, CreatedGate{
 			GateID: gid, AwaitID: awaitID, Repo: p.Repo, PatchID: pid, AppliedBaseline: repo.AppliedRef,
 		})

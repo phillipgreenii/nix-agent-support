@@ -162,3 +162,37 @@ func TestCreate_beadNotInAnyDBErrors(t *testing.T) {
 		t.Fatal("expected error when bead not found in any DB")
 	}
 }
+
+// TestCreate_recordsCommitIdentity: tc-xr6lj. Create records the gated commit's sha,
+// author date and subject so Check can survive a context-changing rebase.
+func TestCreate_recordsCommitIdentity(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: createInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "show", "b-1", "--json"}, run.Result{Stdout: "{}"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 sha1\n"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-1", "--format=%H%x00%aI%x00%s", "HEAD", "--"},
+		run.Result{Stdout: "sha1\x002026-06-20T10:00:00+00:00\x00tune five\n"}, nil)
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
+		"--await-id", "home:repo-a:abc123", "--reason", "r", "--json",
+	}, run.Result{Stdout: `{"data":{"id":"g-1"}}`}, nil)
+	for _, kv := range []string{
+		"applied_baseline=base1", "gated_sha=sha1", "gated_author_date=2026-06-20T10:00:00+00:00", "gated_subject=tune five",
+	} {
+		f.AddResponse("bd", []string{"-C", "/ws", "update", "g-1", "--set-metadata", kv}, run.Result{}, nil)
+	}
+	d := CreateDeps{PN: pn.Client{R: f}, BD: bd.Client{R: f}, PatchID: patchid.Client{R: f}, R: f, Discover: stubDiscoverWS}
+	if _, err := Create(context.Background(), d, CreateParams{WorkspaceDir: "/ws", BeadID: "b-1", Repo: "repo-a", Reason: "r"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	n := 0
+	for _, c := range f.Calls() {
+		if c.Name == "bd" && len(c.Args) > 4 && c.Args[3] == "g-1" && c.Args[4] == "--set-metadata" {
+			n++
+		}
+	}
+	if n != 4 {
+		t.Errorf("set-metadata calls = %d, want 4", n)
+	}
+}
