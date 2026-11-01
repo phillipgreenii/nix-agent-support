@@ -35,28 +35,60 @@ setup() {
   LINKED="$ROOT/linked-wt"
   OTHER="$TEST_DIR/other-clone"
 
-  # Remote with main and a pr branch (seed -> pr1).
-  gfh_init_bare "$REMOTE"
-  gfh_clone "$REMOTE" "$MAIN_WT" "pg-rescue-push-branch"
-  echo seed >"$MAIN_WT/f"
-  git -C "$MAIN_WT" add f
-  git -C "$MAIN_WT" commit -q -m seed
-  git -C "$MAIN_WT" push -q origin main
-  git -C "$MAIN_WT" checkout -q -b pr
-  echo pr1 >"$MAIN_WT/f"
-  git -C "$MAIN_WT" commit -q -am pr1
-  git -C "$MAIN_WT" push -q origin pr
-  git -C "$MAIN_WT" checkout -q main
+  seed_fixture
 
   OLD_SHA=$(git -C "$REMOTE" rev-parse refs/heads/pr)
   BASE_SHA=$(git -C "$REMOTE" rev-parse refs/heads/main)
-
-  mkdir -p "$ROOT"
-  # The role's linked worktree: the PR branch rebased/amended locally.
-  git -C "$MAIN_WT" worktree add -q -b pr-local "$LINKED" pr
-  echo rebased >"$LINKED/f"
-  git -C "$LINKED" commit -q -am rebased
   LOCAL_SHA=$(git -C "$LINKED" rev-parse HEAD)
+}
+
+# Perf (tc-7kqc8): the remote (main and a pr branch: seed -> pr1), the main working
+# tree and the role's linked worktree (the PR branch rebased locally) are built ONCE
+# per file, in a throwaway gfh tree inside a subshell (so the harness environment
+# reset never reaches the file-level process); each test copies the finished tree
+# with cp -a. Two things hold absolute paths and are re-pointed by seed_fixture:
+# the clone's origin URL and the linked worktree's gitdir links.
+seed_template() { printf '%s\n' "$BATS_FILE_TMPDIR/seed-template"; }
+
+setup_file() {
+  if [[ -z ${GFH_LIB:-} ]]; then
+    echo "GFH_LIB is not set: run under the workspace .envrc (direnv) or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+    return 1
+  fi
+  # shellcheck disable=SC1090,SC1091
+  source "$GFH_LIB"
+  (
+    set -e
+    gfh_setup "pg-rescue-push-branch"
+    local seed="$GFH_WORK/seed" remote main_wt linked
+    remote="$seed/remote.git"
+    main_wt="$seed/main-wt"
+    linked="$seed/wt-root/linked-wt"
+    gfh_init_bare "$remote"
+    gfh_clone "$remote" "$main_wt" "pg-rescue-push-branch"
+    echo seed >"$main_wt/f"
+    git -C "$main_wt" add f
+    git -C "$main_wt" commit -q -m seed
+    git -C "$main_wt" push -q origin main
+    git -C "$main_wt" checkout -q -b pr
+    echo pr1 >"$main_wt/f"
+    git -C "$main_wt" commit -q -am pr1
+    git -C "$main_wt" push -q origin pr
+    git -C "$main_wt" checkout -q main
+    mkdir -p "$seed/wt-root"
+    git -C "$main_wt" worktree add -q -b pr-local "$linked" pr
+    echo rebased >"$linked/f"
+    git -C "$linked" commit -q -am rebased
+    cp -a "$seed" "$(seed_template)"
+    gfh_teardown
+  )
+}
+
+# seed_fixture: lay the cached seed tree down under TEST_DIR and repair its paths.
+seed_fixture() {
+  cp -a "$(seed_template)/." "$TEST_DIR/"
+  git -C "$MAIN_WT" remote set-url origin "$REMOTE"
+  git -C "$MAIN_WT" worktree repair "$LINKED"
 }
 
 teardown() {

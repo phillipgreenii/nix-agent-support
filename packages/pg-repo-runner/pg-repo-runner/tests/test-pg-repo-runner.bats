@@ -8,6 +8,45 @@
 # documented PG_REPO_RUNNER_LOADAVG override; nothing here pushes, and every repo
 # in the fixture config has push = false.
 
+# Perf (tc-7kqc8): the four bare remotes and their clones are built ONCE per file,
+# in a throwaway gfh tree inside a subshell (so the harness environment reset never
+# reaches the file-level process), and each test copies the finished tree with
+# cp -a. A clone records its remote by absolute path, so seed_fixture re-points
+# every origin at the copy; nothing else in the tree holds an absolute path.
+seed_template() { printf '%s\n' "$BATS_FILE_TMPDIR/seed-template"; }
+
+setup_file() {
+  if [[ -z ${GFH_LIB:-} ]]; then
+    echo "GFH_LIB is not set: run under the workspace .envrc (direnv) or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+    return 1
+  fi
+  # shellcheck disable=SC1090,SC1091
+  source "$GFH_LIB"
+  (
+    set -e
+    gfh_setup "pg-repo-runner"
+    TEST_DIR="$GFH_WORK/seed"
+    WS="$TEST_DIR/ws"
+    mkdir -p "$WS" "$TEST_DIR/remotes" "$TEST_DIR/elsewhere"
+    make_repo "$WS/nix-alpha" alpha
+    make_repo "$WS/nix-beta" beta
+    make_repo "$WS/nix-gamma" gamma
+    make_repo "$TEST_DIR/elsewhere/nix-link-target" link
+    cp -a "$TEST_DIR" "$(seed_template)"
+    gfh_teardown
+  )
+}
+
+# seed_fixture: lay the cached seed tree down under TEST_DIR and re-point origins.
+seed_fixture() {
+  local t pair
+  t="$(seed_template)"
+  cp -a "$t/remotes" "$t/elsewhere" "$t/ws" "$TEST_DIR/"
+  for pair in "ws/nix-alpha alpha" "ws/nix-beta beta" "ws/nix-gamma gamma" "elsewhere/nix-link-target link"; do
+    git -C "$TEST_DIR/${pair% *}" remote set-url origin "$TEST_DIR/remotes/${pair#* }.git"
+  done
+}
+
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
@@ -30,12 +69,8 @@ setup() {
 
   TEST_DIR="$GFH_WORK"
   WS="$TEST_DIR/ws"
-  mkdir -p "$WS" "$TEST_DIR/remotes" "$TEST_DIR/elsewhere"
+  seed_fixture
 
-  make_repo "$WS/nix-alpha" alpha
-  make_repo "$WS/nix-beta" beta
-  make_repo "$WS/nix-gamma" gamma
-  make_repo "$TEST_DIR/elsewhere/nix-link-target" link
   ln -s "$TEST_DIR/elsewhere/nix-link-target" "$WS/nix-link"
   mkdir -p "$WS/nix-plain"
   ALPHA_SHA="$(git -C "$WS/nix-alpha" rev-parse HEAD)"
