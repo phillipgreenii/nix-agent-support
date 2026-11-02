@@ -286,6 +286,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	if err != nil {
 		return Interpretation{}, fmt.Errorf("interpret: decode pr show: %w", err)
 	}
+	pr.stack = facts.StackParents
 
 	// A truncated review read is a partial-data degradation. Gather already
 	// names it in Facts.Degraded; re-derive it from the stored pr show so an
@@ -438,6 +439,11 @@ type prShow struct {
 		Comments prConnectionReport `json:"comments"`
 		Reviews  prConnectionReport `json:"reviews"`
 	} `json:"connections"`
+
+	// stack is the chain of open PRs this PR is stacked on (Facts.StackParents).
+	// Not part of the pr show wire shape: Interpret sets it from the gathered
+	// facts after decoding.
+	stack []gather.StackParent
 }
 
 type prConnectionReport struct {
@@ -475,6 +481,39 @@ func (p prShow) allComments() []prComment {
 // (CONFLICTING) or merge-state status (DIRTY). UNKNOWN is not a conflict.
 func (p prShow) hasConflict() bool {
 	return p.Mergeable == "CONFLICTING" || p.MergeStateStatus == "DIRTY"
+}
+
+// stackParentDepthCap bounds the parent chain hasStackParentConflict follows.
+const stackParentDepthCap = 16
+
+// hasStackParentConflict reports that a PR this one is stacked on (its base
+// branch is the parent's head branch, followed up the chain) is OPEN and
+// conflicts (CONFLICTING or DIRTY): the stack cannot land even though this PR
+// reads clean against its base. A merged or closed parent is not a blocker and
+// ends the walk; a parent whose own CI fails does not block (conflict only).
+// The walk has a depth cap and a visited set, so a cycle terminates.
+func (p prShow) hasStackParentConflict() bool {
+	visited := map[string]bool{}
+	base := p.Base
+	for depth := 0; depth < stackParentDepthCap && base != ""; depth++ {
+		var parent *gather.StackParent
+		for i := range p.stack {
+			c := &p.stack[i]
+			if c.Branch == base && !visited[c.ID] {
+				parent = c
+				break
+			}
+		}
+		if parent == nil || parent.State != "open" {
+			return false
+		}
+		visited[parent.ID] = true
+		if parent.Mergeable == "CONFLICTING" || parent.MergeStateStatus == "DIRTY" {
+			return true
+		}
+		base = parent.Base
+	}
+	return false
 }
 
 func decodePRShow(raw json.RawMessage) (prShow, error) {

@@ -1,6 +1,10 @@
 package interpret
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+)
 
 // Team-panel placement matrix for the operator rulings of 2026-10-05:
 //
@@ -391,5 +395,43 @@ func TestDecodePRShow_ReviewThreadFields(t *testing.T) {
 	c := pr.Reviews[0].Comments[0]
 	if c.ReviewThreadID != "PRRT_1" || !c.ThreadOutdated {
 		t.Errorf("decoded comment = %+v; want ReviewThreadID PRRT_1 and ThreadOutdated", c)
+	}
+}
+
+// A stacked team PR whose open parent PR conflicts cannot land, so it is
+// awaiting the owner even though it reads clean against its own base
+// (pg2-7ew2bj). Only a conflict on an OPEN parent counts; CI is not judged.
+func TestClassifyPanel_TeamStackedParentConflict(t *testing.T) {
+	reasons := []string{MatchReasonTeamAuthored}
+	green := ciRollupResult{State: "success"}
+	child := func(stack ...gather.StackParent) prShow {
+		return prShow{State: "open", Branch: "c", Base: "b", MergeStateStatus: "BLOCKED", stack: stack}
+	}
+	sp := func(id, branch, base, state, mss string) gather.StackParent {
+		return gather.StackParent{ID: id, Branch: branch, Base: base, State: state, MergeStateStatus: mss}
+	}
+	tests := []struct {
+		name string
+		pr   prShow
+		want string
+	}{
+		{"no parent -> team", child(), PanelTeamAwaitingTeam},
+		{"parent DIRTY -> owner", child(sp("r#2", "b", "main", "open", "DIRTY")), PanelTeamAwaitingOwner},
+		{"parent CONFLICTING -> owner", child(gather.StackParent{ID: "r#2", Branch: "b", Base: "main", State: "open", Mergeable: "CONFLICTING"}), PanelTeamAwaitingOwner},
+		{"parent clean -> team", child(sp("r#2", "b", "main", "open", "CLEAN")), PanelTeamAwaitingTeam},
+		{"parent DIRTY but merged -> team", child(sp("r#2", "b", "main", "merged", "DIRTY")), PanelTeamAwaitingTeam},
+		{"parent DIRTY but closed -> team", child(sp("r#2", "b", "main", "closed", "DIRTY")), PanelTeamAwaitingTeam},
+		{"unrelated DIRTY PR in the chain data -> team", child(sp("r#9", "other", "main", "open", "DIRTY")), PanelTeamAwaitingTeam},
+		{"two-level chain, grandparent DIRTY -> owner", child(sp("r#2", "b", "a", "open", "CLEAN"), sp("r#1", "a", "main", "open", "DIRTY")), PanelTeamAwaitingOwner},
+		{"two-level chain, grandparent merged -> team", child(sp("r#2", "b", "a", "open", "CLEAN"), sp("r#1", "a", "main", "merged", "DIRTY")), PanelTeamAwaitingTeam},
+		{"cycle terminates, no conflict -> team", child(sp("r#2", "b", "a", "open", "CLEAN"), sp("r#1", "a", "b", "open", "CLEAN")), PanelTeamAwaitingTeam},
+		{"cycle terminates, conflict found -> owner", child(sp("r#2", "b", "a", "open", "CLEAN"), sp("r#1", "a", "b", "open", "DIRTY")), PanelTeamAwaitingOwner},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPanel(OwnershipTeam, tt.pr, green, Approvals{}, reasons); got != tt.want {
+				t.Errorf("classifyPanel = %q; want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -115,10 +115,20 @@ and MUST NOT use an LLM for any step below.
     `copilot-pull-request-reviewer`). A bot's approval is carried by the bot verdict instead.
   - **Team**, evaluated in this order:
     1. **Hard-blocked** — CI failing (judged as described under the cancelled-run and no-CI-data
-       rules above), a non-bot reviewer's `CHANGES_REQUESTED`, or a merge conflict →
-       `team_awaiting_owner`, even when the operator is a requested reviewer: fixing those is the PR
+       rules above), a non-bot reviewer's `CHANGES_REQUESTED`, or a merge conflict (the PR's own,
+       or a **stacked-parent conflict**, below) → `team_awaiting_owner`, even when the operator is a requested reviewer: fixing those is the PR
        owner's job, not the reviewer's. (A reviewer's own `CHANGES_REQUESTED` therefore still beats a
        later re-request; that is existing behavior, not part of the 2026-10-05 ruling.)
+       **Stacked-parent conflict.** A PR stacked on another PR (its base branch is the head branch of
+       an open PR in the same repository) can read clean against that base while the parent
+       conflicts, and the stack cannot land. A conflict (`CONFLICTING` or `DIRTY`) on any OPEN PR up
+       the chain counts as a merge conflict for the child. The chain comes from the facts' stack
+       parents, which gather reads from the stored PR rows (so a parent's mergeability is as current
+       as its own stored row), is followed with a depth cap and a visited set (a cycle ends the
+       walk), and stops at a parent that is merged, closed or not stored: such a parent is never a
+       blocker. Decision (pg2-7ew2bj, default taken): ONLY a conflict on the parent blocks the
+       child; a parent whose own CI fails does not (that is the parent owner's problem, and the
+       child's own CI already reflects what runs against it). Applies to the team branch only.
     2. **Requested of the operator, or the operator is the acting reviewer** →
        `team_awaiting_me`, whether or not they already approved
        (GitHub drops a reviewer from the requested list once they submit any review, so a

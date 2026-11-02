@@ -211,6 +211,13 @@ type Facts struct {
 	// or digest_state keys decode without error; the keys are ignored.
 	ReviewPending *ReviewPendingFact `json:"review_pending,omitempty"`
 
+	// StackParents is the chain of open PRs the triggering PR is stacked on
+	// (its base branch is the parent's head branch, same repository),
+	// nearest first, read from the store's own PR rows (stack_parents.go).
+	// interpret reads it so a stack whose parent conflicts is not treated as
+	// landable. Empty for a PR not stacked on an open stored PR.
+	StackParents []StackParent `json:"stack_parents,omitempty"`
+
 	// AsOf is the timestamp pg-connector's `pr show` reported for this read.
 	AsOf string `json:"as_of,omitempty"`
 	// HeadSHA is the triggering PR's current head commit, from `pr show` —
@@ -356,6 +363,8 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 	if names := show.Connections.truncated(); len(names) > 0 {
 		f.degrade("pr show truncated: " + strings.Join(names, ", "))
 	}
+
+	g.gatherStackParents(show.Repo, entityID, show.Base, &f)
 
 	if change == ChangeSweep {
 		if prev, seen := g.lastHeadSHA[entityID]; seen && prev == show.HeadSHA {
@@ -688,6 +697,7 @@ type prShowFields struct {
 	Title   string `json:"title"`
 	State   string `json:"state"`
 	Branch  string `json:"branch"`
+	Base    string `json:"base"`
 	Body    string `json:"body"`
 	Merged  bool   `json:"merged"`
 	HeadSHA string `json:"head_sha"`

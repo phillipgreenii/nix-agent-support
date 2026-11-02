@@ -541,11 +541,13 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 	// one (see the doc comment). ReviewerState, not ReviewState: a harmless
 	// cancelled run and "no CI data" do not make a PR unreviewable. A human's
 	// own CHANGES_REQUESTED also lands here even if the author re-requested
-	// review (pre-existing behavior, pinned by a test).
+	// review (pre-existing behavior, pinned by a test). A conflict on an open
+	// PR this one is stacked on counts too: the stack cannot land (pg2-7ew2bj).
 	reviewerCI := ci.ReviewerState()
 	if reviewerCI != "success" && reviewerCI != "pending" ||
 		appr.HumanChangesRequested ||
-		conflict {
+		conflict ||
+		pr.hasStackParentConflict() {
 		return PanelTeamAwaitingOwner
 	}
 

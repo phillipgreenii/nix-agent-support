@@ -103,6 +103,17 @@ making. A read failure degrades this run exactly like every other non-triggering
 naming `linked threads`; zero linked threads is a normal, expected outcome (most PRs have none),
 not a degradation.
 
+## Stack parents
+
+When the triggering PR's base branch is the head branch of an open PR in the same repository,
+gather records that parent into the facts' `stack_parents` (nearest first): its id, head and base
+branch, state, `mergeable` and `merge_state_status`. The chain is followed up with a depth cap and a
+visited set, and ends at a merged, closed or unstored PR. This is a store read ONLY (the stored PR
+rows, as the stack dependency source reads them), never a pg-connector call, so a parent's
+mergeability is as current as its own stored row. A read failure degrades the run, naming
+`stack parents`; a PR stacked on nothing has no stack parents, which is not a degradation. interpret
+uses it for the stacked-parent conflict in [`interpret.md`](interpret.md)'s hard-blockers rule.
+
 ## Pending-review state (PR entity seam)
 
 The PR adapter of the generic entity seam (the `pr` gatherer that `refresh`, `changes` and `show
