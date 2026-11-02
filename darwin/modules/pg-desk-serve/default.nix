@@ -257,7 +257,7 @@ in
         # `obs.enable`-only gate for its own alertRuleFiles entry.
         alertRuleFiles = [
           ../../../packages/pg-desk/grafana/alerting/alerts.yaml
-          # PR lane refactor P9b: deleteRules-only file for the four retired sync_error rules
+          # PR lane refactor P9b: deleteRules-only file for the retired rules (the four sync_error rules and the lookup ceiling rule)
           # (Grafana keeps a file-provisioned rule live after its file drops it).
           ../../../packages/pg-desk/grafana/alerting/alerts-delete.yaml
         ];

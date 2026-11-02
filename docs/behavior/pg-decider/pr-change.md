@@ -193,13 +193,13 @@ neither, and leaves the PR's persisted apply-mode residual alone. The residual p
 after an `apply` is passed as the residual OF that run, never as a run of its own; in `plan` mode the
 residual is the number of actions the plan lists, which is non-zero by definition when there is work.
 A run that ends at the lock is in the run record only: it holds no lock to write the PR's own state
-under. The decider's work-item lookup item count and ceiling are forwarded too: the command reads
-`lookup_items` and `lookup_ceiling` from the decider's run counters line (an `apply`, and a run that
-failed closed on the lookup, whose line carries the figures known), or, for a `plan` run, from the
+under. The decider's work-item lookup item count is forwarded too: the command reads
+`lookup_items` from the decider's run counters line (an `apply`, and a run that
+failed closed on the lookup, whose line carries the count when a listing was read), or, for a `plan` run, from the
 read-only `plan --json` it makes after the plan. A run that failed closed on the lookup (the decider
 exits `4`) is the class `decide_failed`, or the retryable class `transient` (exit `32`) when the
-lookup was unavailable, and still forwards the figures, so the two gauges that
-export them keep following the lane at the moment it stops; a decider that reports none leaves them
+lookup was unavailable, and still forwards the count, so the gauge that
+exports it keeps following the lane at the moment it stops; a decider that reports none leaves it
 out and the store keeps what it has. The run record's per-stage timings (lock wait, hydrate, view read,
 decide, and the decide stage's lookup, pre-plan, apply and residual parts) are forwarded as the lane
 document's `timings` member, so `pg-desk` exports them as the stage-duration series; a run that measured
@@ -268,8 +268,8 @@ while the event carries a future `expiresAt`, and only if the role opts in with
   upstream text: the command rewrites each of them in the upstream text before it is quoted;
 - a failure that the router does not retry is never re-run, so every transient condition is marked
   retryable: a transient or degraded hydrate, a lock wait that ran out, a decider exit `2`, a decider
-  exit `4` whose lookup was unavailable (a listing above the ceiling, a truncated one or an unset
-  query or ceiling stays `decide_failed`: a retry cannot clear it), and
+  exit `4` whose lookup was unavailable (a truncated one, an inconsistent one or an unset
+  query stays `decide_failed`: a retry cannot clear it), and
   every step of the not-found handling below that cannot be trusted.
 
 ## A PR that no longer exists

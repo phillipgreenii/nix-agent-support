@@ -27,7 +27,6 @@ The configuration is one JSON file whose path is named by the environment variab
   "focus_beads_query": "focus-beads",
   "work_items_query": "work-items-for-pr",
   "work_items_query_params": ["repo", "pr_number"],
-  "work_items_ceiling": 7000,
   "focus_priority_map": {
     "Highest": "P0",
     "High": "P1",
@@ -92,21 +91,19 @@ no such lookup and needs neither.
 | ------------------------- | --------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `work_items_query`        | string          | empty   | The name of the pg-connector named query that lists the work items of all six PR kinds (`merge-request`, `process-feedback`, `review-pr`, `fix-ci`, `resolve-conflict`, `focus-item`) in EVERY status, closed included, with no result cap. It MUST NOT be a feed name the work-bead feeds share                                                                       |
 | `work_items_query_params` | list of strings | empty   | The parameter names of `work_items_query` when it is the per-PR query: each of `repo` and `pr_number` (at most once) is sent as `--param name=value` from the viewed PR. Unset means the query takes none and lists the whole tracker (the rollback form), and the consistency check against the view does not run. A name other than those two makes the file invalid |
-| `work_items_ceiling`      | integer         | unset   | The largest listing the lookup accepts: a listing with MORE items than this fails the run closed. It MUST be at least `1`                                                                                                                                                                                                                                              |
 
-Both keys are required for a `pr` run: with either unset the run fails closed (exit `4`, nothing
+`work_items_query` is required for a `pr` run: with it unset the run fails closed (exit `4`, nothing
 written) with a message naming the missing key, and it never falls back to the gather's work-beads
-query or to a default ceiling. An `issue` run, and any run with no `pr`, is unaffected.
+query. An `issue` run, and any run with no `pr`, is unaffected.
 
-The ceiling is a recurring operational cost, not a one-time setting. Closed work items only
-accumulate, so the listing only grows, and the lane WILL reach any fixed ceiling at a predictable
-point, at which every `pr` run fails closed until an operator acts. The deployment therefore starts
-the ceiling at about twice the listing size measured against the real tracker, the decider reports
-the item count and the ceiling on every run (so the growth is visible before the lane stops: the
-alert on the item count over a fraction of the ceiling is the warning), and the operator remedy is
-to raise `work_items_ceiling` or to compact (archive) closed items, as the runbook says. The
-decider names no project or tracker of its own: the deployment supplies the query's name and its
-expression.
+There is no ceiling on the size of the listing. The `work_items_ceiling` key existed while the lookup
+read the whole tracker, and was retired (operator ruling, Phillip, 2026-10-30, pg2-eclw3j.9: "i don't
+expect it to hit that limit often, so i would rather not have the limit. i think that would be easier
+to deal with than getting stuck when a limit is hit."). The key is no longer read: a file that still
+names it loads, and the value is ignored. The decider reports the size of the listing it read as
+`lookup_items` on every run (see "The work-item lookup"), so an abnormal count is visible without
+stopping a run. The decider names no project or tracker of its own: the deployment supplies the
+query's name and its expression.
 
 ### Area labels
 
@@ -167,8 +164,8 @@ configuration.
   to `review-pr` and `process-feedback` items, MUST NOT remove a label for this reason, MUST NOT
   create a write whose only purpose is to add one, and with no `area_labels` configured MUST emit
   exactly the plan it would emit without the key.
-- **INV-DECIDER-26.** <!-- uuid: 5115c572-0c55-43ce-8e22-a911be8a373b --> A `pr` run MUST have both `work_items_query` and `work_items_ceiling`
-  and MUST fail closed, writing nothing, with a message naming the key when either is unset;
-  `work_items_ceiling` MUST be at least `1` and a blank `work_items_query` MUST make the file
-  invalid. The ceiling is the largest accepted listing: a listing of exactly the ceiling is
-  accepted, a larger one is not.
+- **INV-DECIDER-26.** <!-- uuid: 5115c572-0c55-43ce-8e22-a911be8a373b --> A `pr` run MUST have `work_items_query` and MUST fail closed, writing
+  nothing, with a message naming the key when it is unset; a blank `work_items_query` MUST make the
+  file invalid. There MUST be no ceiling on the size of the listing: the decider MUST NOT read a
+  `work_items_ceiling` key (a file that still names it MUST load, the value ignored) and MUST NOT
+  refuse a listing for its size (retired, pg2-eclw3j.9).

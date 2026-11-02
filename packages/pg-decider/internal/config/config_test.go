@@ -231,12 +231,14 @@ func TestInvalidFocusKeysFailLoudly(t *testing.T) {
 }
 
 func TestLoadReadsTheLookupKeys(t *testing.T) {
+	// A leftover work_items_ceiling key (retired, pg2-eclw3j.9) is tolerated and
+	// ignored: Config has no field for it.
 	writeCfg(t, `{"work_items_query":"work-items-all","work_items_ceiling":7000}`)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.WorkItemsQuery != "work-items-all" || c.WorkItemsCeiling == nil || *c.WorkItemsCeiling != 7000 {
+	if c.WorkItemsQuery != "work-items-all" {
 		t.Fatalf("got %+v", c)
 	}
 }
@@ -247,16 +249,14 @@ func TestAbsentLookupKeysLoadAsUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.WorkItemsQuery != "" || c.WorkItemsCeiling != nil {
+	if c.WorkItemsQuery != "" {
 		t.Fatalf("absent keys must load as unset: %+v", c)
 	}
 }
 
-// Negative cases: a ceiling below 1 and a blank query are refused at load.
+// Negative cases: a blank query and a bad parameter list are refused at load.
 func TestInvalidLookupKeysFailLoudly(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
-		{`{"work_items_ceiling":0}`, "work_items_ceiling"},
-		{`{"work_items_ceiling":-5}`, "work_items_ceiling"},
 		{`{"work_items_query":"   "}`, "work_items_query"},
 		{`{"work_items_query_params":["repo","nope"]}`, "work_items_query_params"},
 		{`{"work_items_query_params":["repo","repo"]}`, "twice"},

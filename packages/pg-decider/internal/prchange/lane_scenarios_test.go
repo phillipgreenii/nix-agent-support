@@ -2,7 +2,6 @@ package prchange
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -207,7 +206,7 @@ func unhydratedScenarios(l *laneRun) {
 // failClosedScenarios share one world that no scenario of it writes to: each
 // run it makes is refused (or is a plan), so the tracker's own listing before
 // and after is the proof that nothing was written. They change the world's
-// ceiling in turn, so they are steps.
+// config in turn, so they are steps.
 func failClosedScenarios(l *laneRun) {
 	var closed *e2eWorld
 	failClosedWorld := func(t *testing.T) *e2eWorld {
@@ -218,44 +217,37 @@ func failClosedScenarios(l *laneRun) {
 		return closed.use(t)
 	}
 
-	l.step("a-listing-above-the-ceiling-fails-the-run-and-writes-nothing", func(t *testing.T) {
+	l.step("a-large-listing-is-accepted-and-lookup-items-is-persisted", func(t *testing.T) {
 		w := failClosedWorld(t)
 		_, items := w.listing()
-		w.setCeiling(items - 1)
-		before := w.tr.snapshot()
-		start := w.callCount()
-		for _, mode := range []string{"plan", "apply"} {
-			res := w.r.change(mode, w.ids[0])
-			if res.code != ExitDecideFailed {
-				t.Fatalf("%s: exit %d, want %d:\n%s", mode, res.code, ExitDecideFailed, res.stderr)
-			}
-			contains(t, mode+" failure line", res.stderr, "decide_failed", "above the ceiling", fmt.Sprintf("work_items_ceiling=%d", items-1))
-		}
-		if got := w.tr.snapshot(); sameSnapshot(before, got) != "" {
-			t.Fatalf("a failed-closed run wrote to the tracker: %s", sameSnapshot(before, got))
-		}
-		if wr := w.writes(start); len(wr) != 0 {
-			t.Fatalf("a failed-closed run made tracker writes: %v", wr)
+		// The config still carries the retired work_items_ceiling key, set below
+		// the listing's size: it must be ignored, not enforced.
+		w.setStaleCeiling(items - 1)
+		res := w.r.change("plan", w.ids[0])
+		if res.code != 0 {
+			t.Fatalf("a listing of %d items was refused under a stale ceiling of %d: exit %d:\n%s", items, items-1, res.code, res.stderr)
 		}
 		lane := w.r.lane()
-		if lane["pr_lane.state.lookup_ceiling"] != strconv.Itoa(items-1) || lane["pr_lane.state.lookup_items"] != strconv.Itoa(items) {
-			t.Errorf("the lane gauges do not carry the listing (%d items, ceiling %d): %v", items, items-1, lane)
+		if lane["pr_lane.state.lookup_items"] != strconv.Itoa(items) {
+			t.Errorf("the lane state does not carry the listing size (%d items): %v", items, lane)
+		}
+		if _, ok := lane["pr_lane.state.lookup_ceiling"]; ok {
+			t.Errorf("the retired lookup_ceiling is still persisted: %v", lane)
 		}
 	})
 
-	l.step("a-listing-of-exactly-the-ceiling-is-accepted", func(t *testing.T) {
+	l.step("a-config-without-a-work-items-ceiling-is-accepted", func(t *testing.T) {
 		w := failClosedWorld(t)
-		_, items := w.listing()
-		w.setCeiling(items)
+		w.setConfig()
 		res := w.r.change("plan", w.ids[0])
 		if res.code != 0 {
-			t.Fatalf("a listing of %d items at ceiling %d was refused: exit %d:\n%s", items, items, res.code, res.stderr)
+			t.Fatalf("a config with no work_items_ceiling was refused: exit %d:\n%s", res.code, res.stderr)
 		}
 	})
 
 	l.step("a-listing-that-reports-itself-truncated-fails-the-run-and-writes-nothing", func(t *testing.T) {
 		w := failClosedWorld(t)
-		w.setCeiling(1000)
+		w.setConfig()
 		raw, _ := w.listing()
 		// The beads backend never truncates the unranged listing, so a tracker
 		// that does is shown by the real answer with the flag set.

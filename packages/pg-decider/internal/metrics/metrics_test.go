@@ -213,28 +213,27 @@ func TestTheLookupFiguresRideTheCountersLineOnlyWhenTheRunReadOne(t *testing.T) 
 		t.Fatalf("a run with no lookup carries figures: %s", buf.String())
 	}
 	buf.Reset()
-	h.Lookup(0, 7000) // a zero count is a figure, not an absent one
+	h.Lookup(0) // a zero count is a figure, not an absent one
 	if err := h.Finish(context.Background(), env, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), `"lookup_items":0,"lookup_ceiling":7000`) {
+	if !strings.Contains(buf.String(), `"lookup_items":0`) {
 		t.Fatalf("line = %s", buf.String())
 	}
 }
 
 func TestLookupFailureLineReportsTheFiguresKnown(t *testing.T) {
-	items, ceiling := 7100, 7000
+	items := 7100
 	for _, tc := range []struct {
 		name            string
-		items, ceiling  *int
+		items           *int
 		wantHas, wantNo string
 	}{
-		{"both known", &items, &ceiling, `"lookup_items":7100,"lookup_ceiling":7000`, ""},
-		{"only the ceiling", nil, &ceiling, `"lookup_ceiling":7000`, "lookup_items"},
-		{"neither", nil, nil, `"failures":{"lookup-unavailable":1}`, "lookup_items"},
+		{"known", &items, `"lookup_items":7100`, "lookup_ceiling"},
+		{"unknown", nil, `"failures":{"lookup-unavailable":1}`, "lookup_items"},
 	} {
 		var buf bytes.Buffer
-		if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-unavailable", tc.items, tc.ceiling, 0); err != nil {
+		if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-unavailable", tc.items, 0); err != nil {
 			t.Fatal(err)
 		}
 		got := buf.String()
@@ -250,24 +249,24 @@ func TestLookupFailureLineReportsTheFiguresKnown(t *testing.T) {
 func TestTheLookupDurationRidesTheCountersLineAsWholeMilliseconds(t *testing.T) {
 	var buf bytes.Buffer
 	h := New(nil, "pr", "acme/widgets#42")
-	h.Lookup(120, 7000)
+	h.Lookup(120)
 	h.LookupDuration(1234567 * time.Microsecond)
 	if err := h.Finish(context.Background(), apply.Env{Stderr: &buf}, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/widgets#42","rules":{},"escalations":0,` +
-		`"lookup_items":120,"lookup_ceiling":7000,"lookup_ms":1234}` + "\n"
+		`"lookup_items":120,"lookup_ms":1234}` + "\n"
 	if buf.String() != want {
 		t.Fatalf("got  %q\nwant %q", buf.String(), want)
 	}
 
 	buf.Reset()
-	items, ceiling := 7100, 7000
-	if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-above-ceiling", &items, &ceiling, 2*time.Second); err != nil {
+	items := 7100
+	if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-truncated", &items, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	want = `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/widgets#42","rules":{},"escalations":0,` +
-		`"failures":{"lookup-above-ceiling":1},"lookup_items":7100,"lookup_ceiling":7000,"lookup_ms":2000}` + "\n"
+		`"failures":{"lookup-truncated":1},"lookup_items":7100,"lookup_ms":2000}` + "\n"
 	if buf.String() != want {
 		t.Fatalf("got  %q\nwant %q", buf.String(), want)
 	}

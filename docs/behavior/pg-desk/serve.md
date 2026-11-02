@@ -75,7 +75,7 @@ the retired gauges: the four rules that did
 `packages/pg-desk/grafana/alerting/alerts-delete.yaml` (Grafana keeps a file-provisioned rule live
 after its file drops it, so each is removed by a `deleteRules` entry), and `pg-desk-sync-stale`, the
 dashboard-snapshot staleness rule, stays. `grafana/check-alert-structure.sh` (rule T10) and the
-`internal/alertrules` tests pin that the delete file names exactly the four retired uids. `serve`'s WARN/ERROR-level operational
+`internal/alertrules` tests pin that the delete file names exactly the five retired uids (these four and `pg-desk-pr-lookup-ceiling`). `serve`'s WARN/ERROR-level operational
 log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 (`internal/telemetry`'s `Init`, wired at `serve` startup only — `run`/`run issue` are untouched);
 `serve` still logs to the path its launchd module configures, defaulting to
@@ -278,9 +278,9 @@ before any run, so the first event is not lost to `increase()`:
   sits on that mode's series and the other two read `0`. A residual recorded in another mode (a plan-era
   residual after the flip) is not counted.
 - `pg_desk_pr_marked_inactive_total` — PRs the lane marked inactive.
-- `pg_desk_pr_lane_lookup_items` and `pg_desk_pr_lane_lookup_ceiling` — the decider's last reported
-  work-item lookup item count and configured ceiling (the decider emits no telemetry of its own); `0`
-  until a run reports them.
+- `pg_desk_pr_lane_lookup_items` — the decider's last reported work-item lookup item count (the decider
+  emits no telemetry of its own); `0` until a run reports it. The former `pg_desk_pr_lane_lookup_ceiling`
+  gauge is retired with the decider's ceiling (pg2-eclw3j.9).
 - `pg_desk_pr_lane_stage_duration_seconds{stage}`, `pg_desk_pr_lane_stage_seconds_total{stage}` and
   `pg_desk_pr_lane_stage_observations_total{stage}` — where a recorded `pg-pr-change` run spends its time.
   `stage` is `lock_wait` (the wait for the per-PR lock), `hydrate` (the refresh), `view_read` (the stored
@@ -465,20 +465,20 @@ recorded the way the composed command records it.
 
 ### PR lane remaining alerts
 
-Two more Grafana rules of the same file follow the outcome rules' shape (`noDataState: OK`, query A the
+One more Grafana rule of the same file follows the outcome rules' shape (`noDataState: OK`, query A the
 instant expression below, B reducing with `last`, C a `gt` threshold, the `SYSTEM_PAUSE` guard of
-`pg-desk-sync-stale` at the end of every expression) and have a firing, a healthy and an empty-input case
-under `grafana/alerting/rule-tests/`. Neither uid is registered with the alert probe yet.
+`pg-desk-sync-stale` at the end of every expression) and has a firing, a healthy and an empty-input case
+under `grafana/alerting/rule-tests/`. Its uid is registered with the alert probe as an exempt rule.
 
-| uid                             | severity  | signal                                                                                                                              | threshold | for   | meaning                                                                                                                             |
-| ------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `pg-desk-pr-hidden-open-anchor` | `info`    | `pg_desk_pr_open_anchors_hidden`, the hidden PRs with an open anchor, counted from the store at scrape time                         | `> 0`     | `30m` | a hidden PR is skipped by every decider rule including closure, so its anchor stays open even after the PR merges (low severity)    |
-| `pg-desk-pr-lookup-ceiling`     | `warning` | `pg_desk_pr_lane_lookup_items / (pg_desk_pr_lane_lookup_ceiling > 0)`, both read from the lane record the composed command persists | `> 0.8`   | `30m` | the decider's work-item lookup holds over 80 percent of its ceiling: the warning before the lane fails closed on a listing above it |
+| uid                             | severity | signal                                                                                                      | threshold | for   | meaning                                                                                                                          |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- | --------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-desk-pr-hidden-open-anchor` | `info`   | `pg_desk_pr_open_anchors_hidden`, the hidden PRs with an open anchor, counted from the store at scrape time | `> 0`     | `30m` | a hidden PR is skipped by every decider rule including closure, so its anchor stays open even after the PR merges (low severity) |
 
-The lookup gauges read 0 until a run reports them, so the ratio is guarded by `ceiling > 0`: with the
-ceiling gauge at 0 the denominator is dropped and the rule is quiet instead of dividing by zero (a rule test
-pins it). The remedy for the ceiling rule is to raise the configured work-items ceiling and apply, or to
-compact closed work items, because closed items only accumulate. The tracked-set rule and the
+The former `pg-desk-pr-lookup-ceiling` warning was retired with the decider's `work_items_ceiling`
+(pg2-eclw3j.9): with no ceiling there is nothing to approach, and `pg_desk_pr_lane_lookup_items` stays as a
+figure to look at. Its uid is in the delete-only file, so a Grafana that still holds the rule drops it.
+
+The tracked-set rule and the
 no-watched-PRs rule read the connector daemon's metrics and live in the connector's alert file
 (`packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml`); the no-watched-PRs rule reads
 `pg_desk_pr_open_anchors` from this service.

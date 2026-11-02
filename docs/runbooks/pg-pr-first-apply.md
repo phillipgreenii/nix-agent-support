@@ -197,20 +197,20 @@ tracker and the real composed command. Run it before any production flip.
 
 ## Operating notes
 
-### The lookup ceiling
+### The work-item lookup size
 
-Every `pr` run lists the work items of all kinds in every status and fails closed (exit 4, nothing
-written) when the listing holds more than `work_items_ceiling`. Closed items only accumulate, so the
-listing only grows and the lane WILL reach any fixed ceiling. The decider reports the item count and
-the ceiling on every run, and the alert on the count over a fraction of the ceiling is the warning.
-The remedy, in this order:
-
-1. Raise `work_items_ceiling` in the decider configuration (`PG_DECIDER_CONFIG`; the deployment sets
-   it at about twice the listing size measured against the real tracker).
-2. Or compact closed items with the tracker's own cleanup (`bd admin cleanup --older-than <days>
---dry-run` first, then `--force`). Deleting a closed review item of a PR that is still open lets
-   the lane create a review item for the same head again: only items of PRs that are terminal on the
-   forge MAY be deleted.
+Every `pr` run reads the work items of ONE PR, closed ones included, through the per-PR query. There
+is no size ceiling and nothing to raise or compact for it: the decider's `work_items_ceiling` and the
+`pg-desk-pr-lookup-ceiling` alert were retired (operator ruling, Phillip, 2026-10-30, pg2-eclw3j.9: a
+limit that stops the lane is worse than a large listing). The decider reports the item count of each
+run as `lookup_items`, in the run counters line and the run record, and `pg_desk_pr_lane_lookup_items`
+exports the last one, so an abnormal count is visible without blocking a run. A run still fails closed
+(exit 4, nothing written) when the answer is truncated, unavailable or inconsistent with the view, and
+that is a different problem: read the failure line's reason (`lookup-truncated`, `lookup-unavailable`,
+`lookup-inconsistent`). Deleting a closed review item of a PR that is still open lets the lane create a
+review item for the same head again, so if closed items are ever compacted with the tracker's own
+cleanup (`bd admin cleanup --older-than <days> --dry-run` first, then `--force`), only items of PRs
+that are terminal on the forge MAY be deleted.
 
 ### The run record
 
@@ -258,7 +258,7 @@ rulings, design calls and risks is in [ADR 0116](../adr/0116-the-pr-lane-is-one-
 | Daemon design: `pr-sweep-full` as a 6 h backstop; `desk-reconcile` kept | DROPPED by ruling 10                                              |
 | Review settle window                                                    | REPLACED by several review items per PR (ruling 16)               |
 
-Operating notes that are not part of the first apply: the lookup-ceiling remedy and the run-record
+Operating notes that are not part of the first apply: the lookup-size note and the run-record
 retention rule above, the driver's commands in [`pg-pr-backfill.md`](pg-pr-backfill.md), the decider's
 behavior in [`docs/behavior/pg-decider/`](../behavior/pg-decider/README.md) and the live `pr lane` status
 line in [`docs/behavior/pg-desk/operator-commands.md`](../behavior/pg-desk/operator-commands.md).

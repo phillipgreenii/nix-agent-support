@@ -381,10 +381,10 @@ type e2eWorld struct {
 	shimCtl string            // the control directory of the bd passthrough ("" without one)
 }
 
-func deciderConfig(dir string, ceiling int) string {
+func deciderConfig(dir string) string {
 	b, _ := json.Marshal(map[string]any{
 		"agent_tracker_backend": "beads", "beads_dir": dir,
-		"work_items_query": "work-items-all", "work_items_ceiling": ceiling,
+		"work_items_query": "work-items-all",
 	})
 	return string(b)
 }
@@ -468,7 +468,7 @@ func newE2EWorldWith(t *testing.T, tools e2eTools, o e2eOpts) *e2eWorld {
 	w.r = newRigWith(t, fx, rigOpts{
 		cutover: true, legacy: legacyIDs, bins: &tools.bins, laneMode: "apply",
 		real:          &realTracker{connector: tools.connector, env: dedupEnv(w.connEnv), all: true},
-		deciderConfig: deciderConfig(w.tr.dir, 1000),
+		deciderConfig: deciderConfig(w.tr.dir),
 	})
 	if !legacy {
 		w.r.hydrate()
@@ -513,9 +513,23 @@ func (w *e2eWorld) tick() {
 	}
 }
 
-func (w *e2eWorld) setCeiling(n int) {
+// setConfig rewrites the decider config to the shipped shape (no ceiling key).
+func (w *e2eWorld) setConfig() {
 	w.t.Helper()
-	must(w.t, os.WriteFile(filepath.Join(w.r.dir, "config", "pg-decider.json"), []byte(deciderConfig(w.tr.dir, n)), 0o644))
+	must(w.t, os.WriteFile(filepath.Join(w.r.dir, "config", "pg-decider.json"), []byte(deciderConfig(w.tr.dir)), 0o644))
+}
+
+// setStaleCeiling rewrites the decider config with the retired
+// work_items_ceiling key set to n: a decider that still enforced it would
+// refuse a listing larger than n.
+func (w *e2eWorld) setStaleCeiling(n int) {
+	w.t.Helper()
+	var m map[string]any
+	must(w.t, json.Unmarshal([]byte(deciderConfig(w.tr.dir)), &m))
+	m["work_items_ceiling"] = n
+	b, err := json.Marshal(m)
+	must(w.t, err)
+	must(w.t, os.WriteFile(filepath.Join(w.r.dir, "config", "pg-decider.json"), b, 0o644))
 }
 
 // listing is the real connector's answer to the decider's lookup query.

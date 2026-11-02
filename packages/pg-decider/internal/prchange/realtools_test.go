@@ -607,22 +607,22 @@ func TestPRChangeRealTools(t *testing.T) {
 			return `{"entities":[` + strings.Join(items, ",") + `],"present_ids":[],"sources":[{"source":"fake-beads","status":"succeeded","count":` + strconv.Itoa(n) + `}],"truncated":false}` + "\n"
 		}
 		for _, mode := range []string{"plan", "apply"} {
-			r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: mode, deciderConfig: `{"work_items_query":"work-items-all","work_items_ceiling":500}`})
+			r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: mode, deciderConfig: `{"work_items_query":"work-items-all"}`})
 			r.ctlWrite("work-items.out", held(3))
 			res := r.change(mode, id11, "5")
 			if res.code != ExitOK && res.code != ExitDecidePartial {
 				t.Fatalf("%s: exit %d:\n%s", mode, res.code, res.stderr)
 			}
 			lane := r.lane()
-			if lane["pr_lane.state.lookup_items"] != "3" || lane["pr_lane.state.lookup_ceiling"] != "500" {
-				t.Fatalf("%s: persisted lookup figures = %q, %q, want 3 and 500: %v", mode, lane["pr_lane.state.lookup_items"], lane["pr_lane.state.lookup_ceiling"], lane)
+			if lane["pr_lane.state.lookup_items"] != "3" {
+				t.Fatalf("%s: persisted lookup_items = %q, want 3: %v", mode, lane["pr_lane.state.lookup_items"], lane)
 			}
 			exposition := r.scrape()
 			if got := gauge(exposition, "pg_desk_pr_lane_lookup_items"); got != "3" {
 				t.Errorf("%s: pg_desk_pr_lane_lookup_items = %q after the run, want 3:\n%s", mode, got, exposition)
 			}
-			if got := gauge(exposition, "pg_desk_pr_lane_lookup_ceiling"); got != "500" {
-				t.Errorf("%s: pg_desk_pr_lane_lookup_ceiling = %q after the run, want 500", mode, got)
+			if strings.Contains(exposition, "pg_desk_pr_lane_lookup_ceiling") {
+				t.Errorf("%s: the retired pg_desk_pr_lane_lookup_ceiling gauge is still exported", mode)
 			}
 			if recs := r.runRecords(); len(recs) != 1 || recs[0].Lane.Result != laneRecorded {
 				t.Errorf("%s: run records = %+v", mode, recs)
@@ -630,7 +630,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	run("a-listing-above-the-ceiling-fails-the-run-decide_failed-writes-nothing-and-still-moves-the-gauges", func(t *testing.T) {
+	run("an-untrusted-listing-fails-the-run-decide_failed-writes-nothing-and-still-moves-the-gauges", func(t *testing.T) {
 		three := `{"entities":[` +
 			`{"id":"wb-1","title":"t","state":"closed","metadata":{"dedup_key":"pr:acme/api#11:fix-ci:aaa"}},` +
 			`{"id":"wb-2","title":"t","state":"closed","metadata":{"dedup_key":"pr:acme/api#11:fix-ci:bbb"}},` +
@@ -641,17 +641,12 @@ func TestPRChangeRealTools(t *testing.T) {
 			items               string // the persisted count; "" = not reported
 			retryable           bool   // an unavailable lookup is retried by the router, the others are not
 		}{
-			{"above the ceiling", three, "0", "3", false},
 			{"truncated", strings.Replace(three, `"truncated":false`, `"truncated":true`, 1), "0", "3", false},
 			{"unavailable", `{"error":{"code":"unavailable","message":"tracker down"}}` + "\n", "1", "", true},
 		}
 		for _, mode := range []string{"plan", "apply"} {
 			for _, c := range cases {
-				ceiling := "50"
-				if c.name == "above the ceiling" {
-					ceiling = "2"
-				}
-				r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: mode, deciderConfig: `{"work_items_query":"work-items-all","work_items_ceiling":` + ceiling + `}`})
+				r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: mode, deciderConfig: `{"work_items_query":"work-items-all"}`})
 				r.ctlWrite("work-items.out", c.listing)
 				r.ctlWrite("work-items.code", c.code)
 				res := r.change(mode, id11, "5")
@@ -690,16 +685,10 @@ func TestPRChangeRealTools(t *testing.T) {
 				if lane["pr_lane.runs.decide."+wantClass] != "1" {
 					t.Errorf("%s/%s: the lane-run counter: %v", mode, c.name, lane)
 				}
-				if got := lane["pr_lane.state.lookup_ceiling"]; got != ceiling {
-					t.Errorf("%s/%s: persisted ceiling = %q, want %s (the failure path persists the figures too)", mode, c.name, got, ceiling)
-				}
 				if c.items != "" && lane["pr_lane.state.lookup_items"] != c.items {
 					t.Errorf("%s/%s: persisted item count = %q, want %s", mode, c.name, lane["pr_lane.state.lookup_items"], c.items)
 				}
 				exposition := r.scrape()
-				if got := gauge(exposition, "pg_desk_pr_lane_lookup_ceiling"); got != ceiling {
-					t.Errorf("%s/%s: the ceiling gauge = %q, want %s", mode, c.name, got, ceiling)
-				}
 				if c.items != "" {
 					if got := gauge(exposition, "pg_desk_pr_lane_lookup_items"); got != c.items {
 						t.Errorf("%s/%s: the item-count gauge = %q, want %s", mode, c.name, got, c.items)

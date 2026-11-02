@@ -172,7 +172,7 @@ with the cutover message (exit `1`); neither calls the tracker or the connector.
 (`off`, `plan` or `apply`), `events` (a list of `{stage, class}` run events, empty for a clean run),
 `residual` (the number of actions a read-only plan still lists after the run; absent when the run did not
 learn it, which keeps the recorded one), `last_outcome`, `decisions` (a list of `{rule, action, outcome,
-reason, count}`), `lookup_items` and `lookup_ceiling` (the decider's lookup figures), and `timings` (an object of whole
+reason, count}`), `lookup_items` (the decider's lookup size), and `timings` (an object of whole
 milliseconds, each member optional: `lock_wait_ms`, `hydrate_ms`, `view_read_ms`, `decide_ms`, `lookup_ms`,
 `pre_plan_ms`, `apply_ms`, `residual_ms`; a document without it is accepted and records no timing). An unknown member
 or a value outside its closed vocabulary rejects the whole document and writes nothing (exit `1`). On

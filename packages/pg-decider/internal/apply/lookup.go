@@ -17,10 +17,11 @@ import (
 // docs/behavior/pg-decider/plan-and-apply.md, "The work-item lookup").
 //
 // A pr plan or apply reads ONE all-status listing of the six PR kinds through
-// the named query config.work_items_query, once per run, and bounds it here
-// instead of in the tracker: a listing above config.work_items_ceiling, one that
-// reports itself truncated, and one that is unavailable all FAIL THE RUN CLOSED
-// (nothing is written). The listing is then used twice, identically by plan and
+// the named query config.work_items_query, once per run. A listing that
+// reports itself truncated and one that is unavailable FAIL THE RUN CLOSED
+// (nothing is written); there is no size ceiling (retired, pg2-eclw3j.9), the
+// size is reported as lookup_items so an abnormal count is visible without
+// blocking a run. The listing is then used twice, identically by plan and
 // by apply: it adds the PR's items the view does not link (a closed fix-ci item
 // the gather's work-beads query never lists) to the view the rules decide from,
 // and it is the dedup lookup of every create.
@@ -28,11 +29,9 @@ import (
 // The counted failure reasons of a lookup that cannot be trusted. They are the
 // `failures` keys of the run counters line the failed run prints.
 const (
-	LookupReasonQueryAbsent   = "lookup-query-absent"
-	LookupReasonCeilingAbsent = "lookup-ceiling-absent"
-	LookupReasonUnavailable   = "lookup-unavailable"
-	LookupReasonTruncated     = "lookup-truncated"
-	LookupReasonAboveCeiling  = "lookup-above-ceiling"
+	LookupReasonQueryAbsent = "lookup-query-absent"
+	LookupReasonUnavailable = "lookup-unavailable"
+	LookupReasonTruncated   = "lookup-truncated"
 	// LookupReasonNoPRIdentity: work_items_query_params is set but the view
 	// names no repo and PR number to send as the parameters.
 	LookupReasonNoPRIdentity = "lookup-pr-identity-absent"
@@ -41,14 +40,13 @@ const (
 	LookupReasonInconsistent = "lookup-inconsistent"
 )
 
-// LookupError is a lookup that cannot be trusted. Items and Ceiling carry the
-// figures known at the point of failure (nil when not known), so the failed
-// run can still report them.
+// LookupError is a lookup that cannot be trusted. Items carries the size known
+// at the point of failure (nil when not known), so the failed run can still
+// report it.
 type LookupError struct {
-	Reason  string
-	Items   *int
-	Ceiling *int
-	Err     error
+	Reason string
+	Items  *int
+	Err    error
 }
 
 func (e *LookupError) Error() string { return e.Err.Error() }
@@ -64,16 +62,15 @@ type ListedItem struct {
 
 // Lookup is one run's all-status listing.
 type Lookup struct {
-	items   []ListedItem
-	ceiling int
+	items []ListedItem
 	// elapsed is the wall time the listing took, set by the caller that timed
 	// it (SetElapsed); zero when not measured.
 	elapsed time.Duration
 }
 
 // NewLookup builds a Lookup from items already read (tests and the reader).
-func NewLookup(items []ListedItem, ceiling int) *Lookup {
-	return &Lookup{items: items, ceiling: ceiling}
+func NewLookup(items []ListedItem) *Lookup {
+	return &Lookup{items: items}
 }
 
 // SetElapsed records the wall time the listing took.
@@ -84,9 +81,6 @@ func (l *Lookup) Elapsed() time.Duration { return l.elapsed }
 
 // Items is the size of the whole listing, before any filtering to a PR.
 func (l *Lookup) Items() int { return len(l.items) }
-
-// Ceiling is the configured ceiling the listing was checked against.
-func (l *Lookup) Ceiling() int { return l.ceiling }
 
 // listedEntity is one entity of an `issue list` answer; metadata values of any
 // JSON type are read (scalars as their text), so one odd value cannot make the
@@ -198,31 +192,19 @@ func paramArgs(names []string, repo, number string) ([]string, error) {
 	return out, nil
 }
 
-// ReadLookup reads the all-status listing through config.work_items_query and
-// checks it against config.work_items_ceiling. When config.work_items_query_params
+// ReadLookup reads the all-status listing through config.work_items_query. When config.work_items_query_params
 // is set the query is the per-PR one: each named parameter is sent as --param
 // with the viewed PR's identity (PRIdentity), and the answer is then checked
 // against v's own index (checkConsistency). It returns a *LookupError (never a
-// partial Lookup) for an unset query or ceiling, a failed or unreadable call, a
-// source that did not succeed, a truncated listing, a listing above the
-// ceiling, a PR with no identity to send, and a per-PR answer that lacks a work
+// partial Lookup) for an unset query, a failed or unreadable call, a
+// source that did not succeed, a truncated listing, a PR with no identity to send, and a per-PR answer that lacks a work
 // item the view's index owns or adopts.
 func ReadLookup(ctx context.Context, env Env, v *view.View) (*Lookup, error) {
 	cfg := env.Config
-	var ceiling *int
-	if cfg != nil {
-		ceiling = cfg.WorkItemsCeiling
-	}
 	if cfg == nil || cfg.WorkItemsQuery == "" {
 		return nil, &LookupError{
-			Reason: LookupReasonQueryAbsent, Ceiling: ceiling,
-			Err: fmt.Errorf("work-item lookup: work_items_query is not configured, so the work items of a PR cannot be listed in every status; nothing was written"),
-		}
-	}
-	if ceiling == nil {
-		return nil, &LookupError{
-			Reason: LookupReasonCeilingAbsent,
-			Err:    fmt.Errorf("work-item lookup: work_items_ceiling is not configured, so the size of the listing cannot be bounded; nothing was written"),
+			Reason: LookupReasonQueryAbsent,
+			Err:    fmt.Errorf("work-item lookup: work_items_query is not configured, so the work items of a PR cannot be listed in every status; nothing was written"),
 		}
 	}
 	var params []string
@@ -230,44 +212,38 @@ func ReadLookup(ctx context.Context, env Env, v *view.View) (*Lookup, error) {
 		repo, number, ok := PRIdentity(v)
 		if !ok {
 			return nil, &LookupError{
-				Reason: LookupReasonNoPRIdentity, Ceiling: ceiling,
-				Err: fmt.Errorf("work-item lookup: the view names no repository and PR number to send as work_items_query_params; nothing was written"),
+				Reason: LookupReasonNoPRIdentity,
+				Err:    fmt.Errorf("work-item lookup: the view names no repository and PR number to send as work_items_query_params; nothing was written"),
 			}
 		}
 		var err error
 		if params, err = paramArgs(cfg.WorkItemsQueryParams, repo, number); err != nil {
-			return nil, &LookupError{Reason: LookupReasonQueryAbsent, Ceiling: ceiling, Err: fmt.Errorf("work-item lookup: %w; nothing was written", err)}
+			return nil, &LookupError{Reason: LookupReasonQueryAbsent, Err: fmt.Errorf("work-item lookup: %w; nothing was written", err)}
 		}
 	}
 	args := append([]string{"issue", "list", "--query", cfg.WorkItemsQuery}, params...)
 	args = append(args, backendFlag(env)...)
 	out, err := call(ctx, env, args)
 	if err != nil {
-		return nil, &LookupError{Reason: LookupReasonUnavailable, Ceiling: ceiling, Err: fmt.Errorf("work-item lookup is unavailable: %w", err)}
+		return nil, &LookupError{Reason: LookupReasonUnavailable, Err: fmt.Errorf("work-item lookup is unavailable: %w", err)}
 	}
 	ans, err := decodeListing(out)
 	if err != nil {
-		return nil, &LookupError{Reason: LookupReasonUnavailable, Ceiling: ceiling, Err: fmt.Errorf("work-item lookup: decode pg-connector %s stdout: %w", strings.Join(args, " "), err)}
+		return nil, &LookupError{Reason: LookupReasonUnavailable, Err: fmt.Errorf("work-item lookup: decode pg-connector %s stdout: %w", strings.Join(args, " "), err)}
 	}
 	for _, s := range ans.Sources {
 		if s.Status != "succeeded" {
 			return nil, &LookupError{
-				Reason: LookupReasonUnavailable, Ceiling: ceiling,
-				Err: fmt.Errorf("work-item lookup is unavailable: source %q of pg-connector %s is %s (%s)", s.Source, strings.Join(args, " "), s.Status, s.Reason),
+				Reason: LookupReasonUnavailable,
+				Err:    fmt.Errorf("work-item lookup is unavailable: source %q of pg-connector %s is %s (%s)", s.Source, strings.Join(args, " "), s.Status, s.Reason),
 			}
 		}
 	}
 	n := len(ans.Entities)
 	if ans.Truncated {
 		return nil, &LookupError{
-			Reason: LookupReasonTruncated, Items: intp(n), Ceiling: ceiling,
+			Reason: LookupReasonTruncated, Items: intp(n),
 			Err: fmt.Errorf("work-item lookup: pg-connector %s was truncated, so the listing cannot be trusted; nothing was written", strings.Join(args, " ")),
-		}
-	}
-	if n > *ceiling {
-		return nil, &LookupError{
-			Reason: LookupReasonAboveCeiling, Items: intp(n), Ceiling: ceiling,
-			Err: fmt.Errorf("work-item lookup: the listing holds %d work items, above the ceiling work_items_ceiling=%d; raise the ceiling or compact closed items (runbook); nothing was written", n, *ceiling),
 		}
 	}
 	items := make([]ListedItem, 0, n)
@@ -277,12 +253,12 @@ func ReadLookup(ctx context.Context, env Env, v *view.View) (*Lookup, error) {
 	if len(params) > 0 {
 		if missing := missingOwned(v, items); len(missing) > 0 {
 			return nil, &LookupError{
-				Reason: LookupReasonInconsistent, Items: intp(n), Ceiling: ceiling,
+				Reason: LookupReasonInconsistent, Items: intp(n),
 				Err: fmt.Errorf("work-item lookup: the per-PR answer of pg-connector %s lacks %d work item(s) the view's own index owns or adopts (%s), so it cannot be trusted; nothing was written", strings.Join(args, " "), len(missing), strings.Join(missing, ", ")),
 			}
 		}
 	}
-	return &Lookup{items: items, ceiling: *ceiling}, nil
+	return &Lookup{items: items}, nil
 }
 
 // missingOwned lists the ids of the work items the view's index owns or adopts

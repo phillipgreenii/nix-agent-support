@@ -151,8 +151,7 @@ type planDoc struct {
 		Rule, Reason string
 		Facts        map[string]any
 	} `json:"skipped"`
-	LookupItems   *int `json:"lookup_items"`
-	LookupCeiling *int `json:"lookup_ceiling"`
+	LookupItems *int `json:"lookup_items"`
 }
 
 func planKinds(p planDoc) []string {
@@ -183,7 +182,7 @@ func runPlanJSON(t *testing.T) (planDoc, string, int) {
 // without it (the negative control) the plan does.
 func TestPlanSeesAClosedItemTheViewDoesNotLinkAndReportsTheFigures(t *testing.T) {
 	realLookup(t)
-	lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":7000`)
+	lookupConfig(t, `"work_items_query":"work-items-all"`)
 
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
 	trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI), closedReviewItem("rv-closed")), 0)
@@ -200,8 +199,8 @@ func TestPlanSeesAClosedItemTheViewDoesNotLinkAndReportsTheFigures(t *testing.T)
 			t.Errorf("the plan lost the create of %s: %s", want, got)
 		}
 	}
-	if p.LookupItems == nil || *p.LookupItems != 2 || p.LookupCeiling == nil || *p.LookupCeiling != 7000 {
-		t.Fatalf("figures = %v %v, want 2 and 7000", p.LookupItems, p.LookupCeiling)
+	if p.LookupItems == nil || *p.LookupItems != 2 {
+		t.Fatalf("lookup_items = %v, want 2", p.LookupItems)
 	}
 
 	// Negative control: an empty listing mints the fix-ci item again.
@@ -218,16 +217,16 @@ func TestPlanSeesAClosedItemTheViewDoesNotLinkAndReportsTheFigures(t *testing.T)
 	}
 }
 
-func TestPlanTextNamesTheListingSizeAndTheCeiling(t *testing.T) {
+func TestPlanTextNamesTheListingSize(t *testing.T) {
 	realLookup(t)
-	lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":50`)
+	lookupConfig(t, `"work_items_query":"work-items-all"`)
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
 	trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI)), 0)
 	out, errOut, code := runCLI(t, "plan", "pr", "acme/widgets#42")
 	if code != exitcode.OK {
 		t.Fatalf("code %d err %q", code, errOut)
 	}
-	if !strings.Contains(out, "\nlookup: 1 work items listed, ceiling 50\n") || !strings.Contains(out, "fix-ci (closed)") {
+	if !strings.Contains(out, "\nlookup: 1 work items listed\n") || !strings.Contains(out, "fix-ci (closed)") {
 		t.Fatalf("plan text:\n%s", out)
 	}
 }
@@ -236,7 +235,7 @@ func TestPlanTextNamesTheListingSizeAndTheCeiling(t *testing.T) {
 // create the plan lists is a create the apply writes, and no other.
 func TestPlanAndApplyAgreePerKindAndOperation(t *testing.T) {
 	realLookup(t)
-	lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":7000`)
+	lookupConfig(t, `"work_items_query":"work-items-all"`)
 	for name, listing := range map[string]string{
 		"empty listing": listingOf(),
 		"one held":      listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI)),
@@ -276,7 +275,7 @@ func TestPlanAndApplyAgreePerKindAndOperation(t *testing.T) {
 // production), apply writes nothing.
 func TestApplyAgainstAListingThatHoldsEveryItemWritesNothing(t *testing.T) {
 	realLookup(t)
-	lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":7000`)
+	lookupConfig(t, `"work_items_query":"work-items-all"`)
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
 	all := listingOf(
 		closedItem("an-1", "acme/widgets#42: Retry", "pr:acme/widgets#42:anchor"),
@@ -302,7 +301,7 @@ func TestApplyAgainstAListingThatHoldsEveryItemWritesNothing(t *testing.T) {
 
 func TestApplyCountersLineCarriesTheLookupFigures(t *testing.T) {
 	realLookup(t)
-	lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":300`)
+	lookupConfig(t, `"work_items_query":"work-items-all"`)
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
 	trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI)), 0)
 	_, errOut, code := runCLI(t, "apply", "pr", "acme/widgets#42")
@@ -310,8 +309,11 @@ func TestApplyCountersLineCarriesTheLookupFigures(t *testing.T) {
 		t.Fatalf("code %d err %q", code, errOut)
 	}
 	line := countersLine(t, errOut)
-	if line.LookupItems == nil || *line.LookupItems != 1 || line.LookupCeiling == nil || *line.LookupCeiling != 300 {
-		t.Fatalf("figures = %v %v in %s", line.LookupItems, line.LookupCeiling, errOut)
+	if line.LookupItems == nil || *line.LookupItems != 1 {
+		t.Fatalf("lookup_items = %v in %s", line.LookupItems, errOut)
+	}
+	if strings.Contains(errOut, "lookup_ceiling") {
+		t.Fatalf("the retired lookup_ceiling is still reported: %s", errOut)
 	}
 }
 
@@ -332,7 +334,7 @@ func countersLine(t *testing.T, stderr string) metrics.Line {
 
 // A lookup that cannot be trusted fails the run closed, plan and apply alike:
 // exit 4, nothing printed as a plan, nothing written, and the failure line
-// still reports the figures known (the ceiling always, the count when read).
+// still reports the figures known (the count, when a listing was read).
 func TestAnUntrustedLookupFailsTheRunClosedAndStillReportsTheFigures(t *testing.T) {
 	three := listingOf(closedItem("a", "t", "pr:acme/widgets#42:anchor"), closedItem("b", "t", keyFixCI), closedItem("c", "t", keyReview))
 	cases := []struct {
@@ -342,24 +344,21 @@ func TestAnUntrustedLookupFailsTheRunClosedAndStillReportsTheFigures(t *testing.
 		listExit   int
 		reason     string
 		wantItems  int // -1 = not reported
-		wantCeil   int // -1 = not reported
 		wantInText string
 	}{
-		{"above the ceiling", `"work_items_query":"work-items-all","work_items_ceiling":2`, three, 0, "lookup-above-ceiling", 3, 2, "above the ceiling"},
 		{
-			"truncated", `"work_items_query":"work-items-all","work_items_ceiling":50`,
-			`{"entities":[` + closedItem("a", "t", keyFixCI) + `],"sources":[{"source":"beads","status":"succeeded","count":1}],"truncated":true}`, 0, "lookup-truncated", 1, 50, "truncated",
+			"truncated", `"work_items_query":"work-items-all"`,
+			`{"entities":[` + closedItem("a", "t", keyFixCI) + `],"sources":[{"source":"beads","status":"succeeded","count":1}],"truncated":true}`, 0, "lookup-truncated", 1, "truncated",
 		},
 		{
-			"unavailable (the call fails)", `"work_items_query":"work-items-all","work_items_ceiling":50`,
-			`{"error":{"code":"unavailable","message":"down"}}`, 1, "lookup-unavailable", -1, 50, "unavailable",
+			"unavailable (the call fails)", `"work_items_query":"work-items-all"`,
+			`{"error":{"code":"unavailable","message":"down"}}`, 1, "lookup-unavailable", -1, "unavailable",
 		},
 		{
-			"unavailable (a source degraded)", `"work_items_query":"work-items-all","work_items_ceiling":50`,
-			`{"entities":[],"sources":[{"source":"beads","status":"degraded","count":0,"reason":"cache"}],"truncated":false}`, 0, "lookup-unavailable", -1, 50, "degraded",
+			"unavailable (a source degraded)", `"work_items_query":"work-items-all"`,
+			`{"entities":[],"sources":[{"source":"beads","status":"degraded","count":0,"reason":"cache"}],"truncated":false}`, 0, "lookup-unavailable", -1, "degraded",
 		},
-		{"ceiling key absent", `"work_items_query":"work-items-all"`, three, 0, "lookup-ceiling-absent", -1, -1, "work_items_ceiling is not configured"},
-		{"query key absent", `"work_items_ceiling":50`, three, 0, "lookup-query-absent", -1, 50, "work_items_query is not configured"},
+		{"query key absent", ``, three, 0, "lookup-query-absent", -1, "work_items_query is not configured"},
 	}
 	for _, tc := range cases {
 		for _, verb := range []string{"plan", "apply"} {
@@ -398,12 +397,43 @@ func TestAnUntrustedLookupFailsTheRunClosedAndStillReportsTheFigures(t *testing.
 					}
 				}
 				check("lookup_items", line.LookupItems, tc.wantItems)
-				check("lookup_ceiling", line.LookupCeiling, tc.wantCeil)
 				if line.LookupMs == nil || *line.LookupMs < 0 {
 					t.Errorf("lookup_ms = %v, want a measured duration on the failed-closed line", line.LookupMs)
 				}
 			})
 		}
+	}
+}
+
+// There is no size ceiling (retired, pg2-eclw3j.9): a config that still carries
+// the old work_items_ceiling key is not checked against it. A run over a
+// listing larger than that stale value succeeds, reports lookup_items on the
+// counters line, and reports no lookup_ceiling.
+func TestNoCeilingIsCheckedAndLookupItemsIsReportedPerRun(t *testing.T) {
+	three := listingOf(closedItem("a", "t", "pr:acme/widgets#42:anchor"), closedItem("b", "t", keyFixCI), closedItem("c", "t", keyReview))
+	for _, verb := range []string{"plan", "apply"} {
+		t.Run(verb, func(t *testing.T) {
+			realLookup(t)
+			lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":2`)
+			withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
+			trackerDouble(t, three, 0)
+			args := []string{verb, "pr", "acme/widgets#42"}
+			if verb == "plan" {
+				args = append(args, "--json")
+			}
+			out, errOut, code := runCLI(t, args...)
+			if code != exitcode.OK {
+				t.Fatalf("exit %d, want OK: a stale ceiling of 2 must not fail a listing of 3; err %q", code, errOut)
+			}
+			if strings.Contains(out+errOut, "lookup_ceiling") {
+				t.Errorf("the retired lookup_ceiling is reported:\n%s\n%s", out, errOut)
+			}
+			if verb == "apply" {
+				if line := countersLine(t, errOut); line.LookupItems == nil || *line.LookupItems != 3 {
+					t.Errorf("lookup_items = %v, want 3 in %s", line.LookupItems, errOut)
+				}
+			}
+		})
 	}
 }
 
@@ -437,7 +467,7 @@ func TestReadRunLookupTimesTheLookup(t *testing.T) {
 	lookupNow = steppingClock(1500 * time.Millisecond)
 
 	lookupRead = func(context.Context, apply.Env, *view.View) (*apply.Lookup, error) {
-		return apply.NewLookup(nil, 7000), nil
+		return apply.NewLookup(nil), nil
 	}
 	var errOut bytes.Buffer
 	lk, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, nil, "apply", "pr", "acme/widgets#42")
@@ -464,7 +494,7 @@ func TestPlanAndApplyReadThePerPRQueryWithThePRIdentity(t *testing.T) {
 	for _, verb := range []string{"plan", "apply"} {
 		t.Run(verb, func(t *testing.T) {
 			realLookup(t)
-			lookupConfig(t, `"work_items_query":"work-items-for-pr","work_items_query_params":["repo","pr_number"],"work_items_ceiling":50`)
+			lookupConfig(t, `"work_items_query":"work-items-for-pr","work_items_query_params":["repo","pr_number"]`)
 			withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
 			d := trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI)), 0)
 			args := []string{verb, "pr", "acme/widgets#42"}

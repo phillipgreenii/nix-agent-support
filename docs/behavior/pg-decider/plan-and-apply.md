@@ -17,7 +17,7 @@ nothing else: the decider reads no tracker or forge data directly.
 flowchart TD
     V["read view: pg-desk TYPE show ID --json"] -->|"unreadable"| X3["exit 3, nothing applied"]
     V -->|"pr only"| L["read the all-status work-item listing, once"]
-    L -->|"above the ceiling, truncated or unavailable"| X4["exit 4, nothing written"]
+    L -->|"truncated or unavailable"| X4["exit 4, nothing written"]
     L --> D
     V --> D["decide: rules over the view plus the listed items of the PR"]
     D --> PL["plan: print actions and skipped rules"]
@@ -84,11 +84,12 @@ issue-change feed, and widening it would pull every closed work item into the is
   return means the answer cannot be trusted: the run FAILS CLOSED (exit `4`, nothing written, reason
   `lookup-inconsistent`) rather than mint the missing item again. A PR identified only by `node_id`
   (no `repo`/`pr_number` metadata and no title match) therefore fails permanently, by design.
-- **Bounded in the decider.** The run counts the listing against `work_items_ceiling`. It FAILS
-  CLOSED, exiting `4` with nothing written (and, for `plan`, nothing printed as a plan), when the
-  listing holds more items than the ceiling, when the connector reports it truncated, when the call
+- **Trusted, not size-bounded.** The run FAILS CLOSED, exiting `4` with nothing written (and, for
+  `plan`, nothing printed as a plan), when the connector reports the listing truncated, when the call
   fails or its answer is unreadable, when any queried source did not succeed (a degraded or cached
-  answer is not trusted), and when either key is unset.
+  answer is not trusted), and when `work_items_query` is unset. There is no limit on the number of
+  items: the former `work_items_ceiling` was retired (pg2-eclw3j.9), and the size is reported instead
+  (see "Reported").
 - **Filtered to the PR.** From the listing the run keeps the items of the viewed PR: an item whose
   `dedup_key` names the PR in either key form, and an item with no `dedup_key` (a legacy anchor or
   child) whose `repo` and `pr_number` metadata name the PR, whose `node_id` is the PR's, or whose
@@ -106,11 +107,12 @@ issue-change feed, and widening it would pull every closed work item into the is
   item that holds it, and a child parented at a removed anchor `create` is parented at the work item
   that holds it. `apply` removes the same creates before it executes, so `plan` and `apply` agree
   per kind and operation on the same state: what `plan` lists is what `apply` then writes.
-- **Reported.** The listing's size and the ceiling are reported, as `lookup_items` and
-  `lookup_ceiling`: in the plan `--json` (after `skipped`), in a `lookup:` line of the text plan, and
-  in the run counters line (see "Run counters"), including the line of a run that failed closed, so
-  the figures are visible exactly when the lane stops. The decider emits no telemetry: the composed
-  command persists the two numbers, and the metrics that export them belong to pg-desk.
+- **Reported.** The listing's size is reported as `lookup_items`, once per `pr` run: in the plan
+  `--json` (after `skipped`), in a `lookup:` line of the text plan, and in the run counters line (see
+  "Run counters"), including the line of a run that failed closed after a listing was read, so an
+  abnormal count is visible without any run being stopped for it. The decider emits no telemetry: the
+  composed command persists the number in the run record, and the metric that exports it belongs to
+  pg-desk.
 
 ### Precedence
 
@@ -170,10 +172,10 @@ skipped:
 ```
 
 `--json` prints `{"actions": [...], "skipped": [{"rule", "reason", "facts"}]}`, both lists always
-arrays (never null), so a program can parse the plan. A `pr` plan adds two members after `skipped`,
-`lookup_items` (the size of the work-item listing the run read, which is zero for an empty listing) and
-`lookup_ceiling`; a plan of another type prints exactly the two lists. The text form of a `pr` plan
-adds one line after `linked work:`, `lookup: <n> work items listed, ceiling <c>`, and its `linked
+arrays (never null), so a program can parse the plan. A `pr` plan adds one member after `skipped`,
+`lookup_items` (the size of the work-item listing the run read, which is zero for an empty listing); a
+plan of another type prints exactly the two lists. The text form of a `pr` plan
+adds one line after `linked work:`, `lookup: <n> work items listed`, and its `linked
 work:` line includes the items the listing added.
 
 ## `pg-decider apply`
@@ -183,7 +185,7 @@ stdout unless `--json` is given; diagnostics go to stderr.
 
 `--json` prints, once the run has finished, the plan the run applied: the same object `plan --json`
 prints (`actions`, each with its `op`, `kind`, `rule` and `facts`, and `skipped`, the rules that
-produced no action and why; for a `pr` also `lookup_items` and `lookup_ceiling`). It is printed on
+produced no action and why; for a `pr` also `lookup_items`). It is printed on
 exit `0` and on exit `2` (a partial failure), so a caller learns what was attempted. A run that
 fails before it applies anything (exit `1`, `3` or `4`) prints nothing. The run counters line on
 stderr is unchanged. The composed command reads the plan from this result rather than from a
@@ -264,13 +266,13 @@ before anything else happens.
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                                |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                                               |
-| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config                           |
-| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                           |
-| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                                                 |
-| `4`  | A `pr` run's work-item lookup could not be trusted (above the ceiling, truncated, unavailable, or its keys unset); nothing was written |
+| Code | Meaning                                                                                                                                          |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                                                         |
+| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config                                     |
+| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                                     |
+| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                                                           |
+| `4`  | A `pr` run's work-item lookup could not be trusted (truncated, unavailable, inconsistent with the view, or its query unset); nothing was written |
 
 `plan` uses `0`, `1`, `3` and `4` the same way; it never exits `2` because it executes nothing. The
 composed command maps exit `4` to the class `decide_failed`, except a run whose counters line names the reason
@@ -440,14 +442,13 @@ focus activity keeps the shape above.
   failed closed. A view that lacks `annotations.focus_selected` prints one line with
   `"rules":{}` and `"failures":{"view-lacks-focus_selected":1}` and exits `3`, writing nothing; `plan`
   prints the same line on stderr before exiting `3`.
-- `lookup_items` and `lookup_ceiling` (line level) are the size of the work-item listing a `pr` run
-  read and the configured ceiling it was checked against (see "The work-item lookup"); both are
-  omitted for a run that made no lookup, and a zero count is printed. A run that failed closed
-  because of the lookup prints one line with `"rules":{}`, a `failures` reason (`lookup-above-ceiling`,
-  `lookup-truncated`, `lookup-unavailable`, `lookup-query-absent`, `lookup-ceiling-absent`,
-  `lookup-pr-identity-absent` or `lookup-inconsistent`) and the
-  figures known at that point: the ceiling whenever it is configured, the item count when a listing
-  was read; the exit code is `4` and nothing was written. `plan` prints the same line on stderr.
+- `lookup_items` (line level) is the size of the work-item listing a `pr` run read (see "The
+  work-item lookup"); it is omitted for a run that made no lookup, and a zero count is printed. A run
+  that failed closed because of the lookup prints one line with `"rules":{}`, a `failures` reason
+  (`lookup-truncated`, `lookup-unavailable`, `lookup-query-absent`, `lookup-pr-identity-absent` or
+  `lookup-inconsistent`) and the item count when a listing was read; the exit code is `4` and nothing
+  was written. The former `lookup_ceiling` member and the reasons `lookup-above-ceiling` and
+  `lookup-ceiling-absent` are retired (pg2-eclw3j.9). `plan` prints the same line on stderr.
 
 Volume and telemetry. The line is the decider's only telemetry: it emits nothing over OpenTelemetry
 or Prometheus, and logs the counters line and its error lines on stderr. Once the issue decider role
@@ -501,7 +502,7 @@ change rate of the watched issues and not their number.
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
   every rule. The outcome set is `applied`, `deduped`, `failed`, `skipped-dependency` and
   `skipped-stale`; the last two are counted under `skipped`. The additive members `transitions`,
-  `skips`, `seq`, `from_item`, `failures`, `lookup_items` and `lookup_ceiling` MUST NOT change what
+  `skips`, `seq`, `from_item`, `failures` and `lookup_items` MUST NOT change what
   any existing member means.
 - **INV-DECIDER-25.** <!-- uuid: 6f0cdfcc-c665-4a73-bf75-28f3c34042c3 --> For a merged or closed PR, the rules that keep the anchor in step with the PR
   and close its open work are the only ones that MAY act, with one deliberate exception: the
@@ -511,15 +512,15 @@ change rate of the watched issues and not their number.
   annotation MUST be created, reopened or updated for it.
 - **INV-DECIDER-27.** <!-- uuid: 864ba3c1-5491-47e7-ad55-50aca0b97e63 --> A `pr` `plan` or `apply` MUST read the all-status work-item listing named by
   `work_items_query` exactly once per run, before any rule runs, and MUST fail closed (exit `4`,
-  nothing written, no plan printed) when the listing is larger than `work_items_ceiling`, reports
-  itself truncated, is unavailable or unreadable, has a source that did not succeed, or when either
-  key is unset. When `work_items_query_params` is set the run MUST send the viewed PR's identity as
+  nothing written, no plan printed) when the listing reports itself truncated, is unavailable or
+  unreadable, has a source that did not succeed, or when `work_items_query` is unset; it MUST NOT
+  fail for the size of the listing (the ceiling was retired, pg2-eclw3j.9). When `work_items_query_params` is set the run MUST send the viewed PR's identity as
   the query's parameters and MUST also fail closed (reason `lookup-pr-identity-absent` or
   `lookup-inconsistent`) when the view has no identity or the answer lacks a work item the view's own
-  index owns or adopts. The failed run's counters line MUST still carry the figures known. The
+  index owns or adopts. The failed run's counters line MUST still carry the item count when a listing was read. The
   gather's work-beads query MUST NOT be widened to serve this lookup.
 - **INV-DECIDER-28.** <!-- uuid: 284030a9-f6aa-4d09-8741-92c89a07d5a6 --> `plan` MUST use the same read-only lookup, and the same steps over it, as `apply`:
   on the same view and listing (whole or per-PR) the `create` actions of the plan MUST be exactly the creates `apply`
   writes, per kind. A `create` the listing already holds MUST NOT be an action of either, and MUST
-  be listed as skipped with the reason `already handled`. The listing MUST report `lookup_items` and
-  `lookup_ceiling` in the plan `--json` and in the run counters line.
+  be listed as skipped with the reason `already handled`. The listing MUST report `lookup_items` in
+  the plan `--json` and in the run counters line.

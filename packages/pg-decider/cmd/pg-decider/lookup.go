@@ -1,4 +1,4 @@
-// lookup.go: the bounded work-item lookup of a pr run, shared by plan and apply
+// lookup.go: the work-item lookup of a pr run, shared by plan and apply
 // (docs/behavior/pg-decider/plan-and-apply.md, "The work-item lookup").
 package main
 
@@ -34,7 +34,7 @@ var lookupNow = time.Now
 // readRunLookup reads the lookup of a pr run, once, before the rules run. It
 // returns (nil, true) for any other entity type. On a lookup that cannot be
 // trusted it prints the diagnostic and the failed-closed counters line (with
-// the figures known, so the composed command can persist them), and returns
+// the size known, so the composed command can persist them), and returns
 // ok=false; the caller exits with exitcode.LookupUntrusted and writes nothing.
 func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, v *view.View, verb, typ, id string) (*apply.Lookup, bool) {
 	if typ != lookupEntityType {
@@ -50,13 +50,13 @@ func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, v 
 		return lk, true
 	}
 	reason := "lookup-unavailable"
-	var items, ceiling *int
+	var items *int
 	var le *apply.LookupError
 	if errors.As(err, &le) {
-		reason, items, ceiling = le.Reason, le.Items, le.Ceiling
+		reason, items = le.Reason, le.Items
 	}
 	fmt.Fprintf(errOut, "pg-decider: cannot %s %s %s: %v\n", verb, typ, id, err)
-	_ = metrics.EmitLookupFailureLine(errOut, typ, id, reason, items, ceiling, took)
+	_ = metrics.EmitLookupFailureLine(errOut, typ, id, reason, items, took)
 	return nil, false
 }
 
@@ -65,5 +65,5 @@ func lookupFigures(lk *apply.Lookup) *plan.Lookup {
 	if lk == nil {
 		return nil
 	}
-	return &plan.Lookup{Items: lk.Items(), Ceiling: lk.Ceiling()}
+	return &plan.Lookup{Items: lk.Items()}
 }

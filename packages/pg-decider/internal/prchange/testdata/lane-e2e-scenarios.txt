@@ -5,8 +5,8 @@ n-keyless-anchors-are-adopted-from-the-trackers-own-listing-with-no-creates
 the-second-apply-writes-nothing
 plan-and-apply-agree-per-kind-and-operation
 an-unhydrated-view-is-refused-and-nothing-is-written
-a-listing-above-the-ceiling-fails-the-run-and-writes-nothing
-a-listing-of-exactly-the-ceiling-is-accepted
+a-large-listing-is-accepted-and-lookup-items-is-persisted
+a-config-without-a-work-items-ceiling-is-accepted
 a-listing-that-reports-itself-truncated-fails-the-run-and-writes-nothing
 the-bd-list-query-of-a-prs-review-items-returns-every-state
 pg-desks-zero-filled-decision-labels-equal-the-deciders-rules-and-reasons

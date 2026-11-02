@@ -22,15 +22,14 @@
 #       mode="apply" series of its gauge, and each stale-anchor rule is gated on
 #       pg_desk_pr_lane_mode{mode="apply"} == 1, so none of them fires while the lane plans
 #   T7  (the sweep-bound and watch-listing rules) the scope: both read issue and thread only
-#   T8  (the lookup-ceiling rule) the ratio is guarded by `ceiling > 0`, so a ceiling gauge of 0
-#       (zero-filled until the decider reports) leaves the rule quiet instead of dividing by zero
+#   T8  (retired with the lookup-ceiling rule, pg2-eclw3j.9; the number is not reused)
 #   T9  (the ingest-failed, watched-source-not-observed, unflagged-members and orphan-read-lag rules) each uid exists once, at most 40 characters, with noDataState:
 #       Alerting guarded by pg-desk liveness: the expression carries the branch that answers 0
 #       while pg-desk is down (so liveness-down speaks alone and NoData alerts only with pg-desk
 #       up), and the rule has the T5 shape. It is NOT an outcome rule: noDataState is Alerting and
 #       there is no SYSTEM_PAUSE guard (an empty result would alert).
 #   T10 (only when the delete-only file is given; PR lane refactor P9b) the deleteRules file is
-#       apiVersion 1 with no groups key, each entry has orgId 1, the uids are exactly the four
+#       apiVersion 1 with no groups key, each entry has orgId 1, the uids are exactly the five
 #       retired sync_error rules (each once), none of them is still a rule of alerts.yaml, and the
 #       kept pg-desk-sync-stale is neither in the delete file nor missing from alerts.yaml
 #
@@ -38,8 +37,7 @@
 # removed MUST fail T3 and one whose noDataState differs MUST fail T2; the never-hydrated rule
 # with its absence branch removed MUST fail T4; each apply-gated rule with its gate removed MUST
 # fail T6; each T9 rule with another noDataState or without its liveness guard MUST fail
-# T9; and each scoped rule with its scope removed MUST fail T7, and the lookup-ceiling rule with its ceiling
-# guard removed MUST fail T8 (each firing only its own rule).
+# T9; and each scoped rule with its scope removed MUST fail T7 (each firing only its own rule).
 #
 # Exit codes: 0 consistent (self-test: the real input passes and every negative case fails with
 # exactly its own rule), 1 a rule failed, 2 usage error or unreadable input or a missing tool.
@@ -86,7 +84,6 @@ outcome_uids=(
   "pg-desk-issue-hydration-failing"
   "pg-desk-pr-hydrate-dead-man"
   "pg-desk-pr-hidden-open-anchor"
-  "pg-desk-pr-lookup-ceiling"
 )
 # Rules that MUST be inert while the lane does not apply (T6), and what each must carry.
 residual_uid="pg-desk-pr-residual-after-apply"
@@ -97,10 +94,6 @@ stale_gate='and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)'
 scoped_uids=("pg-desk-sweep-bound-violated" "pg-desk-watch-listing-degraded")
 scope='type=~"issue|thread"'
 
-# The lookup-ceiling rule divides by the ceiling gauge, so it MUST drop a ceiling of 0 (T8).
-ceiling_uid="pg-desk-pr-lookup-ceiling"
-ceiling_guard='/ (max(pg_desk_pr_lane_lookup_ceiling) > 0)'
-
 # The failed-ingest rule (T9): noDataState Alerting, guarded by pg-desk liveness.
 ingest_uid="pg-desk-ingest-failed-old"
 # The two Jira-half outcome rules (watched source not observed, unflagged members) and the orphan-read-lag rule carry the same
@@ -110,12 +103,13 @@ ingest_guard=' or (vector(0) and on() absent(pg_desk_liveness == 1))'
 
 guard_uid="pg-desk-sync-stale"
 
-# The four retired sync_error rules the delete-only file must name (T10); the kept rule is guard_uid.
+# The retired rules the delete-only file must name (T10): the four sync_error rules and the lookup ceiling rule; the kept rule is guard_uid.
 retired_uids=(
   "pg-desk-sync-error-retrying"
   "pg-desk-sync-error-rows"
   "pg-desk-sync-errors"
   "pg-desk-unreconciled-anchor-age"
+  "pg-desk-pr-lookup-ceiling"
 )
 absence='pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated'
 
@@ -221,16 +215,6 @@ lint() {
     esac
   done
 
-  # T8
-  expr="$(expr_of "$json" "$ceiling_uid")"
-  case "$expr" in
-  *"$ceiling_guard"*) ;;
-  *)
-    echo "RULE-T8: $ceiling_uid: the expression lacks the ceiling guard: $ceiling_guard" >&2
-    status=1
-    ;;
-  esac
-
   # T9
   for ingest_uid in "${liveness_guarded_uids[@]}"; do
     count="$(jq --arg uid "$ingest_uid" '[.groups[]?.rules[]? | select(.uid == $uid)] | length' <<<"$json")"
@@ -284,7 +268,7 @@ lint_delete() {
   got="$(jq -r '[.deleteRules[]?.uid] | sort | join(",")' <<<"$djson")"
   want="$(printf '%s\n' "${retired_uids[@]}" | sort | paste -sd, -)"
   if [ "$got" != "$want" ]; then
-    echo "RULE-T10: the deleteRules uids are not exactly the four retired uids, each once: got [$got], want [$want]" >&2
+    echo "RULE-T10: the deleteRules uids are not exactly the retired uids, each once: got [$got], want [$want]" >&2
     status=1
   fi
   bad="$(jq -r '.deleteRules[]? | select(.orgId != 1) | .uid' <<<"$djson")"
@@ -379,8 +363,6 @@ for uid in "${scoped_uids[@]}"; do
   negative T7 "$uid: the issue and thread scope removed" \
     "$(expr_path "$uid") |= sub(\"type=~\\\"issue\\|thread\\\",?\"; \"\")"
 done
-negative T8 "$ceiling_uid: the ceiling greater than 0 guard removed" \
-  "$(expr_path "$ceiling_uid") |= sub(\" / [(]max[(]pg_desk_pr_lane_lookup_ceiling[)] > 0[)]\"; \" / max(pg_desk_pr_lane_lookup_ceiling)\")"
 for ingest_uid in "${liveness_guarded_uids[@]}"; do
   negative T9 "$ingest_uid: noDataState differs (OK)" \
     "($(rule_of "$ingest_uid") | .noDataState) = \"OK\""

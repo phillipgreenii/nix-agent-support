@@ -151,7 +151,7 @@ func TestFactSummaryIsSortedAndStable(t *testing.T) {
 func TestJSONWithLookupAddsTheFiguresAfterSkippedAndKeepsTheListsArrays(t *testing.T) {
 	var with, without bytes.Buffer
 	res := action.PlanResult{}
-	if err := JSONWithLookup(&with, res, &Lookup{Items: 0, Ceiling: 7000}); err != nil {
+	if err := JSONWithLookup(&with, res, &Lookup{Items: 0}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -164,8 +164,11 @@ func TestJSONWithLookupAddsTheFiguresAfterSkippedAndKeepsTheListsArrays(t *testi
 	if s, ok := got["skipped"].([]any); !ok || len(s) != 0 {
 		t.Errorf("skipped = %v", got["skipped"])
 	}
-	if got["lookup_items"] != float64(0) || got["lookup_ceiling"] != float64(7000) {
-		t.Errorf("figures = %v %v (a zero count must still be printed)", got["lookup_items"], got["lookup_ceiling"])
+	if got["lookup_items"] != float64(0) {
+		t.Errorf("lookup_items = %v (a zero count must still be printed)", got["lookup_items"])
+	}
+	if _, ok := got["lookup_ceiling"]; ok {
+		t.Errorf("lookup_ceiling is retired but printed: %v", got)
 	}
 	if i, j := strings.Index(with.String(), `"skipped"`), strings.Index(with.String(), `"lookup_items"`); i < 0 || j < i {
 		t.Errorf("lookup_items does not follow skipped:\n%s", with.String())
@@ -183,10 +186,10 @@ func TestJSONWithLookupAddsTheFiguresAfterSkippedAndKeepsTheListsArrays(t *testi
 func TestTextWithLookupNamesTheFiguresAndTextWithoutOneDoesNot(t *testing.T) {
 	v := loadView(t, "pr_view.json")
 	var with, without bytes.Buffer
-	if err := TextWithLookup(&with, v, action.PlanResult{}, &Lookup{Items: 12, Ceiling: 40}); err != nil {
+	if err := TextWithLookup(&with, v, action.PlanResult{}, &Lookup{Items: 12}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(with.String(), "\nlookup: 12 work items listed, ceiling 40\n") {
+	if !strings.Contains(with.String(), "\nlookup: 12 work items listed\n") {
 		t.Errorf("text:\n%s", with.String())
 	}
 	if err := Text(&without, v, action.PlanResult{}); err != nil || strings.Contains(without.String(), "lookup:") {

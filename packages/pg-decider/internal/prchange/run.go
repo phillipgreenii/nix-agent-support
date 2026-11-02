@@ -100,13 +100,13 @@ type run struct {
 	// run (apply) or that the plan lists (plan); nil when not learned.
 	residual  *int
 	decisions []decision
-	// lookupItems and lookupCeiling are the decider's work-item lookup figures,
-	// when it reported them (see lookupFromDecider).
-	lookupItems, lookupCeiling *int64
-	// planItems and planCeiling are the same figures as read from a read-only
-	// `plan --json` of the run (the plan mode's only source: the decider's plan
-	// prints no counters line).
-	planItems, planCeiling *int64
+	// lookupItems is the decider's work-item lookup size, when it reported it
+	// (see lookupFromDecider).
+	lookupItems *int64
+	// planItems is the same figure as read from a read-only `plan --json` of
+	// the run (the plan mode's only source: the decider's plan prints no
+	// counters line).
+	planItems *int64
 }
 
 // ms is the whole milliseconds the run's clock has advanced since t0.
@@ -391,8 +391,8 @@ func (r *run) readPlan() (*action.PlanResult, string) {
 	if err != nil {
 		return nil, "the plan is not readable JSON: " + err.Error()
 	}
-	if items, ceiling := lookupFromPlanJSON(string(res.Stdout)); items != nil || ceiling != nil {
-		r.planItems, r.planCeiling = items, ceiling
+	if items := lookupFromPlanJSON(string(res.Stdout)); items != nil {
+		r.planItems = items
 	}
 	return p, ""
 }
@@ -467,9 +467,9 @@ func (r *run) decide() int {
 	r.decisions = decisionsFor(r.o.Mode, pre, counters)
 	r.logRules(rec.Rules)
 	r.rec.Adoption = adoptionOutcome(r.o.Mode, r.view, pre, counters)
-	r.lookupItems, r.lookupCeiling = lookupFromDecider(res)
-	if r.lookupItems == nil && r.lookupCeiling == nil {
-		r.lookupItems, r.lookupCeiling = r.planItems, r.planCeiling
+	r.lookupItems = lookupFromDecider(res)
+	if r.lookupItems == nil {
+		r.lookupItems = r.planItems
 	}
 	rec.LookupItems = r.lookupItems
 	if counters != nil {
@@ -478,18 +478,17 @@ func (r *run) decide() int {
 	return code
 }
 
-// lookupFromDecider extracts the decider's work-item lookup item count and its
-// ceiling from the deciding call, when it reports them: the `lookup_items` and
-// `lookup_ceiling` members of the run counters line on its stderr (an apply, a
-// failed-closed plan or apply: that line carries them as far as they are known
-// on the failure path too), else the same two members of a `--json` plan on its
-// stdout. A plan in text form prints them in prose only, so a plan run takes
-// them from the read-only `plan --json` that follows (see readPlan). The lane
-// write path call forwards the two values; a test replaces this function to
-// show that with a stub.
-var lookupFromDecider = func(res Result) (items, ceiling *int64) {
-	if c := parseCounters(string(res.Stderr)); c != nil && (c.LookupItems != nil || c.LookupCeiling != nil) {
-		return intp64(c.LookupItems), intp64(c.LookupCeiling)
+// lookupFromDecider extracts the decider's work-item lookup item count from
+// the deciding call, when it reports it: the `lookup_items` member of the run
+// counters line on its stderr (an apply, a failed-closed plan or apply: that
+// line carries it as far as it is known on the failure path too), else the
+// same member of a `--json` plan on its stdout. A plan in text form prints it
+// in prose only, so a plan run takes it from the read-only `plan --json` that
+// follows (see readPlan). The lane write path call forwards the value; a test
+// replaces this function to show that with a stub.
+var lookupFromDecider = func(res Result) (items *int64) {
+	if c := parseCounters(string(res.Stderr)); c != nil && c.LookupItems != nil {
+		return intp64(c.LookupItems)
 	}
 	return lookupFromPlanJSON(string(res.Stdout))
 }
@@ -502,18 +501,17 @@ func intp64(p *int) *int64 {
 	return &n
 }
 
-// lookupFromPlanJSON reads lookup_items and lookup_ceiling out of a decider
-// plan printed with --json; nil, nil for anything else (a text plan, an older
-// decider that prints neither member).
-func lookupFromPlanJSON(stdout string) (items, ceiling *int64) {
+// lookupFromPlanJSON reads lookup_items out of a decider plan printed with
+// --json; nil for anything else (a text plan, an older decider that prints no
+// such member).
+func lookupFromPlanJSON(stdout string) (items *int64) {
 	var p struct {
-		Items   *int `json:"lookup_items"`
-		Ceiling *int `json:"lookup_ceiling"`
+		Items *int `json:"lookup_items"`
 	}
 	if json.Unmarshal([]byte(stdout), &p) != nil {
-		return nil, nil
+		return nil
 	}
-	return intp64(p.Items), intp64(p.Ceiling)
+	return intp64(p.Items)
 }
 
 // mapDecide maps the decider's exit. Its stderr is re-wrapped: the run counters
@@ -546,7 +544,7 @@ func (r *run) mapDecide(res Result) int {
 	}
 	if res.Code == exitcode.LookupUntrusted && lookupUnavailable(string(res.Stderr)) {
 		// The decider failed closed because the tracker could not be read, and
-		// wrote nothing: retryable, unlike a listing above the ceiling or a
+		// wrote nothing: retryable, unlike an inconsistent or a
 		// truncated one, which a retry cannot clear.
 		return r.fail(StageDecide, ClassTransient, "the decider's work-item lookup could not be read", detail, r.planCmd())
 	}

@@ -43,7 +43,7 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
 
   Both skip in a plain `go test ./...` (they need the binaries). The scenarios: N keyless anchors adopted
   with no creates, the second apply writing nothing, plan and apply agreeing per kind and operation, an
-  unhydrated view refused, a lookup listing above the ceiling or reporting itself truncated failing the
+  unhydrated view refused, a lookup listing reporting itself truncated failing the
   run closed, the review rule (a burst of pushes, claimed, closed, legacy suffix-less, deferred and
   force-reviewed items, a claim landing between the listing and the update, a reopened PR), two
   concurrent composed runs for one PR (one anchor with the lock, two with a double that skips it, the

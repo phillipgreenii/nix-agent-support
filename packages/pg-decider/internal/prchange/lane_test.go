@@ -336,8 +336,8 @@ func TestALockTimeoutIsInTheRunRecordButNotTheLaneState(t *testing.T) {
 func TestLookupFiguresAreForwardedToTheLaneWritePath(t *testing.T) {
 	orig := lookupFromDecider
 	t.Cleanup(func() { lookupFromDecider = orig })
-	items, ceiling := int64(412), int64(500)
-	lookupFromDecider = func(Result) (*int64, *int64) { return &items, &ceiling }
+	items := int64(412)
+	lookupFromDecider = func(Result) *int64 { return &items }
 
 	s := hydrated().on("pg-decider plan pr", ok(planEmpty))
 	o, _, errb := opts(t, ModePlan, s)
@@ -345,8 +345,8 @@ func TestLookupFiguresAreForwardedToTheLaneWritePath(t *testing.T) {
 		t.Fatalf("exit %d: %s", got, errb)
 	}
 	in := laneCalls(t, s)[0]
-	if in.LookupItems == nil || *in.LookupItems != 412 || in.LookupCeiling == nil || *in.LookupCeiling != 500 {
-		t.Fatalf("lookup figures = %v, %v", in.LookupItems, in.LookupCeiling)
+	if in.LookupItems == nil || *in.LookupItems != 412 {
+		t.Fatalf("lookup_items = %v", in.LookupItems)
 	}
 	// Without a report (today's decider) the figures are left out, so the store
 	// keeps what it has.
@@ -354,8 +354,8 @@ func TestLookupFiguresAreForwardedToTheLaneWritePath(t *testing.T) {
 	s = hydrated().on("pg-decider plan pr", ok(planEmpty))
 	o, _, _ = opts(t, ModePlan, s)
 	Run(context.Background(), o)
-	if in := laneCalls(t, s)[0]; in.LookupItems != nil || in.LookupCeiling != nil {
-		t.Fatalf("figures invented: %v %v", in.LookupItems, in.LookupCeiling)
+	if in := laneCalls(t, s)[0]; in.LookupItems != nil {
+		t.Fatalf("figure invented: %v", in.LookupItems)
 	}
 }
 
@@ -490,28 +490,28 @@ func TestTheRunRecordIsNotTheLegacyRunRecord(t *testing.T) {
 
 // The real extraction (the default of lookupFromDecider): the figures the decider
 // reports in its run counters line, in its --json plan, and on its failure path.
-const planJSONWithLookup = `{"actions":[],"skipped":[{"rule":"all.closed","reason":"not matched"}],"lookup_items":3443,"lookup_ceiling":7000}`
+const planJSONWithLookup = `{"actions":[],"skipped":[{"rule":"all.closed","reason":"not matched"}],"lookup_items":3443}`
 
-func figures(t *testing.T, in laneInput, items, ceiling int64) {
+func figures(t *testing.T, in laneInput, items int64) {
 	t.Helper()
-	if in.LookupItems == nil || *in.LookupItems != items || in.LookupCeiling == nil || *in.LookupCeiling != ceiling {
-		t.Fatalf("lookup figures = %v, %v, want %d and %d", in.LookupItems, in.LookupCeiling, items, ceiling)
+	if in.LookupItems == nil || *in.LookupItems != items {
+		t.Fatalf("lookup_items = %v, want %d", in.LookupItems, items)
 	}
 }
 
 func TestPlanModeForwardsTheFiguresOfThePlanJSONRead(t *testing.T) {
 	s := hydrated().
 		on("pg-decider plan pr acme/api#7 --json", ok(planJSONWithLookup)).
-		on("pg-decider plan pr", ok("pr acme/api#7  mine\nlookup: 3443 work items listed, ceiling 7000\n"))
+		on("pg-decider plan pr", ok("pr acme/api#7  mine\nlookup: 3443 work items listed\n"))
 	o, _, errb := opts(t, ModePlan, s)
 	if got := Run(context.Background(), o); got != ExitOK {
 		t.Fatalf("exit %d: %s", got, errb)
 	}
-	figures(t, laneCalls(t, s)[0], 3443, 7000)
+	figures(t, laneCalls(t, s)[0], 3443)
 }
 
 func TestApplyModeForwardsTheFiguresOfTheCountersLine(t *testing.T) {
-	line := strings.TrimSuffix(applyCounters, "}") + `,"lookup_items":3443,"lookup_ceiling":7000}`
+	line := strings.TrimSuffix(applyCounters, "}") + `,"lookup_items":3443}`
 	s := hydrated().
 		on("pg-decider plan pr", ok(planWithWork)).
 		on("pg-decider apply", Result{Stderr: []byte(line + "\n")})
@@ -520,7 +520,7 @@ func TestApplyModeForwardsTheFiguresOfTheCountersLine(t *testing.T) {
 	if len(laneCalls(t, s)) != 1 {
 		t.Fatalf("lane calls: %v\n%s", s.calls, errb)
 	}
-	figures(t, laneCalls(t, s)[0], 3443, 7000)
+	figures(t, laneCalls(t, s)[0], 3443)
 }
 
 // A decider that failed closed on the lookup (exit 4) still reports the figures
@@ -528,12 +528,12 @@ func TestApplyModeForwardsTheFiguresOfTheCountersLine(t *testing.T) {
 // run is classed decide_failed and the gauges keep following the lane.
 func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.T) {
 	failLine := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/api#7","rules":{},"escalations":0,` +
-		`"failures":{"lookup-above-ceiling":1},"lookup_items":7100,"lookup_ceiling":7000}`
+		`"failures":{"lookup-truncated":1},"lookup_items":7100}`
 	for _, mode := range []string{ModePlan, ModeApply} {
 		t.Run(mode, func(t *testing.T) {
 			s := hydrated().
-				on("pg-decider plan pr", Result{Code: 4, Stderr: []byte("pg-decider: cannot plan pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n")}).
-				on("pg-decider apply", Result{Code: 4, Stderr: []byte("pg-decider: cannot apply pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n")})
+				on("pg-decider plan pr", Result{Code: 4, Stderr: []byte("pg-decider: cannot plan pr acme/api#7: work-item lookup: truncated\n" + failLine + "\n")}).
+				on("pg-decider apply", Result{Code: 4, Stderr: []byte("pg-decider: cannot apply pr acme/api#7: work-item lookup: truncated\n" + failLine + "\n")})
 			o, _, errb := opts(t, mode, s)
 			got := Run(context.Background(), o)
 			if got != ExitDecideFailed {
@@ -546,7 +546,7 @@ func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.
 			if len(calls) != 1 {
 				t.Fatalf("lane calls = %d: %v", len(calls), s.calls)
 			}
-			figures(t, calls[0], 7100, 7000)
+			figures(t, calls[0], 7100)
 			if calls[0].LastOutcome != "decide.decide_failed" {
 				t.Errorf("last outcome = %q", calls[0].LastOutcome)
 			}
@@ -554,12 +554,12 @@ func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.
 	}
 }
 
-// A decider that reports neither figure leaves them out (no invented zero).
+// A decider that reports no figure leaves it out (no invented zero).
 func TestADeciderThatReportsNoFiguresForwardsNone(t *testing.T) {
 	s := hydrated().on("pg-decider plan pr", ok(planEmpty))
 	o, _, _ := opts(t, ModePlan, s)
 	Run(context.Background(), o)
-	if in := laneCalls(t, s)[0]; in.LookupItems != nil || in.LookupCeiling != nil {
-		t.Fatalf("figures invented: %v %v", in.LookupItems, in.LookupCeiling)
+	if in := laneCalls(t, s)[0]; in.LookupItems != nil {
+		t.Fatalf("figure invented: %v", in.LookupItems)
 	}
 }

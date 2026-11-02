@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -18,8 +19,8 @@ import (
 
 const lookupQuery = "work-items-all"
 
-func lookupCfg(ceiling int) *config.Config {
-	return &config.Config{WorkItemsQuery: lookupQuery, WorkItemsCeiling: &ceiling}
+func lookupCfg() *config.Config {
+	return &config.Config{WorkItemsQuery: lookupQuery}
 }
 
 func listing(entities string, extra string) string {
@@ -37,16 +38,14 @@ func lookupView() *view.View {
 	}
 }
 
-func TestReadLookupFailsClosedWithoutTheQueryOrTheCeiling(t *testing.T) {
-	ceil := 10
+func TestReadLookupFailsClosedWithoutTheQuery(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		cfg    *config.Config
 		reason string
 	}{
 		{"nil config", nil, LookupReasonQueryAbsent},
-		{"no query", &config.Config{WorkItemsCeiling: &ceil}, LookupReasonQueryAbsent},
-		{"no ceiling", &config.Config{WorkItemsQuery: lookupQuery}, LookupReasonCeilingAbsent},
+		{"no query", &config.Config{}, LookupReasonQueryAbsent},
 	} {
 		d := newDouble(t)
 		env := testEnv(d, nil)
@@ -56,9 +55,6 @@ func TestReadLookupFailsClosedWithoutTheQueryOrTheCeiling(t *testing.T) {
 		if lk != nil || !errors.As(err, &le) || le.Reason != tc.reason {
 			t.Fatalf("%s: lookup=%v err=%v, want reason %s", tc.name, lk, err, tc.reason)
 		}
-		if tc.reason == LookupReasonCeilingAbsent && !strings.Contains(err.Error(), "work_items_ceiling is not configured") {
-			t.Errorf("%s: the message does not state the missing key: %v", tc.name, err)
-		}
 		if n := len(d.calls()); n != 0 {
 			t.Errorf("%s: %d connector call(s) made without a usable configuration", tc.name, n)
 		}
@@ -67,14 +63,14 @@ func TestReadLookupFailsClosedWithoutTheQueryOrTheCeiling(t *testing.T) {
 
 func TestReadLookupCallsTheNamedQueryOnceOnTheConfiguredBackend(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "acme/api#7: x", "open", `"repo":"acme/api"`), "")})
-	cfg := lookupCfg(5)
+	cfg := lookupCfg()
 	cfg.AgentTrackerBackend = "trk"
 	lk, err := ReadLookup(context.Background(), testEnv(d, cfg), lookupView())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lk.Items() != 1 || lk.Ceiling() != 5 {
-		t.Fatalf("items=%d ceiling=%d", lk.Items(), lk.Ceiling())
+	if lk.Items() != 1 {
+		t.Fatalf("items=%d", lk.Items())
 	}
 	got := d.lines()
 	if len(got) != 1 || got[0] != "pg-connector issue list --query work-items-all --backend trk" {
@@ -82,31 +78,26 @@ func TestReadLookupCallsTheNamedQueryOnceOnTheConfiguredBackend(t *testing.T) {
 	}
 }
 
-func TestReadLookupAcceptsAListingExactlyAtTheCeiling(t *testing.T) {
-	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "t", "closed", "")+","+ent("b2", "t", "open", ""), "")})
-	if _, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(2)), lookupView()); err != nil {
-		t.Fatalf("2 items at ceiling 2: %v", err)
+// There is no size ceiling (retired, pg2-eclw3j.9): a listing of any size is
+// accepted and its size is reported through Items (the lookup_items signal).
+func TestReadLookupAcceptsAListingOfAnySizeAndReportsItsSize(t *testing.T) {
+	var ents []string
+	for i := 0; i < 250; i++ {
+		ents = append(ents, ent(fmt.Sprintf("b%d", i), "t", "closed", ""))
 	}
-}
-
-func TestReadLookupAboveTheCeilingFailsClosedAndReportsTheFigures(t *testing.T) {
-	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "t", "closed", "")+","+ent("b2", "t", "open", "")+","+ent("b3", "t", "open", ""), "")})
-	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(2)), lookupView())
-	var le *LookupError
-	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonAboveCeiling {
-		t.Fatalf("lookup=%v err=%v", lk, err)
+	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(strings.Join(ents, ","), "")})
+	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg()), lookupView())
+	if err != nil {
+		t.Fatalf("250 items with no ceiling: %v", err)
 	}
-	if le.Items == nil || *le.Items != 3 || le.Ceiling == nil || *le.Ceiling != 2 {
-		t.Fatalf("figures = %v %v, want 3 and 2", le.Items, le.Ceiling)
-	}
-	if !strings.Contains(err.Error(), "work_items_ceiling=2") || !strings.Contains(err.Error(), "nothing was written") {
-		t.Errorf("message = %v", err)
+	if lk.Items() != 250 {
+		t.Errorf("Items() = %d, want 250", lk.Items())
 	}
 }
 
 func TestReadLookupTruncatedListingFailsClosed(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: `{"entities":[` + ent("b1", "t", "open", "") + `],"sources":[{"source":"beads","status":"succeeded","count":1}],"truncated":true}`})
-	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(100)), lookupView())
+	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg()), lookupView())
 	var le *LookupError
 	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonTruncated {
 		t.Fatalf("lookup=%v err=%v", lk, err)
@@ -131,13 +122,10 @@ func TestReadLookupUnavailableListingFailsClosed(t *testing.T) {
 	}
 	for name, rule := range cases {
 		d := newDouble(t, rule)
-		lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(100)), lookupView())
+		lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg()), lookupView())
 		var le *LookupError
 		if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonUnavailable {
 			t.Fatalf("%s: lookup=%v err=%v", name, lk, err)
-		}
-		if le.Ceiling == nil || *le.Ceiling != 100 {
-			t.Errorf("%s: the ceiling is not reported: %v", name, le.Ceiling)
 		}
 	}
 }
@@ -147,7 +135,7 @@ func TestReadLookupToleratesNonStringMetadataAndTheEnvelopeShape(t *testing.T) {
 		Match:  "issue list",
 		Stdout: `{"result":{"entities":[{"id":"b1","title":"t","state":"open","metadata":{"pr_number":7,"dedup_key":"pr:acme/api#7:fix-ci:abc","flag":true}}]}}`,
 	})
-	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(10)), lookupView())
+	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg()), lookupView())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +165,7 @@ func TestAugmentAddsTheClosedItemsOfThePRAndNothingOfAnotherPR(t *testing.T) {
 		{ID: "legacy-node", Title: "review-pr: whatever", State: "closed", Metadata: map[string]string{"node_id": "PR_node7"}},
 		{ID: "legacy-meta", Title: "process-feedback: acme/api#7", State: "closed", Metadata: map[string]string{"repo": "acme/api", "pr_number": "7"}},
 		{ID: "unrelated", Title: "write docs", State: "open", Metadata: map[string]string{"repo": "acme/api", "pr_number": "9"}},
-	}, 100)
+	})
 	v := lookupView()
 	v.Links = []view.Link{{Type: "issue", ID: "legacy-meta", Title: "process-feedback: acme/api#7", State: "open", Metadata: map[string]string{}}}
 
@@ -210,7 +198,7 @@ func TestAugmentAddsTheClosedItemsOfThePRAndNothingOfAnotherPR(t *testing.T) {
 }
 
 func TestAugmentLinksAFocusBeadWithTheSourceRelation(t *testing.T) {
-	lk := NewLookup([]ListedItem{{ID: "f1", Title: "focus: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:focus-item"}}}, 10)
+	lk := NewLookup([]ListedItem{{ID: "f1", Title: "focus: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:focus-item"}}})
 	got := lk.Augment(lookupView())
 	if len(got.Links) != 1 || got.Links[0].Relation != workitem.RelationSource {
 		t.Fatalf("links = %+v", got.Links)
@@ -223,7 +211,7 @@ func TestAugmentOfNilOrEmptyLookupReturnsTheViewItself(t *testing.T) {
 	if nilLookup.Augment(v) != v {
 		t.Error("a nil lookup must return the view unchanged")
 	}
-	if NewLookup(nil, 5).Augment(v) != v {
+	if NewLookup(nil).Augment(v) != v {
 		t.Error("a lookup with nothing to add must return the view unchanged")
 	}
 }
@@ -239,7 +227,7 @@ func TestDedupePlanMovesAHeldCreateToSkippedAndReparentsItsChildren(t *testing.T
 	lk := NewLookup([]ListedItem{
 		{ID: "anchor-1", Title: "acme/api#7: x", State: "closed", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:anchor"}},
 		{ID: "ci-1", Title: "fix-ci: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:fix-ci:aaa"}},
-	}, 10)
+	})
 	ref := workitem.EntityRef{Type: "pr", ID: "acme/api#7", NodeID: "PR_node7"}
 	in := action.PlanResult{
 		Actions: []action.Action{
@@ -279,9 +267,9 @@ func ptr(s string) *string { return &s }
 // The create of apply uses the run's listing, not one `issue list` per create.
 func TestApplyDedupsAgainstTheRunListingWithoutAnotherListCall(t *testing.T) {
 	d := newDouble(t)
-	lk := NewLookup([]ListedItem{{ID: "ci-1", Title: "fix-ci: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:fix-ci:aaa"}}}, 10)
+	lk := NewLookup([]ListedItem{{ID: "ci-1", Title: "fix-ci: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:fix-ci:aaa"}}})
 	res := Run(context.Background(), Input{
-		Type: "pr", ID: "acme/api#7", View: lookupView(), Lookup: lk, Env: testEnv(d, lookupCfg(10)),
+		Type: "pr", ID: "acme/api#7", View: lookupView(), Lookup: lk, Env: testEnv(d, lookupCfg()),
 		Actions: []action.Action{
 			createAction("fixci.failing-on-head", "fix-ci", "pr:acme/api#7:fix-ci:aaa", ""),
 			createAction("fixci.failing-on-head", "fix-ci", "pr:acme/api#7:fix-ci:bbb", ""),
@@ -318,7 +306,7 @@ func TestMixedKeyFormsAreOneIdentityForAugmentAndDedupe(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			lk := NewLookup([]ListedItem{
 				{ID: "ci-1", Title: "fix-ci: acme/api#7 @ aaa", State: "open", Metadata: map[string]string{"dedup_key": tc.listed}},
-			}, 10)
+			})
 			// Owns: the listed item belongs to the PR, so the rules can see it.
 			if got := linkIDs(lk.Augment(lookupView())); strings.Join(got, ",") != "ci-1" {
 				t.Fatalf("the item keyed %q was not linked: %v", tc.listed, got)
@@ -343,10 +331,10 @@ func TestMixedKeyFormsAreOneIdentityForAugmentAndDedupe(t *testing.T) {
 // focus bead needs no refresh.
 func TestApplyFocusHitThroughTheRunListingStillRefreshesTheHit(t *testing.T) {
 	const key = "pr:acme/api#7:focus-item"
-	lk := NewLookup([]ListedItem{{ID: "f-1", Title: "focus: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": key}}}, 10)
+	lk := NewLookup([]ListedItem{{ID: "f-1", Title: "focus: acme/api#7", State: "closed", Metadata: map[string]string{"dedup_key": key}}})
 	d := newDouble(t)
 	res := Run(context.Background(), Input{
-		Type: "pr", ID: "acme/api#7", View: lookupView(), Lookup: lk, Env: testEnv(d, lookupCfg(10)),
+		Type: "pr", ID: "acme/api#7", View: lookupView(), Lookup: lk, Env: testEnv(d, lookupCfg()),
 		Actions: []action.Action{createAction("focus.open", "focus-item", key, "")},
 	})
 	if len(res.Events) != 1 || res.Events[0].Outcome != OutcomeDeduped || res.Events[0].WorkItemID != "f-1" {
@@ -368,8 +356,8 @@ func TestApplyFocusHitThroughTheRunListingStillRefreshesTheHit(t *testing.T) {
 // The per-PR query (work_items_query_params): the PR identity is sent as
 // --param, and the answer is checked against the view's own index.
 
-func perPRCfg(ceiling int) *config.Config {
-	c := lookupCfg(ceiling)
+func perPRCfg() *config.Config {
+	c := lookupCfg()
 	c.WorkItemsQuery = "work-items-for-pr"
 	c.WorkItemsQueryParams = []string{"repo", "pr_number"}
 	return c
@@ -400,7 +388,7 @@ func TestPRIdentityPrefersTheSnapshotThenParsesTheViewID(t *testing.T) {
 
 func TestReadLookupSendsThePRIdentityAsParams(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "acme/api#7: x", "open", `"repo":"acme/api","pr_number":"7"`), "")})
-	cfg := perPRCfg(5)
+	cfg := perPRCfg()
 	cfg.AgentTrackerBackend = "trk"
 	lk, err := ReadLookup(context.Background(), testEnv(d, cfg), lookupView())
 	if err != nil {
@@ -418,7 +406,7 @@ func TestReadLookupSendsThePRIdentityAsParams(t *testing.T) {
 
 func TestReadLookupPerPRFailsClosedWithoutAPRIdentity(t *testing.T) {
 	d := newDouble(t)
-	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), &view.View{Type: "pr", ID: "weird"})
+	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), &view.View{Type: "pr", ID: "weird"})
 	var le *LookupError
 	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonNoPRIdentity {
 		t.Fatalf("lookup=%v err=%v", lk, err)
@@ -435,7 +423,7 @@ func TestReadLookupPerPRTruncatedAndDegradedFailClosed(t *testing.T) {
 	}
 	for name, tc := range cases {
 		d := newDouble(t, respRule{Match: "issue list", Stdout: tc.stdout})
-		lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), lookupView())
+		lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), lookupView())
 		var le *LookupError
 		if lk != nil || !errors.As(err, &le) || le.Reason != tc.reason {
 			t.Errorf("%s: lookup=%v err=%v, want %s", name, lk, err, tc.reason)
@@ -443,7 +431,7 @@ func TestReadLookupPerPRTruncatedAndDegradedFailClosed(t *testing.T) {
 	}
 	// The connector refusing the parameters (a short PR number) fails closed too.
 	d := newDouble(t, respRule{Match: "issue list", Exit: 2, Stdout: `{"error":{"code":"invalid_argument","message":"pr_number"}}`})
-	_, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), lookupView())
+	_, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), lookupView())
 	var le *LookupError
 	if !errors.As(err, &le) || le.Reason != LookupReasonUnavailable {
 		t.Fatalf("refused params: %v", err)
@@ -464,7 +452,7 @@ func consistencyView() *view.View {
 func TestReadLookupPerPRConsistencyCheckFailsClosedOnAMissingOwnedItem(t *testing.T) {
 	complete := ent("k1", "x", "open", `"dedup_key":"pr:acme/api#7:anchor"`) + "," + ent("legacy1", "acme/api#7: legacy anchor", "closed", "") + "," + ent("nodeonly", "fix-ci: whatever", "open", `"node_id":"PR_node7"`)
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(complete, "")})
-	if _, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(50)), consistencyView()); err != nil {
+	if _, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), consistencyView()); err != nil {
 		t.Fatalf("complete answer: %v", err)
 	}
 	// each owned item missing in turn: keyed, keyless title-adopted, node_id-adopted
@@ -480,7 +468,7 @@ func TestReadLookupPerPRConsistencyCheckFailsClosedOnAMissingOwnedItem(t *testin
 			}
 		}
 		d := newDouble(t, respRule{Match: "issue list", Stdout: listing(strings.Join(parts, ","), "")})
-		lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(50)), consistencyView())
+		lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), consistencyView())
 		var le *LookupError
 		if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonInconsistent {
 			t.Fatalf("missing %s: lookup=%v err=%v", drop, lk, err)
@@ -493,7 +481,7 @@ func TestReadLookupPerPRConsistencyCheckFailsClosedOnAMissingOwnedItem(t *testin
 
 func TestReadLookupWithoutParamsSkipsTheConsistencyCheck(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing("", "")})
-	if _, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(5)), consistencyView()); err != nil {
+	if _, err := ReadLookup(context.Background(), testEnv(d, lookupCfg()), consistencyView()); err != nil {
 		t.Fatalf("the whole-listing form is not checked against the index: %v", err)
 	}
 }
@@ -501,7 +489,7 @@ func TestReadLookupWithoutParamsSkipsTheConsistencyCheck(t *testing.T) {
 func TestReadLookupPerPRAcceptsStringAndNumberPRNumber(t *testing.T) {
 	both := ent("a", "acme/api#7: s", "open", `"repo":"acme/api","pr_number":"7"`) + "," + ent("b", "acme/api#7: n", "open", `"repo":"acme/api","pr_number":7`)
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(both, "")})
-	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), lookupView())
+	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), lookupView())
 	if err != nil {
 		t.Fatal(err)
 	}

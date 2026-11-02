@@ -91,10 +91,6 @@ type Config struct {
 	// the whole tracker (the rollback form); set, the answer is also checked
 	// against the view's own work items.
 	WorkItemsQueryParams []string `json:"work_items_query_params,omitempty"`
-	// WorkItemsCeiling is work_items_ceiling: the largest listing the pr lookup
-	// accepts; a listing above it fails the run closed. nil means unset, which
-	// fails a pr run closed; an explicit value below 1 makes Load fail.
-	WorkItemsCeiling *int `json:"work_items_ceiling,omitempty"`
 	// FocusPriorityMap is focus_priority_map: tracker priority name to P0..P4,
 	// the priority of a focus bead minted for that source. When set it
 	// replaces the default (Highest:P0, High:P1, Medium:P2, Low:P3, Lowest:P4)
@@ -147,9 +143,6 @@ func validateLookupKeys(c *Config) error {
 			return fmt.Errorf("work_items_query_params names %q twice", n)
 		}
 		seen[n] = true
-	}
-	if c.WorkItemsCeiling != nil && *c.WorkItemsCeiling < 1 {
-		return fmt.Errorf("work_items_ceiling is %d; it must be at least 1", *c.WorkItemsCeiling)
 	}
 	return nil
 }

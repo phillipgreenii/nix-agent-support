@@ -18,8 +18,8 @@ const (
 	// applied.
 	ViewUnreadable = 3
 	// LookupUntrusted: a pr run's work-item lookup could not be trusted (the
-	// listing was above the ceiling, truncated or unavailable, or the lookup
-	// keys are not configured); nothing was written. The composed command
+	// listing was truncated or unavailable, the per-PR answer was
+	// inconsistent, or the lookup query is not configured); nothing was written. The composed command
 	// maps it to the class decide_failed, or to the retryable class transient
 	// when the reason is lookup-unavailable.
 	LookupUntrusted = 4

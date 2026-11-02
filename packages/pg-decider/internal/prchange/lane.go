@@ -26,15 +26,14 @@ const (
 // lanestate.RunInput (another module: this is a copy, and the unknown-member
 // refusal of the verb makes a drift fail loudly).
 type laneInput struct {
-	PR            string         `json:"pr"`
-	Mode          string         `json:"mode"`
-	Events        []laneEvent    `json:"events,omitempty"`
-	Residual      *int           `json:"residual,omitempty"`
-	LastOutcome   string         `json:"last_outcome,omitempty"`
-	Decisions     []laneDecision `json:"decisions,omitempty"`
-	LookupItems   *int64         `json:"lookup_items,omitempty"`
-	LookupCeiling *int64         `json:"lookup_ceiling,omitempty"`
-	Timings       *laneTimings   `json:"timings,omitempty"`
+	PR          string         `json:"pr"`
+	Mode        string         `json:"mode"`
+	Events      []laneEvent    `json:"events,omitempty"`
+	Residual    *int           `json:"residual,omitempty"`
+	LastOutcome string         `json:"last_outcome,omitempty"`
+	Decisions   []laneDecision `json:"decisions,omitempty"`
+	LookupItems *int64         `json:"lookup_items,omitempty"`
+	Timings     *laneTimings   `json:"timings,omitempty"`
 }
 
 // laneTimings is pg-desk's lanestate.StageTimings (a copy; same members, whole
@@ -102,8 +101,8 @@ func (r *run) startRecord() {
 func (r *run) laneInput(code int) laneInput {
 	in := laneInput{
 		PR: r.id, Mode: r.o.Mode, Residual: r.residual, LastOutcome: "ok",
-		LookupItems: r.lookupItems, LookupCeiling: r.lookupCeiling,
-		Timings: laneTimingsOf(r.rec),
+		LookupItems: r.lookupItems,
+		Timings:     laneTimingsOf(r.rec),
 	}
 	if code != ExitOK && r.failStage != "" {
 		in.Events = []laneEvent{{Stage: r.failStage, Class: r.failClass}}

@@ -17,7 +17,6 @@
 //	pr_lane.state.flip_at                                 flip time (RFC 3339)
 //	pr_lane.state.last_run_at                             last recorded run
 //	pr_lane.state.lookup_items                            decider lookup count
-//	pr_lane.state.lookup_ceiling                          decider lookup ceiling
 //	pr_lane.pr.<normalized id>                            per-PR state (JSON)
 package lanestate
 
@@ -33,7 +32,6 @@ const (
 	KeyStateFlipAt     = "pr_lane.state.flip_at"
 	KeyStateLastRunAt  = "pr_lane.state.last_run_at"
 	KeyStateLookupItem = "pr_lane.state.lookup_items"
-	KeyStateLookupCeil = "pr_lane.state.lookup_ceiling"
 	KeyPRPrefix        = "pr_lane.pr."
 	// KeyPrefix is the prefix of every lane key.
 	KeyPrefix = "pr_lane."

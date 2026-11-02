@@ -151,8 +151,7 @@ type rigOpts struct {
 	// laneMode, when set, is the configured pr_lane.mode (off, plan or apply).
 	laneMode string
 	// deciderConfig, when set, is the pg-decider configuration file's JSON
-	// instead of parity.DeciderConfigJSON (the lookup query and a ceiling far
-	// above any fixture).
+	// instead of parity.DeciderConfigJSON (the lookup query).
 	deciderConfig string
 }
 

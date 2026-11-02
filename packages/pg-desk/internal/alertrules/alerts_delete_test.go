@@ -9,14 +9,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// retiredRuleUIDs are the four sync_error alert rules removed by PR lane refactor
-// packet P9b. Their uids must be in the delete-only file, because Grafana keeps a
+// retiredRuleUIDs are the alert rules retired from pg-desk: the four sync_error rules (PR lane
+// refactor packet P9b) and the work-item lookup ceiling rule (pg2-eclw3j.9). Their uids must be in the delete-only file, because Grafana keeps a
 // file-provisioned rule live after its file drops it.
 var retiredRuleUIDs = []string{
 	"pg-desk-sync-error-retrying",
 	"pg-desk-sync-error-rows",
 	"pg-desk-sync-errors",
 	"pg-desk-unreconciled-anchor-age",
+	"pg-desk-pr-lookup-ceiling",
 }
 
 // keptRuleUID has "sync" in its uid but is a keeper: it MUST NOT be deleted.
@@ -103,6 +104,8 @@ deleteRules:
     uid: pg-desk-sync-errors
   - orgId: 1
     uid: pg-desk-unreconciled-anchor-age
+  - orgId: 1
+    uid: pg-desk-pr-lookup-ceiling
 `
 
 const goodAlerts = `apiVersion: 1

@@ -59,7 +59,7 @@ func TestEveryLaneKeyLivesUnderTheLanePrefixAndNoneIsTheConfigKey(t *testing.T) 
 	st := store.OpenNewSchemaForTest(t)
 	lookup := int64(5)
 	mustRecord(t, st, "apply", t0, RunInput{
-		PR: "o/r#1", Mode: "apply", Residual: intp(2), LookupItems: &lookup, LookupCeiling: &lookup,
+		PR: "o/r#1", Mode: "apply", Residual: intp(2), LookupItems: &lookup,
 		Events:    []RunEvent{{Stage: "decide", Class: "decide_failed"}},
 		Decisions: []DecisionCount{{Rule: "land.ready", Action: "skip", Outcome: "skipped", Reason: "not matched"}},
 	})
@@ -67,7 +67,7 @@ func TestEveryLaneKeyLivesUnderTheLanePrefixAndNoneIsTheConfigKey(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) < 8 {
+	if len(rows) < 7 {
 		t.Fatalf("expected the run to write several lane keys, got %v", rows)
 	}
 	for k := range rows {
@@ -78,7 +78,7 @@ func TestEveryLaneKeyLivesUnderTheLanePrefixAndNoneIsTheConfigKey(t *testing.T) 
 			t.Errorf("key %q is outside the lane prefix %q", k, KeyPrefix)
 		}
 	}
-	for _, k := range []string{KeyStateMode, KeyStateFlipAt, KeyStateLastRunAt, KeyStateLookupItem, KeyStateLookupCeil, KeyMarkedInactive} {
+	for _, k := range []string{KeyStateMode, KeyStateFlipAt, KeyStateLastRunAt, KeyStateLookupItem, KeyMarkedInactive} {
 		if k == "pr_lane.mode" {
 			t.Errorf("constant %q is the configuration key name", k)
 		}
@@ -235,9 +235,9 @@ func TestRecordRejectsAnythingOutsideTheClosedVocabulariesAndWritesNothing(t *te
 
 func TestDecisionsAndRunsAccumulateAcrossRunsAndLookupFiguresAreKept(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	items, ceil := int64(40), int64(500)
+	items := int64(40)
 	in := RunInput{
-		PR: "o/r#1", Mode: "plan", LookupItems: &items, LookupCeiling: &ceil,
+		PR: "o/r#1", Mode: "plan", LookupItems: &items,
 		Events:    []RunEvent{{Stage: "decide", Class: "decide_partial"}},
 		Decisions: []DecisionCount{{Rule: "review.head-advanced", Action: "create", Outcome: "planned"}, {Rule: "review.head-advanced", Action: "skip", Outcome: "skipped", Reason: "review-pending", Count: 3}},
 	}
@@ -253,8 +253,8 @@ func TestDecisionsAndRunsAccumulateAcrossRunsAndLookupFiguresAreKept(t *testing.
 	if got := s.Decisions[Decision{"review.head-advanced", "skip", "skipped", "review-pending"}]; got != 6 {
 		t.Errorf("skip counter = %d, want 3 per run times 2", got)
 	}
-	if s.LookupItems != 40 || s.LookupCeiling != 500 {
-		t.Errorf("lookup %d of %d, want 40 of 500", s.LookupItems, s.LookupCeiling)
+	if s.LookupItems != 40 {
+		t.Errorf("lookup %d, want 40", s.LookupItems)
 	}
 }
 

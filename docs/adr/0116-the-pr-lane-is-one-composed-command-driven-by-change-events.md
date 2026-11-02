@@ -51,9 +51,12 @@ the connector's daemon, and the legacy sync, ledger, reconcile and sweep machine
   PRs, and pg-desk consumes only change events. A PR watched in any way stays watched until it closes.
 - **No reconcile and no sweep** (ruling 10). There is no `pr.reconcile` event, no `pr-sweep`, no
   `pr-sweep-full`, no anchor sweep. The revisit conditions are in the behavior docs of pg-desk.
-- **Work-item visibility.** The per-PR work-item lookup is a bounded, all-status, named query in the
-  deployment's connector configuration, filtered to the PR inside the decider, and fails closed above
-  `work_items_ceiling` (V6-4).
+- **Work-item visibility.** The per-PR work-item lookup is an all-status, named query in the
+  deployment's connector configuration, filtered to the PR inside the decider. It fails closed only
+  when the answer cannot be trusted (truncated, unavailable, or inconsistent with the view); there is
+  no size ceiling. V6-4 first set a fixed `work_items_ceiling`; the operator retired it on
+  2026-10-30 (pg2-eclw3j.9) once the lookup became per PR, and the decider reports `lookup_items` on
+  every run instead.
 - **Several review items per PR** (ruling 16): a PR whose head advances with no open, unclaimed review
   item gets one; an existing one has its head updated; a closed item for the same head is never
   recreated. There is no relation link between review items (ruling 18).
@@ -82,7 +85,7 @@ the connector's daemon, and the legacy sync, ledger, reconcile and sweep machine
 | Outcome alerts that read the store and the run record | A lane that is wired up but produces nothing: the primary never-hydrated alert, the residual-after-apply, stale-anchor and similar rules. |
 
 The alerts read the outcome (an open anchor that is never hydrated, a stale anchor, a hidden PR with
-an open anchor, a tracked set above its limit, a lookup near its ceiling, no watched PRs) rather than
+an open anchor, a tracked set above its limit, no watched PRs) rather than
 the machinery.
 
 ### Operator rulings recorded
@@ -125,7 +128,7 @@ These were recommendations of the design's author, accepted by approving the des
 | V6-1  | P7 (thread support) is DEFERRED out of the program's acceptance: no decider or interpretation rule consumes thread data. The follow-up bead is `pg2-9eec8`. `run thread` and `run issue` stay.                        |
 | V6-2  | The `migrate --cutover` preflight is dropped: the verb is idempotent and does nothing at schema 2. The exhaustiveness test, the safe-verb list, the deployment check, the `sync.mode` pin and the lane key stay.      |
 | V6-3  | Rollback is a by-timestamp listing of every write since the flip marker, not only closing created beads.                                                                                                              |
-| V6-4  | The work-item lookup is a bounded all-status named query, filtered in the decider, failing closed above a ceiling.                                                                                                    |
+| V6-4  | The work-item lookup is an all-status named query, filtered in the decider; its ceiling was retired (pg2-eclw3j.9).                                                                                                   |
 | V6-5  | The router attempt key: the sequence, else the integer value of the item id's `@<12 hex>` suffix, else no `--from-item`; 0 is never passed. `retry_exhausted` is dropped.                                             |
 | V6-6  | The failure-rate rule keeps its `upstream-killed` exclusion; no scoped exclusion for `pr-change`.                                                                                                                     |
 | V6-7  | The daemon cutover resets the new consumer with a replay after the marking step; the old ledger cursor cannot carry over.                                                                                             |
@@ -153,9 +156,10 @@ These were recommendations of the design's author, accepted by approving the des
   operator names a consuming rule.
 - No reconcile and no sweep: if the daemon misses a change, nothing re-asserts it (risk R5). The
   stale-anchor, hydrate dead-man, store-aside and no-watched-PRs alerts are the detectors.
-- The lookup reads the whole all-status set on every run, so a fixed ceiling WILL be reached as closed
-  items accumulate. The runbook gives the remedy (raise `work_items_ceiling`, or compact closed items
-  of terminal PRs only), and the lookup-ceiling alert warns before it stops the lane.
+- History: while the lookup read the whole all-status set on every run, a fixed ceiling
+  (`work_items_ceiling`) WILL have been reached as closed items accumulate. The per-PR query removes
+  that growth, and the ceiling and its alert (`pg-desk-pr-lookup-ceiling`) were retired
+  (pg2-eclw3j.9); an abnormal per-PR item count shows in `lookup_items`, without stopping the lane.
 - Several review items per PR can waste a review on an old head (risk R7).
 
 ### Neutral

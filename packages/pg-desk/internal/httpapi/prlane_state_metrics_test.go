@@ -28,8 +28,8 @@ func requireLines(t *testing.T, body string, want ...string) {
 
 // TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRun
 // is the scrape test on a migrated schema-2 store: every lane-run series, the
-// residual gauges, the decisions counter, the inactive counter and the two
-// lookup gauges exist at 0 before any run, and move after one recorded run.
+// residual gauges, the decisions counter, the inactive counter and the
+// lookup gauge exist at 0 before any run, and move after one recorded run.
 func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRun(t *testing.T) {
 	setClock(t, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	s := store.OpenNewSchemaForTest(t)
@@ -50,17 +50,16 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 		`pg_decider_decisions_total{action="close",outcome="applied",reason="",rule="all.closed"} 0`,
 		`pg_desk_pr_marked_inactive_total 0`,
 		`pg_desk_pr_lane_lookup_items 0`,
-		`pg_desk_pr_lane_lookup_ceiling 0`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="lock_wait"} 0`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="residual"} 0`,
 		`pg_desk_pr_lane_stage_seconds_total{stage="hydrate"} 0`,
 		`pg_desk_pr_lane_stage_observations_total{stage="decide"} 0`,
 	)
 
-	resid, items, ceil := 2, int64(40), int64(500)
+	resid, items := 2, int64(40)
 	hyd, dec, lk := int64(1200), int64(4300), int64(250)
 	if err := lanestate.Record(s, "apply", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), lanestate.RunInput{
-		PR: "o/r#1", Mode: "apply", Residual: &resid, LookupItems: &items, LookupCeiling: &ceil,
+		PR: "o/r#1", Mode: "apply", Residual: &resid, LookupItems: &items,
 		Events:    []lanestate.RunEvent{{Stage: "hydrate", Class: "transient"}},
 		Decisions: []lanestate.DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
 		Timings:   &lanestate.StageTimings{HydrateMs: &hyd, DecideMs: &dec, LookupMs: &lk},
@@ -84,7 +83,6 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 		`pg_decider_decisions_total{action="close",outcome="applied",reason="",rule="all.closed"} 1`,
 		`pg_desk_pr_marked_inactive_total 1`,
 		`pg_desk_pr_lane_lookup_items 40`,
-		`pg_desk_pr_lane_lookup_ceiling 500`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="hydrate"} 1.2`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="decide"} 4.3`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="lookup"} 0.25`,

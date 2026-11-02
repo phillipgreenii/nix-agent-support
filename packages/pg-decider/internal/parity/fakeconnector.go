@@ -7,20 +7,15 @@ import (
 )
 
 // WorkItemsQuery is the named query the harness's decider configuration names
-// as work_items_query (the decider's bounded all-status lookup), and
-// WorkItemsCeiling the work_items_ceiling it sets: far above any fixture, so a
-// scenario never trips it. The fake connector answers the query with every
+// as work_items_query (the decider's all-status lookup). The fake connector answers the query with every
 // fixture bead whatever its state, the way the production query lists every
 // status.
-const (
-	WorkItemsQuery   = "work-items-all"
-	WorkItemsCeiling = 100000
-)
+const WorkItemsQuery = "work-items-all"
 
 // DeciderConfigJSON is the pg-decider configuration file the harness (and the
 // composed command's real-tool rig) runs the real decider under.
 func DeciderConfigJSON() string {
-	return fmt.Sprintf(`{"work_items_query":%q,"work_items_ceiling":%d}`+"\n", WorkItemsQuery, WorkItemsCeiling)
+	return fmt.Sprintf(`{"work_items_query":%q}`+"\n", WorkItemsQuery)
 }
 
 // FakeConnectorScript is fakeConnectorScript for another package's real-tool

@@ -50,7 +50,7 @@ func timedRunner(s *script, c *fakeClock, cost map[string]time.Duration) Runner 
 }
 
 const timedApplyCounters = `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/api#7","rules":{},"escalations":0,` +
-	`"lookup_items":40,"lookup_ceiling":7000,"lookup_ms":250}`
+	`"lookup_items":40,"lookup_ms":250}`
 
 func readRecord(t *testing.T, path string) (line string, rec RunRecord) {
 	t.Helper()

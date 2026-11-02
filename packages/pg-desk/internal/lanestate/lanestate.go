@@ -44,10 +44,9 @@ type RunInput struct {
 	LastOutcome string `json:"last_outcome,omitempty"`
 	// Decisions are the decider's per-rule results of the run.
 	Decisions []DecisionCount `json:"decisions,omitempty"`
-	// LookupItems and LookupCeiling are the decider's work-item lookup item
-	// count and its configured ceiling; nil leaves the stored value alone.
-	LookupItems   *int64 `json:"lookup_items,omitempty"`
-	LookupCeiling *int64 `json:"lookup_ceiling,omitempty"`
+	// LookupItems is the decider's work-item lookup item count; nil leaves the
+	// stored value alone.
+	LookupItems *int64 `json:"lookup_items,omitempty"`
 	// Timings is the wall time of each stage the run reached (whole
 	// milliseconds). A record without it (an older writer) decodes and records
 	// no timing.
@@ -194,11 +193,6 @@ func Record(st *store.Store, configuredMode string, now time.Time, in RunInput) 
 			return err
 		}
 	}
-	if in.LookupCeiling != nil {
-		if err := st.SetMeta(KeyStateLookupCeil, strconv.FormatInt(*in.LookupCeiling, 10)); err != nil {
-			return err
-		}
-	}
 
 	if in.Mode == configuredMode {
 		if err := recordLaneLevel(st, in.Mode, stamp); err != nil {
@@ -293,9 +287,9 @@ type Snapshot struct {
 	LaneMode string
 	// FlipAt and LastRunAt are RFC 3339 times, or "" when unset.
 	FlipAt, LastRunAt string
-	// LookupItems and LookupCeiling are the decider's last reported lookup
-	// figures, 0 before any report.
-	LookupItems, LookupCeiling int64
+	// LookupItems is the decider's last reported lookup size, 0 before any
+	// report.
+	LookupItems int64
 	// ResidualPRs and ResidualOldestAgeSeconds describe the PRs whose
 	// persisted state is in the lane-level mode and has a non-empty residual
 	// (a residual left by another mode is not counted).
@@ -329,7 +323,6 @@ func Read(st *store.Store, now time.Time) (Snapshot, error) {
 	}
 	snap.MarkedInactive = atoi(rows[KeyMarkedInactive])
 	snap.LookupItems = atoi(rows[KeyStateLookupItem])
-	snap.LookupCeiling = atoi(rows[KeyStateLookupCeil])
 
 	var prs []PRState
 	for k, v := range rows {

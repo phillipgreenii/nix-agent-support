@@ -31,12 +31,10 @@ const (
 	// MetricPRLaneResidualOldestAge is the age in seconds of the oldest such
 	// residual (0 when there is none), labelled like MetricPRLaneResidualPRs.
 	MetricPRLaneResidualOldestAge = "pg_desk_pr_lane_residual_oldest_age_seconds"
-	// MetricPRLaneLookupItems and MetricPRLaneLookupCeiling are the decider's
-	// last reported work-item lookup item count and configured ceiling (the
-	// decider is a short-lived command that emits no telemetry of its own); 0
-	// before any run reports them.
-	MetricPRLaneLookupItems   = "pg_desk_pr_lane_lookup_items"
-	MetricPRLaneLookupCeiling = "pg_desk_pr_lane_lookup_ceiling"
+	// MetricPRLaneLookupItems is the decider's last reported work-item lookup
+	// item count (the decider is a short-lived command that emits no telemetry
+	// of its own); 0 before any run reports it.
+	MetricPRLaneLookupItems = "pg_desk_pr_lane_lookup_items"
 	// MetricPRLaneStageDuration is the last recorded wall time in seconds of
 	// each pr-change stage (label stage in lanestate.TimingStages), 0 before a
 	// run reports it. MetricPRLaneStageSeconds and MetricPRLaneStageObservations
@@ -85,11 +83,6 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 	}
 	items, err := m.Int64ObservableGauge(MetricPRLaneLookupItems,
 		metric.WithDescription("work items the decider's last lookup returned (0 before a run reports it)"))
-	if err != nil {
-		return err
-	}
-	ceiling, err := m.Int64ObservableGauge(MetricPRLaneLookupCeiling,
-		metric.WithDescription("the decider's configured work-item lookup ceiling (0 before a run reports it)"))
 	if err != nil {
 		return err
 	}
@@ -154,7 +147,6 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 			o.ObserveInt64(oldest, age, attr)
 		}
 		o.ObserveInt64(items, snap.LookupItems)
-		o.ObserveInt64(ceiling, snap.LookupCeiling)
 		for _, stage := range lanestate.TimingStages {
 			t := snap.Timings[stage]
 			attr := metric.WithAttributes(attribute.String("stage", stage))
@@ -163,6 +155,6 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 			o.ObserveInt64(stageObs, t.Count, attr)
 		}
 		return nil
-	}, runs, decisions, marked, residual, oldest, items, ceiling, stageLast, stageSum, stageObs)
+	}, runs, decisions, marked, residual, oldest, items, stageLast, stageSum, stageObs)
 	return err
 }

@@ -68,12 +68,12 @@ func TestPerPRLookupEqualsTheFilteredFullListingForEveryPR(t *testing.T) {
 	for n := 1000; n < 1006; n++ {
 		v := &view.View{Type: "pr", ID: fmt.Sprintf("acme/api#%d", n), Snapshot: view.PRSnapshot{Repo: "acme/api", Number: n}}
 		full := newDouble(t, respRule{Match: "issue list", Stdout: listing(entities(all), "")})
-		fl, err := ReadLookup(context.Background(), testEnv(full, lookupCfg(100)), v)
+		fl, err := ReadLookup(context.Background(), testEnv(full, lookupCfg()), v)
 		if err != nil {
 			t.Fatal(err)
 		}
 		per := newDouble(t, respRule{Match: "issue list", Stdout: listing(entities(perPRAnswer(all, "acme/api", n)), "")})
-		pl, err := ReadLookup(context.Background(), testEnv(per, perPRCfg(100)), v)
+		pl, err := ReadLookup(context.Background(), testEnv(per, perPRCfg()), v)
 		if err != nil {
 			t.Fatalf("PR %d: %v", n, err)
 		}

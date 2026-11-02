@@ -6783,7 +6783,7 @@
               # command line), so the tracker's own listing is the ground truth: N
               # keyless anchors adopted with no creates and every item keyed, the second
               # apply writing nothing, plan and apply agreeing per kind and operation, an
-              # unhydrated view refused, a listing above the ceiling or reporting itself
+              # unhydrated view refused, a listing reporting itself
               # truncated failing the run closed, the review rule's dedup, the lock race
               # and its negative control, a duplicate delivery writing nothing, a kill
               # between a create and its audit comment, a decider exit 2 converging, the

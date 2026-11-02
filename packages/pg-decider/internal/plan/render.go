@@ -26,24 +26,22 @@ func JSON(w io.Writer, res action.PlanResult) error {
 	return err
 }
 
-// Lookup is the work-item lookup figures of a pr plan: the size of the
-// all-status listing the run read and the configured ceiling it was checked
-// against. A nil *Lookup means the run made no lookup.
-type Lookup struct{ Items, Ceiling int }
+// Lookup is the work-item lookup figure of a pr plan: the size of the
+// all-status listing the run read. A nil *Lookup means the run made no lookup.
+type Lookup struct{ Items int }
 
-// JSONWithLookup is JSON plus, when lk is not nil, the two members
-// "lookup_items" and "lookup_ceiling" after "skipped". The two lists are still
+// JSONWithLookup is JSON plus, when lk is not nil, the member
+// "lookup_items" after "skipped". The two lists are still
 // always arrays; with a nil lk the output is byte-identical to JSON's.
 func JSONWithLookup(w io.Writer, res action.PlanResult, lk *Lookup) error {
 	if lk == nil {
 		return JSON(w, res)
 	}
 	out := struct {
-		Actions       []action.Action `json:"actions"`
-		Skipped       []action.Skip   `json:"skipped"`
-		LookupItems   int             `json:"lookup_items"`
-		LookupCeiling int             `json:"lookup_ceiling"`
-	}{Actions: res.Actions, Skipped: res.Skipped, LookupItems: lk.Items, LookupCeiling: lk.Ceiling}
+		Actions     []action.Action `json:"actions"`
+		Skipped     []action.Skip   `json:"skipped"`
+		LookupItems int             `json:"lookup_items"`
+	}{Actions: res.Actions, Skipped: res.Skipped, LookupItems: lk.Items}
 	if out.Actions == nil {
 		out.Actions = []action.Action{}
 	}
@@ -65,13 +63,13 @@ func Text(w io.Writer, v *view.View, res action.PlanResult) error {
 }
 
 // TextWithLookup is Text plus, when lk is not nil, a "lookup:" line after the
-// "linked work:" line naming the listing size and the ceiling.
+// "linked work:" line naming the listing size.
 func TextWithLookup(w io.Writer, v *view.View, res action.PlanResult, lk *Lookup) error {
 	var sb strings.Builder
 	sb.WriteString(Header(v) + "\n")
 	sb.WriteString("linked work: " + linkedWork(v) + "\n")
 	if lk != nil {
-		fmt.Fprintf(&sb, "lookup: %d work items listed, ceiling %d\n", lk.Items, lk.Ceiling)
+		fmt.Fprintf(&sb, "lookup: %d work items listed\n", lk.Items)
 	}
 
 	sb.WriteString("\nactions:\n")
