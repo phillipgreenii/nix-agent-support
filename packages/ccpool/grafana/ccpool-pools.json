@@ -731,7 +731,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "The pg-router ccpool handler janitor (INV-CCH-41): wall time of its last run, its p90 over 6 hours (creep shows before the deadline is reached) and the runs that hit their deadline. Emitted through ccpool emit-gauge; empty where the janitor is not enabled. Alert rules: pg-router-ccpool-janitor-*.",
+      "description": "The pg-router ccpool handler janitor (INV-CCH-41): wall time of its last run, its p90 over 6 hours (creep shows before the deadline is reached) and the runs that hit their deadline. Emitted through ccpool emit-gauge; empty where the janitor is not enabled. Alert rules: pg-router-ccpool-janitor-*. window: fixed - the p90 horizon is deliberately 6h (it matches the title and the pg-router-ccpool-janitor-* alert design), so it must not scale with the dashboard range or scrape interval.",
       "gridPos": {
         "x": 0,
         "y": 48,
