@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -182,6 +183,11 @@ func sanitize(s string) string {
 // Listen binds the Unix socket at path with mode 0600, replacing a stale
 // socket but refusing when a live daemon answers on it.
 func (s *Server) Listen(path string) error {
+	// The socket may sit in a directory nothing else has created yet (the
+	// state home).
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("socket directory: %w", err)
+	}
 	if fi, err := os.Lstat(path); err == nil {
 		if fi.Mode()&os.ModeSocket == 0 {
 			return fmt.Errorf("%s exists and is not a socket", path)

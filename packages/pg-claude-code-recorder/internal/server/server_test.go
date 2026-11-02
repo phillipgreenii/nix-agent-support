@@ -41,6 +41,20 @@ func newServer(t *testing.T) (*Server, *obs.Obs, string) {
 	return s, o, p
 }
 
+// The HM module puts the socket in the state home, a directory nothing else
+// may have created before the daemon starts (pg2-wb689g).
+func TestListenCreatesMissingSocketDirectory(t *testing.T) {
+	p := filepath.Join(filepath.Dir(sockPath(t)), "state", "pg-claude-code-recorder", "recorder.sock")
+	s := New(obs.New(nil), nil, func() any { return nil })
+	if err := s.Listen(p); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("socket not created: %v", err)
+	}
+}
+
 func TestSocketIs0600AndServesHelloAndOperations(t *testing.T) {
 	_, o, p := newServer(t)
 	fi, err := os.Stat(p)

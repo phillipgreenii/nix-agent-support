@@ -100,6 +100,23 @@ func dial(t *testing.T, sock string, sleeps *[]time.Duration) *client.Client {
 	return c
 }
 
+// The Home Manager module's socketPath default is
+// "${xdg.stateHome}/pg-claude-code-recorder/recorder.sock"; this pins the
+// client default to the same path (tests/pg-claude-code-recorder-hm-launchd.nix
+// asserts the rendered side, pg2-wb689g). With only XDG_STATE_HOME set, no HOME.
+func TestDefaultSocketWithOnlyXDGStateHomeMatchesHMRenderedPath(t *testing.T) {
+	stateHome := "/example/home/.local/state"
+	get := func(k string) string {
+		if k == "XDG_STATE_HOME" {
+			return stateHome
+		}
+		return ""
+	}
+	if got, want := client.DefaultSocket(get), stateHome+"/pg-claude-code-recorder/recorder.sock"; got != want {
+		t.Fatalf("DefaultSocket = %q, want %q", got, want)
+	}
+}
+
 func TestSocketDiscoveryEnvironmentThenDefaultPath(t *testing.T) {
 	env := map[string]string{"HOME": "/example/home", "XDG_STATE_HOME": "/example/state"}
 	get := func(k string) string { return env[k] }

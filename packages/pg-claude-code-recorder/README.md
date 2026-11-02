@@ -66,7 +66,7 @@ queue overflow (`fs.inotify.max_queued_events`) triggers a sweep. Linux reports 
 `pg-claude-code-recorder serve --config FILE` composes the watcher, the copier and the store and
 listens on `recorder.sock` (mode 0600, HTTP/1.1 with JSON bodies: `GET /v1/hello`,
 `POST /v1/<operation>`). The Go client side reads `PG_CLAUDE_CODE_RECORDER_SOCKET`, else the
-config's `socket` (default `<stateDir>/recorder.sock`). `internal/server` owns the framing and
+config's `socket` (the module renders `$XDG_STATE_HOME/pg-claude-code-recorder/recorder.sock`, the client default). `internal/server` owns the framing and
 the operation registry (`Register(name, kind, handler)`); phases 2, 3, 4 and 6 add operations
 there. `status` and `coverage` are the two operations this phase serves.
 

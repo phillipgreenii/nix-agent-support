@@ -276,6 +276,21 @@ let
       (entryOf "pg-claude-code-recorder-second" second)
       .serviceConfig.EnvironmentVariables.PG_CLAUDE_CODE_RECORDER_PPROF_ADDR
       == "${stateHome}/pg-claude-code-recorder-second/pprof.sock";
+    # the socket is where client.DefaultSocket looks ($XDG_STATE_HOME/pg-claude-code-recorder),
+    # never under the data-home stateDir (pg2-wb689g)
+    socketNotUnderStateDir = !(lib.hasPrefix "${d.stateDir}/" d.socket);
+    instanceHasOwnSocket =
+      (data second).socket == "${stateHome}/pg-claude-code-recorder-second/recorder.sock"
+      && !(lib.hasPrefix "${(data second).stateDir}/" (data second).socket);
+    # the darwin observability module's daemonLog path (flake.nix darwin-module check)
+    # is this agent's stderr log with the state home spelled as the log-source variable
+    stderrLogMatchesDarwinLogSource =
+      lib.replaceStrings [ stateHome ] [ "\${env:XDG_STATE_HOME}" ] e.serviceConfig.StandardErrorPath
+      == "\${env:XDG_STATE_HOME}/pg-claude-code-recorder-launchd/launchd-stderr.log";
+    instanceStderrLogMatchesDarwinLogSource =
+      lib.replaceStrings [ stateHome ] [ "\${env:XDG_STATE_HOME}" ]
+        (entryOf "pg-claude-code-recorder-second" second).serviceConfig.StandardErrorPath
+      == "\${env:XDG_STATE_HOME}/pg-claude-code-recorder-launchd-second/launchd-stderr.log";
     defaultInstanceHasNoPprofEnv =
       !(e.serviceConfig.EnvironmentVariables ? PG_CLAUDE_CODE_RECORDER_PPROF_ADDR);
     instanceConfigPath =
@@ -305,7 +320,7 @@ let
     pathDefaults =
       d.claudeDir == "/example/home/.claude"
       && d.stateDir == "/example/home/.local/share/pg-claude-code-recorder"
-      && d.socket == "${d.stateDir}/recorder.sock"
+      && d.socket == "${stateHome}/pg-claude-code-recorder/recorder.sock"
       && d.controlStateDir == "${stateHome}/pg-claude-control";
     claudeDirFollowsSessionVariable =
       (data (
@@ -360,6 +375,8 @@ let
     daemon.enable = true;
     claudeDir = "/example/live/claude";
     stateDir = "/example/live/state";
+    # in a directory the daemon must create itself, like the state home default
+    socketPath = "/example/live/xdg-state/pg-claude-code-recorder/recorder.sock";
     controlStateDir = "/example/live/control";
   } null;
   liveEntry = entryOf agent liveCase;

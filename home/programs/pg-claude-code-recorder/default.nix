@@ -187,14 +187,20 @@ in
       type = lib.types.str;
       default = "${config.xdg.dataHome}/pg-claude-code-recorder${suffix}";
       defaultText = lib.literalExpression ''"''${config.xdg.dataHome}/pg-claude-code-recorder"'';
-      description = "Copies, index, journal, archives and the socket.";
+      description = "Copies, index, journal and archives (the socket is `socketPath`, in the state home).";
     };
 
     socketPath = lib.mkOption {
       type = lib.types.str;
-      default = "${cfg.stateDir}/recorder.sock";
-      defaultText = lib.literalExpression ''"''${stateDir}/recorder.sock"'';
-      description = "The Unix socket the daemon listens on.";
+      default = "${config.xdg.stateHome}/pg-claude-code-recorder${suffix}/recorder.sock";
+      defaultText = lib.literalExpression ''"''${config.xdg.stateHome}/pg-claude-code-recorder/recorder.sock"'';
+      description = ''
+        The Unix socket the daemon listens on. It sits in the state home, next
+        to the pprof socket and not in `stateDir`, because the clients
+        (`client.DefaultSocket`) dial
+        `$XDG_STATE_HOME/pg-claude-code-recorder/recorder.sock` when nothing
+        overrides it. The daemon creates the directory before it listens.
+      '';
     };
 
     blockList.extra = lib.mkOption {
