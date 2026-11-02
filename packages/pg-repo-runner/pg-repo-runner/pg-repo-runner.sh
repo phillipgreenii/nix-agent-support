@@ -24,6 +24,7 @@ fi
 export RR_GIT_BIN="${PG_REPO_RUNNER_GIT_BIN:-${RR_GIT_BIN:-git}}"
 export RR_JQ_BIN="${RR_JQ_BIN:-jq}"
 export RR_TQ_BIN="${RR_TQ_BIN:-tq}"
+export RR_DATE_BIN="${RR_DATE_BIN:-date}"
 export RR_NICE_BIN="${RR_NICE_BIN:-nice}"
 # PG_REPO_RUNNER_NIX_BIN replaces the nix binary (a test seam, like the load
 # average one: the bats suites use it to count and classify nix runs).
