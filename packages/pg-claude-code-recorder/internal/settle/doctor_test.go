@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
 func TestDoctorCleanWritesResultFileAndGauges(t *testing.T) {
@@ -105,5 +107,56 @@ func TestDoctorSeesAJournalThatDisagreesWithTheIndex(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no journal mismatch: %+v", res)
+	}
+}
+
+// pg2-dt89wi: a commit writes the journal first and the index second. A doctor
+// run that lands between the two must not report journal_differs_from_index on
+// a live daemon: it waits for the commit and compares a frozen view.
+func TestDoctorIgnoresACommitInFlight(t *testing.T) {
+	e := newEnv(t, false)
+	e.seed(3, time.Hour)
+	inJournal := make(chan struct{})
+	release := make(chan struct{})
+	disarm := faults.Arm("store.after-journal", func() {
+		close(inJournal)
+		<-release
+	})
+	defer disarm()
+	committed := make(chan error, 1)
+	go func() {
+		committed <- e.st.Commit(&store.Rec{T: store.TState, At: e.clk.Now().UnixNano(), File: 1, State: "copy_mismatch"})
+	}()
+	<-inJournal // the journal has the record, the index does not
+	type answer struct {
+		res DoctorResult
+		err error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		r, err := e.sett.Doctor()
+		done <- answer{r, err}
+	}()
+	var a answer
+	select {
+	case a = <-done: // an unfrozen doctor finishes while the commit is stuck
+	case <-time.After(300 * time.Millisecond):
+		close(release)
+		a = <-done
+		release = nil
+	}
+	if release != nil {
+		close(release)
+	}
+	if a.err != nil {
+		t.Fatal(a.err)
+	}
+	for _, m := range a.res.Mismatches {
+		if m.Kind == MismatchJournal {
+			t.Fatalf("false journal mismatch during a commit: %+v", m)
+		}
+	}
+	if err := <-committed; err != nil {
+		t.Fatal(err)
 	}
 }

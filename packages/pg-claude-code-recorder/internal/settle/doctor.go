@@ -184,22 +184,28 @@ func (s *Settler) prefixMatches(f store.File, g store.Generation, orig string) (
 // record beyond the journal's last intact sequence, and a replay of the journal
 // equals the index's observations.
 func (s *Settler) doctorJournal(add func(DoctorMismatch)) {
-	jp := filepath.Join(s.st.Dir(), store.JournalName)
-	delta, err := store.JournalDelta(jp)
+	// A frozen view: reading the journal and the index at different instants
+	// races a commit in flight (journal first, index second).
+	fz, err := s.st.FreezeJournal()
 	if err != nil {
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: "reading the journal: " + err.Error()})
 		return
 	}
-	if s.st.LastSeq() > delta.LastGoodSeq {
-		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("the index applied sequence %d, the journal's last intact sequence is %d", s.st.LastSeq(), delta.LastGoodSeq)})
+	defer fz.Remove()
+	delta, err := store.JournalDelta(fz.Path)
+	if err != nil {
+		add(DoctorMismatch{Kind: MismatchJournal, Detail: "reading the journal: " + err.Error()})
 		return
 	}
-	replay, rerr := store.ReplayDump(jp)
-	live, lerr := s.st.Dump()
+	if fz.LastSeq > delta.LastGoodSeq {
+		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("the index applied sequence %d, the journal's last intact sequence is %d", fz.LastSeq, delta.LastGoodSeq)})
+		return
+	}
+	replay, rerr := store.ReplayDump(fz.Path)
 	switch {
-	case rerr != nil || lerr != nil:
-		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("dump: replay=%v index=%v", rerr, lerr)})
-	case replay != live:
+	case rerr != nil:
+		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("dump: replay=%v", rerr)})
+	case replay != fz.Live:
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: "a replay of the journal differs from the index"})
 	}
 }

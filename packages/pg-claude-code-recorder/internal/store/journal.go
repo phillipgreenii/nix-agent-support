@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 )
 
 // readJournal parses the journal at path. It returns the intact records, the
@@ -55,4 +56,49 @@ func JournalDelta(path string) (TornJournalDelta, error) {
 		last = recs[len(recs)-1].Seq
 	}
 	return TornJournalDelta{LastGoodSeq: last, TornBytes: torn}, nil
+}
+
+// JournalFreeze is a consistent view of the journal and the index, both taken
+// at one instant: no commit was in flight between reading the two.
+type JournalFreeze struct {
+	// Path is a private copy of the journal; Remove deletes it.
+	Path string
+	// LastSeq is the last sequence the index had applied.
+	LastSeq int64
+	// Live is the index's Dump.
+	Live string
+	dir  string
+}
+
+// Remove deletes the journal copy.
+func (j JournalFreeze) Remove() { _ = os.RemoveAll(j.dir) }
+
+// FreezeJournal copies the journal and reads the index's last sequence and
+// Dump while holding the write lock. A commit writes the journal first and the
+// index second, both under that lock, so reading either without it can see the
+// journal ahead of the index (a false journal_differs_from_index on a live
+// daemon). The copy is then checked and replayed outside the lock.
+func (s *Store) FreezeJournal() (JournalFreeze, error) {
+	dir, err := os.MkdirTemp("", "ccrec-freeze-")
+	if err != nil {
+		return JournalFreeze{}, err
+	}
+	j := JournalFreeze{dir: dir, Path: dir + "/" + JournalName}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := os.ReadFile(filepath.Join(s.dir, JournalName))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		j.Remove()
+		return JournalFreeze{}, err
+	}
+	if err := os.WriteFile(j.Path, data, 0o600); err != nil {
+		j.Remove()
+		return JournalFreeze{}, err
+	}
+	j.LastSeq = s.lastSeq
+	if j.Live, err = s.Dump(); err != nil {
+		j.Remove()
+		return JournalFreeze{}, err
+	}
+	return j, nil
 }
