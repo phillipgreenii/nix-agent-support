@@ -46,7 +46,7 @@ func TestCrash_leavesInspectablePane(t *testing.T) {
 	}
 
 	socket := "ccpool-crashtest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	_ = os.MkdirAll(cfgDir, 0o700)

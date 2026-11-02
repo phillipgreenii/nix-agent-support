@@ -110,7 +110,7 @@ func TestEndToEnd_hookLifecycleReflectedInList(t *testing.T) {
 	// into this test's has-session checks (nas-a95.5). runCC points XDG_CONFIG_HOME
 	// at <base>/cfg, so the override lives at <base>/cfg/ccpool/config.toml.
 	const socket = "ccpool-hooktest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)

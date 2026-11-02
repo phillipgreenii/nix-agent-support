@@ -142,7 +142,7 @@ func newSandbox(t *testing.T) *sandbox {
 	)
 
 	sb := &sandbox{t: t, bin: bin, socket: socket, prefix: prefix, cwd: cwd, env: env}
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 	return sb
 }
 

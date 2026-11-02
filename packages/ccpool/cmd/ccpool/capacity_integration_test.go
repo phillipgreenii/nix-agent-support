@@ -30,7 +30,7 @@ func TestCapacity_emptyPoolFreeEqualsMax(t *testing.T) {
 	}
 	installFakePAMonitor(t, bin, `{"sessions":[]}`)
 	socket := "ccpool-capacitytest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	_ = os.MkdirAll(cfgDir, 0o700)
 	_ = os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(`

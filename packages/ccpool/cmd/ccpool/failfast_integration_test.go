@@ -52,7 +52,7 @@ func newFFPool(t *testing.T, claudeBin, timeout string) *ffPool {
 	// A short per-test socket name: a long one overflows the unix socket path.
 	sum := sha256.Sum256([]byte(base))
 	socket := "ccff-" + hex.EncodeToString(sum[:6])
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 
 	p := &ffPool{t: t, base: base, ccpool: ccpool, socket: socket}
 	if err := os.MkdirAll(filepath.Join(base, "cfg", "ccpool"), 0o700); err != nil {

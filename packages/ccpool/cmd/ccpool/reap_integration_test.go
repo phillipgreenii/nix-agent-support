@@ -26,7 +26,7 @@ func TestReap_closesOverCap(t *testing.T) {
 	fake := filepath.Join(bin, "fake-claude")
 	_ = os.WriteFile(fake, src, 0o755)
 	socket := "ccpool-reaptest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	_ = os.MkdirAll(cfgDir, 0o700)
 	_ = os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(`

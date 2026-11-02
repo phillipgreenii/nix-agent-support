@@ -39,7 +39,7 @@ func TestNew_launchesFakeClaude_reachesReadyAndLive(t *testing.T) {
 	}
 
 	socket := "ccpool-newtest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 
 	// Config: point claude.bin at fake-claude, dedicated test socket.
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
@@ -135,7 +135,7 @@ func TestNew_metaFlag_setsMetadataAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := "ccpool-metatest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	_ = os.MkdirAll(cfgDir, 0o700)
 	cfg := `
@@ -210,7 +210,7 @@ func TestNew_labelFlag_carriesLabelIntoSessionNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := config.SocketFor(base) // unique per run; never the live "ccpool" socket
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)

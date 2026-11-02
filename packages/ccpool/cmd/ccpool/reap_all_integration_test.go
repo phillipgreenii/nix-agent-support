@@ -151,7 +151,7 @@ timeout = "10s"
 	t.Cleanup(func() {
 		for _, s := range []string{defSocket, socketA, socketN} {
 			if s != "" {
-				_ = exec.Command("tmux", "-L", s, "kill-server").Run()
+				killTmuxServer(t, s)
 			}
 		}
 	})
@@ -293,7 +293,7 @@ func TestReapAll_closureNarrationResolvesEachPoolsOwnLabels(t *testing.T) {
 	var sockets []string
 	t.Cleanup(func() {
 		for _, s := range append(sockets, defSocket) {
-			_ = exec.Command("tmux", "-L", s, "kill-server").Run()
+			killTmuxServer(t, s)
 		}
 	})
 	// Register each pool via ccpool's own create-on-first-resolve, then drop in

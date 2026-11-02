@@ -51,7 +51,7 @@ func TestPools_isolated(t *testing.T) {
 	t.Cleanup(func() {
 		for _, p := range []string{poolA, poolB} {
 			if abs, e := filepath.EvalSymlinks(p); e == nil {
-				_ = exec.Command("tmux", "-L", config.SocketFor(abs), "kill-server").Run()
+				killTmuxServer(t, config.SocketFor(abs))
 			}
 		}
 	})

@@ -26,7 +26,7 @@ func TestReply_returnsAssistantReply(t *testing.T) {
 	_ = os.WriteFile(fake, src, 0o755)
 
 	socket := "ccpool-replytest"
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	registerTmuxCleanup(t, socket)
 
 	transcript := filepath.Join(base, "t.jsonl")
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
