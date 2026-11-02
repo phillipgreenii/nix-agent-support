@@ -612,3 +612,27 @@ make_flake_repo() {
   [ "$(jq -r .result "$(verdict_file nix-flk "$FLK_SHA")")" = superseded ]
   [ ! -d "$STATE/logs/nix-flk" ] || [ -z "$(ls -A "$STATE/logs/nix-flk")" ]
 }
+
+# pg2-jwwrv1: under pg-router's strict base env only BSD date is on PATH, which has
+# no `date -d`. The runner must use its injected date (RR_DATE_BIN), not PATH's.
+@test "tips works when only a BSD-style date (no -d) is on PATH" {
+  local gnu
+  gnu="$(command -v date)"
+  "$gnu" -u -d @0 +%s >/dev/null 2>&1 || skip "no GNU date available to inject"
+  mkdir -p "$TEST_DIR/bsd-bin"
+  cat >"$TEST_DIR/bsd-bin/date" <<'SH'
+#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "-d" ]; then
+    echo "date: illegal option -- d" >&2
+    exit 1
+  fi
+done
+exec /bin/date "$@"
+SH
+  chmod +x "$TEST_DIR/bsd-bin/date"
+  PATH="$TEST_DIR/bsd-bin:$PATH" RR_DATE_BIN="$gnu" tips
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]
+  [ -n "$(jq -r .expiresAt <<<"$output")" ]
+}

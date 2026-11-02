@@ -21,6 +21,8 @@
 
 rr_err() { printf 'pg-repo-runner: %s\n' "$*" >&2; }
 
+rr_date() { "${RR_DATE_BIN:-date}" "$@"; }
+
 rr_jq() { "${RR_JQ_BIN:-jq}" "$@"; }
 
 # rr_tq FILE: a TOML file as one JSON document on stdout (tomlq's `tq`).
@@ -33,7 +35,7 @@ rr_git() {
     -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_GIT_BIN:-git}" "$@"
 }
 
-rr_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+rr_now() { rr_date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # --- state directory and run log ------------------------------------------
 
@@ -422,12 +424,12 @@ rr_epoch() {
   if [[ ${PG_REPO_RUNNER_EPOCH:-} =~ ^[0-9]+$ ]]; then
     printf '%s\n' "$PG_REPO_RUNNER_EPOCH"
   else
-    date -u +%s
+    rr_date -u +%s
   fi
 }
 
 # rr_iso_at EPOCH: an RFC 3339 UTC time.
-rr_iso_at() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+rr_iso_at() { rr_date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 
 # rr_retry_window: how long an emitted tip item stays offered, in seconds
 # (PG_REPO_RUNNER_RETRY_WINDOW, else the config's thresholds.retry_window, else
@@ -1217,14 +1219,14 @@ rr_ws_tips_json() {
 
 # rr_ws_set_name EPOCH: the throwaway set's branch name for a run that started at EPOCH.
 rr_ws_set_name() {
-  printf '%s%s' "$RR_WS_PREFIX" "$(date -u -d "@$1" +%Y%m%dT%H%M%SZ)"
+  printf '%s%s' "$RR_WS_PREFIX" "$(rr_date -u -d "@$1" +%Y%m%dT%H%M%SZ)"
 }
 
 # rr_ws_name_epoch NAME: the epoch a set name encodes; fails for any other shape.
 rr_ws_name_epoch() {
   local n="${1#"$RR_WS_PREFIX"}"
   [[ $n =~ ^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z$ ]] || return 1
-  date -u -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}T${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}Z" +%s 2>/dev/null
+  rr_date -u -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}T${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}Z" +%s 2>/dev/null
 }
 
 # rr_ws_set_name_ok NAME: a reserved-prefix name made of safe characters only.

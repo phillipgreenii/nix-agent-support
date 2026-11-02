@@ -32,6 +32,7 @@ mkBashScript {
     RR_GIT_BIN = "${pkgs.git}/bin/git";
     RR_JQ_BIN = "${pkgs.jq}/bin/jq";
     RR_TQ_BIN = "${pkgs.tomlq}/bin/tq";
+    RR_DATE_BIN = "${pkgs.coreutils}/bin/date";
     RR_NICE_BIN = "${pkgs.coreutils}/bin/nice";
     RR_NIX_BIN = "${pkgs.nix}/bin/nix";
     RR_NIX_LOG_WRAPPED_BIN =
