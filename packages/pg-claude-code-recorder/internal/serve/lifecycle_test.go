@@ -299,9 +299,12 @@ func TestAStaleFifoIsRemovedAtStartupAndWhenItsProcessExits(t *testing.T) {
 	}
 	e.procs.Exit(461, t0.Add(time.Minute))
 	waitExit(t, d, 461)
-	if _, err := os.Lstat(filepath.Join(inbox, "461.fifo")); err == nil {
-		t.Fatal("the FIFO of an exited Process was not removed")
-	}
+	// The tracker commits the exit and then removes the FIFO, so the exit row
+	// appearing does not mean the FIFO is gone yet.
+	waitFor(t, "the FIFO of an exited Process to be removed", func() bool {
+		_, err := os.Lstat(filepath.Join(inbox, "461.fifo"))
+		return err != nil
+	})
 }
 
 func TestEndFilesAreParsedJoinedCountedAndRemovedAfterADay(t *testing.T) {
