@@ -15415,7 +15415,7 @@
               # Pure module eval (same stub harness as the sibling
               # claude-settings eval checks) reading the option values the
               # `claude-auto-mode` module contributes. This file holds its OWN
-              # copy of the seven strings so a drive-by edit to the module
+              # copy of the five strings so a drive-by edit to the module
               # fails here.
               test-claude-auto-mode-base =
                 let
@@ -15466,13 +15466,11 @@
                   disabled = evalWith [ ];
 
                   expectedEnvironment = [
-                    "Primary use of Claude Code: software development in the ZipRecruiter monorepo and in the user's personal nix repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), plus agent-tooling and beads issue-tracking work."
+                    "Primary use of Claude Code: software development in the user's personal nix repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), plus agent-tooling and beads issue-tracking work."
                     "Host containment: Claude Code runs on an ordinary developer macOS machine with open internet; there is no container, VM or egress allow-list."
-                    "Cloud provider(s): AWS."
-                    "Secrets management: AWS access uses Granted profiles with credential_process in ~/.aws/config (no ~/.aws/credentials file; the SSO token lives in the OS keychain); credential values are never exported, printed or written to files."
                     "Key internal services: a shared per-user Dolt server for the beads issue tracker listens on 127.0.0.1:25252 (launchd agent org.nixos.beads-dolt-server); local reads and writes through the bd CLI are routine."
                     "Org-specific CLIs: bd, pn, pg-desk, pg-router, ccpool, pg-disk-reclaimer, session-mode, handoff-create, assume, tuicr, cmux, nb, pa-monitor and glowm are tools the user installed deliberately through nix/home-manager."
-                    "Source control: github.com/ZR-Private/* (the employer organization, ZipRecruiter), github.com/phillipgreenii/* and github.com/phillipgziprecruiter/* (the user's personal accounts) are trusted. The two personal accounts are trusted destinations only for content that originates in the user's nix-* repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), never for ZR-Private content."
+                    "Source control: github.com/phillipgreenii/* and github.com/phillipgziprecruiter/* (the user's personal accounts) are trusted. The two personal accounts are trusted destinations only for content that originates in the user's nix-* repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), never for content that belongs to the user's other organizations."
                   ];
 
                   entries = (autoModeOf enabled).environment;
@@ -15493,9 +15491,9 @@
                     );
                   allIps = lib.concatMap ipv4Of entries;
                 in
-                # (a) exactly the seven strings, in order.
+                # (a) exactly the five strings, in order.
                 assert entries == expectedEnvironment;
-                assert builtins.length entries == 7;
+                assert builtins.length entries == 5;
                 assert (autoModeOf enabled).manage == true;
                 # (b) disabled: manage stays false and all three lists are empty.
                 assert (autoModeOf disabled).manage == false;
