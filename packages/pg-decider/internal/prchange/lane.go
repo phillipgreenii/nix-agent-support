@@ -190,7 +190,11 @@ func (r *run) finish(code int) {
 		r.rec.Hydrate.Class = r.failClass
 	}
 	r.rec.Residual = r.residual
+	laneStart := r.o.Clock()
 	r.rec.Lane = r.recordLane(code)
+	if r.failStage != StageLock {
+		r.timings().LaneRecordMs = r.ms(laneStart)
+	}
 	r.rec.FinishedAt = r.o.Clock().UTC().Format("2006-01-02T15:04:05Z")
 	if r.o.RunRecordPath == "" {
 		return

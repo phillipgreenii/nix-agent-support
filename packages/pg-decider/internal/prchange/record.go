@@ -80,6 +80,12 @@ type TimingsRecord struct {
 	ViewReadMs *int64 `json:"view_read_ms,omitempty"`
 	// DecideMs is the whole decide stage (its parts are on the decide record).
 	DecideMs *int64 `json:"decide_ms,omitempty"`
+	// LaneRecordMs is the `pg-desk pr lane-record` write of the run's lane state
+	// (every attempt, including a retry without the decisions or timings). It runs
+	// after the decide stage and is not part of any stage above; omitted when the
+	// run ended at the lock (nothing is written then). It is not forwarded to
+	// pg-desk (it is measured after the document is sent).
+	LaneRecordMs *int64 `json:"lane_record_ms,omitempty"`
 }
 
 // HydrateRecord is the hydrate stage of a run. Result is ok, failed or not_run

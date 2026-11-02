@@ -268,3 +268,49 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// The lane write is its own stage: time spent in `pg-desk pr lane-record` (after
+// the decide stage) is recorded as lane_record_ms and is not part of any other
+// stage, so a run whose wall time exceeds its stages can be told apart. It is
+// not forwarded to pg-desk's lane write path.
+func TestTheLaneWriteIsRecordedAsItsOwnTimingStage(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)}
+	s := hydrated().on("pg-decider plan pr", ok(planWithWork))
+	o, _, errb := opts(t, ModePlan, s)
+	o.Clock = clock.now
+	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
+	o.Runner = timedRunner(s, clock, map[string]time.Duration{"pg-desk pr lane-record": 900 * time.Second})
+	if got := Run(context.Background(), o); got != ExitOK {
+		t.Fatalf("exit %d: %s", got, errb)
+	}
+	_, rec := readRecord(t, o.RunRecordPath)
+	if rec.Timings == nil || rec.Timings.LaneRecordMs == nil || *rec.Timings.LaneRecordMs != 900_000 {
+		t.Fatalf("timings = %s, want lane_record_ms 900000", mustJSON(rec.Timings))
+	}
+	if rec.Timings.DecideMs == nil || *rec.Timings.DecideMs >= 900_000 {
+		t.Errorf("decide_ms %v must not include the lane write", rec.Timings.DecideMs)
+	}
+	if in := laneCalls(t, s)[0]; strings.Contains(mustJSON(in.Timings), "lane_record") {
+		t.Errorf("lane_record_ms was sent to pg-desk: %s", mustJSON(in.Timings))
+	}
+}
+
+// A run that ended at the lock writes no lane state, so it has no lane stage.
+func TestARunThatEndedAtTheLockHasNoLaneTiming(t *testing.T) {
+	s := hydrated()
+	o, _, _ := opts(t, ModePlan, s)
+	o.LockWait = 30 * time.Millisecond
+	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
+	held, err := AcquireLock(context.Background(), o.LockDir, "acme/api#7", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	if got := Run(context.Background(), o); got == ExitOK {
+		t.Fatal("run succeeded while the lock was held")
+	}
+	_, rec := readRecord(t, o.RunRecordPath)
+	if rec.Timings == nil || rec.Timings.LaneRecordMs != nil {
+		t.Errorf("timings = %s", mustJSON(rec.Timings))
+	}
+}
