@@ -128,9 +128,14 @@ and MUST NOT use an LLM for any step below.
        code-owner requirements and human review is still required, so its verdict is advice to a
        human reviewer, not a gate (operator ruling 2026-10-05).
 
-       The operator is the **acting reviewer** when they have a review of their own in progress — a
-       pending (started, unsubmitted) review or a submitted comment-only review — and no approval of
-       their own stands (`self_review_in_progress`; operator ruling 2026-10-12, bead `pg2-tgq8o`).
+       The operator is the **acting reviewer** when they have a submitted comment-only review of their
+       own and no approval of their own stands (`self_review_in_progress`; operator ruling
+       2026-10-12, bead `pg2-tgq8o`). A pending (started, unsubmitted) review is NOT an acting
+       review: the PR owner is not waiting on a draft nobody has seen, so it routes nothing, and a
+       PR that is neither requested of the operator nor commented on by them falls through to the
+       rules below (operator ruling, Phillip, 2026-11-02: "the owner is not waiting on that. i don't
+       think a pending review is a good signal"; it supersedes the pending half of the 2026-10-12
+       ruling). A pending review still admits the PR to the team panels as a match reason.
        The originally requested reviewer will likely not review once the operator has, so the PR
        stays with the operator for re-review exactly as if they were requested. A teammate's
        approval does NOT end it: the operator still needs to see what to re-review. The operator's

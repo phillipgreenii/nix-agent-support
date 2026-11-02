@@ -361,10 +361,14 @@ const (
 )
 
 // selfInProgressReviewStates are the operator's review states that make them
-// the acting reviewer (Approvals.SelfReviewInProgress): a started-but-unsubmitted
-// review, or a submitted comment-only review. APPROVED ends the work,
-// CHANGES_REQUESTED is a hard blocker, DISMISSED carries no usable signal.
-var selfInProgressReviewStates = map[string]bool{"PENDING": true, "COMMENTED": true}
+// the acting reviewer (Approvals.SelfReviewInProgress): a submitted
+// comment-only review. A PENDING (unsubmitted) review is deliberately absent:
+// the PR owner is not waiting on a draft nobody has seen, so it routes nothing
+// (operator ruling 2026-11-02, superseding the PENDING half of 2026-10-12,
+// pg2-tgq8o); it still admits the PR via MatchReasonReviewInProgress.
+// APPROVED ends the work, CHANGES_REQUESTED is a hard blocker, DISMISSED
+// carries no usable signal.
+var selfInProgressReviewStates = map[string]bool{"COMMENTED": true}
 
 // selfHasReview reports whether self authored a review on pr whose state is in
 // states.
@@ -464,9 +468,10 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 //     which also sets aside a harmless cancelled run and reads "no CI
 //     data" as pending (neither is a verdict about the code).
 //     2. I'm a requested reviewer (MatchReasonReviewRequested) or the acting
-//     reviewer (Approvals.SelfReviewInProgress: a PENDING or COMMENTED
+//     reviewer (Approvals.SelfReviewInProgress: a submitted COMMENTED
 //     review of mine with no standing approval of mine; operator ruling
-//     2026-10-12, pg2-tgq8o -- another human's approval does not end it) ->
+//     2026-10-12, pg2-tgq8o -- another human's approval does not end it; a
+//     PENDING draft does not count, ruling 2026-11-02) ->
 //     team_awaiting_me, whether or not I already approved (GitHub drops a
 //     reviewer from review_requests once they submit any review, so
 //     requested && SelfApproved is the RE-REQUEST case -- a live

@@ -104,10 +104,10 @@ func TestClassifyPanel_TeamBotDisapprovalIsAdvice(t *testing.T) {
 	}
 }
 
-// Operator ruling 2026-10-12 (pg2-tgq8o): an operator with a PENDING or
-// COMMENTED review of their own is the acting reviewer and is treated like a
-// requested reviewer. Motivating PRs: 105206 and 113985 (bot disapproved, only
-// a pending review of mine, not requested -> was owner).
+// Operator ruling 2026-10-12 (pg2-tgq8o), narrowed 2026-11-02: an operator
+// with a submitted COMMENTED review of their own is the acting reviewer and is
+// treated like a requested reviewer. A PENDING (unsent) draft is NOT: the owner
+// is not waiting on it (PRs 105206 and 113985 motivated the original rule).
 func TestClassifyPanel_TeamActingReviewer(t *testing.T) {
 	reasons := []string{MatchReasonTeamAuthored}
 	green := ciRollupResult{State: "success"}
@@ -129,7 +129,8 @@ func TestClassifyPanel_TeamActingReviewer(t *testing.T) {
 		{"review in progress + bot disapproved -> me (105206/113985)", open, green, botNo, reasons, PanelTeamAwaitingMe},
 		{"review in progress + another human approved, BLOCKED -> me (their approval does not end it)", prShow{State: "open", MergeStateStatus: "BLOCKED"}, green, otherApproved, reasons, PanelTeamAwaitingMe},
 		{"review in progress + another human approved, CLEAN -> me", prShow{State: "open", MergeStateStatus: "CLEAN"}, green, otherApproved, reasons, PanelTeamAwaitingMe},
-		{"review in progress, only a pending review admits it -> me", open, green, acting, []string{MatchReasonReviewInProgress}, PanelTeamAwaitingMe},
+		{"only an unsent pending review admits it, not acting -> team (2026-11-02)", open, green, Approvals{}, []string{MatchReasonReviewInProgress}, PanelTeamAwaitingTeam},
+		{"unsent pending review + another human approved, not requested -> not me (125022)", prShow{State: "open", MergeStateStatus: "BLOCKED"}, green, Approvals{HumanApproved: true, HumanApprovers: 1}, []string{MatchReasonReviewInProgress, MatchReasonLabelPrefix + "team/x"}, PanelTeamAwaitingTeam},
 		{"review in progress + real CI failure -> owner (hard blocker first)", open, realFailure, acting, reasons, PanelTeamAwaitingOwner},
 		{"review in progress + conflict -> owner", prShow{State: "open", MergeStateStatus: "DIRTY"}, green, acting, reasons, PanelTeamAwaitingOwner},
 		{"review in progress + human changes-requested -> owner", open, green, Approvals{SelfReviewInProgress: true, HumanChangesRequested: true}, reasons, PanelTeamAwaitingOwner},
@@ -158,10 +159,11 @@ func TestComputeApprovals_SelfReviewInProgress(t *testing.T) {
 		want    bool
 	}{
 		{"none", nil, false},
-		{"pending only", []prReview{rev("PENDING", "")}, true},
+		{"pending only (an unsent draft routes nothing, 2026-11-02)", []prReview{rev("PENDING", "")}, false},
 		{"submitted comment", []prReview{rev("COMMENTED", "2026-10-01T00:00:00Z")}, true},
+		{"submitted comment + pending follow-up", []prReview{rev("COMMENTED", "2026-10-01T00:00:00Z"), rev("PENDING", "")}, true},
 		{"dismissed only", []prReview{rev("DISMISSED", "2026-10-01T00:00:00Z")}, false},
-		{"dismissed + pending (113985)", []prReview{rev("DISMISSED", "2026-09-24T20:22:09Z"), rev("PENDING", "")}, true},
+		{"dismissed + pending (113985)", []prReview{rev("DISMISSED", "2026-09-24T20:22:09Z"), rev("PENDING", "")}, false},
 		{"approved", []prReview{rev("APPROVED", "2026-10-01T00:00:00Z")}, false},
 		{"approved then pending follow-up", []prReview{rev("APPROVED", "2026-10-01T00:00:00Z"), rev("PENDING", "")}, false},
 		{"changes requested only", []prReview{rev("CHANGES_REQUESTED", "2026-10-01T00:00:00Z")}, false},
