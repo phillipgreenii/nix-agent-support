@@ -15441,5 +15441,81 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-ve5xen: sd/ast-grep classification. sg is deliberately unregistered (shadow-utils sg exists on Linux)."
+  },
+  {
+    "case": "grep_ignore_binary_recursive_approve",
+    "tags": ["ceta-spec", "tc-zfzyt"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "grep -rIn -i healthchecks roles"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-zfzyt: -I/--ignore-binary is inert (ugrep 7.8.4 grep --help)."
+  },
+  {
+    "case": "grep_ignore_binary_long_approve",
+    "tags": ["ceta-spec", "tc-zfzyt"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "grep --ignore-binary foo README.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-zfzyt: long spelling of -I."
+  },
+  {
+    "case": "grep_ignore_binary_ssh_reject",
+    "tags": ["ceta-spec", "tc-zfzyt"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "grep -I foo ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "tc-zfzyt guardrail: -I does not loosen the credential-store read rejection."
+  },
+  {
+    "case": "grep_unrelated_absolute_path_not_approve",
+    "tags": ["ceta-spec", "tc-zfzyt"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "grep -rn foo /home/nobody/elsewhere/src"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-zfzyt: an unrelated absolute path outside every known zone stays abstain (successor of the discarded old-engine TestSafecmds_PnWorkspace_GrepUnrelatedAbsolutePath_StaysAbstain)."
   }
 ]

@@ -1625,6 +1625,7 @@ var grepSchema = CommandSchema{
 		"-r": inert, "--recursive": inert,
 		"-R": inert, "--dereference-recursive": inert,
 		"-a": inert, "--text": inert,
+		"-I": inert, "--ignore-binary": inert,
 		"-z": inert, "--decompress": inert,
 		"--color": literalOpt, "--colour": literalOpt,
 		"-A": literal1, "--after-context": literal1,

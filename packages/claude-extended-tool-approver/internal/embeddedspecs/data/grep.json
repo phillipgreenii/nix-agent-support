@@ -212,6 +212,18 @@
           "source": "grep --help: \"-F, --fixed-strings PATTERNS are strings\""
         }
       },
+      "--ignore-binary": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "grep --help (ugrep 7.8.4): \"-I, --ignore-binary  Ignore matches in binary files.  This option is equivalent to the --binary-files=without-match option.\""
+        }
+      },
       "--ignore-case": {
         "arity": "none",
         "operand": {
@@ -510,6 +522,18 @@
         },
         "citation": {
           "source": "grep --help: \"-H, --with-filename print file name with output lines\""
+        }
+      },
+      "-I": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "grep --help (ugrep 7.8.4): \"-I, --ignore-binary  Ignore matches in binary files.  This option is equivalent to the --binary-files=without-match option.\""
         }
       },
       "-L": {
