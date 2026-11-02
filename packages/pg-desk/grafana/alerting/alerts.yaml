@@ -1240,6 +1240,51 @@ groups:
                     type: gt
                     params: [0]
 
+      # Hydration failure and repeated degradation for type issue: the existing
+      # persisted counters and gauge (internal/metrics/changeflow.go), read here for
+      # the issue type, the twin of pg-desk-pr-hydration-failing. A Jira daemon that never
+      # restarted onto a changed config leaves every issue hydration failing on each poll,
+      # and no other rule reads these series for type issue.
+      - uid: pg-desk-issue-hydration-failing
+        title: pg-desk issue hydration keeps failing or degrading
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "Issue hydrations are failing or repeatedly degraded"
+          description: 'More than 5 issue hydrations failed or came back degraded in the last 30 minutes (pg_desk_hydration_failures_total{type="issue"}), or pg_desk_repeated_degraded_entities{type="issue"} is above 0, for 15 minutes. Check the Jira daemon (pg-conn-jira-* alerts), its config hash against the running pg-desk, and the pg-desk poll log for the failing issue keys. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((sum(increase(pg_desk_hydration_failures_total{type="issue"}[30m])) > 5) or (max(pg_desk_repeated_degraded_entities{type="issue"}) > 0)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # Hydrate stage dead-man: the pr-change role was dispatched (a router series,
       # pg_router_throughput_total{role="pr-change"}) in the last hour while the
       # persisted PR hydration counter did not move at all. A role that is accepted

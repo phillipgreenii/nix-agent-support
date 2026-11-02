@@ -83,6 +83,7 @@ outcome_uids=(
   "pg-desk-pr-lane-hard-failure"
   "pg-desk-pr-lane-failure-rate"
   "pg-desk-pr-hydration-failing"
+  "pg-desk-issue-hydration-failing"
   "pg-desk-pr-hydrate-dead-man"
   "pg-desk-pr-hidden-open-anchor"
   "pg-desk-pr-lookup-ceiling"
