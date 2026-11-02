@@ -10,7 +10,9 @@ description: >-
   (observable outcomes, not implementation mechanisms), premise-freshness re-verification before
   acting on stale state, the `worktree-review` label's full lifecycle (entry marker,
   promotion, exit verdict, release), and the lightweight `auto-session-wrapped` provenance
-  label applied by session-wrapup:wrap-up-session's auto-trigger mode. Handoff BEADS (type
+  label applied by session-wrapup:wrap-up-session's auto-trigger mode, and the CR-1 commit-reference
+  rule (a `bd create`/`update`/`close`/`comment` or gate whose text cites a commit or change MUST name
+  it by `git patch-id --stable`, never a commit SHA). Handoff BEADS (type
   `handoff`) have their own skill, `beads-lifecycle:handoff-bead`. Do NOT use for ordinary
   read-only `bd list`/`bd show` queries, or for the beads-as-issue-tracker BINDING question
   (that's `wayfinder-beads`).
@@ -442,6 +444,23 @@ repo's tracker) stay in the always-on core. Their follow-through lives here.
 - **BF-4** After creating a bead (or its dependency edges) the agent MUST verify with a read-back
   run from the intended tracker root (`bd show <id>`, and `bd dep list <id>` if edges were
   added) and confirm the id, title and labels landed where intended, before reporting it filed.
+
+## Commit References In Beads (CR-1)
+
+CR-2 (no bead ids written into a repository) stays in the always-on core: its violation window
+is `git commit` and file edits, with no `bd` trigger. Only the bead-side half lives here.
+
+- **CR-1** A bead (body, comment, close reason, acceptance criteria, gate) MUST identify a commit
+  or change by its `git patch-id --stable`, never by a commit SHA, because rebases rewrite SHAs.
+  Operator ruling (Phillip, 2026-11-02, verbatim): "a bead must not rely on a specific commit sha
+  because rebases are common." and "use patch-id as with pb-gate-lifecycle." This matches the key
+  `pb:pb-gate-lifecycle` already uses for its await id.
+  - Compute: `git -C <repo> show --no-ext-diff <commit> | git patch-id --stable` (first field).
+  - Look a patch-id up later:
+    `git -C <repo> log -p --no-ext-diff -n 400 <primary> | git patch-id --stable | rg <patch-id prefix>`
+    (the second field of the match is the CURRENT sha, valid only for that lookup; do not record it).
+  - A SHA MAY appear only as transient command output in the current session, never as the
+    durable reference in the bead.
 
 ## Handoff Preconditions
 

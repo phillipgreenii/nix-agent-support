@@ -61,6 +61,7 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 
 - Before any state-mutating `bd` command (create/update/close/dep), before parking/re-parking/escalating/releasing/accepting a bead, or before applying/checking/removing the `worktree-review` or `human` labels, MUST invoke the `beads-lifecycle` skill if not already done this session. `B-*`/`D-*`/`F-*`/`LV-*`/`P-*`/`W-*` live there.
 - **Handoff beads**: before reading, claiming, working, or closing a bead of type `handoff`, or before creating one (e.g. at wrap-up), invoke `beads-lifecycle:handoff-bead` (sole contract; an ambiguous bead is NOT a handoff).
+- **CR-1** (stub) Before writing a `bd create`/`update`/`close`/`comment` (or gate) whose text cites a commit or change, MUST invoke `beads-lifecycle`: a bead identifies a commit by its `git patch-id --stable`, never a commit SHA (rebases rewrite SHAs). Full rule: that skill.
 - **B-1/B-2** Whatever claims a bead MUST release it before ending (every exit path ends `closed` or released); a release MUST clear the assignee in the SAME call: `bd update <id> --status open --assignee ""` (`--status open` alone is NOT a release).
 - **B-5** Every agent/daemon claim (`--claim`, `bd ready --claim`, `--status in_progress`, `--assignee`) MUST carry `--actor "<session-id>[-<role>]"` (or `BEADS_ACTOR`) and MUST NOT resolve to the operator's name.
 - **F-9** Before briefing a subagent to create, restore, or commit a missing artifact, invoke `beads-lifecycle` and run its `decided-against?` probe first (an absence MAY be a ruling).
@@ -77,6 +78,10 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 - **BF-1** File a bead in the tracker of the repo where the fix will LAND, not the cwd's repo: determine that repo first (work subject, repo `CLAUDE.md`/workspace lookup table), then run `bd -C <tracker-root> ...` against it.
 - **BF-2** If the correct tracker is unreachable, MUST NOT fall back to another repo's tracker; report/escalate (or park the bead text in the session report) and retry later.
 - **BF-3/BF-4** (recreate misfiled beads; read-back verification before reporting filed): see `beads-lifecycle`.
+
+### No Bead Ids In The Repository
+
+- **CR-2** An agent MUST NOT write a bead id into a repository: not in a commit message (subject or body), a code comment, a doc, a test name, or a CLAUDE.md. It MUST refer to a ruling by who, when and the quoted text, or describe the behavior instead, because a reader outside this machine does not know beads. Operator ruling (Phillip, 2026-11-02, verbatim): "i don't like having bead ids in the repo because nothing outside of this machine know/understands beads." This governs NEW writes only; whether to scrub existing bead ids is a separate operator decision, and an agent MUST NOT start such a scrub on its own initiative. (No tool parses a bead id out of a commit message: `integrate-branch-support` finds its merge-request bead by bead metadata.) The tracker itself (bead bodies, comments, labels) is not "the repo" and MAY cite bead ids.
 
 ### Superseding Rulings
 
