@@ -10,9 +10,9 @@
 #     dashboards/pg-router.json (the existing dashboard panels)
 #   - packages/pg-router/internal/metrics/metrics.go (this repo)
 #
-# Folder "pg-router" (deliberately NOT the shared "Daemon Health" folder
-# launchd-health/mysql-probe/logsource-health use in
-# phillipgreenii-nix-support-apps) converges BY TITLE with the existing
+# Folder "Work" (the shared folder for the work-related daemons: pg-desk,
+# pg-connector, pg-task-focus and pg-router; not a per-service folder)
+# converges BY TITLE with the existing
 # pg-router dashboard's own dashboardProviders folder, registered from
 # phillipgreenii-nix-support-apps/darwin/modules/observability/ui.nix (ADR
 # 0039's title-convergence mechanism -- no folderUid is ever pinned, since
@@ -43,7 +43,7 @@ deleteRules:
 groups:
   - orgId: 1
     name: pg-router-alerts
-    folder: pg-router
+    folder: Work
     interval: 1m
     rules:
       # Conventions (pg2-x7ie2): the optional rule label `escalation` routes the

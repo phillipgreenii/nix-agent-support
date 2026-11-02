@@ -412,8 +412,8 @@ func TestAlertRulesReadRealMetrics(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, g := range doc.Groups {
-		if g.Folder != "Focus" {
-			t.Errorf("group %s is in folder %q, want Focus (it converges with the dashboard by title)", g.Name, g.Folder)
+		if g.Folder != "Work" {
+			t.Errorf("group %s is in folder %q, want Work (it converges with the dashboard by title)", g.Name, g.Folder)
 		}
 		for _, r := range g.Rules {
 			w, ok := want[r.UID]

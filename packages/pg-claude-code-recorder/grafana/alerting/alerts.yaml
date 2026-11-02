@@ -26,13 +26,13 @@
 #
 # Shape notes (copied from packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml):
 # condition C over refIds A (the query), B (reduce, last), C (threshold); a Prometheus rule is
-# `datasourceUid: prometheus` with the boolean `instant: true`. Folder "pg-claude-code-recorder"
+# `datasourceUid: prometheus` with the boolean `instant: true`. Folder "Claude Agents"
 # converges by title, so no folderUid is ever written. Annotations are static text.
 apiVersion: 1
 groups:
   - orgId: 1
     name: pg-claude-code-recorder
-    folder: pg-claude-code-recorder
+    folder: Claude Agents
     interval: 1m
     rules:
       # Daemon scraped. noDataState is Alerting (the pg-conn-github-daemon-down polarity): once the

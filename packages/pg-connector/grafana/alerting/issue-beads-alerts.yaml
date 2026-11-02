@@ -31,13 +31,13 @@
 # Shape notes (see issue-jira-alerts.yaml): datasourceUid is `loki`, the query
 # model uses the string `queryType: instant`, every rule's noDataState is OK,
 # the outer sum() collapses the per-field series `| json` produces, the folder
-# "pg-connector" converges by title and rule uids stay under Grafana's 40-char
+# "Work" converges by title and rule uids stay under Grafana's 40-char
 # cap. The rule's severity label MUST be one of critical, error, warning, info.
 apiVersion: 1
 groups:
   - orgId: 1
     name: pg-connector-issue-beads
-    folder: pg-connector
+    folder: Work
     interval: 1m
     rules:
       # (a) Sustained budget denials: calls the bd budget refused after their

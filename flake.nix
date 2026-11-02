@@ -3101,7 +3101,7 @@
                 assert o.logSources.pg-task-focus.format == "jsonl";
                 assert o.logSources.pg-task-focus.path == "\${env:XDG_STATE_HOME}/pg-task-focus/*.jsonl";
                 assert o.logSources.pg-task-focus.errorAlert.threshold == 1;
-                assert o.dashboardProviders.pg-task-focus.folder == "Focus";
+                assert o.dashboardProviders.pg-task-focus.folder == "Work";
                 assert
                   o.dashboardProviders.pg-task-focus.dashboards
                   == [ ./packages/pg-task-focus/grafana/pg-task-focus.json ];
@@ -3134,7 +3134,7 @@
                     f=${./packages/pg-task-focus/grafana/alerting/alerts.yaml}
                     yq -o=json '.' "$f" > alerts.json
                     jq -e '.apiVersion == 1' alerts.json >/dev/null
-                    jq -e '[.groups[].folder] | unique == ["Focus"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Focus" >&2; exit 1; }
+                    jq -e '[.groups[].folder] | unique == ["Work"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Work" >&2; exit 1; }
                     jq -e '[.groups[].rules[]] | length == 11' alerts.json >/dev/null || { echo "FAIL: expected 11 rules" >&2; exit 1; }
                     # TF-10: the sound-failing rule keeps its expression on the failure counter and
                     # its description names the notifier daemon and the Notifications permission,
@@ -3243,10 +3243,10 @@
                   }
                   ''
                     # The registered file is well-formed, holds the three rules in one
-                    # "Keep Awake" folder, and pins no folderUid.
+                    # "Host" folder, and pins no folderUid.
                     yq -o=json '.' ${alertsFile} > alerts.json
                     jq -e '.apiVersion == 1' alerts.json >/dev/null
-                    jq -e '[.groups[].folder] | unique == ["Keep Awake"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Keep Awake" >&2; exit 1; }
+                    jq -e '[.groups[].folder] | unique == ["Host"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Host" >&2; exit 1; }
                     jq -e '[.groups[].rules[]] | length == 3' alerts.json >/dev/null || { echo "FAIL: expected 3 rules" >&2; exit 1; }
                     jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
                     touch $out
@@ -3467,7 +3467,7 @@
                 assert lib.attrNames noDaemon.dashboardProviders == [ "pg-connector-github" ];
                 assert lib.attrNames enabled.dashboardProviders == [ "pg-connector-github" ];
                 assert enabled.dashboardProviders.pg-connector-github.dashboards == [ dashboardFile ];
-                assert enabled.dashboardProviders.pg-connector-github.folder == "pg-connector";
+                assert enabled.dashboardProviders.pg-connector-github.folder == "Work";
                 pkgs.runCommand "test-pg-connector-github-darwin-module-ok"
                   {
                     nativeBuildInputs = [
@@ -3875,11 +3875,11 @@
                 # The log sources follow the stack alone, not the daemon flag.
                 assert noDaemon.logSources == enabled.logSources;
                 # The dashboard follows the daemon flag like the alert rules do, and lands in
-                # the same "pg-connector" Grafana folder (converging BY TITLE).
+                # the same "Work" Grafana folder (converging BY TITLE).
                 assert disabled.dashboardProviders == { };
                 assert lib.attrNames enabled.dashboardProviders == [ "pg-connector-issue-jira" ];
                 assert enabled.dashboardProviders.pg-connector-issue-jira.dashboards == [ dashboardFile ];
-                assert enabled.dashboardProviders.pg-connector-issue-jira.folder == "pg-connector";
+                assert enabled.dashboardProviders.pg-connector-issue-jira.folder == "Work";
                 assert sized.dashboardProviders == enabled.dashboardProviders;
                 assert noUsers.dashboardProviders == { };
                 assert noDaemon.dashboardProviders == { };
@@ -4107,7 +4107,7 @@
 
                     # Alert file structure: auth + availability, no quota rule.
                     [ "$(yq '.groups[0].rules | length' "$alerts")" = 2 ] || fail "want exactly 2 rules"
-                    [ "$(yq '.groups[0].folder' "$alerts")" = pg-connector ] || fail "folder is not pg-connector"
+                    [ "$(yq '.groups[0].folder' "$alerts")" = Work ] || fail "folder is not Work"
                     uids="$(yq '.groups[0].rules[].uid' "$alerts")"
                     [ "$(printf '%s\n' "$uids" | sort -u | wc -l)" = 2 ] || fail "uids are not unique"
                     printf '%s\n' "$uids" | while read -r u; do
@@ -4255,7 +4255,7 @@
                     # Alert file structure: auth + availability + throttling, and no
                     # remaining-budget rule.
                     [ "$(yq '.groups[0].rules | length' "$alerts")" = 3 ] || fail "want exactly 3 rules"
-                    [ "$(yq '.groups[0].folder' "$alerts")" = pg-connector ] || fail "folder is not pg-connector"
+                    [ "$(yq '.groups[0].folder' "$alerts")" = Work ] || fail "folder is not Work"
                     uids="$(yq '.groups[0].rules[].uid' "$alerts")"
                     [ "$(printf '%s\n' "$uids" | sort -u | wc -l)" = 3 ] || fail "uids are not unique"
                     printf '%s\n' "$uids" | while read -r u; do

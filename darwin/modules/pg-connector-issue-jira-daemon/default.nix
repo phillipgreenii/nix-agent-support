@@ -105,7 +105,7 @@ in
         };
       };
 
-      # Group pg-connector-issue-jira-daemon, folder pg-connector. The old
+      # Group pg-connector-issue-jira-daemon, folder Work. The old
       # backend's issue-jira-alerts.yaml is deliberately NOT listed here (its
       # module still registers it). Listed only while the daemon is deployed
       # (see the header comment); otherwise the deleteRules file below.
@@ -120,7 +120,7 @@ in
             ../../../packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml
           ];
 
-      # Same folder title as the alert group ("pg-connector"), so dashboards and
+      # Same folder title as the alert group ("Work"), so dashboards and
       # alerts converge on one Grafana folder BY TITLE (no folderUid anywhere).
       # Only rendered when observability.ui.enable is also set. Listed only
       # while the daemon is deployed, so a machine without the daemon gets no
@@ -128,7 +128,7 @@ in
       # an empty dashboard there is harmless and this one is simply tidier).
       dashboardProviders = lib.optionalAttrs daemonDeployed {
         pg-connector-issue-jira = {
-          folder = "pg-connector";
+          folder = "Work";
           dashboards = [ ../../../packages/pg-connector/grafana/pg-connector-issue-jira.json ];
         };
       };

@@ -10,7 +10,7 @@
 # Every failure line starts with RULE-Sn so a mutant can assert the exact rule that fired.
 #
 #   S1  exactly the ten uids, each once, each at most 40 characters
-#   S2  one group pg-connector-github in folder pg-connector, no folderUid key anywhere
+#   S2  one group pg-connector-github in folder Work, no folderUid key anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description, labels
 #       with exactly the one key severity; each Prometheus rule has a non-empty for
 #   S4  the Prometheus rules use datasourceUid prometheus (instant: true), the two Loki rules
@@ -103,8 +103,8 @@ lint() {
 
   # S2
   if ! jq -e '(.groups | length) == 1 and .groups[0].name == "pg-connector-github"
-      and .groups[0].folder == "pg-connector"' <<<"$json" >/dev/null; then
-    echo "RULE-S2: want one group named pg-connector-github in folder pg-connector" >&2
+      and .groups[0].folder == "Work"' <<<"$json" >/dev/null; then
+    echo "RULE-S2: want one group named pg-connector-github in folder Work" >&2
     status=1
   fi
   if jq -e '[.. | objects | select(has("folderUid"))] | length > 0' <<<"$json" >/dev/null; then
@@ -346,7 +346,7 @@ rule_of() { printf '.groups[0].rules[] | select(.uid == "%s")' "$1"; }
 mutant S1 "a uid longer than 40 characters" \
   "($(rule_of pg-conn-github-settle-failing) | .uid) = \"pg-conn-github-settle-failing-and-much-too-long\"" ""
 mutant S2 "a folderUid key" \
-  "($(rule_of pg-conn-github-query-stale) | .folderUid) = \"pg-connector\"" ""
+  "($(rule_of pg-conn-github-query-stale) | .folderUid) = \"Work\"" ""
 mutant S3 "a rule without its description" \
   "del($(rule_of pg-conn-github-query-stale) | .annotations.description)" ""
 mutant S4 "a Prometheus rule on the Loki datasource" \

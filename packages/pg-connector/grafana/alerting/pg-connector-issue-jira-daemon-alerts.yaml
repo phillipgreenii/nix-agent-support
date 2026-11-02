@@ -26,7 +26,7 @@
 # issue-jira-alerts.yaml): condition C over refIds A (the query), B (reduce,
 # last), C (threshold); a Prometheus rule is `datasourceUid: prometheus` with the
 # boolean `instant: true`; a Loki rule is `datasourceUid: loki` with the string
-# `queryType: instant`. Folder "pg-connector" converges by title (ADR 0039 in
+# `queryType: instant`. Folder "Work" converges by title (ADR 0039 in
 # phillipgreenii-nix-support-apps), so no folderUid is ever written. Rule uids
 # stay under Grafana's 40-char cap. Annotations are static text. Severity
 # follows docs/alert-severity.md of nix-repo-base (critical, error, warning,
@@ -38,7 +38,7 @@ apiVersion: 1
 groups:
   - orgId: 1
     name: pg-connector-issue-jira-daemon
-    folder: pg-connector
+    folder: Work
     interval: 1m
     rules:
       # Daemon up. daemon_up is the daemon's OWN single liveness gauge. pg2-nxukx8

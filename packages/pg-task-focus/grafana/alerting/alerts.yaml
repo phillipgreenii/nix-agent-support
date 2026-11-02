@@ -7,7 +7,7 @@
 # refId A is plain PromQL and refId C a single threshold stage, so any rule can be wrapped
 # and run under `promtool test rules` the way packages/beads-exporter does.
 #
-# The folder "Focus" converges BY TITLE with the dashboard provider of the same folder (never
+# The folder "Work" converges BY TITLE with the dashboard provider of the same folder (never
 # pin a folderUid: Grafana alerting provisioning ignores it, grafana/grafana#125079).
 #
 # "Daemon down" uses noDataState Alerting because an absent series, once the module is
@@ -22,7 +22,7 @@ apiVersion: 1
 groups:
   - orgId: 1
     name: pg-task-focus-alerts
-    folder: Focus
+    folder: Work
     interval: 1m
     rules:
       - uid: pg-task-focus-daemon-down

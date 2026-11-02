@@ -58,11 +58,11 @@ in
       };
 
       # The dashboard provider and the alert rule groups are both titled
-      # "Focus" so they converge on ONE Grafana folder BY TITLE (never pin a
+      # "Work" so they converge on ONE Grafana folder BY TITLE (never pin a
       # folderUid: Grafana alerting provisioning ignores it, grafana/grafana
       # #125079, and alerting provisions BEFORE dashboards).
       dashboardProviders.pg-task-focus = {
-        folder = "Focus";
+        folder = "Work";
         dashboards = [ ../../../packages/pg-task-focus/grafana/pg-task-focus.json ];
       };
       alertRuleFiles = [ ../../../packages/pg-task-focus/grafana/alerting/alerts.yaml ];

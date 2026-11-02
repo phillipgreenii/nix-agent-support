@@ -28,7 +28,7 @@ in
   #    (launchd only captures stdout/stderr in `pg-keep-awake-launchd/`, and its
   #    logs go to OTel), so a Loki log source would match nothing.
   #  - dashboardProviders: no dashboard is designed.
-  # The rule group's folder "Keep Awake" is created by alerting provisioning
+  # The rule group's folder "Host" is created by alerting provisioning
   # BY TITLE (never pin a folderUid: Grafana ignores it, grafana/grafana#125079).
   config = lib.mkIf gate {
     phillipgreenii.observability.alertRuleFiles = [

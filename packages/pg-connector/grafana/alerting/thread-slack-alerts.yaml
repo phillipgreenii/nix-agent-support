@@ -46,7 +46,7 @@
 # the outer sum() collapses them to the single series the reduce stage
 # expects.
 #
-# Folder "pg-connector" converges by title (ADR 0039 in
+# Folder "Work" converges by title (ADR 0039 in
 # phillipgreenii-nix-support-apps -- no folderUid, since alerting file
 # provisioning has no such field). Rule uids stay under Grafana's 40-char cap.
 #
@@ -58,7 +58,7 @@ apiVersion: 1
 groups:
   - orgId: 1
     name: pg-connector-thread-slack
-    folder: pg-connector
+    folder: Work
     interval: 1m
     rules:
       # (a) Auth: claude (or the Slack MCP behind it) reported an

@@ -39,7 +39,7 @@
 # running, which pa-monitor's own liveness and the launchd-health rule cover, and which says
 # nothing about the keeper.
 #
-# The folder "Keep Awake" has no dashboard provider yet (a dashboard is not designed); never pin
+# The folder "Host" has no dashboard provider yet (a dashboard is not designed); never pin
 # a folderUid (Grafana alerting provisioning ignores it, grafana/grafana#125079). This file is
 # registered with the observability stack (phillipgreenii.observability.alertRuleFiles) by
 # darwin/modules/pg-keep-awake, behind the pg-keep-awake enable flag.
@@ -47,7 +47,7 @@ apiVersion: 1
 groups:
   - orgId: 1
     name: pg-keep-awake-alerts
-    folder: Keep Awake
+    folder: Host
     interval: 1m
     rules:
       - uid: pg-keep-awake-keeper-down-leases-live

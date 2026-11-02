@@ -94,7 +94,7 @@ in
         };
       };
 
-      # Group pg-connector-github, folder pg-connector: Prometheus rules over the
+      # Group pg-connector-github, folder Work: Prometheus rules over the
       # daemon's own metrics and two Loki rules over its logs (store-aside, and
       # unavailable-ratio over events.jsonl). pr-github-alerts.yaml is gone (its
       # rules are retired, their deleteRules file was removed in Phase 6b). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
@@ -110,11 +110,11 @@ in
           # not deployed, register a deleteRules-only file for those uids instead.
           [ ../../../packages/pg-connector/grafana/alerting/pg-connector-github-alerts-delete.yaml ];
 
-      # Same folder title as the alert group ("pg-connector"), so dashboards and
+      # Same folder title as the alert group ("Work"), so dashboards and
       # alerts converge on one Grafana folder BY TITLE (no folderUid anywhere).
       # Only rendered when observability.ui.enable is also set.
       dashboardProviders.pg-connector-github = {
-        folder = "pg-connector";
+        folder = "Work";
         dashboards = [ ../../../packages/pg-connector/grafana/pg-connector-github.json ];
       };
     };

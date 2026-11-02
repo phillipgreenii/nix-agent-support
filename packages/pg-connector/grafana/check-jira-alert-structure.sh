@@ -11,7 +11,7 @@
 # Every failure line starts with RULE-Sn so a mutant can assert the exact rule that fired.
 #
 #   S1  exactly the eleven uids, each once, each at most 40 characters
-#   S2  one group pg-connector-issue-jira-daemon in folder pg-connector, no folderUid key anywhere
+#   S2  one group pg-connector-issue-jira-daemon in folder Work, no folderUid key anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description, labels
 #       with exactly the one key severity whose value is critical, error, warning or info; each
 #       rule has a non-empty for
@@ -102,8 +102,8 @@ lint() {
 
   # S2
   if ! jq -e '(.groups | length) == 1 and .groups[0].name == "pg-connector-issue-jira-daemon"
-      and .groups[0].folder == "pg-connector"' <<<"$json" >/dev/null; then
-    echo "RULE-S2: want one group named pg-connector-issue-jira-daemon in folder pg-connector" >&2
+      and .groups[0].folder == "Work"' <<<"$json" >/dev/null; then
+    echo "RULE-S2: want one group named pg-connector-issue-jira-daemon in folder Work" >&2
     status=1
   fi
   if jq -e '[.. | objects | select(has("folderUid"))] | length > 0' <<<"$json" >/dev/null; then
@@ -309,7 +309,7 @@ mutant S1 "a uid longer than 40 characters" \
 mutant S1 "a rule uid renamed" \
   "($(rule_of pg-conn-jira-query-stale) | .uid) = \"pg-conn-jira-query-old\"" ""
 mutant S2 "a folderUid key" \
-  "($(rule_of pg-conn-jira-query-stale) | .folderUid) = \"pg-connector\"" ""
+  "($(rule_of pg-conn-jira-query-stale) | .folderUid) = \"Work\"" ""
 mutant S3 "a rule without its description" \
   "del($(rule_of pg-conn-jira-query-stale) | .annotations.description)" ""
 mutant S3 "a severity outside the standard levels" \

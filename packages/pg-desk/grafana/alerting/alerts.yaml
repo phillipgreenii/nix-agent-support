@@ -18,9 +18,9 @@
 # fetch is pg_desk_source_age_seconds{source}; data staleness is alerted by
 # pg-desk-sources-stale on pg_desk_sources_stale (count of stale sources).
 #
-# Folder "pg-desk" converges by TITLE with the existing pg-desk dashboards'
+# Folder "Work" converges by TITLE with the existing pg-desk dashboards'
 # own dashboardProviders folder (phillipgreenii-nix-support-apps
-# darwin/modules/observability/ui.nix's `pg-desk = { folder = "pg-desk"; ... }`).
+# darwin/modules/observability/ui.nix's `pg-desk = { folder = "Work"; ... }`).
 #
 # Registered via phillipgreenii.observability.alertRuleFiles from
 # darwin/modules/pg-desk-serve/default.nix, gated on this module's own
@@ -30,7 +30,7 @@ apiVersion: 1
 groups:
   - orgId: 1
     name: pg-desk-alerts
-    folder: pg-desk
+    folder: Work
     interval: 1m
     rules:
       # Liveness: pg_desk_liveness reports 1 whenever pg-desk serve answers

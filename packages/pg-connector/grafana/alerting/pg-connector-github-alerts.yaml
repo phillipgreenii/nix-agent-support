@@ -32,14 +32,14 @@
 # A (the query), B (reduce, last), C (threshold); a Prometheus rule is
 # `datasourceUid: prometheus` with the boolean `instant: true`; a Loki rule is
 # `datasourceUid: loki` with the string `queryType: instant`. Folder
-# "pg-connector" converges by title (ADR 0039 in phillipgreenii-nix-support-apps),
+# "Work" converges by title (ADR 0039 in phillipgreenii-nix-support-apps),
 # so no folderUid is ever written. Rule uids stay under Grafana's 40-char cap.
 # Annotations are static text.
 apiVersion: 1
 groups:
   - orgId: 1
     name: pg-connector-github
-    folder: pg-connector
+    folder: Work
     interval: 1m
     rules:
       # Daemon up. daemon_up is the daemon's OWN single liveness gauge. pg2-nxukx8

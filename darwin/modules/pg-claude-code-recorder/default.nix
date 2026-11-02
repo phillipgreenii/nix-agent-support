@@ -91,7 +91,7 @@ in
 
       dashboardProviders = lib.mkIf daemonDeployed {
         pg-claude-code-recorder = {
-          folder = "pg-claude-code-recorder";
+          folder = "Claude Agents";
           dashboards = [ (grafanaDir + "/pg-claude-code-recorder.json") ];
         };
       };

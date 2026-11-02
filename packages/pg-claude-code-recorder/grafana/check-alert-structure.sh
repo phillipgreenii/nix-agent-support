@@ -12,7 +12,7 @@
 #
 #   S1  exactly the thirteen expected uids, each once, each of the form pg-ccrec-<name> and at most
 #       40 characters (Grafana's cap)
-#   S2  one group pg-claude-code-recorder in folder pg-claude-code-recorder, no folderUid anywhere
+#   S2  one group pg-claude-code-recorder in folder Claude Agents, no folderUid anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description (the
 #       description names the first command to run), labels with exactly the one key severity
 #       (warning or critical), and a non-empty for
@@ -92,9 +92,9 @@ check() {
   if ! printf '%s' "$j" | jq -e '
       (.groups | length == 1)
       and (.groups[0].name == "pg-claude-code-recorder")
-      and (.groups[0].folder == "pg-claude-code-recorder")
+      and (.groups[0].folder == "Claude Agents")
       and ([.. | objects | select(has("folderUid"))] | length == 0)' >/dev/null; then
-    rule_fail "RULE-S2: expected one group and folder pg-claude-code-recorder and no folderUid"
+    rule_fail "RULE-S2: expected one group and folder Claude Agents and no folderUid"
   fi
   # S3
   if ! printf '%s' "$j" | jq -e '
