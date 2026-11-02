@@ -55,3 +55,17 @@ func TestRunCapacity_refusesWhenDaemonOffline(t *testing.T) {
 		t.Fatalf("runCapacity with the recorder down = %d, %q; want failure naming daemon offline", code, out)
 	}
 }
+
+// TestRunReply_refusesWhenDaemonOffline: reply to an unknown external_id falls
+// through to a brand-new launch, which never consults the recorder itself. With
+// the recorder down reply must still refuse with "daemon offline" and launch
+// nothing (pg2-c8137b).
+func TestRunReply_refusesWhenDaemonOffline(t *testing.T) {
+	a := armedLaunchEnv(t)
+	useDownRecorder(t)
+	out, code := captureStderr(t, func() int { return runReply([]string{"nosuch", "hi", "--no-wait"}) })
+	if code == 0 || !strings.Contains(out, "daemon offline") {
+		t.Fatalf("runReply with the recorder down = %d, %q; want failure naming daemon offline", code, out)
+	}
+	a.assertNoLaunch(t)
+}

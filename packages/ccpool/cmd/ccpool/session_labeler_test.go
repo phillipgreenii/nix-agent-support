@@ -220,6 +220,7 @@ func TestNewAndReply_narrationCarriesStoreLabels(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateLabelerEnv(t)
+			useRecorder(t) // reply refuses up front without a recorder
 			cfg, err := config.Load()
 			if err != nil {
 				t.Fatal(err)
