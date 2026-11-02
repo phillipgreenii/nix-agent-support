@@ -40,6 +40,16 @@ export RR_PN_BIN="${PG_REPO_RUNNER_PN_BIN:-${RR_PN_BIN:-pn}}"
 # tracker. The notifier seam is PG_OSX_NOTIFY_BIN, read directly by rr_notify.
 export RR_BD_BIN="${PG_REPO_RUNNER_BD_BIN:-${RR_BD_BIN:-bd}}"
 
+# The bare tool names the kernel still uses (sha256sum, nproc, sort -z, find,
+# sed, mktemp, ps, ...) must not depend on the caller's PATH: pg-router runs this
+# under /usr/bin:/bin:/usr/sbin:/sbin (BSD tools; no sha256sum, no nproc). The
+# nix build injects RR_TOOLS_PATH (the store bin dirs of coreutils, findutils,
+# gnused and ps), prepended here so one GNU toolset answers every bare name. A
+# raw run has none and uses the PATH it was given.
+if [[ -n ${RR_TOOLS_PATH:-} ]]; then
+  export PATH="$RR_TOOLS_PATH:$PATH"
+fi
+
 # Exit status of a "not now" answer: pg-router re-offers the item.
 RR_EXIT_BUSY=9
 

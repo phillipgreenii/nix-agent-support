@@ -36,6 +36,16 @@ mkBashScript {
     RR_TIMEOUT_BIN = "${pkgs.coreutils}/bin/timeout";
     RR_NICE_BIN = "${pkgs.coreutils}/bin/nice";
     RR_NIX_BIN = "${pkgs.nix}/bin/nix";
+    # The PATH the kernel runs with: prepended to the ambient PATH by
+    # pg-repo-runner.sh, so every bare tool name (sha256sum, nproc, sort, find,
+    # sed, mktemp, ps, ...) resolves to the pinned GNU one, never to whatever the
+    # strict base PATH of pg-router (BSD tools only) happens to hold.
+    RR_TOOLS_PATH = pkgs.lib.makeBinPath [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gnused
+      pkgs.ps
+    ];
     RR_NIX_LOG_WRAPPED_BIN =
       if pgNixLogWrapped == null then "" else "${pgNixLogWrapped}/bin/pg-nix-log-wrapped";
   };
