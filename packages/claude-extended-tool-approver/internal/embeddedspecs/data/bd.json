@@ -80,6 +80,18 @@
           "source": "bd --help: \"--global Use the global shared-server database (beads_global)\""
         }
       },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bd --help: \"-h, --help help for bd\""
+        }
+      },
       "--ignore-schema-skew": {
         "arity": "none",
         "operand": {
@@ -186,6 +198,18 @@
         },
         "citation": {
           "source": "bd --help: \"-V, --version Print version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bd --help: \"-h, --help help for bd\""
         }
       },
       "-q": {
@@ -450,6 +474,103 @@
         "unknownFlag": "inert",
         "endOfOptions": true
       },
+      "blocked": {
+        "name": "blocked",
+        "provenance": "bd blocked --help",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
       "bootstrap": {
         "name": "bootstrap",
         "provenance": "bd bootstrap --help",
@@ -626,6 +747,18 @@
               "source": "bd children --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -636,6 +769,18 @@
             },
             "citation": {
               "source": "bd children --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -869,6 +1014,18 @@
               "source": "bd comments --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -879,6 +1036,18 @@
             },
             "citation": {
               "source": "bd comments --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -1027,6 +1196,18 @@
                   "source": "bd comments list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -1037,6 +1218,18 @@
                 },
                 "citation": {
                   "source": "bd comments list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -1176,6 +1369,18 @@
               "source": "bd context --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -1186,6 +1391,18 @@
             },
             "citation": {
               "source": "bd context --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -1249,6 +1466,18 @@
               "source": "bd count --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -1259,6 +1488,18 @@
             },
             "citation": {
               "source": "bd count --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -1686,6 +1927,18 @@
               "source": "bd dep --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -1696,6 +1949,18 @@
             },
             "citation": {
               "source": "bd dep --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -1832,6 +2097,18 @@
                   "source": "bd dep cycles --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -1842,6 +2119,18 @@
                 },
                 "citation": {
                   "source": "bd dep cycles --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -1905,6 +2194,18 @@
                   "source": "bd dep list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -1915,6 +2216,18 @@
                 },
                 "citation": {
                   "source": "bd dep list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -2124,6 +2437,18 @@
                   "source": "bd dep tree --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -2134,6 +2459,18 @@
                 },
                 "citation": {
                   "source": "bd dep tree --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -2345,6 +2682,18 @@
               "source": "bd dolt --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -2355,6 +2704,18 @@
             },
             "citation": {
               "source": "bd dolt --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -2917,6 +3278,18 @@
                   "source": "bd dolt show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -2927,6 +3300,18 @@
                 },
                 "citation": {
                   "source": "bd dolt show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -3063,6 +3448,18 @@
                   "source": "bd dolt status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -3073,6 +3470,18 @@
                 },
                 "citation": {
                   "source": "bd dolt status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -3209,6 +3618,18 @@
                   "source": "bd dolt test --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -3219,6 +3640,18 @@
                 },
                 "citation": {
                   "source": "bd dolt test --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -3576,6 +4009,18 @@
               "source": "bd export --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--output": {
             "arity": "one",
             "operand": {
@@ -3598,6 +4043,18 @@
             },
             "citation": {
               "source": "bd export --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "-o": {
@@ -4038,6 +4495,18 @@
               "source": "bd graph --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -4048,6 +4517,18 @@
             },
             "citation": {
               "source": "bd graph --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -4111,6 +4592,18 @@
               "source": "bd history --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -4121,6 +4614,18 @@
             },
             "citation": {
               "source": "bd history --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -4257,6 +4762,18 @@
               "source": "bd human --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -4267,6 +4784,18 @@
             },
             "citation": {
               "source": "bd human --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -4391,6 +4920,18 @@
                   "source": "bd human list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -4401,6 +4942,18 @@
                 },
                 "citation": {
                   "source": "bd human list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -4537,6 +5090,18 @@
                   "source": "bd human stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -4547,6 +5112,18 @@
                 },
                 "citation": {
                   "source": "bd human stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -4686,6 +5263,18 @@
               "source": "bd info --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -4696,6 +5285,18 @@
             },
             "citation": {
               "source": "bd info --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -4905,6 +5506,18 @@
               "source": "bd label --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -4915,6 +5528,18 @@
             },
             "citation": {
               "source": "bd label --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -5039,6 +5664,18 @@
                   "source": "bd label list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -5049,6 +5686,18 @@
                 },
                 "citation": {
                   "source": "bd label list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -5112,6 +5761,18 @@
                   "source": "bd label list-all --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
                 }
               },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "-C": {
                 "arity": "one",
                 "operand": {
@@ -5122,6 +5783,18 @@
                 },
                 "citation": {
                   "source": "bd label list-all --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               }
             },
@@ -5406,6 +6079,18 @@
               "source": "bd lint --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -5416,6 +6101,18 @@
             },
             "citation": {
               "source": "bd lint --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -5479,6 +6176,18 @@
               "source": "bd list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -5489,6 +6198,18 @@
             },
             "citation": {
               "source": "bd list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -5552,6 +6273,18 @@
               "source": "bd memories --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -5562,6 +6295,18 @@
             },
             "citation": {
               "source": "bd memories --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -5771,6 +6516,18 @@
               "source": "bd onboard --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -5781,6 +6538,18 @@
             },
             "citation": {
               "source": "bd onboard --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -5844,6 +6613,18 @@
               "source": "bd prime --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -5854,6 +6635,18 @@
             },
             "citation": {
               "source": "bd prime --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6136,6 +6929,18 @@
               "source": "bd query --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6146,6 +6951,18 @@
             },
             "citation": {
               "source": "bd query --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6209,6 +7026,18 @@
               "source": "bd quickstart --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6219,6 +7048,18 @@
             },
             "citation": {
               "source": "bd quickstart --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6282,6 +7123,18 @@
               "source": "bd ready --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6292,6 +7145,18 @@
             },
             "citation": {
               "source": "bd ready --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6355,6 +7220,18 @@
               "source": "bd recall --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6365,6 +7242,18 @@
             },
             "citation": {
               "source": "bd recall --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6647,6 +7536,18 @@
               "source": "bd search --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6657,6 +7558,18 @@
             },
             "citation": {
               "source": "bd search --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6866,6 +7779,18 @@
               "source": "bd show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6876,6 +7801,18 @@
             },
             "citation": {
               "source": "bd show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -6939,6 +7876,18 @@
               "source": "bd stale --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -6949,6 +7898,18 @@
             },
             "citation": {
               "source": "bd stale --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7012,6 +7973,18 @@
               "source": "bd state --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -7022,6 +7995,18 @@
             },
             "citation": {
               "source": "bd state --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7085,6 +8070,18 @@
               "source": "bd stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -7095,6 +8092,18 @@
             },
             "citation": {
               "source": "bd stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7158,6 +8167,18 @@
               "source": "bd status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -7168,6 +8189,18 @@
             },
             "citation": {
               "source": "bd status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7231,6 +8264,18 @@
               "source": "bd statuses --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -7241,6 +8286,18 @@
             },
             "citation": {
               "source": "bd statuses --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7596,6 +8653,18 @@
               "source": "bd types --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -7606,6 +8675,18 @@
             },
             "citation": {
               "source": "bd types --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7924,6 +9005,18 @@
               "source": "bd version --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -7934,6 +9027,18 @@
             },
             "citation": {
               "source": "bd version --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },
@@ -7997,6 +9102,18 @@
               "source": "bd where --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -8007,6 +9124,18 @@
             },
             "citation": {
               "source": "bd where --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },

@@ -15574,5 +15574,119 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-monxg guardrail: unknown-zone absolute path not widened."
+  },
+  {
+    "case": "bd_blocked_json_approve",
+    "tags": ["ceta-spec", "tc-gyiyl"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd blocked --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gyiyl: read subcommand bd blocked is modeled."
+  },
+  {
+    "case": "bd_read_verb_help_approve",
+    "tags": ["ceta-spec", "tc-gyiyl"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gyiyl: --help on a read verb prints usage only."
+  },
+  {
+    "case": "bd_root_help_approve",
+    "tags": ["ceta-spec", "tc-gyiyl"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gyiyl: root --help prints usage only."
+  },
+  {
+    "case": "bd_dep_group_help_approve",
+    "tags": ["ceta-spec", "tc-gyiyl"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd dep --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gyiyl: group --help prints usage only."
+  },
+  {
+    "case": "bd_dep_remove_help_not_approve",
+    "tags": ["ceta-spec", "tc-gyiyl"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd dep remove --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-gyiyl: mutating verb help stays abstain; write verbs not silently approved."
+  },
+  {
+    "case": "bd_reopen_not_approve",
+    "tags": ["ceta-spec", "tc-gyiyl"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd reopen tc-abc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-gyiyl: non-skill write verb still needs consent."
   }
 ]

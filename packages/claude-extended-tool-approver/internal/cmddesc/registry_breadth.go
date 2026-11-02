@@ -86,6 +86,8 @@ var bdSchema = CommandSchema{
 		"-v":         inert, "--verbose": inert,
 		"--ignore-schema-skew": inert,
 		"-V":                   inert, "--version": inert,
+		// tc-gyiyl: cobra's help flag prints usage and exits (read-only).
+		"-h": inert, "--help": inert,
 	},
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
@@ -100,7 +102,7 @@ func bdSubcommands() map[string]CommandSchema {
 		"list", "show", "ready", "search", "count", "query", "children",
 		"graph", "history", "stale", "status", "statuses", "types", "info", "where",
 		"context", "quickstart", "prime", "onboard", "memories", "recall",
-		"state", "lint", "export", "stats", "version",
+		"state", "lint", "export", "stats", "version", "blocked",
 	} {
 		m[v] = bdRemote(v, "read")
 	}
@@ -190,6 +192,12 @@ func bdRemoteIn(parent, name, operation string) CommandSchema {
 		"-C":          {Arity: ArityOne, Operand: CommandDir},
 		"--directory": {Arity: ArityOne, Operand: CommandDir},
 	}
+	if operation == "read" {
+		// tc-gyiyl: `bd <read-verb> --help` prints usage only. Not added for
+		// mutating verbs, whose --help forms keep abstaining.
+		flags["-h"] = inert
+		flags["--help"] = inert
+	}
 	if operation == "tracker-write" {
 		key := name
 		if parent != "" {
@@ -241,6 +249,7 @@ func bdNested(name string, verbs map[string]string, defaultSub string) CommandSc
 		Flags: map[string]FlagSpec{
 			"-C":          {Arity: ArityOne, Operand: CommandDir},
 			"--directory": {Arity: ArityOne, Operand: CommandDir},
+			"-h":          inert, "--help": inert, // tc-gyiyl: group usage (read-only)
 		},
 		UnknownFlag:       UnknownFlagInsufficient,
 		EndOfOptions:      true,
