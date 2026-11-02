@@ -15823,7 +15823,7 @@
     "notes": "tc-k0r5o: check mode writes nothing; -f inside the repo."
   },
   {
-    "case": "just_fmt_write_in_repo_approve",
+    "case": "just_fmt_write_in_repo_not_approve",
     "tags": ["ceta-spec", "tc-k0r5o"],
     "tool_input": {
       "tool_name": "Bash",
@@ -15838,8 +15838,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "approve",
-    "notes": "tc-k0r5o: bounded in-repo write of the justfile."
+    "expected_verdict": "not-approve",
+    "notes": "tc-k0r5o guardrail: the write form (no --check) rewrites the justfile and stays a prompt."
   },
   {
     "case": "just_recipe_run_not_approve",

@@ -2006,14 +2006,14 @@ var justSchema = CommandSchema{
 		"-f": {Arity: ArityOne, Operand: ConfigSource}, "--justfile": {Arity: ArityOne, Operand: ConfigSource},
 		"-d": {Arity: ArityOne, Operand: ConfigSource}, "--working-directory": {Arity: ArityOne, Operand: ConfigSource},
 		// tc-k0r5o: `--fmt` formats and OVERWRITES the justfile in place (a
-		// bounded write, modeled by the implicit path-modify below); `--check`
+		// write, modeled by the implicit path-modify below with a DYNAMIC target: the written file is -f or an ancestor-discovered justfile, so it is never statically judged and the write form abstains); `--check`
 		// runs `--fmt` in check mode (prints a diff, writes nothing), so it
 		// strips that write. A recipe run stays judged by the verb dispatch.
 		"--fmt":   inert,
 		"--check": {Transform: EffectTransform{Kind: TransformDryRun}},
 	},
 	ImplicitEffects: []ImplicitEffect{
-		{Role: PathModify, Target: "justfile", WhenFlags: []string{"--fmt"}},
+		{Role: PathModify, Target: "justfile", Dynamic: true, WhenFlags: []string{"--fmt"}},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,

@@ -384,9 +384,10 @@
           "kind": "path-modify"
         },
         "target": "justfile",
+        "dynamic": true,
         "whenFlags": ["--fmt"],
         "citation": {
-          "source": "just --help: \"--fmt Format and overwrite justfile\" -- the justfile (discovered in the working directory; -f/--justfile redirects it and is judged as a config source) is rewritten in place, so path-modify target \"justfile\" fires when --fmt is present; --check drops it"
+          "source": "just --help: \"--fmt Format and overwrite justfile\" -- the rewritten file is -f/--justfile or an ancestor-discovered justfile, not statically known, so the path-modify is dynamic (the write form abstains); --check drops it"
         }
       }
     ],
