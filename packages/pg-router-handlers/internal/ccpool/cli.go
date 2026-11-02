@@ -255,7 +255,7 @@ func (c *CLIRunner) Send(ctx context.Context, externalID, prompt string, mode Se
 	if c.ConfirmIngest > 0 && mode == ModeNoWait {
 		args = append(args, "--confirm-ingest", c.ConfirmIngest.String())
 	}
-	_, err := c.ccpool(ctx, quickCallTimeout, args...)
+	_, err := c.ccpool(ctx, replyTimeout(c.ConfirmIngest, mode), args...)
 	if err != nil {
 		// Surface a confirmed dropped nudge (exit 7) as ErrPromptNotIngested so the
 		// executor can fail-fast and hand the bead back (mirror Cancel's code-6 wrap).

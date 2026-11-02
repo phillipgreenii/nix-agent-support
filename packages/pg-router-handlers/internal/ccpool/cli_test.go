@@ -831,3 +831,39 @@ func TestCLI_EmitGaugeArgv(t *testing.T) {
 		t.Fatalf("EmitGauge argv = %q, want %q", got, want)
 	}
 }
+
+// pg2-mpabs0: Send itself must bound the ccpool call with replyTimeout, not
+// quickCallTimeout; the helper test above cannot see which one Send passes.
+func TestSend_usesReplyTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    SendMode
+		confirm time.Duration
+		want    time.Duration
+	}{
+		{"no-wait confirm", ModeNoWait, 90 * time.Second, 120 * time.Second},
+		{"queue keeps quick", ModeQueue, 90 * time.Second, quickCallTimeout},
+		{"no confirm keeps quick", ModeNoWait, 0, quickCallTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := NewCLIRunner(config.Default())
+			cli.ConfirmIngest = tc.confirm
+			var got time.Duration
+			cli.run = func(ctx context.Context, _ []string) ([]byte, []byte, error) {
+				dl, ok := ctx.Deadline()
+				if !ok {
+					t.Fatal("ccpool call has no deadline")
+				}
+				got = time.Until(dl)
+				return nil, nil, nil
+			}
+			if err := cli.Send(context.Background(), "ext-1", "hi", tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			if got > tc.want || got < tc.want-5*time.Second {
+				t.Errorf("Send deadline = %v, want ~%v", got, tc.want)
+			}
+		})
+	}
+}
