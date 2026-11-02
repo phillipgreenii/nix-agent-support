@@ -170,6 +170,29 @@ func BenchmarkDispatchQmuHoldTimeP99AtTenKConcurrentListeners(b *testing.B) {
 	b.ReportMetric(float64(p99Of(samples).Nanoseconds()), "p99-ns/op")
 }
 
+// BenchmarkPendingByListenerAtTenK reports the cost of one PendingByListener
+// pass over 10k retained, unsettled events and 15 matching listeners
+// (informational; TestPendingByListenerAllocBudget is the enforced gate).
+func BenchmarkPendingByListenerAtTenK(b *testing.B) {
+	q, err := New(NewMemStore())
+	if err != nil {
+		b.Fatalf("New: %v", err)
+	}
+	for i := 0; i < 15; i++ {
+		q.Register(&neverOfferedListener{id: fmt.Sprintf("l%d", i), typ: "T"})
+	}
+	for j := 0; j < 10_000; j++ {
+		if _, err := q.Enqueue(Event{ID: fmt.Sprintf("e%d", j), Type: "T", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			b.Fatalf("Enqueue: %v", err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.PendingByListener()
+	}
+}
+
 // BenchmarkExpireQmuHoldTimeP99AtTenK approximates Expire's q.mu hold time
 // at 10k retained, already-expired-with-nothing-owed entries (no bound
 // listener, so retainedLocked's second half is vacuous and every entry

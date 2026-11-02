@@ -2070,6 +2070,59 @@ func (q *Queue) InFlightByListener() map[string]int {
 	return out
 }
 
+// ListenerPending is one listener's backlog as PendingByListener reports it: how
+// many retained events it matches and has not settled, and the age (from the
+// event's own stamped time) of the oldest of them; zero values when caught up.
+type ListenerPending struct {
+	Count     int
+	OldestAge time.Duration
+}
+
+// PendingByListener reports, for EVERY registered listener id, the retained
+// events it still owes (DEC-OBS-12, epic pg2-u1cxx0): an event is pending for L
+// when it is retained (in q.entries/q.order), L matches it and it is NOT settled
+// for L. Settled, not accepted: settled also covers a post-expiry decline, as
+// retention, release and head-of-line all read it. There is NO expiry filter: an
+// event with no ExpiresAt is born expired, and filtering on it would hide exactly
+// the head-of-line backlog. Idle listeners are present as the zero value.
+//
+// Count and OldestAge come from ONE q.mu acquisition, ONE q.now() and ONE pass
+// over q.order, so they cannot disagree (two calls could read count 1 with age 0
+// if a settle landed between them). Cost: another scan under q.mu per scrape
+// (OldestPendingAgeByType is one already; DepthByType went lock-free to avoid
+// exactly this); at ~3000 entries x ~15 listeners it is a type-compare loop and
+// acceptable only because it is this single merged pass. It allocates only the
+// result map. Caller must NOT hold q.mu.
+func (q *Queue) PendingByListener() map[string]ListenerPending {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	out := make(map[string]ListenerPending, len(q.listeners))
+	for _, ls := range q.listeners {
+		out[ls.l.ID()] = ListenerPending{}
+	}
+	for _, id := range q.order {
+		e, ok := q.entries[id]
+		if !ok {
+			continue
+		}
+		age := nonNegative(now.Sub(e.evt.At))
+		for _, ls := range q.listeners {
+			lid := ls.l.ID()
+			if !ls.l.Matches(e.evt) || e.settled[lid] {
+				continue
+			}
+			p := out[lid]
+			p.Count++
+			if age > p.OldestAge {
+				p.OldestAge = age
+			}
+			out[lid] = p
+		}
+	}
+	return out
+}
+
 // WaitForInFlightDrain blocks until no offer is outstanding
 // (SessionsInFlight() == 0) or ctx is done, whichever comes first, polling
 // on pollInterval. It exists for the shutdown-ordering fix this package's
