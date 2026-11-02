@@ -64,7 +64,10 @@ func TestStartMetricsServer_ExposesWaitRunHistogramsAndNewGauges(t *testing.T) {
 	})
 	emitter, err := metrics.New(mp, func() map[string]int { return map[string]int{"pr.changed": 2} },
 		metrics.WithQueueAges(func() map[string]time.Duration { return map[string]time.Duration{"pr.changed": 42 * time.Second} }),
-		metrics.WithListenerInFlight(func() map[string]int { return map[string]int{"desk-pr": 1} }))
+		metrics.WithListenerInFlight(func() map[string]int { return map[string]int{"desk-pr": 1} }),
+		metrics.WithListenerPending(func() map[string]eventqueue.ListenerPending {
+			return map[string]eventqueue.ListenerPending{"desk-pr": {Count: 2, OldestAge: 7 * time.Second}}
+		}))
 	if err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}
@@ -84,6 +87,9 @@ func TestStartMetricsServer_ExposesWaitRunHistogramsAndNewGauges(t *testing.T) {
 		`role="desk-pr"`,
 		`pg_router_queue_oldest_age_seconds{`,
 		`pg_router_listener_in_flight{`,
+		// both exposed names, unit {event} adds no suffix and unit s adds _seconds
+		`pg_router_listener_pending{`,
+		`pg_router_listener_oldest_pending_age_seconds{`,
 		// the deprecated histogram is still exposed alongside them
 	} {
 		if !strings.Contains(body, w) {
@@ -116,10 +122,19 @@ func TestBootCore_WiresOldestAgeAndInFlightGaugesToTheLiveQueue(t *testing.T) {
 	}
 	var age float64 = -1
 	busy := int64(-1)
+	pending := int64(-1)
+	pendingAge := float64(-1)
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
 			switch d := m.Data.(type) {
 			case metricdata.Gauge[float64]:
+				if m.Name == metrics.MetricListenerOldestPendingAge {
+					for _, dp := range d.DataPoints {
+						if v, ok := dp.Attributes.Value(attribute.Key("role")); ok && v.AsString() == "r1" {
+							pendingAge = dp.Value
+						}
+					}
+				}
 				if m.Name == metrics.MetricQueueOldestAge {
 					for _, dp := range d.DataPoints {
 						if v, ok := dp.Attributes.Value(attribute.Key("type")); ok && v.AsString() == "t1" {
@@ -128,6 +143,13 @@ func TestBootCore_WiresOldestAgeAndInFlightGaugesToTheLiveQueue(t *testing.T) {
 					}
 				}
 			case metricdata.Gauge[int64]:
+				if m.Name == metrics.MetricListenerPending {
+					for _, dp := range d.DataPoints {
+						if v, ok := dp.Attributes.Value(attribute.Key("role")); ok && v.AsString() == "r1" {
+							pending = dp.Value
+						}
+					}
+				}
 				if m.Name == metrics.MetricListenerInFlight {
 					for _, dp := range d.DataPoints {
 						if v, ok := dp.Attributes.Value(attribute.Key("role")); ok && v.AsString() == "r1" {
@@ -143,5 +165,11 @@ func TestBootCore_WiresOldestAgeAndInFlightGaugesToTheLiveQueue(t *testing.T) {
 	}
 	if busy != 0 {
 		t.Fatalf("%s{role=r1} = %d, want 0 (registered and idle)", metrics.MetricListenerInFlight, busy)
+	}
+	if pending != 1 {
+		t.Fatalf("%s{role=r1} = %d, want 1 (one retained event r1 has not settled)", metrics.MetricListenerPending, pending)
+	}
+	if pendingAge < 119 || pendingAge > 180 {
+		t.Fatalf("%s{role=r1} = %v, want ~120s", metrics.MetricListenerOldestPendingAge, pendingAge)
 	}
 }

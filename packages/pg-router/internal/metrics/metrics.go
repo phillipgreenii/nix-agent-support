@@ -209,6 +209,15 @@ const (
 	// at 1; the time-average of it is the lane's utilisation. Exposed as
 	// pg_router_listener_in_flight.
 	MetricListenerInFlight = "pg_router_listener_in_flight"
+	// MetricListenerPending is a gauge, per role: the retained events the listener
+	// matches and has not settled (eventqueue.Queue.PendingByListener; DEC-OBS-12).
+	// A caught-up listener reads 0 while pg_router_queue_depth still shows the
+	// events it handled. Unit {event} adds no exporter suffix. No alert reads it.
+	MetricListenerPending = "pg_router_listener_pending"
+	// MetricListenerOldestPendingAge is a gauge, per role: the age in seconds of
+	// the oldest of those pending events, 0 when none (same source and pass as
+	// MetricListenerPending). Exposed as pg_router_listener_oldest_pending_age_seconds.
+	MetricListenerOldestPendingAge = "pg_router_listener_oldest_pending_age"
 	// MetricRoleLastProgressAge, MetricRoleUnsuccessfulSinceProgress and
 	// MetricRoleBusySinceProgress are the per-role progress gauges (docket
 	// pg2-12gr4.8, design section 5, rulings 30 and 31). Core counts them in
@@ -634,6 +643,7 @@ type options struct {
 	awakeSince      func(time.Time) time.Duration
 	queueAges       func() map[string]time.Duration
 	listenerBusy    func() map[string]int
+	listenerPending func() map[string]eventqueue.ListenerPending
 	roleAvail       func() map[string]bool
 	queueReady      func() bool
 	progressRoles   []string
@@ -677,6 +687,15 @@ func WithQueueAges(fn func() map[string]time.Duration) Option {
 // option the gauge is not registered.
 func WithListenerInFlight(fn func() map[string]int) Option {
 	return func(o *options) { o.listenerBusy = fn }
+}
+
+// WithListenerPending registers MetricListenerPending and
+// MetricListenerOldestPendingAge from ONE source, read once per collect by ONE
+// callback (typically queue.PendingByListener), so the count and the age cannot
+// disagree: one series of each per registered listener, 0 when idle (DEC-OBS-12).
+// Without the option neither gauge is registered.
+func WithListenerPending(fn func() map[string]eventqueue.ListenerPending) Option {
+	return func(o *options) { o.listenerPending = fn }
 }
 
 // WithRoleAvailability registers MetricRoleAvailable, an ObservableGauge reading
@@ -983,6 +1002,38 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 				return nil
 			}),
 		); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.listenerPending != nil {
+		pendingCount, err := m.Int64ObservableGauge(
+			MetricListenerPending,
+			metric.WithUnit("{event}"),
+			metric.WithDescription("retained events a role's listener matches and has not settled, per role; 0 when caught up although the per-type depth still shows handled events (DEC-OBS-12; no alert reads it)"),
+		)
+		if err != nil {
+			return nil, err
+		}
+		pendingAge, err := m.Float64ObservableGauge(
+			MetricListenerOldestPendingAge,
+			metric.WithUnit("s"),
+			metric.WithDescription("age in seconds of the oldest retained event a role's listener has not settled, per role, from the event's own stamped time; 0 when none (DEC-OBS-12; no alert reads it)"),
+		)
+		if err != nil {
+			return nil, err
+		}
+		// ONE callback observes both from one queue pass (one lock, one clock reading).
+		if _, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+			if !ready() {
+				return nil
+			}
+			for role, p := range cfg.listenerPending() {
+				attr := metric.WithAttributes(attribute.String("role", role))
+				o.ObserveInt64(pendingCount, int64(p.Count), attr)
+				o.ObserveFloat64(pendingAge, p.OldestAge.Seconds(), attr)
+			}
+			return nil
+		}, pendingCount, pendingAge); err != nil {
 			return nil, err
 		}
 	}

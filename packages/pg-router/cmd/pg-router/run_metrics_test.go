@@ -50,6 +50,8 @@ var queueBoundMetrics = []string{
 	metrics.MetricBacklog,
 	metrics.MetricQueueOldestAge,
 	metrics.MetricListenerInFlight,
+	metrics.MetricListenerPending,
+	metrics.MetricListenerOldestPendingAge,
 	metrics.MetricQueueLogBytes,
 	metrics.MetricQueueLogLimitBytes,
 	metrics.MetricQueueLogPercent,

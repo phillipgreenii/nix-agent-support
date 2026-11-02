@@ -305,6 +305,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg2-n7da9), read live off the queue on each collect.
 	metricsOpts = append(metricsOpts, metrics.WithQueueAges(func() map[string]time.Duration { return queueRef.Load().OldestPendingAgeByType() }))
 	metricsOpts = append(metricsOpts, metrics.WithListenerInFlight(func() map[string]int { return queueRef.Load().InFlightByListener() }))
+	// Per-listener pending count and oldest pending age (DEC-OBS-12), one queue pass.
+	metricsOpts = append(metricsOpts, metrics.WithListenerPending(func() map[string]eventqueue.ListenerPending { return queueRef.Load().PendingByListener() }))
 	// Per-role progress gauges (docket pg2-12gr4.8): last-progress age and the
 	// unsuccessful and busy counts since it, one series per ENABLED role (the
 	// roles that get a listener below), all starting at daemon start. The age

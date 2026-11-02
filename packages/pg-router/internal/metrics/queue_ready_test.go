@@ -32,6 +32,7 @@ func hasMetric(rm metricdata.ResourceMetrics, name string) bool {
 func TestQueueReadyGatesEveryQueueBoundGauge(t *testing.T) {
 	queueBound := []string{
 		MetricQueueDepth, MetricBacklog, MetricQueueOldestAge, MetricListenerInFlight,
+		MetricListenerPending, MetricListenerOldestPendingAge,
 		MetricQueueLogBytes, MetricQueueLogLimitBytes, MetricQueueLogPercent,
 		MetricEmittersHalted, MetricLogRejecting, MetricActiveGates,
 	}
@@ -44,6 +45,10 @@ func TestQueueReadyGatesEveryQueueBoundGauge(t *testing.T) {
 		WithQueueReady(func() bool { return ready }),
 		WithQueueAges(func() map[string]time.Duration { reads++; return map[string]time.Duration{"t1": time.Second} }),
 		WithListenerInFlight(func() map[string]int { reads++; return map[string]int{"r1": 1} }),
+		WithListenerPending(func() map[string]eventqueue.ListenerPending {
+			reads++
+			return map[string]eventqueue.ListenerPending{"r1": {Count: 1, OldestAge: time.Second}}
+		}),
 		WithQueueLogSize(func() int64 { reads++; return 10 }),
 		WithLogLimitStatus(func() eventqueue.LimitStatus {
 			reads++
