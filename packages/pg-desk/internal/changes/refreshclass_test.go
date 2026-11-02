@@ -27,6 +27,13 @@ func TestRefreshClass(t *testing.T) {
 			"config hash mismatch is transient (apply restart window)",
 			errors.New("pipeline: gather pr o/r#1: pg-connector [pr show o/r#1 --fresh]: exit 1: invalid_argument: config hash mismatch: the request's backends block was rendered from config /nix/store/a-pg-connector-github-config.json (hash 2bf15f0c) but the daemon runs config /nix/store/b-pg-connector-github-config.json (hash d809103d)"), "", RefreshClassTransient,
 		},
+		{
+			// The Jira daemon's CheckBlock (cmd/pg-connector-issue-jira/internal/config/block.go)
+			// renders the same ErrConfigHashMismatch text; pg-desk issue refresh of a Jira key
+			// meets it through the issue gather path (pg2-gnocj6).
+			"jira config hash mismatch is transient (apply restart window)",
+			errors.New("pipeline: gather issue ZR-123: pg-connector [issue show ZR-123 --fresh]: exit 1: invalid_argument: config hash mismatch: the request's backends block was rendered from config /nix/store/a-pg-connector-issue-jira-config.json (hash 2bf15f0c) but the daemon runs config /nix/store/b-pg-connector-issue-jira-config.json (hash d809103d)"), "", RefreshClassTransient,
+		},
 		{"other invalid_argument stays hydrate_error", errors.New("pg-connector [x]: exit 1: invalid_argument: cursor_expired: gone"), "", RefreshClassHydrateError},
 		{"exit 4 text", errors.New("gather: fetch triggering PR o/r#1: pg-connector reports not_found"), "", RefreshClassNotFound},
 		{"pipeline not found", errors.New("pipeline: issue bd-1: not found"), "", RefreshClassNotFound},

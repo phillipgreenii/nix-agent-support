@@ -82,7 +82,8 @@ entity.
 
   The connector's own wire code decides first, because its message text can say anything: a
   transient answer whose message mentions a missing repository is `transient`, never `not_found`.
-  A config hash mismatch (`invalid_argument: config hash mismatch ...`) is `transient` too, because an
+  A config hash mismatch (`invalid_argument: config hash mismatch ...`, the same text from the GitHub and the
+  Jira daemon, so a Jira `issue` refresh meets it too) is `transient` too, because an
   apply switches the umbrella's backends block before launchd restarts the daemon; every other
   `invalid_argument` stays `hydrate_error`. A daemon that never restarts onto the new config is not
   retried silently forever: the router's bounded `max_dispatch_retries` ends in a failed dispatch of
