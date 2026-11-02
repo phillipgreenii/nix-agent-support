@@ -23,6 +23,22 @@ rr_err() { printf 'pg-repo-runner: %s\n' "$*" >&2; }
 
 rr_date() { "${RR_DATE_BIN:-date}" "$@"; }
 
+# rr_realdir DIR: the physical (symlink-free) path of an existing directory, with
+# no external tool. GNU `realpath -e` is not available under pg-router's strict
+# base PATH (BSD realpath has no -e), so the shell resolves it itself (pg2-8y330k).
+rr_realdir() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
+
+# rr_timeout_pre: sets the array RR_TIMEOUT_PRE to the command prefix that limits
+# a run to 300 s: the injected RR_TIMEOUT_BIN, else `timeout` on PATH, else none.
+rr_timeout_pre() {
+  RR_TIMEOUT_PRE=()
+  if [[ -n ${RR_TIMEOUT_BIN:-} ]]; then
+    RR_TIMEOUT_PRE=("$RR_TIMEOUT_BIN" 300)
+  elif command -v timeout >/dev/null 2>&1; then
+    RR_TIMEOUT_PRE=(timeout 300)
+  fi
+}
+
 rr_jq() { "${RR_JQ_BIN:-jq}" "$@"; }
 
 # rr_tq FILE: a TOML file as one JSON document on stdout (tomlq's `tq`).
@@ -141,12 +157,12 @@ rr_workspace_has_key() {
 # other repository, is refused). Sets RR_REPO_PATH.
 rr_path_check() {
   local root_real expected actual top
-  root_real="$(realpath -e -- "$1")" || return 1
+  root_real="$(rr_realdir "$1")" || return 1
   expected="$root_real/$2"
-  actual="$(realpath -e -- "$expected" 2>/dev/null)" || return 1
+  actual="$(rr_realdir "$expected")" || return 1
   [[ $actual == "$expected" ]] || return 1
   top="$(rr_git -C "$actual" rev-parse --show-toplevel 2>/dev/null)" || return 1
-  top="$(realpath -e -- "$top" 2>/dev/null)" || return 1
+  top="$(rr_realdir "$top")" || return 1
   [[ $top == "$actual" ]] || return 1
   # shellcheck disable=SC2034  # read by the roles and the entry point
   RR_REPO_PATH="$actual"
@@ -932,9 +948,8 @@ rr_sync_counts() {
 # explicit so that a clone without a default fetch refspec cannot silently keep
 # a stale ref. Never prompts, and ends after 300 s when `timeout` is available.
 rr_sync_fetch() {
-  local -a pre=()
-  if command -v timeout >/dev/null 2>&1; then pre=(timeout 300); fi
-  GIT_TERMINAL_PROMPT=0 "${pre[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
+  rr_timeout_pre
+  GIT_TERMINAL_PROMPT=0 "${RR_TIMEOUT_PRE[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
     -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_GIT_BIN:-git}" \
     -C "$1" fetch --quiet --no-tags origin "+refs/heads/$2:refs/remotes/origin/$2"
 }
@@ -974,9 +989,8 @@ rr_verdict_green() {
 # rr_push_exec PATH SHA BRANCH: THE push. Never prompts, ends after 300 s when
 # `timeout` is available. Nothing else in this code base runs `git push`.
 rr_push_exec() {
-  local -a pre=()
-  if command -v timeout >/dev/null 2>&1; then pre=(timeout 300); fi
-  GIT_TERMINAL_PROMPT=0 "${pre[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
+  rr_timeout_pre
+  GIT_TERMINAL_PROMPT=0 "${RR_TIMEOUT_PRE[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
     -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_GIT_BIN:-git}" \
     -C "$1" push origin "$2:refs/heads/$3"
 }

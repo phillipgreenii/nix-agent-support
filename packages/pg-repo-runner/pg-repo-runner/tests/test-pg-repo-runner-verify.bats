@@ -636,3 +636,47 @@ SH
   [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]
   [ -n "$(jq -r .expiresAt <<<"$output")" ]
 }
+
+# pg2-8y330k: under pg-router's strict base env (PATH is only /usr/bin:/bin:
+# /usr/sbin:/sbin) realpath is BSD realpath, which has no -e. The path check used to
+# call `realpath -e` and so refused EVERY repo: tips skipped them all (and exited 0)
+# and sync died with exit 2. The tools below are injected by absolute path, as the
+# nix build does; PATH holds nothing else.
+strict_path_env() {
+  STRICT_ENV=(
+    "PATH=/usr/bin:/bin:/usr/sbin:/sbin"
+    "RR_GIT_BIN=$(command -v git)" "RR_JQ_BIN=$(command -v jq)" "RR_TQ_BIN=$(command -v tq)"
+    "RR_DATE_BIN=$(command -v date)"
+  )
+  sd -s "sync = false" "sync = true" "$TEST_DIR/config.toml"
+  STRICT_RUNNER=("${RUNNER[@]}")
+  # The raw-source runner starts with a bare `bash`; keep the nix one, not /bin/bash 3.2.
+  [[ ${STRICT_RUNNER[0]} != bash ]] || STRICT_RUNNER[0]="$(command -v bash)"
+  # The fixture must fail on the old code: BSD-only PATH has no `realpath -e`.
+  if PATH=/usr/bin:/bin:/usr/sbin:/sbin realpath -e -- / >/dev/null 2>&1; then
+    skip "this host's base-PATH realpath supports -e, so it cannot reproduce the defect"
+  fi
+}
+
+@test "tips reports the repo under a BSD-only PATH (no realpath -e)" {
+  strict_path_env
+  run --separate-stderr env "${STRICT_ENV[@]}" "${STRICT_RUNNER[@]}" tips
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]
+  [[ $stderr != *'not the top level of a git repository'* ]]
+}
+
+@test "sync's path check passes under a BSD-only PATH (no realpath -e)" {
+  strict_path_env
+  PG_ROUTER_ITEM_ID="nix-alpha@$ALPHA_SHA" run --separate-stderr env "${STRICT_ENV[@]}" "${STRICT_RUNNER[@]}" sync
+  [ "$status" -ne 2 ]
+  [[ $stderr != *'path check failed'* ]]
+  [[ $stderr != *'illegal option'* ]]
+}
+
+@test "the path check still refuses a symlinked key under a BSD-only PATH" {
+  strict_path_env
+  PG_ROUTER_ITEM_ID="nix-link@$ALPHA_SHA" run --separate-stderr env "${STRICT_ENV[@]}" "${STRICT_RUNNER[@]}" sync
+  grep -q 'path check failed' <<<"$stderr"
+  [ "$status" -eq 2 ]
+}
