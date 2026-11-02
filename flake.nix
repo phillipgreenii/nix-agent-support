@@ -6449,8 +6449,51 @@
                     '';
                   });
 
+              # pg-claude-code-recorder LOAD tier (bead pg2-yme5i5; phillipg-nix-repo-base ADR
+              # 0024, V-4). ON DEMAND ONLY: build it by hand
+              # (`nix build .#checks.<system>.pg-claude-code-recorder-load-tests -L`). It MUST
+              # NOT be wired into any hook, run-unit-tests, pre-land or land gate, and is not
+              # part of pg-claude-code-recorder-go-tests. Runs the `//go:build loadtest`
+              # TestBackfillRate: first-copy files/s for the single-file and the batched (64)
+              # ingest paths over 3000 fixture files, printed in the log, and fails unless
+              # batched is faster than single-file. A RATIO assertion only, never an absolute
+              # rate, because host load varies (reference: 54.1 vs 148.5 files/s, about 2.7x).
+              pg-claude-code-recorder-load-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-load-tests";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/load.log"
+                      if ! nice -n 10 go test -p 4 -tags loadtest -run 'TestBackfillRate' -count=1 -v -timeout 30m ./internal/copier/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-claude-code-recorder-load-tests: TestBackfillRate FAILED (batched ingest not faster than single-file, or the run broke)" >&2
+                        exit 1
+                      fi
+                      cat "$log"
+                      grep -q -- '^--- PASS: TestBackfillRate ' "$log" || {
+                        echo "pg-claude-code-recorder-load-tests: TestBackfillRate did not report PASS" >&2
+                        exit 1
+                      }
+                      grep -q -- 'SUMMARY files=3000 single=' "$log" || {
+                        echo "pg-claude-code-recorder-load-tests: no files/s summary line for the 3000-file fixture" >&2
+                        exit 1
+                      }
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        echo "pg-claude-code-recorder-load-tests: the load test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      runHook postBuild
+                    '';
+                  });
+
               # Regression guard for the unit/integration split: against the REAL go
-              # tool, proves that for each of the integration, faults and soak tags
+              # tool, proves that for each of the integration, faults, soak and loadtest tags
               # every package carrying a file with that tag lists strictly more tests
               # in the tagged build than in the default build, that the integration tag
               # is carried by at least one package, and that the module vets with and
@@ -6468,7 +6511,7 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       fail() { echo "pg-claude-code-recorder-integration-tests-gating: $*" >&2; exit 1; }
-                      for tag in integration faults soak; do
+                      for tag in integration faults soak loadtest; do
                         pkgs=$(grep -rl --include='*_test.go' "^//go:build $tag" . | xargs -r -n1 dirname | sort -u || true)
                         if [ "$tag" = integration ] && [ -z "$pkgs" ]; then
                           fail "no test file carries //go:build integration"
@@ -6481,7 +6524,7 @@
                         go vet -tags "$tag" ./... || fail "go vet of the $tag build failed"
                       done
                       go vet ./... || fail "go vet of the default build failed"
-                      echo "pg-claude-code-recorder-integration-tests-gating: the integration, faults and soak tags split every package that carries them; every build vets clean"
+                      echo "pg-claude-code-recorder-integration-tests-gating: the integration, faults, soak and loadtest tags split every package that carries them; every build vets clean"
                       runHook postBuild
                     '';
                   });

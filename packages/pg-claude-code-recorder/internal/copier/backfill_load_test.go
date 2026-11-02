@@ -15,20 +15,35 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
+// loadBatchSize is the IngestBatch size the batched measurement uses (the
+// production backfill batch size).
+const loadBatchSize = 64
+
 // TestBackfillRate measures first-copy files/s on a throwaway fixture tree with
-// the real clone policy, real SQLite and the real file system. It is a load
-// test: run it with -tags loadtest (it is not part of the unit gate, V-4).
-// RECORDER_LOAD_FILES sets the file count (default 3000); RECORDER_LOAD_BATCH
-// sets the IngestBatch size (0 measures one Ingest call per file).
+// the real clone policy, real SQLite and the real file system, once with one
+// Ingest call per file and once with IngestBatch(64), and fails unless batched
+// is faster than single-file. The assertion is a RATIO, never an absolute rate,
+// because host load varies. It is a load test: run it with -tags loadtest (it
+// is not part of the unit gate, V-4); the flake check
+// pg-claude-code-recorder-load-tests runs it. RECORDER_LOAD_FILES sets the file
+// count (default 3000).
 func TestBackfillRate(t *testing.T) {
 	n := 3000
 	if v, err := strconv.Atoi(os.Getenv("RECORDER_LOAD_FILES")); err == nil && v > 0 {
 		n = v
 	}
-	batch := 0
-	if v, err := strconv.Atoi(os.Getenv("RECORDER_LOAD_BATCH")); err == nil {
-		batch = v
+	single := measureBackfill(t, n, 0)
+	batched := measureBackfill(t, n, loadBatchSize)
+	t.Logf("SUMMARY files=%d single=%.1f files/s batched(%d)=%.1f files/s ratio=%.2fx", n, single, loadBatchSize, batched, batched/single)
+	if batched <= single {
+		t.Fatalf("batched ingest (%.1f files/s) is not faster than single-file ingest (%.1f files/s)", batched, single)
 	}
+}
+
+// measureBackfill ingests n fresh fixture files (batch <= 1 means one Ingest
+// call per file) and returns the rate in files/s.
+func measureBackfill(t *testing.T, n, batch int) float64 {
+	t.Helper()
 	root := t.TempDir()
 	claude := filepath.Join(root, "claude")
 	proj := filepath.Join(claude, "projects", "example-project")
@@ -56,10 +71,12 @@ func TestBackfillRate(t *testing.T) {
 	start := time.Now()
 	ingestAll(t, cp, paths, batch)
 	el := time.Since(start)
-	t.Logf("method=%s (%s) files=%d batch=%d elapsed=%s rate=%.1f files/s", m, why, n, batch, el.Round(time.Millisecond), float64(n)/el.Seconds())
+	rate := float64(n) / el.Seconds()
+	t.Logf("method=%s (%s) files=%d batch=%d elapsed=%s rate=%.1f files/s", m, why, n, batch, el.Round(time.Millisecond), rate)
 	if m != "clone" {
 		t.Fatalf("clone method required for the measurement, got %s", m)
 	}
+	return rate
 }
 
 func ingestAll(t *testing.T, cp *Copier, paths []string, batch int) {
