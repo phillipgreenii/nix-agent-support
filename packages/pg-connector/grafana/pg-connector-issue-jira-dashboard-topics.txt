@@ -9,5 +9,9 @@ answer staleness by group
 detection delay
 settle results and pending rows
 consumer lag
+consumer redeliveries
+change rows without a kind
 tracked and watched
 store size and evictions
+daemon up
+governor paused

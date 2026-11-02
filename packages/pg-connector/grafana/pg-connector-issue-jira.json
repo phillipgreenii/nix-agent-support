@@ -1,7 +1,7 @@
 {
   "uid": "pg-connector-issue-jira",
   "title": "pg-connector-issue-jira",
-  "description": "The pg-connector-issue-jira daemon: the Atlassian rate-limit reading against the configured floor, requests by result, queues, freshness, where answers are served from, change detection delay, settle results, consumer lag, tracked and watched sets, and the local store.",
+  "description": "The pg-connector-issue-jira daemon: the Atlassian rate-limit reading against the configured floor, requests by result, queues, freshness, where answers are served from, change detection delay, settle results, consumer lag and redeliveries, tracked and watched sets, and the local store.",
   "tags": ["pg-connector", "pg-connector-issue-jira"],
   "schemaVersion": 39,
   "editable": false,
@@ -19,7 +19,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Rate-limit headroom against the floor",
-      "description": "The Atlassian burst window as the last response reported it: requests remaining (origin_remaining), the window size (origin_limit), the configured floor (origin_floor, rate_reserve_requests: nothing spends below it) and the headroom (remaining minus floor; negative means the floor is breached). The series are absent while no reading is current, which is normal on an idle daemon. The alert rules read the same gauges.",
+      "description": "The Atlassian burst window as the last response reported it: requests remaining (origin_remaining), the window size (origin_limit), the configured floor (origin_floor, rate_reserve_requests: nothing spends below it) and the headroom (remaining minus floor; negative means the floor is breached). The series are absent while no reading is current, and the line breaks there on purpose: a gap means no reading, not healthy headroom. The alert rule 'pg-connector-issue-jira origin budget is below its floor' fires on the 10-minute average headroom held for 5 minutes, so a brief dip on this panel does not page.",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -90,7 +90,7 @@
           "custom": {
             "lineWidth": 1,
             "fillOpacity": 0,
-            "spanNulls": true
+            "spanNulls": false
           }
         },
         "overrides": [
@@ -123,7 +123,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Jira requests by result",
-      "description": "Requests the daemon made to Jira per second, by result (ok, error, rate_limited, unauthenticated or refused), over the dashboard's rate interval. A growing rate_limited or unauthenticated series is the first sign of trouble; refused counts requests the daemon declined to send.",
+      "description": "Requests the daemon made to Jira per second, by result (ok, error, rate_limited, unauthenticated or refused), over the dashboard's rate interval. A growing rate_limited or unauthenticated series is the first sign of trouble; refused counts requests the daemon declined to send. The Loki alert rules 'daemon rate limited' and 'daemon authentication failing' (pg-connector-issue-jira) watch the same conditions in the event log.",
       "gridPos": {
         "x": 0,
         "y": 9,
@@ -173,7 +173,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Rate-limit pressure: near limit",
-      "description": "1 while Atlassian says the tenant is below 20% of its burst capacity (origin_near_limit, from the X-RateLimit-NearLimit header), else 0. The series is absent while no reading is current.",
+      "description": "1 while Atlassian says the tenant is below 20% of its burst capacity (origin_near_limit, from the X-RateLimit-NearLimit header), else 0. The series is absent while no reading is current, and the line breaks there.",
       "gridPos": {
         "x": 12,
         "y": 9,
@@ -214,7 +214,9 @@
           "custom": {
             "lineWidth": 1,
             "fillOpacity": 0,
-            "spanNulls": true
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "axisSoftMax": 1
           }
         },
         "overrides": []
@@ -224,7 +226,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Rate-limit pressure: reading age",
-      "description": "Seconds since the last rate-limit reading (origin_reading_age_seconds). A reading older than the daemon's validity window is dropped, so the origin series above go absent; a climbing age with traffic flowing means the responses carry no rate-limit headers.",
+      "description": "Seconds since the last rate-limit reading (origin_reading_age_seconds). A reading older than the daemon's validity window is dropped, so the origin series above go absent; a climbing age with traffic flowing means the responses carry no rate-limit headers. The line breaks where there is no reading.",
       "gridPos": {
         "x": 0,
         "y": 17,
@@ -265,7 +267,7 @@
           "custom": {
             "lineWidth": 1,
             "fillOpacity": 0,
-            "spanNulls": true
+            "spanNulls": false
           }
         },
         "overrides": []
@@ -425,7 +427,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Freshness per query",
-      "description": "Seconds since each configured query last refreshed successfully. A query that keeps climbing is stale; the alert rule on query staleness reads the same gauge.",
+      "description": "Seconds since each configured query last refreshed successfully. A query that keeps climbing is stale; the alert rule 'pg-connector-issue-jira configured query is stale' reads the same gauge.",
       "gridPos": {
         "x": 0,
         "y": 33,
@@ -475,7 +477,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Served-from ratio",
-      "description": "The share of answers by where they were served from, over the dashboard's rate interval: each served_from value's rate of the request duration count divided by the total rate, so it is a windowed ratio and not the lifetime count.",
+      "description": "The share of answers by where they were served from, over the dashboard's rate interval: each served_from value's rate of the request duration count divided by the total rate, so it is a windowed ratio and not the lifetime count. Requests with served_from none (answers that were not served from data) are excluded from both sides.",
       "gridPos": {
         "x": 12,
         "y": 33,
@@ -529,7 +531,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Answer staleness by group",
-      "description": "How far past fresh_until the served group data was, per answered request (group_staleness_seconds, zero when fresh): the 90th percentile by group over the dashboard's rate interval.",
+      "description": "How far past fresh_until the served group data was, per answered request (group_staleness_seconds, zero when fresh): the 90th percentile by group over the dashboard's rate interval. The line breaks while no request was answered.",
       "gridPos": {
         "x": 0,
         "y": 41,
@@ -570,7 +572,7 @@
           "custom": {
             "lineWidth": 1,
             "fillOpacity": 0,
-            "spanNulls": true
+            "spanNulls": false
           }
         },
         "overrides": []
@@ -580,7 +582,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Detection delay",
-      "description": "How long after a change in Jira the daemon detected it, by kind: the median, the 90th percentile and the 99th percentile of the detection delay histogram. window: fixed - sparse events",
+      "description": "How long after a change in Jira the daemon detected it, by kind: the median, the 90th percentile and the 99th percentile of the detection delay histogram (origins of one kind are merged). window: fixed - sparse events",
       "gridPos": {
         "x": 12,
         "y": 41,
@@ -701,7 +703,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Settle results and pending rows: pending rows",
-      "description": "Change rows waiting to settle (change_settle_pending). A count that does not return to zero means rows are stuck unsettled.",
+      "description": "Change rows waiting to settle (change_settle_pending). The alert rule 'pg-connector-issue-jira change settle is holding' fires only when the count stays above zero for the whole of a 10-minute window, so a spike that returns to zero is normal.",
       "gridPos": {
         "x": 12,
         "y": 49,
@@ -801,7 +803,7 @@
       "id": 15,
       "type": "timeseries",
       "title": "Consumer lag: oldest unacknowledged age",
-      "description": "Age of the oldest unacknowledged change row per consumer and query (consumer_oldest_unacked_age_seconds).",
+      "description": "Age of the oldest unacknowledged change row per consumer and query (consumer_oldest_unacked_age_seconds). The alert rule 'pg-connector-issue-jira consumer is stuck' reads this gauge.",
       "gridPos": {
         "x": 12,
         "y": 57,
@@ -850,11 +852,111 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Tracked and watched: tracked set by class",
-      "description": "Issues in the daemon's tracked set by class (tracked_entities). The alert rule on tracked-set size reads the same gauge against jira.settings.tracked_set_alert_size.",
+      "title": "Consumer redeliveries",
+      "description": "Change rows redelivered to a consumer per second, by consumer and query (consumer_redeliveries), over the dashboard's rate interval. A sustained redelivery rate means a consumer receives rows and does not acknowledge them; the lag panels above show the same fault only once rows pile up.",
       "gridPos": {
         "x": 0,
         "y": 65,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (consumer, query) (rate(pg_connector_issue_jira_consumer_redeliveries[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{consumer}} / {{query}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Change rows without a kind",
+      "description": "Change rows stored without a kind (change_rows_without_kind). The value MUST be zero: any other value means a change was recorded that consumers cannot classify. The alert rule 'pg-connector-issue-jira change rows without a kind' reads this gauge.",
+      "gridPos": {
+        "x": 12,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_connector_issue_jira_change_rows_without_kind)",
+          "range": true,
+          "legendFormat": "rows without a kind"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Tracked and watched: tracked set by class",
+      "description": "Issues in the daemon's tracked set by class (tracked_entities). The alert rule 'pg-connector-issue-jira tracked set is over its size' reads the same gauge against jira.settings.tracked_set_alert_size.",
+      "gridPos": {
+        "x": 0,
+        "y": 73,
         "w": 12,
         "h": 8
       },
@@ -898,13 +1000,13 @@
       }
     },
     {
-      "id": 17,
+      "id": 19,
       "type": "timeseries",
       "title": "Tracked and watched: watched issues",
       "description": "Issues the watched queries currently cover (watched_entities).",
       "gridPos": {
         "x": 12,
-        "y": 65,
+        "y": 73,
         "w": 12,
         "h": 8
       },
@@ -948,13 +1050,13 @@
       }
     },
     {
-      "id": 18,
+      "id": 20,
       "type": "timeseries",
       "title": "Store size and evictions: size",
       "description": "Size of the daemon's local store in bytes (store_bytes).",
       "gridPos": {
         "x": 0,
-        "y": 73,
+        "y": 81,
         "w": 12,
         "h": 8
       },
@@ -998,13 +1100,13 @@
       }
     },
     {
-      "id": 19,
+      "id": 21,
       "type": "timeseries",
       "title": "Store size and evictions: evictions",
       "description": "Store evictions per second over the dashboard's rate interval (store_evictions). Steady evictions mean the store is at its size cap and is discarding data.",
       "gridPos": {
         "x": 12,
-        "y": 73,
+        "y": 81,
         "w": 12,
         "h": 8
       },
@@ -1048,13 +1150,13 @@
       }
     },
     {
-      "id": 20,
+      "id": 22,
       "type": "stat",
       "title": "Daemon up",
-      "description": "Whether the daemon reports itself running (daemon_up, max across series): UP when 1, DOWN when 0 or absent.",
+      "description": "Whether the daemon reports itself running (daemon_up, max across series): UP when 1, DOWN when 0 or absent. The alert rule 'pg-connector-issue-jira daemon is down' deliberately does not count a sleeping host, so this stat can read DOWN after a sleep or wake with no alert firing.",
       "gridPos": {
         "x": 0,
-        "y": 81,
+        "y": 89,
         "w": 12,
         "h": 4
       },
@@ -1120,13 +1222,13 @@
       }
     },
     {
-      "id": 21,
+      "id": 23,
       "type": "stat",
       "title": "Governor paused",
-      "description": "Whether background work is held back (governor_paused, max across reasons): PAUSED when 1, running when 0 or absent.",
+      "description": "Whether background work is held back (governor_paused, max across reasons): PAUSED when 1, running when 0 or absent. The series carries a reason label that this stat folds away; query governor_paused by reason in Explore to see why. No alert rule covers it.",
       "gridPos": {
         "x": 12,
-        "y": 81,
+        "y": 89,
         "w": 12,
         "h": 4
       },

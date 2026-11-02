@@ -200,6 +200,12 @@ if ! out="$(lint "$sdash" "$scat" 2>&1)"; then
   exit 1
 fi
 
+# The position-based mutants below need five leading panels that each carry a target.
+if ! jq -e '(.panels | length) >= 5 and all(.panels[:5][]; (.targets // []) | length > 0)' "$sdash" >/dev/null; then
+  echo "self-test: the first five panels of the dashboard must each carry a target (the mutants address panels by position)" >&2
+  exit 1
+fi
+
 mutants=0
 fail=0
 # expect <name> <rule> <dashboard> <catalog>: the lint must fail with exactly RULE-<rule>.

@@ -8,3 +8,5 @@ settle results and pending rows
 consumer lag
 tracked and watched
 governor backlog
+daemon up
+governor paused
