@@ -363,9 +363,9 @@ groups:
       # (TestStalledRecordedDay, TestStalledRestartHoleThatIsLongEnoughPages) and the real
       # series in rule-tests/pg-router-queue-stalled.test.yaml. The router now makes its
       # first dispatch pass before its first producer tick (DEC-EVENT-5, pg2-x3zkb), so a
-      # restart's hole is the boot plus the postStartup hooks instead of the first producer
-      # tick that stood in front of the re-offer (the postStartup part goes away when
-      # pg2-fx5x0l.6 removes the dispatch gate, INV-CCH-18: then it is the boot alone), and the handler that adopts a surviving
+      # restart's hole is the boot alone instead of the first producer
+      # tick that stood in front of the re-offer (the postStartup dispatch gate is gone,
+      # pg2-fx5x0l.6, INV-CCH-18), and the handler that adopts a surviving
       # session is to report the dispatch's original start (decided, not yet built);
       # neither changes this rule. The dedicated host-awake signal belongs to
       # pg2-9uvm5; when it lands this rule needs one more `unless` clause on that signal

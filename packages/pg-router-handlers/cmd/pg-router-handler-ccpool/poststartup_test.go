@@ -2,46 +2,47 @@ package main
 
 import (
 	"bytes"
-	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
-	"github.com/phillipgreenii/pg-router-handlers/internal/config"
-	"github.com/phillipgreenii/pg-router-handlers/internal/dispatchlib"
-	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
-	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
+	"github.com/phillipgreenii/pg-router-handlers/internal/handlerstate"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
-func postStartupWith(t *testing.T, body, cfgPath string, mk func(config.Config, roles.Role) executor.Deps) (int, string) {
+// kickRecorder is a janitorKick that records its calls instead of spawning.
+type kickRecorder struct {
+	calls []string // "<cfgPath>|<roleFile>"
+	err   error
+}
+
+func (k *kickRecorder) kick(cfgPath, roleFile string) error {
+	k.calls = append(k.calls, cfgPath+"|"+roleFile)
+	return k.err
+}
+
+func postStartupWith(t *testing.T, body, cfgPath string, kick janitorKick) (int, string) {
 	t.Helper()
 	var out bytes.Buffer
-	code := servePostStartup(context.Background(), strings.NewReader(body), &out, cfgPath, mk)
+	code := servePostStartup(strings.NewReader(body), &out, cfgPath, kick)
 	return code, out.String()
 }
 
-// TestServePostStartup_runsThePostStartupReconcile proves postStartup is the
-// post-startup reconcile, not the old no-op: an idle session of this handler
-// whose bead has closed (the daemon was down while the bead closed) is purged at
-// boot, through the same pass a dispatch runs before its executor, and the reply
-// is the conformant `ok`.
-func TestServePostStartup_runsThePostStartupReconcile(t *testing.T) {
-	t.Setenv("CCPOOL_POOL", "") // skip the default-pool pass: it builds a real runner
-	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pg-router-worker-zr-done", State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyBead: "zr-done"}},
-		{ExternalID: "pg-router-worker-zr-open", State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyBead: "zr-open"}},
-		{ExternalID: "other-worker-zr-done", State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyBead: "zr-done"}},
-	}}}
-	br := fakeBR{out: map[string]string{
-		"show zr-done --json": `{"status":"closed"}`,
-		"show zr-open --json": `{"status":"open"}`,
-	}}
-	cfgPath, _ := launchConfig(t, `,"SessionPrefix":"pg-router-"`)
+// TestServePostStartup_doesNotSweep proves postStartup no longer runs the
+// housekeeping passes (INV-CCH-41, bead pg2-fx5x0l.6): servePostStartup takes no
+// ccpool or bd seam at all, so nothing can be swept; the reply is the conformant
+// `ok` and the janitor is kicked exactly once with the launch config and a role
+// file naming this role. (The test below shows the sweep's absence does not cost
+// the role's first dispatch.)
+func TestServePostStartup_doesNotSweep(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "")
+	cfgPath, stateDir := launchConfig(t, `,"SessionPrefix":"pg-router-"`)
 	name, cfg := workerRole("", "")
-	code, out := postStartupWith(t, request("", name, cfg), cfgPath, func(config.Config, roles.Role) executor.Deps {
-		return executor.Deps{CC: cc, BD: br, LockDir: t.TempDir()}
-	})
+	k := &kickRecorder{}
+	code, out := postStartupWith(t, request("", name, cfg), cfgPath, k.kick)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d; reply %s", code, conformance.ExitOK, out)
 	}
@@ -52,69 +53,128 @@ func TestServePostStartup_runsThePostStartupReconcile(t *testing.T) {
 	if err := conformance.Check("handler.postStartup-reply", reply); err != nil {
 		t.Errorf("reply does not conform: %v", err)
 	}
-	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-done" {
-		t.Errorf("postStartup must close exactly the closed-bead session of this handler; closed=%v", cc.Closed)
+	if len(k.calls) != 1 {
+		t.Fatalf("janitor kicks = %v, want exactly one", k.calls)
+	}
+	parts := strings.SplitN(k.calls[0], "|", 2)
+	if parts[0] != cfgPath {
+		t.Errorf("kick config = %q, want %q", parts[0], cfgPath)
+	}
+	if filepath.Dir(parts[1]) != stateDir {
+		t.Errorf("role file %q must sit in the handler state dir %q", parts[1], stateDir)
+	}
+	body, err := os.ReadFile(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro, err := parseRole(body)
+	if err != nil || ro.Name != name {
+		t.Errorf("role file = %s (%v); want the %q role object the janitor can decode", body, err, name)
 	}
 }
 
-// A sweep that cannot run (ccpool is unavailable) never fails the call: every
-// pass is best effort and the reply is still `ok`. With PATH broken the real
-// BuildDeps runner fails each list; the log lines prove the passes ran.
-func TestServePostStartup_sweepFailureIsNotAFailure(t *testing.T) {
-	t.Setenv("PATH", "/usr/bin")
-	t.Setenv("CCPOOL_POOL", "")
+// A janitor that cannot be started never fails the call: the scheduled janitor
+// still runs, and the reply is still `ok`.
+func TestServePostStartup_kickFailureIsNotAFailure(t *testing.T) {
 	cfgPath, _ := launchConfig(t, "")
 	name, cfg := workerRole("", "")
+	k := &kickRecorder{err: errors.New("spawn refused")}
 	var code int
 	var out string
-	msgs := captureSlog(t, func() {
-		code, out = postStartupWith(t, request("", name, cfg), cfgPath, dispatchlib.BuildDeps)
-	})
+	msgs := captureSlog(t, func() { code, out = postStartupWith(t, request("", name, cfg), cfgPath, k.kick) })
 	if code != conformance.ExitOK || decodeReply(t, out)["outcome"] != "ok" {
 		t.Fatalf("exit = %d, reply = %s; want ok", code, out)
 	}
-	for _, want := range []string{"reconcile: list failed", "orphan reconcile: list failed"} {
-		if !containsSubstring(msgs, want) {
-			t.Errorf("postStartup must run the sweeps (missing %q); got messages=%v", want, msgs)
-		}
+	if !containsSubstring(msgs, "postStartup: janitor kick failed; the scheduled janitor still runs") {
+		t.Errorf("a failed kick must be logged; got %v", msgs)
 	}
 }
 
-// The sweeps are idempotent: calling postStartup again (core calls it once per
-// role) finds nothing left to do and still replies ok.
+// Calling postStartup again (core calls it once per role, and again after every
+// daemon restart) is safe: each call replies ok and kicks the janitor, whose
+// single-flight lock makes the extra runs harmless.
 func TestServePostStartup_repeatedCallsAreSafe(t *testing.T) {
-	t.Setenv("CCPOOL_POOL", "")
-	cc := &fakeCC{ListSeq: [][]ccpool.Session{
-		{{ExternalID: "pg-router-worker-zr-done", State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyBead: "zr-done"}}},
-		nil,
-	}}
-	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
-	cfgPath, _ := launchConfig(t, `,"SessionPrefix":"pg-router-"`)
+	cfgPath, _ := launchConfig(t, "")
 	name, cfg := workerRole("", "")
-	mk := func(config.Config, roles.Role) executor.Deps {
-		return executor.Deps{CC: cc, BD: br, LockDir: t.TempDir()}
-	}
+	k := &kickRecorder{}
 	for i := 0; i < 3; i++ {
-		if code, out := postStartupWith(t, request("", name, cfg), cfgPath, mk); code != conformance.ExitOK {
+		if code, out := postStartupWith(t, request("", name, cfg), cfgPath, k.kick); code != conformance.ExitOK {
 			t.Fatalf("call %d: exit = %d, reply %s", i, code, out)
 		}
 	}
-	if len(cc.Closed) != 1 {
-		t.Errorf("the session must be closed once across repeated calls; closed=%v", cc.Closed)
+	if len(k.calls) != 3 {
+		t.Errorf("kicks = %d, want 3", len(k.calls))
 	}
 }
 
-func noDeps(t *testing.T) func(config.Config, roles.Role) executor.Deps {
-	return func(config.Config, roles.Role) executor.Deps {
-		t.Error("deps were built for a request that must be refused first")
-		return executor.Deps{}
+// TestKickJanitor_startsADetachedRealJanitor runs the production kick against the
+// real tool: the test binary stands in for the adapter (adapterRunEnv), the
+// janitor it starts runs against this test's own state dir, and its janitor_run
+// event proves the process ran. The kick itself returns without waiting for it.
+func TestKickJanitor_startsADetachedRealJanitor(t *testing.T) {
+	t.Setenv(adapterRunEnv, "1")
+	t.Setenv("PATH", "/usr/bin") // ccpool and bd are unreachable: the passes fail best-effort
+	t.Setenv("CCPOOL_POOL", "")
+	cfgPath, stateDir := launchConfig(t, "")
+	name, cfg := workerRole("", "")
+	var out bytes.Buffer
+	k := func(c, r string) error { return kickJanitor(c, r) }
+	if code := servePostStartup(strings.NewReader(request("", name, cfg)), &out, cfgPath, k); code != conformance.ExitOK {
+		t.Fatalf("exit = %d, reply %s", code, out.String())
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		b, _ := os.ReadFile(filepath.Join(stateDir, handlerstate.EventLogName))
+		if strings.Contains(string(b), `"janitor_run"`) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the kicked janitor wrote no janitor_run event; log=%s", b)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestFirstDispatchAfterSimulatedBootLaunchesWithAFullPoolOfClosedBeadSessions
+// pins I-4 (pg2-fx5x0l.6): postStartup sweeps nothing, so a role's first dispatch
+// after a boot meets a pool full of sessions whose beads closed while the daemon
+// was down, and still launches, because the capacity-pressure reconcile frees a
+// slot (admission.go). The boot is postStartup, then the dispatch, on one launch
+// config and one pool.
+func TestFirstDispatchAfterSimulatedBootLaunchesWithAFullPoolOfClosedBeadSessions(t *testing.T) {
+	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"), pressureRow("b", "zr-x"))
+	name, cfg := workerRole("", "")
+	k := &kickRecorder{}
+	if code, out := postStartupWith(t, request("", name, cfg), e.cfgPath, k.kick); code != conformance.ExitOK {
+		t.Fatalf("postStartup exit = %d, reply %s", code, out)
+	}
+	if got := e.cc.closed(); len(got) != 0 {
+		t.Fatalf("postStartup closed %v; the boot must leave the full pool for the dispatch to meet", got)
+	}
+	if _, caps := e.cc.counts(); caps != 0 {
+		t.Fatalf("postStartup touched ccpool capacity (%d calls)", caps)
+	}
+	code, reply := e.dispatch(t, defaultEvent)
+	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
+		t.Fatalf("exit=%d reply=%v, want the first dispatch to pass the capacity gate and reach the (failing) launch", code, reply)
+	}
+	got := e.cc.closed()
+	if len(got) == 0 || got[0] != "pg-router-worker-a" {
+		t.Fatalf("closed = %v, want a closed-bead session freed for the dispatch", got)
+	}
+}
+
+func noKick(t *testing.T) janitorKick {
+	return func(string, string) error {
+		t.Error("the janitor was kicked for a request that must be refused first")
+		return nil
 	}
 }
 
 // TestServePostStartup_rejectsMalformedRequest proves the schema check runs
 // before anything else.
 func TestServePostStartup_rejectsMalformedRequest(t *testing.T) {
-	code, out := postStartupWith(t, `{"schemaVersion":"1","role":{"name":"worker"}}`, "", noDeps(t)) // missing id
+	code, out := postStartupWith(t, `{"schemaVersion":"1","role":{"name":"worker"}}`, "", noKick(t)) // missing id
 	if code != conformance.ExitError || !strings.Contains(out, "error") {
 		t.Fatalf("exit = %d, out = %q; want exit %d and an error reply", code, out, conformance.ExitError)
 	}
@@ -127,7 +187,7 @@ func TestServePostStartup_requestWithoutRoleIsUsageError(t *testing.T) {
 		"empty name": `{"schemaVersion":"1","id":"hs-1","role":{"name":""}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			code, out := postStartupWith(t, body, "", noDeps(t))
+			code, out := postStartupWith(t, body, "", noKick(t))
 			if code != conformance.ExitUsage || !strings.Contains(out, "error") {
 				t.Fatalf("exit = %d, out = %q; want exit %d and an error reply", code, out, conformance.ExitUsage)
 			}
@@ -136,7 +196,7 @@ func TestServePostStartup_requestWithoutRoleIsUsageError(t *testing.T) {
 }
 
 // A role whose config the strict decoder rejects, or a launch config that
-// cannot be loaded, is an error reply (exit 1) and no sweep runs.
+// cannot be loaded, is an error reply (exit 1) and the janitor is not kicked.
 func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
 	cfgPath, _ := launchConfig(t, "")
 	_, good := workerRole("", "")
@@ -151,7 +211,7 @@ func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
 		"unreadable launch cfg":   {good, "/does/not/exist/launch.json", "launch.json"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			code, out := postStartupWith(t, request("", "worker", tc.cfg), tc.cfgPath, noDeps(t))
+			code, out := postStartupWith(t, request("", "worker", tc.cfg), tc.cfgPath, noKick(t))
 			msg, _ := decodeReply(t, out)["error"].(string)
 			if code != conformance.ExitError || !strings.Contains(msg, tc.want) {
 				t.Fatalf("exit = %d, out = %q; want exit %d and %q in the error reply", code, out, conformance.ExitError, tc.want)

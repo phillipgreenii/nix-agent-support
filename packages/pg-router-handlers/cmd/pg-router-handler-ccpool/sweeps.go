@@ -13,8 +13,8 @@ import (
 )
 
 // runSweeps runs the housekeeping passes a ccpool role's dispatch has always run
-// before its executor, and that its postStartup request now runs too (the
-// post-startup reconcile): the closed-bead session reconcile, the default-pool
+// before its executor (postStartup no longer runs them, bead pg2-fx5x0l.6; the
+// janitor does): the closed-bead session reconcile, the default-pool
 // pass, the role-scoped orphan reconcile, the worktree-keyed sweep and the lock
 // file GC. who prefixes the log lines ("dispatch" or "postStartup").
 //

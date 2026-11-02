@@ -14,9 +14,10 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
-// Bead pg2-pzb5d8: a slow or hung postStartup hook of one role must not delay
-// producers or another role's dispatch; a role's own first dispatch waits for
-// ITS OWN hook, bounded by postStartupTimeout.
+// Beads pg2-pzb5d8 and pg2-fx5x0l.6: a slow or hung postStartup hook must not
+// delay producers or ANY role's dispatch, including its own role's first one
+// (the per-role dispatch gate and its timeout are gone; the handler protects the
+// first dispatch itself, INV-CCH-41).
 
 // hookRunner is a wireclient.Runner whose argv is [fake-handler, subcommand,
 // role]. The postStartup of role "slow" blocks until released or its ctx ends.
@@ -25,6 +26,19 @@ type hookRunner struct {
 	mu          sync.Mutex
 	steps       []string // "<role>:<subcommand>" in completion/start order
 	slowHookErr error
+	failFast    bool // the "fast" role's postStartup exits non-zero
+}
+
+func (r *hookRunner) count(s string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, x := range r.steps {
+		if x == s {
+			n++
+		}
+	}
+	return n
 }
 
 func (r *hookRunner) record(s string) {
@@ -60,6 +74,10 @@ func (r *hookRunner) Run(ctx context.Context, argv []string, _ []byte) ([]byte, 
 			return nil, 0, ctx.Err()
 		}
 		r.record("slow:postStartup-returned")
+	}
+	if sub == "postStartup" && role == "fast" && r.failFast {
+		r.record("fast:postStartup-failed")
+		return nil, 1, nil
 	}
 	if sub == "dispatch" {
 		r.record(role + ":dispatch")
@@ -104,7 +122,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-func TestRunLongRunning_blockedPostStartupDoesNotDelayOtherRole(t *testing.T) {
+func TestRunLongRunning_blockedPostStartupDoesNotDelayAnyRole(t *testing.T) {
 	r := &hookRunner{releaseSlow: make(chan struct{})}
 	stop, done := startHookDaemon(t, r)
 	released := false
@@ -116,45 +134,25 @@ func TestRunLongRunning_blockedPostStartupDoesNotDelayOtherRole(t *testing.T) {
 	}
 	t.Cleanup(func() { release(); stop(); <-done })
 
-	// Producers enqueue and the OTHER role dispatches while slow's hook is blocked.
+	// Both roles dispatch while slow's hook is still blocked: no gate holds slow's
+	// own first dispatch behind its hook.
 	waitFor(t, "fast role dispatch while slow's postStartup is blocked", func() bool { return r.seen("fast:dispatch") })
-	if r.seen("slow:dispatch") {
-		t.Fatal("slow role dispatched before its own postStartup returned")
-	}
-	// Give the gated dispatch time to (wrongly) slip through, then release.
-	time.Sleep(100 * time.Millisecond)
-	if r.seen("slow:dispatch") {
-		t.Fatal("slow role dispatched before its own postStartup returned")
-	}
-	release()
-	waitFor(t, "slow role dispatch after its hook returned", func() bool { return r.seen("slow:dispatch") })
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	ret, disp := -1, -1
-	for i, s := range r.steps {
-		if s == "slow:postStartup-returned" && ret < 0 {
-			ret = i
-		}
-		if s == "slow:dispatch" && disp < 0 {
-			disp = i
-		}
-	}
-	if ret < 0 || disp < ret {
-		t.Fatalf("slow dispatch (%d) must follow its postStartup return (%d); steps=%v", disp, ret, r.steps)
+	waitFor(t, "slow role dispatch while its own postStartup is blocked", func() bool { return r.seen("slow:dispatch") })
+	if r.seen("slow:postStartup-returned") {
+		t.Fatal("the slow hook returned; the test needs it still blocked to prove the dispatch is not gated")
 	}
 }
 
-func TestRunLongRunning_hungPostStartupIsBoundedByTimeout(t *testing.T) {
-	old := postStartupTimeout
-	postStartupTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { postStartupTimeout = old })
-
-	r := &hookRunner{releaseSlow: make(chan struct{})} // never released
+func TestRunLongRunning_postStartupRunsOncePerEnabledRoleAndFailureIsNotFatal(t *testing.T) {
+	r := &hookRunner{releaseSlow: make(chan struct{}), failFast: true}
+	close(r.releaseSlow)
 	stop, done := startHookDaemon(t, r)
 	t.Cleanup(func() { stop(); <-done })
 
-	waitFor(t, "slow role dispatch after its hook timed out", func() bool { return r.seen("slow:dispatch") })
-	if !r.seen("slow:postStartup-cancelled") {
-		t.Fatalf("the hung hook was not cancelled; steps=%v", r.steps)
+	waitFor(t, "both hooks", func() bool { return r.seen("slow:postStartup-returned") && r.seen("fast:postStartup-failed") })
+	// A failed hook is logged and nothing more: the role still dispatches.
+	waitFor(t, "fast role dispatch after its hook failed", func() bool { return r.seen("fast:dispatch") })
+	if n := r.count("fast:postStartup-failed"); n != 1 {
+		t.Fatalf("fast hook ran %d times, want exactly once", n)
 	}
 }

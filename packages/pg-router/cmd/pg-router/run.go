@@ -1679,8 +1679,9 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	stopChaining := context.AfterFunc(ctx, q.StopChaining)
 	defer stopChaining()
 	validateRolesAtStartup(ctx, pr.o, pr.cfg)
-	// Non-blocking, per-role gated and bounded (bead pg2-pzb5d8, see
-	// startPostStartupAsync); run-until-idle keeps the blocking postStartupAll.
+	// Non-blocking, fire-and-forget per role, no dispatch gate (beads pg2-pzb5d8
+	// and pg2-fx5x0l.6, see startPostStartupAsync); run-until-idle keeps the
+	// blocking postStartupAll.
 	startPostStartupAsync(ctx, pr.o, pr.cfg)
 	// Ordering considered and accepted (same reasoning as runRunUntilIdle's
 	// identical defer pair; review of this bead's design doc, "decouple
@@ -1734,10 +1735,9 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// daemon that restarted over a surviving ccpool dispatch (ADR 0085) held no offer
 	// for it for 4 min 28.6 s, and pg_router_listener_in_flight read 0 for its role
 	// the whole time. What the durable queue restored is already queued, so nothing
-	// needs producing before it is re-offered. A role's first
-	// dispatch still waits for ITS OWN postStartup hook (the wrapper
-	// startPostStartupAsync installed gates it; bead pg2-pzb5d8), not for the
-	// other roles' hooks, and this pass is still silent
+	// needs producing before it is re-offered. No dispatch waits
+	// for a postStartup hook any more (the gate startPostStartupAsync once
+	// installed is gone, bead pg2-fx5x0l.6), and this pass is still silent
 	// once shutdown was requested (the same rule as runOneTick's own pass).
 	if ctx.Err() == nil {
 		slog.Info("run: startup dispatch pass, before the first producer tick", "offersLaunched", q.Kick())
