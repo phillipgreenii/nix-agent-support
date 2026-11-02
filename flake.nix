@@ -2455,6 +2455,7 @@
                       ${./packages/ccpool/grafana/ccpool-pools.json} \
                       ${./packages/pa-monitor/grafana/pa-monitor-overview.json} \
                       ${./packages/pg-connector/grafana/pg-connector-github.json} \
+                      ${./packages/pg-connector/grafana/pg-connector-issue-jira.json} \
                       ${./packages/pg-rescue/grafana/pg-rescue-runs.json} \
                       ${./packages/pg-task-focus/grafana/pg-task-focus.json}
                     touch $out
@@ -3772,6 +3773,10 @@
                               type = lib.types.listOf lib.types.path;
                               default = [ ];
                             };
+                            dashboardProviders = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
                           };
                           config.phillipgreenii.observability.enable = obsEnable;
                         }
@@ -3818,6 +3823,7 @@
                   sized = evalDarwin true sizedUser;
                   conflicting = evalDarwin true conflictingUsers;
                   deleteFile = ./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml;
+                  dashboardFile = ./packages/pg-connector/grafana/pg-connector-issue-jira.json;
                   stateDir = "\${env:XDG_STATE_HOME}/pg-connector-issue-jira-daemon";
                   # The old stateless backend's directory (and its module's default
                   # glob root); no path of this module may fall inside it.
@@ -3868,6 +3874,17 @@
                 assert otherUser.alertRuleFiles == [ deleteFile ];
                 # The log sources follow the stack alone, not the daemon flag.
                 assert noDaemon.logSources == enabled.logSources;
+                # The dashboard follows the daemon flag like the alert rules do, and lands in
+                # the same "pg-connector" Grafana folder (converging BY TITLE).
+                assert disabled.dashboardProviders == { };
+                assert lib.attrNames enabled.dashboardProviders == [ "pg-connector-issue-jira" ];
+                assert enabled.dashboardProviders.pg-connector-issue-jira.dashboards == [ dashboardFile ];
+                assert enabled.dashboardProviders.pg-connector-issue-jira.folder == "pg-connector";
+                assert sized.dashboardProviders == enabled.dashboardProviders;
+                assert noUsers.dashboardProviders == { };
+                assert noDaemon.dashboardProviders == { };
+                assert githubOnly.dashboardProviders == { };
+                assert otherUser.dashboardProviders == { };
                 pkgs.runCommand "test-pg-connector-issue-jira-daemon-darwin-module-ok"
                   {
                     nativeBuildInputs = [
@@ -7254,10 +7271,12 @@
                     touch "$out"
                   '';
 
-              # pg-connector-github dashboard: rules D1-D7 over the dashboard JSON and the metric
-              # catalog (uid and title, catalogued names, counters inside rate/increase, the eight
-              # topics, descriptions, Prometheus datasource, every expr parses under promtool),
-              # then the script's own mutant self-tests.
+              # pg-connector-github dashboard: rules D1-D8 over the dashboard JSON and the metric
+              # catalog (uid and title, catalogued names, counters inside rate/increase, the topic
+              # list, descriptions, Prometheus datasource, every expr parses under promtool,
+              # gauges inside max/min/avg), then the script's own mutant self-tests. The same
+              # script lints the Jira dashboard below; the connector name, catalog and topic list
+              # are its arguments.
               test-pg-connector-github-dashboard =
                 pkgs.runCommand "test-pg-connector-github-dashboard"
                   {
@@ -7274,8 +7293,34 @@
                     script=${./packages/pg-connector/grafana/check-dashboard.sh}
                     dashboard=${./packages/pg-connector/grafana/pg-connector-github.json}
                     catalog=${./packages/pg-connector/grafana/pg-connector-github-metrics.txt}
-                    bash "$script" "$dashboard" "$catalog"
-                    bash "$script" --self-test "$dashboard" "$catalog"
+                    topics=${./packages/pg-connector/grafana/pg-connector-github-dashboard-topics.txt}
+                    bash "$script" pg-connector-github "$dashboard" "$catalog" "$topics"
+                    bash "$script" --self-test pg-connector-github "$dashboard" "$catalog" "$topics"
+                    touch "$out"
+                  '';
+
+              # pg-connector-issue-jira dashboard (bead pg2-p58fjr): the same lint and mutant
+              # self-tests as the GitHub dashboard, against the Jira daemon's metric catalog and
+              # its own topic list.
+              test-pg-connector-issue-jira-dashboard =
+                pkgs.runCommand "test-pg-connector-issue-jira-dashboard"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.prometheus.cli
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-connector/grafana/check-dashboard.sh}
+                    dashboard=${./packages/pg-connector/grafana/pg-connector-issue-jira.json}
+                    catalog=${./packages/pg-connector/grafana/pg-connector-issue-jira-metrics.txt}
+                    topics=${./packages/pg-connector/grafana/pg-connector-issue-jira-dashboard-topics.txt}
+                    bash "$script" pg-connector-issue-jira "$dashboard" "$catalog" "$topics"
+                    bash "$script" --self-test pg-connector-issue-jira "$dashboard" "$catalog" "$topics"
                     touch "$out"
                   '';
 

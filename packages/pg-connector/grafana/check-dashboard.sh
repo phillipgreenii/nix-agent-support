@@ -1,27 +1,36 @@
 #!/usr/bin/env bash
-# Lint of the pg-connector-github Grafana dashboard against the daemon's metric catalog, plus
-# mutant self-tests proving each rule can fail.
+# Lint of a pg-connector daemon's Grafana dashboard against the daemon's metric catalog, plus
+# mutant self-tests proving each rule can fail. One script serves every connector dashboard
+# (pg-connector-github, pg-connector-issue-jira, ...): the connector name, the catalog and the
+# topic list are arguments.
 #
-#   check-dashboard.sh <dashboard.json> <metrics-catalog.txt>
-#   check-dashboard.sh --self-test <dashboard.json> <metrics-catalog.txt>
+#   check-dashboard.sh <connector> <dashboard.json> <metrics-catalog.txt> <topics.txt>
+#   check-dashboard.sh --self-test <connector> <dashboard.json> <metrics-catalog.txt> <topics.txt>
 #
-# The catalog is pg-connector-github-metrics.txt: one line per metric,
+# <connector> is the daemon's name, for example pg-connector-github. The dashboard's uid and title
+# are that name, and its metric prefix is the name with - read as _ plus a trailing _
+# (pg_connector_github_).
+#
+# The catalog is <connector>-metrics.txt: one line per metric,
 # "<prometheus_name> <type> <labels>", type gauge, counter or histogram. A histogram is listed
 # once under its base name; its _bucket, _sum and _count series are implied.
+#
+# The topic list is <connector>-dashboard-topics.txt: one phrase per line, the subjects the
+# dashboard MUST show (rule D4). Blank lines are ignored.
 #
 # Needs jq and promtool (rule D7). Every failure line starts with RULE-Dn, at most one line per
 # rule, so a mutant can assert the exact rule that fired.
 #
-#   D1  uid and title are pg-connector-github; .time.from, .time.to and .refresh are non-empty
+#   D1  uid and title are the connector name; .time.from, .time.to and .refresh are non-empty
 #       strings
-#   D2  every pg_connector_github_* token of an expr is a catalogued name once a _bucket, _sum
+#   D2  every <prefix>* token of an expr is a catalogued name once a _bucket, _sum
 #       or _count suffix is stripped (a token is a maximal run of [a-z0-9_])
 #   D3  every occurrence of a counter name is followed by an optional {...} selector and a
 #       [<range>], and its expression contains rate(, irate( or increase(; a _bucket, _sum or
 #       _count suffix appears only on a histogram's name, and a histogram's name appears only
 #       with one of those suffixes
-#   D4  each of the ten topic phrases is a case-insensitive substring of at least one panel's
-#       title, with - and _ read as spaces
+#   D4  each topic phrase of the topic list is a case-insensitive substring of at least one
+#       panel's title, with - and _ read as spaces
 #   D5  every panel whose type is not row has a non-empty description
 #   D6  every target's datasource is {"type": "prometheus", "uid": "prometheus"}
 #   D7  every expr, with the Grafana variables $__rate_interval, $__interval, $__range and any
@@ -40,7 +49,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: check-dashboard.sh [--self-test] <dashboard.json> <metrics-catalog.txt>" >&2
+  echo "usage: check-dashboard.sh [--self-test] <connector> <dashboard.json> <metrics-catalog.txt> <topics.txt>" >&2
   exit 2
 }
 
@@ -49,10 +58,17 @@ if [ "${1:-}" = "--self-test" ]; then
   selftest=1
   shift
 fi
-[ "$#" -eq 2 ] || usage
-dash="$1"
-catalog="$2"
-for f in "$dash" "$catalog"; do
+[ "$#" -eq 4 ] || usage
+connector="$1"
+dash="$2"
+catalog="$3"
+topicfile="$4"
+if ! [[ $connector =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
+  echo "check-dashboard.sh: connector '$connector' must be lower-case words joined by -" >&2
+  exit 2
+fi
+prefix="${connector//-/_}_"
+for f in "$dash" "$catalog" "$topicfile"; do
   if [ ! -f "$f" ] || [ ! -r "$f" ]; then
     echo "check-dashboard.sh: cannot read $f" >&2
     exit 2
@@ -65,13 +81,18 @@ for tool in jq promtool; do
   fi
 done
 
-topics='["budget against the cap","spend by purpose and group","queue depth and oldest overdue","freshness per query","served_from ratio","detection delay","settle results and pending rows","consumer lag","tracked and watched","governor backlog"]'
+topics="$(jq -R -s -c '[split("\n")[] | select(length > 0)]' "$topicfile")"
+if ! jq -e 'length > 0' <<<"$topics" >/dev/null 2>&1; then
+  echo "check-dashboard.sh: $topicfile lists no topic" >&2
+  exit 2
+fi
 
-# jq definitions shared by the rules.
+# jq definitions shared by the rules. The prefix is [a-z0-9_] only (checked above), so splicing it
+# into the program is safe.
 defs='
 def panels: (.panels[]? | ., panels);
 def exprs: [.. | objects | select(has("expr")) | .expr];
-def tokens: [scan("(?<![a-z0-9_])pg_connector_github_[a-z0-9_]+")];
+def tokens: [scan("(?<![a-z0-9_])'"$prefix"'[a-z0-9_]+")];
 def base: if test("_(bucket|sum|count)$") then sub("_(bucket|sum|count)$"; "") else . end;
 '
 
@@ -89,13 +110,14 @@ lint() {
     fi
   }
 
-  rule D1 'uid and title must be pg-connector-github, and time.from, time.to and refresh non-empty strings' \
-    '.uid == "pg-connector-github" and .title == "pg-connector-github"
+  rule D1 "uid and title must be $connector, and time.from, time.to and refresh non-empty strings" \
+    --arg connector "$connector" \
+    '.uid == $connector and .title == $connector
      and (.time.from | type == "string" and length > 0)
      and (.time.to | type == "string" and length > 0)
      and (.refresh | type == "string" and length > 0)' "$d"
 
-  rule D2 'a query uses a pg_connector_github_* token that is not a catalogued name (after stripping a histogram suffix)' \
+  rule D2 "a query uses a ${prefix}* token that is not a catalogued name (after stripping a histogram suffix)" \
     --argjson cat "$cat" \
     "$defs"'($cat | map(.name)) as $names
      | exprs | [.[] | tokens[]] | length > 0
@@ -226,40 +248,62 @@ mutate_catalog() {
   expect "$name" "$want" "$sdash" "$work/c-$name.txt"
 }
 
-# set_expr <panel id> <expr>: replace the expr of the first target of that panel.
+# set_expr <panel index> <expr>: replace the expr of the first target of the panel at that index.
+# The mutants address panels by position, so a dashboard MUST open with five panels that each
+# carry a target (the stat panels come last).
 set_expr() {
-  printf '(.panels[] | select(.id == %s) | .targets[0].expr) = %s' "$1" "$(jq -n --arg e "$2" '$e')"
+  printf '(.panels[%s].targets[0].expr) = %s' "$1" "$(jq -n --arg e "$2" '$e')"
 }
 
-mutate wrong-uid D1 '.uid = "pg-connector-github-x"'
+# The first counter of the catalog that a dashboard query uses: the counter mutants rewrite a
+# query around it.
+counter=""
+while read -r name type _; do
+  if [ "$type" = "counter" ] &&
+    jq -e --arg n "$name" '[.. | objects | select(has("expr")) | .expr] | any(.[]; contains($n))' "$sdash" >/dev/null; then
+    counter="$name"
+    break
+  fi
+done <"$scat"
+if [ -z "$counter" ]; then
+  echo "self-test: the dashboard uses no counter of the catalog, so the counter mutants cannot be built" >&2
+  exit 1
+fi
+queue_depth="${prefix}queue_depth"
+
+mutate wrong-uid D1 ".uid = \"${connector}-x\""
 mutate wrong-title D1 '.title = "pg connector"'
 mutate empty-time-from D1 '.time.from = ""'
 mutate missing-refresh D1 'del(.refresh)'
 
 mutate unknown-metric D2 '(.. | objects | select(has("expr")) | .expr) |= gsub("queue_depth"; "queue_depthz")'
-mutate_catalog dropped-catalog-line D2 '/^pg_connector_github_query_last_success_age_seconds /d'
+mutate_catalog dropped-catalog-line D2 "/^${prefix}query_last_success_age_seconds /d"
 
-mutate counter-outside-rate D3 "$(set_expr 1 'sum(pg_connector_github_budget_spent{bucket="graphql"})')"
-mutate counter-without-range D3 "$(set_expr 1 'sum(pg_connector_github_budget_spent{bucket="graphql"}) + sum(increase(pg_connector_github_budget_spent{bucket="graphql"}[1h]))')"
+mutate counter-outside-rate D3 "$(set_expr 0 "sum(${counter})")"
+mutate counter-without-range D3 "$(set_expr 0 "sum(${counter}) + sum(increase(${counter}[1h]))")"
 mutate suffix-on-gauge D3 '(.. | objects | select(has("expr")) | .expr) |= gsub("queue_depth"; "queue_depth_sum")'
 mutate histogram-without-suffix D3 '(.. | objects | select(has("expr")) | .expr) |= gsub("request_duration_count"; "request_duration")'
-mutate_catalog counter-retyped D3 's/^(pg_connector_github_queue_depth) gauge/\1 counter/'
+mutate_catalog counter-retyped D3 "s/^(${queue_depth}) gauge/\\1 counter/"
 
-mutate missing-topic D4 '(.panels[] | select(.title == "Freshness per query") | .title) = "Staleness"'
-mutate topic-underscore-lost D4 '(.panels[] | select(.title == "Served-from ratio") | .title) = "Served ratio"'
-mutate missing-governor-backlog-topic D4 '(.panels[] | select(.title == "Governor backlog by class") | .title) = "Pending work"'
-mutate missing-tracked-watched-topic D4 '(.panels[] | select(.title | startswith("Tracked and watched")) | .title) |= "Set size: " + ltrimstr("Tracked and watched: ")'
+# One mutant per topic of the list: rename every panel whose title names it, so D4 must fire.
+# A topic that no title names fails the real inputs first, so each mutant really removes a panel.
+topic_no=0
+while read -r topic; do
+  topic_no=$((topic_no + 1))
+  phrase="$(jq -n -r --arg t "$topic" '$t | ascii_downcase | gsub("[-_]"; " ")')"
+  mutate "drop-topic-${topic_no}" D4 "(.panels[] | select((.title // \"\" | ascii_downcase | gsub(\"[-_]\"; \" \")) | contains($(jq -n --arg p "$phrase" '$p'))) | .title) = \"Renamed panel\""
+done < <(jq -r '.[]' <<<"$topics")
 
-mutate missing-description D5 'del(.panels[] | select(.id == 2) | .description)'
-mutate empty-description D5 '(.panels[] | select(.id == 3) | .description) = ""'
+mutate missing-description D5 'del(.panels[1].description)'
+mutate empty-description D5 '.panels[2].description = ""'
 
-mutate target-loki D6 '(.panels[] | select(.id == 4) | .targets[0].datasource) = {"type": "loki", "uid": "loki"}'
-mutate target-no-datasource D6 'del(.panels[] | select(.id == 5) | .targets[0].datasource)'
+mutate target-loki D6 '.panels[3].targets[0].datasource = {"type": "loki", "uid": "loki"}'
+mutate target-no-datasource D6 'del(.panels[4].targets[0].datasource)'
 
-mutate gauge-under-sum D8 "$(set_expr 4 'sum by (class) (pg_connector_github_queue_depth)')"
-mutate bad-promql D7 "$(set_expr 4 'max by (class) (pg_connector_github_queue_depth))')"
+mutate gauge-under-sum D8 "$(set_expr 3 "sum by (class) (${queue_depth})")"
+mutate bad-promql D7 "$(set_expr 3 "max by (class) (${queue_depth}))")"
 
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "OK: the dashboard passes D1-D8 and $mutants mutants were each rejected by exactly the intended rule."
+echo "OK: the $connector dashboard passes D1-D8 and $mutants mutants were each rejected by exactly the intended rule."

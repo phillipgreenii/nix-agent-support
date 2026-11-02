@@ -1,0 +1,13 @@
+rate limit headroom
+jira requests by result
+rate limit pressure
+request rate headroom
+queue depth and oldest overdue
+freshness per query
+served_from ratio
+answer staleness by group
+detection delay
+settle results and pending rows
+consumer lag
+tracked and watched
+store size and evictions

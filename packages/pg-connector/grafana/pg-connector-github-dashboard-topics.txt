@@ -1,0 +1,10 @@
+budget against the cap
+spend by purpose and group
+queue depth and oldest overdue
+freshness per query
+served_from ratio
+detection delay
+settle results and pending rows
+consumer lag
+tracked and watched
+governor backlog

@@ -119,6 +119,19 @@ in
           [
             ../../../packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml
           ];
+
+      # Same folder title as the alert group ("pg-connector"), so dashboards and
+      # alerts converge on one Grafana folder BY TITLE (no folderUid anywhere).
+      # Only rendered when observability.ui.enable is also set. Listed only
+      # while the daemon is deployed, so a machine without the daemon gets no
+      # empty dashboard (the GitHub module lists its dashboard unconditionally;
+      # an empty dashboard there is harmless and this one is simply tidier).
+      dashboardProviders = lib.optionalAttrs daemonDeployed {
+        pg-connector-issue-jira = {
+          folder = "pg-connector";
+          dashboards = [ ../../../packages/pg-connector/grafana/pg-connector-issue-jira.json ];
+        };
+      };
     };
   };
 }
