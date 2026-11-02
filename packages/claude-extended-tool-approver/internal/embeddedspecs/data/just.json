@@ -44,6 +44,18 @@
           "source": "just --help: \"--allow-missing Ignore missing recipe and module errors [env: JUST_ALLOW_MISSING=]\""
         }
       },
+      "--check": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "dry-run"
+        },
+        "citation": {
+          "source": "just --help: \"--check Run `--fmt` in 'check' mode. Exits with 0 if justfile is formatted correctly. Exits with 1 and prints a diff if formatting is required.\" (check mode writes nothing, so it strips the --fmt write via the dry-run transform)"
+        }
+      },
       "--color": {
         "arity": "one",
         "operand": {
@@ -90,6 +102,18 @@
         },
         "citation": {
           "source": "just --help: \"--explain Print recipe doc comment before running it [env: JUST_EXPLAIN=]\""
+        }
+      },
+      "--fmt": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "just --help: \"--fmt Format and overwrite justfile\""
         }
       },
       "--help": {
@@ -354,6 +378,18 @@
         "source": "just --help: \"Usage: just [OPTIONS] [ARGUMENTS]...\""
       }
     },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "path-modify"
+        },
+        "target": "justfile",
+        "whenFlags": ["--fmt"],
+        "citation": {
+          "source": "just --help: \"--fmt Format and overwrite justfile\" -- the justfile (discovered in the working directory; -f/--justfile redirects it and is judged as a config source) is rewritten in place, so path-modify target \"justfile\" fires when --fmt is present; --check drops it"
+        }
+      }
+    ],
     "stdin": "never",
     "stdout": "metadata",
     "unknownFlag": "insufficient",

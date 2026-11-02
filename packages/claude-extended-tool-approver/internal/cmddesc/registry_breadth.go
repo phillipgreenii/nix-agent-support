@@ -2005,6 +2005,15 @@ var justSchema = CommandSchema{
 		// tc-o14i5.3.5: a different justfile / working directory is a config source.
 		"-f": {Arity: ArityOne, Operand: ConfigSource}, "--justfile": {Arity: ArityOne, Operand: ConfigSource},
 		"-d": {Arity: ArityOne, Operand: ConfigSource}, "--working-directory": {Arity: ArityOne, Operand: ConfigSource},
+		// tc-k0r5o: `--fmt` formats and OVERWRITES the justfile in place (a
+		// bounded write, modeled by the implicit path-modify below); `--check`
+		// runs `--fmt` in check mode (prints a diff, writes nothing), so it
+		// strips that write. A recipe run stays judged by the verb dispatch.
+		"--fmt":   inert,
+		"--check": {Transform: EffectTransform{Kind: TransformDryRun}},
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: "justfile", WhenFlags: []string{"--fmt"}},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,

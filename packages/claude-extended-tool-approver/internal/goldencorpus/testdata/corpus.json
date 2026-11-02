@@ -15802,5 +15802,119 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-gx5ui guardrail: non-ruled mutating verb still abstains."
+  },
+  {
+    "case": "just_fmt_check_f_approve",
+    "tags": ["ceta-spec", "tc-k0r5o"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "just --fmt --check --unstable -f justfile 2>&1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-k0r5o: check mode writes nothing; -f inside the repo."
+  },
+  {
+    "case": "just_fmt_write_in_repo_approve",
+    "tags": ["ceta-spec", "tc-k0r5o"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "just --fmt --unstable"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-k0r5o: bounded in-repo write of the justfile."
+  },
+  {
+    "case": "just_recipe_run_not_approve",
+    "tags": ["ceta-spec", "tc-k0r5o"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "just build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-k0r5o guardrail: recipe execution stays un-approved."
+  },
+  {
+    "case": "just_fmt_unmodeled_flag_not_approve",
+    "tags": ["ceta-spec", "tc-k0r5o"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "just --fmt --check --bogus"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-k0r5o guardrail: unmodeled flag abstains."
+  },
+  {
+    "case": "just_fmt_f_unknown_zone_not_approve",
+    "tags": ["ceta-spec", "tc-k0r5o"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "just --fmt --unstable -f /etc/justfile"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-k0r5o guardrail: -f outside the trusted zone does not widen."
+  },
+  {
+    "case": "just_fmt_f_credential_store_reject",
+    "tags": ["ceta-spec", "tc-k0r5o"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "just --fmt --unstable -f ~/.ssh/justfile"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "tc-k0r5o guardrail: credential store path."
   }
 ]
