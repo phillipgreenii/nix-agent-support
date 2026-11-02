@@ -8,6 +8,15 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 )
 
+// nonBeadTypes are item types emitted by sources whose items are never beads
+// (pg-repo-runner: repo-sync items are keyed by repo name, repo-tip items by
+// repo@sha). Their ids can look like a bd id, so the id shape cannot exclude
+// them; the type does (pg2-j8vjrx).
+var nonBeadTypes = map[string]bool{
+	"repo-sync": true,
+	"repo-tip":  true,
+}
+
 // RefreshItem returns it with its Metadata overlaid by the bead's CURRENT
 // metadata, read from bd at dispatch time (pg2-1pt7r).
 //
@@ -28,6 +37,12 @@ import (
 // emit the connector entity type). Detecting by id shape cannot skip a genuine
 // bead, since bd only mints ids of that shape (pg2-rk7t9).
 //
+// The id shape alone is not enough (pg2-j8vjrx): a repo-sync item's id is the
+// bare repo name (`nix-agent-support`) and a repo-tip item's id can be one too,
+// and a repo name has exactly the shape of a bd id, so each such dispatch ran
+// `bd show <repo>` and logged the WARN. Items whose Type names a source that
+// never emits beads (nonBeadTypes) are therefore skipped by type as well.
+//
 // Best effort: a bd read failure (or a bead with no metadata) leaves the
 // payload item untouched and is logged, never turned into a dispatch failure —
 // a stale-but-present prompt is no worse than before this refresh existed.
@@ -42,7 +57,7 @@ func RefreshItem(ctx context.Context, bd beads.Runner, it item.Item) item.Item {
 // bead was read: a non-bead item, a nil runner, or a bd failure (already
 // logged). Everything else about the item is as RefreshItem documents.
 func RefreshItemIssue(ctx context.Context, bd beads.Runner, it item.Item) (item.Item, *beads.Issue) {
-	if bd == nil || !beads.IsID(it.ID) {
+	if bd == nil || nonBeadTypes[it.Type] || !beads.IsID(it.ID) {
 		return it, nil
 	}
 	iss, err := beads.ShowObj(ctx, bd, it.ID)
