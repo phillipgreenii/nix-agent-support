@@ -218,19 +218,19 @@ No exit code is `1` (reserved for unexpected errors) or `9` (the router's "busy,
 code names the failing stage and the class; `0` is success and `64` is a usage or configuration
 error (a bad mode or id, an unknown flag, a decider configuration file that cannot be read).
 
-| Code | Stage     | Class             | Retried by the router | Meaning                                                                                  |
-| ---- | --------- | ----------------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| `20` | `hydrate` | `transient`       | yes                   | Forge or connector failure a later attempt may clear: a 5xx, a rate limit, a timeout     |
-| `21` | `hydrate` | `degraded`        | yes                   | Part of the read failed; the previous detail is kept and nothing was written             |
-| `22` | `hydrate` | `not_found`       | no                    | The PR no longer exists at its source; see "A PR that no longer exists"                  |
-| `23` | `hydrate` | `unauthenticated` | no                    | A missing or invalid credential; needs a person                                          |
-| `24` | `hydrate` | `hydrate_error`   | no                    | Refresh exit `1`, or any other failure that is not one of the classes above              |
-| `25` | `hydrate` | `unhydrated`      | no                    | The stored view is at version `0` or marked stale, so the decider was not run            |
-| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried        |
-| `31` | `decide`  | `decide_failed`   | no                    | The decider exited `1` or `3`, or could not be started                                   |
-| `32` | `decide`  | `transient`       | yes                   | The decider exited `4` because its work-item lookup was unavailable; nothing was written |
-| `40` | `lock`    | `transient`       | yes                   | The per-PR lock was not free within the wait                                             |
-| `41` | `lock`    | `hydrate_error`   | no                    | The lock file could not be created or opened                                             |
+| Code | Stage     | Class             | Retried by the router | Meaning                                                                                                                                                   |
+| ---- | --------- | ----------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `20` | `hydrate` | `transient`       | yes                   | Forge or connector failure a later attempt may clear: a 5xx, a rate limit, a timeout, a connector config hash mismatch while an apply restarts the daemon |
+| `21` | `hydrate` | `degraded`        | yes                   | Part of the read failed; the previous detail is kept and nothing was written                                                                              |
+| `22` | `hydrate` | `not_found`       | no                    | The PR no longer exists at its source; see "A PR that no longer exists"                                                                                   |
+| `23` | `hydrate` | `unauthenticated` | no                    | A missing or invalid credential; needs a person                                                                                                           |
+| `24` | `hydrate` | `hydrate_error`   | no                    | Refresh exit `1`, or any other failure that is not one of the classes above                                                                               |
+| `25` | `hydrate` | `unhydrated`      | no                    | The stored view is at version `0` or marked stale, so the decider was not run                                                                             |
+| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried                                                                         |
+| `31` | `decide`  | `decide_failed`   | no                    | The decider exited `1` or `3`, or could not be started                                                                                                    |
+| `32` | `decide`  | `transient`       | yes                   | The decider exited `4` because its work-item lookup was unavailable; nothing was written                                                                  |
+| `40` | `lock`    | `transient`       | yes                   | The per-PR lock was not free within the wait                                                                                                              |
+| `41` | `lock`    | `hydrate_error`   | no                    | The lock file could not be created or opened                                                                                                              |
 
 There is no `retry_exhausted` class: the router keeps its attempt count in memory and passes none
 to the command, so the command cannot know that a run is the last attempt.

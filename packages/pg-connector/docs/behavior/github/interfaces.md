@@ -118,25 +118,25 @@ log addresses are not signals.
 
 Every failure is answered from the parent's seven-value taxonomy (`INV-GH-ERR-1`):
 
-| Failure                                        | Answer                                                                                                                          |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| origin error or timeout                        | the group stays stale and records its last error; an interactive read gets stale content inside expiry, otherwise `unavailable` |
-| origin batch fails for one group               | that batch falls back to per-entity fetches for the group                                                                       |
-| secondary limit from the origin                | background work pauses for the stated time; interactive reads are served stale                                                  |
-| point-metered bucket below the reserve         | background work stops; interactive reads are served stale or answered `unavailable` naming the reserve                          |
-| authentication failure                         | fetches answer `unauthenticated`; cached reads are still served with their age; `auth_status` reports the failure               |
-| acting identity changed                        | identity-scoped data is flushed (`INV-GH-FRESH-11`)                                                                             |
-| PR deleted or inaccessible                     | the entity is tombstoned and recorded as `removed`                                                                              |
-| daemon unreachable                             | `unavailable` naming the socket path and the supervisor's restart hint (`INV-GH-PROC-2`)                                        |
-| daemon migrating its store                     | `unavailable` whose message starts with `migrating:`                                                                            |
-| store corrupt, or its migration fails          | the store is moved aside with a timestamp, the daemon starts empty with refill limited, and an alert fires (`INV-GH-PROC-4`)    |
-| store newer than the binary                    | the daemon refuses to start and alerts; it never moves the store aside (`INV-GH-PROC-4`)                                        |
-| protocol version outside the supported range   | `version_mismatch`; a difference inside the range is reported by `status`, never as an error                                    |
-| socket path, permission or peer identity       | the daemon rejects with a log line; the client answers `unavailable` naming the socket path                                     |
-| query name the config does not define          | `query_not_recognized` (`INV-ERR-3`)                                                                                            |
-| attached config hash differs from the daemon's | `invalid_argument` naming both config paths, so a stale registry fails loudly                                                   |
-| consumer position outside retention            | `invalid_argument` whose message starts with `cursor_expired:` (`INV-GH-CHG-8`)                                                 |
-| a key held for the other feed                  | `invalid_argument` naming the existing key (`INV-GH-CHG-10`)                                                                    |
+| Failure                                        | Answer                                                                                                                                                                                              |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| origin error or timeout                        | the group stays stale and records its last error; an interactive read gets stale content inside expiry, otherwise `unavailable`                                                                     |
+| origin batch fails for one group               | that batch falls back to per-entity fetches for the group                                                                                                                                           |
+| secondary limit from the origin                | background work pauses for the stated time; interactive reads are served stale                                                                                                                      |
+| point-metered bucket below the reserve         | background work stops; interactive reads are served stale or answered `unavailable` naming the reserve                                                                                              |
+| authentication failure                         | fetches answer `unauthenticated`; cached reads are still served with their age; `auth_status` reports the failure                                                                                   |
+| acting identity changed                        | identity-scoped data is flushed (`INV-GH-FRESH-11`)                                                                                                                                                 |
+| PR deleted or inaccessible                     | the entity is tombstoned and recorded as `removed`                                                                                                                                                  |
+| daemon unreachable                             | `unavailable` naming the socket path and the supervisor's restart hint (`INV-GH-PROC-2`)                                                                                                            |
+| daemon migrating its store                     | `unavailable` whose message starts with `migrating:`                                                                                                                                                |
+| store corrupt, or its migration fails          | the store is moved aside with a timestamp, the daemon starts empty with refill limited, and an alert fires (`INV-GH-PROC-4`)                                                                        |
+| store newer than the binary                    | the daemon refuses to start and alerts; it never moves the store aside (`INV-GH-PROC-4`)                                                                                                            |
+| protocol version outside the supported range   | `version_mismatch`; a difference inside the range is reported by `status`, never as an error                                                                                                        |
+| socket path, permission or peer identity       | the daemon rejects with a log line; the client answers `unavailable` naming the socket path                                                                                                         |
+| query name the config does not define          | `query_not_recognized` (`INV-ERR-3`)                                                                                                                                                                |
+| attached config hash differs from the daemon's | `invalid_argument` naming both config paths, so a stale registry fails loudly; pg-desk classes it `transient` (apply restart window), so the PR lane retries it within the router's bounded retries |
+| consumer position outside retention            | `invalid_argument` whose message starts with `cursor_expired:` (`INV-GH-CHG-8`)                                                                                                                     |
+| a key held for the other feed                  | `invalid_argument` naming the existing key (`INV-GH-CHG-10`)                                                                                                                                        |
 
 - **What must hold.** Each op and answer above, under the invariants named against it. The backend
   MUST NOT answer an op from the umbrella's own state, and MUST NOT depend on the umbrella's cache

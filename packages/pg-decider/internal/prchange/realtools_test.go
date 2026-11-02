@@ -54,7 +54,7 @@ const (
 // minScenarios is the number of subtests TestPRChangeRealTools has; the nix
 // check requires at least this many PASS lines, so a filtered-out or renamed
 // scenario cannot pass vacuously. Keep it equal to the number of t.Run calls.
-const minScenarios = 22
+const minScenarios = 23
 
 func contains(t *testing.T, what, got string, want ...string) {
 	t.Helper()
@@ -253,6 +253,29 @@ func TestPRChangeRealTools(t *testing.T) {
 		lacksRetryWords(t, "hydrate_error line", res.stderr)
 		if len(r.deciderRuns()) != 0 {
 			t.Error("the decider ran after a refresh exit 1")
+		}
+	})
+
+	run("a-connector-config-hash-mismatch-is-transient-and-retryable-with-the-mismatch-text-kept", func(t *testing.T) {
+		// The apply restart window (pg2-knpshx): the umbrella's backends block was
+		// switched before the daemon restarted, so the daemon answers
+		// invalid_argument "config hash mismatch". The router must re-run the
+		// delivery; once its bounded retries are spent the last line still names
+		// the mismatch, so a daemon that never picks up the new config is visible.
+		r := newRig(t, fxOpenAnchor, true)
+		r.hydrate()
+		r.ctlWrite("fail.pr-show", "invalid_argument")
+		r.ctlWrite("fail.pr-show.message", "config hash mismatch: the request's backends block was rendered from config /nix/store/a-cfg.json (hash 2bf15f0c) but the daemon runs config /nix/store/b-cfg.json (hash d809103d)")
+		res := r.change("apply", id7)
+		if res.code != ExitHydrateTransient {
+			t.Fatalf("exit %d, want %d:\n%s", res.code, ExitHydrateTransient, res.stderr)
+		}
+		contains(t, "line", res.stderr, "stage=hydrate", "class=transient", "unavailable")
+		if !strings.Contains(res.stderr, "config hash mismatch") {
+			t.Errorf("the failure line lost the mismatch text: %q", res.stderr)
+		}
+		if len(r.deciderRuns()) != 0 {
+			t.Error("the decider ran after a failed hydrate")
 		}
 	})
 

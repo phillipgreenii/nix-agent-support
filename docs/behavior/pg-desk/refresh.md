@@ -72,16 +72,21 @@ entity.
   written to standard output on those exits; the error text goes to standard error as before). The
   class is machine-readable, so a caller never has to read message text to tell the failures apart:
 
-  | Class             | Meaning                                                                                                                                                             |
-  | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `not_found`       | The source says the entity is absent (the connector's exit 4 or its `not_found` code).                                                                              |
-  | `transient`       | The source or the connector failed in a way a later attempt may clear: the connector's `unavailable` code (a forge 5xx), a killed or timed-out child, a busy store. |
-  | `unauthenticated` | The source refused the credentials (the connector's `unauthenticated` code); it needs a person.                                                                     |
-  | `degraded`        | Exit `2` only: part of the read failed and the previous detail is kept.                                                                                             |
-  | `hydrate_error`   | Any other failure: another connector code, an undecodable answer, a store or interpretation error.                                                                  |
+  | Class             | Meaning                                                                                                                                                                                                                                                                          |
+  | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `not_found`       | The source says the entity is absent (the connector's exit 4 or its `not_found` code).                                                                                                                                                                                           |
+  | `transient`       | The source or the connector failed in a way a later attempt may clear: the connector's `unavailable` code (a forge 5xx), its `invalid_argument` answer for a config hash mismatch (an apply restarting the daemon onto a new config), a killed or timed-out child, a busy store. |
+  | `unauthenticated` | The source refused the credentials (the connector's `unauthenticated` code); it needs a person.                                                                                                                                                                                  |
+  | `degraded`        | Exit `2` only: part of the read failed and the previous detail is kept.                                                                                                                                                                                                          |
+  | `hydrate_error`   | Any other failure: another connector code, an undecodable answer, a store or interpretation error.                                                                                                                                                                               |
 
   The connector's own wire code decides first, because its message text can say anything: a
   transient answer whose message mentions a missing repository is `transient`, never `not_found`.
+  A config hash mismatch (`invalid_argument: config hash mismatch ...`) is `transient` too, because an
+  apply switches the umbrella's backends block before launchd restarts the daemon; every other
+  `invalid_argument` stays `hydrate_error`. A daemon that never restarts onto the new config is not
+  retried silently forever: the router's bounded `max_dispatch_retries` ends in a failed dispatch of
+  class `transient` whose line still names the mismatch.
   Exit `3` therefore still covers both a missing entity and a transient failure, and the class is how
   they are told apart. An `issue` whose backend's daemon answers `unavailable` (during the read or the
   probe of the owning backends that `--watch` makes for an id nothing names) is therefore exit `3` with

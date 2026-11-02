@@ -23,6 +23,11 @@ func TestRefreshClass(t *testing.T) {
 		{"unauthenticated", errors.New("pg-connector [pr show x]: exit 1: unauthenticated: bad credentials"), "", RefreshClassUnauthenticated},
 		{"wire not_found", errors.New("pg-connector [pr show x]: exit 1: not_found: gone"), "", RefreshClassNotFound},
 		{"other wire code", errors.New("pg-connector [x]: exit 1: version_mismatch: skew"), "", RefreshClassHydrateError},
+		{
+			"config hash mismatch is transient (apply restart window)",
+			errors.New("pipeline: gather pr o/r#1: pg-connector [pr show o/r#1 --fresh]: exit 1: invalid_argument: config hash mismatch: the request's backends block was rendered from config /nix/store/a-pg-connector-github-config.json (hash 2bf15f0c) but the daemon runs config /nix/store/b-pg-connector-github-config.json (hash d809103d)"), "", RefreshClassTransient,
+		},
+		{"other invalid_argument stays hydrate_error", errors.New("pg-connector [x]: exit 1: invalid_argument: cursor_expired: gone"), "", RefreshClassHydrateError},
 		{"exit 4 text", errors.New("gather: fetch triggering PR o/r#1: pg-connector reports not_found"), "", RefreshClassNotFound},
 		{"pipeline not found", errors.New("pipeline: issue bd-1: not found"), "", RefreshClassNotFound},
 		{"killed child", errors.New("pg-connector [x]: signal: killed"), "", RefreshClassTransient},

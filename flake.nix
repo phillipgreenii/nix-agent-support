@@ -6679,7 +6679,7 @@
                     # Two scenarios scrape the real `pg-desk serve` on a loopback port
                     # to read the lane lookup gauges the way a scraper does.
                     __darwinAllowLocalNetworking = true;
-                    minScenarios = "22";
+                    minScenarios = "23";
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
