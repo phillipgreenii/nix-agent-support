@@ -15688,5 +15688,119 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-gyiyl: non-skill write verb still needs consent."
+  },
+  {
+    "case": "bd_update_actor_var_approve",
+    "tags": ["ceta-spec", "tc-gx5ui"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update tc-abc --claim --actor \"$ACTOR\" --json 2>&1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gx5ui: --actor is bd persistent flag; a variable value is a flag value, not a positional."
+  },
+  {
+    "case": "bd_update_assignee_var_approve",
+    "tags": ["ceta-spec", "tc-gx5ui"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update tc-abc --status open --assignee \"$A\" --actor \"$A\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gx5ui: update value flags (--assignee/--status) consume a runtime value."
+  },
+  {
+    "case": "bd_update_literal_forms_approve",
+    "tags": ["ceta-spec", "tc-gx5ui"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update tc-abc --defer +7d --add-label human --priority 2 --title \"x\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-gx5ui: ruled tracker-write update with modeled value flags."
+  },
+  {
+    "case": "bd_update_positional_var_abstain",
+    "tags": ["ceta-spec", "tc-gx5ui"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update \"$id\" --claim --actor x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-gx5ui guardrail: a runtime-expanded id in a positional slot still abstains."
+  },
+  {
+    "case": "bd_update_body_file_secret_reject",
+    "tags": ["ceta-spec", "tc-gx5ui"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update tc-abc --body-file ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-gx5ui guardrail: file-reading flag still path-checked."
+  },
+  {
+    "case": "bd_reopen_actor_var_abstain",
+    "tags": ["ceta-spec", "tc-gx5ui"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd reopen tc-abc --actor \"$A\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-gx5ui guardrail: non-ruled mutating verb still abstains."
   }
 ]

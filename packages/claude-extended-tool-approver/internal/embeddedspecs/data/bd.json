@@ -832,6 +832,42 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--directory": {
             "arity": "one",
             "operand": {
@@ -842,6 +878,18 @@
             },
             "citation": {
               "source": "bd close --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "--reason-file": {
@@ -917,6 +965,42 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--directory": {
             "arity": "one",
             "operand": {
@@ -927,6 +1011,18 @@
             },
             "citation": {
               "source": "bd comment --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "--file": {
@@ -1087,6 +1183,42 @@
               }
             },
             "flags": {
+              "--actor": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--database": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--db": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "--directory": {
                 "arity": "one",
                 "operand": {
@@ -1097,6 +1229,18 @@
                 },
                 "citation": {
                   "source": "bd comments add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "--dolt-auto-commit": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               },
               "--file": {
@@ -1551,6 +1695,18 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--body-file": {
             "arity": "one",
             "operand": {
@@ -1561,6 +1717,30 @@
             },
             "citation": {
               "source": "bd create --help: \"--body-file string Read description from file (use - for stdin)\""
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "--design-file": {
@@ -1585,6 +1765,18 @@
             },
             "citation": {
               "source": "bd create --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "--file": {
@@ -1769,6 +1961,42 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--directory": {
             "arity": "one",
             "operand": {
@@ -1779,6 +2007,18 @@
             },
             "citation": {
               "source": "bd defer --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "-C": {
@@ -2000,6 +2240,42 @@
               }
             },
             "flags": {
+              "--actor": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--database": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--db": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "--directory": {
                 "arity": "one",
                 "operand": {
@@ -2010,6 +2286,18 @@
                 },
                 "citation": {
                   "source": "bd dep add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "--dolt-auto-commit": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               },
               "--file": {
@@ -5579,6 +5867,42 @@
               }
             },
             "flags": {
+              "--actor": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--database": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--db": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "--directory": {
                 "arity": "one",
                 "operand": {
@@ -5589,6 +5913,18 @@
                 },
                 "citation": {
                   "source": "bd label add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "--dolt-auto-commit": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               },
               "-C": {
@@ -5919,6 +6255,42 @@
               }
             },
             "flags": {
+              "--actor": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--database": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
+              "--db": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                }
+              },
               "--directory": {
                 "arity": "one",
                 "operand": {
@@ -5929,6 +6301,18 @@
                 },
                 "citation": {
                   "source": "bd label remove --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "--dolt-auto-commit": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
                 }
               },
               "-C": {
@@ -6844,6 +7228,42 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--directory": {
             "arity": "one",
             "operand": {
@@ -6854,6 +7274,18 @@
             },
             "citation": {
               "source": "bd q --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "-C": {
@@ -8738,6 +9170,42 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--directory": {
             "arity": "one",
             "operand": {
@@ -8748,6 +9216,18 @@
             },
             "citation": {
               "source": "bd undefer --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "-C": {
@@ -8811,6 +9291,54 @@
           }
         },
         "flags": {
+          "--actor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--add-label": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--assignee": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--await-id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--body-file": {
             "arity": "one",
             "operand": {
@@ -8821,6 +9349,42 @@
             },
             "citation": {
               "source": "bd update --help: \"--body-file string Read description from file (use - for stdin)\""
+            }
+          },
+          "--database": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--db": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--defer": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "--design-file": {
@@ -8847,6 +9411,78 @@
               "source": "bd update --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "--dolt-auto-commit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--due": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--estimate": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--external-ref": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--if-assignee": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--if-status": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--metadata": {
             "arity": "one",
             "operand": {
@@ -8859,6 +9495,126 @@
               "source": "bd update --help: \"--metadata string Set custom metadata (JSON string or @file.json to read from file)\""
             }
           },
+          "--parent": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--priority": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--remove-label": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--session": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--set-labels": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--set-metadata": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--spec-id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--status": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--type": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--unset-metadata": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-C": {
             "arity": "one",
             "operand": {
@@ -8869,6 +9625,66 @@
             },
             "citation": {
               "source": "bd update --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-a": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-e": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-p": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-s": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-t": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },

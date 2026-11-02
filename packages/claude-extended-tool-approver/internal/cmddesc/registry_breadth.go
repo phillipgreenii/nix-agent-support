@@ -171,6 +171,25 @@ var bdFileFlags = map[string][]string{
 	"dep add":      {"--file"},
 }
 
+// bdValueFlags are, per tracker-write verb, the value-taking flags from
+// `bd <verb> --help` whose operand is plain data (tc-gx5ui). Modeling them
+// makes a runtime-expanded value a flag value rather than a live positional.
+// Positional ids are unaffected: `bd update $ID` still abstains.
+var bdValueFlags = map[string][]string{
+	"update": {
+		"--add-label", "-a", "--assignee",
+		"--await-id", "--defer", "--due",
+		"-e", "--estimate", "--external-ref", "--if-assignee", "--if-status",
+		"--parent", "-p", "--priority", "--remove-label", "--session",
+		"--set-labels", "--set-metadata", "--spec-id", "-s", "--status",
+		"-t", "--type", "--unset-metadata",
+		// Free-text flags (--title, --description, --design, --notes,
+		// --append-notes, --acceptance) are deliberately NOT modeled: a
+		// note value opening with a runtime expansion stays held
+		// (pg2-i4lbg pin in plugin_forms_test.go).
+	},
+}
+
 // bdMetadataVerbs take --metadata (JSON string or @file.json).
 var bdMetadataVerbs = map[string]bool{"create": true, "update": true}
 
@@ -202,6 +221,17 @@ func bdRemoteIn(parent, name, operation string) CommandSchema {
 		key := name
 		if parent != "" {
 			key = parent + " " + name
+		}
+		// tc-gx5ui: bd's persistent flags may follow the verb. Without them
+		// `--actor "$ID"` parsed as an unknown inert flag plus a live
+		// positional (option injection abstain) although the flag consumes
+		// that value. Values only; the permission is unchanged.
+		for _, f := range []string{"--actor", "--dolt-auto-commit", "--database"} {
+			flags[f] = literal1
+		}
+		flags["--db"] = FlagSpec{Arity: ArityOne, Operand: PathRead}
+		for _, f := range bdValueFlags[key] {
+			flags[f] = literal1
 		}
 		for _, f := range bdFileFlags[key] {
 			flags[f] = FlagSpec{Arity: ArityOne, Operand: PathRead}
