@@ -565,7 +565,10 @@ sequenceDiagram
 - **The catalog.** Because an enumerated catalog belongs to the interface that carries it, the
   members are named here and `INV-OBS-1` states only the obligation to declare them. The catalog
   **MUST** declare at least:
-  - **queue depth** — gauge, per `type`;
+  - **queue depth** — gauge, per `type`: the events the queue still **retains** of that type,
+    **including events every listener has already handled**, which stay until their time to live
+    ends. It is **not** a backlog and **MUST NOT** be read as one; the per-listener pending gauges
+    below say what a listener still owes (`DEC-OBS-12`);
   - **failure rate** — counter, per **delivery-side** failure class, of which there are exactly two: a
     **pre-accept decline** (an `unavailable` self-report, or a **busy** decline from a handler at
     capacity, `INV-CONC-1`) and a **dispatch failure** where the core could not hand the event over at
@@ -719,6 +722,21 @@ sequenceDiagram
     a fetch of it is in flight. A `[[query]]` is a pull source under the same name, so a query has no
     series of its own. The state comes from the decline's **kind** and the in-flight state only, **never
     from a decline's reason**. `status` and the TUI show the same state (`INTF-CLI`).
+
+  and two more gauges, per **registered** `role`, which are **not** progress gauges and feed **no
+  alert** (`DEC-OBS-12`):
+  - **listener_pending** — a count: the retained events that role's handler matches and has not
+    **settled** (accepted, or given up on at its post-expiry attempt, `INV-FAIL-1`), **whatever
+    their expiry**. A listener that is caught up reads `0` while the per-`type` queue depth still
+    shows the events it handled; a listener registered after `N` matching events were retained reads
+    `N` at once and falls as it settles them;
+  - **listener_oldest_pending_age** — in seconds: the age, from the event's own stamped time, of the
+    oldest of those pending events, `0` when none is pending. It is the indicator of a listener
+    **falling behind**, because a count alone cannot tell a listener that normally holds one event
+    from one stuck on its first.
+
+  Both read the queue and are derived from it, so a restart does **not** reset them, and a scrape
+  before the core has built its queue reads no series for them, not a zero (`DEC-OBS-12`).
 
   **Two alert levels** read the three progress gauges and nothing else (`INV-OBS-3`). Both require a **recent
   offer** to the role, so an idle role never fires, and both read the age as its **maximum over a

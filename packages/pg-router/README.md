@@ -283,6 +283,8 @@ the role's prompt in `config.toml` instead; pg-router warns if any are still set
 `internal/metrics` builds the full OTel metric catalog (queue depth, failure rate,
 unconsumed-expired, unknown-type-rejected, throughput, backlog, liveness, dispatch
 latency (deprecated), queue wait and run time, oldest pending age, per-listener in-flight,
+per-listener pending count and oldest pending age
+(`pg_router_listener_pending`, `pg_router_listener_oldest_pending_age_seconds`; no alert reads them),
 source failures, deduped) against an injected `metric.MeterProvider` — the
 core stays unaware of any concrete monitoring backend. `run`'s own `--metrics-addr
 <host:port>` flag (or `PG_ROUTER_METRICS_ADDR`; the flag wins) opts a **daemon-mode**

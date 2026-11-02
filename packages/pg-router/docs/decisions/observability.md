@@ -544,7 +544,7 @@ from the re-offer, and the lane fixtures of 2026-10-12 and 2026-10-13 list the s
 metric changes name, labels or buckets.
 
 **Before the queue exists (decided 2026-10-14, bead `pg2-nzkjl`, `DEC-EVENT-5`).** Every gauge that
-reads the queue (the depth gauge and its backlog sum, `queue_oldest_age`, `listener_in_flight`, and the
+reads the queue (the depth gauge and its backlog sum, `queue_oldest_age`, `listener_in_flight`, `listener_pending`, `listener_oldest_pending_age`, and the
 log-size, log-limit and active-gate gauges) reads it on each collect, and the daemon serves `/metrics`
 before it has built the queue (the startup compaction alone took 6.03 s on 2026-10-12). A scrape in that
 gap reads **no series** for them, not a zero: there is no queue to read a zero from, and a zero would say
@@ -555,6 +555,7 @@ crashed the daemon (`DEC-EVENT-5` has the evidence).
 
 **Bounds.** `role` is config-bounded (`DEC-OBS-5`); `type` is bounded as above; neither adds an event
 id, bead or session as a label. The oldest-age gauge is a scan of the retained events at scrape time.
+`DEC-OBS-12`'s two per-listener gauges are bounded the same way (one series per registered role).
 
 **Reading the 24h wait-versus-run table.** Group `events.jsonl` dispatch rows by `role` and
 `event_type`; wait is `started_at - enqueued_at`, run is `duration_ms`. The histograms give the same
@@ -785,3 +786,51 @@ three gauges and the in-flight gauge and combine them. Now the core says it.
   ` [processing]`), plus a `Busy:` line in the drill-down.
 - **Not decided here.** Whether a busy role should also age out of the busy state without progress (as
   it stands it stays busy until its next progress or a restart, exactly as the busy count does).
+
+### `DEC-OBS-12` — per-listener pending count and oldest pending age; the per-type depth counts retained events, not backlog <!-- uuid: 6c2f9b1e-4a7d-4e83-b5c0-9d1e3a7f8264 -->
+
+**Decided** (operator requirement, 2026-11-02, epic `pg2-u1cxx0`: an operator wants, per listener,
+how many events it still owes, 0 once it has handled them all, and says "the oldest event is a better
+indicator"). The per-type `queue_depth` gauge counts events the queue still **retains**: a handled
+event stays until its time to live ends (only an event type listed for early eviction leaves sooner),
+so on a busy weekday it climbs while every listener is caught up. It cannot show a listener falling
+behind, and **MUST NOT** be read as a backlog. The same holds for the `backlog` sum. It also counts
+retained events that are already expired but still owed to a listener, not only non-expired ones.
+
+- **Definition.** An event is **pending** for listener L when it is still retained, L's `Matches`
+  accepts it, and it is **not settled for L**. **Expiry plays no part**: an event with no expiry is
+  born expired (its expiry defaults to its own time), and filtering on "not expired" would hide exactly
+  the head-of-line backlog. This is the predicate `OldestPendingAgeByType` already uses
+  (`internal/eventqueue/queue.go`).
+- **Settled, not accepted.** The queue marks an entry settled for a listener when it is accepted **or**
+  when a declined or failed last attempt, made past expiry, ends the offering (`e.settled`, set at the
+  accept and at the last-attempt decline). Settled is a superset of accepted, and the retention, release
+  and head-of-line logic all read settled, so an accepted-based count would show a ghost for an event
+  whose final attempt was declined. Settled is not persisted; accepted is (replay restores it).
+- **Consequences** (readers **MUST** know these):
+  - An in-flight offer is neither accepted nor settled until the offer returns, so pending is at least
+    the in-flight count: a listener that is normally busy shows 1 or 2 and is not stuck.
+  - A handler error after accept counts as accepted (`INV-FAIL-1`), so failed work is **not** pending.
+  - A decline, or a hand-back for a dispatch retry, stays pending until the single post-expiry attempt,
+    then drops to 0, so a listener that declines for the whole time to live shows a sawtooth. The count
+    of events that reach their time to live still unsettled (bead `pg2-u1cxx0.5`) closes that gap.
+  - A pause gate, a `Matches` that is not yet met, or serialize occupancy (`INV-CONC-1`) keeps events
+    pending, so a pause raises every listener's count and age. `Matches` is by type today; a payload
+    narrowing would flow through automatically.
+  - An event no listener matches counts for nobody: only `unconsumed_expired` shows it. A disabled role
+    has no listener, so no series.
+  - Age is measured from the event's own stamped time, not from when the listener was bound.
+  - A listener registered after `N` retained matching events reads `N` at once and decreases as it
+    settles them.
+  - Both are derived from the queue log, so a restart does **not** reset them (unlike the role-progress
+    gauges). Settling by post-expiry decline is not persisted, so such an event is pending again after
+    a restart. Before the queue exists (startup compaction) the series are absent, not zero.
+- **Metrics.** `pg_router_listener_pending{role}` (a count, unit `{event}`) and
+  `pg_router_listener_oldest_pending_age_seconds{role}` (seconds, 0 when nothing is pending), one series
+  per **registered** listener, `0` when idle. `role` is the listener id, the label
+  `listener_in_flight` carries (`DEC-OBS-7`), so cardinality is bounded by configured roles (`DEC-OBS-9`
+  "Bounds"). Both come from one queue pass under one lock, so they cannot disagree.
+- **No alert.** None reads these gauges. Operator ruling, 2026-11-02, verbatim: "hold on alert for now.
+  i don't want noise due to incorrect tuning. we might need have different values per listener." The
+  existing `pg-router-queue-depth-growing` alert and the per-type `queue_depth`, `backlog` and
+  `queue_oldest_age` gauges keep their behavior; only their descriptions say they count retained events.

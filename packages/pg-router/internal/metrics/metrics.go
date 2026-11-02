@@ -911,7 +911,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if _, err := m.Int64ObservableGauge(
 		MetricQueueDepth,
 		metric.WithUnit("{event}"),
-		metric.WithDescription("retained non-expired events in the queue, per type (INV-OBS-1)"),
+		metric.WithDescription("retained events in the queue, per type, including events every listener has handled until their time to live ends (not a backlog; DEC-OBS-12) (INV-OBS-1)"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
 			if !ready() {
 				return nil
@@ -927,7 +927,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if _, err := m.Int64ObservableGauge(
 		MetricBacklog,
 		metric.WithUnit("{event}"),
-		metric.WithDescription("retained non-expired events across every type, a scalar distinct from the per-type MetricQueueDepth (STORY-OBS-1)"),
+		metric.WithDescription("retained events across every type, handled ones included until their time to live ends (not a backlog; DEC-OBS-12), a scalar distinct from the per-type MetricQueueDepth (STORY-OBS-1)"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
 			if !ready() {
 				return nil
