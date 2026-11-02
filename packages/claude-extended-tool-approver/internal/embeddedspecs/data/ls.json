@@ -80,6 +80,18 @@
           "source": "ls --help: \"-d, --directory list directories themselves, not their contents\""
         }
       },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ls --help: \"--help display this help and exit\""
+        }
+      },
       "--human-readable": {
         "arity": "none",
         "operand": {
@@ -126,6 +138,18 @@
         },
         "citation": {
           "source": "ls --help: \"-r, --reverse reverse order while sorting\""
+        }
+      },
+      "--time-style": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ls --help: \"--time-style=TIME_STYLE time/date format with -l; see TIME_STYLE below\""
         }
       },
       "-1": {

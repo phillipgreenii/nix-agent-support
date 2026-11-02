@@ -15517,5 +15517,62 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-zfzyt: an unrelated absolute path outside every known zone stays abstain (successor of the discarded old-engine TestSafecmds_PnWorkspace_GrepUnrelatedAbsolutePath_StaysAbstain)."
+  },
+  {
+    "case": "ls_time_style_approve",
+    "tags": ["ceta-spec", "tc-monxg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls -ld --time-style=long-iso README.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-monxg: --time-style is display-only (ls --help)."
+  },
+  {
+    "case": "ls_time_style_ssh_reject",
+    "tags": ["ceta-spec", "tc-monxg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls -l --time-style=long-iso ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "tc-monxg guardrail: credential store still rejects."
+  },
+  {
+    "case": "ls_time_style_unknown_zone_not_approve",
+    "tags": ["ceta-spec", "tc-monxg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls -l --time-style=long-iso /var/lib/elsewhere"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-monxg guardrail: unknown-zone absolute path not widened."
   }
 ]

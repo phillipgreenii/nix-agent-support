@@ -1502,6 +1502,8 @@ var lsSchema = CommandSchema{
 		"-F": inert, "--classify": literalOpt,
 		"-G": inert, "--no-group": inert,
 		"--color": literalOpt,
+		// tc-monxg: display-format selector / usage text; neither touches paths.
+		"--time-style": literal1, "--help": inert,
 	},
 	Positionals: PositionalSpec{Rest: PathRead},
 	ImplicitEffects: []ImplicitEffect{
