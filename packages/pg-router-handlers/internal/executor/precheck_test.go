@@ -565,8 +565,11 @@ func TestPrecheckTriage_SkipReasons(t *testing.T) {
 		{"open escalated assigned to a peer proceeds (bd ready lists it)", with(func(i *beads.Issue) { i.Assignee = "someone-else" }), ""},
 		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadClosed},
 		{"in_progress", with(func(i *beads.Issue) { i.Status = "in_progress" }), SkipBeadNotOpen},
-		{"human", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHuman},
-		{"human and escalated together", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHuman},
+		{"human and escalated together is moot (pg2-n7pufu)", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHumanEscalated},
+		{"attention and escalated together is moot", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "attention") }), SkipBeadHumanEscalated},
+		{"human-focus and escalated together is moot", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human-focus") }), SkipBeadHumanEscalated},
+		{"human-focus-required and escalated together is moot", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human-focus-required") }), SkipBeadHumanEscalated},
+		{"in_progress with escalated and human is moot too", with(func(i *beads.Issue) { i.Status = "in_progress"; i.Labels = append(i.Labels, "human") }), SkipBeadHumanEscalated},
 		{"de-escalated", with(func(i *beads.Issue) { i.Labels = []string{"agent-support"} }), SkipBeadNotEscalated},
 		{"handed to a human: human, no escalated (pg2-4u0d0u)", with(func(i *beads.Issue) { i.Labels = []string{"agent-support", "attention", "human"} }), SkipBeadNotEscalated},
 		{"in_progress without escalated is moot, not not-open", with(func(i *beads.Issue) { i.Status = "in_progress"; i.Labels = []string{"human"} }), SkipBeadNotEscalated},
@@ -592,8 +595,8 @@ func TestPrecheckTriage_SkipReasons(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := captureLog(t)
 			clk := time.Unix(0, 0)
-			deps := Deps{Cfg: cfg, Now: func() time.Time { return clk }}
-			got, skipped := PrecheckTriage(DispatchContext{Role: triageRole(cfg), Item: item.Item{ID: "zr-t"}}, deps, tc.bead)
+			deps := Deps{Cfg: cfg, BD: &recBD{}, Now: func() time.Time { return clk }}
+			got, skipped := PrecheckTriage(context.Background(), DispatchContext{Role: triageRole(cfg), Item: item.Item{ID: "zr-t"}}, deps, tc.bead)
 			if tc.want == "" {
 				if skipped {
 					t.Fatalf("must proceed, got skip %+v", got)
@@ -614,7 +617,7 @@ func TestPrecheckTriage_SkipReasons(t *testing.T) {
 }
 
 func TestPrecheckTriage_NoCCPoolBlock(t *testing.T) {
-	if _, skipped := PrecheckTriage(DispatchContext{Role: roles.Role{Name: "t"}}, Deps{}, &beads.Issue{Status: "closed"}); skipped {
+	if _, skipped := PrecheckTriage(context.Background(), DispatchContext{Role: roles.Role{Name: "t"}}, Deps{}, &beads.Issue{Status: "closed"}); skipped {
 		t.Error("a role with no ccpool block is never prechecked")
 	}
 }

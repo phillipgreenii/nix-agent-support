@@ -192,7 +192,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 		{"open escalated bead launches as before", openEscalated, wire.BusyReasonPoolUnreadable},
 		{"open escalated bead held by a peer launches as before", peerHeld, wire.BusyReasonPoolUnreadable},
 		{"closed bead is completed as skipped", closed, "skipped-bead-closed"},
-		{"human bead is declined", human, "skipped-bead-human"},
+		{"escalated and human bead is commented, stripped and completed as skipped (pg2-n7pufu)", human, "skipped-bead-human-escalated"},
 		{"de-escalated bead is completed as skipped", deEscalated, "skipped-bead-not-escalated"},
 		{"human bead without escalated is completed as skipped (pg2-4u0d0u)", handedToHuman, "skipped-bead-not-escalated"},
 		{"deferred bead is declined", deferred, "skipped-bead-deferred"},
@@ -221,7 +221,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 			}
 			// A MOOT outcome (closed, de-escalated) is completed as skipped (exit 0,
 			// bead pg2-6t91v7); every other precheck outcome is still a busy decline.
-			if moot := tc.wantReason == "skipped-bead-closed" || tc.wantReason == "skipped-bead-not-escalated"; moot {
+			if moot := tc.wantReason == "skipped-bead-closed" || tc.wantReason == "skipped-bead-not-escalated" || tc.wantReason == "skipped-bead-human-escalated"; moot {
 				if code != conformance.ExitOK || reply.Skipped != tc.wantReason || reply.Reason != "" {
 					t.Fatalf("got exit %d skipped %q reason %q, want ExitOK completed as skipped %q", code, reply.Skipped, reply.Reason, tc.wantReason)
 				}
@@ -242,6 +242,22 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 			}
 			if len(skipRecords) != 1 || skipRecords[0]["reason"] != tc.wantReason || skipRecords[0]["bead"] != tc.id {
 				t.Fatalf("want exactly one precheck_skip record for %s with reason %q, got %v", tc.id, tc.wantReason, skipRecords)
+			}
+			if tc.id == human {
+				// The one precheck that writes: escalated is gone, human stays, a comment
+				// was added; a repeat is moot through not-escalated and writes nothing.
+				after := f.show(t, tc.id)
+				if strings.Contains(after, `"escalated"`) || !strings.Contains(after, `"human"`) || !strings.Contains(after, `"comment_count": 1`) {
+					t.Fatalf("human+escalated bead after the precheck, want escalated stripped, human kept and a comment:\n%s", after)
+				}
+				code, got := dispatchWith(t, triager.name, triager.cfg, "", `{"id":"e-2","type":"dispatch","payload":{"id":"`+tc.id+`","type":"task"}}`)
+				if code != conformance.ExitOK || !strings.Contains(got, "skipped-bead-not-escalated") {
+					t.Fatalf("repeat: exit %d %s, want moot skipped-bead-not-escalated", code, got)
+				}
+				if again := f.show(t, tc.id); again != after {
+					t.Fatalf("the repeat wrote to the bead:\nbefore: %s\nafter:  %s", after, again)
+				}
+				return
 			}
 			if after := f.show(t, tc.id); after != before {
 				t.Fatalf("a precheck decline wrote to the bead:\nbefore: %s\nafter:  %s", before, after)

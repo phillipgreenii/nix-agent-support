@@ -94,6 +94,15 @@ change. Not implemented.
 
 Rejected: the helper picks one behavior (single call, removing `escalated`) for every tracker.
 
+## Amendment: a bead with both sets (bead pg2-n7pufu, 2026-11-02)
+
+The queues keep a bead carrying `escalated` and a `HUMAN_LABELS` label away from the triager, but two
+paths could still create that state: the handler's park step (`AddHumanAndUnclaim` added `human` and
+left `escalated`) and a stale event for such a bead. The park step now removes `escalated` in the same
+update call. The triage precheck handles a bead that arrives with both gracefully: it comments, removes
+`escalated` and completes the event as skipped (moot), instead of declining it on every offer and
+jamming the serial queue. The drain (`ready`) precheck is unchanged and still declines a human bead.
+
 ## Related Decisions
 
 - [0079](0079-queue-definitions-mirror-contract.md): the queue mirror and its drift check, extended

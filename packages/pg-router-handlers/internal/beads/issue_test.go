@@ -186,7 +186,7 @@ func TestAddHumanAndUnclaim_commentThenOneUpdate(t *testing.T) {
 	if want := []string{"comment", "zr-1", "why it was parked"}; joinArgs(fr.args[0]) != joinArgs(want) {
 		t.Errorf("first call = %v, want %v (the note is written BEFORE the label)", fr.args[0], want)
 	}
-	want := []string{"update", "zr-1", "--add-label", "human", "--status=open", "--assignee="}
+	want := []string{"update", "zr-1", "--add-label", "human", "--remove-label", "escalated", "--status=open", "--assignee="}
 	if joinArgs(fr.args[1]) != joinArgs(want) {
 		t.Errorf("argv = %v, want %v", fr.args[1], want)
 	}

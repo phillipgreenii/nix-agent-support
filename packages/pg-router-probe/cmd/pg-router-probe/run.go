@@ -67,9 +67,11 @@
 // beads straight to the operator, skipping the triager, by setting the
 // alert label escalation="human": the bead is then created with the strict
 // operator pair "human" + "attention" (bead pg2-ikkpk; the label vocabulary
-// is docs/guides/bead-label-vocabulary.md) AND "escalated" (so a dedup query
-// that reads only the escalated label still sees it); "human" is also what
-// keeps the triager's dispatch query away from it. The pair is written in
+// is docs/guides/bead-label-vocabulary.md) AND "escalated"; "human" is what
+// keeps the triager's dispatch query away from it, and the dedup queries read
+// the UNION of the escalated and human label sets, so they would see the bead
+// without "escalated" too (the triage precheck strips "escalated" from a bead
+// that carries both, bead pg2-n7pufu). The pair is written in
 // the ONE create call, so there is no window with neither label and the
 // hand-to-human command (which edits an existing bead) is not needed here.
 // Recognised values: "human"; absent or anything else is the default,

@@ -273,7 +273,8 @@ esac
 // skipped-bead-human on every offer, because the human check ran before the
 // not-escalated check, and so blocked every later escalated event. It is now moot
 // and completes as skipped on its first offer, and the next event is offered. A
-// bead that carries BOTH human and escalated still declines: the work is not moot.
+// bead that carries BOTH human and escalated is also moot since bead pg2-n7pufu: the
+// precheck comments, strips escalated and completes it as skipped.
 func TestDispatch_triageHumanHandedOffHeadOfQueueSettlesOnItsFirstOffer(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", stubBin(t, map[string]string{"bd": `case "$*" in
@@ -297,7 +298,5 @@ esac
 	}
 
 	code, reply = runDispatchReply(t, triager, event("esc-both"))
-	if code != conformance.ExitBusy || reply["reason"] != "skipped-bead-human" {
-		t.Fatalf("a bead with both human and escalated: got exit %d reply %v, want ExitBusy with skipped-bead-human (a decline, not moot)", code, reply)
-	}
+	assertSkippedCompletion(t, code, reply, "skipped-bead-human-escalated")
 }

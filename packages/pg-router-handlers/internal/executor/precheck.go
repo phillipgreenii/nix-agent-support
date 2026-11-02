@@ -66,6 +66,18 @@ const (
 // "skipped-".
 const SkipBeadNotEscalated = "skipped-bead-not-escalated"
 
+// SkipBeadHumanEscalated is the "triage" precheck's MOOT reason for a bead that
+// carries escalated AND a HUMAN_LABELS label (bead pg2-n7pufu): the precheck
+// commented on the bead and stripped escalated, so no triager work remains. It
+// is deliberately not SkipBeadHuman, which the "ready" precheck shares and must
+// keep declining.
+const SkipBeadHumanEscalated = "skipped-bead-human-escalated"
+
+// SkipBeadHumanStripFailed is the RETRYABLE decline when the comment or the
+// escalated strip of the SkipBeadHumanEscalated disposition could not be
+// written: the event is re-offered and the write is tried again.
+const SkipBeadHumanStripFailed = "skipped-bead-human-strip-failed"
+
 // labelHasAcceptanceCriteria marks a bead as groomed: the drain query selects
 // on it, so a bead that lost it is no longer one a drain worker may take.
 const labelHasAcceptanceCriteria = "has-acceptance-criteria"
@@ -96,16 +108,16 @@ const reviewRoleName = "review"
 // 2026-10-26, bead pg2-6t91v7). A decline is re-offered until the event expires,
 // and the queue is a per-handler serial FIFO, so a dead event declined at the head
 // blocks every later event for the handler; a completion settles it on its first
-// offer. Exactly three outcomes are moot: the bead is closed, the PR is merged, the
+// offer. Exactly four outcomes are moot: the bead is closed, the PR is merged, the
 // bead no longer carries the escalated label (this includes a human bead that lost it
-// through hand-to-human, bead pg2-4u0d0u; a bead carrying BOTH human and escalated is
-// not moot). Every other outcome stays a decline
+// through hand-to-human, bead pg2-4u0d0u), and a bead carrying escalated AND a human
+// label whose escalated the triage precheck just stripped (bead pg2-n7pufu). Every other outcome stays a decline
 // because the work still exists and a completion would drop it: a pending review
 // awaiting submission, a human or not-groomed bead, a blocked, deferred, claimed or
 // otherwise not-open bead, and an unavailable connector.
 func Moot(reason string) bool {
 	switch reason {
-	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated:
+	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated, SkipBeadHumanEscalated:
 		return true
 	}
 	return false
@@ -301,7 +313,7 @@ func Precheck(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issu
 	case roles.PrecheckReady:
 		return PrecheckReady(d, deps, iss)
 	case roles.PrecheckTriage:
-		return PrecheckTriage(d, deps, iss)
+		return PrecheckTriage(ctx, d, deps, iss)
 	case roles.PrecheckReview:
 		return precheckReview(ctx, d, deps, iss)
 	}
@@ -388,22 +400,33 @@ const escalatedLabel = complete.EscalatedLabel
 //     through hand-to-human, which removes escalated and adds human; MOOT, see
 //     Moot, whatever its status or other labels, because no triager work can
 //     remain for the event: bead pg2-4u0d0u);
+//     A bead carrying escalated AND any HUMAN_LABELS label is handled gracefully
+//     (bead pg2-n7pufu): the precheck comments, THEN removes escalated (safe under
+//     LV-4, the human label is already present) and returns the MOOT
+//     SkipBeadHumanEscalated, so the event completes as skipped and the queue
+//     advances; a repeat is moot through the not-escalated check. A failed write
+//     declines retryably (SkipBeadHumanStripFailed). It is the only precheck that
+//     writes to a bead;
 //  3. it is otherwise not open (a deferred or blocked status gets its own reason,
 //     the rest is not-open; all are declines);
-//  4. it carries human (together with escalated: a decline, the work is not moot);
+//  4. (a human bead never reaches here: it is handled above);
 //  5. its defer_until is in the future;
 //  6. it has an open blocks dependency.
 //
 // The assignee is deliberately NOT checked: `bd ready` lists an open bead
 // whatever its assignee, and the triager never claims its bead. A nil iss (the
 // bead could not be read) fails open, and so does an unparseable defer_until. A
-// decline writes nothing to the bead.
-func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+// decline writes nothing to the bead; only the human-and-escalated disposition
+// (above) writes.
+func PrecheckTriage(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
 	if d.Role.CCPool == nil || iss == nil {
 		return Skip{}, false
 	}
 	decline := func(reason, detail string) (Skip, bool) {
 		return deps.skip(d, Skip{Reason: reason, Detail: detail}, ""), true
+	}
+	retry := func(reason, detail string) (Skip, bool) {
+		return deps.skip(d, Skip{Reason: reason, Detail: detail, Retryable: true}, ""), true
 	}
 	if iss.Status == "closed" {
 		return decline(SkipBeadClosed, "the bead is closed")
@@ -415,6 +438,27 @@ func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool)
 	if !iss.HasLabel(escalatedLabel) {
 		return decline(SkipBeadNotEscalated, "the bead no longer carries the "+escalatedLabel+" label")
 	}
+	// A bead carrying escalated AND a human label must never reach a triager
+	// (LV-5). Handle it gracefully instead of declining it forever (bead
+	// pg2-n7pufu): comment, strip escalated, complete as moot.
+	for _, l := range beads.HumanLabels {
+		if !iss.HasLabel(l) {
+			continue
+		}
+		if deps.BD == nil {
+			return retry(SkipBeadHumanStripFailed, "the bead carries "+escalatedLabel+" and "+l+" but no bd runner is available to strip it")
+		}
+		note := "Escalation triager precheck: this bead carried both the " + escalatedLabel + " and " + l +
+			" labels, which the escalation queue must never hold (a person is already the blocker). " +
+			"Removed " + escalatedLabel + " and launched no session; the bead stays with its human label."
+		if err := beads.Comment(ctx, deps.BD, iss.ID, note); err != nil {
+			return retry(SkipBeadHumanStripFailed, err.Error())
+		}
+		if err := beads.RemoveLabel(ctx, deps.BD, iss.ID, escalatedLabel); err != nil {
+			return retry(SkipBeadHumanStripFailed, err.Error())
+		}
+		return decline(SkipBeadHumanEscalated, "the bead carried "+escalatedLabel+" and "+l+"; commented and removed "+escalatedLabel)
+	}
 	switch iss.Status {
 	case "open":
 	case "deferred":
@@ -423,9 +467,6 @@ func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool)
 		return decline(SkipBeadBlocked, "the bead's status is blocked")
 	default:
 		return decline(SkipBeadNotOpen, "the bead's status is "+iss.Status+", not open")
-	}
-	if iss.HasLabel(beads.LabelHuman) {
-		return decline(SkipBeadHuman, "the bead now carries the "+beads.LabelHuman+" label")
 	}
 	if iss.DeferredUntilAfter(deps.clock()) {
 		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
@@ -531,6 +572,10 @@ func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
 		msg = "dispatch declined: bead is blocked"
 	case SkipBeadNotEscalated:
 		msg = "dispatch skipped: bead is no longer escalated"
+	case SkipBeadHumanEscalated:
+		msg = "dispatch skipped: bead was escalated and human; commented and stripped escalated"
+	case SkipBeadHumanStripFailed:
+		msg = "dispatch declined: could not strip escalated from a human bead, retry later"
 	case ReasonConnectorUnavailable:
 		msg = "dispatch declined: connector unavailable, retry later"
 	default:

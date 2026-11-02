@@ -34,7 +34,7 @@ const (
 	stallActor     = relActor // the drain role's own claim identity
 	strikeLabelBd  = "update zr-d --add-label drain-needs-input-stall"
 	releaseCallBd  = "update zr-d --status=open --assignee="
-	releaseHumanBd = "update zr-d --add-label human --status=open --assignee="
+	releaseHumanBd = "update zr-d --add-label human --remove-label escalated --status=open --assignee="
 )
 
 // hermeticPoolEnv removes every CCPOOL_* and BEADS_* variable from the test's

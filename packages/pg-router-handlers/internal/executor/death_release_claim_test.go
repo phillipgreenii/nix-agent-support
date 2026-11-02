@@ -39,7 +39,7 @@ func TestDispatch_deathReleasesClaim(t *testing.T) {
 		wantVerbs []report.Verb
 	}{
 		{
-			"add-human", roles.AddHuman, "update bead-1 --add-label human --status=open --assignee=",
+			"add-human", roles.AddHuman, "update bead-1 --add-label human --remove-label escalated --status=open --assignee=",
 			[]report.Verb{report.Escalated, report.Unclaimed},
 		},
 		{
@@ -157,7 +157,7 @@ func TestDispatch_deathReleaseFailureIsSurfaced(t *testing.T) {
 	if len(res.Actions) != 0 {
 		t.Errorf("a release bd refused wrote nothing, so no verb may be reported; got %v", verbsOf(res))
 	}
-	if !dtest.HasUpdate(script, "update bead-1 --add-label human --status=open --assignee= --if-assignee dead-actor --if-status in_progress") {
+	if !dtest.HasUpdate(script, "update bead-1 --add-label human --remove-label escalated --status=open --assignee= --if-assignee dead-actor --if-status in_progress") {
 		t.Errorf("the release must be guarded by the observed holder; updates=%v", script.Updates)
 	}
 	raw, rerr := os.ReadFile(logPath)

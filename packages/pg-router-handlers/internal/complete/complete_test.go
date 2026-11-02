@@ -69,7 +69,7 @@ func TestOnDeath_addHumanReleasesClaimInOneUpdate(t *testing.T) {
 	// recRunner's show is unreadable, so the release is unguarded (the guarded
 	// form is covered by TestOnDeath_guardsReleaseWithObservedHolder and the
 	// real-bd contract test).
-	if len(fr.calls) != 3 || fr.calls[0] != "show zr-w1 --json" || fr.calls[1] != "comment zr-w1 park note" || fr.calls[2] != "update zr-w1 --add-label human --status=open --assignee=" {
+	if len(fr.calls) != 3 || fr.calls[0] != "show zr-w1 --json" || fr.calls[1] != "comment zr-w1 park note" || fr.calls[2] != "update zr-w1 --add-label human --remove-label escalated --status=open --assignee=" {
 		t.Errorf("add-human death must write the park note, then add human AND release the claim in one update; calls=%v", fr.calls)
 	}
 }
@@ -112,7 +112,7 @@ func TestOnDeath_guardsReleaseWithObservedHolder(t *testing.T) {
 		action roles.FailureAction
 		want   string
 	}{
-		{"add-human", roles.AddHuman, "update zr-w1 --add-label human --status=open --assignee= --if-assignee dead-actor --if-status in_progress"},
+		{"add-human", roles.AddHuman, "update zr-w1 --add-label human --remove-label escalated --status=open --assignee= --if-assignee dead-actor --if-status in_progress"},
 		{"unclaim", roles.Unclaim, "update zr-w1 --status=open --assignee= --if-assignee dead-actor --if-status in_progress"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

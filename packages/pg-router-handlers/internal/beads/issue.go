@@ -265,6 +265,11 @@ const (
 	LabelAttention = "attention"
 )
 
+// HumanLabels is the HUMAN_LABELS set (docs/guides/bead-label-vocabulary.md, ADR
+// 0105): every label that marks a bead as waiting on a person. A bead carrying
+// any of them is excluded from the escalation handler's queue (LV-5).
+var HumanLabels = []string{LabelAttention, "human-focus", "human-focus-required", LabelHuman}
+
 // HandToHuman hands a bead to the operator: ONE
 // `bd update <id> --add-label human --add-label attention --remove-label
 // escalated [--remove-label <extra>]...` call. It is the Go form of the
@@ -297,7 +302,9 @@ const DefaultParkNote = "Handler park note: this bead was parked as human by the
 	"no person-question was identified. This is resume-or-land work, not a decision."
 
 // AddHumanAndUnclaim flags a bead for a human AND releases its claim in ONE
-// write: `bd update <id> --add-label human --status=open --assignee=`. For a
+// write: `bd update <id> --add-label human --remove-label escalated --status=open --assignee=`
+// (escalated goes in the SAME call, so the park never leaves a bead carrying both
+// escalated and human: bead pg2-n7pufu). For a
 // session that is gone: the human label keeps the bead out of every retry
 // queue, and the cleared assignee keeps it from staying in_progress under a
 // session that no longer exists (pg2-0fsuu). One call, so a bd hiccup cannot
@@ -331,7 +338,7 @@ func addHumanAndUnclaim(ctx context.Context, r Runner, id, note string, guard []
 	if err := Comment(ctx, r, id, note); err != nil {
 		slog.Error("park note not written; parking the bead anyway", "bead", id, "err", err)
 	}
-	args := append([]string{"update", id, "--add-label", "human", "--status=open", "--assignee="}, guard...)
+	args := append([]string{"update", id, "--add-label", "human", "--remove-label", "escalated", "--status=open", "--assignee="}, guard...)
 	if _, err := r.Run(ctx, args...); err != nil {
 		slog.Error("park: add human and release failed; the bead keeps its claim",
 			"bead", id, "guarded", len(guard) > 0, "guard_stale", IsGuardStale(err), "err", err)

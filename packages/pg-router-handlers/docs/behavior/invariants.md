@@ -517,7 +517,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
 - **`INV-CCH-22`** <!-- uuid: 347d82ef-4149-4a35-945b-754ba35a8e6a --> — before a dispatch preflights anything that costs a session (capacity,
   isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
   cost, that the dispatch is still worth running, and MUST launch no session and write nothing
-  when the check says no. The check is chosen by the role's `precheck` setting:
+  when the check says no (the one exception: the triage check's comment and `escalated` strip of a
+  bead carrying `escalated` and a human label, rule (d) below). The check is chosen by the role's `precheck` setting:
   `review` (also the default for the role named `review`, so that role is unchanged), `ready` or
   `triage`; a role with none of them is never prechecked. What a "no" comes to depends on whether
   the dispatch is MOOT, that is, nothing it asks for can ever need doing:
@@ -528,17 +529,20 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     per handler (`DEC-EVENT-2`), so a dead event declined at the head of the queue blocks every
     later event for that handler (observed 2026-10-15: a closed bead's event declined 288 times
     over 15 hours while no other event of its type was dispatched; bead `pg2-57oql`). Exactly
-    three outcomes are moot: the bead is closed (`skipped-bead-closed`, for every check, a closed
+    four outcomes are moot: the bead is closed (`skipped-bead-closed`, for every check, a closed
     status being read as this and not as not-open), the pull request is merged (`skipped-pr-merged`)
     and the bead no longer carries `escalated` (`skipped-bead-not-escalated`; this includes a bead
     that carries `human` but not `escalated`, which was handed to a person through hand-to-human
-    and leaves no triager work, bead `pg2-4u0d0u`). The router counts
+    and leaves no triager work, bead `pg2-4u0d0u`) and the triage check's bead that carries
+    `escalated` together with a human label, after the check commented and removed `escalated`
+    (`skipped-bead-human-escalated`, bead `pg2-n7pufu`). The router counts
     the completion on its own counter (`pg_router_skipped_total`, by type, role and reason) and
     NOT as throughput or as role progress, so a stream of them cannot make a stuck queue look
     like it is progressing (`pg-router-queue-stalled`).
   - **Every other outcome is declined** with the pre-accept busy decline of `INV-CCH-6`, carrying
     one reason per case, because the work still exists and a completion would drop it:
-    `skipped-pending-review`, `skipped-bead-human`, `skipped-bead-not-groomed`,
+    `skipped-pending-review`, `skipped-bead-human`, `skipped-bead-human-strip-failed` (retryable),
+    `skipped-bead-not-groomed`,
     `skipped-bead-blocked`, `skipped-bead-deferred`, `skipped-bead-claimed`,
     `skipped-bead-not-open` (any status other than open and closed) and `connector-unavailable`.
 
@@ -609,9 +613,15 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     status and whether or not it carries `human`: no triager work can remain, and a decline of
     such an event at the head of the queue jammed it, bead `pg2-4u0d0u`); (c) the bead is not
     `open` otherwise (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
-    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (d) the bead carries `human` and
-    `escalated` together (`skipped-bead-human`: declined, not moot, because the triager never
-    handles a bead for a person but the work still exists); (e) the bead's
+    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (d) the bead carries `escalated`
+    together with any label of `HUMAN_LABELS` (`attention`, `human-focus`, `human-focus-required`,
+    `human`), a state the discovery query never lists and the park step no longer creates: the
+    check adds a bead comment saying what it did, THEN removes `escalated` (safe under LV-4, a
+    human label is already present) and completes the event as skipped (MOOT,
+    `skipped-bead-human-escalated`, no session, bead `pg2-n7pufu`); a repeat of the event is moot
+    through (b). A failed comment or removal declines retryably
+    (`skipped-bead-human-strip-failed`) and is tried again. The `ready` check is unchanged and
+    still declines a human bead (`skipped-bead-human`); (e) the bead's
     deferral date is in the future (`skipped-bead-deferred`); (f) the bead has an open `blocks`
     dependency (`skipped-bead-blocked`). Who holds the bead is NOT checked: the discovery query
     lists an open bead whatever its assignee, and this role never claims its bead. An unreadable

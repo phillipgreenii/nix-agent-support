@@ -75,7 +75,7 @@ func TestParkNote_deathNamesTheDrainWorktree(t *testing.T) {
 			t.Errorf("the park note must contain %q; got:\n%s", want, note)
 		}
 	}
-	if !dtest.HasUpdate(bd, "update bw-1 --add-label human --status=open --assignee=") {
+	if !dtest.HasUpdate(bd, "update bw-1 --add-label human --remove-label escalated --status=open --assignee=") {
 		t.Errorf("the bead must still be parked and released; updates=%v", bd.Updates)
 	}
 }
@@ -96,7 +96,7 @@ func TestParkNote_failingGitStillParks(t *testing.T) {
 	if len(bd.Comments) != 1 || !strings.Contains(bd.Comments[0], "not determined") {
 		t.Fatalf("the note must say discovery failed; comments=%q", bd.Comments)
 	}
-	if !dtest.HasUpdate(bd, "update bw-1 --add-label human --status=open --assignee=") {
+	if !dtest.HasUpdate(bd, "update bw-1 --add-label human --remove-label escalated --status=open --assignee=") {
 		t.Errorf("a failing git must not stop the park; updates=%v", bd.Updates)
 	}
 }

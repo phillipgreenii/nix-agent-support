@@ -145,7 +145,7 @@ func TestDeathOnOtherCause_triagerIsStillParkedHuman(t *testing.T) {
 			if out.err == nil || out.err.Error() != triBead+": session exited before completing" {
 				t.Fatalf("the failure text must be unchanged; err=%v", out.err)
 			}
-			if !dtest.HasUpdate(out.bd, "update "+triBead+" --add-label human --status=open --assignee=") {
+			if !dtest.HasUpdate(out.bd, "update "+triBead+" --add-label human --remove-label escalated --status=open --assignee=") {
 				t.Errorf("on_failure=add-human must apply in one update; updates=%v", out.bd.Updates)
 			}
 			if len(out.bd.Comments) == 0 {

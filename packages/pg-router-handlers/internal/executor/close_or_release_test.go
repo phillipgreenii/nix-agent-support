@@ -281,7 +281,7 @@ func TestWaitDoneRelease_diedHoldingClaimAppliesOnFailureAndClearsStrike(t *test
 		t.Fatalf("got %v, want a plain failure", err)
 	}
 	// The release is guarded with the observed holder (pg2-qyc3h).
-	if !dtest.HasUpdate(bd, "update zr-d --add-label human --status=open --assignee= --if-assignee "+relActor+" --if-status in_progress") {
+	if !dtest.HasUpdate(bd, "update zr-d --add-label human --remove-label escalated --status=open --assignee= --if-assignee "+relActor+" --if-status in_progress") {
 		t.Errorf("on_failure add-human must apply, guarded by the observed holder; updates=%v", bd.Updates)
 	}
 	if !dtest.HasUpdate(bd, "update zr-d --remove-label drain-unclaimed-end") {

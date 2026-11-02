@@ -18,7 +18,9 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 	cfg := fastCfg()
 	clk := time.Unix(0, 0)
 	future := clk.Add(time.Hour).UTC().Format(time.RFC3339)
-	deps := func(pr *fakePR) Deps { return Deps{Cfg: cfg, PR: pr, Now: func() time.Time { return clk }} }
+	deps := func(pr *fakePR) Deps {
+		return Deps{Cfg: cfg, PR: pr, BD: &recBD{}, Now: func() time.Time { return clk }}
+	}
 	ready := func(f func(*beads.Issue)) *beads.Issue { i := groomed(); f(&i); return &i }
 	triage := func(f func(*beads.Issue)) *beads.Issue { i := escalated(); f(&i); return &i }
 
@@ -35,7 +37,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 	}
 	triageRun := func(bead *beads.Issue) run {
 		return func(t *testing.T) (Skip, bool) {
-			return PrecheckTriage(DispatchContext{Role: triageRole(cfg), Item: reviewItem()}, deps(&fakePR{}), bead)
+			return PrecheckTriage(context.Background(), DispatchContext{Role: triageRole(cfg), Item: reviewItem()}, deps(&fakePR{}), bead)
 		}
 	}
 
@@ -53,6 +55,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 		{"triage: bead closed (the head-of-line jam of 2026-10-15)", triageRun(triage(func(i *beads.Issue) { i.Status = "closed" })), SkipBeadClosed, true, false},
 		{"triage: bead no longer escalated", triageRun(triage(func(i *beads.Issue) { i.Labels = []string{"agent-support"} })), SkipBeadNotEscalated, true, false},
 		{"triage: human bead without escalated (handed to a person, pg2-4u0d0u)", triageRun(triage(func(i *beads.Issue) { i.Labels = []string{"attention", "human"} })), SkipBeadNotEscalated, true, false},
+		{"triage: human and escalated together (pg2-n7pufu)", triageRun(triage(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") })), SkipBeadHumanEscalated, true, false},
 
 		// NOT moot: still declines, the work still exists.
 		{"review: pending review holds the head", review(openBead(), &fakePR{pending: PendingReview{Pending: true}}), SkipPendingReview, false, false},
@@ -63,7 +66,11 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 		{"ready: deferred", readyRun(ready(func(i *beads.Issue) { i.DeferUntil = future })), SkipBeadDeferred, false, false},
 		{"ready: claimed by a peer", readyRun(ready(func(i *beads.Issue) { i.Assignee = "someone-else" })), SkipBeadClaimed, false, false},
 		{"ready: not open (in_progress by a peer)", readyRun(ready(func(i *beads.Issue) { i.Status = "in_progress"; i.Assignee = "someone-else" })), SkipBeadNotOpen, false, false},
-		{"triage: human", triageRun(triage(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") })), SkipBeadHuman, false, false},
+		{"triage: strip failed (retryable)", func(t *testing.T) (Skip, bool) {
+			d := deps(&fakePR{})
+			d.BD = &recBD{failOn: "update"}
+			return PrecheckTriage(context.Background(), DispatchContext{Role: triageRole(cfg), Item: reviewItem()}, d, triage(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }))
+		}, SkipBeadHumanStripFailed, false, true},
 		{"triage: blocked", triageRun(triage(func(i *beads.Issue) { i.Status = "blocked" })), SkipBeadBlocked, false, false},
 		{"triage: deferred", triageRun(triage(func(i *beads.Issue) { i.DeferUntil = future })), SkipBeadDeferred, false, false},
 		{"triage: not open (in_progress)", triageRun(triage(func(i *beads.Issue) { i.Status = "in_progress" })), SkipBeadNotOpen, false, false},
@@ -89,7 +96,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 	}
 	// Every reason constant is covered above and its disposition is the pinned one.
 	for _, reason := range []string{
-		SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated,
+		SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated, SkipBeadHumanEscalated, SkipBeadHumanStripFailed,
 		SkipPendingReview, SkipBeadHuman, SkipBeadNotGroomed, SkipBeadBlocked,
 		SkipBeadDeferred, SkipBeadClaimed, SkipBeadNotOpen, ReasonConnectorUnavailable,
 	} {
@@ -98,7 +105,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 		}
 	}
 	for reason, want := range map[string]bool{
-		SkipBeadClosed: true, SkipPRMerged: true, SkipBeadNotEscalated: true,
+		SkipBeadClosed: true, SkipPRMerged: true, SkipBeadNotEscalated: true, SkipBeadHumanEscalated: true, SkipBeadHumanStripFailed: false,
 		SkipPendingReview: false, SkipBeadHuman: false, SkipBeadNotGroomed: false, SkipBeadBlocked: false,
 		SkipBeadDeferred: false, SkipBeadClaimed: false, SkipBeadNotOpen: false, ReasonConnectorUnavailable: false,
 		"some-future-reason": false,
