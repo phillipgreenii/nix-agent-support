@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
 	"github.com/phillipgreenii/pg-decider/internal/plan"
+	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
 // lookupEntityType is the one entity type whose runs make the lookup: the PR
@@ -22,8 +23,8 @@ const lookupEntityType = "pr"
 // lookupRead reads and bounds the all-status listing (apply.ReadLookup); tests
 // swap it. A nil Lookup with a nil error means "no lookup" and never happens in
 // production for a pr run.
-var lookupRead = func(ctx context.Context, env apply.Env) (*apply.Lookup, error) {
-	return apply.ReadLookup(ctx, env)
+var lookupRead = func(ctx context.Context, env apply.Env, v *view.View) (*apply.Lookup, error) {
+	return apply.ReadLookup(ctx, env, v)
 }
 
 // lookupNow is the clock the lookup is timed with (the lookup_ms member of the
@@ -35,12 +36,12 @@ var lookupNow = time.Now
 // trusted it prints the diagnostic and the failed-closed counters line (with
 // the figures known, so the composed command can persist them), and returns
 // ok=false; the caller exits with exitcode.LookupUntrusted and writes nothing.
-func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, verb, typ, id string) (*apply.Lookup, bool) {
+func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, v *view.View, verb, typ, id string) (*apply.Lookup, bool) {
 	if typ != lookupEntityType {
 		return nil, true
 	}
 	started := lookupNow()
-	lk, err := lookupRead(ctx, apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut})
+	lk, err := lookupRead(ctx, apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut}, v)
 	took := lookupNow().Sub(started)
 	if err == nil {
 		if lk != nil {

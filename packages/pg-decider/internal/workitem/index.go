@@ -183,6 +183,14 @@ func cloneMap(m map[string]string) map[string]string {
 	return out
 }
 
+// Items lists every recognized work item (keyed and adoptable), in link order.
+func (ix *Index) Items() []Item {
+	if ix == nil {
+		return nil
+	}
+	return append([]Item(nil), ix.items...)
+}
+
 // Anchor returns the anchor, preferring an open one, then link order.
 func (ix *Index) Anchor() (Item, bool) {
 	best, ok := Item{}, false

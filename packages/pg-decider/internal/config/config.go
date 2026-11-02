@@ -85,6 +85,12 @@ type Config struct {
 	// closed included, with no result cap. A pr plan or apply reads it once per
 	// run (the bounded lookup). Empty means unset, which fails a pr run closed.
 	WorkItemsQuery string `json:"work_items_query,omitempty"`
+	// WorkItemsQueryParams is work_items_query_params: the parameter names of
+	// the per-PR named query (each of "repo" and "pr_number"), sent as --param
+	// with the viewed PR's identity. Empty means the query takes none and lists
+	// the whole tracker (the rollback form); set, the answer is also checked
+	// against the view's own work items.
+	WorkItemsQueryParams []string `json:"work_items_query_params,omitempty"`
 	// WorkItemsCeiling is work_items_ceiling: the largest listing the pr lookup
 	// accepts; a listing above it fails the run closed. nil means unset, which
 	// fails a pr run closed; an explicit value below 1 makes Load fail.
@@ -131,6 +137,16 @@ func (c *Config) FocusPriority(name string) string {
 func validateLookupKeys(c *Config) error {
 	if c.WorkItemsQuery != "" && strings.TrimSpace(c.WorkItemsQuery) == "" {
 		return fmt.Errorf("work_items_query %q must not be blank", c.WorkItemsQuery)
+	}
+	seen := map[string]bool{}
+	for _, n := range c.WorkItemsQueryParams {
+		if n != "repo" && n != "pr_number" {
+			return fmt.Errorf("work_items_query_params names %q; the only names are \"repo\" and \"pr_number\"", n)
+		}
+		if seen[n] {
+			return fmt.Errorf("work_items_query_params names %q twice", n)
+		}
+		seen[n] = true
 	}
 	if c.WorkItemsCeiling != nil && *c.WorkItemsCeiling < 1 {
 		return fmt.Errorf("work_items_ceiling is %d; it must be at least 1", *c.WorkItemsCeiling)

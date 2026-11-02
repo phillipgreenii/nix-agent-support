@@ -51,7 +51,7 @@ func TestReadLookupFailsClosedWithoutTheQueryOrTheCeiling(t *testing.T) {
 		d := newDouble(t)
 		env := testEnv(d, nil)
 		env.Config = tc.cfg
-		lk, err := ReadLookup(context.Background(), env)
+		lk, err := ReadLookup(context.Background(), env, lookupView())
 		var le *LookupError
 		if lk != nil || !errors.As(err, &le) || le.Reason != tc.reason {
 			t.Fatalf("%s: lookup=%v err=%v, want reason %s", tc.name, lk, err, tc.reason)
@@ -69,7 +69,7 @@ func TestReadLookupCallsTheNamedQueryOnceOnTheConfiguredBackend(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "acme/api#7: x", "open", `"repo":"acme/api"`), "")})
 	cfg := lookupCfg(5)
 	cfg.AgentTrackerBackend = "trk"
-	lk, err := ReadLookup(context.Background(), testEnv(d, cfg))
+	lk, err := ReadLookup(context.Background(), testEnv(d, cfg), lookupView())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,14 +84,14 @@ func TestReadLookupCallsTheNamedQueryOnceOnTheConfiguredBackend(t *testing.T) {
 
 func TestReadLookupAcceptsAListingExactlyAtTheCeiling(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "t", "closed", "")+","+ent("b2", "t", "open", ""), "")})
-	if _, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(2))); err != nil {
+	if _, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(2)), lookupView()); err != nil {
 		t.Fatalf("2 items at ceiling 2: %v", err)
 	}
 }
 
 func TestReadLookupAboveTheCeilingFailsClosedAndReportsTheFigures(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "t", "closed", "")+","+ent("b2", "t", "open", "")+","+ent("b3", "t", "open", ""), "")})
-	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(2)))
+	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(2)), lookupView())
 	var le *LookupError
 	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonAboveCeiling {
 		t.Fatalf("lookup=%v err=%v", lk, err)
@@ -106,7 +106,7 @@ func TestReadLookupAboveTheCeilingFailsClosedAndReportsTheFigures(t *testing.T) 
 
 func TestReadLookupTruncatedListingFailsClosed(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Stdout: `{"entities":[` + ent("b1", "t", "open", "") + `],"sources":[{"source":"beads","status":"succeeded","count":1}],"truncated":true}`})
-	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(100)))
+	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(100)), lookupView())
 	var le *LookupError
 	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonTruncated {
 		t.Fatalf("lookup=%v err=%v", lk, err)
@@ -131,7 +131,7 @@ func TestReadLookupUnavailableListingFailsClosed(t *testing.T) {
 	}
 	for name, rule := range cases {
 		d := newDouble(t, rule)
-		lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(100)))
+		lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(100)), lookupView())
 		var le *LookupError
 		if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonUnavailable {
 			t.Fatalf("%s: lookup=%v err=%v", name, lk, err)
@@ -147,7 +147,7 @@ func TestReadLookupToleratesNonStringMetadataAndTheEnvelopeShape(t *testing.T) {
 		Match:  "issue list",
 		Stdout: `{"result":{"entities":[{"id":"b1","title":"t","state":"open","metadata":{"pr_number":7,"dedup_key":"pr:acme/api#7:fix-ci:abc","flag":true}}]}}`,
 	})
-	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(10)))
+	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(10)), lookupView())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,5 +362,156 @@ func TestApplyFocusHitThroughTheRunListingStillRefreshesTheHit(t *testing.T) {
 	}
 	if listed {
 		t.Errorf("a per-create list call was made: %q", d.lines())
+	}
+}
+
+// The per-PR query (work_items_query_params): the PR identity is sent as
+// --param, and the answer is checked against the view's own index.
+
+func perPRCfg(ceiling int) *config.Config {
+	c := lookupCfg(ceiling)
+	c.WorkItemsQuery = "work-items-for-pr"
+	c.WorkItemsQueryParams = []string{"repo", "pr_number"}
+	return c
+}
+
+func TestPRIdentityPrefersTheSnapshotThenParsesTheViewID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    *view.View
+		repo string
+		num  string
+		ok   bool
+	}{
+		{"snapshot", lookupView(), "acme/api", "7", true},
+		{"id only", &view.View{Type: "pr", ID: "acme/api#0113446"}, "acme/api", "113446", true},
+		{"snapshot wins", &view.View{ID: "x/y#1", Snapshot: view.PRSnapshot{Repo: "acme/api", Number: 7}}, "acme/api", "7", true},
+		{"no number", &view.View{ID: "acme/api"}, "", "", false},
+		{"bad number", &view.View{ID: "acme/api#x"}, "", "", false},
+		{"no repo", &view.View{ID: "#7"}, "", "", false},
+		{"nil", nil, "", "", false},
+	} {
+		repo, num, ok := PRIdentity(tc.v)
+		if repo != tc.repo || num != tc.num || ok != tc.ok {
+			t.Errorf("%s: got %q %q %v, want %q %q %v", tc.name, repo, num, ok, tc.repo, tc.num, tc.ok)
+		}
+	}
+}
+
+func TestReadLookupSendsThePRIdentityAsParams(t *testing.T) {
+	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(ent("b1", "acme/api#7: x", "open", `"repo":"acme/api","pr_number":"7"`), "")})
+	cfg := perPRCfg(5)
+	cfg.AgentTrackerBackend = "trk"
+	lk, err := ReadLookup(context.Background(), testEnv(d, cfg), lookupView())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lk.Items() != 1 {
+		t.Fatalf("items = %d", lk.Items())
+	}
+	got := d.lines()
+	want := "pg-connector issue list --query work-items-for-pr --param repo=acme/api --param pr_number=7 --backend trk"
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("calls = %q, want %q", got, want)
+	}
+}
+
+func TestReadLookupPerPRFailsClosedWithoutAPRIdentity(t *testing.T) {
+	d := newDouble(t)
+	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), &view.View{Type: "pr", ID: "weird"})
+	var le *LookupError
+	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonNoPRIdentity {
+		t.Fatalf("lookup=%v err=%v", lk, err)
+	}
+	if n := len(d.calls()); n != 0 {
+		t.Errorf("%d connector call(s) without an identity", n)
+	}
+}
+
+func TestReadLookupPerPRTruncatedAndDegradedFailClosed(t *testing.T) {
+	cases := map[string]struct{ stdout, reason string }{
+		"truncated": {`{"entities":[],"sources":[{"source":"beads","status":"succeeded","count":0}],"truncated":true}`, LookupReasonTruncated},
+		"degraded":  {`{"entities":[],"sources":[{"source":"beads","status":"degraded","count":0,"reason":"cache"}],"truncated":false}`, LookupReasonUnavailable},
+	}
+	for name, tc := range cases {
+		d := newDouble(t, respRule{Match: "issue list", Stdout: tc.stdout})
+		lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), lookupView())
+		var le *LookupError
+		if lk != nil || !errors.As(err, &le) || le.Reason != tc.reason {
+			t.Errorf("%s: lookup=%v err=%v, want %s", name, lk, err, tc.reason)
+		}
+	}
+	// The connector refusing the parameters (a short PR number) fails closed too.
+	d := newDouble(t, respRule{Match: "issue list", Exit: 2, Stdout: `{"error":{"code":"invalid_argument","message":"pr_number"}}`})
+	_, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), lookupView())
+	var le *LookupError
+	if !errors.As(err, &le) || le.Reason != LookupReasonUnavailable {
+		t.Fatalf("refused params: %v", err)
+	}
+}
+
+func consistencyView() *view.View {
+	v := lookupView()
+	v.Links = []view.Link{
+		{Type: "issue", ID: "k1", Title: "anything", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:anchor"}},
+		{Type: "issue", ID: "legacy1", Title: "acme/api#7: legacy anchor"},                                             // adopted by anchor prefix
+		{Type: "issue", ID: "other", Title: "unrelated"},                                                               // not owned
+		{Type: "issue", ID: "nodeonly", Title: "fix-ci: whatever", Metadata: map[string]string{"node_id": "PR_node7"}}, // adopted by node_id
+	}
+	return v
+}
+
+func TestReadLookupPerPRConsistencyCheckFailsClosedOnAMissingOwnedItem(t *testing.T) {
+	complete := ent("k1", "x", "open", `"dedup_key":"pr:acme/api#7:anchor"`) + "," + ent("legacy1", "acme/api#7: legacy anchor", "closed", "") + "," + ent("nodeonly", "fix-ci: whatever", "open", `"node_id":"PR_node7"`)
+	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(complete, "")})
+	if _, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(50)), consistencyView()); err != nil {
+		t.Fatalf("complete answer: %v", err)
+	}
+	// each owned item missing in turn: keyed, keyless title-adopted, node_id-adopted
+	for _, drop := range []string{"k1", "legacy1", "nodeonly"} {
+		var parts []string
+		for _, e := range []struct{ id, e string }{
+			{"k1", ent("k1", "x", "open", `"dedup_key":"pr:acme/api#7:anchor"`)},
+			{"legacy1", ent("legacy1", "acme/api#7: legacy anchor", "closed", "")},
+			{"nodeonly", ent("nodeonly", "fix-ci: whatever", "open", `"node_id":"PR_node7"`)},
+		} {
+			if e.id != drop {
+				parts = append(parts, e.e)
+			}
+		}
+		d := newDouble(t, respRule{Match: "issue list", Stdout: listing(strings.Join(parts, ","), "")})
+		lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(50)), consistencyView())
+		var le *LookupError
+		if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonInconsistent {
+			t.Fatalf("missing %s: lookup=%v err=%v", drop, lk, err)
+		}
+		if !strings.Contains(err.Error(), drop) || le.Items == nil || *le.Items != 2 {
+			t.Errorf("missing %s: message %v items %v", drop, err, le.Items)
+		}
+	}
+}
+
+func TestReadLookupWithoutParamsSkipsTheConsistencyCheck(t *testing.T) {
+	d := newDouble(t, respRule{Match: "issue list", Stdout: listing("", "")})
+	if _, err := ReadLookup(context.Background(), testEnv(d, lookupCfg(5)), consistencyView()); err != nil {
+		t.Fatalf("the whole-listing form is not checked against the index: %v", err)
+	}
+}
+
+func TestReadLookupPerPRAcceptsStringAndNumberPRNumber(t *testing.T) {
+	both := ent("a", "acme/api#7: s", "open", `"repo":"acme/api","pr_number":"7"`) + "," + ent("b", "acme/api#7: n", "open", `"repo":"acme/api","pr_number":7`)
+	d := newDouble(t, respRule{Match: "issue list", Stdout: listing(both, "")})
+	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg(5)), lookupView())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, it := range lk.items {
+		if it.Metadata["pr_number"] != "7" {
+			t.Errorf("item %d pr_number = %q, want 7", i, it.Metadata["pr_number"])
+		}
+	}
+	got := lk.Augment(lookupView())
+	if len(got.Links) != 2 {
+		t.Errorf("both pr_number forms are the PR's own: links = %d", len(got.Links))
 	}
 }

@@ -258,10 +258,23 @@ func TestInvalidLookupKeysFailLoudly(t *testing.T) {
 		{`{"work_items_ceiling":0}`, "work_items_ceiling"},
 		{`{"work_items_ceiling":-5}`, "work_items_ceiling"},
 		{`{"work_items_query":"   "}`, "work_items_query"},
+		{`{"work_items_query_params":["repo","nope"]}`, "work_items_query_params"},
+		{`{"work_items_query_params":["repo","repo"]}`, "twice"},
 	} {
 		writeCfg(t, tc.body)
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("%s: err = %v", tc.body, err)
 		}
+	}
+}
+
+func TestLoadReadsTheQueryParams(t *testing.T) {
+	writeCfg(t, `{"work_items_query":"work-items-for-pr","work_items_query_params":["repo","pr_number"]}`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.WorkItemsQueryParams) != 2 || c.WorkItemsQueryParams[0] != "repo" || c.WorkItemsQueryParams[1] != "pr_number" {
+		t.Fatalf("got %+v", c.WorkItemsQueryParams)
 	}
 }

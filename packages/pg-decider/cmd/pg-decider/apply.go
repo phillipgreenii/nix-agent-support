@@ -85,7 +85,7 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 	// goes through the very same steps as plan (planFn): the rules decide from
 	// the view plus the PR's listed items, and a create the listing already
 	// holds is not planned, so apply executes exactly the actions plan lists.
-	lk, ok := readRunLookup(ctx, errOut, cfg, "apply", typ, id)
+	lk, ok := readRunLookup(ctx, errOut, cfg, v, "apply", typ, id)
 	if !ok {
 		return exitcode.LookupUntrusted
 	}

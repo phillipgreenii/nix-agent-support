@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,12 @@ const (
 	LookupReasonUnavailable   = "lookup-unavailable"
 	LookupReasonTruncated     = "lookup-truncated"
 	LookupReasonAboveCeiling  = "lookup-above-ceiling"
+	// LookupReasonNoPRIdentity: work_items_query_params is set but the view
+	// names no repo and PR number to send as the parameters.
+	LookupReasonNoPRIdentity = "lookup-pr-identity-absent"
+	// LookupReasonInconsistent: the per-PR answer lacks a work item the view's
+	// own index owns or adopts, so it cannot be trusted.
+	LookupReasonInconsistent = "lookup-inconsistent"
 )
 
 // LookupError is a lookup that cannot be trusted. Items and Ceiling carry the
@@ -147,12 +154,60 @@ func decodeListing(stdout []byte) (listAnswer, error) {
 
 func intp(n int) *int { return &n }
 
+// prParamRepo and prParamNumber are the parameter names work_items_query_params
+// may hold: the PR's repository (owner/name) and its number.
+const (
+	PRParamRepo   = "repo"
+	PRParamNumber = "pr_number"
+)
+
+// PRIdentity is the repository and number of the viewed PR: the snapshot's
+// when it carries both, else parsed from the view id ("<owner/name>#<n>").
+func PRIdentity(v *view.View) (repo, number string, ok bool) {
+	if v == nil {
+		return "", "", false
+	}
+	if s := v.Snapshot; s.Repo != "" && s.Number > 0 {
+		return s.Repo, strconv.Itoa(s.Number), true
+	}
+	i := strings.LastIndex(v.ID, "#")
+	if i <= 0 || i == len(v.ID)-1 {
+		return "", "", false
+	}
+	n, err := strconv.Atoi(v.ID[i+1:])
+	if err != nil || n <= 0 {
+		return "", "", false
+	}
+	return v.ID[:i], strconv.Itoa(n), true
+}
+
+// paramArgs renders one --param flag per configured parameter name, in the
+// configured order.
+func paramArgs(names []string, repo, number string) ([]string, error) {
+	var out []string
+	for _, n := range names {
+		switch n {
+		case PRParamRepo:
+			out = append(out, "--param", PRParamRepo+"="+repo)
+		case PRParamNumber:
+			out = append(out, "--param", PRParamNumber+"="+number)
+		default:
+			return nil, fmt.Errorf("work_items_query_params names %q, which is not a parameter the decider can supply (%s, %s)", n, PRParamRepo, PRParamNumber)
+		}
+	}
+	return out, nil
+}
+
 // ReadLookup reads the all-status listing through config.work_items_query and
-// checks it against config.work_items_ceiling. It returns a *LookupError (never
-// a partial Lookup) for an unset query or ceiling, a failed or unreadable
-// call, a source that did not succeed, a truncated listing, and a listing above
-// the ceiling.
-func ReadLookup(ctx context.Context, env Env) (*Lookup, error) {
+// checks it against config.work_items_ceiling. When config.work_items_query_params
+// is set the query is the per-PR one: each named parameter is sent as --param
+// with the viewed PR's identity (PRIdentity), and the answer is then checked
+// against v's own index (checkConsistency). It returns a *LookupError (never a
+// partial Lookup) for an unset query or ceiling, a failed or unreadable call, a
+// source that did not succeed, a truncated listing, a listing above the
+// ceiling, a PR with no identity to send, and a per-PR answer that lacks a work
+// item the view's index owns or adopts.
+func ReadLookup(ctx context.Context, env Env, v *view.View) (*Lookup, error) {
 	cfg := env.Config
 	var ceiling *int
 	if cfg != nil {
@@ -170,7 +225,22 @@ func ReadLookup(ctx context.Context, env Env) (*Lookup, error) {
 			Err:    fmt.Errorf("work-item lookup: work_items_ceiling is not configured, so the size of the listing cannot be bounded; nothing was written"),
 		}
 	}
-	args := append([]string{"issue", "list", "--query", cfg.WorkItemsQuery}, backendFlag(env)...)
+	var params []string
+	if len(cfg.WorkItemsQueryParams) > 0 {
+		repo, number, ok := PRIdentity(v)
+		if !ok {
+			return nil, &LookupError{
+				Reason: LookupReasonNoPRIdentity, Ceiling: ceiling,
+				Err: fmt.Errorf("work-item lookup: the view names no repository and PR number to send as work_items_query_params; nothing was written"),
+			}
+		}
+		var err error
+		if params, err = paramArgs(cfg.WorkItemsQueryParams, repo, number); err != nil {
+			return nil, &LookupError{Reason: LookupReasonQueryAbsent, Ceiling: ceiling, Err: fmt.Errorf("work-item lookup: %w; nothing was written", err)}
+		}
+	}
+	args := append([]string{"issue", "list", "--query", cfg.WorkItemsQuery}, params...)
+	args = append(args, backendFlag(env)...)
 	out, err := call(ctx, env, args)
 	if err != nil {
 		return nil, &LookupError{Reason: LookupReasonUnavailable, Ceiling: ceiling, Err: fmt.Errorf("work-item lookup is unavailable: %w", err)}
@@ -204,7 +274,34 @@ func ReadLookup(ctx context.Context, env Env) (*Lookup, error) {
 	for _, e := range ans.Entities {
 		items = append(items, e.item())
 	}
+	if len(params) > 0 {
+		if missing := missingOwned(v, items); len(missing) > 0 {
+			return nil, &LookupError{
+				Reason: LookupReasonInconsistent, Items: intp(n), Ceiling: ceiling,
+				Err: fmt.Errorf("work-item lookup: the per-PR answer of pg-connector %s lacks %d work item(s) the view's own index owns or adopts (%s), so it cannot be trusted; nothing was written", strings.Join(args, " "), len(missing), strings.Join(missing, ", ")),
+			}
+		}
+	}
 	return &Lookup{items: items, ceiling: *ceiling}, nil
+}
+
+// missingOwned lists the ids of the work items the view's index owns or adopts
+// (workitem.BuildIndex: keyed items and adoptable keyless ones) that the
+// per-PR answer does not hold. A per-PR query is a narrower read than the whole
+// listing, so an item it fails to return would be minted again; any such item
+// makes the answer untrusted.
+func missingOwned(v *view.View, items []ListedItem) []string {
+	have := make(map[string]bool, len(items))
+	for _, it := range items {
+		have[it.ID] = true
+	}
+	var missing []string
+	for _, it := range workitem.BuildIndex(v).Items() {
+		if !have[it.ID] {
+			missing = append(missing, it.ID)
+		}
+	}
+	return missing
 }
 
 // belongs reports whether a listed item is one of the viewed PR's own work

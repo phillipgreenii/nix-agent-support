@@ -25,7 +25,8 @@ The configuration is one JSON file whose path is named by the environment variab
   "escalate_after": 3,
   "bead_id_pattern": "^bd-[a-z0-9]+$",
   "focus_beads_query": "focus-beads",
-  "work_items_query": "work-items-all",
+  "work_items_query": "work-items-for-pr",
+  "work_items_query_params": ["repo", "pr_number"],
   "work_items_ceiling": 7000,
   "focus_priority_map": {
     "Highest": "P0",
@@ -87,10 +88,11 @@ These two keys serve the bounded work-item lookup of a `pr` run (see "The work-i
 [`plan-and-apply.md`](plan-and-apply.md)). A `pr` `plan` or `apply` needs both; an `issue` run makes
 no such lookup and needs neither.
 
-| Key                  | Type    | Default | Effect                                                                                                                                                                                                                                                                                           |
-| -------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `work_items_query`   | string  | empty   | The name of the pg-connector named query that lists the work items of all six PR kinds (`merge-request`, `process-feedback`, `review-pr`, `fix-ci`, `resolve-conflict`, `focus-item`) in EVERY status, closed included, with no result cap. It MUST NOT be a feed name the work-bead feeds share |
-| `work_items_ceiling` | integer | unset   | The largest listing the lookup accepts: a listing with MORE items than this fails the run closed. It MUST be at least `1`                                                                                                                                                                        |
+| Key                       | Type            | Default | Effect                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | --------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `work_items_query`        | string          | empty   | The name of the pg-connector named query that lists the work items of all six PR kinds (`merge-request`, `process-feedback`, `review-pr`, `fix-ci`, `resolve-conflict`, `focus-item`) in EVERY status, closed included, with no result cap. It MUST NOT be a feed name the work-bead feeds share                                                                       |
+| `work_items_query_params` | list of strings | empty   | The parameter names of `work_items_query` when it is the per-PR query: each of `repo` and `pr_number` (at most once) is sent as `--param name=value` from the viewed PR. Unset means the query takes none and lists the whole tracker (the rollback form), and the consistency check against the view does not run. A name other than those two makes the file invalid |
+| `work_items_ceiling`      | integer         | unset   | The largest listing the lookup accepts: a listing with MORE items than this fails the run closed. It MUST be at least `1`                                                                                                                                                                                                                                              |
 
 Both keys are required for a `pr` run: with either unset the run fails closed (exit `4`, nothing
 written) with a message naming the missing key, and it never falls back to the gather's work-beads

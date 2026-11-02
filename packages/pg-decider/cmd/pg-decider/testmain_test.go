@@ -64,5 +64,5 @@ func writeFile(t *testing.T, path, content string) {
 // the work-item lookup; they run with none (lookupRead answers nil, nil, which
 // production never does). lookup_test.go swaps the real reader back in.
 func init() {
-	lookupRead = func(context.Context, apply.Env) (*apply.Lookup, error) { return nil, nil }
+	lookupRead = func(context.Context, apply.Env, *view.View) (*apply.Lookup, error) { return nil, nil }
 }

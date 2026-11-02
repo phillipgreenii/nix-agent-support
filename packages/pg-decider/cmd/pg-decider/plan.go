@@ -55,7 +55,7 @@ var planFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, as
 	// and fails closed (exit 4, nothing printed as a plan) when it cannot be
 	// trusted. The very same lookup feeds apply (applyFn), so what plan shows is
 	// what apply then does on the same state.
-	lk, ok := readRunLookup(ctx, errOut, cfg, "plan", typ, id)
+	lk, ok := readRunLookup(ctx, errOut, cfg, v, "plan", typ, id)
 	if !ok {
 		return exitcode.LookupUntrusted
 	}

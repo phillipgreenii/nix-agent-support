@@ -71,9 +71,19 @@ issue-change feed, and widening it would pull every closed work item into the is
 
 - **One listing, once per run.** The run reads the named query `work_items_query` (see
   [`config.md`](config.md)) through `pg-connector issue list --query <name>` once, before any rule
-  runs. The query lists the work items of all six PR kinds in every status, closed included, with no
-  result cap (the tracker backend passes `--limit 0`); the PR is not part of the query, because the
-  connector takes only a named query.
+  runs. When `work_items_query_params` is set the query is the per-PR one: the run passes each named
+  parameter as `--param name=value` from the viewed PR (`repo` is the snapshot's repository,
+  `pr_number` its number without leading zeros; both are read from the view id when the snapshot
+  carries neither), so the answer holds only that PR's work items, closed included, with no result
+  cap. A PR whose identity cannot be read fails the run closed. When the key is unset the query
+  takes no parameters and lists the work items of all six PR kinds in every status (the whole-listing
+  form; the PR is then not part of the query).
+- **Consistent with the view (per-PR form only).** Every work item the decider's own index of the
+  view owns or adopts (keyed items, and keyless ones adopted by title, anchor prefix or `node_id`)
+  MUST appear in the per-PR answer. A per-PR query is a narrower read, so an owned item it fails to
+  return means the answer cannot be trusted: the run FAILS CLOSED (exit `4`, nothing written, reason
+  `lookup-inconsistent`) rather than mint the missing item again. A PR identified only by `node_id`
+  (no `repo`/`pr_number` metadata and no title match) therefore fails permanently, by design.
 - **Bounded in the decider.** The run counts the listing against `work_items_ceiling`. It FAILS
   CLOSED, exiting `4` with nothing written (and, for `plan`, nothing printed as a plan), when the
   listing holds more items than the ceiling, when the connector reports it truncated, when the call
@@ -434,7 +444,8 @@ focus activity keeps the shape above.
   read and the configured ceiling it was checked against (see "The work-item lookup"); both are
   omitted for a run that made no lookup, and a zero count is printed. A run that failed closed
   because of the lookup prints one line with `"rules":{}`, a `failures` reason (`lookup-above-ceiling`,
-  `lookup-truncated`, `lookup-unavailable`, `lookup-query-absent` or `lookup-ceiling-absent`) and the
+  `lookup-truncated`, `lookup-unavailable`, `lookup-query-absent`, `lookup-ceiling-absent`,
+  `lookup-pr-identity-absent` or `lookup-inconsistent`) and the
   figures known at that point: the ceiling whenever it is configured, the item count when a listing
   was read; the exit code is `4` and nothing was written. `plan` prints the same line on stderr.
 
@@ -502,10 +513,13 @@ change rate of the watched issues and not their number.
   `work_items_query` exactly once per run, before any rule runs, and MUST fail closed (exit `4`,
   nothing written, no plan printed) when the listing is larger than `work_items_ceiling`, reports
   itself truncated, is unavailable or unreadable, has a source that did not succeed, or when either
-  key is unset. The failed run's counters line MUST still carry the figures known. The gather's
-  work-beads query MUST NOT be widened to serve this lookup.
+  key is unset. When `work_items_query_params` is set the run MUST send the viewed PR's identity as
+  the query's parameters and MUST also fail closed (reason `lookup-pr-identity-absent` or
+  `lookup-inconsistent`) when the view has no identity or the answer lacks a work item the view's own
+  index owns or adopts. The failed run's counters line MUST still carry the figures known. The
+  gather's work-beads query MUST NOT be widened to serve this lookup.
 - **INV-DECIDER-28.** <!-- uuid: 284030a9-f6aa-4d09-8741-92c89a07d5a6 --> `plan` MUST use the same read-only lookup, and the same steps over it, as `apply`:
-  on the same view and listing the `create` actions of the plan MUST be exactly the creates `apply`
+  on the same view and listing (whole or per-PR) the `create` actions of the plan MUST be exactly the creates `apply`
   writes, per kind. A `create` the listing already holds MUST NOT be an action of either, and MUST
   be listed as skipped with the reason `already handled`. The listing MUST report `lookup_items` and
   `lookup_ceiling` in the plan `--json` and in the run counters line.

@@ -21,6 +21,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
+	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
 const lookupView = "views/pr_new_everything.json"
@@ -30,7 +31,9 @@ func realLookup(t *testing.T) {
 	t.Helper()
 	orig := lookupRead
 	t.Cleanup(func() { lookupRead = orig })
-	lookupRead = func(ctx context.Context, env apply.Env) (*apply.Lookup, error) { return apply.ReadLookup(ctx, env) }
+	lookupRead = func(ctx context.Context, env apply.Env, v *view.View) (*apply.Lookup, error) {
+		return apply.ReadLookup(ctx, env, v)
+	}
 }
 
 // lookupConfig writes the decider configuration file with the lookup keys and
@@ -433,23 +436,56 @@ func TestReadRunLookupTimesTheLookup(t *testing.T) {
 	t.Cleanup(func() { lookupRead, lookupNow = origRead, origNow })
 	lookupNow = steppingClock(1500 * time.Millisecond)
 
-	lookupRead = func(context.Context, apply.Env) (*apply.Lookup, error) {
+	lookupRead = func(context.Context, apply.Env, *view.View) (*apply.Lookup, error) {
 		return apply.NewLookup(nil, 7000), nil
 	}
 	var errOut bytes.Buffer
-	lk, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, "apply", "pr", "acme/widgets#42")
+	lk, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, nil, "apply", "pr", "acme/widgets#42")
 	if !ok || lk.Elapsed() != 1500*time.Millisecond {
 		t.Fatalf("ok=%v elapsed=%v", ok, lk.Elapsed())
 	}
 
-	lookupRead = func(context.Context, apply.Env) (*apply.Lookup, error) {
+	lookupRead = func(context.Context, apply.Env, *view.View) (*apply.Lookup, error) {
 		return nil, &apply.LookupError{Reason: apply.LookupReasonUnavailable, Err: errors.New("down")}
 	}
 	errOut.Reset()
-	if _, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, "apply", "pr", "acme/widgets#42"); ok {
+	if _, ok := readRunLookup(context.Background(), &errOut, &config.Config{}, nil, "apply", "pr", "acme/widgets#42"); ok {
 		t.Fatal("a failed lookup must not be ok")
 	}
 	if line := countersLine(t, errOut.String()); line.LookupMs == nil || *line.LookupMs != 1500 {
 		t.Fatalf("lookup_ms = %v, want 1500", line.LookupMs)
+	}
+}
+
+// With work_items_query_params the run reads the per-PR query once, passing
+// the viewed PR's repository and number (the number normalised) as --param,
+// and plan and apply see the answer exactly as they see the whole listing.
+func TestPlanAndApplyReadThePerPRQueryWithThePRIdentity(t *testing.T) {
+	for _, verb := range []string{"plan", "apply"} {
+		t.Run(verb, func(t *testing.T) {
+			realLookup(t)
+			lookupConfig(t, `"work_items_query":"work-items-for-pr","work_items_query_params":["repo","pr_number"],"work_items_ceiling":50`)
+			withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
+			d := trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI)), 0)
+			args := []string{verb, "pr", "acme/widgets#42"}
+			if verb == "plan" {
+				args = append(args, "--json")
+			}
+			if _, errOut, code := runCLI(t, args...); code == exitcode.LookupUntrusted {
+				t.Fatalf("code %d err %q", code, errOut)
+			}
+			if n := d.listCalls(); n != 1 {
+				t.Fatalf("%d list calls, want 1", n)
+			}
+			var line string
+			for _, c := range d.calls {
+				if strings.HasPrefix(c.args, "issue list") {
+					line = c.args
+				}
+			}
+			if !strings.Contains(line, "--query work-items-for-pr --param repo=acme/widgets --param pr_number=42") {
+				t.Errorf("list call = %q", line)
+			}
+		})
 	}
 }
