@@ -1969,3 +1969,118 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # ccpool goes dark (bead pg2-oewtdh, found by the 2026-11-02 health review). From the
+      # 2026-10-31T20:36Z apply the ccpool recorder daemon was offline for 33 h: the pool
+      # gauge stopped, no session launched, the router declined every ccpool dispatch with
+      # "pool capacity unknown", and only the generic failure-rate class=declined rule
+      # fired. These two rules name the condition directly. Root cause of that incident
+      # (daemon not deployed): pg2-dwm97z.
+      #
+      # pg-router-ccpool-pool-capacity-absent: ccpool_pool_capacity is emitted by the
+      # handler's pool-metrics LaunchAgent (poolMetrics.intervalSeconds, about every 60s;
+      # live samples are 60-100s apart). absent_over_time returns a series (value 1, no
+      # labels) only when NO sample landed in the window and nothing at all when the gauge
+      # is healthy, so a healthy pool yields no data and noDataState: OK is correct. The
+      # 10m window is 6+ missed emissions, so a LaunchAgent restart or one slow emit does
+      # not trip it; `for: 5m` then absorbs a laptop wake, whose first evaluations see
+      # the gap before the first fresh sample (within about 2 minutes) clears it. The
+      # rule fires about 15 minutes after the gauge stops. A machine with the router
+      # alerts but no ccpool pool-metrics agent would fire it permanently; the router
+      # alerts are registered only where the observability stack and ccpool are deployed.
+      - uid: pg-router-ccpool-pool-capacity-absent
+        title: ccpool pool capacity gauge is absent
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "ccpool_pool_capacity has had no sample for 10 minutes; the pool-metrics emitter is down"
+          description: "No ccpool_pool_capacity sample arrived in 10 minutes (the pool-metrics LaunchAgent emits about every 60 seconds) and that held for another 5 minutes. The router declines every ccpool dispatch with `pool capacity unknown` while the gauge is dark, so no review, worker, feedback, drain or triager session launches. First check that the LaunchAgent org.nixos.pg-router-ccpool-handler-pool-metrics is loaded and its log (StandardErrorPath) for emit errors, then that the OTLP collector accepts pushes, then run `ccpool capacity --emit-metrics --pool <dir>` by hand. A pool-metrics agent that was never deployed on this machine fires this rule permanently: deploy it (pg2-dwm97z)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: absent_over_time(ccpool_pool_capacity[10m])
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-ccpool-no-launch-while-queued: work waits for a ccpool-backed role and
+      # no ccpool session was launched or reused for 2 hours. ccpool_launch_outcome_total
+      # (labels pool, route, outcome, pgrouter_role) is recorded once per launch attempt
+      # by the short-lived ccpool process, exported as delta and summed to cumulative by
+      # the collector, so a sample exists only when a launch happened; after a quiet
+      # period a lone sample makes increase() empty, hence count_over_time (a sample in
+      # the window = a launch). ccpool-backed queue types (the bound role's pool; same
+      # role->type bindings as pg-router-queue-stalled): review.ready (review),
+      # feedback.ready (feedback), work.ready (worker), drain.zr / drain.pg2 (drain-zr,
+      # drain-pg2), escalated.zr / escalated.pg2 (the triagers). Command roles (pr.changed,
+      # repo.sync, disk.check, ...) launch no ccpool session and are NOT in the selector.
+      # The backlog clause needs depth > 0 on EVERY scrape of the 2h (at least 200 scrapes,
+      # so a laptop sleep or a restart that left gaps cannot satisfy it on a few points,
+      # same device as pg-router-queue-stalled), and a held gate (pg-router pause) turns
+      # the rule off, as it does there. One honest limit: an account usage window
+      # (five_hour) that stays at its limit for more than 2 hours also yields queued work
+      # and no launch; that is a warning-level false positive the description names.
+      - uid: pg-router-ccpool-no-launch-while-queued
+        title: no ccpool session launched while ccpool work is queued
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "work has waited for a ccpool role for 2 hours and no ccpool session launched"
+          description: "pg_router_queue_depth stayed above 0 on every scrape of the last 2 hours for a ccpool-backed queue (review.ready, feedback.ready, work.ready, drain.zr, drain.pg2, escalated.zr, escalated.pg2) while ccpool_launch_outcome_total recorded no launch of any kind in that window, and that held for another 15 minutes. First check ccpool_pool_capacity (pg-router-ccpool-pool-capacity-absent fires when the recorder is down), then `pg-router status` for the roles' decline backoff and `ccpool --pool <pool> list --json`. A five_hour or spend usage window that stayed at its limit for more than 2 hours looks the same and is not a defect."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (max(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

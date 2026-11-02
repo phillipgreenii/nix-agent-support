@@ -1,0 +1,127 @@
+# promtool unit tests for the two "ccpool went dark" alerts (bead pg2-oewtdh, the
+# 2026-10-31/11-02 outage: the recorder was offline 33 h, the pool gauge stopped and no
+# session launched). Run by the flake check test-pg-router-alert-rules, which wraps each
+# rule's refId A as `alert: <uid>` with `expr: (<A>) > 0` and the rule's `for`.
+#
+# Time model: promtool's clock starts at 0. The pool gauge is emitted about every 60s, the
+# router queue depth is scraped every 30s (the queue-stalled cases use the same pace), and
+# ccpool_launch_outcome_total has a sample only at a launch.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: capacity-absent fires 15 minutes after the gauge stops, labelless, and not before
+    interval: 1m
+    input_series:
+      # Emitted until t=30m, then the recorder is gone.
+      - series: ccpool_pool_capacity{pool="p",dim="free"}
+        values: "1x30 _x100"
+    alert_rule_test:
+      # Window not yet empty (last sample 30m, window 10m), then `for: 5m` still pending.
+      - eval_time: 35m
+        alertname: pg-router-ccpool-pool-capacity-absent
+        exp_alerts: []
+      - eval_time: 43m
+        alertname: pg-router-ccpool-pool-capacity-absent
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-ccpool-pool-capacity-absent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: capacity-absent is quiet while the gauge is emitted, even at a slow 90s pace
+    interval: 90s
+    input_series:
+      - series: ccpool_pool_capacity{pool="p",dim="free"}
+        values: "1x200"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-ccpool-pool-capacity-absent
+        exp_alerts: []
+
+  - name: capacity-absent rides out a recorder restart gap of 12 minutes
+    interval: 1m
+    input_series:
+      - series: ccpool_pool_capacity{pool="p",dim="free"}
+        values: "1x20 _x11 1x60"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: pg-router-ccpool-pool-capacity-absent
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-ccpool-pool-capacity-absent
+        exp_alerts: []
+
+  - name: no-launch fires when ccpool work waited 2h with no launch, and the lone old launch sample does not hide it
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.ready"}
+        values: "2x600"
+      # One launch at t=90m (index 180) and none after.
+      - series: ccpool_launch_outcome_total{pool="p",route="reuse_live",outcome="success",pgrouter_role="review"}
+        values: "_x180 1 _x419"
+    alert_rule_test:
+      # The launch is inside the 2h window: quiet.
+      - eval_time: 150m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts: []
+      # Window (100m, 220m] holds no launch, backlog on every scrape, `for: 15m` served.
+      - eval_time: 250m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: no-launch fires for the escalation triager queue too, and a plain failed launch counts as a launch
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="escalated.pg2"}
+        values: "1x600"
+      - series: ccpool_launch_outcome_total{pool="p",route="brand_new",outcome="timeout",pgrouter_role="x"}
+        values: "_x400 1 _x199"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      # The attempt at t=200m is inside (140m, 260m]: quiet.
+      - eval_time: 260m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts: []
+
+  - name: no-launch is quiet for a command-role queue, a backlog that drained, a short backlog and a held gate
+    interval: 30s
+    input_series:
+      # Command roles launch no ccpool session.
+      - series: pg_router_queue_depth{type="pr.changed"}
+        values: "5x600"
+      - series: pg_router_queue_depth{type="repo.sync"}
+        values: "3x600"
+      - series: pg_router_queue_depth{type="disk.check"}
+        values: "1x600"
+      # ccpool-backed, but the queue touched 0 in the window.
+      - series: pg_router_queue_depth{type="work.ready"}
+        values: "2x300 0 2x299"
+      # ccpool-backed, but only 40 scrapes (20 minutes) of data.
+      - series: pg_router_queue_depth{type="drain.zr"}
+        values: "_x560 2x40"
+    alert_rule_test:
+      - eval_time: 250m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts: []
+
+  - name: no-launch is quiet while a gate is held
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.ready"}
+        values: "2x600"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x600"
+    alert_rule_test:
+      - eval_time: 250m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts: []
