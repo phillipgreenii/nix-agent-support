@@ -135,6 +135,10 @@ func (c *Copier) now() int64 { return c.cfg.Clock.Now().UnixNano() }
 func (c *Copier) Ingest(path string) (Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.ingestLocked(path)
+}
+
+func (c *Copier) ingestLocked(path string) (Result, error) {
 	path = filepath.Clean(path)
 	if d := c.cfg.Scope.Match(path); !d.Ingest {
 		return Result{Action: "skipped", Reason: d.Reason}, nil
@@ -155,6 +159,16 @@ func (c *Copier) Ingest(path string) (Result, error) {
 	src, mode := c.cfg.Scope.Classify(path)
 	if mode == scope.Snapshot {
 		return c.ingestSnapshot(path, fi, src)
+	}
+	// A new append file takes the first-copy path: one journal commit and one
+	// directory sync (the same flush a backfill batch shares across its files).
+	if s, err := c.stageFirstCopy(path, nil); err != nil {
+		return Result{}, err
+	} else if s != nil {
+		if err := c.flushStaged([]*staged{s}); err != nil {
+			return Result{}, err
+		}
+		return Result{Action: "new-generation", File: s.fid}, nil
 	}
 	return c.ingestAppend(path, fi, src)
 }
@@ -894,7 +908,7 @@ func (c *Copier) startGeneration(f store.File, src *os.File, reason string, rese
 	var off int64
 	var tail []byte
 	if c.cloneOK {
-		o, t, err := c.tryClone(src, dst)
+		o, t, err := c.tryClone(src, dst, true)
 		switch {
 		case err == nil && o >= 0:
 			method, why, off, tail = "clone", "clone ok", o, t
@@ -962,11 +976,12 @@ func (c *Copier) startGeneration(f store.File, src *os.File, reason string, rese
 }
 
 // tryClone clones src to a temporary name, fsyncs it, checks its tail against
-// the original, renames it into place and fsyncs the directory. It returns
+// the original, renames it into place and (when syncDir) fsyncs the directory;
+// a batching caller passes false and syncs the directory once per batch. It returns
 // off < 0 (and no error) when byte mode must be used: ENOTSUP or EXDEV (logged
 // at info level), or a clone whose tail does not match the original. Any other
 // errno is a fault.
-func (c *Copier) tryClone(src *os.File, dst string) (off int64, tail []byte, err error) {
+func (c *Copier) tryClone(src *os.File, dst string, syncDir bool) (off int64, tail []byte, err error) {
 	srcFi, err := src.Stat()
 	if err != nil {
 		return 0, nil, err
@@ -1018,8 +1033,10 @@ func (c *Copier) tryClone(src *os.File, dst string) (off int64, tail []byte, err
 	if err := c.fs.Rename(tmp, dst); err != nil {
 		return 0, nil, err
 	}
-	if err := c.fs.SyncDir(filepath.Dir(dst)); err != nil {
-		return 0, nil, err
+	if syncDir {
+		if err := c.fs.SyncDir(filepath.Dir(dst)); err != nil {
+			return 0, nil, err
+		}
 	}
 	if ps, err := c.cfg.Clone.PrivateSize(dst); err == nil {
 		c.cfg.Obs.Reg.Set(obs.MClonePrivateSize, map[string]string{"file": fmt.Sprint(filepath.Base(dst))}, float64(ps))

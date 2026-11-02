@@ -210,6 +210,12 @@ func (d *Daemon) filter(p string) bool {
 
 func (d *Daemon) ingest(p string) copier.Result {
 	res, err := d.cp.Ingest(p)
+	return d.afterIngest(p, res, err)
+}
+
+// afterIngest logs a failed ingest and tells the parser and the lifecycle
+// tracker about a copied path.
+func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Result {
 	if err != nil {
 		d.obs.Log.Warn("ingest_failed", "path", p, "err", err.Error())
 	}
@@ -260,6 +266,11 @@ func (d *Daemon) notifyDeletedSnapshots() {
 	}
 }
 
+// backfillBatch is the number of files the first backfill copies per group
+// commit. The per-file work (clone, fsync, rename) is unchanged; only the
+// journal commit and directory sync are shared.
+const backfillBatch = 64
+
 func (d *Daemon) backfill(files []watcher.FileInfo) {
 	d.backfillAt.Store(d.clock.Now().UnixNano())
 	d.filesTotal.Store(int64(len(files)))
@@ -268,24 +279,34 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ModTime.After(sorted[j].ModTime) })
 	d.obs.Event("backfill_start", "files", fmt.Sprint(len(files)))
 	skipped := false
-	for _, f := range sorted {
+	// Files are copied in batches that share one journal commit and one directory
+	// sync (copier.IngestBatch); the newest-first order and the low-space check
+	// are unchanged. A batch is durable as a unit: a crash inside one leaves the
+	// files of that batch uncommitted and the next backfill copies them again.
+	for start := 0; start < len(sorted); start += backfillBatch {
 		select {
 		case <-d.stop:
 			return
 		default:
 		}
-		if d.sett.LowSpace() {
-			// Low-space mode stops backfilling Conversations not yet copied.
-			if fl, _ := d.st.FilesByCurrentPath(f.Path); len(fl) == 0 {
-				skipped = true
-				continue
+		var paths []string
+		for _, f := range sorted[start:min(start+backfillBatch, len(sorted))] {
+			if d.sett.LowSpace() {
+				// Low-space mode stops backfilling Conversations not yet copied.
+				if fl, _ := d.st.FilesByCurrentPath(f.Path); len(fl) == 0 {
+					skipped = true
+					continue
+				}
 			}
+			paths = append(paths, f.Path)
 		}
-		res := d.ingest(f.Path)
-		d.filesCopied.Add(1)
-		d.obs.Reg.Set(obs.MCopiedFiles, nil, float64(d.filesCopied.Load()))
-		if res.Bytes > 0 && d.cfg.CopyThrottle > 0 {
-			d.clock.Sleep(d.cfg.CopyThrottle)
+		for _, br := range d.cp.IngestBatch(paths) {
+			res := d.afterIngest(br.Path, br.Result, br.Err)
+			d.filesCopied.Add(1)
+			d.obs.Reg.Set(obs.MCopiedFiles, nil, float64(d.filesCopied.Load()))
+			if res.Bytes > 0 && d.cfg.CopyThrottle > 0 {
+				d.clock.Sleep(d.cfg.CopyThrottle)
+			}
 		}
 	}
 	if skipped {
