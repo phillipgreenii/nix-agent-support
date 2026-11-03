@@ -49,6 +49,8 @@ func newEnv(t *testing.T, ctl bool) *env {
 	e.cfg.StateDir = filepath.Join(root, "state")
 	e.cfg.Socket = filepath.Join(root, "r.sock")
 	e.cfg.CopyThrottle = 0
+	// The default floor is a production value (20 GiB); a test must not depend on the host's free space.
+	e.cfg.MinFreeBytes = 1
 	if ctl {
 		e.cfg.ControlStateDir = filepath.Join(root, "control")
 		if err := os.MkdirAll(e.cfg.EndsDir(), 0o755); err != nil {

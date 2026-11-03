@@ -98,6 +98,8 @@ func liveDaemon(t *testing.T) (sock string, logbuf *serve.SyncBuffer, d *serve.D
 	_ = os.WriteFile(tp, []byte("{\"n\":1}\n"), 0o600)
 	cfg := config.Defaults(func(string) string { return "" })
 	cfg.ClaudeDir, cfg.StateDir, cfg.Socket = claude, filepath.Join(root, "state"), filepath.Join(root, "r.sock")
+	// The default floor is a production value (20 GiB); a test must not depend on the host's free space.
+	cfg.MinFreeBytes = 1
 	logbuf = &serve.SyncBuffer{}
 	var err error
 	d, err = serve.Open(serve.Options{Config: cfg, Logger: serve.NewLogger(logbuf), NoEvents: true})
