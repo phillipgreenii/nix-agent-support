@@ -48,6 +48,10 @@ type Options struct {
 	// It is also the way past a database whose schema_version is newer than
 	// this binary knows.
 	Rebuild bool
+	// DriverName is the database/sql driver name for both handles; empty
+	// means "sqlite". A test registers a counting wrapper under another name
+	// (internal/store/countdriver) to count reads.
+	DriverName string
 }
 
 // SchemaNewerError is returned by Open when index.db carries a newer
@@ -61,9 +65,10 @@ func (e *SchemaNewerError) Error() string {
 
 // Store is an open state directory.
 type Store struct {
-	dir string
-	fs  fsx.FS
-	obs *obs.Obs
+	driverName string // database/sql driver name (Options.DriverName)
+	dir        string
+	fs         fsx.FS
+	obs        *obs.Obs
 
 	wdb *sql.DB // the one serialized write connection
 	rdb *sql.DB
@@ -98,7 +103,10 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.Obs == nil {
 		opt.Obs = obs.New(nil)
 	}
-	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs}
+	if opt.DriverName == "" {
+		opt.DriverName = "sqlite"
+	}
+	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName}
 	for _, d := range []string{dir, filepath.Join(dir, CopiesDir), filepath.Join(dir, ArchivesDir)} {
 		if err := s.fs.MkdirAll(d, 0o700); err != nil {
 			return nil, err
@@ -197,7 +205,7 @@ func Open(dir string, opt Options) (*Store, error) {
 
 func (s *Store) openDB(path string) error {
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)"
-	w, err := sql.Open("sqlite", dsn)
+	w, err := sql.Open(s.driverName, dsn)
 	if err != nil {
 		return err
 	}
@@ -212,7 +220,7 @@ func (s *Store) openDB(path string) error {
 		_ = w.Close()
 		return err
 	}
-	r, err := sql.Open("sqlite", dsn+"&_pragma=query_only(1)")
+	r, err := sql.Open(s.driverName, dsn+"&_pragma=query_only(1)")
 	if err != nil {
 		_ = w.Close()
 		return err

@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store/countdriver"
 )
 
 func open(t *testing.T, dir string) *Store {
@@ -399,4 +400,42 @@ func TestOpenPointerReadsACopyASnapshotVersionAndAnArchive(t *testing.T) {
 	if _, err := s.ReadPointer(app, 7, 0, 4); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing bytes: %v", err)
 	}
+}
+
+func TestCountingDriverCountsStoreReads(t *testing.T) {
+	c := countdriver.Register("store-test-counting")
+	s, err := Open(t.TempDir(), Options{DriverName: "store-test-counting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	seed(t, s)
+	c.Reset()
+	rs, err := s.rdb.Query(`SELECT key FROM meta`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for rs.Next() {
+		n++
+	}
+	_ = rs.Close()
+	if n == 0 || c.Queries() != 1 || c.RowsRead() != int64(n) {
+		t.Fatalf("rows %d queries %d rowsRead %d", n, c.Queries(), c.RowsRead())
+	}
+	// A second open under the same registered name does not panic.
+	s2, err := Open(t.TempDir(), Options{DriverName: "store-test-counting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s2.Close()
+}
+
+func TestDefaultDriverNameStillWorks(t *testing.T) {
+	s, err := Open(t.TempDir(), Options{DriverName: "sqlite"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	seed(t, s)
 }
