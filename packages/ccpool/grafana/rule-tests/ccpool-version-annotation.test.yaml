@@ -1,0 +1,133 @@
+# promtool unit tests for the "ccpool version" annotation expression of the ccpool-pools
+# dashboard (packages/ccpool/grafana/ccpool-pools.json). Run by the flake check
+# test-ccpool-version-annotation, which extracts the annotation's expr from the dashboard
+# and writes rules.yml next to this file: a recording rule `annotation:ccpool_version_change`
+# over exactly that string.
+#
+# What this proves: the expression (a (component, version) pair present now that was not
+# present one window (35m) earlier) yields one sample for a deploy and nothing in steady
+# state, that it also fires after a gap longer than the window (a known limit), and that a
+# component's change is not masked by another component running the same version.
+#
+# Time model: every series has a 10m interval and samples start at 0, so sample N is at
+# N*10m. Evaluation times sit 5m off the sample grid so no sample lies on a window edge.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a version change marks the new version once and the old version never
+    interval: 10m
+    input_series:
+      # v1 pushed for 2h (samples 0..12), v2 from 130m.
+      - series: ccpool_build_info{component="ccpool",version="v1"}
+        values: "1x12"
+      - series: ccpool_build_info{component="ccpool",version="v2"}
+        values: "_x13 1x20"
+    promql_expr_test:
+      - expr: annotation:ccpool_version_change
+        eval_time: 105m
+        exp_samples: []
+      - expr: annotation:ccpool_version_change
+        eval_time: 135m
+        exp_samples:
+          - labels: 'annotation:ccpool_version_change{component="ccpool", version="v2"}'
+            value: 1
+      - expr: annotation:ccpool_version_change
+        eval_time: 145m
+        exp_samples:
+          - labels: 'annotation:ccpool_version_change{component="ccpool", version="v2"}'
+            value: 1
+      # Two windows after the change the new version is the old state: no marker.
+      - expr: annotation:ccpool_version_change
+        eval_time: 205m
+        exp_samples: []
+
+  - name: the first deploy marks each component once, then nothing
+    interval: 10m
+    input_series:
+      - series: ccpool_build_info{component="ccpool",version="v1"}
+        values: "1x30"
+      - series: ccpool_build_info{component="pg-router-handler-ccpool",version="v1"}
+        values: "1x30"
+    promql_expr_test:
+      - expr: annotation:ccpool_version_change
+        eval_time: 25m
+        exp_samples:
+          - labels: 'annotation:ccpool_version_change{component="ccpool", version="v1"}'
+            value: 1
+          - labels: 'annotation:ccpool_version_change{component="pg-router-handler-ccpool", version="v1"}'
+            value: 1
+      - expr: annotation:ccpool_version_change
+        eval_time: 105m
+        exp_samples: []
+
+  - name: a gap longer than the window marks the same version again (known behaviour)
+    interval: 10m
+    input_series:
+      # v1 for 40m, silent for 1h50m, v1 again from 150m.
+      - series: ccpool_build_info{component="ccpool",version="v1"}
+        values: "1x4 _x10 1x10"
+    promql_expr_test:
+      - expr: annotation:ccpool_version_change
+        eval_time: 105m
+        exp_samples: []
+      - expr: annotation:ccpool_version_change
+        eval_time: 155m
+        exp_samples:
+          - labels: 'annotation:ccpool_version_change{component="ccpool", version="v1"}'
+            value: 1
+      - expr: annotation:ccpool_version_change
+        eval_time: 205m
+        exp_samples: []
+
+  - name: steady state with no change yields nothing
+    interval: 10m
+    input_series:
+      - series: ccpool_build_info{component="ccpool",version="v1"}
+        values: "1x40"
+      - series: ccpool_build_info{component="pg-router-handler-ccpool",version="v1"}
+        values: "1x40"
+    promql_expr_test:
+      - expr: annotation:ccpool_version_change
+        eval_time: 155m
+        exp_samples: []
+      - expr: annotation:ccpool_version_change
+        eval_time: 305m
+        exp_samples: []
+
+  - name: two components on equal versions, a change in one is not masked by the other
+    interval: 10m
+    input_series:
+      # ccpool stays on v1. The handler goes v1 -> v2 at 130m.
+      - series: ccpool_build_info{component="ccpool",version="v1"}
+        values: "1x40"
+      - series: ccpool_build_info{component="pg-router-handler-ccpool",version="v1"}
+        values: "1x12 _x30"
+      - series: ccpool_build_info{component="pg-router-handler-ccpool",version="v2"}
+        values: "_x13 1x20"
+    promql_expr_test:
+      - expr: annotation:ccpool_version_change
+        eval_time: 135m
+        exp_samples:
+          - labels: 'annotation:ccpool_version_change{component="pg-router-handler-ccpool", version="v2"}'
+            value: 1
+
+  - name: a component that moves onto the version another component already runs is still marked
+    interval: 10m
+    input_series:
+      # ccpool is on v2 throughout. The handler goes v1 -> v2, the version ccpool already
+      # runs: dropping `component` from the match would hide this deploy.
+      - series: ccpool_build_info{component="ccpool",version="v2"}
+        values: "1x40"
+      - series: ccpool_build_info{component="pg-router-handler-ccpool",version="v1"}
+        values: "1x12 _x30"
+      - series: ccpool_build_info{component="pg-router-handler-ccpool",version="v2"}
+        values: "_x13 1x20"
+    promql_expr_test:
+      - expr: annotation:ccpool_version_change
+        eval_time: 135m
+        exp_samples:
+          - labels: 'annotation:ccpool_version_change{component="pg-router-handler-ccpool", version="v2"}'
+            value: 1

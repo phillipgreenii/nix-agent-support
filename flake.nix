@@ -2416,9 +2416,19 @@
                     jq -e '[.templating.list[] | select(.name == "pool") | .query == "label_values(ccpool_pool_capacity, pool)"] == [true]' "$g" >/dev/null \
                       || { echo "pool variable query is not label_values(ccpool_pool_capacity, pool)" >&2; return 1; }
                     # (5) the stat panels dedupe and gate on exporter liveness
-                    jq -e --arg a 'max by (state, live, pool, pgrouter_role)' --arg b 'and on() (max(ccpool_pool_capacity) >= 0)' \
+                    jq -e --arg a 'max by (state, live, pool, pgrouter_role)' --arg b 'and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0)' \
                       '[.. | objects | select(.id? == 15 or .id? == 16) | .targets[0].expr | (contains($a) and contains($b))] | length == 2 and all' "$g" >/dev/null \
                       || { echo "panels 15/16 lack the max by dedupe or the liveness gate" >&2; return 1; }
+                    # (6) janitor, worktree, orphan, build_info and host_group series carry no pool label
+                    jq -e '[.. | objects | select(has("targets")) | .targets[]?.expr
+                            | select(test("janitor|worktree|orphan|build_info|host_group")) | contains("$pool")] | any | not' "$g" >/dev/null \
+                      || { echo "a janitor/worktree/host_group panel filters on \$pool" >&2; return 1; }
+                    # (7) no pie charts: 0 to 3 sessions make a pie misleading
+                    jq -e '[.. | objects | select(.type? == "piechart")] | length == 0' "$g" >/dev/null \
+                      || { echo "a pie chart is present" >&2; return 1; }
+                    # (8) the version annotation is a Prometheus query stepping one window
+                    jq -e '[.annotations.list[] | select(.name == "ccpool version") | .step == "35m" and .datasource.uid == "prometheus"] == [true]' "$g" >/dev/null \
+                      || { echo "the ccpool version annotation is missing or lacks step 35m" >&2; return 1; }
                     return 0
                   }
                   check "$f" || exit 1
@@ -2434,14 +2444,41 @@
                   mutant "bare pa_monitor_session_tokens" '(.panels[] | select(.id == 8) | .targets[0].expr) |= sub("max by \\(session_id\\) \\(pa_monitor_session_tokens\\)"; "pa_monitor_session_tokens")'
                   mutant "panel 8 ignores role" '(.panels[] | select(.id == 8) | .targets[0].expr) |= gsub("pgrouter_role=~\"\\$role\""; "pgrouter_role=~\".*\"")'
                   mutant "pool variable from session_info" '(.templating.list[] | select(.name == "pool") | .query) = "label_values(ccpool_session_info, pool)"'
-                  mutant "panel 15 without liveness gate" '(.panels[] | select(.id == 15) | .targets[0].expr) |= sub(" and on\\(\\) \\(max\\(ccpool_pool_capacity\\) >= 0\\)"; "")'
+                  mutant "panel 15 without liveness gate" '(.panels[] | select(.id == 15) | .targets[0].expr) |= sub(" and on\\(\\) \\(max\\(last_over_time\\(ccpool_pool_capacity\\[35m\\]\\)\\) >= 0\\)"; "")'
                   mutant "panel 16 without max by dedupe" '(.panels[] | select(.id == 16) | .targets[0].expr) |= sub("max by \\(state, live, pool, pgrouter_role\\)"; "max by (state, live)")'
+                  mutant "janitor panel filters on pool" '(.panels[] | select(.id == 30) | .targets[0].expr) |= sub("pass_errors"; "pass_errors{pool=~\"$pool\"}")'
+                  mutant "pie chart" '(.panels[] | select(.id == 34) | .type) = "piechart"'
+                  mutant "annotation without step" 'del(.annotations.list[0].step)'
                   mutant "unlisted metric" '(.panels[] | select(.id == 5) | .targets[0].expr) += " + ccpool_invented_total"'
                   mutant "unlisted metric in an annotation" '.annotations.list = ((.annotations.list // []) + [{"name": "m", "expr": "ccpool_invented_total"}])'
 
-                  echo "ok: uid ccpool-pools, $exprs queries, assertions pass, 9 mutants rejected"
+                  echo "ok: uid ccpool-pools, $exprs queries, assertions pass, 12 mutants rejected"
                   touch $out
                 '';
+
+              # ccpool-pools version annotation: its expr is extracted from the dashboard and
+              # run under `promtool test rules` against the cases in grafana/rule-tests/.
+              test-ccpool-version-annotation =
+                pkgs.runCommand "test-ccpool-version-annotation"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    work="$(mktemp -d)"
+                    cp ${./packages/ccpool/grafana/rule-tests}/*.test.yaml "$work/"
+                    cd "$work"
+                    expr="$(jq -er '[.annotations.list[] | select(.name == "ccpool version") | .expr] | if length == 1 then .[0] else error("want exactly one ccpool version annotation") end' ${./packages/ccpool/grafana/ccpool-pools.json})"
+                    jq -n --arg e "$expr" '{groups: [{name: "annotation", interval: "1m", rules: [{record: "annotation:ccpool_version_change", expr: $e}]}]}' > rules.yml
+                    promtool check rules rules.yml
+                    for t in *.test.yaml; do
+                      promtool test rules "$t"
+                    done
+                    touch "$out"
+                  '';
 
               # pg-rescue-runs Grafana dashboard guard (bead pg2-lnfwd). The
               # panels read the run log (runs.jsonl, shipped raw to Loki) with

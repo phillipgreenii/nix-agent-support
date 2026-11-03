@@ -6,10 +6,10 @@
   "version": 1,
   "editable": true,
   "time": {
-    "from": "now-24h",
+    "from": "now-6h",
     "to": "now"
   },
-  "refresh": "1m",
+  "refresh": "30s",
   "description": "ccpool sessions grouped by pool (the basename of the pool directory). The pool variable lists the pools that report capacity, and All expands to those pools. A series with no pgrouter_role label is shown as unlabelled.",
   "templating": {
     "list": [
@@ -54,29 +54,1282 @@
   },
   "panels": [
     {
-      "id": 1,
-      "title": "Runs",
+      "id": 20,
+      "title": "Quick state",
       "type": "row",
+      "collapsed": false,
       "gridPos": {
         "x": 0,
         "y": 0,
         "w": 24,
         "h": 1
-      },
-      "collapsed": false
+      }
     },
     {
-      "id": 2,
-      "title": "Run duration (p50 / p95)",
-      "type": "timeseries",
+      "id": 21,
+      "type": "stat",
+      "title": "Live sessions",
+      "description": "Live ccpool sessions across the selected pools and roles. A bad value is a count that is 0 while work is queued, or one that sits at the pool maximum.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Duration of one session run (launch or resume), by pool. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
       "gridPos": {
         "x": 0,
         "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (state, live, pool, pgrouter_role) (last_over_time(ccpool_session_states{live=\"true\",pool=~\"$pool\",pgrouter_role=~\"$role\"}[35m])))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Awaiting human",
+      "description": "Live sessions waiting for input. Any value above 0 means a person is needed. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 3,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (state, live, pool, pgrouter_role) (last_over_time(ccpool_session_states{state=\"needs_input\",live=\"true\"}[35m]))) or (vector(0) and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Pool free capacity",
+      "description": "Free launch slots across the selected pools (ccpool_pool_capacity dim free; the ceiling is dim max_sessions, shown in Capacity live vs max). 0 means no new session can start.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (pool) (last_over_time(ccpool_pool_capacity{dim=\"free\",pool=~\"$pool\"}[35m])))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Worktrees",
+      "description": "Handler worktrees on disk (the janitor census). A count that keeps climbing means worktrees are leaking.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 9,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(last_over_time(ccpool_worktree_count[35m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Worktree size (GB)",
+      "description": "Total size of the handler worktrees in GB (a lower bound when the scan is cut short). A fast-growing value means a leak or an oversized checkout.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(last_over_time(ccpool_worktree_bytes[35m])) / 1e9",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Worktree scan",
+      "description": "Whether the last worktree census finished. A lower bound means it hit its time or entry budget, so the count and size are minimums.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(last_over_time(ccpool_worktree_scan_truncated[35m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "complete",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "lower bound",
+                  "color": "orange"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Versions",
+      "description": "The running version of each ccpool component, from ccpool_build_info. An unexpected or dev/unknown version means a deploy did not take.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (component, version) (last_over_time(ccpool_build_info[35m]))",
+          "legendFormat": "{{component}} {{version}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "name"
+      }
+    },
+    {
+      "id": 27,
+      "title": "Daemon and job status",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Janitor last success age",
+      "description": "Time since the janitor last finished a pass successfully. Amber above 20 minutes, red above 30 minutes means the janitor is stale or failing. window: fixed - the 7d lookback only has to outlast any outage.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(last_over_time(ccpool_janitor_last_success_timestamp_seconds[7d]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1200
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Janitor deadline hit",
+      "description": "Whether the janitor's last pass ran out of time. 1 means it hit its deadline and left work undone.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(last_over_time(ccpool_janitor_deadline_hit[35m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "ok"
+                },
+                "1": {
+                  "text": "hit"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Janitor pass errors",
+      "description": "Errors reported by the janitor's passes in its last run. Any value above 0 means a pass failed (see the error log).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_pass_errors[35m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "Oldest unexamined age",
+      "description": "Age of the oldest worktree the janitor has not examined yet, by pass. A value that keeps growing means the janitor cannot keep up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pass) (last_over_time(ccpool_janitor_oldest_unexamined_age_seconds[35m]))",
+          "legendFormat": "{{pass}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "Orphan last event age",
+      "description": "Time since the orphan sweep last recorded an event. A very large value means the sweep is not running. window: fixed - the 7d lookback only has to outlast any outage.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(last_over_time(ccpool_orphan_last_event_timestamp_seconds[7d]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "Worktree census duration",
+      "description": "How long the last worktree census took. A value near the scan budget means the census is about to be cut short.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(last_over_time(ccpool_worktree_census_seconds[35m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Session breakdown",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 34,
+      "type": "bargauge",
+      "title": "Sessions by state",
+      "description": "Sessions per state and liveness. Many live=false rows in working or needs_input mean sessions died without being closed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (state, live) (max by (state, live, pool, pgrouter_role) (last_over_time(ccpool_session_states{pool=~\"$pool\",pgrouter_role=~\"$role\"}[35m])))",
+          "legendFormat": "{{state}} live={{live}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "table",
+      "title": "Sessions by role",
+      "description": "Sessions per role and pool (all states). A role that is missing or unlabelled when it should have sessions points at a launch problem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 11,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pgrouter_role, pool) (max by (state, live, pool, pgrouter_role) (last_over_time(ccpool_session_states{pool=~\"$pool\",pgrouter_role=~\"$role\"}[35m])))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Sessions over time by pool",
+      "description": "Live sessions over time, stacked by pool. A flat line at the pool maximum means the pool is saturated.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 11,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pool) (max by (state, live, pool, pgrouter_role) (last_over_time(ccpool_session_states{live=\"true\",pool=~\"$pool\",pgrouter_role=~\"$role\"}[35m])))",
+          "legendFormat": "{{pool}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data",
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 40
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 37,
+      "title": "Reaper and janitor",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Reap closures by reason",
+      "description": "Sessions the reaper closed, by reason (idle_ttl, cap_eviction, dead_needs_input_ttl and others). A burst of cap_eviction means the pool is oversubscribed; dead_needs_input_ttl means abandoned sessions waiting on a human.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (increase(ccpool_reap_closures_total[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data",
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 40
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "Phantoms pruned",
+      "description": "Phantom session records the reaper pruned. A steady non-zero rate means sessions keep disappearing without a close.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(ccpool_reap_phantom_pruned_total[$__rate_interval]))",
+          "legendFormat": "pruned",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Cancels by outcome",
+      "description": "Session cancels, by outcome. Outcomes other than success mean a cancel did not take effect.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Janitor funnel",
+      "description": "The janitor's last pass: candidates, examined, cached, kept, unexamined and reclaimed worktrees. Many unexamined candidates, or nothing reclaimed while the worktree count climbs, means the janitor is not keeping up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_candidates[35m]))",
+          "legendFormat": "candidates",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_examined[35m]))",
+          "legendFormat": "examined",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_cached[35m]))",
+          "legendFormat": "cached",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_kept[35m]))",
+          "legendFormat": "kept",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_unexamined[35m]))",
+          "legendFormat": "unexamined",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(last_over_time(ccpool_janitor_reclaimed[35m]))",
+          "legendFormat": "reclaimed",
+          "refId": "F"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Janitor phase seconds",
+      "description": "Wall time of each janitor phase in its last pass. A phase that grows toward the pass deadline will start hitting it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (phase) (last_over_time(ccpool_janitor_phase_seconds[35m]))",
+          "legendFormat": "{{phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "s",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "title": "Pool breakdowns",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Run duration by pool",
+      "description": "p50 and p95 duration of a session run (launch or resume), by pool. A p95 that keeps rising means runs are getting slower or stuck. A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
         "w": 12,
         "h": 8
       },
@@ -106,7 +1359,7 @@
             "mode": "palette-classic-by-name"
           },
           "unit": "s",
-          "noValue": "no runs in window"
+          "noValue": "no data"
         },
         "overrides": []
       },
@@ -118,17 +1371,69 @@
       }
     },
     {
-      "id": 3,
-      "title": "How runs ended",
-      "type": "bargauge",
+      "id": 45,
+      "type": "timeseries",
+      "title": "Run duration by result",
+      "description": "p50 and p95 duration of a session run by how it ended. Long idle_ttl runs are normal; long runs that end in handler or exited errors are not.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Runs ended over the selected time range, by pool and result (idle_ttl, cap_eviction, operator, handler, exited). Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
       "gridPos": {
         "x": 12,
-        "y": 1,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, result) (rate(ccpool_session_duration_seconds_bucket{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{result}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, result) (rate(ccpool_session_duration_seconds_bucket{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{result}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "s",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "type": "bargauge",
+      "title": "Sessions closed by pool and result",
+      "description": "Runs ended over the selected time range, by pool and result (idle_ttl, cap_eviction, operator, handler, exited, dead_needs_input_ttl). A large handler or exited share means runs are failing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
         "w": 12,
         "h": 8
       },
@@ -150,7 +1455,8 @@
             "mode": "palette-classic-by-name"
           },
           "unit": "short",
-          "decimals": 0
+          "decimals": 0,
+          "noValue": "no data"
         },
         "overrides": []
       },
@@ -160,33 +1466,26 @@
           "placement": "bottom"
         },
         "orientation": "horizontal",
-        "displayMode": "gradient"
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
       }
     },
     {
-      "id": 4,
-      "title": "Retries and failures",
-      "type": "row",
-      "gridPos": {
-        "x": 0,
-        "y": 9,
-        "w": 24,
-        "h": 1
-      },
-      "collapsed": false
-    },
-    {
-      "id": 5,
-      "title": "Retries",
+      "id": 6,
       "type": "timeseries",
+      "title": "Launch outcomes",
+      "description": "Session launch outcomes by pool, outcome and route. Anything other than a success outcome means launches are failing.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Retry attempts by pool and class, and genuine retry-policy exhaustion by pool. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
       "gridPos": {
-        "x": 0,
-        "y": 10,
+        "x": 12,
+        "y": 44,
         "w": 12,
         "h": 8
       },
@@ -196,8 +1495,385 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "expr": "sum by (pool, outcome, route) (increase(ccpool_launch_outcome_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "{{pool}} {{outcome}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 47,
+      "type": "timeseries",
+      "title": "Capacity live vs max",
+      "description": "Live sessions against the pool maximum. Live pinned at max means the pool is full and launches will queue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pool) (last_over_time(ccpool_pool_capacity{dim=\"live\", pool=~\"$pool\"}[35m]))",
+          "legendFormat": "live {{pool}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pool) (last_over_time(ccpool_pool_capacity{dim=\"max_sessions\", pool=~\"$pool\"}[35m]))",
+          "legendFormat": "max {{pool}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Live session tokens",
+      "description": "Tokens in live sessions, by pool and role. A session that keeps growing without finishing is burning budget.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (pool, pgrouter_role) (max by (session_id) (pa_monitor_session_tokens)\n  * on (session_id) group_left (pool, pgrouter_role)\n    label_replace(\n      max by (claude_session_id, pool, pgrouter_role) (last_over_time(ccpool_session_info{pool=~\"$pool\", pgrouter_role=~\"$role\"}[35m])),\n      \"session_id\", \"$1\", \"claude_session_id\", \"(.*)\"\n    )), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
+          "legendFormat": "{{pool}} {{pgrouter_role}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 48,
+      "type": "timeseries",
+      "title": "Output tokens by pool and role",
+      "description": "Output tokens produced by finished sessions, by pool and role. A role whose output suddenly stops or spikes needs a look. A series with no role is shown as unlabelled.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (pool, pgrouter_role) (increase(ccpool_session_output_tokens_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
+          "legendFormat": "{{pool}} {{pgrouter_role}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 49,
+      "type": "timeseries",
+      "title": "Worktrees over time",
+      "description": "Handler worktree count over time (the janitor census). A line that only climbs means worktrees are leaking.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(last_over_time(ccpool_worktree_count[35m]))",
+          "legendFormat": "worktrees",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 50,
+      "title": "Resources",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "ccpool CPU",
+      "description": "CPU used by ccpool processes, in cores, by app. Sustained high CPU means a runaway ccpool process.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (app) (rate(host_group_cpu_seconds_total{app=~\"ccpool: .*\"}[$__rate_interval]))",
+          "legendFormat": "{{app}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "ccpool memory",
+      "description": "Memory footprint of ccpool processes, by app. A footprint that keeps growing means a leak.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (app) (host_group_memory_footprint_bytes{app=~\"ccpool: .*\"})",
+          "legendFormat": "{{app}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "bytes",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 53,
+      "type": "timeseries",
+      "title": "ccpool disk write",
+      "description": "Disk write rate of ccpool processes, by app. Sustained heavy writes mean a process is churning the disk.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (app) (rate(host_group_disk_write_bytes_total{app=~\"ccpool: .*\"}[$__rate_interval]))",
+          "legendFormat": "{{app}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "Bps",
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 54,
+      "title": "Errors",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 77,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Retries and exhausted",
+      "description": "Retries by class and genuinely exhausted retry policies, by pool. Any exhausted retry means a launch gave up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 78,
+        "w": 16,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (pool, class) (increase(ccpool_retries_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
-          "legendFormat": "retries {{pool}} / {{class}}",
+          "legendFormat": "retries {{pool}} {{class}}",
           "refId": "A"
         },
         {
@@ -215,16 +1891,8 @@
           "color": {
             "mode": "palette-classic-by-name"
           },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 80,
-            "stacking": {
-              "mode": "normal"
-            }
-          },
-          "noValue": "no retries yet (or exporter down)",
           "unit": "short",
-          "decimals": 0
+          "noValue": "no data"
         },
         "overrides": []
       },
@@ -236,18 +1904,18 @@
       }
     },
     {
-      "id": 6,
-      "title": "Launch outcomes and cancels",
-      "type": "timeseries",
+      "id": 16,
+      "type": "stat",
+      "title": "Dead-but-working",
+      "description": "Sessions recorded as working whose process is gone. Any value above 0 means a session died without being closed. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Launch outcomes by pool, outcome and route, and cancel outcomes by pool. Router-wide failures live on the pg-router dashboard. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
       "gridPos": {
-        "x": 12,
-        "y": 10,
-        "w": 12,
+        "x": 16,
+        "y": 78,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -256,533 +1924,130 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pool, outcome, route) (increase(ccpool_launch_outcome_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
-          "legendFormat": "launch {{pool}} / {{outcome}} / {{route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (pool, outcome) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
-          "legendFormat": "cancel {{pool}} / {{outcome}}",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 80,
-            "stacking": {
-              "mode": "normal"
-            }
-          },
-          "noValue": "no launches in window",
-          "unit": "short",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
-    },
-    {
-      "id": 7,
-      "title": "Tokens and capacity",
-      "type": "row",
-      "gridPos": {
-        "x": 0,
-        "y": 18,
-        "w": 24,
-        "h": 1
-      },
-      "collapsed": false
-    },
-    {
-      "id": 8,
-      "title": "Tokens in live sessions",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Output tokens used so far by each LIVE Claude session, grouped by pool. Source: pa-monitor session_tokens, which is CUMULATIVE over the session (the sum of output_tokens across the session's assistant messages in the transcript; it is not the current context size, which pa-monitor reports separately as context_tokens). Only live sessions appear: a session's series vanishes when it ends, so this is not a per-pool lifetime total; see the finished-session panels for ended sessions. Like the finished-session counter, it counts each distinct assistant message once (a multi-block turn is written as one transcript line per block, all repeating the same usage). Sessions not managed by ccpool are excluded. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
-      "gridPos": {
-        "x": 0,
-        "y": 19,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "label_replace(sum by (pool, pgrouter_role) (max by (session_id) (pa_monitor_session_tokens)\n  * on (session_id) group_left (pool, pgrouter_role)\n    label_replace(\n      max by (claude_session_id, pool, pgrouter_role) (ccpool_session_info{pool=~\"$pool\", pgrouter_role=~\"$role\"}),\n      \"session_id\", \"$1\", \"claude_session_id\", \"(.*)\"\n    )), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
-          "legendFormat": "{{pool}} / {{pgrouter_role}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          },
-          "noValue": "none (or exporter down)",
-          "unit": "short",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
-    },
-    {
-      "id": 9,
-      "title": "Capacity",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Sessions in use (dim=live) against the pool maximum (dim=max_sessions), by pool. Pool values are directory basenames, the same as the pool variable. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
-      "gridPos": {
-        "x": 12,
-        "y": 19,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "max by (pool) (ccpool_pool_capacity{dim=\"live\", pool=~\"$pool\"})",
-          "legendFormat": "in use {{pool}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "max by (pool) (ccpool_pool_capacity{dim=\"max_sessions\", pool=~\"$pool\"})",
-          "legendFormat": "capacity {{pool}}",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          },
-          "unit": "none",
-          "min": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
-    },
-    {
-      "id": 10,
-      "title": "Tokens in finished sessions",
-      "type": "bargauge",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Output tokens produced by sessions whose run has ENDED, over the selected time range, by pool and role. Source: ccpool_session_output_tokens_total, incremented once per ended run from the session transcript (counted once per distinct assistant message, so a resumed session contributes only the tokens produced since its previous run ended). Use together with 'Tokens in live sessions' for sessions still running; the two are not summed because a resumed live session's cumulative gauge already includes tokens counted when its earlier run ended. A session whose transcript is gone before the run is emitted (a pruned phantom) cannot be attributed. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
-      "gridPos": {
-        "x": 0,
-        "y": 27,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "label_replace(sum by (pool, pgrouter_role) (increase(ccpool_session_output_tokens_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__range])), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
-          "legendFormat": "{{pool}} / {{pgrouter_role}}",
+          "expr": "sum(max by (state, live, pool, pgrouter_role) (last_over_time(ccpool_session_states{state=\"working\",live=\"false\"}[35m]))) or (vector(0) and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
+          "legendFormat": "",
           "refId": "A",
           "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
           "unit": "short",
-          "decimals": 0
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data"
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient"
+        "colorMode": "value",
+        "graphMode": "none"
       }
     },
     {
-      "id": 11,
-      "title": "Tokens in finished sessions over time",
-      "type": "timeseries",
+      "id": 55,
+      "type": "logs",
+      "title": "Error log (jsonl sources)",
+      "description": "WARN and ERROR lines from the ccpool and handler event logs. Any line is a fault to read.",
       "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
+        "type": "loki",
+        "uid": "loki"
       },
-      "description": "Output tokens produced by sessions whose run ended in each interval, by pool and role (see 'Tokens in finished sessions' for the counting rules). A run is attributed at the reaper's next sweep after it ends, so bars lag the actual end by up to 300 s. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
-      "gridPos": {
-        "x": 12,
-        "y": 27,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "label_replace(sum by (pool, pgrouter_role) (increase(ccpool_session_output_tokens_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
-          "legendFormat": "{{pool}} / {{pgrouter_role}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 80,
-            "stacking": {
-              "mode": "normal"
-            }
-          },
-          "noValue": "no tokens in window",
-          "unit": "short",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
-    },
-    {
-      "id": 12,
-      "type": "row",
-      "title": "Session health",
-      "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 86,
         "w": 24,
-        "h": 1
-      },
-      "panels": []
-    },
-    {
-      "id": 13,
-      "type": "timeseries",
-      "title": "Sessions by state",
-      "description": "Sessions by state and liveness (live=true means the owning process is alive). Source: ccpool_session_states, deduplicated per pool and role with max by before summing.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 36,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "unit": "short",
-          "decimals": 0,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A",
-          "legendFormat": "{{state}} / live={{live}}",
-          "expr": "sum by (state, live) (max by (state, live, pool, pgrouter_role) (ccpool_session_states))"
-        }
-      ]
-    },
-    {
-      "id": 14,
-      "type": "timeseries",
-      "title": "Preserved for human",
-      "description": "Sessions preserved for a human to look at, by pool. Source: ccpool_sessions_preserved_for_human, deduplicated per pool and role with max by before summing.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 36,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "unit": "short",
-          "decimals": 0,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A",
-          "legendFormat": "{{pool}}",
-          "expr": "sum by (pool) (max by (pool, pgrouter_role) (ccpool_sessions_preserved_for_human{pool=~\"$pool\",pgrouter_role=~\"$role\"}))"
-        }
-      ]
-    },
-    {
-      "id": 15,
-      "type": "stat",
-      "title": "needs_input (live)",
-      "description": "Live sessions waiting for input. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 44,
-        "w": 6,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A",
-          "instant": true,
-          "legendFormat": "",
-          "expr": "sum(max by (state, live, pool, pgrouter_role) (ccpool_session_states{state=\"needs_input\",live=\"true\"})) or (vector(0) and on() (max(ccpool_pool_capacity) >= 0))"
-        }
-      ]
-    },
-    {
-      "id": 16,
-      "type": "stat",
-      "title": "dead-but-working",
-      "description": "Sessions recorded as working whose process is dead. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 6,
-        "y": 44,
-        "w": 6,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A",
-          "instant": true,
-          "legendFormat": "",
-          "expr": "sum(max by (state, live, pool, pgrouter_role) (ccpool_session_states{state=\"working\",live=\"false\"})) or (vector(0) and on() (max(ccpool_pool_capacity) >= 0))"
-        }
-      ]
-    },
-    {
-      "id": 17,
-      "title": "Janitor run time (p90 over 6h) and deadline hits",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "The pg-router ccpool handler janitor (INV-CCH-41): wall time of its last run, its p90 over 6 hours (creep shows before the deadline is reached) and the runs that hit their deadline. Emitted through ccpool emit-gauge; empty where the janitor is not enabled. Alert rules: pg-router-ccpool-janitor-*. window: fixed - the p90 horizon is deliberately 6h (it matches the title and the pg-router-ccpool-janitor-* alert design), so it must not scale with the dashboard range or scrape interval.",
-      "gridPos": {
-        "x": 0,
-        "y": 48,
-        "w": 12,
         "h": 8
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
+            "type": "loki",
+            "uid": "loki"
           },
-          "expr": "max(ccpool_janitor_last_run_seconds)",
-          "legendFormat": "last run",
+          "expr": "{service_name=~\"ccpool|pg-router-ccpool-handler-events\"} | severity_text =~ \"WARN|ERROR\"",
+          "queryType": "range",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "quantile_over_time(0.9, max(ccpool_janitor_last_run_seconds)[6h:1m])",
-          "legendFormat": "p90 (6h)",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "max(ccpool_janitor_deadline_hit)",
-          "legendFormat": "deadline hit",
-          "refId": "C"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic-by-name"
-          },
-          "unit": "s",
-          "noValue": "janitor not running"
-        },
-        "overrides": []
-      },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      }
+    },
+    {
+      "id": 56,
+      "type": "logs",
+      "title": "Error log (raw sources)",
+      "description": "WARN and ERROR lines from the raw launchd logs of the janitor, daemon and pool-metrics handlers (matched on the level text, as these sources carry no reliable severity). Any line is a fault to read.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 94,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=~\"pg-router-ccpool-handler-(janitor|daemon|pool-metrics)\"} |~ \"level=(WARN|ERROR)\"",
+          "queryType": "range",
+          "refId": "A"
         }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
       }
     }
-  ]
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "ccpool version",
+        "type": "dashboard",
+        "enable": true,
+        "iconColor": "blue",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "expr": "max by (component, version) (last_over_time(ccpool_build_info[35m])) unless max by (component, version) (last_over_time(ccpool_build_info[35m] offset 35m))",
+        "step": "35m",
+        "titleFormat": "Version change",
+        "textFormat": "{{component}} deployed {{version}}",
+        "useValueForTime": false
+      }
+    ]
+  }
 }
