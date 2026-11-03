@@ -12,6 +12,9 @@ opts)
     _arguments \
       '--json[Print only the verdicts, as one JSON array]' \
       '--repo[Only this repo'"'"'s verdicts]:repo key:'
+  elif [[ ${words[1]} == tips ]]; then
+    _arguments \
+      '--repo[Only this repo'"'"'s tip]:repo key:'
   fi
   ;;
 esac

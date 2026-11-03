@@ -108,9 +108,15 @@ prints one JSONL record on stdout and nothing else:
 
 The id carries the sha, so a re-emit is the same event and a new tip is a new one; `expiresAt` is
 the retry window (`thresholds.retry_window` seconds, default 3600). "Tips without a verdict" is
-derived state, so a crash resumes by construction. A repo that fails a check is logged in the run
-log and skipped. `tips` takes no lease, does not look at the load and ignores the kill switch: it
-only reads refs and the verdict store.
+derived state, so a crash resumes by construction. A repo that fails a check (not a plain key, not a
+repo key of `pn-workspace.toml`, path check, unreadable branch, missing branch ref) is a FAILURE, not
+a skip: it is logged as `tips: FAILED '<key>': <reason>`, the remaining repos are still processed and
+the healthy ones still print, and the run exits 1 at the end. A repo that already has a verdict is
+not a failure. pg-router discards all stdout of a command query that exits non-zero, so the
+deployment runs ONE query per repo, using `tips --repo <key>`: a key that is not in the allow-list
+is a refusal (exit 2), a key whose `verify` is not true prints nothing and exits 0, and any other
+key gets the checks above (exit 1 on a failure). `tips` takes no lease, does not look at the load
+and ignores the kill switch: it only reads refs and the verdict store.
 
 ### `verify` (the role)
 

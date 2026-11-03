@@ -60,9 +60,15 @@ pg-repo-runner: Kernel and facade of the pg-router-managed async repo runners
 Usage: pg-repo-runner COMMAND [OPTIONS]
 
 Commands:
-  tips             Source: emit one JSONL item per allow-listed repo (verify on)
-                   whose primary tip has no check verdict
-  workspace-tips   Source: emit the workspace tip tuple (workspace@<hash>) once
+  tips [--repo KEY]
+                   Source: emit one JSONL item per allow-listed repo (verify on)
+                   whose primary tip has no check verdict. A repo that cannot be
+                   read (not a plain key, not in pn-workspace.toml, path check,
+                   branch or ref) is a FAILURE: logged "tips: FAILED", the other
+                   repos still print, and the run exits 1. --repo KEY handles only
+                   that repo: a key outside the allow-list exits 2, a key with
+                   verify off prints nothing and exits 0
+  workspace-tips  Source: emit the workspace tip tuple (workspace@<hash>) once
                    it has been unchanged for the quiet window and has no build
                    verdict
   verify           Role: check the repo tip named by PG_ROUTER_ITEM_ID
@@ -183,7 +189,8 @@ Exit codes:
   0  the run completed, whatever the verdict (a red check exits 0)
   9  busy: not now (kill switch, load, lease held); pg-router re-offers the item
   2  usage error or a refusal
-  1  malfunction (unreadable config, no load reading, state directory unusable)
+  1  malfunction (unreadable config, no load reading, state directory unusable;
+     for tips also: at least one repo could not be read)
 
 status [--json] [--repo KEY]:
   Prints every stored verdict (optionally one repo's), whether the lease is free,
@@ -666,61 +673,96 @@ run_role() {
 
 # --- tips (the source of runner B) -----------------------------------------
 
-# run_tips: one JSONL record per allow-listed repo (verify on) whose primary tip
-# has no check verdict, on stdout and nothing else. The id carries the sha, so a
-# re-emit is the same event and a new tip is a new one; expiresAt is the retry
-# window. "Tips without a verdict" is derived state, so a crash resumes by
-# construction. A repo that fails the resolve or the path check is logged and
-# skipped: one broken entry never blanks the others. Not subject to the kill
+# tips_one KEY: one repo of the allow-list (verify on). Prints its JSONL record
+# when its primary tip has no check verdict; prints nothing when it has one.
+# Returns 1, after logging "tips: FAILED '<key>': <reason>", when the repo cannot
+# be read (not a plain key, not in pn-workspace.toml, path check, branch, ref).
+tips_one() {
+  local key="$1" branch tip rc
+  if ! rr_valid_key "$key"; then
+    rr_log "tips: FAILED '$key': not a plain repo key"
+    return 1
+  fi
+  rc=0
+  rr_workspace_has_key "$TIPS_ROOT" "$key" || rc=$?
+  if ((rc != 0)); then
+    rr_log "tips: FAILED '$key': not a repo key of pn-workspace.toml (or the file is unreadable)"
+    return 1
+  fi
+  if ! rr_path_check "$TIPS_ROOT" "$key"; then
+    rr_log "tips: FAILED '$key': $TIPS_ROOT/$key is not the top level of a git repository at that exact real path"
+    return 1
+  fi
+  branch="$(rr_repo_branch "$TIPS_ROOT" "$key")" || {
+    rr_log "tips: FAILED '$key': cannot read its branch"
+    return 1
+  }
+  if ! tip="$(rr_tip_of "$RR_REPO_PATH" "$branch")"; then
+    rr_log "tips: FAILED '$key': refs/heads/$branch does not exist"
+    return 1
+  fi
+  if rr_verdict_exists "$key" "$tip" check; then
+    return 0
+  fi
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rr_jq -nc --arg repo "$key" --arg sha "$tip" --arg branch "$branch" \
+    --arg at "$TIPS_AT" --arg exp "$TIPS_EXPIRES" \
+    '{id: ($repo + "@" + $sha), type: "repo-tip", title: ($repo + " tip"),
+      metadata: {repo: $repo, sha: $sha, branch: $branch}, at: $at, expiresAt: $exp}' ||
+    die "cannot emit the item for '$key'" 1
+}
+
+# run_tips [--repo KEY]: one JSONL record per allow-listed repo (verify on) whose
+# primary tip has no check verdict, on stdout and nothing else. The id carries the
+# sha, so a re-emit is the same event and a new tip is a new one; expiresAt is the
+# retry window. "Tips without a verdict" is derived state, so a crash resumes by
+# construction. A repo that fails the resolve or the path check is a FAILURE: it
+# is logged ("tips: FAILED"), the remaining repos are still processed and the
+# healthy ones still print, and the run exits 1 at the end (pg-router discards the
+# stdout of a failed query, so the deployment runs one query per repo). With
+# --repo KEY only that repo is processed: a key outside the allow-list is a
+# refusal (exit 2), a key whose verify is not true prints nothing and exits 0. A
+# repo that already has a verdict is not a failure. Not subject to the kill
 # switch, the load check or the lease: it only reads refs and the store.
 run_tips() {
-  local root key now_e at expires branch tip rc keys
-  [[ $# -eq 0 ]] || die "tips takes no arguments" 2
+  local key keys only="" failed=0 now_e
+  while (($# > 0)); do
+    case "$1" in
+    --repo)
+      [[ $# -ge 2 && -n $2 ]] || die "tips --repo needs a repo key" 2
+      [[ -z $only ]] || die "tips takes --repo only once" 2
+      only="$2"
+      shift 2
+      ;;
+    *) die "tips takes no arguments except --repo KEY" 2 ;;
+    esac
+  done
   # shellcheck disable=SC2034  # read by rr_log in pg-repo-runner.bash
   RR_ROLE=tips
   rr_init_state || die "cannot create the state directory" 1
   rr_load_config || die "cannot load the config" 1
-  root="$(rr_cfg '.workspace_root // empty')"
-  [[ -n $root && -d $root ]] || die "config workspace_root is missing or not a directory" 1
+  TIPS_ROOT="$(rr_cfg '.workspace_root // empty')"
+  [[ -n $TIPS_ROOT && -d $TIPS_ROOT ]] || die "config workspace_root is missing or not a directory" 1
   now_e="$(rr_epoch)"
-  at="$(rr_iso_at "$now_e")"
-  expires="$(rr_iso_at "$((now_e + $(rr_retry_window)))")"
-  keys="$(rr_cfg '(.repos // {}) | to_entries | map(select(.value.verify == true) | .key) | sort | .[]')" ||
-    die "cannot read the allow-list" 1
-  while IFS= read -r key; do
-    [[ -n $key ]] || continue
-    if ! rr_valid_key "$key"; then
-      rr_log "tips: skipped '$key': not a plain repo key"
-      continue
+  TIPS_AT="$(rr_iso_at "$now_e")"
+  TIPS_EXPIRES="$(rr_iso_at "$((now_e + $(rr_retry_window)))")"
+  if [[ -n $only ]]; then
+    rr_repo_listed "$only" || die "tips --repo: '$only' is not in the allow-list" 2
+    if rr_repo_flag "$only" verify; then
+      tips_one "$only" || failed=1
     fi
-    rc=0
-    rr_workspace_has_key "$root" "$key" || rc=$?
-    if ((rc != 0)); then
-      rr_log "tips: skipped '$key': not a repo key of pn-workspace.toml (or the file is unreadable)"
-      continue
-    fi
-    if ! rr_path_check "$root" "$key"; then
-      rr_log "tips: skipped '$key': $root/$key is not the top level of a git repository at that exact real path"
-      continue
-    fi
-    branch="$(rr_repo_branch "$root" "$key")" || {
-      rr_log "tips: skipped '$key': cannot read its branch"
-      continue
-    }
-    if ! tip="$(rr_tip_of "$RR_REPO_PATH" "$branch")"; then
-      rr_log "tips: skipped '$key': refs/heads/$branch does not exist"
-      continue
-    fi
-    if rr_verdict_exists "$key" "$tip" check; then
-      continue
-    fi
-    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
-    rr_jq -nc --arg repo "$key" --arg sha "$tip" --arg branch "$branch" \
-      --arg at "$at" --arg exp "$expires" \
-      '{id: ($repo + "@" + $sha), type: "repo-tip", title: ($repo + " tip"),
-        metadata: {repo: $repo, sha: $sha, branch: $branch}, at: $at, expiresAt: $exp}' ||
-      die "cannot emit the item for '$key'" 1
-  done <<<"$keys"
+  else
+    keys="$(rr_cfg '(.repos // {}) | to_entries | map(select(.value.verify == true) | .key) | sort | .[]')" ||
+      die "cannot read the allow-list" 1
+    while IFS= read -r key; do
+      [[ -n $key ]] || continue
+      tips_one "$key" || failed=1
+    done <<<"$keys"
+  fi
+  if ((failed != 0)); then
+    rr_log "tips: done, at least one repo FAILED"
+    exit 1
+  fi
   rr_log "tips: done"
   exit 0
 }

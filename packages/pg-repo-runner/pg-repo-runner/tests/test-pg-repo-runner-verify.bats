@@ -414,11 +414,23 @@ hold_lease() {
 
 # ---- the tips source --------------------------------------------------------
 
-tips() { run --separate-stderr "${RUNNER[@]}" tips; }
+tips() { run --separate-stderr "${RUNNER[@]}" tips "$@"; }
 
-@test "tips emits one JSONL record per verify-enabled repo whose tip has no verdict" {
+# only_alpha_verified: turn verify off for the repos the fixture config lists but
+# that cannot be read (nix-link, nix-ghost, nix-flk), so no-argument tips sees
+# healthy repos only. Every other tips test starts from this; the failure tests
+# do not call it.
+only_alpha_verified() {
+  awk '/^\[/ { off = ($0 ~ /^\[repos\.nix-(link|ghost|flk)\]$/) }
+    off && /^verify = true$/ { print "verify = false"; next }
+    { print }' "$TEST_DIR/config.toml" >"$TEST_DIR/config.toml.new"
+  mv -f "$TEST_DIR/config.toml.new" "$TEST_DIR/config.toml"
+  [ "$(tq -o json -f "$TEST_DIR/config.toml" . | jq '[.repos[] | select(.verify == true)] | length')" -eq 1 ]
+}
+
+@test "tips: a repo that cannot be read is a failure; the healthy record still prints and the run exits 1" {
   tips
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   # nix-alpha only: nix-beta is verify=false, nix-ghost is not a workspace key,
   # nix-link is a symlink, nix-flk is in neither the workspace file nor on disk
   [ "$(wc -l <<<"$output" | tr -d ' ')" -eq 1 ]
@@ -430,12 +442,75 @@ tips() { run --separate-stderr "${RUNNER[@]}" tips; }
   [ "$(jq -r .metadata.branch <<<"$output")" = main ]
   # the default retry window is an hour
   [ "$(jq '(.expiresAt | fromdateiso8601) - (.at | fromdateiso8601)' <<<"$output")" = 3600 ]
-  # the skipped entries are explained in the run log, not on stdout
-  grep -q "tips: skipped 'nix-ghost'" "$STATE/run.log"
-  grep -q "tips: skipped 'nix-link'" "$STATE/run.log"
+  # the failed entries are explained in the run log, not on stdout
+  grep -q "tips: FAILED 'nix-ghost'" "$STATE/run.log"
+  grep -q "tips: FAILED 'nix-link'" "$STATE/run.log"
+  grep -q "tips: FAILED 'nix-flk'" "$STATE/run.log"
+  ! grep -q "tips: skipped" "$STATE/run.log"
+}
+
+@test "tips --repo: a healthy repo emits its record and exits 0" {
+  tips --repo nix-alpha
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<<"$output" | tr -d ' ')" -eq 1 ]
+  [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]
+  ! grep -q "tips: FAILED" "$STATE/run.log"
+}
+
+@test "tips --repo: a repo that cannot be read exits 1 with a FAILED log line and no output" {
+  tips --repo nix-ghost
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q "tips: FAILED 'nix-ghost': not a repo key of pn-workspace.toml" "$STATE/run.log"
+  tips --repo nix-link
+  [ "$status" -eq 1 ]
+  grep -q "tips: FAILED 'nix-link': .*not the top level of a git repository" "$STATE/run.log"
+}
+
+@test "tips --repo: a branch ref that does not exist is a failure" {
+  git -C "$WS/nix-alpha" branch -m main renamed
+  tips --repo nix-alpha
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q "tips: FAILED 'nix-alpha': refs/heads/main does not exist" "$STATE/run.log"
+}
+
+@test "tips --repo: a key outside the allow-list is a refusal (exit 2) that names the key" {
+  tips --repo nix-unknown
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ $stderr == *nix-unknown* ]]
+}
+
+@test "tips --repo: a key whose verify is off prints nothing and exits 0" {
+  tips --repo nix-beta
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  ! grep -q "tips: FAILED" "$STATE/run.log"
+}
+
+@test "tips --repo: needs exactly one key, and other arguments are refused" {
+  tips --repo
+  [ "$status" -eq 2 ]
+  tips --repo nix-alpha --repo nix-beta
+  [ "$status" -eq 2 ]
+  tips --bogus
+  [ "$status" -eq 2 ]
+}
+
+@test "tips: every repo already verified exits 0 with no output" {
+  only_alpha_verified
+  verify
+  tips
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  tips --repo nix-alpha
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "tips: the retry window is configurable, and stdout is nothing but JSON lines" {
+  only_alpha_verified
   PG_REPO_RUNNER_RETRY_WINDOW=120 tips
   [ "$(jq '(.expiresAt | fromdateiso8601) - (.at | fromdateiso8601)' <<<"$output")" = 120 ]
   [ -z "$stderr" ]
@@ -445,6 +520,7 @@ tips() { run --separate-stderr "${RUNNER[@]}" tips; }
 }
 
 @test "tips: a tip with a verdict is not emitted, a new tip is, and the id carries the sha" {
+  only_alpha_verified
   verify
   tips
   [ "$status" -eq 0 ]
@@ -475,6 +551,7 @@ tips() { run --separate-stderr "${RUNNER[@]}" tips; }
 }
 
 @test "tips does not take the lease or consult the load: it only reads refs and the store" {
+  only_alpha_verified
   hold_lease
   local owner
   owner="$(readlink "$STATE/lease")"
@@ -493,7 +570,7 @@ tips() { run --separate-stderr "${RUNNER[@]}" tips; }
   [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = green ]
 }
 
-@test "tips refuses arguments, and a broken config is a malfunction" {
+@test "tips refuses stray arguments, and a broken config is a malfunction" {
   run "${RUNNER[@]}" tips extra
   [ "$status" -eq 2 ]
   rm "$TEST_DIR/config.toml"
@@ -631,6 +708,7 @@ done
 exec /bin/date "$@"
 SH
   chmod +x "$TEST_DIR/bsd-bin/date"
+  only_alpha_verified
   PATH="$TEST_DIR/bsd-bin:$PATH" RR_DATE_BIN="$gnu" tips
   [ "$status" -eq 0 ]
   [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]
@@ -660,6 +738,7 @@ strict_path_env() {
 
 @test "tips reports the repo under a BSD-only PATH (no realpath -e)" {
   strict_path_env
+  only_alpha_verified
   run --separate-stderr env "${STRICT_ENV[@]}" "${STRICT_RUNNER[@]}" tips
   [ "$status" -eq 0 ]
   [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]

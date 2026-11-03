@@ -18,6 +18,8 @@ _pg_repo_runner() {
 
   if [[ $cmd == status && $cur == -* ]]; then
     mapfile -t COMPREPLY < <(compgen -W "--json --repo" -- "$cur")
+  elif [[ $cmd == tips && $cur == -* ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "--repo" -- "$cur")
   fi
 }
 

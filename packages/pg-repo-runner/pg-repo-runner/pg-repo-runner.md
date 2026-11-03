@@ -15,6 +15,10 @@
 
 `pg-repo-runner tips`
 
+- Print the tip of one repo only (exit `2` for a key outside the allow-list, nothing and exit `0` when its verify is off, exit `1` when the repo cannot be read; the no-argument form also exits `1` if any repo cannot be read, after printing the healthy ones):
+
+`pg-repo-runner tips --repo {{repo-key}}`
+
 - Check one repo tip by hand (an immutable `nix flake check`, then a verdict; a red check still exits `0`):
 
 `PG_ROUTER_ITEM_ID={{repo-key}}@{{sha}} pg-repo-runner verify`
