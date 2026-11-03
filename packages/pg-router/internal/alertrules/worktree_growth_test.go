@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// pg-router-worktree-growth (pg2-hxxtt): the floor of pg_router_worktree_count over the
+// pg-router-worktree-growth: the floor of ccpool_worktree_count over the
 // last 12h rising by 10 or more against the floor of the 12h before it. The PromQL
 // behaviour is covered by rule-tests/pg-router-worktree-growth.test.yaml; this pins the
 // Grafana-only fields promtool cannot run. Raise the 10 here and in alerts.yaml together.
-const wantWorktreeGrowthExpr = `min_over_time(sum(pg_router_worktree_count)[12h:10m]) - min_over_time(sum(pg_router_worktree_count)[12h:10m] offset 12h) >= 10`
+const wantWorktreeGrowthExpr = `min_over_time(sum(last_over_time(ccpool_worktree_count[15m]))[12h:10m]) - min_over_time(sum(last_over_time(ccpool_worktree_count[15m]))[12h:10m] offset 12h) >= 10`
 
 func TestWorktreeGrowthRule(t *testing.T) {
 	r := ruleBlock(t, "pg-router-worktree-growth")
