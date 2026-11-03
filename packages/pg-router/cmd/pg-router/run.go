@@ -269,7 +269,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	mp, metricsReader := resolveMeterProvider(cfg)
 	var metricsOpts []metrics.Option
 	if runMode == core.RunModeLongRunning {
-		metricsOpts = append(metricsOpts, metrics.WithLiveness(func() bool { return true }))
+		metricsOpts = append(metricsOpts, metrics.WithLiveness(func() bool { return true }), metrics.WithBuildInfo(version))
 		if cfg.WorktreeDir != "" {
 			// Worktree pool count/size (pg2-kftf9.22): TTL-cached background scan.
 			metricsOpts = append(metricsOpts, metrics.WithWorktreePool(cfg.WorktreeDir, 0))

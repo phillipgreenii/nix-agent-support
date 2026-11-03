@@ -211,3 +211,38 @@ func scrape(t *testing.T, url string) string {
 	}
 	return string(b)
 }
+
+// TestStartMetricsServer_ServesBuildInfoGaugeWithoutSuffix proves the optional
+// build-info gauge reaches /metrics under its exact name (no unit suffix) with
+// a version label and value 1.
+func TestStartMetricsServer_ServesBuildInfoGaugeWithoutSuffix(t *testing.T) {
+	var ln net.Listener
+	mp, shutdown, err := startMetricsServer("127.0.0.1:0", func(l net.Listener) { ln = l })
+	if err != nil {
+		t.Fatalf("startMetricsServer: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	})
+	if _, err := metrics.New(mp, func() map[string]int { return nil }, metrics.WithBuildInfo("1.2.3-test")); err != nil {
+		t.Fatalf("metrics.New: %v", err)
+	}
+	if err := forceFlush(context.Background(), mp); err != nil {
+		t.Fatalf("force flush: %v", err)
+	}
+	body := scrape(t, fmt.Sprintf("http://%s/metrics", ln.Addr().String()))
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "pg_router_build_info{") {
+			found = true
+			if !strings.Contains(line, `version="1.2.3-test"`) || !strings.HasSuffix(line, " 1") {
+				t.Errorf("build_info series = %q, want version label and value 1", line)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("scrape missing pg_router_build_info series: %q", body)
+	}
+}

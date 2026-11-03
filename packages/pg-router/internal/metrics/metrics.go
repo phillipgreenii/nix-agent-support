@@ -176,6 +176,12 @@ const (
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
 	// registers this observable at all, not merely never observes it true).
 	MetricLiveness = "pg_router_liveness"
+	// MetricBuildInfo is the running daemon's version as a constant gauge of 1
+	// labelled version. It has NO unit (a unit would make the Prometheus
+	// exporter append a suffix). Registered ONLY when New is given WithBuildInfo
+	// (daemon-mode only), so it is an optional member outside the ten-member core
+	// catalog.
+	MetricBuildInfo = "pg_router_build_info"
 	// MetricDispatchLatency is the catalog's original Histogram: the time from an
 	// event's enqueue to a settling dispatch outcome, in milliseconds. See
 	// RecordDispatchLatency's doc for why this task builds and exposes it
@@ -635,6 +641,8 @@ type options struct {
 	logLimits       func() eventqueue.LimitStatus
 	activeGates     func() []eventqueue.Gate
 	isLive          func() bool
+	buildVersion    string
+	buildInfo       bool
 	now             func() time.Time
 	poolDir         string
 	poolTTL         time.Duration
@@ -782,6 +790,13 @@ func WithActiveGates(fn func() []eventqueue.Gate) Option {
 // decision.
 func WithLiveness(isLive func() bool) Option {
 	return func(o *options) { o.isLive = isLive }
+}
+
+// WithBuildInfo registers MetricBuildInfo, an ObservableGauge that always
+// reports 1 with a version label. Daemon-mode only: a drain-and-exit caller
+// does not pass it.
+func WithBuildInfo(version string) Option {
+	return func(o *options) { o.buildVersion, o.buildInfo = version, true }
 }
 
 // New registers the instruments above on a meter from mp and returns an Emitter.
@@ -1170,6 +1185,20 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 					v = 1
 				}
 				o.Observe(v)
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.buildInfo {
+		ver := cfg.buildVersion
+		if _, err := m.Int64ObservableGauge(
+			MetricBuildInfo,
+			metric.WithDescription("constant 1 labelled with the running daemon's version; daemon-mode only"),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				o.Observe(1, metric.WithAttributes(attribute.String("version", ver)))
 				return nil
 			}),
 		); err != nil {

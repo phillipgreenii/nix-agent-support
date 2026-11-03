@@ -1745,3 +1745,21 @@ func findMetricOK(rm metricdata.ResourceMetrics, name string) bool {
 	}
 	return false
 }
+
+func TestNew_WithoutBuildInfo_RegistersNoBuildInfoGauge(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	if _, err := New(mp, func() map[string]int { return nil }, WithLiveness(func() bool { return true })); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	_ = reader.Collect(context.Background(), &rm)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricBuildInfo {
+				t.Errorf("%s registered without WithBuildInfo", m.Name)
+			}
+		}
+	}
+}
