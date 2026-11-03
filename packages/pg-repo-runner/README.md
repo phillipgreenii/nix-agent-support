@@ -149,6 +149,31 @@ and ignores the kill switch: it only reads refs and the verdict store.
    a signal exit (128 + n, that is 129 to 192) is a malfunction: exit 1, NO verdict is stored, and
    pg-router retries (`max_dispatch_retries`). There is no "inconclusive" class and a red is never
    retried automatically. A red verdict exits 0 (it is data, not a failure of the runner).
+7. **The sibling-override check (a signal, never a gate).** A `red` locked verdict is followed, in the
+   same run and under the same lease, by `pn workspace flake-check --no-build --rev <sha> <repo>`
+   (`PN_WORKSPACE_ROOT=<canonical root>`, under `nice`, `pn` unwrapped): pn's own evaluation of that
+   commit with the repo's workspace siblings pinned to their local clones, the override set
+   `pn workspace flake-check` uses. Its result is stored as a second `check` verdict with
+   `inputs = override` in its own file, `<sha>.check-override.json`, so it never replaces the locked
+   verdict: pn exit 0 is `green`, exit 10 is `red`, and any other exit (a signal, 1, 2, 126, 127) did
+   not run to a result, so NO override verdict is stored and the run still exits 0. The pair classifies
+   the red:
+
+   | Locked | Override | Class          | Meaning                                                                                  |
+   | ------ | -------- | -------------- | ---------------------------------------------------------------------------------------- |
+   | red    | green    | `skew`         | The locked inputs are behind a sibling: a relock is owed (`pn workspace push`). No push. |
+   | red    | red      | `defect`       | Red with the siblings' local tips too: a real defect of this tip.                        |
+   | red    | none     | `unclassified` | The override check did not run to a result.                                              |
+
+   The class is the first words of the evidence on the `red` bead (`LOCK SKEW: ...`, `DEFECT: ...`,
+   `unclassified: ...`), of the `push withheld: the check verdict for <sha> is red (<class>)` text, and
+   the gauge `pg_repo_runner_check_latest_red_class`. The override verdict MUST NOT open the push gate
+   (ADR 0108 decision 3(a), gate (b) below): `rr_verdict_green` reads only `<sha>.check.json` with
+   `inputs = locked`. The check is evaluation-only (`--no-build`), so it classifies a failure that is
+   visible at evaluation; a locked red that is a build or test failure reads `defect` or
+   `unclassified` only if the override evaluation also fails. It reads the siblings' working
+   trees, as `pn workspace flake-check` does. The `build` verdict of the workspace build role also
+   has `inputs = override` but `kind = build`; the two are told apart by `kind`.
 
 The verdict also records the measured duration and the sampled load, the calibration input for
 `thresholds.max_load`: `durationS` (whole seconds between `startedAt` and `finishedAt`) and
@@ -172,7 +197,7 @@ renamed aside (atomic, so one reclaimer wins), re-checked, and taken. This is th
 ### Verdict store
 
 `$XDG_STATE_HOME/pg-repo-runner/verdicts/<repo>/<sha>.<kind>.json`, with the fields `repo`, `sha`,
-`kind` (`check` or `build`), `result` (`green`, `red`, `superseded`; the writer also accepts `error`, which no role writes today), `inputs` (`locked` or `override`),
+`kind` (`check` or `build`), `result` (`green`, `red`, `superseded`; the writer also accepts `error`, which no role writes today), `inputs` (`locked` or `override`; the locked check is `<sha>.check.json`, the sibling-override check `<sha>.check-override.json`),
 `startedAt`, `finishedAt`, `exit`, `logPath`, and for a verify check `durationS`, `loadStart`,
 `loadEnd`. A `superseded` result means the tip moved before the check ran. `rr_verdict_write` builds the document in a temp file
 in the same directory and renames it over the final name, so a reader sees the old verdict or the
@@ -452,6 +477,8 @@ Emitted at the end of `tips` and `tips --repo KEY`, per repo processed (every 5 
 | `pg_repo_runner_check_last_timestamp_seconds`    | `repo`,`result` | `finishedAt` of the latest `green` and of the latest `red` verdict (omitted when none).                                                     |
 | `pg_repo_runner_check_last_duration_seconds`     | `repo`          | `durationS` of the latest non-superseded verdict.                                                                                           |
 | `pg_repo_runner_check_latest_red`                | `repo`          | 1 when the latest non-superseded verdict is red, else 0.                                                                                    |
+| `pg_repo_runner_check_override_verdicts`         | `repo`,`result` | Count of stored sibling-override check verdicts, for `result` = `green`, `red`. `check_verdicts` counts the locked ones only.               |
+| `pg_repo_runner_check_latest_red_class`          | `repo`,`class`  | 1 for the `class` (`skew`, `defect`, `unclassified`) of the latest red locked verdict, 0 for the others and for all when it is not red.     |
 | `pg_repo_runner_sync_ahead`                      | `repo`          | Commits ahead of the remote, from the sync record (omitted without a record).                                                               |
 | `pg_repo_runner_sync_behind`                     | `repo`          | Commits behind the remote, from the sync record (omitted without a record).                                                                 |
 | `pg_repo_runner_sync_diverged`                   | `repo`          | 1 when the sync record says `diverged`, else 0 (omitted without a record).                                                                  |

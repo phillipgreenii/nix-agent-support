@@ -232,13 +232,26 @@ write_verdict() { # REPO [SHA] [KIND] [RESULT]
 
 @test "a verdict write leaves no temp file, and an overwrite replaces the verdict whole" {
   write_verdict nix-alpha
-  rr_verdict_write nix-alpha "$SHA" check red override 2026-10-28T01:00:00Z 2026-10-28T01:10:00Z 1 "$RR_RUN_LOG"
+  rr_verdict_write nix-alpha "$SHA" check red locked 2026-10-28T01:00:00Z 2026-10-28T01:10:00Z 1 "$RR_RUN_LOG"
   [ "$(find "$RR_STATE_DIR/verdicts" -type f | wc -l | tr -d ' ')" = 1 ]
   [ -z "$(find "$RR_STATE_DIR/verdicts" -name '.*' -type f)" ]
   local f="$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check.json"
   [ "$(jq -r .result "$f")" = red ]
-  [ "$(jq -r .inputs "$f")" = override ]
+  [ "$(jq -r .inputs "$f")" = locked ]
   [ "$(jq -r .exit "$f")" = 1 ]
+}
+
+@test "a check verdict over the sibling overrides has its own file and never replaces the locked one" {
+  write_verdict nix-alpha
+  rr_verdict_write nix-alpha "$SHA" check red override 2026-10-28T01:00:00Z 2026-10-28T01:10:00Z 10 "$RR_RUN_LOG"
+  [ "$(find "$RR_STATE_DIR/verdicts" -type f | wc -l | tr -d ' ')" = 2 ]
+  [ "$(jq -r .inputs "$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check.json")" = locked ]
+  [ "$(jq -r .result "$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check.json")" = green ]
+  [ "$(jq -r .inputs "$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check-override.json")" = override ]
+  [ "$(jq -r .result "$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check-override.json")" = red ]
+  # a build verdict keeps its own name, whatever its inputs
+  rr_verdict_write workspace "$SHA" build red override 2026-10-28T01:00:00Z 2026-10-28T01:10:00Z 1 "$RR_RUN_LOG"
+  [ -f "$RR_STATE_DIR/verdicts/workspace/$SHA.build.json" ]
 }
 
 @test "a failing write (jq missing) fails and leaves neither a verdict nor a temp file" {

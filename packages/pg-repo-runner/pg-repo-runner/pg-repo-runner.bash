@@ -316,7 +316,8 @@ rr_lease_release() {
 # --- verdict store (Memento) ----------------------------------------------
 
 # rr_verdict_write REPO SHA KIND RESULT INPUTS STARTED FINISHED EXIT LOGPATH [EXTRA]
-# writes $RR_STATE_DIR/verdicts/<repo>/<sha>.<kind>.json, atomically: the
+# writes $RR_STATE_DIR/verdicts/<repo>/<sha>.<kind>.json (a check over the sibling
+# overrides: <sha>.check-override.json, so it never replaces the locked check), atomically: the
 # document is built in a temp file in the same directory, then renamed over the
 # final name, so a reader sees the old file or the new one and a failure leaves
 # no temp file behind. KIND is check|build, RESULT is green|red|error|superseded
@@ -328,7 +329,7 @@ rr_lease_release() {
 # shellcheck disable=SC2329  # called by the role bodies
 rr_verdict_write() {
   local repo="$1" sha="$2" kind="$3" result="$4" inputs="$5"
-  local started="$6" finished="$7" exitc="$8" logp="$9" extra="${10:-}" dir tmp
+  local started="$6" finished="$7" exitc="$8" logp="$9" extra="${10:-}" dir tmp fname
   [[ -n $extra ]] || extra='{}'
   rr_valid_key "$repo" || {
     rr_err "verdict: bad repo key: $repo"
@@ -375,7 +376,11 @@ rr_verdict_write() {
     rm -f "$tmp"
     return 1
   fi
-  if ! mv -f "$tmp" "$dir/$sha.$kind.json"; then
+  # a check run over the sibling overrides is a different verdict from the locked check of
+  # the same sha, so it has its own file (kind stays check, inputs says which one it is)
+  fname="$sha.$kind.json"
+  [[ $kind == check && $inputs == override ]] && fname="$sha.check-override.json"
+  if ! mv -f "$tmp" "$dir/$fname"; then
     rm -f "$tmp"
     return 1
   fi
@@ -1026,6 +1031,25 @@ rr_push_exec() {
     -C "$1" push origin "$2:refs/heads/$3"
 }
 
+# rr_override_class REPO SHA: classifies a RED locked check from the check verdict stored
+# over the sibling overrides for the same sha: `skew` (green with the overrides: the
+# locked inputs are behind, a relock is owed), `defect` (red both ways) or
+# `unclassified` (no override verdict). This is a signal only: the push gate
+# (rr_verdict_green) never reads it.
+rr_override_class() {
+  local f="$RR_STATE_DIR/verdicts/$1/$2.check-override.json" res
+  [[ -f $f ]] || {
+    printf unclassified
+    return 0
+  }
+  res="$(rr_jq -r 'select(.kind == "check" and .inputs == "override") | .result' "$f" 2>/dev/null)"
+  case "$res" in
+  green) printf skew ;;
+  red) printf defect ;;
+  *) printf unclassified ;;
+  esac
+}
+
 # rr_push_siblings_ahead REPO: prints the consumed siblings (repos.<key>.consumes)
 # whose canonical primary branch holds commits their remote lacks, one per line.
 # Read-only; RR_REPO_PATH is preserved.
@@ -1123,7 +1147,7 @@ rr_push_step() {
       if [[ -n $stray ]]; then
         rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "origin/$branch is not an ancestor of the green commit $stray"
       elif [[ -f $vf ]] && [[ "$(rr_jq -r '.result' "$vf" 2>/dev/null)" == red ]]; then
-        rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the check verdict for $tip is red, and no ancestor above origin/$branch is green"
+        rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the check verdict for $tip is red ($(rr_override_class "$repo" "$tip")), and no ancestor above origin/$branch is green"
       else
         rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "no green check verdict for the tip $tip or any ancestor above origin/$branch"
       fi
@@ -1449,7 +1473,8 @@ rr_m_state_points() {
     [[ -n $n ]] && rr_m_add "$n" "$val" "$lab"
   done < <(rr_jq -r --arg r "$repo" --arg p "$RR_M_PREFIX" '
     def pt(n; v; l): [$p + "_" + n, (v | tostring), l] | @tsv;
-    map(select(.kind == "check")) as $c
+    map(select(.kind == "check" and .inputs == "locked")) as $c
+    | map(select(.kind == "check" and .inputs == "override")) as $o
     | ($c | sort_by(.finishedAt)) as $s
     | ($s | map(select(.result != "superseded")) | last) as $l
     | (["green", "red", "superseded", "error"][] as $res
@@ -1460,7 +1485,14 @@ rr_m_state_points() {
        | pt("check_last_timestamp_seconds"; ($x.finishedAt | fromdateiso8601); "repo=\($r),result=\($res)")),
       (select($l != null and ($l.durationS | type) == "number")
        | pt("check_last_duration_seconds"; $l.durationS; "repo=\($r)")),
-      pt("check_latest_red"; (if $l != null and $l.result == "red" then 1 else 0 end); "repo=\($r)")
+      pt("check_latest_red"; (if $l != null and $l.result == "red" then 1 else 0 end); "repo=\($r)"),
+      (["green", "red"][] as $res
+       | pt("check_override_verdicts"; ($o | map(select(.result == $res)) | length); "repo=\($r),result=\($res)")),
+      (($l != null and $l.result == "red") as $isred
+       | ($o | map(select(.sha == ($l.sha // ""))) | last) as $ov
+       | (if $ov == null then "unclassified" elif $ov.result == "green" then "skew" else "defect" end) as $cls
+       | ["skew", "defect", "unclassified"][] as $c2
+       | pt("check_latest_red_class"; (if $isred and $c2 == $cls then 1 else 0 end); "repo=\($r),class=\($c2)"))
   ' <<<"$v" 2>/dev/null)
   f="$RR_STATE_DIR/sync/$repo.json"
   if [[ -f $f ]]; then

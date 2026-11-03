@@ -281,11 +281,48 @@ early_verify() {
   return 1
 }
 
+# rr_override_text CLASS: the one-line reading of a red check's classification.
+rr_override_text() {
+  case "$1" in
+  skew) printf 'LOCK SKEW: green with the sibling overrides, so the locked inputs are behind; a relock is owed: run pn workspace push; not a defect of this tip' ;;
+  defect) printf 'DEFECT: red with the locked inputs AND with the sibling overrides' ;;
+  *) printf 'unclassified: no sibling-override verdict (the override check did not run to a result)' ;;
+  esac
+}
+
+# rr_verify_override REPO SHA ROOT: the second check of a red locked check. Runs
+#   pn workspace flake-check --no-build --rev SHA REPO
+# (pn's own evaluation-only check of one commit with the repo's workspace siblings
+# pinned to their local clones: the override set pn workspace flake-check uses), and
+# stores it as a check verdict with inputs=override. Exit 0 is green, pn's exit 10 is
+# red; any other exit (a signal, 1, 2, 126, 127) did not run to a result: no verdict.
+# Never gates anything: the push gate reads the locked verdict only (ADR 0108).
+# shellcheck disable=SC2329  # called by act_verify, which is itself invoked indirectly
+rr_verify_override() {
+  local repo="$1" sha="$2" root="$3" olog started finished rc=0 res
+  olog="$RR_STATE_DIR/logs/$repo/$sha.override.log"
+  started="$(rr_now)"
+  PN_WORKSPACE_ROOT="$root" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY \
+    "${RR_PN_BIN:-pn}" workspace flake-check --no-build --rev "$sha" "$repo" >"$olog" 2>&1 || rc=$?
+  finished="$(rr_now)"
+  case "$rc" in
+  0) res=green ;;
+  10) res=red ;;
+  *)
+    rr_log "override check: pn exit $rc is not a result (output in $olog); no verdict"
+    return 1
+    ;;
+  esac
+  rr_log "override check: $repo@$sha is $res with the sibling overrides (pn exit $rc), output in $olog"
+  rr_verdict_write "$repo" "$sha" check "$res" override "$started" "$finished" "$rc" "$olog" || return 1
+}
+
 # act_verify: runner B. The precheck is only that the sha exists; the canonical
 # working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls
   root="$(rr_cfg '.workspace_root // empty')"
 
   # precheck: the sha exists as a commit
@@ -359,7 +396,11 @@ act_verify() {
       rr_log "surface: green handling failed for $repo@$full"
   else
     rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
-    rr_surface_raise "$repo" red "$full" "red check verdict, exit $rc, log $log" ||
+    # a red locked check is classified by the same check over the sibling overrides
+    # (signal only: the override verdict never opens the push gate)
+    rr_verify_override "$repo" "$full" "$root" || rr_log "override check: no verdict for $repo@$full"
+    cls="$(rr_override_class "$repo" "$full")"
+    rr_surface_raise "$repo" red "$full" "$(rr_override_text "$cls"), red check verdict, exit $rc, log $log" ||
       rr_log "surface: raising the red transition failed for $repo@$full"
   fi
   rr_surface_flush_repo "$repo" || true

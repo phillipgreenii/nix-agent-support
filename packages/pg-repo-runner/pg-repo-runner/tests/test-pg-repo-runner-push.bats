@@ -458,6 +458,23 @@ assert_argv_clean() {
   [ "$(runner_beads nix-alpha | jq length)" -eq 0 ]
 }
 
+@test "a red locked verdict with a green sibling-override verdict is lock skew: not pushed, and the withheld text says so" {
+  local tip before
+  commit_file "$A" f
+  tip="$(git -C "$A" rev-parse HEAD)"
+  write_verdict "$tip" red
+  jq -n --arg sha "$tip" \
+    '{repo: "nix-alpha", sha: $sha, kind: "check", result: "green", inputs: "override",
+      startedAt: "2026-10-28T00:00:00Z", finishedAt: "2026-10-28T00:01:00Z", exit: 0, logPath: ""}' \
+    >"$STATE/verdicts/nix-alpha/$tip.check-override.json"
+  go_live
+  before="$(remote_refs)"
+  sync_pass
+  [ "$status" -eq 0 ]
+  [[ "$(rec nix-alpha detail)" == *"is red (skew)"* ]]
+  no_push "$before"
+}
+
 @test "error, superseded and override-input verdicts do not open the gate" {
   local tip before r
   commit_file "$A" f

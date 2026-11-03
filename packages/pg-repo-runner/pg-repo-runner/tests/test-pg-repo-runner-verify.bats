@@ -61,6 +61,7 @@ setup() {
   STATE="$XDG_STATE_HOME/pg-repo-runner"
   SLEEPER=""
   make_nix_shim
+  make_pn_shim
 }
 
 teardown() {
@@ -154,6 +155,36 @@ exit "\${SHIM_EXIT:-0}"
 EOF
   chmod +x "$TEST_DIR/nix-shim"
   export PG_REPO_RUNNER_NIX_BIN="$TEST_DIR/nix-shim"
+}
+
+# make_pn_shim: the recorder that stands in for pn in the override-check tests. It appends
+# $PN_WORKSPACE_ROOT and its argv to $TEST_DIR/pn.argv and ends as $PN_SHIM_EXIT says
+# (default 0: green with the sibling overrides). A signal exit is PN_SHIM_MODE=kill.
+make_pn_shim() {
+  cat >"$TEST_DIR/pn-shim" <<SHIMEOF
+#!/usr/bin/env bash
+echo "\$PN_WORKSPACE_ROOT :: \$*" >>"$TEST_DIR/pn.argv"
+echo "pn shim output line"
+if [[ \${PN_SHIM_MODE:-exit} == kill ]]; then
+  kill -KILL \$\$
+fi
+exit "\${PN_SHIM_EXIT:-0}"
+SHIMEOF
+  chmod +x "$TEST_DIR/pn-shim"
+  export PG_REPO_RUNNER_PN_BIN="$TEST_DIR/pn-shim"
+}
+
+pn_runs() {
+  if [[ -f $TEST_DIR/pn.argv ]]; then wc -l <"$TEST_DIR/pn.argv" | tr -d ' '; else echo 0; fi
+}
+
+override_file() { # REPO SHA
+  printf '%s/verdicts/%s/%s.check-override.json' "$STATE" "$1" "$2"
+}
+
+# lib_eval CODE: runs CODE with the library sourced and the state directory of the test.
+lib_eval() {
+  run bash -c "source '$SCRIPTS_DIR/pg-repo-runner.bash'; RR_STATE_DIR='$STATE'; $1"
 }
 
 nix_runs() {
@@ -327,6 +358,88 @@ hold_lease() {
   SHIM_EXIT=193 verify
   [ "$status" -eq 0 ]
   [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
+}
+
+# ---- the sibling-override check: lock skew versus defect --------------------
+
+@test "a green locked check never runs the override check" {
+  verify
+  [ "$status" -eq 0 ]
+  [ "$(pn_runs)" -eq 0 ]
+  [ ! -e "$(override_file nix-alpha "$ALPHA_SHA")" ]
+}
+
+@test "locked red and override green is lock skew: both verdicts stored, the locked one stays red" {
+  SHIM_EXIT=1 PN_SHIM_EXIT=0 verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
+  [ "$(jq -r .inputs "$(verdict_file nix-alpha "$ALPHA_SHA")")" = locked ]
+  local o
+  o="$(override_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -r .result "$o")" = green ]
+  [ "$(jq -r .inputs "$o")" = override ]
+  [ "$(jq -r .kind "$o")" = check ]
+  [ "$(jq -r .sha "$o")" = "$ALPHA_SHA" ]
+  [ "$(pn_runs)" -eq 1 ]
+  # pn's own single-repo evaluation of exactly the tip, in the canonical workspace
+  [ "$(cat "$TEST_DIR/pn.argv")" = "$WS :: workspace flake-check --no-build --rev $ALPHA_SHA nix-alpha" ]
+  lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
+  [ "$output" = skew ]
+  # the status listing tells the two verdicts apart
+  run "${RUNNER[@]}" status
+  [[ $output == *$'check\tred\tlocked'* ]]
+  [[ $output == *$'check\tgreen\toverride'* ]]
+}
+
+@test "locked red and override red is a defect" {
+  SHIM_EXIT=1 PN_SHIM_EXIT=10 verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(override_file nix-alpha "$ALPHA_SHA")")" = red ]
+  [ "$(jq -r .exit "$(override_file nix-alpha "$ALPHA_SHA")")" = 10 ]
+  lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
+  [ "$output" = defect ]
+}
+
+@test "an override check that does not run to a result stores no override verdict: unclassified, the run still exits 0" {
+  local mode
+  for mode in 1 2 127 143; do
+    rm -rf "$STATE/verdicts" "$TEST_DIR/pn.argv"
+    SHIM_EXIT=1 PN_SHIM_EXIT=$mode verify
+    [ "$status" -eq 0 ] || {
+      echo "pn exit $mode: $output"
+      return 1
+    }
+    [ ! -e "$(override_file nix-alpha "$ALPHA_SHA")" ]
+    [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
+  done
+  rm -rf "$STATE/verdicts"
+  SHIM_EXIT=1 PN_SHIM_MODE=kill verify
+  [ "$status" -eq 0 ]
+  [ ! -e "$(override_file nix-alpha "$ALPHA_SHA")" ]
+  lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
+  [ "$output" = unclassified ]
+}
+
+@test "the override verdict never satisfies the locked-verdict gate" {
+  SHIM_EXIT=1 PN_SHIM_EXIT=0 verify
+  [ "$status" -eq 0 ]
+  lib_eval "rr_verdict_green nix-alpha $ALPHA_SHA"
+  [ "$status" -ne 0 ]
+  # even a green override verdict copied over the locked file is not a locked green
+  cp "$(override_file nix-alpha "$ALPHA_SHA")" "$(verdict_file nix-alpha "$ALPHA_SHA")"
+  lib_eval "rr_verdict_green nix-alpha $ALPHA_SHA"
+  [ "$status" -ne 0 ]
+}
+
+@test "the metrics split the two verdicts and name the class of the latest red" {
+  SHIM_EXIT=1 PN_SHIM_EXIT=0 verify
+  [ "$status" -eq 0 ]
+  lib_eval "RR_M_PREFIX=pg_repo_runner; rr_m_add() { echo \"\$1 \$2 \$3\"; }; rr_surface_enabled() { return 1; }; rr_m_state_points nix-alpha"
+  [[ $output == *'pg_repo_runner_check_verdicts 1 repo=nix-alpha,result=red'* ]]
+  [[ $output == *'pg_repo_runner_check_verdicts 0 repo=nix-alpha,result=green'* ]]
+  [[ $output == *'pg_repo_runner_check_override_verdicts 1 repo=nix-alpha,result=green'* ]]
+  [[ $output == *'pg_repo_runner_check_latest_red_class 1 repo=nix-alpha,class=skew'* ]]
+  [[ $output == *'pg_repo_runner_check_latest_red_class 0 repo=nix-alpha,class=defect'* ]]
 }
 
 @test "a tip that moved before the run is a superseded verdict and nix is never run" {

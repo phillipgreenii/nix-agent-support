@@ -63,7 +63,7 @@ nix), and the workspace policy that `main` has no branch protection.
    ref other than the primary branch; pass `--no-verify`; or invoke `pn workspace push`,
    `pn workspace update` or `pn workspace apply`.
 3. **Gate.** The push MUST NOT run unless all of these hold in the same pass: (a) a `check` verdict
-   `green` exists for exactly `<sha>`; (b) `<sha>` is the current primary tip; (c) the canonical clone
+   `green` over the `locked` inputs exists for exactly `<sha>`; (b) `<sha>` is the current primary tip; (c) the canonical clone
    is in steady state (primary branch checked out, clean, no rebase, merge or cherry-pick in
    progress, no `core.worktree`); (d) `origin/<primary>` is an ancestor of `<sha>`, so the push is a
    fast-forward. If (d) fails the repo is diverged: the runner MUST NOT rebase, reset or force, and
@@ -107,6 +107,16 @@ nix), and the workspace policy that `main` has no branch protection.
    initiative, and `git push` and `pn workspace push` are allowed. Where this ADR says U-5 forbids
    an agent push or `pn workspace push`, read it as that earlier wording. Whether the runner's own
    push gate (decisions 1 to 7) stays is NOT decided by that ruling and needs its own ruling.
+
+   **Amendment, 2026-11-03 (sibling-override check).** Decision 3(a) now says `green` over the
+   `locked` inputs. The README push gate (b) already required it and the code
+   (`rr_verdict_green`) already enforced it; the ADR text had not said so. The operator ruling that
+   adds a second signal next to the locked check (Phillip, 2026-11-03, verbatim: "use recommended
+   for the remaining") adopts the recommendation: keep the locked-input check as the push gate, and
+   add the sibling-override check as a separate signal (red locked and green override is lock skew
+   and needs the operator's relock; both red is a real defect). A `check` verdict with
+   `inputs = override` MUST NOT satisfy decision 3(a), whatever its result. Decisions 1 to 7 are
+   otherwise unchanged.
 
    **Amendment, 2026-11-03 (decisions 2 and 3b).** Operator ruling (Phillip, 2026-11-03, handoff on
    the runner design, verbatim): "use recommended for the remaining"; the recommended option for the
