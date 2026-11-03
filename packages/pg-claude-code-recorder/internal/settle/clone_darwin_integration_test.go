@@ -1,4 +1,4 @@
-//go:build darwin && integration
+//go:build integration && darwin
 
 package settle
 
@@ -12,7 +12,8 @@ import (
 
 // Integration tier (V-4): needs real APFS cloning, which the nix build sandbox
 // makes very slow, so it stays out of the unit gate and runs under
-// checks.<system>.pg-claude-code-recorder-integration-tests.
+// checks.<system>.pg-claude-code-recorder-integration-tests, or directly on a
+// host with `go test -tags integration -run Clonefile ./internal/settle`.
 //
 // A real clonefile: a copy that diverged from its original (the copier appended
 // private blocks) shares its blocks again after settle re-clones it. It skips,
