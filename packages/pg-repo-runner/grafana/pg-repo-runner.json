@@ -44,7 +44,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Repo $repo",
+      "title": "Repo",
       "repeat": "repo",
       "collapsed": false,
       "gridPos": {
