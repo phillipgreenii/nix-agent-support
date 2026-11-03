@@ -7,6 +7,10 @@
 
 `wtaudit scan > {{scan.json}}`
 
+- JSON is the default output; `--json` states it explicitly, and `wtaudit --help` lists the verdict enum and every exit code:
+
+`wtaudit scan --json`
+
 - Classify specific repos only, as a human table (every row is shown, nothing is hidden):
 
 `wtaudit scan --repo {{/path/to/repo}} --table`
