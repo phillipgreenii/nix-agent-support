@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && integration
 
 package settle
 
@@ -10,6 +10,10 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 )
 
+// Integration tier (V-4): needs real APFS cloning, which the nix build sandbox
+// makes very slow, so it stays out of the unit gate and runs under
+// checks.<system>.pg-claude-code-recorder-integration-tests.
+//
 // A real clonefile: a copy that diverged from its original (the copier appended
 // private blocks) shares its blocks again after settle re-clones it. It skips,
 // with the reason, off APFS or when the volume reports no clone capability.
