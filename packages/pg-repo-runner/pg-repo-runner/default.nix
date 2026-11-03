@@ -59,6 +59,7 @@ mkBashScript {
     pkgs.findutils
     pkgs.gnused
     pkgs.gnugrep
+    pkgs.sd
     pkgs.git
     pkgs.jq
     pkgs.tomlq
