@@ -1,0 +1,41 @@
+#compdef wtaudit
+
+_wtaudit() {
+  local -a subcommands
+  subcommands=(
+    'scan:Classify every candidate worktree, set member and dangling branch (read-only)'
+    'remove:Re-verify one candidate and remove it with a compare-and-swap'
+  )
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Show help message]' \
+    '(-v --version)'{-v,--version}'[Show version information]' \
+    '1:subcommand:->subcmd' \
+    '*::arg:->args'
+
+  case $state in
+  subcmd)
+    _describe -t commands 'wtaudit subcommand' subcommands
+    ;;
+  args)
+    case $words[1] in
+    scan)
+      _arguments \
+        '*--repo[Repository to scan (repeatable; overrides discovery)]:directory:_files -/' \
+        '--json[Print JSON (default)]' \
+        '--table[Print a human summary table]' \
+        '(-h --help)'{-h,--help}'[Show help message]'
+      ;;
+    remove)
+      _arguments \
+        '--repo[Repository holding the candidate]:directory:_files -/' \
+        '--branch[Branch to remove]:branch:' \
+        '--expect-tip[Branch tip sha from the scan row]:sha:' \
+        '(-h --help)'{-h,--help}'[Show help message]'
+      ;;
+    esac
+    ;;
+  esac
+}
+
+_wtaudit "$@"
