@@ -67,6 +67,17 @@ func (e *SchemaNewerError) Error() string {
 		"upgrade the binary, or start with --rebuild to rebuild the index from the journal", e.Found, e.Known)
 }
 
+// SchemaOlderError is returned by Open when index.db carries an older
+// schema_version than this binary knows. The derived part is not migrated in
+// place; it is rebuilt from the journal and the copies.
+type SchemaOlderError struct{ Found, Known int }
+
+func (e *SchemaOlderError) Error() string {
+	return fmt.Sprintf("index.db schema_version %d is older than the %d this binary needs; "+
+		"rebuild the index (the rebuild command with the daemon stopped, or serve --rebuild): "+
+		"the old file is kept as index.db.pre-rebuild", e.Found, e.Known)
+}
+
 // Store is an open state directory.
 type Store struct {
 	driverName string // database/sql driver name (Options.DriverName)
@@ -158,7 +169,8 @@ func Open(dir string, opt Options) (*Store, error) {
 		dbExisted = false
 	}
 	if err := s.openDB(dbPath); err != nil {
-		if !dbExisted {
+		var older *SchemaOlderError
+		if !dbExisted || errors.As(err, &older) {
 			return nil, err
 		}
 		// A corrupt index.db: keep it aside for diagnosis and rebuild from the journal.
@@ -218,6 +230,15 @@ func (s *Store) openDB(path string) error {
 		return err
 	}
 	w.SetMaxOpenConns(1)
+	// An older schema is refused before any DDL runs: the idempotent CREATE
+	// statements below would not change an existing table's columns.
+	var cur string
+	if w.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&cur) == nil {
+		if v, err := strconv.Atoi(cur); err == nil && v < SchemaVersion {
+			_ = w.Close()
+			return &SchemaOlderError{Found: v, Known: SchemaVersion}
+		}
+	}
 	// One transaction: with synchronous=FULL each statement of a multi-statement
 	// Exec would otherwise sync on its own (the FTS5 tables add many).
 	if err := execInTx(w, schemaSQL+derivedSQL); err != nil {

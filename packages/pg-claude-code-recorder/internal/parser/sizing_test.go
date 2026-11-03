@@ -5,7 +5,7 @@ package parser_test
 // The sizing measurement is a one-off investigation tool, not a unit test (V-4):
 // it writes a synthetic transcript tree through the real parser and store and
 // reports bytes per table and index from the dbstat virtual table, plus a few
-// what-if variants (interned field names, other FTS options). It runs only
+// what-if variants (a partial numeric index, other FTS options). It runs only
 // under the soak tag and only when PG_CCREC_SIZING_TURNS is set, and it is not
 // named TestSoak*, so the soak check does not pick it up. Reproduction:
 // packages/pg-claude-code-recorder/docs/investigations/2026-11-03-index-db-size.md.
@@ -260,7 +260,7 @@ func TestSizingFixture(t *testing.T) {
 	fmt.Printf("SIZING records=%d fields=%d texts=%d fields_per_record=%.2f texts_per_record=%.3f opaque_texts=%d\n",
 		records, fields, texts, float64(fields)/float64(records), float64(texts)/float64(records), len(opaque))
 	var wordBytes, triBytes int64
-	_ = k.Store.Read().QueryRow(`SELECT COALESCE(SUM(length(name)+length(COALESCE(s,''))),0) FROM fields`).Scan(&fields)
+	_ = k.Store.Read().QueryRow(`SELECT COALESCE(SUM(length(n.name)+length(COALESCE(f.s,''))),0) FROM fields f JOIN field_names n ON n.id=f.name_id`).Scan(&fields)
 	for _, b := range opaque {
 		triBytes += int64(len(b))
 	}
@@ -268,7 +268,7 @@ func TestSizingFixture(t *testing.T) {
 	_ = wordBytes
 
 	// Field-name census.
-	rows, err := k.Store.Read().Query(`SELECT name, COUNT(*), SUM(length(name)), SUM(length(COALESCE(s,''))) FROM fields GROUP BY name ORDER BY COUNT(*) DESC`)
+	rows, err := k.Store.Read().Query(`SELECT n.name, COUNT(*), SUM(length(n.name)), SUM(length(COALESCE(f.s,''))) FROM fields f JOIN field_names n ON n.id=f.name_id GROUP BY n.name ORDER BY COUNT(*) DESC`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestSizingFixture(t *testing.T) {
 		fmt.Printf("FIELDNAME %s rows=%d name_bytes=%d s_bytes=%d\n", nm, c, ln, ls)
 	}
 	rows.Close()
-	fmt.Printf("SIZING dup_of_record_cols rows=%d\n", q(`SELECT COUNT(*) FROM fields WHERE name IN ('type','session_id','timestamp')`))
+	fmt.Printf("SIZING dup_of_record_cols rows=%d\n", q(`SELECT COUNT(*) FROM fields f JOIN field_names n ON n.id=f.name_id WHERE n.name IN ('type','session_id','timestamp')`))
 
 	// What-if variants, built in the same database so dbstat sizes them alike.
 	err = k.Store.WithWrite("", func(tx *sql.Tx) error {
@@ -289,16 +289,7 @@ func TestSizingFixture(t *testing.T) {
 			`CREATE VIRTUAL TABLE alt_tri_nocase USING fts5(body, content='', contentless_delete=1, tokenize="trigram")`,
 			`CREATE VIRTUAL TABLE alt_word_opaque USING fts5(body, content='', contentless_delete=1, tokenize='unicode61')`,
 			`CREATE VIRTUAL TABLE alt_word_opaque_detailnone USING fts5(body, content='', tokenize='unicode61', detail=none, columnsize=0)`,
-			`CREATE TABLE alt_names(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)`,
-			`INSERT INTO alt_names(name) SELECT DISTINCT name FROM fields`,
-			`CREATE TABLE alt_fields_interned(rec_id INTEGER NOT NULL, name_id INTEGER NOT NULL, s TEXT, n INTEGER, f REAL)`,
-			`INSERT INTO alt_fields_interned SELECT f.rec_id, a.id, f.s, f.n, f.f FROM fields f JOIN alt_names a ON a.name=f.name`,
-			`CREATE INDEX alt_fi_rec ON alt_fields_interned(rec_id, name_id)`,
-			`CREATE INDEX alt_fi_name_n ON alt_fields_interned(name_id, n)`,
-			`CREATE TABLE alt_fields_norowid(rec_id INTEGER NOT NULL, name_id INTEGER NOT NULL, s TEXT, n INTEGER, f REAL, PRIMARY KEY(rec_id, name_id)) WITHOUT ROWID`,
-			`INSERT OR IGNORE INTO alt_fields_norowid SELECT rec_id, name_id, s, n, f FROM alt_fields_interned`,
-			`CREATE INDEX alt_fnr_name_n ON alt_fields_norowid(name_id, n)`,
-			`CREATE INDEX alt_fields_partial_name_n ON fields(name, n) WHERE n IS NOT NULL`,
+			`CREATE INDEX alt_fields_partial_name_n ON fields(name_id, n) WHERE n IS NOT NULL`,
 		}
 		for _, s := range stmts {
 			if _, err := tx.Exec(s); err != nil {
@@ -323,9 +314,6 @@ func TestSizingFixture(t *testing.T) {
 		err := k.Store.Read().QueryRow(`SELECT COUNT(*) FROM ` + tbl + ` WHERE ` + tbl + ` MATCH '"example/work"'`).Scan(&n)
 		fmt.Printf("SIZING substring_query table=%s hits=%d err=%v\n", tbl, n, err)
 	}
-	var dups int64
-	_ = k.Store.Read().QueryRow(`SELECT (SELECT COUNT(*) FROM alt_fields_interned) - (SELECT COUNT(*) FROM alt_fields_norowid)`).Scan(&dups)
-	fmt.Printf("SIZING norowid_dropped_duplicate_pk_rows=%d\n", dups)
 	var pageCount, pageSize int64
 	_ = k.Store.Read().QueryRow(`PRAGMA page_count`).Scan(&pageCount)
 	_ = k.Store.Read().QueryRow(`PRAGMA page_size`).Scan(&pageSize)

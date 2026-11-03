@@ -154,6 +154,13 @@ parse offset in one transaction; a re-parse replaces a file generation atomicall
 `parse_resets` marker. Only `text` fields (FTS5 word index) and `opaque` fields (FTS5 trigram index,
 case sensitive, every hit verified against the copy) are search-indexed; no file contents are stored.
 
+Typed scalars live in `fields(rec_id, name_id, s, n, f)`, `WITHOUT ROWID`, keyed `(rec_id, name_id)`;
+the field name is stored once in `field_names(id, name UNIQUE)` and the query layer resolves a name to
+its id (`name_id = (SELECT id FROM field_names WHERE name = ?)`). Invariants: a record has at most one
+row per field name; when a record yields the same name twice, the LAST value wins and replaces the
+whole row (`s`, `n` and `f` together, never a mix of two values); `fields_name_n` indexes
+`(name_id, n)` for numeric filters. This is `schema_version` 2.
+
 ```sh
 echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}' | pg-claude-code-recorder query
 echo '{"mode":"substring","q":"--no-verify","fields":["tool_use.input"]}' | pg-claude-code-recorder search
@@ -207,7 +214,11 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   `rebuild` (daemon stopped) or `serve --rebuild` forces it and sets the old index aside as
   `index.db.pre-rebuild`. A rebuild bumps the epoch, counts `index_rebuilds_total` and logs
   `index_rebuilt`. A binary that meets a newer `schema_version` refuses to start and says so;
-  `--rebuild` is the way past it. `feed_waiters` is the gauge of waiters in progress.
+  `--rebuild` is the way past it. An OLDER `schema_version` (1, before field names were interned) is
+  refused the same way, untouched and not migrated in place: stop the daemon and run `rebuild` (or
+  `serve --rebuild`), which re-derives records, fields and text indexes from the journal and the
+  copies into a new file and keeps the old one as `index.db.pre-rebuild`; nothing is deleted before
+  the operator has checked the new file. `feed_waiters` is the gauge of waiters in progress.
 
 ```sh
 pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'

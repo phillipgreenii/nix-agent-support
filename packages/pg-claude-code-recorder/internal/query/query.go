@@ -379,10 +379,10 @@ func (e *Engine) linkTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Er
 		return e.scanTargets(tx, targetHead+` WHERE r.session=? AND r.type IN (`+ph+`) ORDER BY r.id LIMIT `+strconv.Itoa(defaultLimit), args)
 	}
 	var key sql.NullString
-	_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name=?`, id, ls.from).Scan(&key)
+	_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name_id=(SELECT id FROM field_names WHERE name=?)`, id, ls.from).Scan(&key)
 	var out []tgt
 	if key.Valid && key.String != "" {
-		q := targetHead + ` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name=? AND fu.s=? AND r.id<>?`
+		q := targetHead + ` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name_id=(SELECT id FROM field_names WHERE name=?) AND fu.s=? AND r.id<>?`
 		args := []any{ls.to, key.String, id}
 		if ls.toType != "" {
 			q += ` AND r.type=?`
@@ -419,11 +419,11 @@ func (e *Engine) pathTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Er
 		if m == nil {
 			return nil, nil
 		}
-		return e.scanTargets(tx, targetHead+` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name='rel_path' AND fu.s=? AND r.type='tool_result_body' ORDER BY r.id`, []any{m[1]})
+		return e.scanTargets(tx, targetHead+` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name_id=(SELECT id FROM field_names WHERE name='rel_path') AND fu.s=? AND r.type='tool_result_body' ORDER BY r.id`, []any{m[1]})
 	}
 	if typ == "tool_result_body" && ls.toType == "tool_result" {
 		var rel sql.NullString
-		_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name='rel_path'`, id).Scan(&rel)
+		_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name_id=(SELECT id FROM field_names WHERE name='rel_path')`, id).Scan(&rel)
 		if !rel.Valid || len(rel.String) < MinSubstringChars {
 			return nil, nil
 		}

@@ -10,6 +10,12 @@ import (
 // the text indexes (a word index and a trigram index, both contentless) and the
 // parse accounting. It is derived from the copies, so a rebuilt database simply
 // parses again. Full file contents are never stored here.
+//
+// A field name is stored once, in field_names, and fields refers to it by
+// name_id. fields is WITHOUT ROWID keyed (rec_id, name_id), so the primary key
+// is also the by-record lookup index. A record holds at most one row per field
+// name: when a record yields the same name twice, the LAST value wins and
+// replaces the whole row (s, n and f together); see Parser.insert.
 const derivedSQL = `
 CREATE TABLE IF NOT EXISTS records(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,15 +34,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS records_ident ON records(file_id, gen, off, it
 CREATE INDEX IF NOT EXISTS records_session ON records(session);
 CREATE INDEX IF NOT EXISTS records_time ON records(time_ns);
 CREATE INDEX IF NOT EXISTS records_type ON records(type);
+CREATE TABLE IF NOT EXISTS field_names(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE
+);
 CREATE TABLE IF NOT EXISTS fields(
   rec_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
+  name_id INTEGER NOT NULL,
   s TEXT,
   n INTEGER,
-  f REAL
-);
-CREATE INDEX IF NOT EXISTS fields_rec ON fields(rec_id, name);
-CREATE INDEX IF NOT EXISTS fields_name_n ON fields(name, n);
+  f REAL,
+  PRIMARY KEY(rec_id, name_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS fields_name_n ON fields(name_id, n);
 CREATE TABLE IF NOT EXISTS texts(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   rec_id INTEGER NOT NULL,

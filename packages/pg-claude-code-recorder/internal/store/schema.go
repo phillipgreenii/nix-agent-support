@@ -2,7 +2,13 @@ package store
 
 // SchemaVersion is the index.db schema version. A change is migrated or the
 // derived part is rebuilt.
-const SchemaVersion = 1
+//
+// Version 2 interns field names (field_names) and stores fields WITHOUT ROWID
+// keyed (rec_id, name_id). A version 1 database is not migrated in place: Open
+// refuses it with a SchemaOlderError and the derived part is rebuilt from the
+// journal and the copies (the rebuild command or serve --rebuild), which sets
+// the old file aside as index.db.pre-rebuild and deletes nothing.
+const SchemaVersion = 2
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);

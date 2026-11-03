@@ -164,6 +164,6 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 // Claude Code version that wrote them (the registry's version field).
 func (s *Settler) fillVersions(info *WhereInfo, session string) {
 	_ = s.st.Read().QueryRow(`SELECT COALESCE(MAX(parser_version),0) FROM records WHERE session=?`, session).Scan(&info.ParserVersion)
-	_ = s.st.Read().QueryRow(`SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id
-WHERE r.source='session-registry' AND r.session=? AND f.name='version' ORDER BY r.id DESC LIMIT 1`, session).Scan(&info.ClaudeCodeVersion)
+	_ = s.st.Read().QueryRow(`SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='version')
+WHERE r.source='session-registry' AND r.session=? ORDER BY r.id DESC LIMIT 1`, session).Scan(&info.ClaudeCodeVersion)
 }

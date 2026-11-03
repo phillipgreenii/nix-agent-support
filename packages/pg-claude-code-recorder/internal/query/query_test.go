@@ -269,7 +269,7 @@ func TestShortSubstringQuerySaysSo(t *testing.T) {
 
 func TestOnlyTextAndOpaqueAreIndexedAndNoContentsStored(t *testing.T) {
 	k := kit(t)
-	if n := k.Count(`SELECT COUNT(*) FROM fields WHERE name IN ('assistant_text','user_text','tool_use.input','tool_result.body')`); n != 0 {
+	if n := k.Count(`SELECT COUNT(*) FROM fields f JOIN field_names n ON n.id=f.name_id WHERE n.name IN ('assistant_text','user_text','tool_use.input','tool_result.body')`); n != 0 {
 		t.Fatalf("%d text or opaque values are stored as typed fields", n)
 	}
 	if n := k.Count(`SELECT COUNT(*) FROM texts WHERE kind='text'`); n != 4 {

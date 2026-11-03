@@ -125,7 +125,7 @@ func (b *builder) alias(stored string) string {
 	}
 	a := fmt.Sprintf("f%d", len(b.aliases))
 	b.aliases[stored] = a
-	b.joins = append(b.joins, fmt.Sprintf("LEFT JOIN fields %s ON %s.rec_id=r.id AND %s.name=?", a, a, a))
+	b.joins = append(b.joins, fmt.Sprintf("LEFT JOIN fields %s ON %s.rec_id=r.id AND %s.name_id=(SELECT id FROM field_names WHERE name=?)", a, a, a))
 	b.joinArgs = append(b.joinArgs, stored)
 	return a
 }

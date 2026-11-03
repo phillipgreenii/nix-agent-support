@@ -429,7 +429,7 @@ func TestStatusOverTheWireHasTheStableShape(t *testing.T) {
 	}
 	var st wire.Status
 	_ = c.Post(context.Background(), "status", nil, &st)
-	if !st.Healthy || st.Short != "ok" || st.SchemaVersion != 1 || st.ProtocolVer != 1 || st.FreeBytes <= 0 {
+	if !st.Healthy || st.Short != "ok" || st.SchemaVersion != store.SchemaVersion || st.ProtocolVer != 1 || st.FreeBytes <= 0 {
 		t.Fatalf("%+v", st)
 	}
 	if !strings.Contains(e.log.String(), `"client":"cli"`) {

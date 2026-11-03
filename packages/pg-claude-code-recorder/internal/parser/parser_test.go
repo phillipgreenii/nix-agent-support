@@ -77,7 +77,7 @@ func TestSubagentAndHistorySources(t *testing.T) {
 	k.AddAgent("example-proj", "example-session-1", "a1", `{"type":"assistant","uuid":"x1","isSidechain":true,"sessionId":"example-session-1","message":{"id":"m9","role":"assistant","content":[{"type":"thinking","thinking":"pondering the plan"}]}}`+"\n")
 	k.Add("example-proj", "history.jsonl", `{"display":"fix the example bug","timestamp":1761768000000,"project":"/example/work","sessionId":"example-session-1"}`+"\n"+`{"display":"second prompt","timestamp":1761768001000,"project":"/example/work"}`+"\n")
 	k.Parse()
-	if n := k.Count(`SELECT COUNT(*) FROM fields WHERE name='agent_id' AND s='a1'`); n != 1 {
+	if n := k.Count(`SELECT COUNT(*) FROM fields f JOIN field_names n ON n.id=f.name_id WHERE n.name='agent_id' AND f.s='a1'`); n != 1 {
 		t.Fatalf("agent_id on %d records, want 1 (on the line record)", n)
 	}
 	if n := k.Count(`SELECT COUNT(*) FROM records WHERE type='thinking'`); n != 1 {
@@ -217,8 +217,8 @@ func TestRebuildEqualityAfterReparse(t *testing.T) {
 	k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
 	k.Parse()
 	dump := func() string {
-		rows, err := k.Store.Read().Query(`SELECT r.type||'|'||r.item||'|'||r.off||'|'||COALESCE(f.name,'')||'='||COALESCE(f.s,f.n,f.f,'')
-FROM records r LEFT JOIN fields f ON f.rec_id=r.id ORDER BY r.off,r.item,f.name`)
+		rows, err := k.Store.Read().Query(`SELECT r.type||'|'||r.item||'|'||r.off||'|'||COALESCE(fn.name,'')||'='||COALESCE(f.s,f.n,f.f,'')
+FROM records r LEFT JOIN fields f ON f.rec_id=r.id LEFT JOIN field_names fn ON fn.id=f.name_id ORDER BY r.off,r.item,fn.name`)
 		if err != nil {
 			t.Fatal(err)
 		}

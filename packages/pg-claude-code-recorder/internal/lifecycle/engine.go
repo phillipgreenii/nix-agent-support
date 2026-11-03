@@ -98,11 +98,11 @@ func (e *Engine) load() (*model, error) {
 	}
 	db := e.St.Read()
 	rows, err := db.Query(`SELECT r.id, r.session, r.time_ns,
-  MAX(CASE WHEN f.name='pid' THEN f.n END), MAX(CASE WHEN f.name='proc_start' THEN f.s END),
-  MAX(CASE WHEN f.name='cwd' THEN f.s END), MAX(CASE WHEN f.name='started_at' THEN f.n END),
-  MAX(CASE WHEN f.name='name' THEN f.s END), MAX(CASE WHEN f.name='status' THEN f.s END),
-  MAX(CASE WHEN f.name='waiting_for' THEN f.s END)
-FROM records r JOIN fields f ON f.rec_id=r.id
+  MAX(CASE WHEN fn.name='pid' THEN f.n END), MAX(CASE WHEN fn.name='proc_start' THEN f.s END),
+  MAX(CASE WHEN fn.name='cwd' THEN f.s END), MAX(CASE WHEN fn.name='started_at' THEN f.n END),
+  MAX(CASE WHEN fn.name='name' THEN f.s END), MAX(CASE WHEN fn.name='status' THEN f.s END),
+  MAX(CASE WHEN fn.name='waiting_for' THEN f.s END)
+FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.name_id
 WHERE r.source='session-registry' AND r.type='registry' GROUP BY r.id ORDER BY r.id`)
 	if err != nil {
 		return nil, err
@@ -147,8 +147,8 @@ WHERE r.source='session-registry' AND r.type='registry' GROUP BY r.id ORDER BY r
 	for _, ss := range m.segs {
 		sort.SliceStable(ss, func(i, j int) bool { return ss[i].start < ss[j].start })
 	}
-	drows, err := db.Query(`SELECT r.time_ns, MAX(CASE WHEN f.name='pid' THEN f.n END), MAX(CASE WHEN f.name='proc_start' THEN f.s END)
-FROM records r JOIN fields f ON f.rec_id=r.id WHERE r.source='session-registry' AND r.type='registry_deleted' GROUP BY r.id`)
+	drows, err := db.Query(`SELECT r.time_ns, MAX(CASE WHEN fn.name='pid' THEN f.n END), MAX(CASE WHEN fn.name='proc_start' THEN f.s END)
+FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.name_id WHERE r.source='session-registry' AND r.type='registry_deleted' GROUP BY r.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ FROM records r JOIN fields f ON f.rec_id=r.id WHERE r.source='session-registry' 
 	if err := drows.Close(); err != nil {
 		return nil, err
 	}
-	hrows, err := db.Query(`SELECT r.session, r.time_ns, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name='slash_command'
+	hrows, err := db.Query(`SELECT r.session, r.time_ns, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='slash_command')
 WHERE r.source='claude-history'`)
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ WHERE r.source='claude-history'`)
 	if err := hrows.Close(); err != nil {
 		return nil, err
 	}
-	erows, err := db.Query(`SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name='reason'
+	erows, err := db.Query(`SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='reason')
 WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`)
 	if err != nil {
 		return nil, err
@@ -337,7 +337,7 @@ func (m *model) conversation(session string) (Conversation, bool) {
 func (e *Engine) transcriptFacts(c *Conversation) error {
 	db := e.St.Read()
 	var cwd sql.NullString
-	err := db.QueryRow(`SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name='cwd'
+	err := db.QueryRow(`SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
 WHERE r.session=? AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`, c.SessionID).Scan(&cwd)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err

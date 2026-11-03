@@ -535,6 +535,23 @@ const (
 
 func (p *Parser) insert(tx *pstx, f store.File, src source.Source, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
 	unk := map[[2]string]int{}
+	// Field names are interned per call: the cache lives no longer than the
+	// transaction's statements, so a rolled-back insert cannot leave a stale id.
+	nameIDs := map[string]int64{}
+	nameID := func(name string) (int64, error) {
+		if id, ok := nameIDs[name]; ok {
+			return id, nil
+		}
+		if _, err := tx.Exec(`INSERT INTO field_names(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name); err != nil {
+			return 0, err
+		}
+		var id int64
+		if err := tx.QueryRow(`SELECT id FROM field_names WHERE name=?`, name).Scan(&id); err != nil {
+			return 0, err
+		}
+		nameIDs[name] = id
+		return id, nil
+	}
 	for _, r := range recs {
 		tns := seen
 		if !r.Time.IsZero() {
@@ -576,7 +593,14 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, g store.Gener
 			default:
 				n = fl.N
 			}
-			if _, err := tx.Exec(`INSERT INTO fields(rec_id,name,s,n,f) VALUES(?,?,?,?,?)`, id, fl.Name, s, n, fv); err != nil {
+			nid, err := nameID(fl.Name)
+			if err != nil {
+				return err
+			}
+			// One row per (rec_id, name_id): a repeated name keeps the LAST value
+			// and replaces the whole row, so s, n and f never mix two values.
+			if _, err := tx.Exec(`INSERT INTO fields(rec_id,name_id,s,n,f) VALUES(?,?,?,?,?)
+ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded.f`, id, nid, s, n, fv); err != nil {
 				return err
 			}
 		}
