@@ -38,10 +38,12 @@ var nonUnitTags = []string{"integration", "faults", "soak"}
 var daemonPackages = map[string]bool{
 	"internal/serve":              true,
 	"cmd/pg-claude-code-recorder": true,
+	"client":                      true,
 }
 
 // daemonStarters are helpers that start a whole in-process daemon.
-var daemonStarters = map[string]bool{"liveDaemon": true, "RunRow": true}
+// start is the client contract suite's helper over clienttest.Start.
+var daemonStarters = map[string]bool{"liveDaemon": true, "RunRow": true, "start": true}
 
 // integrationMarkers returns one reason per integration-tier construct in src.
 // daemonScope turns on the "starts a whole daemon" rule for the file.
@@ -51,6 +53,26 @@ func integrationMarkers(name string, src []byte, daemonScope bool) ([]string, er
 		return nil, err
 	}
 	var reasons []string
+	// A Test function that calls clienttest.Start itself starts a whole daemon;
+	// a shared untagged helper that wraps it is reached through start() instead.
+	if daemonScope {
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Start" {
+						if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "clienttest" {
+							reasons = append(reasons, "starts a whole daemon through clienttest.Start()")
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -217,6 +239,8 @@ func TestUnitTierGuardDetectsADaemonStartedInTheUnitTier(t *testing.T) {
 		"start":      "func TestX(t *testing.T) { d := open(); _ = d.Start() }",
 		"liveDaemon": "func TestX(t *testing.T) { liveDaemon(t) }",
 		"runRow":     "func TestX(t *testing.T) { clienttest.RunRow(t, row) }",
+		"clienttest": "func TestX(t *testing.T) { clienttest.Start(t) }",
+		"helper":     "func TestX(t *testing.T) { start(t, nil) }",
 	}
 	for name, fn := range cases {
 		t.Run(name, func(t *testing.T) {
