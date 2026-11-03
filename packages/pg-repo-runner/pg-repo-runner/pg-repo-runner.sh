@@ -282,6 +282,7 @@ early_verify() {
 }
 
 # rr_override_text CLASS: the one-line reading of a red check's classification.
+# shellcheck disable=SC2329  # called by act_verify, which is itself invoked indirectly
 rr_override_text() {
   case "$1" in
   skew) printf 'LOCK SKEW: green with the sibling overrides, so the locked inputs are behind; a relock is owed: run pn workspace push; not a defect of this tip' ;;
