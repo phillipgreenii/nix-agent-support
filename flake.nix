@@ -6477,7 +6477,9 @@
                   src = ./packages/pg-claude-code-recorder;
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
-                  (_: {
+                  (old: {
+                    # ps for internal/proc's real-ps agreement test (the sandbox PATH has none).
+                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.procps ];
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
@@ -6490,6 +6492,7 @@
                         exit 1
                       fi
                       total=0
+                      failed=""
                       for dir in $pkgs; do
                         tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
                         plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
@@ -6500,20 +6503,25 @@
                         fi
                         regex="^($(echo "$names" | paste -sd'|' -))\$"
                         echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        # One package failing must not hide the rest: record and go on.
                         if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          cat "$log"
                           echo "pg-claude-code-recorder-integration-tests: $dir FAILED" >&2
-                          exit 1
+                          failed="$failed $dir"
+                          continue
                         fi
                         for t in $names; do
                           if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            cat "$log"
                             echo "pg-claude-code-recorder-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            exit 1
+                            failed="$failed $dir"
                           fi
                         done
                         total=$((total + $(echo "$names" | wc -l)))
                       done
+                      if [ -n "$failed" ]; then
+                        cat "$log"
+                        echo "pg-claude-code-recorder-integration-tests: failing packages:$failed" >&2
+                        exit 1
+                      fi
                       if grep -q -- '^--- SKIP' "$log"; then
                         cat "$log"
                         echo "pg-claude-code-recorder-integration-tests: a test was SKIPPED" >&2
@@ -8174,6 +8182,7 @@
                         exit 1
                       fi
                       total=0
+                      failed=""
                       for dir in $pkgs; do
                         tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
                         plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
