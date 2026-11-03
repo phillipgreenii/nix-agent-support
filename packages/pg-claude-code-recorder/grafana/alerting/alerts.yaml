@@ -4,9 +4,9 @@
 # packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
-# Thirteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# Fourteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
 # parse-stuck, held-old, free-space, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
-# control-inbox-gone) plus crash-share and removal-stuck of the second review. Each uid is
+# control-inbox-gone) plus crash-share and removal-stuck of the second review, plus settle-tick-slow. Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
 # packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
@@ -589,3 +589,45 @@ groups:
                 - evaluator:
                     type: gt
                     params: [3600]
+
+      # Settle tick slow: the settle tick runs every 60 s, so a last tick over 60 s means ticks
+      # overrun (a structural threshold, no baseline needed); for: 15m.
+      - uid: pg-ccrec-settle-tick-slow
+        title: pg-claude-code-recorder settle tick is slow
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder settle tick has taken over 60 seconds for 15 minutes"
+          description: "settle_tick_last_duration_seconds is above 60 s, the tick interval, for 15 minutes: the settle pass is overrunning and burning CPU. Run pg-claude-code-recorder status, then read the recorder log for the settle_tick line, and take a 30 s CPU profile from the pprof socket."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_settle_tick_last_duration_seconds)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [60]

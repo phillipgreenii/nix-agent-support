@@ -10,7 +10,7 @@
 # Needs yq (mikefarah), jq, grep. Every failure line starts with RULE-Sn so a mutant can assert the
 # exact rule that fired.
 #
-#   S1  exactly the thirteen expected uids, each once, each of the form pg-ccrec-<name> and at most
+#   S1  exactly the fourteen expected uids, each once, each of the form pg-ccrec-<name> and at most
 #       40 characters (Grafana's cap)
 #   S2  one group pg-claude-code-recorder in folder Claude Agents, no folderUid anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description (the
@@ -65,7 +65,7 @@ EXPECTED_UIDS=(
   pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-copy-lag pg-ccrec-parse-stuck
   pg-ccrec-held-old pg-ccrec-free-space pg-ccrec-unknown-key-burst pg-ccrec-data-loss
   pg-ccrec-removal-backlog pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
-  pg-ccrec-crash-share pg-ccrec-removal-stuck
+  pg-ccrec-crash-share pg-ccrec-removal-stuck pg-ccrec-settle-tick-slow
 )
 NODATA_ALERTING=(pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-free-space pg-ccrec-doctor-mismatch)
 
@@ -86,7 +86,7 @@ check() {
       ([.groups[].rules[].uid] | sort) as $u
       | ($u == $exp)
         and ($u | all(. | test("^pg-ccrec-[a-z0-9-]+$") and (length <= 40)))' >/dev/null; then
-    rule_fail "RULE-S1: the rule uids are not exactly the thirteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
+    rule_fail "RULE-S1: the rule uids are not exactly the fourteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
   fi
   # S2
   if ! printf '%s' "$j" | jq -e '

@@ -345,7 +345,7 @@ Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 
 | File                                  | What it is                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alerting/alerts.yaml`                | thirteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                         |
+| `alerting/alerts.yaml`                | fourteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                         |
 | `alerting/alerts-delete.yaml`         | the `deleteRules`-only twin (same uids), registered instead while no daemon is deployed; the two are never loaded together                                                                                                                                                                                                               |
 | `alerting/rule-tests/`                | one promtool test file per rule, run through `packages/pg-connector/grafana/check-alert-rules.sh`                                                                                                                                                                                                                                        |
 | `pg_claude_code_recorder_metrics.txt` | the metric catalogue (the Signals table): name, type, labels, with the enumerated label values                                                                                                                                                                                                                                           |
@@ -357,7 +357,7 @@ Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 Flake checks (build one with `nix build .#checks.<system>.<name>`): `test-pg-claude-code-recorder-alert-rules`,
 `test-pg-claude-code-recorder-alert-structure` and `test-pg-claude-code-recorder-signals-registration`. Every rule uid is also in
 `registeredRuleUIDs` of `packages/pg-router-probe/cmd/pg-router-probe/run.go` (a deployment that passes its own `--rule-uid` list replaces
-that list and must carry the thirteen too).
+that list and must carry the fourteen too).
 
 Alerts and their thresholds (the thresholds are the builder's calls; a literal that stands for a config default is named in the rule):
 
@@ -376,6 +376,7 @@ Alerts and their thresholds (the thresholds are the builder's calls; a literal t
 | `control-inbox-gone` | a live Process in `control_inbox_state{state="gone"}` for 10 minutes (never `never_loaded`)             | warning  | OK       | `pg-claude-control list`          |
 | `crash-share`        | crashed plus suspected over 20 percent of a day's ends, with at least 20 ends                           | warning  | OK       | `conversations --crashed --since` |
 | `removal-stuck`      | the oldest quarantined file is over an hour old                                                         | warning  | OK       | `remove --dry-run`; the log       |
+| `settle-tick-slow`   | the last settle tick took over 60 s (the tick interval) for 15 minutes                                  | warning  | OK       | `status`; the log; pprof CPU      |
 
 Grafana has no inhibition, so each guard is in the expression: `daemon-down` carries the `SYSTEM_PAUSE` guard; `heartbeat-stale` and
 `doctor-mismatch` read 0 while the daemon is not scraped (so `daemon-down` alone pages); `free-space` is deliberately unguarded and

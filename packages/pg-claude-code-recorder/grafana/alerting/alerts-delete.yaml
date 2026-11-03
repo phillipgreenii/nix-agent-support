@@ -42,4 +42,6 @@ deleteRules:
   - orgId: 1
     uid: pg-ccrec-removal-stuck
   - orgId: 1
+    uid: pg-ccrec-settle-tick-slow
+  - orgId: 1
     uid: pg-ccrec-unknown-key-burst
