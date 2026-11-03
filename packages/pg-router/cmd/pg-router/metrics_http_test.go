@@ -245,4 +245,11 @@ func TestStartMetricsServer_ServesBuildInfoGaugeWithoutSuffix(t *testing.T) {
 	if !found {
 		t.Errorf("scrape missing pg_router_build_info series: %q", body)
 	}
+	// pg-router emits only about itself: the worktree pool belongs to the
+	// ccpool handler janitor, so no pg_router_worktree* series may appear.
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "pg_router_worktree") {
+			t.Errorf("scrape exposes a worktree series pg-router no longer emits: %q", line)
+		}
+	}
 }

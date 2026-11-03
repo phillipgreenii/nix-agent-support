@@ -644,8 +644,6 @@ type options struct {
 	buildVersion    string
 	buildInfo       bool
 	now             func() time.Time
-	poolDir         string
-	poolTTL         time.Duration
 	pullSources     map[string]time.Duration
 	sourceStatePath string
 	awakeSince      func(time.Time) time.Duration
@@ -1202,12 +1200,6 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 				return nil
 			}),
 		); err != nil {
-			return nil, err
-		}
-	}
-
-	if cfg.poolDir != "" {
-		if err := registerWorktreePool(m, newPoolScanner(cfg.poolDir, cfg.poolTTL, cfg.now)); err != nil {
 			return nil, err
 		}
 	}
