@@ -178,16 +178,30 @@ may hold it, or the cause is not yet known).
 6. COMMENT what you tried, why you couldn't finish, what a reader (the triager, then
    possibly the operator) needs to move it, and where the work is preserved. Either form
    MUST carry the step-2 `FRESHNESS:` line. Write the comment BEFORE the label (step 7), so
-   the findings are already on the bead when the triager is dispatched. Name the concrete
-   question, input, approval or action a PERSON would have to supply, or write
-   `NEEDS: unknown` when you could not tell; the triager uses it to choose between
-   answering, closing, re-queueing and a hand-off to the operator.
+   the findings are already on the bead when the triager is dispatched. Classify the
+   finding and write exactly one `NEEDS:` line, in this one vocabulary:
+   - `NEEDS: SCOPE: <what must be split or re-curated, and where the seam is>` when the
+     work is too big for one session or under-scoped. Agents can fix this (the triager
+     routes it to the split disposition), so a person is NOT asked. If the packet is
+     oversized, say so with `SCOPE:` and name the seam; MUST NOT frame budget or splitting
+     as a question. When two or more packets of one docket have been escalated as oversize
+     or under-scoped, state that docket-wide pattern in the same `SCOPE:` comment (the
+     docket and the other packets) so the triager can weigh a docket reconcile
+     (`plan-decompose` `references/reconcile.md`) instead of splitting one packet.
+   - `NEEDS: DECISION: <the question a person must answer>` when a person must choose
+     between designs, supply an approval, an input or an action. Only this form is a
+     candidate for the person queue.
+   - `NEEDS: unknown` when you could not tell which. A worker MUST NOT write a free-form
+     NEEDS (for example "a scoping decision"): the triager reads it literally.
+
+   The triager uses the form to choose between split, answering, closing, re-queueing
+   and a hand-off to the operator.
 
    **6a — ordinary escalation**, carrying the step-4 block when there is a precondition:
 
    ```bash
    bd comment <id> "stuck: <what you tried / why>. ESCALATED to the escalation-triager. Work preserved on branch <work-branch> in <repo>.
-   NEEDS: <the decision, input, approval or action a person would have to supply, or: unknown>
+   NEEDS: SCOPE: <what must be split or re-curated and where the seam is> | NEEDS: DECISION: <question a person must answer> | NEEDS: unknown
    FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
    PRECONDITION: <observable outcome that must hold before this is workable>
    PRECONDITION-KEY: <stable-outcome-slug>

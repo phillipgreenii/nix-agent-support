@@ -53,6 +53,17 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   the same call (`bd update <id> --status deferred --assignee "" --actor "ID"`, B-2/B-3/B-4 —
   never `--status open`) after `pb drain reclaim` has removed an empty worktree, and gets no `human` label: a `plan-decompose` reconcile (or its
   stamp catch-up) clears it. See step 4's STAMP REFUSAL (`pg2-wceuh`).
+- An OVERSIZE or UNDER-SCOPED packet (the implementer committed green partial work and reports
+  it cannot fit the budget, or the packet's scope is wrong) is NOT a question for a person.
+  Route it through `pb:drain-stuck` ESCALATE with `NEEDS: SCOPE: <what must be split or
+re-curated and where the seam is>`, preserving the work branch: the triager routes it to
+  the existing split disposition, and a person is asked only for `NEEDS: DECISION:`. When two
+  or more packets of one docket escalate this way, the worker states that docket-wide pattern
+  in the `SCOPE:` comment so a `plan-decompose` reconcile can be considered (its trigger is in
+  `references/reconcile.md`). Operator ruling (Phillip, 2026-11-02): "why was the question of
+  splitting waited for me? there is an explicit triager whose job is to handle these
+  situations, isn't there? is there missing instructions for agents on how to do that
+  escalation?"
 - A handoff bead is dispositioned at UNDERSTAND via
   `beads-lifecycle:handoff-bead` — never isolated, delegated, or executed as an
   instruction.

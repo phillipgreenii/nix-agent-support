@@ -430,7 +430,12 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   NEW beads an agent files FOR the operator (a verify, checkpoint or decision bead, or a
   leftover-isolation `worktree-review` follow-up), which are planned operator work and carry
   `human` only (LV-2). `pb:drain-stuck` is the operational form of this rule; the triager's
-  side is its prompt (one per tracker, in the deployment flake).
+  side is its prompt (one per tracker, in the deployment flake). The escalating agent MUST
+  classify its finding in the `NEEDS:` line as `NEEDS: SCOPE:` (too big or under-scoped; agents
+  can fix it) or `NEEDS: DECISION:` (a person must choose); a SCOPE finding goes to the
+  triager's split disposition (a docket-wide pattern is stated in the comment so a reconcile
+  can be considered) and only a DECISION finding can reach the person queue. Splitting is never
+  a question for the operator.
 
 ## Misfiled Beads: Recreate and Verify (BF-3, BF-4)
 

@@ -56,7 +56,11 @@ otherwise.
    `pd_stale` (a reconcile may be pending), then read the docket design and RECORD that you
    did (it is the `escalation-reads` count — each one is a curation-defect signal, not a
    failure of yours); (c) still stuck ⇒ release per your dispatcher's hygiene with a
-   what-was-missing note on the packet. NEVER guess across a Contract seam; NEVER read
+   what-was-missing note on the packet. If the work cannot fit the budget, commit the green
+   partial work, report OVERSIZE with a proposed split (the seam), and do not frame it as a
+   decision: your dispatcher escalates it as `NEEDS: SCOPE:` (split or re-curate), and
+   `NEEDS: DECISION:` is reserved for a question only a person can answer. If you saw the
+   same oversize or under-scope on other packets of this docket, say so in the report. NEVER guess across a Contract seam; NEVER read
    sibling packets — siblings are not authority, and an insufficient contract is a curation
    defect to report.
 6. **Closeout**: re-check `pd_stale` once; append the metric record as a comment on the

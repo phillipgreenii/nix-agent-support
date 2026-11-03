@@ -192,3 +192,17 @@ plan-decompose/agents/phase-plan-verifier.md:1"
   run grep -qF 'bd update <id> --add-label escalated --status open --assignee "" --actor "ID"' "$(stuck)"
   [ "$status" -ne 0 ]
 }
+
+@test "the NEEDS vocabulary is NEEDS: SCOPE: versus NEEDS: DECISION: in every document that states it" {
+  s="$(stuck)"
+  grep -qF 'NEEDS: SCOPE:' "$s"
+  grep -qF 'NEEDS: DECISION:' "$s"
+  grep -qF 'NEEDS: SCOPE:' "$work/mp/pb/skills/drain-one/references/rules.md"
+  grep -qF 'NEEDS: SCOPE:' "$work/mp/plan-decompose/agents/packet-implementer.md"
+  grep -qF 'NEEDS: SCOPE:' "$work/mp/plan-decompose/skills/plan-decompose/references/reconcile.md"
+}
+
+@test "no document invents a needs-reconcile label or role" {
+  run grep -rn 'needs-reconcile' "$work/mp/pb" "$work/mp/plan-decompose"
+  [ "$status" -eq 1 ]
+}

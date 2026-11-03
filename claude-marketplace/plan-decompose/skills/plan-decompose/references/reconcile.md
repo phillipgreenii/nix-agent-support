@@ -4,7 +4,16 @@
 
 Input: a docket + either a diff against the docket's current design or, when the docket
 carries no prior design revision yet, full replacement text — or NO amendment at all, for a
-stamp catch-up (below). The binding's `amend-design` RESOLVES an amendment into the full
+stamp catch-up (below).
+
+**Triggers.** Run this mode when (a) the design was amended (the usual case), (b) a stamp
+catch-up is needed, or (c) two or more packets of one docket have escalated as oversize or
+under-scoped (`NEEDS: SCOPE:` from `pb:drain-stuck`): the curation, not one packet, is then
+the defect, so amend the design's affected sections (the seams the packets' `SCOPE:` comments
+name) and reconcile. Trigger (c) is a documented trigger, not an automated one: the
+escalating worker states the docket-wide pattern in its `NEEDS: SCOPE:` comment for the
+escalation-triager. A single oversize packet is split on the triager's existing split path
+instead. The binding's `amend-design` RESOLVES an amendment into the full
 amended design text (patch-applying a diff, or using full text as-is) before anything is
 written to the docket. Below, `R` is the docket's `pd_rev` once step 2 has run (the new
 revision). Revisions are integers and compare NUMERICALLY, for equality and order alike,

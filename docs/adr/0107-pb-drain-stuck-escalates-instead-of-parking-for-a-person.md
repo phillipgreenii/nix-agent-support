@@ -24,7 +24,16 @@ records the remove-versus-update decision the bead left to the agent.
    `FRESHNESS:` probe output, a `NEEDS:` line naming what a person would have to supply, and the
    preserved branch), then ONE `bd update --add-label escalated --status open --assignee ""`
    (`beads-lifecycle` LV-7, B-1 to B-3), then reads the bead back. It never writes `human` or
-   `attention` on the stuck bead and never runs `hand-to-human`.
+   `attention` on the stuck bead and never runs `hand-to-human`. The `NEEDS:` line uses one
+   vocabulary: `NEEDS: SCOPE:` (too big for one session or under-scoped; what to split or
+   re-curate and where the seam is) or `NEEDS: DECISION:` (the question a person must answer),
+   or `NEEDS: unknown`. A SCOPE finding goes to the triager's split disposition and is never put
+   to a person; where two or more packets of one docket escalate this way the worker states the
+   docket-wide pattern in the comment so a `plan-decompose` reconcile can be considered. Only a
+   DECISION finding can reach the operator. Operator ruling (Phillip, 2026-11-02): "why was the
+   question of splitting waited for me? there is an explicit triager whose job is to handle
+   these situations, isn't there? is there missing instructions for agents on how to do that
+   escalation?"
 2. **The triager prompts own the person decision.** Both escalation-triager prompts gain a
    "stuck work beads" section: recognise a drain escalation, answer or close it when the
    evidence allows, re-queue it at most once, and otherwise hand it to the operator with
