@@ -227,16 +227,20 @@ type janitorRun struct {
 	// really reached its deadline.
 	cutRoles []string
 	skipped  []string
+	// counts is each role-level pass's progress counters, in run order
+	// (INV-CCH-41, design D2).
+	counts []*passCounts
 }
 
 // runPass runs one pass under ctx, timing it and recording its count and error
 // (a panic counts as an error: a pass that blows up must not stop the others).
-func (j *janitorRun) runPass(ctx context.Context, name, role string, deps executor.Deps, fn func() int) {
+func (j *janitorRun) runPass(ctx context.Context, name, role string, deps executor.Deps, fn func(ctx context.Context) int) {
 	st := j.stats[name]
 	if st == nil {
 		st = &passStat{}
 		j.stats[name] = st
 	}
+	counts := &passCounts{Pass: name, Role: role}
 	start := time.Now()
 	n, err := func() (n int, err error) {
 		defer func() {
@@ -244,9 +248,13 @@ func (j *janitorRun) runPass(ctx context.Context, name, role string, deps execut
 				err = fmt.Errorf("panic: %v", r)
 			}
 		}()
-		return fn(), nil
+		return fn(withCounts(ctx, counts)), nil
 	}()
 	elapsed := time.Since(start)
+	counts.finish(n)
+	if name != passLockGC {
+		j.counts = append(j.counts, counts)
+	}
 	st.Runs++
 	st.Reclaimed += n
 	st.ElapsedMS += elapsed.Milliseconds()
@@ -328,15 +336,15 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		// Pool-level passes: once per distinct pool however many roles share it.
 		if !poolDone[jr.pool] {
 			poolDone[jr.pool] = true
-			run.runPass(rctx, passClosedBead, name, jr.deps, func() int { return passes.closedBead(rctx, jr.role, jr.cfg, jr.deps) })
+			run.runPass(rctx, passClosedBead, name, jr.deps, func(ctx context.Context) int { return passes.closedBead(ctx, jr.role, jr.cfg, jr.deps) })
 		}
 		// Default-pool pass: the same condition runSweeps keys on, once per run.
 		if !defaultPoolDone && (jr.role.CCPool.PoolDir != "" || os.Getenv("CCPOOL_POOL") != "") {
 			defaultPoolDone = true
-			run.runPass(rctx, passDefaultPool, name, jr.deps, func() int { return passes.defaultPool(rctx, jr.cfg) })
+			run.runPass(rctx, passDefaultPool, name, jr.deps, func(ctx context.Context) int { return passes.defaultPool(ctx, jr.cfg) })
 		}
-		run.runPass(rctx, passOrphan, name, jr.deps, func() int { return passes.orphan(rctx, jr.role, jr.cfg, jr.deps) })
-		run.runPass(rctx, passWorktree, name, jr.deps, func() int { return passes.worktree(rctx, jr.role, jr.cfg, jr.deps) })
+		run.runPass(rctx, passOrphan, name, jr.deps, func(ctx context.Context) int { return passes.orphan(ctx, jr.role, jr.cfg, jr.deps) })
+		run.runPass(rctx, passWorktree, name, jr.deps, func(ctx context.Context) int { return passes.worktree(ctx, jr.role, jr.cfg, jr.deps) })
 		rcancel()
 	}
 	// Lock-file collection: handler-wide and cheap, once per run, after every
@@ -345,7 +353,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	if len(jroles) > 0 {
 		lockDeps = jroles[0].deps
 	}
-	run.runPass(context.Background(), passLockGC, "", lockDeps, func() int { return passes.lockGC(lockDeps) })
+	run.runPass(context.Background(), passLockGC, "", lockDeps, func(context.Context) int { return passes.lockGC(lockDeps) })
 
 	outcome := janitorCompleted
 	if run.cutOff || runCtx.Err() != nil {
@@ -366,9 +374,11 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		"reclaimed":     reclaimed,
 		"roles_skipped": run.skipped,
 		"roles_cut":     run.cutRoles,
+		"counters":      run.counts,
 	}
 	_ = log.Emit("info", janitorRunEvent, "janitor run "+outcome, fields)
 	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats)
+	emitJanitorProgressGauges(ctx, passes.emit, run.counts)
 	fmt.Fprintf(stdout, "janitor: outcome=%s elapsed=%s roles=%d pools=%d reclaimed=%d\n", outcome, elapsed.Round(time.Millisecond), len(jroles), len(poolDone), reclaimed)
 	return conformance.ExitOK
 }

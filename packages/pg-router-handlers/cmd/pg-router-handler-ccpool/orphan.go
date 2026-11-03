@@ -105,11 +105,14 @@ func reconcileOrphanSessions(ctx context.Context, role roles.Role, deps executor
 // re-read under its own lock, the correctness guard.
 func reconcileOrphanSessionsFrom(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, sessions []ccpool.Session) (reclaimed, hardStopped, candidates int) {
 	now := orphanNow(deps)
+	counts := countsFrom(ctx)
 	for _, s := range sessions {
 		if !isOrphanOf(s, role, deps.Cfg.SessionPrefix, now) {
 			continue
 		}
 		candidates++
+		counts.seen(1)
+		counts.examined()
 		switch reconcileOneOrphan(ctx, role, deps, env, s) {
 		case orphanReclaimed:
 			reclaimed++

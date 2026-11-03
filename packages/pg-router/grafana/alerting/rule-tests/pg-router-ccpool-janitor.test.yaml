@@ -138,3 +138,40 @@ tests:
       - eval_time: 8h
         alertname: pg-router-ccpool-janitor-idle
         exp_alerts: []
+
+  - name: stagnant fires when a pass keeps an unexamined candidate over 6h, not while it advances
+    interval: 10m
+    input_series:
+      # worktree_sweep: the oldest unexamined age grows every run (stuck), so it crosses 21600.
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="worktree_sweep"}
+        values: "0+600x60"
+      # orphan_reconcile: candidates are reached, the age resets to 0 on every run.
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="orphan_reconcile"}
+        values: "0x60"
+      # closed_bead_reconcile: waits a while, then is examined and resets before 6h.
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="closed_bead_reconcile"}
+        values: "0+600x20 0x40"
+    alert_rule_test:
+      # Age is 18000 (5h) at 5h: below the bar.
+      - eval_time: 5h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      # Age passes 21600 after 6h, then `for: 30m`.
+      - eval_time: 8h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+
+  - name: stagnant stays quiet when ages reset and on a host without the gauge
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="worktree_sweep"}
+        values: "0+600x30 0x60"
+      - series: unrelated_metric
+        values: "1x90"
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []

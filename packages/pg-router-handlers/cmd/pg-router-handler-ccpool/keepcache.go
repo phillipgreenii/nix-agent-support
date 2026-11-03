@@ -48,6 +48,11 @@ type keepEntry struct {
 // keepFile maps a bead to its cache file under dir; characters outside
 // [A-Za-z0-9._-] become "_" so a name can never escape dir.
 func keepFile(dir, bead string) string {
+	return keepLikeFile(dir, keepFilePrefix, keepFileSuffix, bead)
+}
+
+// keepLikeFile is keepFile for any per-bead record kept beside the keep cache.
+func keepLikeFile(dir, prefix, suffix, bead string) string {
 	name := strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
@@ -55,7 +60,7 @@ func keepFile(dir, bead string) string {
 		}
 		return '_'
 	}, bead)
-	return filepath.Join(dir, keepFilePrefix+name+keepFileSuffix)
+	return filepath.Join(dir, prefix+name+suffix)
 }
 
 // keepSignature fingerprints the state a keep decision depends on. A missing
@@ -123,7 +128,7 @@ func keepRemember(lockDir string, c leakedWorktree, sig string, now time.Time, t
 	}
 }
 
-// sweepKeepCache removes cache entries that can no longer matter: expired,
+// sweepKeepCache removes cache entries (and first-seen records, janitor_progress.go) that can no longer matter: expired,
 // unparseable, or naming a worktree that is gone, plus abandoned temp files. It
 // returns how many it removed.
 func sweepKeepCache(lockDir string, now time.Time) int {
@@ -134,7 +139,8 @@ func sweepKeepCache(lockDir string, now time.Time) int {
 	removed := 0
 	for _, de := range des {
 		name := de.Name()
-		if !strings.HasPrefix(name, keepFilePrefix) {
+		isKeep, isSeen := strings.HasPrefix(name, keepFilePrefix), strings.HasPrefix(name, seenFilePrefix)
+		if !isKeep && !isSeen {
 			continue
 		}
 		p := filepath.Join(lockDir, name)
@@ -143,7 +149,17 @@ func sweepKeepCache(lockDir string, now time.Time) int {
 			if fi, err := de.Info(); err == nil && now.Sub(fi.ModTime()) > keepTmpMaxAge && os.Remove(p) == nil {
 				removed++
 			}
-		case strings.HasSuffix(name, keepFileSuffix):
+		case isSeen && strings.HasSuffix(name, seenFileSuffix):
+			// A first-seen record outlives its candidate only until the worktree is gone.
+			if e, ok := readSeen(p); ok {
+				if _, err := os.Lstat(e.Path); err == nil {
+					continue
+				}
+			}
+			if os.Remove(p) == nil {
+				removed++
+			}
+		case isKeep && strings.HasSuffix(name, keepFileSuffix):
 			e, ok := readKeep(p)
 			if ok && now.UnixNano() < e.Until {
 				if _, err := os.Lstat(e.Path); err == nil {

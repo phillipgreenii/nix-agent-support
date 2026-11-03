@@ -1970,6 +1970,58 @@ groups:
                     type: gt
                     params: [0]
 
+      # pg-router-ccpool-janitor-stagnant: a candidate the janitor has seen but not reached
+      # for more than 6 hours (36 intervals), whatever the cause (a role timer that keeps
+      # cutting the pass, a per-run examination cap, a slow scan). The handler keeps one
+      # first-seen time per worktree and publishes the age of the longest-waiting one
+      # (ccpool_janitor_oldest_unexamined_age_seconds{pass}); it reports the gauge only for
+      # a pass that ran, so a janitor that stops running is the stale rule's business, and a
+      # run that reaches every candidate resets it to 0. The expression reads the last
+      # sample of a 35 minute window per pass (a push every 10 minutes), and `for: 30m`
+      # keeps one slow run from alerting. First check: the counters of the janitor_run rows
+      # in the handler's events.jsonl (candidates, examined, cached, unexamined, and the
+      # list_ms, probe_ms, scan_ms phases of worktree_sweep), then the ccpool_janitor_*
+      # gauges by pass and role, then one hand run. Annotations are STATIC.
+      - uid: pg-router-ccpool-janitor-stagnant
+        title: ccpool janitor is not reaching some candidates
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "the ccpool handler's janitor has left a candidate unexamined for more than 6 hours"
+          description: "ccpool_janitor_oldest_unexamined_age_seconds is above 21600 (6 hours) for a pass: some candidate, for example a leaked worktree, was seen and has not been examined since, so cleanup is not reaching it. First check the counters of the janitor_run rows in the handler's events.jsonl (candidates, examined, cached, unexamined per pass and role, and list_ms, probe_ms, scan_ms for worktree_sweep) to see whether runs are cut by a timer, held to the examination cap or slow in one phase, then the ccpool_janitor_unexamined and ccpool_janitor_phase_seconds gauges by pass and role, then run the janitor by hand."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (pass) (last_over_time(ccpool_janitor_oldest_unexamined_age_seconds[35m])) > 21600
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # ccpool goes dark (bead pg2-oewtdh, found by the 2026-11-02 health review). From the
       # 2026-10-31T20:36Z apply the ccpool recorder daemon was offline for 33 h: the pool
       # gauge stopped, no session launched, the router declined every ccpool dispatch with

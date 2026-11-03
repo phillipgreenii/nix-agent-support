@@ -22,6 +22,15 @@ const (
 	gaugeJanitorReclaimed   = "ccpool_janitor_reclaimed"
 	gaugeOrphanLastEvent    = "ccpool_orphan_last_event_timestamp_seconds"
 
+	// Progress gauges (design D2), per pass and role for the counters.
+	gaugeJanitorCandidates = "ccpool_janitor_candidates"
+	gaugeJanitorExamined   = "ccpool_janitor_examined"
+	gaugeJanitorCached     = "ccpool_janitor_cached"
+	gaugeJanitorKept       = "ccpool_janitor_kept"
+	gaugeJanitorUnexamined = "ccpool_janitor_unexamined"
+	gaugeJanitorPhase      = "ccpool_janitor_phase_seconds"
+	gaugeJanitorOldestAge  = "ccpool_janitor_oldest_unexamined_age_seconds"
+
 	gaugeEmitTimeout = 10 * time.Second
 )
 
@@ -68,6 +77,46 @@ func emitJanitorGauges(ctx context.Context, emit gaugeEmitFn, now time.Time, out
 		}
 		put(gaugeJanitorPassErrors, errs, map[string]string{"pass": p})
 		put(gaugeJanitorReclaimed, rec, map[string]string{"pass": p})
+	}
+}
+
+// emitJanitorProgressGauges publishes the progress counters of one run that was
+// not skipped (design D2). Best effort, like the heartbeat. The oldest
+// unexamined age is per pass, the largest over the roles that ran it, and is
+// reported only for a pass that ran: a run that never reached the pass must not
+// reset the age to zero and hide a stagnation.
+func emitJanitorProgressGauges(ctx context.Context, emit gaugeEmitFn, counts []*passCounts) {
+	if emit == nil {
+		return
+	}
+	put := func(name string, v float64, labels map[string]string) {
+		if err := emit(ctx, name, v, labels); err != nil {
+			slog.Warn("janitor: gauge emit failed", "gauge", name, "err", err)
+		}
+	}
+	oldest := map[string]float64{}
+	ran := map[string]bool{}
+	for _, c := range counts {
+		ran[c.Pass] = true
+		l := map[string]string{"pass": c.Pass, "role": c.Role}
+		put(gaugeJanitorCandidates, float64(c.Candidates), l)
+		put(gaugeJanitorExamined, float64(c.Examined), l)
+		put(gaugeJanitorCached, float64(c.Cached), l)
+		put(gaugeJanitorKept, float64(c.Kept), l)
+		put(gaugeJanitorUnexamined, float64(c.Unexamined), l)
+		for phase, ms := range map[string]*int64{phaseList: c.ListMS, phaseProbe: c.ProbeMS, phaseScan: c.ScanMS} {
+			if ms != nil {
+				put(gaugeJanitorPhase, float64(*ms)/1000, map[string]string{"pass": c.Pass, "role": c.Role, "phase": phase})
+			}
+		}
+		if c.OldestUnexaminedAgeSeconds > oldest[c.Pass] {
+			oldest[c.Pass] = c.OldestUnexaminedAgeSeconds
+		}
+	}
+	for _, p := range allJanitorPasses {
+		if ran[p] {
+			put(gaugeJanitorOldestAge, oldest[p], map[string]string{"pass": p})
+		}
 	}
 }
 

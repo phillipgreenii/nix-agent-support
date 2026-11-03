@@ -1353,6 +1353,19 @@ changes a core gate or `INV-LIFE-2`.
     publishes the time of the latest such event per role and kind. Three alerts watch the heartbeat:
     no completed run for three intervals, three consecutive deadline runs, and a pass failing on
     every run or nothing reclaimed for hours while a pool has no free slot.
+  - **Progress counters.** A run MUST also record, per pass and per role (a pool-level pass under
+    the role that ran it), how many candidates it saw (`candidates`), examined, skipped as cached
+    (`cached`), kept, removed and did not reach (`unexamined`), so a run that reclaimed nothing can
+    be told from one that was stuck. They add up: `candidates = examined + cached + unexamined`
+    and `kept + removed <= examined`. The worktree-keyed sweep also records the milliseconds of its
+    phases (`list_ms`, `probe_ms`, `scan_ms`). They are written into the run's record and published
+    as gauges (`ccpool_janitor_candidates`, `_examined`, `_cached`, `_kept`, `_unexamined` by pass
+    and role, `_phase_seconds` by pass, role and phase). The sweep MUST keep one first-seen time per
+    candidate worktree, beside the keep cache and shared by all roles, forgotten when any pass
+    reaches the candidate or stops seeing it as one, and publish the age of the longest-waiting
+    candidate it did not reach (`ccpool_janitor_oldest_unexamined_age_seconds` by pass; reported
+    only for a pass that ran). A fourth alert fires when that age stays above six hours, whatever
+    the cause of the pass not advancing.
   - **Dry run.** An operator MUST be able to ask a janitor run what each pass WOULD reclaim,
     without it reclaiming anything.
   - **Capacity pressure in a dispatch.** A dispatch handles its role's orphans first (`INV-CCH-18`).

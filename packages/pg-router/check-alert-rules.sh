@@ -24,7 +24,7 @@ tests_dir="$2"
 
 # Every rule uid this check wraps and tests. A rule added here extends the cases under
 # rule-tests/.
-rule_uids='["pg-router-pool-full-idle", "pg-router-ccpool-dead-needs-input", "pg-router-gate-held", "pg-router-queue-stalled", "pg-router-queue-depth-growing", "pg-router-queue-slow-growth", "pg-router-event-dispatch-failed", "pg-router-pr-dispatch-failed", "pg-router-failure-rate", "pg-router-role-stalled", "pg-router-role-busy-long", "pg-router-worktree-growth", "pg-router-liveness-down", "pg-router-ccpool-janitor-stale", "pg-router-ccpool-janitor-deadline", "pg-router-ccpool-janitor-idle", "pg-router-ccpool-pool-capacity-absent", "pg-router-ccpool-no-launch-while-queued"]'
+rule_uids='["pg-router-pool-full-idle", "pg-router-ccpool-dead-needs-input", "pg-router-gate-held", "pg-router-queue-stalled", "pg-router-queue-depth-growing", "pg-router-queue-slow-growth", "pg-router-event-dispatch-failed", "pg-router-pr-dispatch-failed", "pg-router-failure-rate", "pg-router-role-stalled", "pg-router-role-busy-long", "pg-router-worktree-growth", "pg-router-liveness-down", "pg-router-ccpool-janitor-stale", "pg-router-ccpool-janitor-deadline", "pg-router-ccpool-janitor-idle", "pg-router-ccpool-janitor-stagnant", "pg-router-ccpool-pool-capacity-absent", "pg-router-ccpool-no-launch-while-queued"]'
 
 fail() {
   echo "FAIL: $*" >&2

@@ -114,16 +114,23 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 	// removal of a 100k-file checkout can take minutes, and this runs in the
 	// dispatch path). A row skipped by a guard (mid-turn, transcript active) is not
 	// an attempt, so the next marked row gets the slot.
+	counts := countsFrom(ctx)
+	attemptedOne := false
 	for _, s := range sessions {
 		if !strings.HasPrefix(s.ExternalID, prefix) || !s.PurgePending() {
 			continue
+		}
+		counts.seen(1)
+		if attemptedOne {
+			continue // left for the next pass: at most one retry per pass
 		}
 		purged, attempted := retryPurgePending(ctx, cc, open, repoRoot, worktreeDir, quiet, sessions, s)
 		if purged {
 			closed++
 		}
 		if attempted {
-			break
+			counts.examined()
+			attemptedOne = true
 		}
 	}
 	for _, s := range sessions {
@@ -139,6 +146,8 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 		if !reconcilableState(s.State) {
 			continue
 		}
+		counts.seen(1)
+		counts.examined()
 		if !beadAlreadyClosed(ctx, br, s) {
 			continue
 		}
