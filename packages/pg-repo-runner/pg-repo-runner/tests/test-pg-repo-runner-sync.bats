@@ -383,9 +383,15 @@ assert_no_history_rewriting() {
   [ "$(jq -r .priority <<<"$b")" = 1 ]
   [[ "$(jq -r .title <<<"$b")" == *"pn workspace rebase or /pn-workspace-sync"* ]]
   [ "$(bd_fixture_show_json "$id" | jq -r '.labels | index("agent-support") != null')" = true ]
+  # the body keeps both commands and the never-rebases sentence, and points to the one reconcile procedure
+  local desc
+  desc="$(bd_fixture_show_json "$id" | jq -r '.description')"
+  [[ $desc == *'The runner never rebases, resets or forces'* ]]
+  [[ $desc == *'`pn workspace rebase` or `/pn-workspace-sync`'* ]]
+  [[ $desc == *'The `reconcile-repo` skill of the `pn-workspace-rules` plugin holds the single reconcile procedure for one repo.'* ]]
   [ "$(notifications)" -eq 1 ]
   # RR-4: the CLI's full argv
-  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha diverged][--body][nix-alpha: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync ($id)][--source][pg-repo-runner][--timeout][5s]" ]
+  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha diverged][--body][nix-alpha: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync (reconcile-repo skill of pn-workspace-rules) ($id)][--source][pg-repo-runner][--timeout][5s]" ]
   # a repeated pass is the same story: no second bead, no second notification, no ref change
   sync_pass nix-alpha
   [ "$status" -eq 0 ]

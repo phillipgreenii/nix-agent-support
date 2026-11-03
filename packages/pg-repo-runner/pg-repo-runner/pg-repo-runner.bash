@@ -613,7 +613,7 @@ rr_surface_title() {
   local repo="$1" kind="$2" sha="${3:0:12}"
   case "$kind" in
   red) printf '%s: primary tip %s fails nix flake check' "$repo" "$sha" ;;
-  diverged) printf '%s: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync' "$repo" ;;
+  diverged) printf '%s: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync (reconcile-repo skill of pn-workspace-rules)' "$repo" ;;
   needs-relock) printf '%s: push blocked: needs relock' "$repo" ;;
   build-red) printf '%s: workspace build is red at %s' "$repo" "$sha" ;;
   esac
@@ -628,7 +628,9 @@ rr_surface_body() {
   if [[ $kind == diverged ]]; then
     printf 'The primary branch has commits the remote lacks AND the remote has commits it lacks. '
     printf 'The runner never rebases, resets or forces: resolve it from a session or the operator '
-    printf 'shell with `pn workspace rebase` or `/pn-workspace-sync`. The runner closes this bead '
+    printf 'shell with `pn workspace rebase` or `/pn-workspace-sync`. The `reconcile-repo` skill of '
+    printf 'the `pn-workspace-rules` plugin holds the single reconcile procedure for one repo. '
+    printf 'The runner closes this bead '
     printf 'on its next pass that finds the branch no longer diverged (it closes only beads '
     printf 'carrying metadata runner = pg-repo-runner).\n'
     return 0
