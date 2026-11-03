@@ -130,6 +130,7 @@ func Open(opt Options) (*Daemon, error) {
 		Q: d.qe, Store: st, Clock: opt.Clock, Obs: o, Retention: cfg.FeedRetention, WaitMax: cfg.WaitMax,
 		MaxWaiters: cfg.WaitMaxWaiter, Behind: d.qe.Behind,
 	}
+	d.qe.FilterFields = d.noteFilterFields
 	st.OnWrite(d.fe.Notify)
 	if opt.Procs == nil {
 		opt.Procs = proc.NewReal()

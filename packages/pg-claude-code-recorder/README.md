@@ -207,6 +207,11 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   held while a waiter waits (it reads, releases, waits, then reads again). A read that hits the
   deadline answers `query_timeout` (504, exit 6, `client.ErrQueryTimeout`, retryable) and counts in
   `query_timeouts_total{op}`.
+- **Filter field census**: each query, search or feed request whose filter compiled counts the catalogued
+  field names its filter leaves named in `query_filter_fields_total{op,field}` (op is query, search or
+  feed) and logs one `query_filter_fields` info line (`op`, `fields` as `name=count,...`). Names and
+  counts only, never values or query text, so the label set is bounded by the catalog. It tells which
+  stored fields are never filtered on and could be dropped or read on demand from the copies.
 - **raw** answers a record (`{"record":{file,gen,offset,item}}`) or a file range. Every reader of
   stored bytes (raw, snippets, substring verification, field reads) goes through
   `Store.OpenPointer`, one abstraction over a copy, a snapshot version and an archive.

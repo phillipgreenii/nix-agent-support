@@ -95,6 +95,7 @@ func (e *Engine) Select(tx *sql.Tx, sel Selection) ([]Selected, *wire.Error) {
 	if err != nil {
 		return nil, err
 	}
+	e.noteFilter("feed", b)
 	selects := []string{"r.id", "r.file_id", "r.gen", "r.off", "r.item"}
 	for _, c := range cols {
 		selects = append(selects, c.expr)

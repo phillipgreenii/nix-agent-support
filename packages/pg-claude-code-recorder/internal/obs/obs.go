@@ -39,6 +39,7 @@ const (
 	MRequestsTotal   = "requests_total"
 	MQueryDuration   = "query_duration_seconds"
 	MQueryTimeouts   = "query_timeouts_total"
+	MFilterFields    = "query_filter_fields_total"
 	MFeedDuration    = "feed_latency_seconds"
 	MWaitDuration    = "wait_duration_seconds"
 	MCopiedFiles     = "backfill_files_copied"

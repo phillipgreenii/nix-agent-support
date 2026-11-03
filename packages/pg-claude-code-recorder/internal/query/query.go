@@ -29,6 +29,17 @@ type Engine struct {
 	// Behind reports whether the recorder is catching up (answers are marked
 	// degraded then).
 	Behind func() bool
+	// FilterFields, when set, is told after each request whose filter compiled
+	// which catalogued field names the filter named and how many leaves each
+	// had (op is query, search or feed). Names only: never values or text.
+	FilterFields func(op string, fields map[string]int)
+}
+
+// noteFilter reports the compiled filter's field names to FilterFields.
+func (e *Engine) noteFilter(op string, b *builder) {
+	if e.FilterFields != nil && len(b.used) > 0 {
+		e.FilterFields(op, b.used)
+	}
 }
 
 // Agg is one aggregate.
@@ -180,6 +191,7 @@ func (e *Engine) rows(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
 	if err != nil {
 		return err
 	}
+	e.noteFilter("query", b)
 	var ord []string
 	for _, o := range req.Order {
 		c, err := b.col(o.By)
@@ -568,6 +580,7 @@ func (e *Engine) aggregate(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
 	if err != nil {
 		return err
 	}
+	e.noteFilter("query", b)
 	if len(sel) == 0 {
 		sel = []string{"r.id"}
 	}

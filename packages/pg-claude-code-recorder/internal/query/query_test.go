@@ -337,3 +337,29 @@ func TestQueryIsDegradedWhileBehind(t *testing.T) {
 		t.Fatal("not marked degraded while behind")
 	}
 }
+
+func TestFilterFieldsReportsNamesOnly(t *testing.T) {
+	k := kit(t)
+	var gotOp string
+	got := map[string]int{}
+	k.Engine.FilterFields = func(op string, f map[string]int) {
+		gotOp = op
+		for n, c := range f {
+			got[n] += c
+		}
+	}
+	q(t, k, `{"where":{"all":[{"field":"type","eq":"assistant"},{"field":"model","eq":"example-model-a"},{"field":"type","eq":"user"}]}}`)
+	if gotOp != "query" || got["type"] != 2 || got["message.model"] != 1 || len(got) != 2 {
+		t.Fatalf("op %q fields %v", gotOp, got)
+	}
+	got = map[string]int{}
+	s(t, k, `{"q":"registry","where":{"field":"cwd","exists":true}}`)
+	if gotOp != "search" || len(got) != 1 {
+		t.Fatalf("op %q fields %v", gotOp, got)
+	}
+	got = map[string]int{}
+	q(t, k, `{"select":["type"]}`)
+	if len(got) != 0 {
+		t.Fatalf("no filter reported %v", got)
+	}
+}

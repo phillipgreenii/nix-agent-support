@@ -46,10 +46,12 @@ type builder struct {
 	joins    []string
 	joinArgs []any
 	err      *wire.Error
+	// used counts, per stored field name, the filter leaves that named it.
+	used map[string]int
 }
 
 func newBuilder(cat map[string]source.Kind) *builder {
-	return &builder{cat: cat, aliases: map[string]string{}}
+	return &builder{cat: cat, aliases: map[string]string{}, used: map[string]int{}}
 }
 
 func badf(format string, a ...any) *wire.Error {
@@ -201,6 +203,9 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		return "NOT (" + s + ")", a, nil
 	case f.Field == "":
 		return "", nil, badf("a filter needs field and an operator, or all, any or not")
+	}
+	if stored, _, rerr := b.resolve(f.Field); rerr == nil {
+		b.used[stored]++
 	}
 	if f.Exists != nil {
 		return b.exists(f.Field, *f.Exists)

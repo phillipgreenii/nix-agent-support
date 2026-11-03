@@ -86,6 +86,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 	if werr != nil {
 		return nil, werr
 	}
+	e.noteFilter("search", b)
 	var fieldSQL string
 	var fieldArgs []any
 	if len(req.Fields) > 0 {
