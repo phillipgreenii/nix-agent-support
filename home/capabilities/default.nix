@@ -79,6 +79,7 @@
       features = [
         "wtnew"
         "wtdone"
+        "wtaudit"
       ];
     }
     # Git helper CLIs — human git work. (The pr-tools feature was retired with

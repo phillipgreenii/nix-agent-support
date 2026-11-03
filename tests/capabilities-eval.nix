@@ -66,6 +66,7 @@ let
     bundle_enables_beads = (p cBundleHuman).beads.enable == true;
     bundle_enables_wtnew = (p cBundleHuman).wtnew.enable == true;
     bundle_enables_wtdone = (p cBundleHuman).wtdone.enable == true;
+    bundle_enables_wtaudit = (p cBundleHuman).wtaudit.enable == true;
     bundle_enables_pb = (p cBundleHuman).pb.enable == true;
     bundle_enables_pb_agent = (p cBundleAgent).pb.enable == true;
     beads_human_gets_perles = (p cBundleHuman).perles.enable == true;

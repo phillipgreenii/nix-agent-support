@@ -277,7 +277,7 @@ wtaudit_build_candidate() {
     else
       ancestor=false
     fi
-    plus="$(git -C "$repo_path" cherry "$primary" "$branch" 2>/dev/null | { grep -c '^+' || true; })"
+    plus="$(git -C "$repo_path" cherry "$primary" "$branch" 2>/dev/null | awk '/^\+/ { n++ } END { print n + 0 }')"
     merges="$(git -C "$repo_path" rev-list --merges --count "$primary..$branch")"
     if [[ $plus -eq 0 && $merges -eq 0 ]]; then patch_eq=true; else patch_eq=false; fi
     last_date="$(git -C "$repo_path" log -1 --format=%cs "$branch" 2>/dev/null || true)"
@@ -456,11 +456,11 @@ wtaudit_holder_of_branch() {
   '
 }
 
-# wtaudit_remove <repo_path> <branch> <expect_tip>: the guarded remove. Prints
+# wtaudit_remove <repo_path> <branch> <expect_tip> <wtdone_bin>: the guarded remove. Prints
 # one JSON object on stdout and returns the documented exit code (10 refused,
 # 11 branch remains, 12 set member, 13 teardown refused, 0 done).
 wtaudit_remove() {
-  local repo_path="$1" branch="$2" expect_tip="$3"
+  local repo_path="$1" branch="$2" expect_tip="$3" wtdone_bin="${4:-}"
   local repo_name primary top cand="" line id
   local kind set bname worktree wtstate detached head
   top="$(wtaudit_repo_toplevel "$repo_path")"
@@ -500,13 +500,13 @@ wtaudit_remove() {
   wt="$(jq -r '.worktree // ""' <<<"$cand")"
   if [[ -n $wt ]]; then
     had_wt=true
-    if [[ -z ${WTDONE_BIN:-} || ! -x ${WTDONE_BIN} ]]; then
-      wtaudit_remove_json "$id" false false 13 teardown-refused "WTDONE_BIN is not an executable file: ${WTDONE_BIN:-<unset>}"
+    if [[ -z $wtdone_bin || ! -x $wtdone_bin ]]; then
+      wtaudit_remove_json "$id" false false 13 teardown-refused "WTDONE_BIN is not an executable file: ${wtdone_bin:-<unset>}"
       return 13
     fi
     # wtdone exits 1 for every failure, so its status is not interpreted: the
     # state is re-read below.
-    wt_err="$("$WTDONE_BIN" "$branch" --cc "$top" 2>&1 >/dev/null || true)"
+    wt_err="$("$wtdone_bin" "$branch" --cc "$top" 2>&1 >/dev/null || true)"
     if [[ -e $wt ]]; then
       wtaudit_remove_json "$id" false false 13 teardown-refused "$wt_err"
       return 13

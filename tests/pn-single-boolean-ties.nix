@@ -69,6 +69,7 @@ let
     "rtk"
     "serena"
     "tuicr"
+    "wtaudit"
     "wtdone"
     "wtnew"
   ];

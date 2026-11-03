@@ -59,6 +59,7 @@
     ./programs/tmp-sweep
     ./programs/wtnew
     ./programs/wtdone
+    ./programs/wtaudit
     ./programs/pg-wi-flow
   ];
 }

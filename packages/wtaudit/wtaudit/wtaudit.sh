@@ -204,5 +204,7 @@ if ! wtaudit_repo_readable "${repos[0]}"; then
   exit 2
 fi
 rc=0
-wtaudit_remove "${repos[0]}" "$branch" "$expect_tip" || rc=$?
+# WTDONE_BIN is injected as config by the nix build (a raw run exports it); it is
+# read here, after the injected assignment, and handed to the function.
+wtaudit_remove "${repos[0]}" "$branch" "$expect_tip" "${WTDONE_BIN:-}" || rc=$?
 exit "$rc"

@@ -18,7 +18,7 @@ configuration files, not hardcoded here.
   `pg-desk` and `pg-task-focus` (operator views).
 - **Monitoring and housekeeping daemons**: `pa-monitor`, `pg-keep-awake`, `pg-rescue`,
   `beads-exporter`, `tmp-sweep`.
-- **Small CLI tools** (`packages/`): `wtnew`, `wtdone`, `bg-tools`, `handoff-create`,
+- **Small CLI tools** (`packages/`): `wtnew`, `wtdone`, `wtaudit`, `bg-tools`, `handoff-create`,
   `work-report`, and others. `ls packages` is the authoritative list.
 
 ## Flake outputs

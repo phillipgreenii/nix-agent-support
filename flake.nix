@@ -564,6 +564,20 @@
               pkgs = final;
               inherit bashBuilders;
             }).wtdone.script;
+          # wtaudit: deterministic classifier and remover for worktrees and
+          # branches (the mechanical half of the audit-worktrees sweep). Single
+          # mkBashScript tool, so -- same rationale as wtdone above -- it takes
+          # `result.wtaudit.script` directly. It pins wtdone through
+          # config.WTDONE_BIN; `bd`, `pn` and `pnwf` resolve from the ambient
+          # machine PATH, and the beads package below is for the test check's
+          # real-bd throwaway-database fixture only.
+          wtaudit =
+            (import ./packages/wtaudit {
+              pkgs = final;
+              inherit bashBuilders;
+              inherit (final) wtdone;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            }).wtaudit.script;
           # pa-monitor-swiftbar: the internal (public = false) renderer behind the
           # pa-monitor SwiftBar menu bar plugin. Single mkBashScript tool, so -- same
           # rationale as wtdone above -- it takes `.pa-monitor-swiftbar.script`
@@ -17995,6 +18009,16 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-wtaudit. Same one-line idiom as wtdone above (the overlay attr
+            # takes only the script derivation, so without this the suite would
+            # run in no gate at all); it also needs `wtdone` (pinned into the
+            # script) and `beads` (the real-bd throwaway-DB fixture).
+            // (import ./packages/wtaudit {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              inherit (pkgs) wtdone;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+            }).checks
             # test-pa-monitor-swiftbar (bats suite of the SwiftBar renderer). Same
             # one-line idiom as wtdone above: the overlay attr takes only the script
             # derivation, so without this the suite would run in no gate at all.
@@ -18215,6 +18239,10 @@
             # the same reason, so `nix build .#wtdone` resolves via
             # flake.packages.<system>.
             inherit (pkgs) wtdone;
+            # wtaudit is likewise an overlay-only attr (single mkBashScript tool
+            # holding just the script derivation) -- re-exported so
+            # `nix build .#wtaudit` resolves via flake.packages.<system>.
+            inherit (pkgs) wtaudit;
             # pa-monitor-swiftbar is likewise an overlay-only attr (single
             # mkBashScript tool, public = false) -- re-exported so
             # `nix build .#pa-monitor-swiftbar` resolves via flake.packages.<system>.

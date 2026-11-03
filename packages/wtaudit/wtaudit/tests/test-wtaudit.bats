@@ -193,6 +193,22 @@ PN
   jq -e '.candidates[] | select(.branch == "feat") | .anchored | all(.blocking == false)' <<<"$SCAN"
 }
 
+@test "scan: works from a minimal PATH without grep, sed or sort (the fallback runtimeDeps are enough)" {
+  mkdir -p "$FX/minbin"
+  local t
+  for t in git jq lsof awk date basename cat tr bd env bash dirname mktemp; do
+    ln -sf "$(command -v "$t")" "$FX/minbin/$t"
+  done
+  [ ! -e "$FX/minbin/grep" ]
+  wt="$(add_wt "$REPO" unlanded)"
+  commit_in "$wt" f.txt "unlanded work"
+  PATH="$FX/minbin" run --separate-stderr "$WTAUDIT" scan --repo "$REPO"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  SCAN="$output"
+  [ "$(row unlanded | jq -r '"\(.plus_commits) \(.reason)"')" = "1 unlanded-work" ]
+}
+
 # ---- help, completions, tldr ------------------------------------------------
 
 @test "--help lists the verdict enum, the set and remove reasons and the exit codes" {
