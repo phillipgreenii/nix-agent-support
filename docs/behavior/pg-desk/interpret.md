@@ -195,6 +195,8 @@ and MUST NOT use an LLM for any step below.
   teammate's approval of the current head stands (`human_approval_standing`), derived from the
   commit each review was submitted against; only the `pr.review-stale-after-push` attention rule
   (see [`attention.md`](attention.md)) reads them, and they never move a PR between panels.
+  (Proposed change: "Waiting-on: the single decision", below, makes a stale review of the
+  operator's own route the PR to the operator.)
 
   **Known scope gap:** pg-desk gathers no required-approver count or CODEOWNERS data. The team side
   works around that with GitHub's own merge state (above); the own-PR side has no such signal, so
@@ -209,6 +211,92 @@ and MUST NOT use an LLM for any step below.
   conversation resolution, which is the author's job; the taxonomy does not distinguish that from
   outstanding reviews (the failing-CI cause is distinguished, rule 4 above). Whether GitHub reports `BLOCKED` or `BEHIND` when a branch is both behind and
   unreviewed is not verified; both are best-effort.
+
+### Waiting-on: the single decision (PROPOSED, pending operator approval)
+
+Operator rulings (Phillip, 2026-11-02 and 2026-11-03): classification decides ownership once;
+a second, single decision names who owes the next step; the panels and the attention items are
+downstream of those two and MUST NOT recompute either. This section states that decision. The
+"Panel placement" text above remains the definition of each predicate until implementation
+restates it as reason codes; where the two disagree, this section wins once approved.
+
+**The decision.** Interpret MUST compute, for every open PR, a pair `(waiting_on, reason)`
+exactly once, from `ownership` and the stored facts. `waiting_on` is one of:
+
+- `me`: the operator owes the next step.
+- `author`: the PR author owes it (team PRs only; on an own PR the author is the operator, so
+  `author` collapses into `me`).
+- `others`: other reviewers or the team owe it.
+- `none`: no one owes a step pg-desk tracks (not open, a draft team PR, or a team PR with no
+  match reason).
+
+Interpret MUST store both fields on the interpretation row (an additive change). Evaluation
+stops at the first predicate that matches, in the order below, so one reason code names the
+PR's one cause.
+
+**Panel = lookup over `(ownership, waiting_on)`.**
+
+| Ownership        | `me`               | `author`              | `others`             | `none`   |
+| ---------------- | ------------------ | --------------------- | -------------------- | -------- |
+| mine or co-owned | `mine_awaiting_me` | (not reachable)       | `mine_awaiting_team` | no panel |
+| team             | `team_awaiting_me` | `team_awaiting_owner` | `team_awaiting_team` | no panel |
+
+**Predicate order, own PR (mine or co-owned).**
+
+| #   | Reason code         | Matches when                                                                   | `waiting_on` |
+| --- | ------------------- | ------------------------------------------------------------------------------ | ------------ |
+| 1   | `ci-failing`        | CI is failing or absent, judged with the `review_exempt_checks` softening only | `me`         |
+| 2   | `bot-disapproved`   | the bot verdict is disapproved                                                 | `me`         |
+| 3   | `changes-requested` | a non-bot reviewer currently carries `CHANGES_REQUESTED`                       | `me`         |
+| 4   | `conflict`          | a merge conflict                                                               | `me`         |
+| 5   | `open-thread`       | any unresolved review-thread comment                                           | `me`         |
+| 6   | `approved-ready`    | a human approval exists                                                        | `me`         |
+| 7   | `own-draft`         | the PR is a draft                                                              | `me`         |
+| 8   | `awaiting-review`   | none of the above                                                              | `others`     |
+
+**Predicate order, team PR.** A PR that is not open, a draft, or has no match reason yields
+`none` before any row below.
+
+| #   | Reason code         | Matches when                                                                                                                                               | `waiting_on` |
+| --- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | `ci-failing`        | CI fails, judged with the reviewer-side softenings (cancelled runs, no CI data, review-exempt checks)                                                      | `author`     |
+| 2   | `conflict`          | a merge conflict, the PR's own or a stacked-parent conflict                                                                                                | `author`     |
+| 3   | `changes-requested` | a non-bot reviewer other than the operator carries `CHANGES_REQUESTED`, or the operator's own `CHANGES_REQUESTED` is fresh (made against the current head) | `author`     |
+| 4   | `stale-review`      | any review of the operator's own has gone stale behind a push, including a stale `CHANGES_REQUESTED`, and the PR passed rows 1 to 3 (it is approvable)     | `me`         |
+| 5   | `review-requested`  | a live review request on the operator                                                                                                                      | `me`         |
+| 6   | `acting-reviewer`   | a submitted comment-only review of the operator's own, and no approval of their own stands                                                                 | `me`         |
+| 7   | `bot-disapproved`   | the bot verdict is disapproved                                                                                                                             | `author`     |
+| 8   | `approved-*`        | a human approval exists; the merge-state rule above picks the code and the owner (`approved-merge-blocked` is `others`; the rest are `author`)             | per code     |
+| 9   | `unanswered-thread` | an unanswered review thread                                                                                                                                | `author`     |
+| 10  | `awaiting-review`   | none of the above                                                                                                                                          | `others`     |
+
+Rules the table encodes:
+
+- **Stale review (rulings 2026-11-02 and 2026-11-03).** If the operator submitted a review and a
+  later push made it stale, the PR is waiting on the operator, provided the PR is approvable:
+  not hard-blocked (rows 1 to 3). A teammate's approval of the current head does NOT silence
+  it; the earlier carve-out in `pr.review-stale-after-push` is dropped. Unknown is not stale
+  (INV-ATTNEVAL-6): a review whose commit was not reported never raises `stale-review`.
+- **The operator's own `CHANGES_REQUESTED`.** A fresh one stays with the author (row 3). A stale
+  one is not a hard blocker; it routes to the operator as `stale-review` (row 4), once rows 1
+  and 2 pass. Another reviewer's `CHANGES_REQUESTED` still blocks.
+- **A bot disapproval** never overrides rows 4 to 6, as today for a live request.
+- **A pending, unsent review** routes nothing (unchanged, ruling 2026-11-02).
+
+**Downstream.**
+
+- The panel MUST be the lookup above and MUST NOT run a second decision tree.
+- Attention rules MUST read `waiting_on` and `reason` and MUST NOT recompute them. The rule
+  `pr.review-requested` raises for a team PR with `waiting_on = me`, and its summary names the
+  reason (`review-requested`, `acting-reviewer`, `stale-review`). The kind
+  `pr.review-stale-after-push` folds into it as the `stale-review` summary variant and is then
+  removed, after every consumer keyed on it is migrated. The rule `pr.own-needs-action` raises
+  for an own PR with `waiting_on = me` for a reason other than `ci-failing` and `own-draft`.
+- `pr.own-ci-failing` stays a small independent fact rule (ruling 2026-11-03). It reports the
+  raw CI rollup without the `review_exempt_checks` softening, so it does not read the reason
+  code. Revisit folding it in only after this design lands.
+- A test MUST enumerate every reason code and assert that the panel and the attention output
+  both follow from the stored `(waiting_on, reason)` pair, so they cannot disagree.
 
 **Hidden and WIP are explicitly NOT interpreted.** `serve` and `open` join the `annotation` table
 at read time, so a `hide` or `wip` call takes effect on the very next request, never waiting for
