@@ -675,6 +675,15 @@
               inherit bashBuilders;
               beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).pg-decider-backfill-pr-metadata.script;
+          # pg-decider-backfill-minted-by: the second one-off of the minted-by
+          # stamp (the per-PR work-item lookup), labels the decider's existing beads. Same
+          # aggregate, shape and `bd` handling as pg-decider-backfill-pr-metadata.
+          pg-decider-backfill-minted-by =
+            (import ./packages/pg-decider-backfill-pr-metadata {
+              pkgs = final;
+              inherit bashBuilders;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            }).pg-decider-backfill-minted-by.script;
           # hand-to-human (bead pg2-ikkpk): hands a bead to the operator by
           # writing the strict label pair human + attention and removing
           # escalated in ONE update call (the label vocabulary lives in
@@ -18209,7 +18218,7 @@
             inherit (pkgs) handoff-create;
             # pg-decider-backfill-pr-metadata: overlay-only attr, re-exported so
             # `nix build .#pg-decider-backfill-pr-metadata` resolves.
-            inherit (pkgs) pg-decider-backfill-pr-metadata;
+            inherit (pkgs) pg-decider-backfill-pr-metadata pg-decider-backfill-minted-by;
             # hand-to-human is likewise an overlay-only attr (single mkBashScript
             # tool) -- re-exported so `nix build .#hand-to-human` resolves via
             # flake.packages.<system>.

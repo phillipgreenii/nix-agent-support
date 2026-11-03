@@ -1,0 +1,9 @@
+#compdef pg-decider-backfill-minted-by
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--bd-dir[Tracker root to run bd against]:directory:_files -/' \
+  '--actor[Actor id recorded on every write]:actor:' \
+  '--expect[Fail unless exactly N beads are planned]:count:' \
+  '--apply[Perform the writes (default is a dry run)]'
