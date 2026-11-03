@@ -250,6 +250,10 @@ func (s *Store) openDB(path string) error {
 			return &SchemaOlderError{Found: v, Known: SchemaVersion}
 		}
 	}
+	if err := dropFullFieldsIndex(w); err != nil {
+		_ = w.Close()
+		return err
+	}
 	// One transaction: with synchronous=FULL each statement of a multi-statement
 	// Exec would otherwise sync on its own (the FTS5 tables add many).
 	if err := execInTx(w, schemaSQL+derivedSQL); err != nil {
@@ -571,6 +575,24 @@ var errNotFound = errors.New("store: not found")
 
 // ErrNotFound is returned by lookups that find nothing.
 var ErrNotFound = errNotFound
+
+// dropFullFieldsIndex drops fields_name_n when an earlier build of the version
+// 2 schema created it as a full index: CREATE INDEX IF NOT EXISTS in derivedSQL
+// would keep it, and the full index is the size the partial one exists to
+// avoid. derivedSQL then recreates it partial. A partial index (its SQL has a
+// WHERE clause) is left alone, so a normal open costs one catalog read.
+func dropFullFieldsIndex(db *sql.DB) error {
+	var def sql.NullString
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name='fields_name_n'`).Scan(&def)
+	if err == sql.ErrNoRows || (err == nil && strings.Contains(strings.ToUpper(def.String), " WHERE ")) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`DROP INDEX fields_name_n`)
+	return err
+}
 
 func execInTx(db *sql.DB, q string) error {
 	tx, err := db.Begin()

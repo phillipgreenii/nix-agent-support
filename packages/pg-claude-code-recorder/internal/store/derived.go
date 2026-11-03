@@ -16,6 +16,12 @@ import (
 // is also the by-record lookup index. A record holds at most one row per field
 // name: when a record yields the same name twice, the LAST value wins and
 // replaces the whole row (s, n and f together); see Parser.insert.
+//
+// fields_name_n is partial: only rows with a number are indexed. A filter or
+// sort on a numeric field compares n with = < > IN and the like, which the
+// planner can prove implies n IS NOT NULL, so it can use the index; a query
+// that asks for n IS NULL cannot, and none exists. A database created with the
+// full index has it dropped at open (dropFullFieldsIndex in store.go).
 const derivedSQL = `
 CREATE TABLE IF NOT EXISTS records(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +52,7 @@ CREATE TABLE IF NOT EXISTS fields(
   f REAL,
   PRIMARY KEY(rec_id, name_id)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS fields_name_n ON fields(name_id, n);
+CREATE INDEX IF NOT EXISTS fields_name_n ON fields(name_id, n) WHERE n IS NOT NULL;
 CREATE TABLE IF NOT EXISTS texts(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   rec_id INTEGER NOT NULL,

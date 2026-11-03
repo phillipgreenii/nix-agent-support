@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,6 +47,28 @@ func sum(t *testing.T, path string) [32]byte {
 		t.Fatal(err)
 	}
 	return sha256.Sum256(b)
+}
+
+func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	for _, q := range []string{`DROP INDEX fields_name_n`, `CREATE INDEX fields_name_n ON fields(name_id, n)`} {
+		if _, err := s.wdb.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s = open(t, dir)
+	defer s.Close()
+	var def string
+	if err := s.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
+		t.Fatalf("a full fields_name_n survived open: %q, %v", def, err)
+	}
+	if s.SchemaVersion() != SchemaVersion {
+		t.Fatalf("schema_version %d", s.SchemaVersion())
+	}
 }
 
 func TestOlderSchemaIsRefusedUntouchedAndRebuildKeepsTheOldFile(t *testing.T) {
