@@ -60,3 +60,8 @@ func CachedCmuxServerPIDsForTest(c *CmuxSignaler) ([]int, error) { return c.cach
 func TTLs() (surface, serverPID, tmux time.Duration) {
 	return surfaceCacheTTL, serverPIDCacheTTL, tmuxCacheTTL
 }
+
+// ParentPIDWithTimeoutForTest exposes parentPID with an injectable timeout.
+func ParentPIDWithTimeoutForTest(pid int, timeout time.Duration) (int, bool) {
+	return parentPID(pid, timeout)
+}

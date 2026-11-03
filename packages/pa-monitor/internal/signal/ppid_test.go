@@ -4,9 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
+
+// testExecTimeout is generous so host load cannot expire the shim exec; the
+// test asserts parsing, not the production 2s bound.
+const testExecTimeout = time.Minute
 
 // TestParentPID_ParsesPsOutput drives ParentPID through a recording ps shim
 // first on PATH (hermetic; never the host's ps).
@@ -19,10 +24,10 @@ func TestParentPID_ParsesPsOutput(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if got, ok := signal.ParentPID(77); !ok || got != 4242 {
+	if got, ok := signal.ParentPIDWithTimeoutForTest(77, testExecTimeout); !ok || got != 4242 {
 		t.Fatalf("ParentPID(77) = %d, %v; want 4242, true", got, ok)
 	}
-	if got, ok := signal.ParentPID(78); ok {
+	if got, ok := signal.ParentPIDWithTimeoutForTest(78, testExecTimeout); ok {
 		t.Fatalf("ParentPID(78) = %d, true; want ok=false for empty output", got)
 	}
 	b, _ := os.ReadFile(log)
