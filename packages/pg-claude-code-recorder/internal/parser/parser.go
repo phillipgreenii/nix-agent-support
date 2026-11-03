@@ -472,7 +472,7 @@ func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Sou
 				continue
 			}
 			seen := seenAt(commits, g.Gen, abs)
-			if err := p.insert(tx, f, src, g, abs, ll, recs, seen); err != nil {
+			if err := p.insert(tx, f, src, caps, g, abs, ll, recs, seen); err != nil {
 				return 0, err
 			}
 			*count += len(recs)
@@ -533,7 +533,25 @@ const (
 	MUnknownKinds  = "unknown_kinds"
 )
 
-func (p *Parser) insert(tx *pstx, f store.File, src source.Source, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
+// derivable reports whether a typed field's value is already answered by
+// another table, so no fields row is stored for it: type and session_id equal
+// the record's own type and session columns (the query layer reads those names
+// from records), and a project or file_session that is just the path capture
+// is read back from the file's path (query.builder.pathFact). The history
+// source's project is a JSON value, not a capture, and is still stored.
+func derivable(fl source.Field, caps source.Captures) bool {
+	switch fl.Name {
+	case "type", "session_id":
+		return true
+	case "project":
+		return fl.Kind == source.KindKeyword && caps["project"] != "" && fl.S == caps["project"]
+	case "file_session":
+		return fl.Kind == source.KindID && caps["session"] != "" && fl.S == caps["session"]
+	}
+	return false
+}
+
+func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
 	unk := map[[2]string]int{}
 	// Field names are interned per call: the cache lives no longer than the
 	// transaction's statements, so a rolled-back insert cannot leave a stale id.
@@ -580,6 +598,9 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, g store.Gener
 				if _, err := tx.Exec(`INSERT INTO `+tbl+`(rowid, body) VALUES(?,?)`, tid, fl.S); err != nil {
 					return err
 				}
+				continue
+			}
+			if derivable(fl, caps) {
 				continue
 			}
 			var s any

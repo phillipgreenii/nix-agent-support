@@ -29,6 +29,10 @@ type Engine struct {
 	// Behind reports whether the recorder is catching up (answers are marked
 	// degraded then).
 	Behind func() bool
+	// ClaudeDir is the directory the recorded paths live under. When set,
+	// project and file_session are read back from the file's path; when empty
+	// they are read from stored fields only.
+	ClaudeDir string
 	// FilterFields, when set, is told after each request whose filter compiled
 	// which catalogued field names the filter named and how many leaves each
 	// had (op is query, search or feed). Names only: never values or text.
@@ -174,7 +178,7 @@ func (e *Engine) Query(ctx context.Context, req Request) (*Answer, *wire.Error) 
 }
 
 func (e *Engine) rows(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
-	b := newBuilder(e.Catalog)
+	b := e.builder()
 	names := req.Select
 	if len(names) == 0 {
 		names = []string{"type", "session", "time"}
@@ -494,7 +498,7 @@ func (e *Engine) follow(tx *sql.Tx, req Request, ids, files []int64, cols []colS
 }
 
 func (e *Engine) fetch(tx *sql.Tx, rec int64, c colSpec) any {
-	b := newBuilder(e.Catalog)
+	b := e.builder()
 	cs, err := b.col(c.name)
 	if err != nil {
 		return nil
@@ -519,7 +523,7 @@ type groupAcc struct {
 }
 
 func (e *Engine) aggregate(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
-	b := newBuilder(e.Catalog)
+	b := e.builder()
 	var sel []string
 	idx := func(name string) (int, colSpec, *wire.Error) {
 		c, err := b.col(name)
@@ -769,4 +773,12 @@ func Decode(body []byte, v any) *wire.Error {
 		return badf("request: %v", err)
 	}
 	return nil
+}
+
+// builder returns a filter builder bound to the engine's catalog and Claude
+// directory.
+func (e *Engine) builder() *builder {
+	b := newBuilder(e.Catalog)
+	b.claudeDir = e.ClaudeDir
+	return b
 }

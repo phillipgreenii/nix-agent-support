@@ -134,7 +134,7 @@ func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captu
 				return err
 			}
 		} else {
-			if err := p.insert(tx, f, src, g, 0, len(raw), recs, sn.SeenNS); err != nil {
+			if err := p.insert(tx, f, src, caps, g, 0, len(raw), recs, sn.SeenNS); err != nil {
 				return err
 			}
 			count = len(recs)
@@ -181,7 +181,7 @@ func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tomb
 			tx := newPS(rawTx)
 			defer tx.Close()
 			// off carries the deletion time so each deletion is its own record.
-			if err := p.insert(tx, f, src, store.Generation{File: f.ID, Gen: last.Version}, at, 0, []source.Record{rec}, at); err != nil {
+			if err := p.insert(tx, f, src, caps, store.Generation{File: f.ID, Gen: last.Version}, at, 0, []source.Record{rec}, at); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {

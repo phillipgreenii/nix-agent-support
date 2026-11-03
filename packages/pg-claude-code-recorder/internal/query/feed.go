@@ -78,7 +78,7 @@ func LimitOf(n int) int { return limitOf(n) }
 // Select reads up to Limit+1 records in id order (the caller trims and sets
 // more).
 func (e *Engine) Select(tx *sql.Tx, sel Selection) ([]Selected, *wire.Error) {
-	b := newBuilder(e.Catalog)
+	b := e.builder()
 	names := sel.Project
 	if len(names) == 0 {
 		names = []string{"type", "session", "time"}

@@ -81,7 +81,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 		}
 		match, table = `"`+strings.ReplaceAll(req.Q, `"`, `""`)+`"`, "fts_tri"
 	}
-	b := newBuilder(e.Catalog)
+	b := e.builder()
 	wsql, wargs, werr := b.where(req.Where)
 	if werr != nil {
 		return nil, werr

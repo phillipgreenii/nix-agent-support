@@ -48,6 +48,11 @@ type builder struct {
 	err      *wire.Error
 	// used counts, per stored field name, the filter leaves that named it.
 	used map[string]int
+	// claudeDir is the directory the recorded paths live under; it is what
+	// project and file_session are read back from (see pathFact). Empty means
+	// no path derivation: those two fields are then read from fields only.
+	claudeDir string
+	pathJoin  bool
 }
 
 func newBuilder(cat map[string]source.Kind) *builder {
@@ -112,6 +117,9 @@ func (b *builder) expr(name string) (string, source.Kind, *wire.Error) {
 		return "", kind, badf("field %q is %s: use exists, match or the search operation", name, kind)
 	}
 	a := b.alias(stored)
+	if d, ok := b.pathFact(stored); ok {
+		return "COALESCE(" + a + ".s," + d + ")", kind, nil
+	}
 	switch kind {
 	case source.KindInt, source.KindBool, source.KindTime:
 		return a + ".n", kind, nil
@@ -304,6 +312,8 @@ func (b *builder) exists(field string, want bool) (string, []any, *wire.Error) {
 	default:
 		if kind.Searchable() {
 			cond, args = "EXISTS(SELECT 1 FROM texts t WHERE t.rec_id=r.id AND t.field=?)", []any{stored}
+		} else if d, ok := b.pathFact(stored); ok {
+			cond = "COALESCE(" + b.alias(stored) + ".s," + d + ") IS NOT NULL"
 		} else {
 			cond = b.alias(stored) + ".rec_id IS NOT NULL"
 		}
@@ -362,4 +372,60 @@ func rfc(ns int64) string {
 		return ""
 	}
 	return time.Unix(0, ns).UTC().Format(time.RFC3339Nano)
+}
+
+// Path facts. A record of a source whose file sits under projects/<project>/
+// carries the project and the file's session as facts of the file's path, not
+// of the line, so the parser stores no fields row for them and they are read
+// back here from paths (the file's own path under the Claude directory, chosen
+// the way the parser chose it: the first current path by name, else the oldest
+// closed one). A stored row, when there is one (the history source's project is
+// a JSON value; a database written before these rows were dropped still holds
+// them), wins over the path.
+const (
+	projectsPrefix = "projects/"
+	// The suffixes are the file name endings a source strips to get the
+	// session of a file directly under the project directory.
+	suffixStatus  = ".status.jsonl"
+	suffixMode    = ".session-mode.json"
+	suffixCompact = ".compaction.json"
+	suffixJSONL   = ".jsonl"
+)
+
+// pathFact returns the SQL expression that derives the stored field name from
+// the record's file path, or false when the field has no path derivation (or no
+// Claude directory is known).
+func (b *builder) pathFact(stored string) (string, bool) {
+	if b.claudeDir == "" || (stored != "project" && stored != "file_session") {
+		return "", false
+	}
+	b.addPathJoin()
+	root := len(strings.TrimRight(b.claudeDir, "/")) + 2 // 1-based start of the relative path
+	// after is the text following "projects/"; it starts with the project.
+	after := fmt.Sprintf("substr(pp.path,%d)", root+len(projectsPrefix))
+	in := fmt.Sprintf("substr(pp.path,%d,%d)='%s' AND instr(%s,'/')>1", root, len(projectsPrefix), projectsPrefix, after)
+	if stored == "project" {
+		return fmt.Sprintf("CASE WHEN %s THEN substr(%s,1,instr(%s,'/')-1) END", in, after, after), true
+	}
+	// seg is the text starting at the session segment.
+	seg := fmt.Sprintf("substr(%s,instr(%s,'/')+1)", after, after)
+	base := seg
+	for _, suf := range []string{suffixJSONL, suffixCompact, suffixMode, suffixStatus} {
+		base = fmt.Sprintf("CASE WHEN substr(%s,-%d)='%s' THEN substr(%s,1,length(%s)-%d) ELSE %s END", seg, len(suf), suf, seg, seg, len(suf), base)
+	}
+	return fmt.Sprintf("CASE WHEN %s THEN NULLIF(CASE WHEN instr(%s,'/')>0 THEN substr(%s,1,instr(%s,'/')-1) ELSE %s END,'') END",
+		in, seg, seg, seg, base), true
+}
+
+// addPathJoin joins paths once as pp: the file's path under the Claude
+// directory, the first current one by name, else the first closed one.
+func (b *builder) addPathJoin() {
+	if b.pathJoin {
+		return
+	}
+	b.pathJoin = true
+	b.joins = append(b.joins, `LEFT JOIN paths pp ON pp.rowid=(SELECT p.rowid FROM paths p WHERE p.file_id=r.file_id AND substr(p.path,1,?)=? `+
+		`ORDER BY p.closed_ns IS NOT NULL, CASE WHEN p.closed_ns IS NULL THEN p.path END, p.first_seen_ns, p.path LIMIT 1)`)
+	pre := strings.TrimRight(b.claudeDir, "/") + "/"
+	b.joinArgs = append(b.joinArgs, len(pre), pre)
 }

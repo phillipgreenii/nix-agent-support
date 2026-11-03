@@ -17,6 +17,13 @@ import (
 // name: when a record yields the same name twice, the LAST value wins and
 // replaces the whole row (s, n and f together); see Parser.insert.
 //
+// Facts another table already holds are not stored as fields rows: type and
+// session_id are the records.type and records.session columns, and the project
+// and file_session of a path capture are read back from the file's path (see
+// query path facts). No schema version change: a database that still holds
+// those rows answers the same (a stored row wins), it is just larger until it
+// is rebuilt.
+//
 // fields_name_n is partial: only rows with a number are indexed. A filter or
 // sort on a numeric field compares n with = < > IN and the like, which the
 // planner can prove implies n IS NOT NULL, so it can use the index; a query

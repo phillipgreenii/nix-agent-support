@@ -56,7 +56,7 @@ func (k *Kit) open() {
 	k.Store = st
 	srcs := sources.All()
 	k.Parser = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: ClaudeDir, Obs: k.Obs, Clock: k.Clk})
-	k.Engine = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), Res: k.Parser}
+	k.Engine = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), ClaudeDir: ClaudeDir, Res: k.Parser}
 }
 
 // Reopen closes and reopens the store (a restart).

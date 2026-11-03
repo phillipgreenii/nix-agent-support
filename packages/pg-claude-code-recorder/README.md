@@ -159,7 +159,10 @@ the field name is stored once in `field_names(id, name UNIQUE)` and the query la
 its id (`name_id = (SELECT id FROM field_names WHERE name = ?)`). Invariants: a record has at most one
 row per field name; when a record yields the same name twice, the LAST value wins and replaces the
 whole row (`s`, `n` and `f` together, never a mix of two values); `fields_name_n` indexes
-`(name_id, n)` for numeric filters. This is `schema_version` 2.
+`(name_id, n)` for numeric filters. A field whose value another table already holds gets no row: `type` and
+`session_id` are the record's own columns, and `project` and `file_session` (the path captures) are read back from
+the file's path under the Claude directory; an older database that still stores them answers the same. This is
+`schema_version` 2.
 
 ```sh
 echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}' | pg-claude-code-recorder query
