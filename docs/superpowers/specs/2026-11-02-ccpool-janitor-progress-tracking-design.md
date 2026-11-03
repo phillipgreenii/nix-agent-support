@@ -1,6 +1,6 @@
 # ccpool janitor: track progress, not timeouts
 
-**Status**: Proposed, for operator review
+**Status**: Proposed, for operator review (revision 2)
 **Date**: 2026-11-02
 **Deciders**: phillipg
 
@@ -8,139 +8,168 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in this document are to
 
 ## Summary
 
-A janitor run that cannot finish all its work inside its time budget is **not a failure**. The janitor is asynchronous, nothing waits on it, and the next run is ten minutes away. The failure to design against is **a pass that can never make progress**. Today nothing observes that, and one mechanism makes it possible. This document proposes to leave the run outcomes and the existing alerts as they are, to make every pass examine its candidates fairly, and to publish progress so that a pass that stops advancing is visible.
+A janitor run that cannot finish all its work inside its time budget is **not a failure**. The janitor is asynchronous, nothing waits on it, and the next run is ten minutes away. The failure to design against is **a pass that makes no progress and nobody can tell**. Today the janitor records how many things each pass reclaimed, but not how many candidates it saw, examined or skipped, so "nothing to do" and "did not get to it" look the same. This document proposes to **measure first**: record per-pass, per-role candidate counters and phase timings, publish them as gauges, and alert when the oldest candidate has gone unexamined for hours. Fair ordering of candidates is a conditional second step, taken only if the counters show candidates left unexamined run after run.
 
-## Context
+## What one run does
 
-The janitor (`pg-router-handler-ccpool janitor`) is the scheduled home of the housekeeping a dispatch used to run inline. A launchd agent starts one run every 600 seconds. A run is single-flight and bounded by a 240 second deadline. It walks the configured roles in a rotating order and gives each role a share of the time left, which is the time remaining divided by the roles still to go. For each role it runs these passes:
+```mermaid
+flowchart TD
+    START["Run starts (launchd, every 600 s)"] --> LOCK{"Single-flight lock free?"}
+    LOCK -->|"No"| SKIP["Record outcome skipped and exit"]
+    LOCK -->|"Yes"| ORDER["Sort roles by name, start at the rotated index"]
+    ORDER --> RUNT["RUN TIMER starts: 240 s for the whole run"]
+    RUNT --> ROLE["Take the next role, one role at a time"]
+    ROLE --> LEFT{"Run time left?"}
+    LEFT -->|"No"| CUT["Role is skipped and recorded in roles_skipped"]
+    LEFT -->|"Yes"| SHARE["ROLE TIMER starts: share = time left / roles still to go"]
+    SHARE --> P1["1. closed_bead_reconcile: once per pool per run"]
+    P1 --> P2["2. default_pool: once per run, by the first role that qualifies"]
+    P2 --> P3["3. orphan_reconcile: this role's sessions"]
+    P3 --> P4["4. worktree_sweep: this role, only if it uses worktree isolation, SWEEP TIMER 60 s inside the share"]
+    P4 --> NEXT{"More roles?"}
+    CUT --> NEXT
+    NEXT -->|"Yes"| ROLE
+    NEXT -->|"No"| P5["5. lock_gc: once, no timer"]
+    P5 --> RECORD["Write the janitor_run record and the gauges"]
+```
 
-| Pass                    | What it does                                                                                          | Scope                                    |
-| ----------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `closed_bead_reconcile` | closes ccpool sessions (and their worktrees) whose bead is closed                                     | once per pool                            |
-| `default_pool`          | closes long-idle needs-input rows in the shared default pool, when their worktree is clean and pushed | once per run                             |
-| `orphan_reconcile`      | reclaims or stops sessions whose handler died (expired lease)                                         | per role                                 |
-| `worktree_sweep`        | removes per-bead worktrees that no session row can lead to                                            | per role                                 |
-| `lock_gc`               | deletes stale lock files                                                                              | once per run, outside every role's share |
+Roles run **one after another**, never at the same time. The passes of one role also run in the order shown. Three timers nest: the run timer (240 s), the role timer (a share of what is left of the run), and, inside `worktree_sweep`, its own 60 s timer. A pass cut off by a timer keeps what it already reclaimed, and every pass is safe to repeat. The rotation moves the first role each run, so every role takes a turn at the biggest share.
 
-Every pass is best effort and idempotent, so any number of repeats is safe. A pass that is cut off keeps what it already reclaimed.
+### The passes and their candidates
 
-### What is measured and alerted today
+A **candidate** is a thing a pass looks at to decide whether to act. Candidates are never stored: each pass derives them again from the live system on every run.
 
-- Gauges per run: last success time, run seconds, deadline hit, errors per pass, reclaimed per pass.
-- Alerts: `pg-router-ccpool-janitor-stale` (no completed run for 30 minutes, for an hour), `pg-router-ccpool-janitor-deadline` (the deadline was hit on **every** run of the last 35 minutes, at least three runs), and `pg-router-ccpool-janitor-idle` (a pass errored on every run, or nothing was reclaimed anywhere for six hours while a pool had no free slot).
-- A run is labelled `deadline` when the run's own deadline was reached, a role was skipped, or any single role's share expired during a pass. The record names the roles whose share expired (`roles_cut`).
+| Pass                    | Candidates are                                                                                                   | Where the list comes from                                                                                             | Natural age   | Per-pass limits                                  | History kept today                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------ | -------------------------------------------------------------- |
+| `closed_bead_reconcile` | idle or needs-input sessions of one pool whose bead is closed                                                    | one `ccpool list` of the pool, then a bead lookup per session                                                         | last activity | none (one interrupted teardown is retried first) | none                                                           |
+| `default_pool`          | the same, in ccpool's shared default pool, and only those idle 7 days or more whose worktree is clean and pushed | one `ccpool list` of the default pool                                                                                 | idle age      | none                                             | none                                                           |
+| `orphan_reconcile`      | sessions of this role whose supervision lease has expired                                                        | the pool listing                                                                                                      | lease expiry  | none                                             | none                                                           |
+| `worktree_sweep`        | directories under the worktree directory that no session row leads to                                            | a directory listing, the pool listing, and one `lsof` of all processes' working directories when any candidate exists | directory age | 20 examined with git and 5 removed per role pass | keep cache: one small file per worktree, trusted for 5 minutes |
+| `lock_gc`               | lock files and keep-cache files in the handler's lock directory                                                  | a directory listing                                                                                                   | file age      | none                                             | none                                                           |
 
-So an occasional miss already alerts nobody: both time-based alerts require consecutive or every run.
+Only `worktree_sweep` has per-candidate limits and history, so it is the only pass where "the candidates it never reached" can exist.
 
-### Evidence
+### Why `default_pool` is a separate pass
 
-The nine most recent runs at the time of writing (summed over all roles in a run; seconds):
+`default_pool` is the closed-bead check applied to the **default pool**, which no role owns. Every role's own pool already gets the same check through `closed_bead_reconcile`, once per pool, so the other pools are covered. The default pool needs a stricter version because its rows may belong to a person (ccpool's reaper spares needs-input rows for a human) and the teardown force-removes the session's worktree: it therefore waits 7 days of idleness and checks that the worktree is clean and pushed. Role pools run the check without that guard.
 
-| Run start (UTC) | Outcome   | Run time | `worktree_sweep` | `closed_bead_reconcile` | `orphan_reconcile` | Roles cut |
-| --------------- | --------- | -------- | ---------------- | ----------------------- | ------------------ | --------- |
-| 19:21           | deadline  | 136.4    | 77.4             | 46.9                    | 10.9               | 3         |
-| 19:33           | deadline  | 90.9     | 42.0             | 3.1                     | 45.5               | 1         |
-| 19:44           | completed | 64.4     | 57.3             | 6.2                     | 0.7                | 0         |
-| 19:55           | deadline  | 71.7     | 67.5             | 3.2                     | 0.8                | 1         |
-| 20:09           | deadline  | 210.2    | 153.4            | 20.7                    | 35.1               | 3         |
-| 20:19           | completed | 34.4     | 29.9             | 3.9                     | 0.5                | 0         |
-| 20:30           | completed | 45.7     | 41.0             | 4.2                     | 0.3                | 0         |
-| 20:41           | completed | 35.1     | 31.3             | 3.1                     | 0.4                | 0         |
-| 20:52           | completed | 44.8     | 41.1             | 3.1                     | 0.4                | 0         |
+### What persists between runs
 
-`worktree_sweep` dominates every run. The early runs after deployment were the slowest, which fits a backlog being worked off.
+```mermaid
+flowchart LR
+    subgraph EACH["Derived again on every run"]
+        C1["candidate lists of all passes"]
+    end
+    subgraph KEEP["Persisted in the handler state directory"]
+        K1["rotation counter: which role goes first"]
+        K2["keep cache: per worktree, 5 minute trust"]
+        K3["lock files: one per session and per bead"]
+        K4["events log: one janitor_run row per run"]
+    end
+    EACH -->|"worktree_sweep reads and writes"| K2
+    EACH -->|"run start reads, run end writes"| K1
+    EACH -->|"record at the end of the run"| K4
+```
+
+The keep cache's 5 minute trust is shorter than the 10 minute interval, so it helps the later roles of the same run (they share the worktree directory and the lock directory) but not the next run.
+
+## Evidence
+
+The latest run at the time of writing (57.6 s, outcome completed, 8 roles, nothing reclaimed by the three passes shown). Time per pass per role, from the `sweep_pass` rows:
+
+| Role                  | `closed_bead_reconcile` | `orphan_reconcile` | `worktree_sweep` |
+| --------------------- | ----------------------- | ------------------ | ---------------- |
+| review                | 0.5 s                   | 0.3 s              | 12.2 s           |
+| worker                | 0.7 s                   | 0.1 s              | 11.8 s           |
+| drain-zr              | 0.3 s                   | 0.2 s              | 17.1 s           |
+| drain-pg2             | 4.7 s                   | 0.5 s              | 0.0 s            |
+| zr-escalation-triager | not shown               | 0.3 s              | 0.0 s            |
+| pg2-split-triager     | not shown               | not shown          | 0.0 s            |
+
+Roles without worktree isolation finish `worktree_sweep` instantly. The three roles with isolation take 12 to 17 s each and reclaim nothing. Why is **not known**: the pass does a directory listing, a pool listing, one `lsof` (0.6 s when measured on an idle machine), and up to 20 git examinations. Nothing records how many candidates there were or which step took the time. Earlier runs after deployment took 90 to 210 s and were cut by the role timers, which fits a backlog being worked off.
 
 ## Problem
 
-Time-outs are expected. The problem is a pass that never advances. Three mechanisms can cause it, and none is visible today:
-
-1. **Cap plus order.** `worktree_sweep` scans the worktree directory in name order, examines at most 20 entries with git per pass, and removes at most 5. A worktree that must be kept (dirty, holding unpushed commits, or in use) is examined again on every run and uses up that budget. Entries behind the kept ones are never reached. The run still finishes inside its time, so no alert fires.
-2. **A nested deadline.** The sweep also carries its own 60 second deadline inside the role's share. A scan that needs longer than that can never finish, whatever the run deadline is, unless it can resume.
-3. **Always cut at the same step.** A role that is cut at the same point every run never reaches the passes after that point.
+1. **No visibility into progress.** A run that reclaimed nothing is either finished or stuck, and the record cannot say which.
+2. **Possible repeated work.** The keep cache expires before the next run, so a kept worktree is probably examined with git again on every run. Whether that is the 12 to 17 s is not measured.
+3. **Possible fixed cost per role.** Three roles that share one worktree directory each pay the same 12 to 17 s. A per-pass fixed cost (listing, `lsof`) repeated per role is possible and is not measured.
+4. **A pass that could starve.** The cap of 20 examinations per role pass, with candidates taken in name order, could leave later candidates unexamined if more than 20 uncached candidates exist. The keep cache and the later roles of the same run probably hide this today. It is a risk to watch, not a measured fact.
 
 ## Goals and non-goals
 
 Goals:
 
-- Every candidate of every pass is examined within a bounded number of runs, whatever the caps and the time budget.
-- An operator can see, per pass, how much is waiting and how long the oldest candidate has waited.
-- A pass that stops advancing raises an alert, independent of how it stopped.
+- An operator can see, per pass and per role, how many candidates exist, how many were examined, how many were skipped as cached, how many were kept and how many were removed, and how long each phase took.
+- A candidate that goes unexamined for hours raises an alert, whatever the cause.
+- Repeated or fixed costs are visible so they can be removed with evidence.
 
 Non-goals:
 
 - Changing the run outcomes, the 240 second deadline, the 600 second interval, or the existing three alerts.
-- Choosing between parallel, turn-taking and sequential execution of roles. That is an implementation detail and is out of scope.
+- Choosing between parallel, turn-taking and sequential execution of roles.
 - Making a run finish all its work in one go.
 
 ## Design
 
-```mermaid
-flowchart TD
-    R["Run starts"] --> P["Each pass lists its candidates"]
-    P --> O["Order: never-examined first, then oldest-examined first"]
-    O --> E["Examine in that order until the caps or the time run out"]
-    E --> S["Persist the cursor: when each candidate was last examined"]
-    S --> C["Emit counters: candidates, examined, kept, removed, unexamined, oldest unexamined age"]
-    C --> A{"Oldest unexamined age over the limit?"}
-    A -->|Yes| AL["Stagnation alert"]
-    A -->|No| N["Next run continues where this one stopped"]
-```
-
 ### D1. Outcomes and existing alerts stay
 
-A share overrun is not a failure, and its outcome string stays as it is. The `roles_cut` field keeps recording it. This avoids changing alert semantics (the reason the earlier outcome-change options were rejected, see Alternatives).
+A role timer expiring is not a failure and its outcome string stays as it is. The record keeps naming the roles whose share expired (`roles_cut`). The existing alerts already need consecutive or every-run misses.
 
-### D2. Fair examination order
+### D2. Per-pass, per-role counters and phase timings
 
-A pass that examines candidates one by one (`worktree_sweep`, and any pass with a cap) MUST order its candidates by when each was last examined, never-examined first, then oldest first. The last-examined times are persisted in the handler state directory, one small file per role and pass, in the same style as the existing rotation counter. A candidate that was examined and kept goes to the back of the queue. A candidate that no longer exists is dropped from the file.
+Every pass reports, per role and per run: `candidates` (seen), `examined`, `cached` (skipped by the keep cache), `kept`, `removed` and `unexamined` (seen but not reached because a limit or a timer ended the pass). `worktree_sweep` also reports the time of each phase: `list_ms` (directory and pool listing), `probe_ms` (the `lsof` call) and `scan_ms` (the git examinations). The numbers come from work the pass already does. They are written into the `janitor_run` record, and published as gauges:
 
-Consequences: the caps stay as per-run bounds, a cut-off scan resumes where it stopped, and a kept worktree cannot use up the budget of the ones behind it.
+| Gauge                                          | Labels                  | Meaning                                                           |
+| ---------------------------------------------- | ----------------------- | ----------------------------------------------------------------- |
+| `ccpool_janitor_candidates`                    | `pass`, `role`          | candidates seen in the last run                                   |
+| `ccpool_janitor_examined`                      | `pass`, `role`          | candidates examined                                               |
+| `ccpool_janitor_cached`                        | `pass`, `role`          | candidates skipped as cached                                      |
+| `ccpool_janitor_kept`                          | `pass`, `role`          | candidates examined and kept                                      |
+| `ccpool_janitor_unexamined`                    | `pass`, `role`          | candidates not reached                                            |
+| `ccpool_janitor_phase_seconds`                 | `pass`, `role`, `phase` | time of one phase                                                 |
+| `ccpool_janitor_oldest_unexamined_age_seconds` | `pass`                  | age of the longest-waiting candidate, from when it was first seen |
 
-### D3. Progress counters
+### D3. Stagnation alert
 
-Each pass reports, per run: `candidates` (seen), `examined`, `kept`, `removed` and `unexamined` (candidates not reached). The numbers come from the scan the pass already does, so they add no work. They go into the `janitor_run` record and out as gauges next to the existing ones:
+A new rule fires when `ccpool_janitor_oldest_unexamined_age_seconds` is above six hours (36 intervals) for a pass. It is independent of why the pass stopped advancing. It is registered with the probe like every other rule.
 
-| Gauge                                          | Label  | Meaning                                                                    |
-| ---------------------------------------------- | ------ | -------------------------------------------------------------------------- |
-| `ccpool_janitor_candidates`                    | `pass` | candidates seen in the last run                                            |
-| `ccpool_janitor_examined`                      | `pass` | candidates examined in the last run                                        |
-| `ccpool_janitor_kept`                          | `pass` | candidates examined and kept in the last run                               |
-| `ccpool_janitor_unexamined`                    | `pass` | candidates not reached in the last run                                     |
-| `ccpool_janitor_oldest_unexamined_age_seconds` | `pass` | age of the longest-waiting candidate, measured from when it was first seen |
+### D4. Remove repeated cost, guided by D2
 
-### D4. Stagnation alert
+When D2 shows the cost, apply the matching fix: keep-cache trust longer than the run interval (so a kept worktree is not re-examined every run), or one `lsof` and one listing per run shared by the roles that scan the same directory.
 
-A new rule fires when `ccpool_janitor_oldest_unexamined_age_seconds` is above a limit for a pass. The proposed limit is six hours, which is 36 intervals and well above what a fair order needs. The rule is independent of why the pass stopped advancing, so it also covers mechanisms nobody has thought of yet. It is registered with the probe like every other rule.
+### D5. Fair order, only if needed
 
-### D5. Rollout and what it unblocks
+If D2 shows `unexamined` above zero on consecutive runs, `worktree_sweep` MUST take uncached candidates oldest-examined-first. The record of when each candidate was last examined is **per candidate** (one entry per worktree, in the same place as the keep cache), shared by all roles. It is not a cursor per pass and not per role. The other passes have no limits, so they need no ordering.
 
-Ship D2 to D4 first. Turning the inline sweeps off (so that the janitor is the only cleanup path) waits until the stagnation alert is live and quiet, because that alert is then the safety net for a janitor that silently stops advancing.
+### D6. Rollout
+
+Ship D2 and D3 first. Turning the inline sweeps off (so the janitor is the only cleanup path) waits until the counters have run for long enough to show the janitor reaching every candidate.
 
 ## Alternatives considered
 
-| Alternative                                           | Why not                                                                                                                         |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Count a share overrun as `completed` plus `roles_cut` | Changes alert semantics to fix a label. The time-based alerts already tolerate occasional misses, and the real gap is progress. |
-| A third `partial` outcome                             | Every alert and the heartbeat would need a rule for it, for no gain over D3.                                                    |
-| A separate exporter running `janitor --dry-run`       | It repeats the expensive scan (a `git status` per worktree). Measuring would cost as much as cleaning.                          |
-| Raise the deadline                                    | Does not fix the cap-plus-order mechanism, and the nested 60 second sweep deadline stays.                                       |
-| Run roles in parallel                                 | Useful for throughput, but not for the problem, and it is an implementation detail here.                                        |
+| Alternative                                                | Why not                                                                                                                            |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Count a role-timer overrun as `completed` plus `roles_cut` | Changes alert semantics to fix a label. The time-based alerts already tolerate occasional misses.                                  |
+| A third `partial` outcome                                  | Every alert and the heartbeat would need a rule for it, for no gain over D2.                                                       |
+| A separate exporter running `janitor --dry-run`            | It repeats the expensive scan. Measuring would cost as much as cleaning; D2 gets the same numbers from the scan that already runs. |
+| A cursor per pass, built now                               | The one pass with limits already has per-candidate history, and the cost is not yet known to come from ordering.                   |
+| Run roles in parallel                                      | An implementation detail, and not what the evidence points to.                                                                     |
 
 ## Behavior documents
 
-When this is accepted, the same change MUST update `packages/pg-router-handlers/docs/behavior/invariants.md`: the janitor invariant gains the fairness rule (D2) and the progress observability rule (D3, D4), and the worktree sweep invariant states that its caps are per-run bounds applied in the fair order. The behavior documents win over this document where they disagree.
+When this is accepted, the same change MUST update `packages/pg-router-handlers/docs/behavior/invariants.md`: the janitor invariant gains the counters and the stagnation alert (D2, D3), and the worktree sweep invariant states the order rule if D5 is taken. The behavior documents win over this document where they disagree.
 
 ## Test plan
 
-- A scan with more kept candidates than the examination cap, placed first in name order, still reaches a later removable candidate within a bounded number of runs (the case that cannot progress today).
-- A scan cut off by its deadline resumes at the cursor on the next run and does not repeat the examined prefix.
-- The counters add up: `candidates = examined + unexamined`, and `kept + removed <= examined`.
-- The persisted file drops entries for candidates that disappeared, and tolerates a missing or corrupt file by treating every candidate as never examined.
+- Counters add up: `candidates = examined + cached + unexamined` for `worktree_sweep`, and `kept + removed <= examined`.
+- A pass cut by a timer reports a non-zero `unexamined` and the next run continues.
+- The oldest-unexamined age grows while a candidate is not reached and resets when it is examined.
 - The new alert rule has promtool tests for a stuck pass and for a pass that advances.
+- If D5 is taken: a scan with more kept candidates than the examination cap, placed first in name order, still reaches a later removable candidate within a bounded number of runs.
 - No mutation testing tool is part of this plan.
 
 ## Open questions
 
 1. Is six hours the right stagnation limit?
-2. Should `kept` carry a reason class (dirty, unpushed, in use) as a label, or stay a count?
-3. Should the cursor files live beside the rotation counter, or in one file per pool?
+2. Should role pools run the closed-bead check with the default pool's guard (a clean, pushed worktree), so a worktree holding unpushed work is not force-removed when its bead closes?
+3. Should `kept` carry a reason class (dirty, unpushed, in use) as a label, or stay a count?
