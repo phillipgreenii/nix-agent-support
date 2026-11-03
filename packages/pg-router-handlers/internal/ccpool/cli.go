@@ -337,6 +337,15 @@ func (c *CLIRunner) EmitGauge(ctx context.Context, name string, value float64, l
 	return err
 }
 
+// Version runs `ccpool version` and returns the trimmed bare version.
+func (c *CLIRunner) Version(ctx context.Context) (string, error) {
+	out, err := c.ccpool(ctx, quickCallTimeout, "version")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // List: ccpool list --all --json.
 func (c *CLIRunner) List(ctx context.Context) ([]Session, error) {
 	out, err := c.ccpool(ctx, quickCallTimeout, "list", "--all", "--json")

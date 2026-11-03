@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dispatchlib"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
@@ -85,6 +86,22 @@ type janitorPasses struct {
 	lockGC      func(deps executor.Deps) int
 	// emit publishes the run's heartbeat gauges; nil (a test) emits nothing.
 	emit gaugeEmitFn
+	// ccpoolVersion reads `ccpool version` for the build_info gauge; nil
+	// reports unknown.
+	ccpoolVersion func(ctx context.Context) (string, error)
+	// now is the clock the census budget is measured on; nil is time.Now.
+	now func() time.Time
+	// censusMaxBudget and censusMaxEntries override the census bounds (a test);
+	// zero selects the defaults.
+	censusMaxBudget  time.Duration
+	censusMaxEntries int
+}
+
+func (p janitorPasses) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
 }
 
 // prodJanitorPasses wires the passes of sweeps.go with the same arguments
@@ -108,6 +125,9 @@ func prodJanitorPasses() janitorPasses {
 		},
 		lockGC: sweepStaleLocks,
 		emit:   ccpoolGaugeEmit,
+		ccpoolVersion: func(ctx context.Context) (string, error) {
+			return ccpool.NewCLIRunner(config.Default()).Version(ctx)
+		},
 	}
 }
 
@@ -296,6 +316,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	lockDir := sessionlock.Dir(stateDir)
 	log := handlerstate.NewEventLog(cfg)
 	started := time.Now()
+	clockStart := passes.clock()
 
 	lock, err := sessionlock.TryLock(lockDir, janitorLockKey)
 	if err != nil {
@@ -380,6 +401,10 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats)
 	emitJanitorProgressGauges(ctx, passes.emit, run.counts)
 	fmt.Fprintf(stdout, "janitor: outcome=%s elapsed=%s roles=%d pools=%d reclaimed=%d\n", outcome, elapsed.Round(time.Millisecond), len(jroles), len(poolDone), reclaimed)
+	if passes.emit != nil {
+		emitBuildInfo(ctx, passes)
+		emitCensus(ctx, passes, jroles, passes.clock().Sub(clockStart))
+	}
 	return conformance.ExitOK
 }
 

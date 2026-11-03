@@ -1376,6 +1376,22 @@ changes a core gate or `INV-LIFE-2`.
     candidate it did not reach (`ccpool_janitor_oldest_unexamined_age_seconds` by pass; reported
     only for a pass that ran). A fourth alert fires when that age stays above six hours, whatever
     the cause of the pass not advancing.
+  - **Self-description.** The janitor also publishes information about the handler's own system,
+    through the same gauge emitter and best effort. (1) **Worktree census.** After a run's outcome,
+    duration and heartbeat gauges are settled, the janitor MUST scan the handler's worktree
+    directory once per distinct directory (roles that share one directory MUST NOT multiply the
+    count) and publish the number of worktrees (`ccpool_worktree_count`), their summed apparent
+    size (`ccpool_worktree_bytes`), whether the scan was cut short by its entry cap of two million
+    or its time budget (`ccpool_worktree_scan_truncated`, in which case the bytes are a lower
+    bound) and the scan's duration (`ccpool_worktree_census_seconds`), none with labels. The scan
+    runs on its own time budget, the lesser of 180 seconds and 540 seconds minus the time since the
+    process started, and MUST NOT share or be able to expire the run's own deadline: it MUST NOT
+    change the run's outcome, the deadline gauge or the last-success time, and its duration is not
+    part of the run duration. A dry run does not scan. (2) **Build information.** Every run that
+    was not skipped MUST publish `ccpool_build_info` with value 1 for two components: label
+    `component="pg-router-handler-ccpool"` with the handler's own stamped version (`dev` when
+    unstamped) and `component="ccpool"` with the output of `ccpool version`, read once per run
+    (`unknown` when that fails, which MUST NOT fail the run), each with a `version` label.
   - **Dry run.** An operator MUST be able to ask a janitor run what each pass WOULD reclaim,
     without it reclaiming anything.
   - **Capacity pressure in a dispatch.** A dispatch handles its role's orphans first (`INV-CCH-18`).

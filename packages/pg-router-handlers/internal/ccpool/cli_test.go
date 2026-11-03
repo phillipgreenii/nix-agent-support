@@ -832,6 +832,19 @@ func TestCLI_EmitGaugeArgv(t *testing.T) {
 	}
 }
 
+// Version execs `ccpool version` and trims the bare version it prints.
+func TestCLI_VersionArgvAndTrim(t *testing.T) {
+	cli, argv, setOut := newSpy()
+	setOut([]byte("0.0.0-abcd1234\n"))
+	got, err := cli.Version(context.Background())
+	if err != nil || got != "0.0.0-abcd1234" {
+		t.Fatalf("Version = %q, %v", got, err)
+	}
+	if a := strings.Join((*argv)[len(*argv)-1], " "); a != "version" {
+		t.Fatalf("argv = %q", a)
+	}
+}
+
 // pg2-mpabs0: Send itself must bound the ccpool call with replyTimeout, not
 // quickCallTimeout; the helper test above cannot see which one Send passes.
 func TestSend_usesReplyTimeout(t *testing.T) {
