@@ -1001,3 +1001,31 @@ func TestIntegration_InputProcessor_NotConfigured(t *testing.T) {
 		t.Error("updatedInput should not be present when processor is not configured")
 	}
 }
+
+// TestIntegration_GitUpdateRef_PrimaryCAS pins the diverged-repo reconcile's ref
+// swap at the boundary (operator ruling 2026-11-03, Phillip: "2b should be agents
+// do all of it"): only the three-operand compare-and-swap on the primary branch
+// ref is allowed; every other update-ref shape is not.
+func TestIntegration_GitUpdateRef_PrimaryCAS(t *testing.T) {
+	const n, o = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	for _, cmd := range []string{
+		"git update-ref refs/heads/main " + n + " " + o,
+		"git update-ref refs/heads/master " + n + " " + o,
+	} {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		if d := getDecision(runHook(t, input)); d != "allow" {
+			t.Errorf("cmd %q: emitted permissionDecision=%q, want allow", cmd, d)
+		}
+	}
+	for _, cmd := range []string{
+		"git update-ref refs/heads/main " + n,
+		"git update-ref -d refs/heads/main",
+		"git update-ref refs/heads/feature " + n + " " + o,
+		"git update-ref refs/heads/main 0000000000000000000000000000000000000000 " + o,
+	} {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		if d := getDecision(runHook(t, input)); d == "allow" {
+			t.Errorf("cmd %q: emitted permissionDecision=allow, want not allowed", cmd)
+		}
+	}
+}

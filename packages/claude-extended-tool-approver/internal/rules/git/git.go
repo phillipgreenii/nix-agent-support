@@ -518,6 +518,14 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 	if subcmd == "symbolic-ref" {
 		return r.symbolicRefVerdict(rest)
 	}
+	// update-ref: ONLY the three-operand compare-and-swap on the primary branch ref
+	// is approved — see updateRefVerdict. Every other shape gets a NoOpinion.
+	if subcmd == "update-ref" {
+		if hasRedirectEnvVar(envs, cwd) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
+		}
+		return r.updateRefVerdict(rest)
+	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
 		if hasRedirectEnvVar(envs, cwd) {
@@ -870,6 +878,60 @@ func (r *Rule) symbolicRefVerdict(rest []string) (hookio.RuleResult, error) {
 	}
 	return r.refuse("git: `git symbolic-ref <name> <ref>` SETS <name> (often HEAD) to point at <ref> with no " +
 		"working-tree or index update — a ref redirection, not a read; deferring to the prompt")
+}
+
+// primaryBranchRefs are the only refs `git update-ref` may move under an Approve.
+// They mirror effectpolicy's primaryBranchNames (main, master).
+var primaryBranchRefs = map[string]bool{"refs/heads/main": true, "refs/heads/master": true}
+
+// isCASObjectID reports whether s is a full-length (40 or 64) hex object id that
+// is not the all-zero id. The all-zero id means "no object": as <new> it DELETES
+// the ref and as <old> it asserts "must not exist", so neither is a swap.
+func isCASObjectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	nonZero := false
+	for _, c := range s {
+		switch {
+		case c >= '1' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+			nonZero = true
+		case c == '0':
+		default:
+			return false
+		}
+	}
+	return nonZero
+}
+
+// updateRefVerdict returns the verdict for `git update-ref` (rest = args after the
+// subcommand). Operator ruling 2026-11-03 (Phillip, "2b should be agents do all of
+// it. (there should be a caveat that if problems are detected that they are
+// esclated)"): the diverged-repo reconcile swaps the primary branch by
+// compare-and-swap, carried out by agents. The narrowest approval that serves it
+// is the exact shape
+//
+//	git update-ref refs/heads/<main|master> <new-sha> <old-sha>
+//
+// with NO flag, exactly three operands, a primary-branch ref, and two literal,
+// non-zero, full-length object ids. Everything else is a NoOpinion (an ADR 0044
+// refusal, same outcome as before this arm existed): the two-operand form
+// (unconditional overwrite), `-d`/`--delete`, `--stdin` (arbitrary ref batches),
+// `-m`/`--no-deref`/`--create-reflog` (any flag at all), any other ref, and a
+// zero or abbreviated id (zero deletes; an abbreviation is not a pinned CAS).
+// The <old> operand is what makes the swap safe to run unattended: git refuses
+// it if the ref moved since the agent read it.
+func (r *Rule) updateRefVerdict(rest []string) (hookio.RuleResult, error) {
+	for _, a := range rest {
+		if strings.HasPrefix(a, "-") {
+			return r.refuse("git: `git update-ref` with a flag is outside the primary-branch compare-and-swap form; deferring to the prompt")
+		}
+	}
+	if len(rest) != 3 || !primaryBranchRefs[rest[0]] || !isCASObjectID(rest[1]) || !isCASObjectID(rest[2]) {
+		return r.refuse("git: only `git update-ref refs/heads/<primary> <new-sha> <old-sha>` (three-operand compare-and-swap, " +
+			"full non-zero object ids) is approved; deferring to the prompt")
+	}
+	return hookio.RuleResult{Decision: hookio.Approve, Reason: "git update-ref: primary-branch compare-and-swap", Module: r.Name()}, nil
 }
 
 // configGateClass is the MECHANISM by which a gated `git config` key is

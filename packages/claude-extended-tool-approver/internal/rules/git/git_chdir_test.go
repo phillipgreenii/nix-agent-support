@@ -284,3 +284,56 @@ func TestGit_Chdir_ConfigInjection_StillAbstains(t *testing.T) {
 		t.Errorf("git -C <rw> -c core.pager=EVIL log: got %s, want reject (RCE guard, escalated per pg2-3zgcf)", got.Decision)
 	}
 }
+
+const (
+	casNew  = "1111111111111111111111111111111111111111"
+	casOld  = "2222222222222222222222222222222222222222"
+	casZero = "0000000000000000000000000000000000000000"
+)
+
+// The diverged-repo reconcile (operator ruling 2026-11-03, Phillip: "2b should be
+// agents do all of it") runs two commands against the canonical clone from a
+// worktree: the primary-branch compare-and-swap and `reset --keep`. Narrow approval
+// chosen: the exact three-operand CAS shape, not a script-by-name rule. The -C
+// target is the canonical clone, a writable zone of the session, so chdirSafe
+// does not withdraw either approval.
+func TestGit_Chdir_ReconcileCommands_CanonicalClone(t *testing.T) {
+	r := newWithProject(t)
+	const canon = projectCWD // the canonical clone; the session runs in a worktree under it
+	wtCWD := canon + "/.worktrees/drain"
+	for _, cmd := range []string{
+		"git -C " + canon + " update-ref refs/heads/main " + casNew + " " + casOld,
+		"git -C " + canon + " update-ref refs/heads/master " + casNew + " " + casOld,
+		"git -C " + canon + " reset --keep " + casNew,
+	} {
+		if got := hookio.Verdict(r.Evaluate(chdirInput(cmd, wtCWD))); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git -C " + canon + " update-ref refs/heads/main " + casNew,                           // two-operand: unconditional overwrite
+		"git -C " + canon + " update-ref -d refs/heads/main",                                  // delete
+		"git -C " + canon + " update-ref -d refs/heads/main " + casOld,                        // delete with old
+		"git -C " + canon + " update-ref --delete refs/heads/main " + casOld,                  // delete
+		"git -C " + canon + " update-ref --stdin",                                             // batch
+		"git -C " + canon + " update-ref -m why refs/heads/main " + casNew + " " + casOld,     // any flag
+		"git -C " + canon + " update-ref --no-deref refs/heads/main " + casNew + " " + casOld, // any flag
+		"git -C " + canon + " update-ref refs/heads/feature " + casNew + " " + casOld,         // non-primary ref
+		"git -C " + canon + " update-ref HEAD " + casNew + " " + casOld,                       // not refs/heads/<primary>
+		"git -C " + canon + " update-ref refs/remotes/origin/main " + casNew + " " + casOld,   // remote-tracking ref
+		"git -C " + canon + " update-ref refs/tags/main " + casNew + " " + casOld,             // tag
+		"git -C " + canon + " update-ref refs/heads/main " + casZero + " " + casOld,           // zero new id deletes
+		"git -C " + canon + " update-ref refs/heads/main " + casNew + " " + casZero,           // zero old id: not a swap
+		"git -C " + canon + " update-ref refs/heads/main abc123 " + casOld,                    // abbreviated id
+		"git -C " + canon + " update-ref refs/heads/main " + casNew + " " + casOld + " x",     // four operands
+		"git -C " + canon + " reset --hard " + casNew,
+		"git -C " + canon + " reset --hard",
+		"git -C /etc update-ref refs/heads/main " + casNew + " " + casOld, // unsafe -C zone
+		"git -C /etc reset --keep " + casNew,
+		"GIT_DIR=/other git update-ref refs/heads/main " + casNew + " " + casOld,
+	} {
+		if got := hookio.Verdict(r.Evaluate(chdirInput(cmd, wtCWD))); got.Decision == hookio.Approve {
+			t.Errorf("cmd %q: got approve (%s), want not approved", cmd, got.Reason)
+		}
+	}
+}
