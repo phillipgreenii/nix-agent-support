@@ -48,15 +48,18 @@ const (
 // matchExisting finds the first existing issue whose own fingerprint
 // metadata, or semicolon-joined alias list, equals f.Fingerprint —
 // exact-match only, no fuzzy matching [design: "Fingerprint metadata
-// key" paragraph].
+// key" paragraph]. The comparison is insensitive to the grafana_folder
+// label on both sides (stripGrafanaFolder), so beads whose stored
+// fingerprint or aliases still carry a folder keep matching.
 func matchExisting(f finding, existing []connectorIssue) *connectorIssue {
+	want := stripGrafanaFolder(f.Fingerprint)
 	for i := range existing {
 		e := &existing[i]
-		if e.Metadata[metaFingerprint] == f.Fingerprint {
+		if stripGrafanaFolder(e.Metadata[metaFingerprint]) == want {
 			return e
 		}
 		for _, alias := range splitAliases(e.Metadata[metaFingerprintAlias]) {
-			if alias == f.Fingerprint {
+			if stripGrafanaFolder(alias) == want {
 				return e
 			}
 		}

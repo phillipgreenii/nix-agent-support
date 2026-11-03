@@ -246,3 +246,29 @@ func TestPruneAlertStates(t *testing.T) {
 		t.Fatalf("input must not be mutated")
 	}
 }
+
+// An open bead filed before grafana_folder was excluded stores a
+// fingerprint (and alias) carrying the old folder; a firing alert now
+// labelled with a different folder must still match it.
+func TestMatchExistingIgnoresGrafanaFolderOnStoredSide(t *testing.T) {
+	newFP := grafanaAlertFingerprint("r", map[string]string{"severity": "warning", "type": "pr.changed", "grafana_folder": "Work"})
+	oldFP := "r|grafana_folder=pg-router,severity=warning,type=pr.changed"
+	f := finding{Kind: kindGrafanaAlert, Fingerprint: newFP}
+	for name, md := range map[string]map[string]string{
+		"fingerprint": {metaFingerprint: oldFP},
+		"alias":       {metaFingerprint: "other", metaFingerprintAlias: "x;" + oldFP},
+	} {
+		existing := []connectorIssue{{ID: "b1", Metadata: md}}
+		if m := matchExisting(f, existing); m == nil || m.ID != "b1" {
+			t.Errorf("%s: folder-carrying stored value did not match %q", name, newFP)
+		}
+		if action, _ := decideAction(f, existing, noGrafanaCtx); action == actionCreate {
+			t.Errorf("%s: decideAction would file a duplicate", name)
+		}
+	}
+	// A different rule or label still does not match.
+	other := finding{Kind: kindGrafanaAlert, Fingerprint: grafanaAlertFingerprint("r", map[string]string{"severity": "warning", "type": "escalated.zr"})}
+	if m := matchExisting(other, []connectorIssue{{ID: "b1", Metadata: map[string]string{metaFingerprint: oldFP}}}); m != nil {
+		t.Errorf("distinct type matched: %v", m)
+	}
+}

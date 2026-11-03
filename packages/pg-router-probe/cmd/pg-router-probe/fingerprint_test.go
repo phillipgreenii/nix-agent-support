@@ -155,3 +155,29 @@ func TestFingerprintIgnoresAnnotations(t *testing.T) {
 		t.Fatalf("annotations changed the fingerprint: %q vs %q", a, b)
 	}
 }
+
+// A folder move must not change the alert's identity.
+func TestGrafanaAlertFingerprintExcludesGrafanaFolder(t *testing.T) {
+	a := grafanaAlertFingerprint("r", map[string]string{"severity": "warning", "type": "pr.changed", "grafana_folder": "pg-router"})
+	b := grafanaAlertFingerprint("r", map[string]string{"severity": "warning", "type": "pr.changed", "grafana_folder": "Work"})
+	if a != b {
+		t.Fatalf("grafana_folder changed the fingerprint: %q vs %q", a, b)
+	}
+	if strings.Contains(a, "grafana_folder") {
+		t.Fatalf("fingerprint %q must not mention grafana_folder", a)
+	}
+}
+
+func TestStripGrafanaFolder(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"r|grafana_folder=pg-router,severity=warning,type=x", "r|severity=warning,type=x"},
+		{"r|severity=warning,type=x", "r|severity=warning,type=x"},
+		{"r|grafana_folder=a,b,severity=w", "r|severity=w"},
+		{"r|severity=w,type=x", "r|severity=w,type=x"},
+		{"binary-hash-mismatch", "binary-hash-mismatch"},
+	} {
+		if got := stripGrafanaFolder(tc.in); got != tc.want {
+			t.Errorf("stripGrafanaFolder(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

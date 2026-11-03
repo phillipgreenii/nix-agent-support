@@ -16,6 +16,13 @@ import (
 const (
 	escalationLabelKey = "escalation"
 	escalationHuman    = "human"
+
+	// grafanaFolderKey is the label Grafana stamps with the alert rule's
+	// folder. A folder move or rename is not a change of the alert's
+	// identity, so it is excluded from the fingerprint (operator-confirmed
+	// intent: a folder rename MUST NOT orphan or duplicate open escalation
+	// beads).
+	grafanaFolderKey = "grafana_folder"
 )
 
 // grafanaAlertFingerprint renders "<rule-uid>|<sorted key=value labels>"
@@ -28,11 +35,15 @@ const (
 // the alert's identity, so moving an already-registered rule to
 // `escalation: human` must keep matching the beads already open for it
 // instead of forking a duplicate (the pg2-dvkbh/pg2-imr6o class).
+// The "grafana_folder" label (grafanaFolderKey) is excluded for the same
+// reason: moving a rule between folders must not change its identity.
+// Fingerprints stored on beads filed before that exclusion still carry the
+// folder; stripGrafanaFolder lets dedup compare across both forms.
 // Annotations (summary/description) are never passed in here at all.
 func grafanaAlertFingerprint(ruleUID string, labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
-		if k == escalationLabelKey {
+		if k == escalationLabelKey || k == grafanaFolderKey {
 			continue
 		}
 		keys = append(keys, k)
@@ -43,6 +54,34 @@ func grafanaAlertFingerprint(ruleUID string, labels map[string]string) string {
 		parts = append(parts, k+"="+labels[k])
 	}
 	return ruleUID + "|" + strings.Join(parts, ",")
+}
+
+// stripGrafanaFolder removes the grafana_folder=<value> label from a
+// stored or computed Grafana fingerprint ("<uid>|k=v,k=v"), so fingerprints
+// recorded before the folder was excluded compare equal to current ones.
+// A fingerprint with no "|" (non-grafana kinds) is returned unchanged. A
+// folder value containing commas leaves fragments without "=" directly
+// after the folder label; those are dropped with it.
+func stripGrafanaFolder(fp string) string {
+	uid, labels, ok := strings.Cut(fp, "|")
+	if !ok {
+		return fp
+	}
+	parts := strings.Split(labels, ",")
+	kept := parts[:0:0]
+	inFolder := false
+	for _, p := range parts {
+		switch {
+		case strings.HasPrefix(p, grafanaFolderKey+"="):
+			inFolder = true
+		case inFolder && !strings.Contains(p, "="):
+			// continuation of a comma-containing folder value
+		default:
+			inFolder = false
+			kept = append(kept, p)
+		}
+	}
+	return uid + "|" + strings.Join(kept, ",")
 }
 
 // binaryHashMismatchFingerprint is the fixed-string fingerprint for the
