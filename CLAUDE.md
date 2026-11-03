@@ -297,6 +297,15 @@ supervisor: no entry, one warning (raise `fs.inotify.max_user_watches`). Check:
 `test-pg-claude-code-recorder-hm-launchd` (`tests/pg-claude-code-recorder-hm-launchd.nix`), which also runs the
 rendered command under `env -i` against throwaway directories.
 
+### pg-repo-runner alerts and dashboard
+
+`darwin/modules/pg-repo-runner` registers `packages/pg-repo-runner/grafana/alerting/alerts.yaml` (six rules over
+the runner's `pg_repo_runner_*` gauges, folder "Host") and the dashboard `packages/pg-repo-runner/grafana/pg-repo-runner.json`,
+gated on `observability.enable` and some `home-manager.users.<u>` enabling `pg-repo-runner`. Checks:
+`test-pg-repo-runner-alert-rules` (promtool, `check-alert-rules.sh`) and `test-grafana-dashboards-lint`. Each rule uid
+MUST also be registered with `pg-router-probe` in the deployment repo (see its "Probe Registration" section), or it
+never escalates to a bead.
+
 ### work-report (`phillipgreenii.programs.work-report`)
 
 Reports are rendered by external generators registered in config and selected through named

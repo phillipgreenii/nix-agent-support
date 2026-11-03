@@ -1,0 +1,48 @@
+# promtool unit tests for the pg-repo-runner-tips-stale alert. The runner stamps the run time
+# every 5 minutes; the rule reads the last stamp, so a runner that stops at minute 10 leaves
+# the gap growing past 1800s (30 minutes) at minute 40, and the alert fires after its 5m wait.
+# Stamps are epoch seconds: the series value at minute m is 60*m, so time() equals the stamp
+# while the runner is running (zero gap).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a repo whose runs stopped fires once the gap passes 30 minutes plus the wait
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x10"
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="beta"}'
+        values: "0+60x100"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts:
+          - exp_labels:
+              severity: error
+              repo: alpha
+
+  - name: a runner that keeps running never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
+
+  - name: a gap under 30 minutes never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x10"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []

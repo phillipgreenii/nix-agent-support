@@ -1,0 +1,46 @@
+# promtool unit tests for the pg-repo-runner-red-no-newer-tip alert. Run by the flake check
+# test-pg-repo-runner-alert-rules (check-alert-rules.sh wraps refId A as a Prometheus alert
+# with the rule's for and labels).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: bad value held past the wait fires, for that repo only
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_latest_red{repo="alpha"}'
+        values: "1x1600"
+      - series: 'pg_repo_runner_check_latest_red{repo="beta"}'
+        values: "0x1600"
+    alert_rule_test:
+      - eval_time: 1400m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts: []
+      - eval_time: 1450m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: alpha
+
+  - name: the good value never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_latest_red{repo="alpha"}'
+        values: "0x1600"
+    alert_rule_test:
+      - eval_time: 1450m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts: []
+
+  - name: recovery inside the wait never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_latest_red{repo="alpha"}'
+        values: "1x3 0x1600"
+    alert_rule_test:
+      - eval_time: 1450m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts: []

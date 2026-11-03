@@ -2458,6 +2458,7 @@
                       ${./packages/pg-connector/grafana/pg-connector-github.json} \
                       ${./packages/pg-connector/grafana/pg-connector-issue-jira.json} \
                       ${./packages/pg-rescue/grafana/pg-rescue-runs.json} \
+                      ${./packages/pg-repo-runner/grafana/pg-repo-runner.json} \
                       ${./packages/pg-task-focus/grafana/pg-task-focus.json}
                     touch $out
                   '';
@@ -7028,6 +7029,27 @@
                     bash ${./packages/pg-keep-awake/check-alert-rules.sh} \
                       ${./packages/pg-keep-awake/grafana/alerting/alerts.yaml} \
                       ${./packages/pg-keep-awake/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
+              # pg-repo-runner: the alert rules. The script pins the Grafana-only fields (for,
+              # severity, noDataState) and runs the cases under grafana/alerting/rule-tests/
+              # under `promtool test rules`.
+              test-pg-repo-runner-alert-rules =
+                pkgs.runCommand "test-pg-repo-runner-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pg-repo-runner/check-alert-rules.sh} \
+                      ${./packages/pg-repo-runner/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-repo-runner/grafana/alerting/rule-tests}
                     touch "$out"
                   '';
 

@@ -1,0 +1,260 @@
+# pg-repo-runner unified-alerting rules. The series are the runner's OTLP gauges
+# (packages/pg-repo-runner/README.md, section "Metrics"), emitted by `ccpool emit-gauge`
+# at the end of each `tips` run (every 5 minutes), so each series is labelled by `repo`
+# (the allow-list key) and the rules alert per repo.
+#
+# Pushed gauges go stale a few minutes after the runner stops, so a dead runner leaves
+# no series at all. Rule "tips-stale" therefore reads the LAST KNOWN run time with
+# max_over_time over 1d; after a day without any run the series is gone and the rule
+# resolves (the launchd-health rules own a runner that is not running at all). The
+# other rules have noDataState OK: no series means the runner is not reporting, which
+# tips-stale covers.
+#
+# refId A is plain PromQL and refId C a single `gt 0` threshold stage, so every rule can
+# be wrapped and run under `promtool test rules`: packages/pg-repo-runner/check-alert-rules.sh
+# does that for the cases under rule-tests/. The `for:` of each rule is the duration the
+# operator asked for. The folder "Host" is created by title; never pin a folderUid
+# (grafana/grafana#125079). Registered by darwin/modules/pg-repo-runner behind the
+# pg-repo-runner enable flag. Every uid below MUST also be registered with pg-router-probe
+# in the deployment repo.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-repo-runner-alerts
+    folder: Host
+    interval: 1m
+    rules:
+      - uid: pg-repo-runner-tips-failing
+        title: pg-repo-runner tips run failing for a repo
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-repo-runner could not read a repo's tips for over 15 minutes"
+          description: "pg_repo_runner_tips_ok has been 0 for over 15 minutes for this repo: the tips run exits 1 for it. Run `pg-repo-runner tips --repo <repo>` by hand and read the run log under the runner's state directory; check that the clone exists and the repo key is still in the workspace."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "1 - pg_repo_runner_tips_ok"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-repo-runner-tips-stale
+        title: pg-repo-runner has not run for a repo
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-repo-runner has not run for a repo for over 30 minutes"
+          description: "More than 30 minutes have passed since pg_repo_runner_tips_last_run_timestamp_seconds for this repo (the runner runs every 5 minutes; this reads the last known run, so it resolves after a day without any run). Check the pg-router daemon (`pg-router status --json`, gates) and the runner's run log."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "time() - max by (repo) (max_over_time(pg_repo_runner_tips_last_run_timestamp_seconds[1d]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1800]
+      - uid: pg-repo-runner-tip-unverified
+        title: pg-repo-runner tip unverified
+        condition: C
+        for: 2h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A repo's primary tip has had no check verdict for over 2 hours"
+          description: "pg_repo_runner_unverified_tip has been 1 for over 2 hours: the verify role has not recorded a verdict for this repo's primary tip. Check that verify is enabled for the repo in the runner allow-list, that pg-router is running, and the verify role's run log."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_repo_runner_unverified_tip == 1"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-repo-runner-red-no-newer-tip
+        title: pg-repo-runner repo red with no newer tip
+        condition: C
+        for: 24h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A repo has been red for over 24 hours with no newer tip"
+          description: "pg_repo_runner_check_latest_red has been 1 for over 24 hours: the latest non-superseded check verdict of the primary tip is red and no newer tip has replaced it. Read the verdict's log, fix the failure and push a new tip."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_repo_runner_check_latest_red == 1"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-repo-runner-diverged
+        title: pg-repo-runner clone diverged
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A repo's clone has been diverged from its remote for over 1 hour"
+          description: "pg_repo_runner_sync_diverged has been 1 for over 1 hour: the clone has commits the remote lacks and the remote has commits the clone lacks. Use the reconcile-repo skill to rebase and resolve it."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_repo_runner_sync_diverged == 1"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-repo-runner-surface-stuck
+        title: pg-repo-runner failure surfacing stuck
+        condition: C
+        for: 168h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A runner failure transition has stayed open for over 7 days"
+          description: "pg_repo_runner_surface_open (labels repo and kind: red, diverged, needs-relock, build-red) has been 1 for over 7 days: the surfaced item for this repo has not been resolved. Find the open item for the kind, fix the cause or close it if it is stale."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_repo_runner_surface_open == 1"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

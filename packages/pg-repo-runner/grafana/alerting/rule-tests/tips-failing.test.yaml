@@ -1,0 +1,46 @@
+# promtool unit tests for the pg-repo-runner-tips-failing alert. Run by the flake check
+# test-pg-repo-runner-alert-rules (check-alert-rules.sh wraps refId A as a Prometheus alert
+# with the rule's for and labels).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: bad value held past the wait fires, for that repo only
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_ok{repo="alpha"}'
+        values: "0x60"
+      - series: 'pg_repo_runner_tips_ok{repo="beta"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-repo-runner-tips-failing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-repo-runner-tips-failing
+        exp_alerts:
+          - exp_labels:
+              severity: error
+              repo: alpha
+
+  - name: the good value never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_ok{repo="alpha"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-repo-runner-tips-failing
+        exp_alerts: []
+
+  - name: recovery inside the wait never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_ok{repo="alpha"}'
+        values: "0x3 1x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-repo-runner-tips-failing
+        exp_alerts: []

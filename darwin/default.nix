@@ -17,6 +17,7 @@
     ./modules/pg-desk-serve
     ./modules/pg-task-focus
     ./modules/pg-keep-awake
+    ./modules/pg-repo-runner
     ./modules/ccpool
     ./modules/pg-router-ccpool-handler
     ./modules/pg-ccaudit
