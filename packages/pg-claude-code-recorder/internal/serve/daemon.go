@@ -349,7 +349,7 @@ func (d *Daemon) Start() error {
 		addr = d.cfg.MetricsAddr
 	}
 	if addr != "" {
-		exp, err := exporter.Start(addr, d.obs.Reg, d.refreshGauges)
+		exp, err := exporter.Start(addr, d.obs.Reg, d.scrapeRefresh)
 		if err != nil {
 			d.obs.Log.Warn("metrics_exporter_failed", "err", err.Error())
 		} else {
@@ -478,6 +478,15 @@ func (d *Daemon) refreshLoop() {
 			d.refreshGauges()
 		}
 	}
+}
+
+// scrapeRefresh is what a /metrics scrape runs before rendering: only the
+// process-local figures (CPU, Go runtime, WAL file size). It MUST NOT query the
+// store or walk the state directory: those wait on the SQLite connection the
+// settle tick holds and made a scrape take 14 s or hang. The heavier gauges
+// come from refreshGauges, which the refresh loop runs every 5 seconds.
+func (d *Daemon) scrapeRefresh() {
+	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
 }
 
 // refreshGauges sets the heartbeat (the watcher's last successful sweep) and the

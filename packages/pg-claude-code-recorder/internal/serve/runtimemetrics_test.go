@@ -2,11 +2,14 @@ package serve
 
 import (
 	"bytes"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/exporter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
@@ -104,5 +107,22 @@ func TestRefreshGaugesRunsRuntimeCollector(t *testing.T) {
 	d.refreshGauges()
 	if _, ok := d.obs.Reg.Gauge(obs.MGoGoroutines, nil); !ok {
 		t.Fatal("refreshGauges did not run the collector")
+	}
+}
+
+// A scrape must answer without the store or the state directory walk: the
+// Daemon here has no parser and no store, so any attempt to reach them panics,
+// and the scrape still answers well inside a second.
+func TestScrapeRefreshNeverReachesTheStoreOrTheDirectoryWalk(t *testing.T) {
+	d := &Daemon{obs: obs.New(nil), cfg: config.Config{StateDir: t.TempDir()}}
+	h := exporter.Handler(d.obs.Reg, d.scrapeRefresh)
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "process_cpu_seconds") {
+		t.Fatalf("scrape: %d %q", rec.Code, rec.Body.String())
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("scrape took %v", el)
 	}
 }
