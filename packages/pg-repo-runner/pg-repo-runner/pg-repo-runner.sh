@@ -220,6 +220,9 @@ Files and environment:
   PG_OSX_NOTIFY_BIN              replaces the pg-osx-notify CLI (test seam)
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
                                 (else thresholds.retry_window, else 3600)
+  PG_REPO_RUNNER_CHECK_INTERVAL seconds between two finished checks of one repo;
+                                verify declines (exit 9) inside it (else
+                                thresholds.check_interval, else 3600; 0 = off)
 
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
 HELP
@@ -282,7 +285,7 @@ early_verify() {
 # working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left
   root="$(rr_cfg '.workspace_root // empty')"
 
   # precheck: the sha exists as a commit
@@ -310,6 +313,13 @@ act_verify() {
     rr_verdict_write "$repo" "$full" check superseded locked "$now" "$now" 0 "" || return 1
     rr_log "superseded: the tip of $branch is $tip, not $full; no nix run"
     return 0
+  fi
+
+  # throttle: at most one finished check per repo per interval. The "not now"
+  # decline (exit 9) keeps the item alive and stores NO verdict: tips keeps
+  # offering this sha, and a later run checks whatever is the tip by then.
+  if left="$(rr_check_throttle_wait "$repo")"; then
+    decline "a check of $repo finished less than $(rr_check_interval)s ago; $left s left"
   fi
 
   [[ -n ${RR_NIX_BIN:-} ]] || {

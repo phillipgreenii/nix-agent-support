@@ -69,6 +69,7 @@ EOF
   export XDG_STATE_HOME="$TEST_DIR/state"
   export PG_REPO_RUNNER_CONFIG="$TEST_DIR/config.toml"
   export PG_REPO_RUNNER_LOADAVG=0.50
+  export PG_REPO_RUNNER_CHECK_INTERVAL=0
   STATE="$XDG_STATE_HOME/pg-repo-runner"
   SLEEPER=""
   BUILD_HASH="$(printf 'a%.0s' {1..64})"

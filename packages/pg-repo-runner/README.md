@@ -128,7 +128,15 @@ and ignores the kill switch: it only reads refs and the verdict store.
    no verdict). The canonical working tree is never read.
 3. Latest wins: if the primary branch no longer points at `<sha>`, a `superseded` verdict is stored
    and the run exits 0 without running nix (the newer tip has its own event).
-4. Otherwise, under the lease:
+4. Throttle: when a `green` or `red` check of this repo finished less than `thresholds.check_interval`
+   seconds ago (default 3600, `PG_REPO_RUNNER_CHECK_INTERVAL`, 0 turns it off), the run declines with
+   exit 9 "not now" and stores NO verdict. A `superseded` verdict is terminal (step 1 ends on any stored
+   verdict and `tips` skips a sha that has one), so the throttle never uses it: the tip stays
+   unverified, `tips` keeps offering it, and a later run checks whatever is the tip by then, which is
+   how at most one check per repo per hour runs against the newest tip. The decline shows as
+   `pg_repo_runner_last_run_exit` 9 for the role; no new gauge. The tip query keeps its 5 minute
+   cadence.
+5. Otherwise, under the lease:
 
    ```text
    nice -n 10 pg-nix-log-wrapped nix flake check --no-write-lock-file "git+file://<canonical abs path>?rev=<sha>"
@@ -137,7 +145,7 @@ and ignores the kill switch: it only reads refs and the verdict store.
    The target is an immutable commit read from git objects, so a dirty or untracked working tree
    cannot change the result.
 
-5. Verdict (`kind` `check`, `inputs` `locked`): exit 0 is `green`; any other non-zero exit is `red`;
+6. Verdict (`kind` `check`, `inputs` `locked`): exit 0 is `green`; any other non-zero exit is `red`;
    a signal exit (128 + n, that is 129 to 192) is a malfunction: exit 1, NO verdict is stored, and
    pg-router retries (`max_dispatch_retries`). There is no "inconclusive" class and a red is never
    retried automatically. A red verdict exits 0 (it is data, not a failure of the runner).
@@ -273,12 +281,18 @@ deletion, other ref, `--tags`, `--mirror` or `--no-verify` (the repo's own pre-p
 `pn workspace push|update|apply`. Gates, all in the same pass; if one fails the record stays `ahead` with
 `push withheld: <reason>` and nothing is pushed:
 
-| Gate | Check                                                                                                                                                                                                |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| (a)  | `push = true`, and no kill switch (`<state dir>/push.disabled`, the config `kill_switch` file, the pg-router `SYSTEM_PAUSE` gate that stops the role before it runs): re-read right before the push. |
-| (b)  | A `check` verdict, `green`, over the locked inputs, for exactly the primary tip; the tip is re-read right before the push (no partial push of a green ancestor).                                     |
-| (c)  | The canonical precheck of this pass passed (a dirty, off-primary or mid-operation clone is `yielded` before the step is reached).                                                                    |
-| (d)  | `origin/<primary>` is an ancestor of the tip. Otherwise the repo is diverged and takes the F5 branch (one deduplicated bead). A remote that moves after the check makes git refuse: `push-rejected`. |
+| Gate | Check                                                                                                                                                                                                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a)  | `push = true`, and no kill switch (`<state dir>/push.disabled`, the config `kill_switch` file, the pg-router `SYSTEM_PAUSE` gate that stops the role before it runs): re-read right before the push.                                                                                                                                            |
+| (b)  | A `check` verdict, `green`, over the locked inputs, for the newest commit of `origin/<primary>..<tip>` that has one: the tip when it is green, else the newest green ancestor that descends from `origin/<primary>` (ADR 0108 amendment, 2026-11-03). The tip is re-read right before the push; the pushed sha is never newer than the verdict. |
+| (c)  | The canonical precheck of this pass passed (a dirty, off-primary or mid-operation clone is `yielded` before the step is reached).                                                                                                                                                                                                               |
+| (d)  | `origin/<primary>` is an ancestor of the tip. Otherwise the repo is diverged and takes the F5 branch (one deduplicated bead). A remote that moves after the check makes git refuse: `push-rejected`.                                                                                                                                            |
+
+When the tip is red or unchecked, the push publishes exactly the newest green ancestor (its argv names that
+ancestor, never the tip), and the dry run logs that range with `(the newest green ancestor of tip <sha>)`.
+No green commit above `origin/<primary>`, or a green commit that does not descend from `origin/<primary>`
+(a side branch merged in), is withheld with `push withheld: <reason>`; nothing is forced or rebased. A push
+publishes every ancestor of the pushed commit too.
 
 A red tip while a sibling named in `repos.<key>.consumes` has commits its remote lacks is "blocked, needs
 sibling push and relock: run `pn workspace push`": a `needs-relock` transition (one bead, one notification),
@@ -466,6 +480,7 @@ kill_switch = "/path/to/state/pg-repo-runner/kill"
 max_load = 11.0 # omitted when unset: the core count
 nice_level = 10
 retry_window = 3600 # seconds a tip item stays offered
+check_interval = 3600 # seconds between two finished checks of one repo (0 = no throttle)
 quiet_window = 900 # seconds the workspace tip tuple must stay unchanged (runner C)
 
 [repos.nix-example]
@@ -511,6 +526,7 @@ package.
 | `PG_REPO_RUNNER_CCPOOL_TIMEOUT` | Replaces the 10 s bound of one gauge call.                         |
 | `PG_OSX_NOTIFY_BIN`             | Replaces the `pg-osx-notify` CLI (the surfacing suites record it). |
 | `PG_REPO_RUNNER_RETRY_WINDOW`   | Replaces the tip item's retry window, in seconds.                  |
+| `PG_REPO_RUNNER_CHECK_INTERVAL` | Replaces the per-repo check spacing, in seconds (0 turns it off).  |
 | `XDG_STATE_HOME`                | Root of the state directory.                                       |
 
 ## Load threshold: the first calibration sample

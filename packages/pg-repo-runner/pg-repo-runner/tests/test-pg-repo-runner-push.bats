@@ -69,6 +69,7 @@ setup() {
   export XDG_STATE_HOME="$TEST_DIR/state"
   export PG_REPO_RUNNER_CONFIG="$TEST_DIR/config.toml"
   export PG_REPO_RUNNER_LOADAVG=0.50
+  export PG_REPO_RUNNER_CHECK_INTERVAL=0
   STATE="$XDG_STATE_HOME/pg-repo-runner"
   REMOTE="$TEST_DIR/remotes/alpha.git"
   write_config push=true
@@ -475,21 +476,137 @@ assert_argv_clean() {
   no_push "$before"
 }
 
-@test "a green verdict for an OLDER sha does not push a newer tip, and no partial push of the green ancestor" {
-  local old tip before
+@test "a red tip with a green ancestor: pushes exactly the newest green ancestor, not the tip" {
+  local c1 c2 c3 tip refs_before
+  commit_file "$A" f
+  c1="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  c2="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  c3="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  tip="$(git -C "$A" rev-parse HEAD)"
+  write_verdict "$c1" green
+  write_verdict "$c2" green
+  write_verdict "$c3" red
+  write_verdict "$tip" red
+  go_live
+  refs_before="$(remote_refs)"
+  sync_pass
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = pushed ]
+  [ "$(remote_main)" = "$c2" ]
+  [ "$(remote_main)" != "$tip" ]
+  [ "$(grep -c -E '^-C [^ ]+ push ' "$TEST_DIR/git.argv")" -eq 1 ]
+  grep -qxF -- "-C $(realpath "$A") push origin $c2:refs/heads/main" "$TEST_DIR/git.argv"
+  assert_argv_clean
+  # the audit record names the verdict of the pushed ancestor
+  [ "$(jq -r .newRemoteSha "$STATE/push-audit.jsonl")" = "$c2" ]
+  [ "$(jq -r .verdict.sha "$STATE/push-audit.jsonl")" = "$c2" ]
+  # the tip itself is still ahead and still unverified-green: the next pass pushes nothing more
+  rm -f "$TEST_DIR/git.argv"
+  sync_pass
+  [ "$status" -eq 0 ]
+  [ -z "$(push_lines)" ]
+  [ "$(remote_main)" = "$c2" ]
+}
+
+@test "a tip with no verdict yet and a green ancestor: the ancestor is pushed" {
+  local old tip
   commit_file "$A" f
   old="$(git -C "$A" rev-parse HEAD)"
   commit_file "$A" f
   tip="$(git -C "$A" rev-parse HEAD)"
   write_verdict "$old" green
   go_live
+  sync_pass
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = pushed ]
+  [ "$(remote_main)" = "$old" ]
+  [ "$(git -C "$A" rev-parse HEAD)" = "$tip" ]
+}
+
+@test "a green tip is still pushed whole even when an ancestor is green too" {
+  local old tip
+  commit_file "$A" f
+  old="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  tip="$(git -C "$A" rev-parse HEAD)"
+  write_verdict "$old" green
+  write_verdict "$tip" green
+  go_live
+  sync_pass
+  [ "$status" -eq 0 ]
+  [ "$(remote_main)" = "$tip" ]
+}
+
+@test "dry run with a red tip: the log names the range of the green ancestor, and nothing is pushed" {
+  local old c1 tip before
+  old="$(remote_main)"
+  commit_file "$A" f
+  commit_file "$A" f
+  c1="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  tip="$(git -C "$A" rev-parse HEAD)"
+  write_verdict "$c1" green
+  write_verdict "$tip" red
+  before="$(remote_refs)"
+  sync_pass
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = push-dry-run ]
+  [[ "$(rec nix-alpha detail)" == "dry run: would push $old..$c1 (2 commit(s))"* ]]
+  grep -q "dry run: would push $old..$c1 (2 commit(s)) to origin refs/heads/main (the newest green ancestor of tip $tip); nothing pushed" "$STATE/run.log"
+  [ "$(grep -c 'dry run: would push [0-9a-f]\{7,\} change f' "$STATE/run.log")" -eq 2 ]
+  no_push "$before"
+}
+
+@test "no green commit above origin (a green verdict only at or below origin, or red ancestors): no push" {
+  local base c1 tip before
+  base="$(remote_main)"
+  commit_file "$A" f
+  c1="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  tip="$(git -C "$A" rev-parse HEAD)"
+  # green only for the commit origin already has; red for the rest
+  write_verdict "$base" green
+  write_verdict "$c1" red
+  write_verdict "$tip" red
+  go_live
   before="$(remote_refs)"
   sync_pass
   [ "$status" -eq 0 ]
   [ "$(rec nix-alpha outcome)" = ahead ]
+  [[ "$(rec nix-alpha detail)" == *"no ancestor above origin/main is green"* ]]
   no_push "$before"
-  [ "$(remote_main)" != "$old" ]
-  [ "$(remote_main)" != "$tip" ]
+}
+
+@test "an ancestor that is green but not a descendant of origin: withheld, not pushed (the diverged path)" {
+  local seed x stray merge before
+  seed="$(git -C "$A" rev-parse HEAD)"
+  commit_file "$A" f
+  x="$(git -C "$A" rev-parse HEAD)"
+  git -C "$A" push -q origin main
+  rm -f "$TEST_DIR/pre-push.ran"
+  # a side commit forked from the seed (so it does not descend from origin/main), merged in
+  git -C "$A" checkout -q -b side "$seed"
+  echo side >"$A/side"
+  git -C "$A" add side
+  git -C "$A" commit -q -m side
+  stray="$(git -C "$A" rev-parse HEAD)"
+  git -C "$A" checkout -q main
+  git -C "$A" merge -q --no-ff -m merge side
+  merge="$(git -C "$A" rev-parse HEAD)"
+  git -C "$A" branch -q -D side
+  write_verdict "$stray" green
+  write_verdict "$merge" red
+  go_live
+  before="$(remote_refs)"
+  [ "$(remote_main)" = "$x" ]
+  sync_pass
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = ahead ]
+  [[ "$(rec nix-alpha detail)" == *"origin/main is not an ancestor of the green commit $stray"* ]]
+  no_push "$before"
 }
 
 @test "the tip moves while the gates are being checked: not pushed" {

@@ -56,6 +56,8 @@ setup() {
   export XDG_STATE_HOME="$TEST_DIR/state"
   export PG_REPO_RUNNER_CONFIG="$TEST_DIR/config.toml"
   export PG_REPO_RUNNER_LOADAVG=0.50
+  # the one-check-per-hour throttle is off for the suite; its own tests turn it on
+  export PG_REPO_RUNNER_CHECK_INTERVAL=0
   STATE="$XDG_STATE_HOME/pg-repo-runner"
   SLEEPER=""
   make_nix_shim
@@ -224,6 +226,72 @@ hold_lease() {
   [ "$status" -eq 0 ]
   [ "$(nix_runs)" -eq 1 ]
   [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
+}
+
+# ---- the check throttle: at most one finished check per repo per interval ----
+
+@test "throttle: two tips inside an hour run one check; the second is declined (exit 9), no verdict, no nix" {
+  local tip2
+  export PG_REPO_RUNNER_CHECK_INTERVAL=3600
+  verify
+  [ "$status" -eq 0 ]
+  [ "$(nix_runs)" -eq 1 ]
+  commit_in "$WS/nix-alpha"
+  tip2="$(git -C "$WS/nix-alpha" rev-parse HEAD)"
+  verify "nix-alpha@$tip2"
+  [ "$status" -eq 9 ]
+  [ "$(nix_runs)" -eq 1 ]
+  [ ! -e "$(verdict_file nix-alpha "$tip2")" ]
+  grep -q 'busy: a check of nix-alpha finished less than 3600s ago' "$STATE/run.log"
+  assert_no_lease
+  # a repeat inside the window is declined again, never marked superseded or done
+  verify "nix-alpha@$tip2"
+  [ "$status" -eq 9 ]
+  [ ! -e "$(verdict_file nix-alpha "$tip2")" ]
+}
+
+@test "throttle: once the interval has passed the newest tip is checked" {
+  local tip2
+  export PG_REPO_RUNNER_CHECK_INTERVAL=3600
+  verify
+  [ "$status" -eq 0 ]
+  commit_in "$WS/nix-alpha"
+  tip2="$(git -C "$WS/nix-alpha" rev-parse HEAD)"
+  PG_REPO_RUNNER_EPOCH=$(($(date -u +%s) + 3700)) verify "nix-alpha@$tip2"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(verdict_file nix-alpha "$tip2")")" = green ]
+  [ "$(nix_runs)" -eq 2 ]
+}
+
+@test "throttle: a red check throttles too, and the interval is configurable" {
+  local tip2
+  export PG_REPO_RUNNER_CHECK_INTERVAL=3600
+  SHIM_EXIT=1 verify
+  [ "$status" -eq 0 ]
+  commit_in "$WS/nix-alpha"
+  tip2="$(git -C "$WS/nix-alpha" rev-parse HEAD)"
+  verify "nix-alpha@$tip2"
+  [ "$status" -eq 9 ]
+  # the config key drives it when the env override is absent
+  unset PG_REPO_RUNNER_CHECK_INTERVAL
+  sd '\[thresholds\]' $'[thresholds]\ncheck_interval = 10' "$TEST_DIR/config.toml"
+  verify "nix-alpha@$tip2"
+  [ "$status" -eq 9 ]
+  PG_REPO_RUNNER_EPOCH=$(($(date -u +%s) + 20)) verify "nix-alpha@$tip2"
+  [ "$status" -eq 0 ]
+}
+
+@test "throttle: a superseded tip is stored before the throttle is consulted, and does not start the interval" {
+  local old
+  export PG_REPO_RUNNER_CHECK_INTERVAL=3600
+  old="$ALPHA_SHA"
+  commit_in "$WS/nix-alpha"
+  verify "nix-alpha@$old"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(verdict_file nix-alpha "$old")")" = superseded ]
+  verify "nix-alpha@$(git -C "$WS/nix-alpha" rev-parse HEAD)"
+  [ "$status" -eq 0 ]
+  [ "$(nix_runs)" -eq 1 ]
 }
 
 @test "a signal exit is a malfunction, not a red: exit 1, no verdict, and the next dispatch runs again" {

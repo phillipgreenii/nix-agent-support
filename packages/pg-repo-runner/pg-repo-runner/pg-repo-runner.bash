@@ -457,6 +457,35 @@ rr_retry_window() {
   printf '%s' "$v"
 }
 
+# rr_check_interval: the minimum spacing, in seconds, between two finished checks
+# of one repo (PG_REPO_RUNNER_CHECK_INTERVAL, else the config's
+# thresholds.check_interval, else 3600). 0 turns the throttle off.
+rr_check_interval() {
+  local v="${PG_REPO_RUNNER_CHECK_INTERVAL:-}"
+  [[ -n $v ]] || v="$(rr_cfg '.thresholds.check_interval // empty')"
+  [[ $v =~ ^[0-9]+$ ]] || v=3600
+  printf '%s' "$v"
+}
+
+# rr_check_throttle_wait REPO: when a check of REPO finished less than
+# rr_check_interval seconds ago, prints the seconds left and succeeds; otherwise
+# fails. Only green and red verdicts count: a superseded or error verdict is not a
+# check that ran, so it never delays one.
+rr_check_throttle_wait() {
+  local repo="$1" interval last now_e left
+  interval="$(rr_check_interval)"
+  ((interval > 0)) || return 1
+  last="$(rr_verdicts_json "$repo" 2>/dev/null | rr_jq -r '
+    map(select(.kind == "check" and (.result == "green" or .result == "red")
+               and ((.finishedAt // null) | type) == "string")
+        | (.finishedAt | fromdateiso8601? // empty)) | max // empty')" || return 1
+  [[ $last =~ ^[0-9]+$ ]] || return 1
+  now_e="$(rr_epoch)"
+  left=$((last + interval - now_e))
+  ((left > 0)) || return 1
+  printf '%s' "$left"
+}
+
 # rr_verdict_exists REPO SHA KIND: a verdict file is stored for exactly that key.
 rr_verdict_exists() {
   [[ -f $RR_STATE_DIR/verdicts/$1/$2.$3.json ]]
@@ -1046,7 +1075,7 @@ rr_push_audit() {
 # record cannot be written; a withheld, refused or dry-run push is a normal exit.
 rr_push_step() {
   local repo="$1" path="$2" branch="$3" tip="$4" ahead="$5" pre_behind="$6"
-  local vf kill old sibs cur out rc count
+  local vf kill old sibs cur out rc count target stray cand note
 
   # (a) authorization: push is exactly true, and no kill switch
   if ! rr_repo_flag "$repo" push; then
@@ -1059,8 +1088,12 @@ rr_push_step() {
     return
   fi
 
-  # (b) a green check verdict for exactly the tip, which is the current primary tip
+  # (b) a green check verdict, over the locked inputs, for the newest commit of
+  # origin/<primary>..<tip> that has one. That is the tip itself when the tip is green;
+  # otherwise the newest green ancestor that descends from origin/<primary> (ADR 0108
+  # amendment of 2026-11-03). Pushing a commit publishes its ancestors too.
   vf="$RR_STATE_DIR/verdicts/$repo/$tip.check.json"
+  target="$tip"
   if ! rr_verdict_green "$repo" "$tip"; then
     if [[ -f $vf ]] && [[ "$(rr_jq -r '.result' "$vf" 2>/dev/null)" == red ]]; then
       sibs="$(rr_push_siblings_ahead "$repo" | paste -sd, -)"
@@ -1071,11 +1104,33 @@ rr_push_step() {
         rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "blocked, needs sibling push and relock (siblings: $sibs): run pn workspace push"
         return
       fi
-      rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the check verdict for $tip is red"
+    fi
+    old="$(rr_git -C "$path" rev-parse --verify -q "refs/remotes/origin/$branch^{commit}")" || old=""
+    target=""
+    stray=""
+    if [[ -n $old ]]; then
+      while IFS= read -r cand; do
+        [[ -n $cand && $cand != "$tip" ]] || continue
+        rr_verdict_green "$repo" "$cand" || continue
+        if rr_git -C "$path" merge-base --is-ancestor "$old" "$cand"; then
+          target="$cand"
+          break
+        fi
+        [[ -n $stray ]] || stray="$cand"
+      done < <(rr_git -C "$path" rev-list --topo-order "$old..$tip" 2>/dev/null)
+    fi
+    if [[ -z $target ]]; then
+      if [[ -n $stray ]]; then
+        rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "origin/$branch is not an ancestor of the green commit $stray"
+      elif [[ -f $vf ]] && [[ "$(rr_jq -r '.result' "$vf" 2>/dev/null)" == red ]]; then
+        rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "the check verdict for $tip is red, and no ancestor above origin/$branch is green"
+      else
+        rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "no green check verdict for the tip $tip or any ancestor above origin/$branch"
+      fi
       return
     fi
-    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "no green check verdict for the tip $tip"
-    return
+    vf="$RR_STATE_DIR/verdicts/$repo/$target.check.json"
+    rr_log "sync: $repo tip $tip is not green; the newest green ancestor above origin/$branch is $target"
   fi
   cur="$(rr_tip_of "$path" "$branch")" || cur=""
   if [[ $cur != "$tip" ]]; then
@@ -1085,8 +1140,8 @@ rr_push_step() {
 
   # (d) origin/<primary> is an ancestor of the verified sha (the push is a fast-forward)
   old="$(rr_git -C "$path" rev-parse --verify -q "refs/remotes/origin/$branch^{commit}")" || old=""
-  if [[ -z $old ]] || ! rr_git -C "$path" merge-base --is-ancestor "$old" "$tip"; then
-    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "origin/$branch is not an ancestor of $tip"
+  if [[ -z $old ]] || ! rr_git -C "$path" merge-base --is-ancestor "$old" "$target"; then
+    rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "origin/$branch is not an ancestor of $target"
     return
   fi
 
@@ -1101,28 +1156,30 @@ rr_push_step() {
     rr_push_withheld "$repo" "$branch" "$ahead" "$pre_behind" "kill switch present: $kill"
     return
   fi
-  count="$(rr_git -C "$path" rev-list --count "$old..$tip" 2>/dev/null || echo "$ahead")"
+  note=""
+  [[ $target == "$tip" ]] || note=" (the newest green ancestor of tip $tip)"
+  count="$(rr_git -C "$path" rev-list --count "$old..$target" 2>/dev/null || echo "$ahead")"
 
   # dry run (decision 6): the default
   if ! rr_push_live "$repo"; then
     rr_sync_record "$repo" "$branch" push-dry-run 0 "$ahead" "$pre_behind" \
-      "dry run: would push $old..$tip ($count commit(s)) to origin $branch" || return 1
-    rr_log "sync: $repo dry run: would push $old..$tip ($count commit(s)) to origin refs/heads/$branch; nothing pushed"
-    rr_git -C "$path" log --oneline --max-count=50 "$old..$tip" 2>/dev/null |
+      "dry run: would push $old..$target ($count commit(s)) to origin $branch$note" || return 1
+    rr_log "sync: $repo dry run: would push $old..$target ($count commit(s)) to origin refs/heads/$branch$note; nothing pushed"
+    rr_git -C "$path" log --oneline --max-count=50 "$old..$target" 2>/dev/null |
       while IFS= read -r out; do rr_log "sync: $repo dry run: would push $out"; done
     return 0
   fi
 
   # the push
   rc=0
-  out="$(rr_push_exec "$path" "$tip" "$branch" 2>&1)" || rc=$?
+  out="$(rr_push_exec "$path" "$target" "$branch" 2>&1)" || rc=$?
   if ((rc != 0)); then
     rr_sync_record "$repo" "$branch" push-rejected 0 "$ahead" "$pre_behind" \
       "git push exited $rc; not retried this pass: $(tail -n 1 <<<"$out")" || return 1
     rr_log "sync: $repo push refused (exit $rc); not forced, not retried this pass: $(tail -n 1 <<<"$out")"
     return 0
   fi
-  cur="$(rr_git -C "$path" rev-parse --verify -q "refs/remotes/origin/$branch^{commit}")" || cur="$tip"
+  cur="$(rr_git -C "$path" rev-parse --verify -q "refs/remotes/origin/$branch^{commit}")" || cur="$target"
   rr_sync_record "$repo" "$branch" pushed 0 "$ahead" "$pre_behind" "pushed $old..$cur" || return 1
   rr_push_audit "$repo" "$path" "$branch" "$old" "$cur" "$vf" ||
     rr_log "sync: $repo: writing the push audit record failed"

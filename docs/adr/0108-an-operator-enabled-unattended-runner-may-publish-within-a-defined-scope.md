@@ -108,6 +108,22 @@ nix), and the workspace policy that `main` has no branch protection.
    an agent push or `pn workspace push`, read it as that earlier wording. Whether the runner's own
    push gate (decisions 1 to 7) stays is NOT decided by that ruling and needs its own ruling.
 
+   **Amendment, 2026-11-03 (decisions 2 and 3b).** Operator ruling (Phillip, 2026-11-03, handoff on
+   the runner design, verbatim): "use recommended for the remaining"; the recommended option for the
+   cadence decision was "at most one check per repo per hour, plus pushing the newest verified
+   ancestor". Consequently decision 2 reads: `<sha>` is the newest commit on the primary branch with a
+   `green` locked-input `check` verdict that is an ancestor of (or equal to) the primary tip AND a
+   descendant of `origin/<primary>`. Decision 3(b) reads: `<sha>` is that commit, and the tip is
+   re-read right before the push (the pushed sha is never newer than the verdict). A red or
+   unchecked tip no longer blocks the push of a green ancestor; no green commit above
+   `origin/<primary>` means no push, and a green commit that is not a descendant of `origin/<primary>`
+   is not pushed (decision 3d: diverged, nothing is rebased or forced). Every other gate (3a, 3c, 3d,
+   the kill switches, the dry run, the audit record) and decisions 1, 4 to 7 are unchanged. As the
+   Consequences already note, pushing a commit also publishes its ancestors, so a push of an ancestor
+   publishes everything below it. The README push-gate row (b) of `packages/pg-repo-runner` carries
+   the same text, and the runner throttles its checks to one per repo per hour with the exit 9
+   "not now" decline.
+
 9. **The 2026-10-22 PR-branch push ruling is unchanged.** It is cited as precedent for an
    operator-authorized unattended push and is neither widened nor narrowed by this ADR.
 
