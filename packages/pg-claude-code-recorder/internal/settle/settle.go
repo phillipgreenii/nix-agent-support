@@ -603,14 +603,6 @@ func (s *Settler) changedSinceSettle(c *conv) bool {
 	for _, f := range m.Files {
 		byID[f.File] = f
 	}
-	gens, err := s.st.AllGenerations()
-	if err != nil {
-		return false
-	}
-	cur := map[[2]int64]int64{}
-	for _, g := range gens {
-		cur[[2]int64{g.File, int64(g.Gen)}] = g.CopyOffset
-	}
 	for _, f := range c.files {
 		mf, ok := byID[f.ID]
 		if !ok {
@@ -622,7 +614,21 @@ func (s *Settler) changedSinceSettle(c *conv) bool {
 			}
 			continue
 		}
-		if f.CurGen != mf.Gen || cur[[2]int64{f.ID, int64(f.CurGen)}] != mf.Size {
+		if f.CurGen != mf.Gen {
+			return true
+		}
+		// One primary-key read per file: the work is bounded by this
+		// Conversation, not by the size of the generations table.
+		var off int64
+		g, err := s.st.Generation(f.ID, f.CurGen)
+		switch {
+		case err == nil:
+			off = g.CopyOffset
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			return false
+		}
+		if off != mf.Size {
 			return true
 		}
 	}
