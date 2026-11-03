@@ -2137,6 +2137,7 @@
                   }
                   ''
                     export PBE_MARKETPLACE="${escalationSrc}"
+                    export PBE_SPLIT_PROMPT="${./packages/pg-router-handlers/docs/roles/split-triager-prompt.txt}"
                     bats --verbose-run ${./tests/pb-escalation-conformance.bats}
                     touch $out
                   '';

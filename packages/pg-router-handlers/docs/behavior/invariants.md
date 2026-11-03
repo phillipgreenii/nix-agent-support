@@ -243,7 +243,12 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   the stop history, releases a held claim, and removes `needs-split-review` last. If a split fails
   after children exist, the parent fails safe to `human` + `attention` (label removed, claim released) rather than
   being retried. A triage session that hits its own budget is the one stop routed to `human` by `INV-CCH-12`
-  and, additionally, has `needs-split-review` removed; it never re-enters the split path. No part
+  and, additionally, has `needs-split-review` removed; it never re-enters the split path. The one
+  exception to "only the `split` subcommand" (operator ruling, Phillip, 2026-11-03) is a docket-wide
+  SCOPE pattern: the reference prompt has the role file ONE reconcile bead per docket with `bd create`
+  (a bead telling a drain agent to run `plan-decompose` mode `reconcile`), comment its id on the
+  escalated packets and block them on it, then either split as above or just remove
+  `needs-split-review`; no new label, role or `plan-decompose` access exists for it. No part
   of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin
   JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the
   role, its discovery query (`ready --label needs-split-review --exclude-label human`) and the

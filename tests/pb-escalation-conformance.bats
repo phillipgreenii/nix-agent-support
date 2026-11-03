@@ -206,3 +206,33 @@ plan-decompose/agents/phase-plan-verifier.md:1"
   run grep -rn 'needs-reconcile' "$work/mp/pb" "$work/mp/plan-decompose"
   [ "$status" -eq 1 ]
 }
+
+# Operator ruling (Phillip, 2026-11-03): a docket-wide SCOPE pattern is handled by the
+# split-triager FILING one reconcile bead for a drain agent (plan-decompose mode reconcile),
+# with no new role, label or plan-decompose access. PBE_SPLIT_PROMPT is the reference prompt.
+reconcile_prompt_ok() {
+  grep -qF 'plan-decompose skill in mode reconcile' "$1" \
+    && grep -qF 'bd search "plan-decompose reconcile of docket' "$1" \
+    && grep -qF 'RECONCILE-FILED:' "$1" \
+    && ! grep -qE -- '--add-label[ =]needs-reconcile' "$1"
+}
+
+@test "the split-triager prompt files one deduped reconcile bead per docket and comments its id" {
+  : "${PBE_SPLIT_PROMPT:?}"
+  reconcile_prompt_ok "$PBE_SPLIT_PROMPT"
+  grep -qF 'ONE reconcile bead' "$PBE_SPLIT_PROMPT"
+}
+
+@test "mutant: a split-triager prompt that does not dedupe the reconcile bead is flagged" {
+  cp "$PBE_SPLIT_PROMPT" "$work/p.txt"; chmod u+w "$work/p.txt"
+  mutate "$work/p.txt" 'bd search "plan-decompose reconcile of docket' 'bd list "x'
+  run reconcile_prompt_ok "$work/p.txt"
+  [ "$status" -ne 0 ]
+}
+
+@test "mutant: a split-triager prompt that writes a needs-reconcile label is flagged" {
+  cp "$PBE_SPLIT_PROMPT" "$work/p.txt"; chmod u+w "$work/p.txt"
+  printf '%s\n' 'bd update X --add-label needs-reconcile' >> "$work/p.txt"
+  run reconcile_prompt_ok "$work/p.txt"
+  [ "$status" -ne 0 ]
+}
