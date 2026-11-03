@@ -9771,6 +9771,20 @@
                           toolSets = [ "hooks" ];
                         };
                       };
+                      # splittriage: the close-or-split-triage
+                      # completion and the `split-triage` precheck render into this
+                      # role's own JSON only.
+                      splittriage = {
+                        handler = ccpoolHandler;
+                        ccpool = {
+                          actor = "splittriage-actor";
+                          completion = "close-or-split-triage";
+                          onFailure = "add-human";
+                          onDispatchFail = "unclaim";
+                          promptBody = "split triage prompt";
+                          precheck = "split-triage";
+                        };
+                      };
                     };
                     # A consumer-defined set (bead pg2-cwn44): defining one must not
                     # drop the module's built-in "go" and "hooks" sets (mkDefault
@@ -10907,6 +10921,8 @@
                         [ "$(jq -r .ccpool.precheck "$ownPoolRolesJson/drain.json")" = ready ]
                         [ "$(jq -r .ccpool.completion "$ownPoolRolesJson/triage.json")" = close-or-triage ]
                         [ "$(jq -r .ccpool.precheck "$ownPoolRolesJson/triage.json")" = triage ]
+                        [ "$(jq -r .ccpool.completion "$ownPoolRolesJson/splittriage.json")" = close-or-split-triage ]
+                        [ "$(jq -r .ccpool.precheck "$ownPoolRolesJson/splittriage.json")" = split-triage ]
                         jq -e '.ccpool | has("precheck") | not' "$twoRolesJson/feedback.json" >/dev/null
                         jq -e '.ccpool | has("precheck") | not' "$ownPoolRolesJson/review.json" >/dev/null
 

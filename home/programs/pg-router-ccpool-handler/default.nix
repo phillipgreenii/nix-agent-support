@@ -1320,6 +1320,7 @@ let
                     "review"
                     "ready"
                     "triage"
+                    "split-triage"
                   ]
                 );
                 default = null;
@@ -1334,7 +1335,9 @@ let
                   `close-or-triage` role, which works a bead it does not claim: the
                   bead must still match the role's own discovery query, so it is
                   declined when it is not open, is deferred or blocked, carries
-                  `human`, or no longer carries `escalated`; bead pg2-p9lcg).
+                  `human`, or no longer carries `escalated`; bead pg2-p9lcg) or
+                  `split-triage` (the same check for a `close-or-split-triage`
+                  role, keyed on `needs-split-review`).
                   The handler that reads the rendered role file MUST be deployed
                   first, since it rejects a precheck value it does not know.
                   Default `null`

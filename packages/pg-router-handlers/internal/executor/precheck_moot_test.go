@@ -106,6 +106,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 	}
 	for reason, want := range map[string]bool{
 		SkipBeadClosed: true, SkipPRMerged: true, SkipBeadNotEscalated: true, SkipBeadHumanEscalated: true, SkipBeadHumanStripFailed: false,
+		SkipBeadNotSplitReview: true, SkipBeadHumanSplitReview: true,
 		SkipPendingReview: false, SkipBeadHuman: false, SkipBeadNotGroomed: false, SkipBeadBlocked: false,
 		SkipBeadDeferred: false, SkipBeadClaimed: false, SkipBeadNotOpen: false, ReasonConnectorUnavailable: false,
 		"some-future-reason": false,

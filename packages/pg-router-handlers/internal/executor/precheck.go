@@ -73,6 +73,16 @@ const SkipBeadNotEscalated = "skipped-bead-not-escalated"
 // keep declining.
 const SkipBeadHumanEscalated = "skipped-bead-human-escalated"
 
+// SkipBeadNotSplitReview is the "split-triage" precheck's MOOT reason for a bead
+// that no longer carries needs-split-review (a split outcome was already
+// recorded, or the bead was handed to a person).
+const SkipBeadNotSplitReview = "skipped-bead-not-split-review"
+
+// SkipBeadHumanSplitReview is the "split-triage" precheck's MOOT reason for a
+// bead that carries needs-split-review AND a HUMAN_LABELS label: the precheck
+// commented on the bead and stripped needs-split-review.
+const SkipBeadHumanSplitReview = "skipped-bead-human-split-review"
+
 // SkipBeadHumanStripFailed is the RETRYABLE decline when the comment or the
 // escalated strip of the SkipBeadHumanEscalated disposition could not be
 // written: the event is re-offered and the write is tried again.
@@ -117,7 +127,8 @@ const reviewRoleName = "review"
 // otherwise not-open bead, and an unavailable connector.
 func Moot(reason string) bool {
 	switch reason {
-	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated, SkipBeadHumanEscalated:
+	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated, SkipBeadHumanEscalated,
+		SkipBeadNotSplitReview, SkipBeadHumanSplitReview:
 		return true
 	}
 	return false
@@ -314,6 +325,8 @@ func Precheck(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issu
 		return PrecheckReady(d, deps, iss)
 	case roles.PrecheckTriage:
 		return PrecheckTriage(ctx, d, deps, iss)
+	case roles.PrecheckSplitTriage:
+		return PrecheckSplitTriage(ctx, d, deps, iss)
 	case roles.PrecheckReview:
 		return precheckReview(ctx, d, deps, iss)
 	}
@@ -419,6 +432,34 @@ const escalatedLabel = complete.EscalatedLabel
 // decline writes nothing to the bead; only the human-and-escalated disposition
 // (above) writes.
 func PrecheckTriage(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	return precheckQueue(ctx, d, deps, iss, queueSpec{
+		label: escalatedLabel, who: "Escalation triager", queue: "escalation queue",
+		notLabel: SkipBeadNotEscalated, humanMoot: SkipBeadHumanEscalated,
+	})
+}
+
+// PrecheckSplitTriage is PrecheckTriage for the split triager:
+// the same checks with needs-split-review in place of escalated (its discovery
+// query is `ready --label needs-split-review --exclude-label human`). A bead
+// carrying needs-split-review AND a HUMAN_LABELS label gets a comment, then loses
+// needs-split-review (its human label stays), and completes as the MOOT
+// SkipBeadHumanSplitReview; a bead without needs-split-review is the MOOT
+// SkipBeadNotSplitReview.
+func PrecheckSplitTriage(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	return precheckQueue(ctx, d, deps, iss, queueSpec{
+		label: beads.LabelNeedsSplitReview, who: "Split triager", queue: "split-review queue",
+		notLabel: SkipBeadNotSplitReview, humanMoot: SkipBeadHumanSplitReview,
+	})
+}
+
+// queueSpec parameterises precheckQueue by the label the role's discovery query
+// selects on.
+type queueSpec struct {
+	label, who, queue   string
+	notLabel, humanMoot string
+}
+
+func precheckQueue(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue, q queueSpec) (Skip, bool) {
 	if d.Role.CCPool == nil || iss == nil {
 		return Skip{}, false
 	}
@@ -435,8 +476,8 @@ func PrecheckTriage(ctx context.Context, d DispatchContext, deps Deps, iss *bead
 	// lacks escalated is moot whatever else it carries. A human bead without
 	// escalated was handed to a person (hand-to-human), and a head-of-queue event
 	// declined for it jammed the serial FIFO (bead pg2-4u0d0u).
-	if !iss.HasLabel(escalatedLabel) {
-		return decline(SkipBeadNotEscalated, "the bead no longer carries the "+escalatedLabel+" label")
+	if !iss.HasLabel(q.label) {
+		return decline(q.notLabel, "the bead no longer carries the "+q.label+" label")
 	}
 	// A bead carrying escalated AND a human label must never reach a triager
 	// (LV-5). Handle it gracefully instead of declining it forever (bead
@@ -446,18 +487,18 @@ func PrecheckTriage(ctx context.Context, d DispatchContext, deps Deps, iss *bead
 			continue
 		}
 		if deps.BD == nil {
-			return retry(SkipBeadHumanStripFailed, "the bead carries "+escalatedLabel+" and "+l+" but no bd runner is available to strip it")
+			return retry(SkipBeadHumanStripFailed, "the bead carries "+q.label+" and "+l+" but no bd runner is available to strip it")
 		}
-		note := "Escalation triager precheck: this bead carried both the " + escalatedLabel + " and " + l +
-			" labels, which the escalation queue must never hold (a person is already the blocker). " +
-			"Removed " + escalatedLabel + " and launched no session; the bead stays with its human label."
+		note := q.who + " precheck: this bead carried both the " + q.label + " and " + l +
+			" labels, which the " + q.queue + " must never hold (a person is already the blocker). " +
+			"Removed " + q.label + " and launched no session; the bead stays with its human label."
 		if err := beads.Comment(ctx, deps.BD, iss.ID, note); err != nil {
 			return retry(SkipBeadHumanStripFailed, err.Error())
 		}
-		if err := beads.RemoveLabel(ctx, deps.BD, iss.ID, escalatedLabel); err != nil {
+		if err := beads.RemoveLabel(ctx, deps.BD, iss.ID, q.label); err != nil {
 			return retry(SkipBeadHumanStripFailed, err.Error())
 		}
-		return decline(SkipBeadHumanEscalated, "the bead carried "+escalatedLabel+" and "+l+"; commented and removed "+escalatedLabel)
+		return decline(q.humanMoot, "the bead carried "+q.label+" and "+l+"; commented and removed "+q.label)
 	}
 	switch iss.Status {
 	case "open":

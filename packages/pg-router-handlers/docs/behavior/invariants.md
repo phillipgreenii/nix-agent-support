@@ -252,7 +252,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin
   JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the
   role, its discovery query (`ready --label needs-split-review --exclude-label human`) and the
-  `allowedTools` grant for the `split` subcommand are wired in the deployment config.
+  `allowedTools` grant for the `split` subcommand are wired in the deployment config. The role
+  opts in to the `split-triage` dispatch precheck of `INV-CCH-22`, so a moot or
+  human-labelled bead launches no session.
 - **`INV-CCH-14`** <!-- uuid: 9f2a7d86-926a-41ac-8c26-851e459c40b0 --> — when the daemon shuts down (this module's `preShutdown` hook), the handler
   MUST SPARE every session that is actively working: a session in `starting`, `ready`, or
   `working` is left alive, and its worktree and anchor branch are left untouched, even if its bead
@@ -537,7 +539,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   when the check says no (the one exception: the triage check's comment and `escalated` strip of a
   bead carrying `escalated` and a human label, rule (d) below). The check is chosen by the role's `precheck` setting:
   `review` (also the default for the role named `review`, so that role is unchanged), `ready` or
-  `triage`; a role with none of them is never prechecked. What a "no" comes to depends on whether
+  `triage` or `split-triage`; a role with none of them is never prechecked. What a "no" comes to depends on whether
   the dispatch is MOOT, that is, nothing it asks for can ever need doing:
   - **A moot outcome is accepted and completed as skipped, never declined.** The handler accepts
     the event, does nothing, and replies with an inline outcome that also carries the reason as the
@@ -552,7 +554,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     that carries `human` but not `escalated`, which was handed to a person through hand-to-human
     and leaves no triager work, bead `pg2-4u0d0u`) and the triage check's bead that carries
     `escalated` together with a human label, after the check commented and removed `escalated`
-    (`skipped-bead-human-escalated`, bead `pg2-n7pufu`). The router counts
+    (`skipped-bead-human-escalated`, bead `pg2-n7pufu`); the `split-triage` check adds the two
+    analogues, `skipped-bead-not-split-review` and `skipped-bead-human-split-review`
+    (below). The router counts
     the completion on its own counter (`pg_router_skipped_total`, by type, role and reason) and
     NOT as throughput or as role progress, so a stream of them cannot make a stuck queue look
     like it is progressing (`pg-router-queue-stalled`).
@@ -650,6 +654,30 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     role config that names this value is read only by a handler that knows it (an unknown
     precheck value is rejected at load), so the handler MUST be deployed before a role config
     names `triage`.
+
+  - **`split-triage`** (a `close-or-split-triage` role, the split triager of `INV-CCH-13`, which
+    works a bead it does not claim). **Decision** (2026-11-02): the split
+    triager MUST get a precheck, and it is the `triage` check parameterised by the label, because
+    its discovery query (`ready --label needs-split-review --exclude-label human`) has the same
+    shape as the escalation triager's and has the same failure: with no precheck, a `removed`
+    change, or an event for a bead that is closed, handed to a person (`human`) or no longer
+    carrying `needs-split-review` (the split path already recorded its outcome), launches a full
+    session, and a bead carrying `needs-split-review` AND a human label (which the query never
+    lists) would launch one too. The check is `triage` with `needs-split-review` in place of
+    `escalated`, in the same order: (a) `closed` is MOOT (`skipped-bead-closed`); (b) no
+    `needs-split-review` is MOOT (`skipped-bead-not-split-review`, whatever the status and other
+    labels, so a bead handed to a person by `split unsplittable` is settled, not declined); (c)
+    `needs-split-review` together with any `HUMAN_LABELS` label (operator direction, Phillip,
+    2026-11-02, verbatim: "if an escalation role is given a bead which has human, it should
+    remove escalation, add a note/comment saying what they did and then stop with that bead"): a
+    bead comment saying what was done, THEN removal of `needs-split-review` only (a human label
+    is already present, so LV-4 holds and the bead keeps it), completed as skipped (MOOT,
+    `skipped-bead-human-split-review`, no session); a failed write declines retryably
+    (`skipped-bead-human-strip-failed`); (d) not `open` (`skipped-bead-not-open`, or
+    `skipped-bead-deferred` / `skipped-bead-blocked`), a future deferral date or an open `blocks`
+    dependency declines. Who holds the bead is not checked. The role config names it with
+    `precheck = "split-triage"` (rendered as `ccpool.precheck`), and, as for `triage`, the handler
+    MUST be deployed before a role config names the value.
 
   A role with `ready` prechecking narrows, but cannot close, the window in which a bead is taken
   or parked between the check and the worker's own claim; a peer winning that claim is handled by

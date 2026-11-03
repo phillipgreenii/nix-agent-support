@@ -598,6 +598,7 @@ func TestDecodeRole_precheckAndCloseOrRelease(t *testing.T) {
 		{"ready", "close-or-release", `,"precheck":"ready"`, roles.PrecheckReady, ""},
 		{"review", "close-or-handback", `,"precheck":"review"`, roles.PrecheckReview, ""},
 		{"triage", "close-or-triage", `,"precheck":"triage"`, roles.PrecheckTriage, ""},
+		{"split-triage", "close-or-split-triage", `,"precheck":"split-triage"`, roles.PrecheckSplitTriage, ""},
 		{"empty", "close-only", `,"precheck":""`, roles.PrecheckNone, ""},
 		{"unknown value", "close-or-release", `,"precheck":"bogus"`, "", "invalid precheck"},
 		{"unknown completion", "close-or-bogus", "", "", "invalid completion"},

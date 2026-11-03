@@ -119,7 +119,7 @@ type RoleFile struct {
 		// (rejected at load).
 		Model string `json:"model"`
 		// Precheck (bead pg2-nk6th.3, INV-CCH-22): opts the role in to a dispatch
-		// precheck, "review", "ready" or "triage"; see roles.CCPoolConfig.Precheck. Absent
+		// precheck, "review", "ready", "triage" or "split-triage"; see roles.CCPoolConfig.Precheck. Absent
 		// or "" => the historical behavior.
 		Precheck roles.Precheck `json:"precheck"`
 	} `json:"ccpool,omitempty"`

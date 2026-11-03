@@ -61,15 +61,19 @@ const (
 	// the role's own discovery query (open, undeferred, unblocked, labelled
 	// escalated, not for a human). Nothing about the assignee is checked.
 	PrecheckTriage Precheck = "triage"
+	// PrecheckSplitTriage is the precheck for a close-or-split-triage role (the
+	// split triager), which works a bead it does NOT claim: the same check as
+	// PrecheckTriage with the needs-split-review label in place of escalated.
+	PrecheckSplitTriage Precheck = "split-triage"
 )
 
 func (p *Precheck) UnmarshalText(b []byte) error {
 	switch Precheck(b) {
-	case PrecheckNone, PrecheckReview, PrecheckReady, PrecheckTriage:
+	case PrecheckNone, PrecheckReview, PrecheckReady, PrecheckTriage, PrecheckSplitTriage:
 		*p = Precheck(b)
 		return nil
 	}
-	return fmt.Errorf("invalid precheck %q (valid: review, ready, triage, or empty for none)", b)
+	return fmt.Errorf("invalid precheck %q (valid: review, ready, triage, split-triage, or empty for none)", b)
 }
 
 // FailureAction is what to do to the bead when a dispatch is flagged.
