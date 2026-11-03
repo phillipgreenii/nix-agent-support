@@ -35,6 +35,13 @@ mkGoApp {
   # third-party deps; claude-transcript is intentionally absent from it.
   gomod2nixToml = ./gomod2nix.toml;
 
+  # cmd/ccpool/main.go declares `var version = "dev"` in LOWERCASE, but mkGoApp's
+  # default ldflag target is capital-V `main.Version`; without this override the
+  # linker silently drops the symbol and `ccpool version` reports "dev". Same trap
+  # and fix as packages/pg-router/default.nix; guarded by the
+  # `test-ccpool-version-stamped` flake check.
+  versionPath = "main.version";
+
   nativeBuildInputs = [ makeWrapper ];
 
   # Only matters when this package's check phase runs. repo-base's mkGoApp

@@ -36,6 +36,13 @@ mkGoApp {
 
   gomod2nixToml = ./gomod2nix.toml;
 
+  # Both cmd/ binaries declare `var version = "dev"` in LOWERCASE, but mkGoApp's
+  # default ldflag target is capital-V `main.Version`; without this override the
+  # linker silently drops the symbol and --version reports "dev". Same trap and
+  # fix as packages/pg-router/default.nix; guarded by the
+  # `test-pg-router-handler-ccpool-version-stamped` flake check.
+  versionPath = "main.version";
+
   # git on PATH for the moved ccpool/watchdog/beads packages' real-git
   # fixture tests (mirrors pg-router's own default.nix nativeCheckInputs).
   nativeCheckInputs = [ pkgs.git ];

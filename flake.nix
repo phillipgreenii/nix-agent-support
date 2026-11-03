@@ -8817,6 +8817,36 @@
                 esac
               '';
 
+              # Regression guard that the ccpool CLI reports its stamped version
+              # (versionPath = "main.version" in packages/ccpool/default.nix; its
+              # lowercase `var version` is missed by mkGoApp's default main.Version).
+              # ccpool has no --version flag; the `version` subcommand prints it.
+              test-ccpool-version-stamped = pkgs.runCommand "ccpool-version-stamped" { } ''
+                v=$(${pkgs.ccpool}/bin/ccpool version)
+                case "$v" in
+                  "0.0.0-"????????) touch "$out" ;;
+                  *)
+                    echo "ccpool version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
+                    exit 1
+                    ;;
+                esac
+              '';
+
+              # Same guard for the pg-router-handler-ccpool binary (versionPath in
+              # packages/pg-router-handlers/default.nix).
+              test-pg-router-handler-ccpool-version-stamped =
+                pkgs.runCommand "pg-router-handler-ccpool-version-stamped" { }
+                  ''
+                    v=$(${pkgs.pg-router-ccpool-handler}/bin/pg-router-handler-ccpool --version)
+                    case "$v" in
+                      "0.0.0-"????????) touch "$out" ;;
+                      *)
+                        echo "pg-router-handler-ccpool version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
+                        exit 1
+                        ;;
+                    esac
+                  '';
+
               # Regression guard that the beads-exporter binary's version string is
               # stamped by the build-time ldflag (mkGoApp's default versionPath
               # main.Version): `0.0.0-<srcdigest8>`, bare, per phillipg-nix-repo-base
