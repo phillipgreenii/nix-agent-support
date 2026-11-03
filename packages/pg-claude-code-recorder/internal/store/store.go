@@ -402,7 +402,10 @@ func (s *Store) Close() error {
 	}
 	if s.wdb != nil {
 		// Checkpoint so a reopen starts from a small WAL.
+		start := time.Now()
+		s.obs.Event(obs.EvWALTruncateStart)
 		_, _ = s.wdb.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		s.obs.Event(obs.EvWALTruncateDone, "duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 	}
 	s.closeDBs()
 	return first

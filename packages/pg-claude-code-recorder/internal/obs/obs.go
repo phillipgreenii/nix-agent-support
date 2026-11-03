@@ -81,6 +81,31 @@ const (
 	EvSettleCrashRecovery = "settle_recovered_on_start"
 )
 
+// Metric and event names of the background loops. Durations are in SECONDS in
+// the metrics and in MILLISECONDS (duration_ms) in the log events.
+// conversations_by_stage is as of the last settle tick (up to 60 s old).
+const (
+	MSettleTickDuration      = "settle_tick_duration_seconds"
+	MRefreshGaugesDuration   = "refresh_gauges_duration_seconds"
+	MLoopRuns                = "loop_runs_total"
+	MSettleTickExamined      = "settle_tick_examined_total"
+	MSettleTickTransitions   = "settle_tick_transitions_total"
+	MSettleTickLastDuration  = "settle_tick_last_duration_seconds"
+	MSettleTickLastTimestamp = "settle_tick_last_timestamp_seconds"
+	EvSettleTick             = "settle_tick"
+	EvWALTruncateStart       = "wal_truncate_start"
+	EvWALTruncateDone        = "wal_truncate_done"
+)
+
+// Loop and outcome label values of loop_runs_total.
+const (
+	LoopSettleTick    = "settle_tick"
+	LoopRefreshGauges = "refresh_gauges"
+	LoopWALCheckpoint = "wal_checkpoint"
+	OutcomeOK         = "ok"
+	OutcomeError      = "error"
+)
+
 // Metric and event names of removal, quarantine, extract and doctor.
 const (
 	MQuarantineFiles      = "quarantine_files"
@@ -119,6 +144,10 @@ var (
 
 // LagBuckets are the upper bounds in seconds of the copy-lag histogram.
 var LagBuckets = []float64{0.1, 0.5, 1, 5, 30, 300}
+
+// LoopBuckets are the upper bounds in seconds of the background-loop duration
+// histograms; 60 s is the settle tick interval, so it has its own edge.
+var LoopBuckets = []float64{0.01, 0.05, 0.25, 1, 5, 15, 30, 60, 120, 300, 600, 1800}
 
 // RequestBuckets are the upper bounds in seconds of the query and feed
 // histograms; WaitBuckets those of the wait histogram.
@@ -220,10 +249,26 @@ func (o *Obs) RegisterStandard() {
 			o.Reg.Set(g, nil, 0)
 		}
 	}
+	for _, l := range []string{LoopSettleTick, LoopRefreshGauges} {
+		for _, out := range []string{OutcomeOK, OutcomeError} {
+			o.Reg.Add(MLoopRuns, map[string]string{"loop": l, "outcome": out}, 0)
+		}
+	}
+	o.Reg.Add(MSettleTickExamined, nil, 0)
+	o.Reg.Add(MSettleTickTransitions, nil, 0)
+	o.Reg.Set(MSettleTickLastDuration, nil, 0)
+	o.Reg.Set(MSettleTickLastTimestamp, nil, 0)
 	for _, h := range []struct {
 		name   string
 		bounds []float64
-	}{{MCopyLagHistogram, LagBuckets}, {MQueryDuration, RequestBuckets}, {MFeedDuration, RequestBuckets}, {MWaitDuration, WaitBuckets}} {
+	}{
+		{MCopyLagHistogram, LagBuckets},
+		{MQueryDuration, RequestBuckets},
+		{MFeedDuration, RequestBuckets},
+		{MWaitDuration, WaitBuckets},
+		{MSettleTickDuration, LoopBuckets},
+		{MRefreshGaugesDuration, LoopBuckets},
+	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}
 }

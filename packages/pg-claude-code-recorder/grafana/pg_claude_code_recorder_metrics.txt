@@ -2,7 +2,8 @@
 # phase 7c). One line per series "<name> <type> <labels>", every name carrying the prefix
 # pg_claude_code_recorder_ in the Prometheus exposition; a histogram is listed once under its base
 # name (its _bucket, _sum and _count series are implied). Labels are bounded and enumerated; a
-# per-file or per-session label is forbidden. check-signals-registration.sh compares this file with
+# per-file or per-session label is forbidden. Loop durations are in SECONDS in the metrics and in
+# MILLISECONDS (duration_ms) in the matching log events. check-signals-registration.sh compares this file with
 # the M* constants of internal/obs/obs.go and internal/parser/parser.go, so a metric added in Go
 # without a line here (or the reverse) fails the flake check
 # test-pg-claude-code-recorder-signals-registration.
@@ -13,6 +14,9 @@
 #   reason (skipped_files_total)   quarantine_unavailable holder_found write_after_rename file_replaced
 #                                  restore_conflict live_process registry_names_session no_archive unlink_failed
 #   stage                          live quiet held settled removal_pending removed
+#                                  (conversations_by_stage is as of the last settle tick, up to 60 s old)
+#   loop (loop_runs_total)         settle_tick refresh_gauges wal_checkpoint
+#   outcome (loop_runs_total)      ok error
 #   state (control_inbox_state)    present gone never_loaded
 #   outcome (end_reason_source_files_total)  ingested removed invalid
 #   verb (control_requests_total)  submit interrupt run read ping other
@@ -69,3 +73,10 @@ pg_claude_code_recorder_parse_lag_seconds gauge -
 pg_claude_code_recorder_parse_lag_bytes gauge -
 pg_claude_code_recorder_parse_progress gauge -
 pg_claude_code_recorder_unknown_kinds gauge -
+pg_claude_code_recorder_settle_tick_duration_seconds histogram -
+pg_claude_code_recorder_refresh_gauges_duration_seconds histogram -
+pg_claude_code_recorder_loop_runs_total counter loop,outcome
+pg_claude_code_recorder_settle_tick_examined_total counter -
+pg_claude_code_recorder_settle_tick_transitions_total counter -
+pg_claude_code_recorder_settle_tick_last_duration_seconds gauge -
+pg_claude_code_recorder_settle_tick_last_timestamp_seconds gauge -

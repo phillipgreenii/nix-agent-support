@@ -265,7 +265,7 @@ func (e *env) seed(n int, age time.Duration) string {
 
 func (e *env) tick() {
 	e.t.Helper()
-	if err := e.sett.Tick(); err != nil {
+	if _, err := e.sett.Tick(); err != nil {
 		e.t.Fatal(err)
 	}
 }

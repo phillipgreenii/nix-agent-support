@@ -2,6 +2,7 @@ package settle
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -317,7 +318,7 @@ func TestCrashPointsConverge(t *testing.T) {
 			content := e.seed(6, 48*time.Hour)
 			file := e.fileID()
 			disarm := faults.ArmPanic(point)
-			crashed := faults.Recover(func() { _ = e.sett.Tick() })
+			crashed := faults.Recover(func() { _, _ = e.sett.Tick() })
 			disarm()
 			if !crashed {
 				t.Fatalf("%s not reached", point)
@@ -503,5 +504,43 @@ func TestRegistryVersionsGoIntoTheSessionArchive(t *testing.T) {
 	}
 	if _, err := os.Stat(e.path("sessions/4242.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// seedSession writes n lines for one session id, quiet since age, and ingests it.
+func (e *env) seedSession(id string, n int, age time.Duration) {
+	e.t.Helper()
+	var s string
+	for i := 1; i <= n; i++ {
+		s += strings.ReplaceAll(line(i), sess, id)
+	}
+	rel := "projects/example-project/" + id + ".jsonl"
+	e.write(rel, s, e.clk.Now().Add(-age), false)
+	e.ingest(rel)
+	e.parseAll()
+}
+
+func TestTickReturnsStats(t *testing.T) {
+	e := newEnv(t, false)
+	id := func(n int) string { return fmt.Sprintf("0a1b2c3d-0000-4000-8000-00000000010%d", n) }
+	for i := 1; i <= 3; i++ {
+		e.seedSession(id(i), 4, 48*time.Hour)
+	}
+	first, err := e.sett.Tick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (TickStats{Examined: 3, SettledNow: 3, Transitions: 3}); first != want {
+		t.Fatalf("first tick %+v, want %+v", first, want)
+	}
+	e.seedSession(id(4), 4, time.Minute)
+	e.live[id(4)] = true
+	e.seedSession(id(5), 4, 48*time.Hour)
+	got, err := e.sett.Tick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (TickStats{Examined: 5, Unchanged: 3, SettledNow: 1, Transitions: 1}); got != want {
+		t.Fatalf("second tick %+v, want %+v", got, want)
 	}
 }

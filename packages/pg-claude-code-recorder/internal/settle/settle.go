@@ -308,20 +308,36 @@ type Outcome struct {
 	Skipped  string // why nothing was evaluated, when nothing was
 }
 
+// TickStats is what one Tick did, for the loop's metrics and log line.
+type TickStats struct {
+	Examined    int // conversations evaluated or skipped (every group)
+	Unchanged   int // already settled and unchanged
+	SettledNow  int // settled by this tick
+	Transitions int // stage changes made by this tick
+}
+
 // Tick runs one pass: it evaluates every Conversation that is not live, moves
 // the ones whose Process came back to Live, and refreshes the gauges.
-func (s *Settler) Tick() error {
+func (s *Settler) Tick() (TickStats, error) {
 	s.run.Lock()
 	defer s.run.Unlock()
+	var stats TickStats
 	now := s.cfg.Clock.Now()
 	s.checkLow()
 	live, err := s.cfg.Live()
 	if err != nil {
-		return err
+		return stats, err
 	}
 	groups, err := s.groups()
 	if err != nil {
-		return err
+		return stats, err
+	}
+	stats.Examined = len(groups)
+	before := map[string]string{}
+	if rows, err := s.st.Stages(); err == nil {
+		for _, r := range rows {
+			before[r.Session] = r.Stage
+		}
 	}
 	sessions := make([]string, 0, len(groups))
 	for k := range groups {
@@ -330,9 +346,11 @@ func (s *Settler) Tick() error {
 	sort.Strings(sessions)
 	var first error
 	for _, session := range sessions {
-		if _, err := s.evaluate(groups[session], live[session], now, false); err != nil && first == nil {
+		out, err := s.evaluate(groups[session], live[session], now, false)
+		if err != nil && first == nil {
 			first = fmt.Errorf("settle %s: %w", session, err)
 		}
+		stats.add(out, before[session])
 	}
 	if s.cfg.RemoveEnable {
 		if _, err := s.removeLocked(RemoveOptions{}, now); err != nil && first == nil {
@@ -344,7 +362,26 @@ func (s *Settler) Tick() error {
 	}
 	// A persisted stage whose Conversation has no files any more is dropped from view.
 	s.refresh(groups, live, now)
-	return first
+	return stats, first
+}
+
+// add folds one evaluation Outcome into the stats. prior is the persisted
+// stage before the tick ("" when the Conversation had no row, which reads as
+// quiet or live).
+func (t *TickStats) add(out Outcome, prior string) {
+	settledNow := out.Stage == StageSettled && out.Skipped == ""
+	switch {
+	case settledNow:
+		t.SettledNow++
+	case out.Stage == StageSettled && out.Skipped == "settled":
+		t.Unchanged++
+	}
+	if prior == "" && (out.Stage == StageQuiet || out.Stage == StageLive) {
+		return
+	}
+	if out.Stage != prior || settledNow {
+		t.Transitions++
+	}
 }
 
 // Recheck is the on-demand re-check entry point (held --retry): it evaluates

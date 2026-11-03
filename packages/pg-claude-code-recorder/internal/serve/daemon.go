@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -398,10 +399,45 @@ func (d *Daemon) settleLoop() {
 		case <-d.stop:
 			return
 		case <-t.C:
-			if err := d.sett.Tick(); err != nil {
-				d.obs.Log.Warn("settle_pass_failed", "err", err.Error())
-			}
+			d.runTick(d.sett.Tick)
 		}
+	}
+}
+
+// settleTickSlow is the duration above which a settle tick logs a warning (the
+// tick interval).
+const settleTickSlow = time.Minute
+
+// runTick runs one settle pass through step and is the only place that records
+// the tick's timing and outcome: the duration histogram, the run counter, the
+// work counters, the last-duration and last-timestamp gauges, and one
+// settle_tick event (duration_ms in milliseconds; the metrics are in seconds).
+func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
+	start := d.clock.Now()
+	stats, err := step()
+	end := d.clock.Now()
+	dur := end.Sub(start)
+	outcome := obs.OutcomeOK
+	if err != nil {
+		outcome = obs.OutcomeError
+		d.obs.Log.Warn("settle_pass_failed", "err", err.Error())
+	}
+	reg := d.obs.Reg
+	reg.Observe(obs.MSettleTickDuration, dur.Seconds())
+	reg.Add(obs.MLoopRuns, map[string]string{"loop": obs.LoopSettleTick, "outcome": outcome}, 1)
+	reg.Add(obs.MSettleTickExamined, nil, float64(stats.Examined))
+	reg.Add(obs.MSettleTickTransitions, nil, float64(stats.Transitions))
+	reg.Set(obs.MSettleTickLastDuration, nil, dur.Seconds())
+	reg.Set(obs.MSettleTickLastTimestamp, nil, float64(end.UnixNano())/1e9)
+	d.obs.Event(obs.EvSettleTick,
+		"outcome", outcome,
+		"duration_ms", strconv.FormatInt(dur.Milliseconds(), 10),
+		"examined", strconv.Itoa(stats.Examined),
+		"unchanged", strconv.Itoa(stats.Unchanged),
+		"settled_now", strconv.Itoa(stats.SettledNow),
+		"transitions", strconv.Itoa(stats.Transitions))
+	if dur > settleTickSlow {
+		d.obs.Log.Warn("settle_tick_slow", "duration_ms", dur.Milliseconds())
 	}
 }
 
@@ -444,6 +480,11 @@ func (d *Daemon) refreshLoop() {
 // state directory's free and used bytes. Used bytes walk the directory, so they
 // are recomputed at most once a minute.
 func (d *Daemon) refreshGauges() {
+	start := time.Now()
+	defer func() {
+		d.obs.Reg.Observe(obs.MRefreshGaugesDuration, time.Since(start).Seconds())
+		d.obs.Reg.Add(obs.MLoopRuns, map[string]string{"loop": obs.LoopRefreshGauges, "outcome": obs.OutcomeOK}, 1)
+	}()
 	d.prs.UpdateGauges()
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)

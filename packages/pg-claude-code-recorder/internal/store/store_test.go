@@ -439,3 +439,31 @@ func TestDefaultDriverNameStillWorks(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	seed(t, s)
 }
+
+func TestCloseLogsWALTruncateStartThenDone(t *testing.T) {
+	o := obs.New(nil)
+	s, err := Open(t.TempDir(), Options{Obs: o})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, s) // writes through the WAL
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	var done map[string]string
+	for _, e := range o.Events() {
+		if e.Name == obs.EvWALTruncateStart || e.Name == obs.EvWALTruncateDone {
+			names = append(names, e.Name)
+			if e.Name == obs.EvWALTruncateDone {
+				done = e.Attrs
+			}
+		}
+	}
+	if len(names) != 2 || names[0] != obs.EvWALTruncateStart || names[1] != obs.EvWALTruncateDone {
+		t.Fatalf("events %v", names)
+	}
+	if _, ok := done["duration_ms"]; !ok {
+		t.Fatalf("wal_truncate_done has no duration_ms: %v", done)
+	}
+}
