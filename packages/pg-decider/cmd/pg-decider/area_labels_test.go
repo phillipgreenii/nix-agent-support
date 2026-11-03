@@ -95,7 +95,7 @@ func TestApplyWritesConfiguredAreaLabelsOnTheAnchorCreate(t *testing.T) {
 			create = r.args
 		}
 	}
-	if !strings.Contains(create, "--labels client,co-owned,feature-branch,retry-area") {
+	if !strings.Contains(create, "--labels client,co-owned,feature-branch,minted-by:pg-decider,retry-area") {
 		t.Fatalf("create exec = %q", create)
 	}
 }

@@ -66,7 +66,7 @@ func TestCreateWithAbsentDedupKeyLooksUpThenCreatesThenRefreshes(t *testing.T) {
 	r := run(t, d, cfg, []action.Action{a})
 	want := []string{
 		"pg-connector issue list --query work-beads --backend trk",
-		"pg-connector issue create --title review-pr: acme/widgets#42 --issue-type task --description please review --priority 2 --labels alpha,zeta --parent wb-anchor --metadata dedup_key=pr:acme/widgets#42:review-pr --metadata kind=review-pr --backend trk",
+		"pg-connector issue create --title review-pr: acme/widgets#42 --issue-type task --description please review --priority 2 --labels alpha,minted-by:pg-decider,zeta --parent wb-anchor --metadata dedup_key=pr:acme/widgets#42:review-pr --metadata kind=review-pr --backend trk",
 		"pg-desk issue refresh wb-2",
 	}
 	if got := d.lines(); !reflect.DeepEqual(got, want) {
@@ -639,7 +639,7 @@ func TestHelpersShareArgvRules(t *testing.T) {
 	}
 	want := []string{
 		"pg-desk pr annotate " + prID + " --key k --value v --origin decider:pr-decider --actor bot",
-		"pg-connector issue create --title t --issue-type task --labels a,b --parent wb-p --metadata \"m=1,2\" --backend trk",
+		"pg-connector issue create --title t --issue-type task --labels a,b,minted-by:pg-decider --parent wb-p --metadata \"m=1,2\" --backend trk",
 		"pg-connector issue comment wb-1 --body audit text --backend trk",
 	}
 	if got := d.lines(); !reflect.DeepEqual(got, want) {

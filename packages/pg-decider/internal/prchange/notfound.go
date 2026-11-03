@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
@@ -226,7 +227,7 @@ func (r *run) createEscalation(title, anchorID, refreshDetail string) (id, class
 		r.id, ClassNotFound, StageHydrate, refreshDetail, r.showCmd())
 	args := []string{
 		"issue", "create", "--title", title, "--issue-type", "task", "--description", body,
-		"--labels", "human", "--parent", anchorID,
+		"--labels", strings.Join(apply.MintedBy([]string{"human"}), ","), "--parent", anchorID,
 	}
 	args = append(args, r.backendFlag()...)
 	res := r.connectorCall(args...)

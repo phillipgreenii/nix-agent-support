@@ -54,7 +54,13 @@ Notes on the table:
   items over time, one per head that was reviewed or is waiting to be, and a worker reads `head_sha`
   at claim time.
 - `base_sha` and `branch`, with `base`, name the conflict context of a `resolve-conflict` item.
-- The labels cell of a review request is `none`: the decider writes no label on it.
+- The labels cell of a review request is `none`: the decider writes no label of its own choosing on
+  it. Every bead the decider creates, of any kind and including its `human` escalation beads, also
+  carries the cross-kind stamp `minted-by:pg-decider` (bead pg2-eclw3j.11), written once at
+  creation and never added to an existing bead by the decider. The stamp is not a row of the table
+  above: the labels cells list the labels each kind needs, and the stamp rides on top of them. It
+  lets a reader that wants the whole decider set ask for one label instead of scanning titles.
+  Per-PR detail stays in metadata, never in labels.
 - A `focus-item` bead is not a PR's own work; see "The focus bead" below. Its `<source ref>` and
   `<source title>` are the source entity's reference and title.
 
@@ -68,8 +74,8 @@ focus. It differs from the other kinds in these ways:
 - **Shape.** The type is `bug` when the source is an issue whose tracker type is `Bug` and `task`
   for every other source, a PR included (`KindContract.IssueTypeFor` in the contract data). The
   title is `Focus <source ref> - <source title>`; it MUST NOT begin with `<ref>: `, which the
-  anchor-adoption match would read as a PR's own anchor. The only label is `focus-item`: no `human`
-  label and no worker-routing label, because whether a worker takes the bead is the router's
+  anchor-adoption match would read as a PR's own anchor. The only kind label is `focus-item` (the
+  `minted-by:pg-decider` stamp is also on it): no `human` label and no worker-routing label, because whether a worker takes the bead is the router's
   decision. It is created without an assignee and has no parent.
 - **Metadata.** `source_type` and `source_id` name the source entity with neutral field names (they
   carry no focus vocabulary). `focus_hold` is the decider's hold marker: `struck` while the bead is
@@ -458,7 +464,8 @@ not absent: it means unset.
 - **INV-DECIDER-3.** <!-- uuid: 58a96e9f-9cc5-4cc2-a21d-07d952d6c61d --> The `id` form and the `node_id` form of a dedup key MUST be treated as the
   same identity, so that a rename or transfer does not orphan an existing work item.
 - **INV-DECIDER-4.** <!-- uuid: e38962f6-138c-494a-86f8-43c2083d4556 --> An open work item labeled `human` MUST count as existing work: the decider
-  MUST NOT recreate it or change its labels.
+  MUST NOT recreate it or change its labels. The `minted-by:pg-decider` stamp is written only when
+  the decider creates a bead, so it never changes the labels of an existing item.
 - **INV-DECIDER-5.** <!-- uuid: 0c9fbe41-d1b9-4285-a549-c737e2f4991d --> No decider behavior MAY depend on who closed a work item or how it was closed;
   the decider MUST read only whether the item is open or closed. The `focus.item` rule additionally
   reads a focus bead's other status (`in_progress`, `deferred`, `blocked`, `pinned`, `hooked`), its

@@ -74,6 +74,25 @@ func metadataFlags(md map[string]string) []string {
 	return out
 }
 
+// MintedByLabel is the coarse label every bead the decider creates carries, so a
+// reader that wants the whole decider set can ask for one label instead of
+// scanning titles (bead pg2-eclw3j.11). Per-PR detail stays in metadata.
+const MintedByLabel = "minted-by:pg-decider"
+
+// MintedBy returns labels plus MintedByLabel, sorted and de-duplicated.
+func MintedBy(labels []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(labels)+1)
+	for _, l := range append(append([]string{}, labels...), MintedByLabel) {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func sortedCopy(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -137,9 +156,7 @@ func createArgs(env Env, f action.Fields) []string {
 	if f.Priority != "" {
 		args = append(args, "--priority", f.Priority)
 	}
-	if len(f.Labels) > 0 {
-		args = append(args, "--labels", strings.Join(sortedCopy(f.Labels), ","))
-	}
+	args = append(args, "--labels", strings.Join(MintedBy(f.Labels), ","))
 	if f.Parent != "" {
 		args = append(args, "--parent", f.Parent)
 	}

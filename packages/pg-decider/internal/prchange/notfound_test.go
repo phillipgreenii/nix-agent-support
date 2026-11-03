@@ -120,7 +120,7 @@ func TestNotFoundWithAnOpenAnchorEscalatesOnce(t *testing.T) {
 			create = c
 		}
 	}
-	for _, want := range []string{"--title " + escTitle, "--labels human", "--parent bd-a", "--backend beads", "class: not_found", "pg-desk pr show " + testID + " --json"} {
+	for _, want := range []string{"--title " + escTitle, "--labels human,minted-by:pg-decider", "--parent bd-a", "--backend beads", "class: not_found", "pg-desk pr show " + testID + " --json"} {
 		if !strings.Contains(create, want) {
 			t.Fatalf("create %q lacks %q", create, want)
 		}

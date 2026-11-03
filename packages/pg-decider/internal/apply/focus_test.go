@@ -586,7 +586,7 @@ func TestFocusMintCreatesAndRefreshesWhenNothingIsListed(t *testing.T) {
 	r := focusRun(t, d, cfg, nil, nil, focusMint())
 	want := []string{
 		"pg-connector issue list --query focus-beads",
-		"pg-connector issue create --title Focus " + prID + " --issue-type task --labels focus-item --metadata dedup_key=" + focusKey + " --metadata source_id=" + prID + " --metadata source_type=pr",
+		"pg-connector issue create --title Focus " + prID + " --issue-type task --labels focus-item,minted-by:pg-decider --metadata dedup_key=" + focusKey + " --metadata source_id=" + prID + " --metadata source_type=pr",
 		"pg-desk issue refresh wb-2",
 	}
 	if got := d.lines(); !reflect.DeepEqual(got, want) {
