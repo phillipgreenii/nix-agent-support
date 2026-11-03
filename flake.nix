@@ -2119,6 +2119,8 @@
                     fileset = lib.fileset.unions [
                       ./claude-marketplace/pb
                       ./claude-marketplace/plan-decompose/agents/phase-plan-verifier.md
+                      ./claude-marketplace/plan-decompose/agents/packet-implementer.md
+                      ./claude-marketplace/plan-decompose/skills/plan-decompose/references/reconcile.md
                       ./claude-marketplace/bead-grooming
                     ];
                   };
