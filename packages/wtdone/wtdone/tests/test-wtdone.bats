@@ -15,6 +15,7 @@ setup() {
   # into plain locals BEFORE it runs and re-exported after (pg2-31f13).
   local scripts_dir_saved="${SCRIPTS_DIR:-}"
   local test_support_saved="${TEST_SUPPORT:-}"
+  local lib_path_saved="${LIB_PATH:-}"
 
   # GFH_LIB is the one required file (tc-4ehow); nix package checks
   # export it.
@@ -46,6 +47,11 @@ setup() {
     export TEST_SUPPORT="$test_support_saved"
   fi
   export GFH_LIB="$gfh_lib"
+  # Also scrubbed by gfh_setup; the raw wtdone.sh run needs it to find
+  # wt-liveness-lib (nix check only; a source checkout uses the sibling dir).
+  if [[ -n $lib_path_saved ]]; then
+    export LIB_PATH="$lib_path_saved"
+  fi
 
   BIN="${SCRIPTS_DIR}/wtdone.sh"
   TEST_DIR="$GFH_REPO"

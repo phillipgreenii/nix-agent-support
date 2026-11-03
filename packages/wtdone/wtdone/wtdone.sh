@@ -2,7 +2,7 @@
 # wtdone - guarded worktree teardown (bead pg2-hpurf): the paired
 # counterpart to wtnew. Given a bead id or branch name, refuses to touch
 # anything if a process on the blocking allow-list (claude, git, shells,
-# python, editors, go, nix -- see wtdone.bash; override via the
+# python, editors, go, nix -- see wt-liveness-lib.bash; override via the
 # WTDONE_BLOCKING_COMMANDS env var) is still anchored inside the associated
 # worktree (lsof) -- processes anchored there under any OTHER name are
 # reported and ignored -- then stops its fsmonitor daemon, removes the worktree,
@@ -14,7 +14,24 @@
 # hasSupportBash injection); this guard only fires for a raw `bash
 # wtdone.sh` run (e.g. local bats), where nothing has sourced it yet.
 if ! declare -F canonical_root >/dev/null 2>&1; then
-  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wtdone.bash"
+  _wtdone_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$_wtdone_dir/wtdone.bash"
+  # The allow-list lives in wt-liveness-lib: ${LIB_PATH} (the nix check
+  # exports the composed library file) or, in a source checkout, the sibling
+  # directory.
+  # shellcheck disable=SC1090,SC1091  # runtime-computed path, by design
+  if ! declare -F wtdone_command_blocks >/dev/null 2>&1; then
+    if [[ -n ${LIB_PATH:-} ]]; then
+      if [[ -d $LIB_PATH ]]; then
+        source "$LIB_PATH/wt-liveness-lib.bash"
+      else
+        source "${LIB_PATH%%:*}"
+      fi
+    else
+      source "$_wtdone_dir/../wt-liveness-lib/wt-liveness-lib.bash"
+    fi
+  fi
+  unset _wtdone_dir
 fi
 
 die() {
