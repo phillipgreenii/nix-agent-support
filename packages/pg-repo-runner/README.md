@@ -280,12 +280,12 @@ something this tool sequences. The pass:
    not a malfunction of the runner, and the next event retries.
 3. **Classify** `git rev-list --left-right --count origin/<primary>...<primary>`:
 
-| Behind, ahead | Outcome (`status`) | Action                                                                                                                                                         |
-| ------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0, 0          | `in-sync`          | Nothing (an open `diverged` bead of the runner is closed).                                                                                                     |
-| more, 0       | `fast-forwarded`   | `git merge --ff-only origin/<primary>` in the clean canonical clone. A refusal is `ff-refused`, recorded, not retried.                                         |
-| 0, more       | `ahead`            | Record the count and do NOTHING else: no bead, no notification (unpushed commits are not in themselves a problem).                                             |
-| more, more    | `diverged`         | ONE deduplicated bead (the F3 transition) "diverged, resolve with pn workspace rebase or /pn-workspace-sync", whose body points to the `reconcile-repo` skill. |
+| Behind, ahead | Outcome (`status`) | Action                                                                                                                                                                                       |
+| ------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0, 0          | `in-sync`          | Nothing (an open `diverged` bead of the runner is closed).                                                                                                                                   |
+| more, 0       | `fast-forwarded`   | `git merge --ff-only origin/<primary>` in the clean canonical clone. A refusal is `ff-refused`, recorded, not retried.                                                                       |
+| 0, more       | `ahead`            | Record the count and do NOTHING else: no bead, no notification (unpushed commits are not in themselves a problem).                                                                           |
+| more, more    | `diverged`         | ONE deduplicated bead (the F3 transition) "diverged, reconcile it with the reconcile-repo skill", whose body tells the claiming agent to reconcile fully, escalate on problems and not push. |
 
 A diverged repo is never rebased, reset or forced (decision D3): the runner has no such code. The bead is closed
 by the runner's own next pass that finds the repo no longer diverged (comment with the evidence, then close; only

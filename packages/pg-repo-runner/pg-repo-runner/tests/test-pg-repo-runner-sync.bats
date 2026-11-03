@@ -382,17 +382,19 @@ assert_no_history_rewriting() {
   id="$(jq -r .id <<<"$b")"
   [ "$(jq -r '.metadata.kind' <<<"$b")" = diverged ]
   [ "$(jq -r .priority <<<"$b")" = 1 ]
-  [[ "$(jq -r .title <<<"$b")" == *"pn workspace rebase or /pn-workspace-sync"* ]]
+  [[ "$(jq -r .title <<<"$b")" == *"reconcile it with the reconcile-repo skill"* ]]
   [ "$(bd_fixture_show_json "$id" | jq -r '.labels | index("agent-support") != null')" = true ]
-  # the body keeps both commands and the never-rebases sentence, and points to the one reconcile procedure
+  # the body keeps the never-rebases sentence, names the reconcile procedure, says escalate and do not push; no human label
+  [ "$(bd_fixture_show_json "$id" | jq -r '.labels | index("human") == null')" = true ]
   local desc
   desc="$(bd_fixture_show_json "$id" | jq -r '.description')"
   [[ $desc == *'The runner never rebases, resets or forces'* ]]
-  [[ $desc == *'`pn workspace rebase` or `/pn-workspace-sync`'* ]]
-  [[ $desc == *'The `reconcile-repo` skill of the `pn-workspace-rules` plugin holds the single reconcile procedure for one repo.'* ]]
+  [[ $desc == *'MUST reconcile the repo end to end with the `reconcile-repo` skill of the `pn-workspace-rules` plugin'* ]]
+  [[ $desc == *'escalate instead of pressing on'* ]]
+  [[ $desc == *'Do NOT push: the runner pushes after a green check.'* ]]
   [ "$(notifications)" -eq 1 ]
   # RR-4: the CLI's full argv
-  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha diverged][--body][nix-alpha: diverged from its remote, resolve with pn workspace rebase or /pn-workspace-sync (reconcile-repo skill of pn-workspace-rules) ($id)][--source][pg-repo-runner][--timeout][5s]" ]
+  [ "$(cat "$TEST_DIR/notify.log")" = "[post][--title][pg-repo-runner: nix-alpha diverged][--body][nix-alpha: diverged from its remote, reconcile it with the reconcile-repo skill (an agent does all of it, escalates on problems, does not push) ($id)][--source][pg-repo-runner][--timeout][5s]" ]
   # a repeated pass is the same story: no second bead, no second notification, no ref change
   sync_pass nix-alpha
   [ "$status" -eq 0 ]

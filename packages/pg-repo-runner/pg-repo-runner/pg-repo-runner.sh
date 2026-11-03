@@ -132,7 +132,7 @@ and the classification of `git rev-list --left-right --count
 origin/<primary>...<primary>`: 0,0 nothing; behind only `git merge --ff-only
 origin/<primary>` (a refusal is recorded, not retried this pass); ahead only the
 count is recorded, and the push step below may run; diverged files ONE deduplicated bead
-"diverged, resolve with pn workspace rebase or /pn-workspace-sync" (closed when
+"diverged, reconcile it with the reconcile-repo skill" (closed when
 a later pass finds it no longer diverged). A fetch that fails is recorded and
 exits 0. The result of every pass is in the sync record that `status` prints.
 

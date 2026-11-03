@@ -356,6 +356,10 @@ lib() {
   id="$(runner_beads nix-beta | jq -r '.[0].id')"
   [ "$(runner_beads nix-beta | jq -r '.[0].metadata.kind')" = diverged ]
   [ "$(bd_fixture_show_json "$id" | jq -r '.labels | index("base") != null')" = true ]
+  [ "$(bd_fixture_show_json "$id" | jq -r '.labels | index("human") == null')" = true ]
+  local desc
+  desc="$(bd_fixture_show_json "$id" | jq -r '.description')"
+  [[ $desc == *'`reconcile-repo` skill'* && $desc == *escalate* && $desc == *'Do NOT push'* ]]
   [ "$(notifications)" -eq 1 ]
   lib 'rr_surface_resolve nix-beta diverged '"$ALPHA_SHA"' "fast-forwarded: no longer diverged"'
   [ "$status" -eq 0 ]
