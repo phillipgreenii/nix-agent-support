@@ -88,7 +88,13 @@ let
         ../home/programs/claude-code-tmp/default.nix
         ../home/programs/pg-disk-reclaimer/default.nix
         stubs
-        { phillipgreenii.programs.pg-disk-reclaimer.enable = true; }
+        {
+          phillipgreenii.programs.pg-disk-reclaimer = {
+            enable = true;
+            # this check pins the items the tmp roots contribute, not the unrelated grower items
+            growerEntries.enable = false;
+          };
+        }
         cfg
       ];
     }).config;
