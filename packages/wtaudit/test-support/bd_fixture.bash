@@ -1,7 +1,6 @@
 # shellcheck shell=bash
-# Real-bd throwaway-database fixture for handoff-create's bats suites (bead
-# pg2-2xfbi). Replicates the approach of the sibling repo's daily-focus
-# bd_fixture.bash (per-module copy, not a cross-repo dependency).
+# Real-bd throwaway-database fixture for wtaudit's bats suites. A per-module
+# copy of handoff-create's bd_fixture.bash (not a cross-repo dependency).
 #
 # ISOLATION INVARIANTS (machine invariant; every one is asserted, not assumed):
 #   - the database lives in a fresh temp dir and is bd EMBEDDED mode
