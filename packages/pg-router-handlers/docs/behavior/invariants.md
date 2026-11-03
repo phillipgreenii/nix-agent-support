@@ -376,8 +376,13 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     session's recorded launch time. Over budget, the handler MUST apply the same hard stop a
     supervised session gets (`INV-CCH-11`) and then remove the worktree under the same guards;
     under budget it MUST leave the session alone. A role with no time budget leaves such an
-    orphan alone, and an over-budget orphan whose bead is already closed is left alone rather than
-    reopened. A `starting` or `ready` orphan left alone here has no turn in progress, so the
+    orphan alone, and an over-budget orphan whose bead is already closed is never hard-stopped (that would
+    reopen it). A `working` one is left to the closed-bead reconcile once its turn ends; a `starting` or
+    `ready` one has never taken a turn, which the closed-bead reconcile (`idle` and `needs_input`
+    only, `INV-CCH-14`) never reaches, so over its budget with its bead closed it MUST be closed
+    without purging (nothing to wrap up, the bead is not written) and its worktree removed under the
+    same guards; one whose bead is still open takes the hard stop, and one under budget is left
+    alone. A `starting` or `ready` orphan left alone here has no turn in progress, so the
     dispatch then closes and replaces it as a leftover (`INV-CCH-30`).
   - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain
     session is bounded by `INV-CCH-29`, an orphan is not.

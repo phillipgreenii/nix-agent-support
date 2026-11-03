@@ -312,8 +312,12 @@ func stopActiveOrphan(ctx context.Context, role roles.Role, deps executor.Deps, 
 		return orphanLeftAlone
 	}
 	// The hard stop unclaims (= reopens) the bead, which would undo a bead that
-	// finished while its session was still wrapping up. Leave such a session to
-	// the closed-bead reconcile once its turn ends.
+	// finished while its session was still wrapping up, so a closed bead is never
+	// hard-stopped. A working session is left to the closed-bead reconcile once
+	// its turn ends. A starting/ready one has never taken a turn (a prompted
+	// session is working, then idle), so the closed-bead reconcile (idle and
+	// needs_input only) would never reach it: close it here, with nothing to
+	// wrap up and no bead to release.
 	iss, err := beads.ShowObj(ctx, deps.BD, beadID)
 	if err != nil {
 		slog.Warn("orphan reconcile: bead lookup failed; not hard-stopping this pass",
@@ -321,7 +325,10 @@ func stopActiveOrphan(ctx context.Context, role roles.Role, deps executor.Deps, 
 		return orphanLeftAlone
 	}
 	if iss.Status == "closed" {
-		slog.Info("orphan reconcile: over-budget orphan's bead is already closed; leaving it to the closed-bead reconcile",
+		if s.State == ccpool.StateStarting || s.State == ccpool.StateReady {
+			return closeNeverPromptedOrphan(ctx, role, deps, env, s, elapsed)
+		}
+		slog.Info("orphan reconcile: over-budget working orphan's bead is already closed; leaving it to the closed-bead reconcile once its turn ends",
 			"session", s.ExternalID, "bead", beadID)
 		return orphanLeftAlone
 	}
@@ -357,6 +364,35 @@ func stopActiveOrphan(ctx context.Context, role roles.Role, deps executor.Deps, 
 	f["budget_time"] = limit.Seconds()
 	emitOrphan(deps, "error", orphanEventHardStop, "orphaned session over its time budget hard-stopped", f)
 	return orphanHardStopped
+}
+
+// closeNeverPromptedOrphan closes a starting/ready orphan that is over its time
+// budget and whose bead is already closed: it never took a turn, so there is
+// nothing to wrap up and the bead is left as it is. Non-purge close, then the
+// worktree under the usual guards.
+func closeNeverPromptedOrphan(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, s ccpool.Session, elapsed time.Duration) orphanOutcome {
+	beadID := s.Meta[ccpool.MetaKeyBead]
+	if err := deps.CC.SetMeta(ctx, s.ExternalID, ccpool.MetaKeyOrphanReclaimed, ccpool.FormatMetaTime(orphanNow(deps))); err != nil {
+		slog.Warn("orphan reconcile: could not mark the row reclaimed", "session", s.ExternalID, "err", err)
+	}
+	if err := deps.CC.Close(ctx, s.ExternalID, false); err != nil {
+		slog.Warn("orphan reconcile: close failed; leaving the never-prompted orphan for the next pass",
+			"session", s.ExternalID, "bead", beadID, "err", err)
+		return orphanLeftAlone
+	}
+	after, err := deps.CC.List(ctx)
+	if err != nil {
+		after = nil
+	}
+	removeOrphanWorktree(ctx, role, deps, env, s, after)
+
+	f := orphanFields(role, s)
+	f["elapsed"] = elapsed.Seconds()
+	f["unclaimed"] = false
+	slog.Info("orphan reconcile: never-prompted over-budget orphan with a closed bead closed", "session", s.ExternalID, "bead", beadID,
+		"role", role.Name, "state", string(s.State), "elapsed", elapsed)
+	emitOrphan(deps, "info", orphanEventReclaimed, "never-prompted orphaned session closed after its bead closed", f)
+	return orphanReclaimed
 }
 
 // removeOrphanWorktree removes the orphan's per-bead worktree and anchor

@@ -596,7 +596,7 @@ func TestStopActiveOrphan_leftAlone(t *testing.T) {
 			s.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-5 * time.Hour).Format(time.RFC3339)
 		}, 0, ""},
 		{"no launched_at to measure from", func(s *ccpool.Session) { delete(s.Meta, ccpool.MetaKeyLaunchedAt) }, time.Minute, ""},
-		{"over budget but its bead already closed (the hard stop would reopen it)", func(s *ccpool.Session) {
+		{"over budget but its bead already closed (the hard stop would reopen it; a working session waits for its turn to end)", func(s *ccpool.Session) {
 			s.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
 		}, 25 * time.Minute, `{"id":"zr-w","status":"closed"}`},
 	}
@@ -615,6 +615,45 @@ func TestStopActiveOrphan_leftAlone(t *testing.T) {
 				t.Errorf("untouched means untouched; closes=%v writes=%v removed=%v", h.cc.closed(), h.bd.writes(), h.opener.Removed)
 			}
 		})
+	}
+}
+
+// A starting/ready orphan over its budget whose bead is closed never took a
+// turn: the closed-bead reconcile skips it (idle/needs_input only), so one pass
+// must close it (non-purge) without touching the bead.
+func TestStopActiveOrphan_neverPromptedClosedBeadIsClosed(t *testing.T) {
+	for _, st := range []ccpool.SessionState{ccpool.StateStarting, ccpool.StateReady} {
+		t.Run(string(st), func(t *testing.T) {
+			row := orphanRow(st)
+			row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+			h := newOrphanHarness(t, row)
+			h.bd.issues["zr-w"] = `{"id":"zr-w","status":"closed"}`
+			r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute))
+			if r != 1 || s != 0 {
+				t.Fatalf("reclaimed=%d stopped=%d, want 1/0", r, s)
+			}
+			if got := h.cc.closed(); len(got) != 1 || got[0] != orphanID || h.cc.purges[0] {
+				t.Errorf("closes=%v, want one non-purge close", got)
+			}
+			if len(h.bd.writes()) != 0 {
+				t.Errorf("a closed bead is never written; writes=%v", h.bd.writes())
+			}
+			if len(h.opener.Removed) != 1 || h.opener.Removed[0] != orphanCWD {
+				t.Errorf("worktree must go; removed=%v", h.opener.Removed)
+			}
+		})
+	}
+}
+
+// The same session whose bead is still OPEN takes the normal hard stop path
+// (covered above); one UNDER budget with a closed bead is not closed either.
+func TestStopActiveOrphan_neverPromptedUnderBudgetClosedBeadLeftAlone(t *testing.T) {
+	row := orphanRow(ccpool.StateReady)
+	row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-5 * time.Minute).Format(time.RFC3339)
+	h := newOrphanHarness(t, row)
+	h.bd.issues["zr-w"] = `{"id":"zr-w","status":"closed"}`
+	if r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r != 0 || s != 0 || len(h.cc.closed()) != 0 {
+		t.Fatalf("reclaimed=%d stopped=%d closes=%v, want untouched", r, s, h.cc.closed())
 	}
 }
 
