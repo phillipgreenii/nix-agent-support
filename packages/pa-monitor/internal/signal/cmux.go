@@ -39,6 +39,10 @@ type CmuxSignaler struct {
 	RunCmd    func(ctx context.Context, name string, args ...string) ([]byte, error)
 	LookupEnv func(key string) (string, bool)
 
+	// Procs, when set, answers every ancestry hop from the shared per-tick
+	// process snapshot instead of one `ps -o ppid=` exec per hop.
+	Procs ProcessTable
+
 	cacheMu   sync.Mutex
 	cacheAt   time.Time
 	cacheLocs map[int]surfaceLoc
@@ -237,6 +241,9 @@ func (c *CmuxSignaler) enumerateCmuxServerPIDs(ctx context.Context) ([]int, erro
 // Returns 0 if pid has no parent (or the lookup fails). Used by ancestry
 // walking; mirrors the same idiom in TmuxSignaler.findPaneLocForPID.
 func (c *CmuxSignaler) parentPID(pid int) (int, error) {
+	if c.Procs != nil {
+		return hopFromTable(c.Procs, pid)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := c.run(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid))

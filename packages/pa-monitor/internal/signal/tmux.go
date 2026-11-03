@@ -43,6 +43,10 @@ type TmuxSignaler struct {
 	// irrelevant); otherwise exec.LookPath.
 	LookPath func(file string) (string, error)
 
+	// Procs, when set, answers every ancestry hop from the shared per-tick
+	// process snapshot instead of one `ps -o ppid=,comm=` exec per hop.
+	Procs ProcessTable
+
 	cacheMu   sync.Mutex
 	cacheAt   time.Time
 	cacheLocs map[int]paneLoc
@@ -128,6 +132,14 @@ func (t *TmuxSignaler) findPaneLocForPID(locs map[int]paneLoc, targetPID int) *p
 		seen[pid] = true
 		if loc, ok := locs[pid]; ok {
 			return &loc
+		}
+		if t.Procs != nil {
+			ppid, _ := t.Procs.Parent(pid)
+			if ppid < 1 {
+				return nil
+			}
+			pid = ppid
+			continue
 		}
 		out, err := t.run(ctx, "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
 		if err != nil {

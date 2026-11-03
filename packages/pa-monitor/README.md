@@ -225,7 +225,7 @@ The daemon never invokes `cmux`: cmux's control socket is only usable from a pro
 inside the cmux process tree, and the daemon runs as a LaunchAgent (not a cmux
 descendant). Instead, each cmux workspace runs a `cmux-bridge` (a cmux descendant) that
 opens a bidirectional `BridgeChannel` gRPC stream to the daemon. To nudge a session the
-daemon resolves the owning cmux **server PID** (via `ps` ancestry — socket-free) and
+daemon resolves the owning cmux **server PID** (via ancestry from one shared ids-only `ps -ax -o pid=,ppid=,lstart=` snapshot per tick, bounded reuse of the previous snapshot when it fails, unknown rather than invented past that bound — socket-free) and
 pushes a `Deliver{pid}` command down that bridge's stream; the bridge resolves the surface
 locally and runs `cmux send`/`send-key`, replying with an ack. The daemon keeps a
 per-server bridge registry maintained by a periodic reaper (dead bridges pruned). If no

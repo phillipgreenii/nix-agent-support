@@ -27,6 +27,7 @@ type recordingPS struct {
 	args   map[int]string
 	panes  string // `tmux list-panes` output
 	walks  int    // `ps -o ppid=[,comm=] -p N` execs (one per ancestor hop)
+	snaps  int    // `ps -ax -o pid=,ppid=,lstart=` ids-only snapshots
 	tables int    // `ps -A ...` whole-table enumerations
 	other  int    // anything else
 }
@@ -47,6 +48,14 @@ func (r *recordingPS) run(_ context.Context, name string, args ...string) ([]byt
 				return []byte(fmt.Sprintf("%d %s\n", ppid, r.comm[pid])), nil
 			}
 			return []byte(fmt.Sprintf("%d\n", ppid)), nil
+		}
+		if len(args) == 3 && args[0] == "-ax" && args[2] == "pid=,ppid=,lstart=" {
+			r.snaps++
+			var sb strings.Builder
+			for pid, ppid := range r.parent {
+				fmt.Fprintf(&sb, "%d %d Mon Nov  2 10:00:00 2026\n", pid, ppid)
+			}
+			return []byte(sb.String()), nil
 		}
 		if len(args) >= 3 && args[0] == "-A" {
 			r.tables++
@@ -69,10 +78,17 @@ func (r *recordingPS) run(_ context.Context, name string, args ...string) ([]byt
 	return nil, fmt.Errorf("recordingPS: unexpected %s %v", name, args)
 }
 
-func (r *recordingPS) snapshot() (walks int) {
+// snapshot is the ancestry-exec counter: per-hop walks plus ids-only snapshots.
+func (r *recordingPS) snapshot() (execs int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.walks
+	return r.walks + r.snaps
+}
+
+func (r *recordingPS) counts() (walks, snaps, tables int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.walks, r.snaps, r.tables
 }
 
 const (
@@ -110,13 +126,17 @@ type tickCounts struct{ refine, surface, unsubmitted int }
 // poller's cached host lookup + cmux refine walk (refineCmuxTerminalHost calls
 // FindCmuxServerAncestor), then the nudger's HasSurface and HasUnsubmittedInput
 // for each session through resolve. resolve is the code under test.
-func runTicks(n int, resolve func(signalers []signal.Signaler, tree *aggregate.Tree) (hasSurface, hasUnsubmitted func(int) bool)) []tickCounts {
+func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tree *aggregate.Tree) (hasSurface, hasUnsubmitted func(int) bool)) ([]tickCounts, *recordingPS) {
 	r, sessions := newShimWorld()
+	clock := time.Unix(1_000_000, 0)
 	cmux := &signal.CmuxSignaler{RunCmd: r.run}
 	tmux := &signal.TmuxSignaler{RunCmd: r.run}
+	if useTable {
+		tbl := &signal.PSProcTable{Run: r.run, Now: func() time.Time { return clock }}
+		cmux.Procs, tmux.Procs = tbl, tbl
+	}
 	signalers := []signal.Signaler{tmux, cmux} // production order: tmux first
 
-	clock := time.Unix(1_000_000, 0)
 	cache := provider.New(func() time.Time { return clock })
 	cache.FetchTerminalHost = func(pid int) string { return signal.DetectHost(signalers, pid) }
 
@@ -150,7 +170,7 @@ func runTicks(n int, resolve func(signalers []signal.Signaler, tree *aggregate.T
 		out = append(out, tc)
 		clock = clock.Add(5 * time.Second)
 	}
-	return out
+	return out, r
 }
 
 func legacyResolve(signalers []signal.Signaler, _ *aggregate.Tree) (func(int) bool, func(int) bool) {
@@ -163,45 +183,35 @@ func productionResolve(signalers []signal.Signaler, tree *aggregate.Tree) (func(
 	return r.HasSurface, r.HasUnsubmittedInput
 }
 
-// TestSurfaceExecCount_PerTick_22Sessions proves the per-tick ps exec count
-// with a NON-VACUOUS lower bound: the unchanged refine walk MUST still cost
-// 3 execs per cmux session (21 x 3 = 63), so a shim that records nothing
-// fails; and the legacy resolution MUST reproduce the spike's baseline
-// (HasSurface = 63 cmux + 105 tmux-walk execs), so the "before" is measured by
-// the same shim, not asserted from the spike's prose.
+// TestSurfaceExecCount_PerTick_22Sessions proves the per-tick ancestry exec
+// count with NON-VACUOUS lower bounds. The legacy path (no process table) MUST
+// reproduce the spike's baseline (63 refine execs + 168 resolution execs), so
+// the "before" is measured by the same shim. With the shared snapshot table the
+// whole tick (refine walk + HasSurface + HasUnsubmittedInput for 22 sessions)
+// MUST cost exactly one ids-only snapshot exec and zero per-hop walks.
 func TestSurfaceExecCount_PerTick_22Sessions(t *testing.T) {
 	const ticks = 12
-	before := runTicks(ticks, legacyResolve)
-	after := runTicks(ticks, productionResolve)
+	before, _ := runTicks(ticks, false, legacyResolve)
+	after, rAfter := runTicks(ticks, true, productionResolve)
 
 	for i := 1; i < ticks; i++ { // tick 0 is cold
 		b, a := before[i], after[i]
-		t.Logf("tick %d: refine=%d | HasSurface before=%d after=%d | HasUnsubmittedInput before=%d after=%d | per-tick total before=%d after=%d",
-			i, a.refine, b.surface, a.surface, b.unsubmitted, a.unsubmitted,
-			b.refine+b.surface, a.refine+a.surface)
+		t.Logf("tick %d: ancestry execs before=%d after=%d", i, b.refine+b.surface+b.unsubmitted, a.refine+a.surface+a.unsubmitted)
+		if b.refine < 3*nCmuxSessions || b.surface < 168 {
+			t.Fatalf("tick %d: legacy baseline not reproduced: refine=%d (want >= %d) surface=%d (want >= 168)", i, b.refine, 3*nCmuxSessions, b.surface)
+		}
+		if got := a.refine + a.surface + a.unsubmitted; got > 1 {
+			t.Errorf("tick %d: ancestry execs after = %d, want <= 1", i, got)
+		}
+	}
 
-		// Lower bound: the refine walk is unchanged and not vacuous.
-		if a.refine < 3*nCmuxSessions {
-			t.Fatalf("tick %d: refine walk recorded %d execs, want >= %d (shim vacuous or refine walk lost)", i, a.refine, 3*nCmuxSessions)
-		}
-		if b.refine != a.refine {
-			t.Errorf("tick %d: refine walk changed: before=%d after=%d (must be untouched)", i, b.refine, a.refine)
-		}
-		// Baseline reproduces the spike: 63 cmux + 105 tmux walks for 21 cmux
-		// sessions (plus the tmux session's own cheap hit).
-		if b.surface < 168 {
-			t.Fatalf("tick %d: legacy HasSurface recorded %d execs, want >= 168 (baseline not reproduced)", i, b.surface)
-		}
-		// After: a cmux session costs 0 execs (cached host proves Detect); only
-		// the one tmux session walks, and only its own tmux signaler (<= 2 hops).
-		if a.surface > 2 {
-			t.Errorf("tick %d: HasSurface after = %d execs, want <= 2 (cmux-only sessions must not walk)", i, a.surface)
-		}
-		if a.unsubmitted > 6 {
-			t.Errorf("tick %d: HasUnsubmittedInput after = %d execs, want <= 6", i, a.unsubmitted)
-		}
-		if total := a.refine + a.surface; total > 3*nCmuxSessions+2 {
-			t.Errorf("tick %d: per-tick total after = %d, want about 63 (<= 65)", i, total)
-		}
+	// Non-vacuous: the snapshot really is taken (one per tick, never zero), and
+	// no per-hop walk execs at all.
+	walks, snaps, _ := rAfter.counts()
+	if walks != 0 {
+		t.Errorf("per-hop ps walks after = %d, want 0", walks)
+	}
+	if snaps != ticks {
+		t.Errorf("snapshots over %d ticks = %d, want exactly %d (one per tick)", ticks, snaps, ticks)
 	}
 }

@@ -192,8 +192,8 @@ func MissingBinaries(signalers []Signaler, lookPath func(string) (string, error)
 }
 
 var defaultSignalers = []Signaler{
-	&TmuxSignaler{},
-	&CmuxSignaler{},
+	&TmuxSignaler{Procs: defaultProcTable},
+	&CmuxSignaler{Procs: defaultProcTable},
 }
 
 // DefaultSignalers returns the standard ordered list of Signalers.
