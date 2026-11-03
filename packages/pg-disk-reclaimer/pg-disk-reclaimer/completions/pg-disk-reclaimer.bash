@@ -44,7 +44,7 @@ _pg_disk_reclaimer() {
   _init_completion || return
 
   if [[ $COMP_CWORD -eq 1 ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "list validate reclaim --help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "list validate reclaim auto --help -h --version -v" -- "$cur")
     return
   fi
 
@@ -57,6 +57,13 @@ _pg_disk_reclaimer() {
       mapfile -t COMPREPLY < <(compgen -W "--aggressiveness --apply --verbose -v --help -h --version" -- "$cur")
     else
       _pg_disk_reclaimer_complete_item_ids "$cur"
+    fi
+    return
+  fi
+
+  if [[ ${words[1]} == auto ]]; then
+    if [[ $cur == -* ]]; then
+      mapfile -t COMPREPLY < <(compgen -W "--apply --volume --below1-gb --below2-gb --below3-gb --help -h --version" -- "$cur")
     fi
     return
   fi

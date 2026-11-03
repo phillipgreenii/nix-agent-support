@@ -26,6 +26,12 @@ Commands:
       Validate a registry file
   reclaim --aggressiveness N [ID...] [--apply] [-v|--verbose]
       Reclaim disk space (dry-run unless --apply)
+  auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N] [--below3-gb N]
+      Scheduled mode: pick level 1, 2 or 3 from the free space on the Data
+      volume (below N1 GiB level 1, below N2 level 2, below N3 level 3 and
+      an alert; defaults 60, 45, 30), reclaim at that level (dry-run unless
+      --apply), and log one JSON line with the level, free space before and
+      after and bytes reclaimed. Levels 4 and 5 are never chosen.
 
 Options:
   -h, --help     Show this help message
@@ -154,6 +160,9 @@ validate)
   ;;
 reclaim)
   cmd_reclaim "$@"
+  ;;
+auto)
+  cmd_auto "$@"
   ;;
 *)
   echo "pg-disk-reclaimer: unknown command '$cmd'" >&2

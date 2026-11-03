@@ -1458,3 +1458,155 @@ cmd_reclaim() {
 
   return "$overall_status"
 }
+
+# ---------------------------------------------------------------------------
+# auto: scheduled, free-space-driven reclaim (levels 1 to 3 only).
+#
+# Intended for an operator launchd job. The aggressiveness is chosen from the
+# free space on the Data volume; levels 4 and 5 are never chosen here (they stay
+# manual and interactive). Without --apply this is a dry run.
+# ---------------------------------------------------------------------------
+
+# Defaults, in GiB of free space: below T1 run level 1, below T2 level 2, below
+# T3 level 3 (and raise an alert).
+: "${PGDR_AUTO_LEVEL1_BELOW_GB:=60}"
+: "${PGDR_AUTO_LEVEL2_BELOW_GB:=45}"
+: "${PGDR_AUTO_LEVEL3_BELOW_GB:=30}"
+: "${PGDR_AUTO_VOLUME:=/System/Volumes/Data}"
+
+# pgdr_auto_level_for_free_kb <free-kb> <below1-gb> <below2-gb> <below3-gb>:
+# pure threshold-to-level selection. Prints 1, 2 or 3, or "none" when free
+# space is at or above the first threshold. The most severe matching threshold
+# wins (free space below the level-3 threshold selects 3, not 1). Thresholds
+# MUST be non-increasing (below1 >= below2 >= below3); returns 1 otherwise.
+pgdr_auto_level_for_free_kb() {
+  local free_kb="$1" t1="$2" t2="$3" t3="$4" a
+  for a in "$free_kb" "$t1" "$t2" "$t3"; do
+    if [[ ! $a =~ ^[0-9]+$ ]]; then
+      echo "pg-disk-reclaimer: auto: '$a' is not a non-negative integer" >&2
+      return 1
+    fi
+  done
+  if ((t1 < t2 || t2 < t3)); then
+    echo "pg-disk-reclaimer: auto: thresholds must satisfy level1 >= level2 >= level3 (got $t1, $t2, $t3)" >&2
+    return 1
+  fi
+  if ((free_kb < t3 * 1048576)); then
+    echo 3
+  elif ((free_kb < t2 * 1048576)); then
+    echo 2
+  elif ((free_kb < t1 * 1048576)); then
+    echo 1
+  else
+    echo none
+  fi
+}
+
+# pgdr_auto_free_kb <volume>: free KiB on the volume holding <volume>. The
+# PGDR_AUTO_FREE_KB variable overrides it (a test seam; also lets an operator
+# rehearse a level).
+pgdr_auto_free_kb() {
+  if [[ -n ${PGDR_AUTO_FREE_KB:-} ]]; then
+    printf '%s\n' "$PGDR_AUTO_FREE_KB"
+    return 0
+  fi
+  local free
+  free=$(df -k -P "$1" 2>/dev/null | awk 'NR==2 {print $4}')
+  if [[ ! $free =~ ^[0-9]+$ ]]; then
+    echo "pg-disk-reclaimer: auto: cannot read free space of '$1'" >&2
+    return 1
+  fi
+  printf '%s\n' "$free"
+}
+
+# pgdr_auto_log <json-line>: one structured line on stdout (JSONL).
+pgdr_auto_log() {
+  printf '%s\n' "$1"
+}
+
+# cmd_auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N]
+#          [--below3-gb N]
+# Logs one JSON line per run: ts, level_chosen, free_kb_before, free_kb_after,
+# bytes_reclaimed, alert, applied. The reclaim output itself goes to stderr.
+# An alert is a line with level "ERROR" (free space below the lowest threshold
+# before the run, or still below it after).
+cmd_auto() {
+  local apply=0 volume="$PGDR_AUTO_VOLUME"
+  local t1="$PGDR_AUTO_LEVEL1_BELOW_GB" t2="$PGDR_AUTO_LEVEL2_BELOW_GB" t3="$PGDR_AUTO_LEVEL3_BELOW_GB"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --apply)
+      apply=1
+      shift
+      ;;
+    --volume | --below1-gb | --below2-gb | --below3-gb)
+      if [[ -z ${2:-} ]]; then
+        echo "pg-disk-reclaimer: $1 requires a value" >&2
+        return 1
+      fi
+      case "$1" in
+      --volume) volume="$2" ;;
+      --below1-gb) t1="$2" ;;
+      --below2-gb) t2="$2" ;;
+      --below3-gb) t3="$2" ;;
+      esac
+      shift 2
+      ;;
+    *)
+      echo "pg-disk-reclaimer: auto: unknown argument '$1'" >&2
+      return 1
+      ;;
+    esac
+  done
+
+  local before after level
+  before=$(pgdr_auto_free_kb "$volume") || return 1
+  level=$(pgdr_auto_level_for_free_kb "$before" "$t1" "$t2" "$t3") || return 1
+
+  local alert_before=false status=0
+  if ((before < t3 * 1048576)); then
+    alert_before=true
+  fi
+
+  if [[ $level == none ]]; then
+    pgdr_auto_log "$(jq -cn --argjson b "$before" --argjson apply "$apply" \
+      '{ts: (now | todate), level: "INFO", msg: "free space above all thresholds, nothing to do",
+        level_chosen: null, free_kb_before: $b, free_kb_after: $b, bytes_reclaimed: 0,
+        alert: false, applied: ($apply == 1)}')"
+    return 0
+  fi
+
+  local -a args=(--aggressiveness "$level")
+  if ((apply)); then
+    args+=(--apply)
+  fi
+  cmd_reclaim "${args[@]}" >&2 || status=$?
+
+  if ((apply)); then
+    after=$(pgdr_auto_free_kb "$volume") || after="$before"
+  else
+    after="$before"
+  fi
+  local alert_after=false
+  if ((after < t3 * 1048576)); then
+    alert_after=true
+  fi
+  local alert=false log_level=INFO msg="auto reclaim finished"
+  if [[ $alert_before == true || $alert_after == true ]]; then
+    alert=true
+    log_level=ERROR
+    msg="free space below the alert threshold (${t3} GiB)"
+  elif ((status != 0)); then
+    log_level=WARN
+    msg="auto reclaim finished with a failing item"
+  fi
+  pgdr_auto_log "$(jq -cn --argjson b "$before" --argjson a "$after" --argjson lvl "$level" \
+    --argjson apply "$apply" --argjson alert "$alert" --arg ll "$log_level" --arg msg "$msg" \
+    --argjson status "$status" \
+    '{ts: (now | todate), level: $ll, msg: $msg, level_chosen: $lvl,
+      free_kb_before: $b, free_kb_after: $a,
+      bytes_reclaimed: (if $a > $b then ($a - $b) * 1024 else 0 end),
+      alert: $alert, applied: ($apply == 1), reclaim_status: $status}')"
+  return "$status"
+}

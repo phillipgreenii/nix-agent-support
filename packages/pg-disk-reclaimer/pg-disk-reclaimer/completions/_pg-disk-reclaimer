@@ -16,7 +16,7 @@ _pg_disk_reclaimer() {
   _arguments -C \
     '(-h --help)'{-h,--help}'[Show help message]' \
     '(-v --version)'{-v,--version}'[Show version information]' \
-    '1: :(list validate reclaim)' \
+    '1: :(list validate reclaim auto)' \
     '*::args:->args'
 
   case $words[1] in
@@ -26,6 +26,14 @@ _pg_disk_reclaimer() {
       '--apply[Actually reclaim instead of dry-run]' \
       '(-v --verbose)'{-v,--verbose}'[Show a note when a selected item path does not exist]' \
       '*:item id:_pg_disk_reclaimer_item_ids'
+    ;;
+  auto)
+    _arguments \
+      '--apply[Actually reclaim instead of dry-run]' \
+      '--volume[Volume whose free space picks the level]:volume:_files' \
+      '--below1-gb[Run level 1 below this many GiB free]:gib:' \
+      '--below2-gb[Run level 2 below this many GiB free]:gib:' \
+      '--below3-gb[Run level 3 and alert below this many GiB free]:gib:'
     ;;
   list)
     _arguments \

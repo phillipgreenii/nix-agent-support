@@ -46,3 +46,7 @@
 - Reclaim, also showing a note when a selected item's path does not exist on this machine (hidden by default):
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} --verbose`
+
+- Scheduled mode: choose level 1, 2 or 3 from the free space on the Data volume (below 60, 45, 30 GiB by default), reclaim at that level and log one JSON line (dry-run unless `--apply`; levels 4 and 5 are never chosen):
+
+`pg-disk-reclaimer auto --apply --below1-gb {{60}} --below2-gb {{45}} --below3-gb {{30}}`

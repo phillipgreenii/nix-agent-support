@@ -23,5 +23,6 @@
     ./modules/pg-ccaudit
     ./modules/ollama
     ./modules/codeburn
+    ./modules/pg-disk-reclaimer
   ];
 }

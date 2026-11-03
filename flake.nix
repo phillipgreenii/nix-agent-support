@@ -11674,6 +11674,31 @@
                     touch $out
                   '';
 
+              # test-pg-disk-reclaimer-auto-hm: the scheduled `auto` launchd job and the
+              # grower registry items of home/programs/pg-disk-reclaimer. Eval cases
+              # (tests/pg-disk-reclaimer-auto-hm.nix) run the REAL module against stubs; the
+              # check then validates the rendered registry with the real CLI.
+              test-pg-disk-reclaimer-auto-hm =
+                let
+                  r = import ./tests/pg-disk-reclaimer-auto-hm.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "test-pg-disk-reclaimer-auto-hm"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.pg-disk-reclaimer
+                      # `validate` checks each registry command's leading token exists
+                      pkgs.pg-claude-code-recorder
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-disk-reclaimer auto eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    pg-disk-reclaimer validate ${r.registry}
+                    touch "$out"
+                  '';
+
               # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
               # launchd sweep agent of home/programs/tmp-sweep. Eval cases
               # (tests/tmp-sweep.nix) run the REAL tmp-sweep, build-tmp, claude-code-tmp and
