@@ -11400,6 +11400,10 @@
                           { lib, ... }:
                           {
                             options = {
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
                               home.packages = lib.mkOption {
                                 type = lib.types.listOf lib.types.package;
                                 default = [ ];
@@ -11426,6 +11430,8 @@
                         {
                           phillipgreenii.programs.pg-disk-reclaimer = {
                             enable = true;
+                            # this check pins its own fixture entries, not the default grower items
+                            growerEntries.enable = false;
                             registryEntries = [
                               {
                                 id = "with-optionals";
