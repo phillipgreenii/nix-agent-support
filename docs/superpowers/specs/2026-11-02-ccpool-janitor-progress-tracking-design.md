@@ -1,8 +1,10 @@
 # ccpool janitor: track progress, not timeouts
 
-**Status**: Proposed, for operator review (revision 2)
-**Date**: 2026-11-02
+**Status**: Accepted (revision 3), plan of record
+**Date**: 2026-11-02, accepted 2026-11-03
 **Deciders**: phillipg
+
+Accepted by the operator on 2026-11-03, with the recommended answer on each open point: the design as written (measure first), outcomes unchanged (D1), and the clean-and-pushed guard for role pools (D7).
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in this document are to be read as in RFC 2119.
 
@@ -51,7 +53,7 @@ Only `worktree_sweep` has per-candidate limits and history, so it is the only pa
 
 ### Why `default_pool` is a separate pass
 
-`default_pool` is the closed-bead check applied to the **default pool**, which no role owns. Every role's own pool already gets the same check through `closed_bead_reconcile`, once per pool, so the other pools are covered. The default pool needs a stricter version because its rows may belong to a person (ccpool's reaper spares needs-input rows for a human) and the teardown force-removes the session's worktree: it therefore waits 7 days of idleness and checks that the worktree is clean and pushed. Role pools run the check without that guard.
+`default_pool` is the closed-bead check applied to the **default pool**, which no role owns. Every role's own pool already gets the same check through `closed_bead_reconcile`, once per pool, so the other pools are covered. The default pool needs a stricter version because its rows may belong to a person (ccpool's reaper spares needs-input rows for a human) and the teardown force-removes the session's worktree: it therefore waits 7 days of idleness and checks that the worktree is clean and pushed. Role pools run the check with only the clean-and-pushed part of that guard (D7).
 
 ### What persists between runs
 
@@ -145,6 +147,10 @@ If D2 shows `unexamined` above zero on consecutive runs, `worktree_sweep` MUST t
 
 Ship D2 and D3 first. Turning the inline sweeps off (so the janitor is the only cleanup path) waits until the counters have run for long enough to show the janitor reaching every candidate.
 
+### D7. Role pools keep a worktree that holds unpushed work
+
+`closed_bead_reconcile` MUST NOT force-remove a role pool session's worktree when that worktree is dirty or holds commits not on any remote branch. It keeps the session, counts the candidate as `kept`, and examines it again on the next run. Role pools take only this part of the default pool's guard: the 7 day idle wait stays specific to the default pool, whose rows may belong to a person.
+
 ## Alternatives considered
 
 | Alternative                                                | Why not                                                                                                                            |
@@ -166,10 +172,12 @@ When this is accepted, the same change MUST update `packages/pg-router-handlers/
 - The oldest-unexamined age grows while a candidate is not reached and resets when it is examined.
 - The new alert rule has promtool tests for a stuck pass and for a pass that advances.
 - If D5 is taken: a scan with more kept candidates than the examination cap, placed first in name order, still reaches a later removable candidate within a bounded number of runs.
+- D7: a role pool session whose bead is closed and whose worktree is dirty, or holds an unpushed commit, is kept and counted; a clean, pushed one is torn down (real git over a throwaway repository).
 - No mutation testing tool is part of this plan.
 
 ## Open questions
 
 1. Is six hours the right stagnation limit?
-2. Should role pools run the closed-bead check with the default pool's guard (a clean, pushed worktree), so a worktree holding unpushed work is not force-removed when its bead closes?
-3. Should `kept` carry a reason class (dirty, unpushed, in use) as a label, or stay a count?
+2. Should `kept` carry a reason class (dirty, unpushed, in use) as a label, or stay a count?
+
+Resolved: role pools take the clean-and-pushed guard, without the idle wait (D7).
