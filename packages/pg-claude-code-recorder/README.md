@@ -91,12 +91,21 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `copy_lag_seconds_histogram`, `last_sweep_timestamp_seconds` (the heartbeat),
   `state_free_bytes`, `state_used_bytes`, `requests_total{client,op,outcome}`,
   `query_duration_seconds`, `feed_latency_seconds`, `wait_duration_seconds`, `backfill_files_*`,
-  `caught_up`. The `client` label is whitelisted (`clients` in the config adds names); any other
+  `caught_up`, and the loop and process series: `settle_tick_duration_seconds`,
+  `settle_tick_examined_total`, `settle_tick_transitions_total`, `settle_tick_last_duration_seconds`,
+  `settle_tick_last_timestamp_seconds`, `refresh_gauges_duration_seconds`, `loop_runs_total{loop,outcome}`,
+  `process_cpu_seconds_total`, `go_goroutines`, `go_memstats_heap_alloc_bytes`,
+  `go_memstats_alloc_bytes_total`, `go_gc_pause_seconds_total` and `wal_bytes`. The `client` label is whitelisted (`clients` in the config adds names); any other
   name is `other`. The exporter is a small text renderer over the in-process registry, so the
   package takes no Prometheus client dependency.
 - Log: JSONL on standard error (or `logFile`), service `pg-claude-code-recorder`, fields `ts`,
-  `level`, `event`, and where they apply `file_id`, `session_id`, `generation`, `offset`,
-  `parser_version`, `cursor`, `stage`. Each request logs `request` with the caller's `--client`.
+  `level`, `event`, and where they apply `file_id`, `session`, `generation`, `offset`,
+  `parser_version`, `cursor`, `stage`. Each request logs `request` with the caller's `--client`. Each settle tick
+  logs `settle_tick` (`outcome`, `duration_ms`, `examined`, `unchanged`, `settled_now`, `transitions`) and a tick
+  over one minute also logs `settle_tick_slow`.
+- Known limitation: `status` `stage_counts` omits `live` and `quiet`, while the dashboard and the metrics include
+  them (phase 1). `status --watch` runs an O(files) loop on the daemon every 2 s, so do not leave it open while
+  profiling.
 
 ### pprof and the profiling harness
 
@@ -334,16 +343,16 @@ Signals: `quarantine_files`, `quarantine_bytes`, `quarantine_oldest_age_seconds`
 
 Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 
-| File                                  | What it is                                                                                                                                                                                  |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alerting/alerts.yaml`                | thirteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                            |
-| `alerting/alerts-delete.yaml`         | the `deleteRules`-only twin (same uids), registered instead while no daemon is deployed; the two are never loaded together                                                                  |
-| `alerting/rule-tests/`                | one promtool test file per rule, run through `packages/pg-connector/grafana/check-alert-rules.sh`                                                                                           |
-| `pg_claude_code_recorder_metrics.txt` | the metric catalogue (the Signals table): name, type, labels, with the enumerated label values                                                                                              |
-| `pg-claude-code-recorder.json`        | the dashboard: copy and parse lag, Conversations by stage, held age, dropped bytes by reason, free space and its slope, removal backlog, Processes without an inbox, request rate by client |
-| `check-alert-structure.sh`            | structure check S1 to S8 with `--self-test` negative controls (a 41-character uid, a missing `noDataState`, a missing guard, a twin that differs, and more)                                 |
-| `check-crash-share-label-table.sh`    | runs the crash-share PromQL against `client/testdata/labels.json`, the same label table the daemon, client and command tests use                                                            |
-| `check-signals-registration.sh`       | catalogue against the Go `M*` constants, rule uids against `registeredRuleUIDs`, the twin, the dashboard and this section, with `--self-test`                                               |
+| File                                  | What it is                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alerting/alerts.yaml`                | thirteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                         |
+| `alerting/alerts-delete.yaml`         | the `deleteRules`-only twin (same uids), registered instead while no daemon is deployed; the two are never loaded together                                                                                                                                                                                                               |
+| `alerting/rule-tests/`                | one promtool test file per rule, run through `packages/pg-connector/grafana/check-alert-rules.sh`                                                                                                                                                                                                                                        |
+| `pg_claude_code_recorder_metrics.txt` | the metric catalogue (the Signals table): name, type, labels, with the enumerated label values                                                                                                                                                                                                                                           |
+| `pg-claude-code-recorder.json`        | the dashboard: copy and parse lag, Conversations by stage, held age, dropped bytes by reason, free space and its slope, removal backlog, Processes without an inbox, request rate by client, settle tick duration, settle tick work, loop runs by outcome, recorder cpu cores, go heap, go goroutines, refresh gauges duration, wal size |
+| `check-alert-structure.sh`            | structure check S1 to S8 with `--self-test` negative controls (a 41-character uid, a missing `noDataState`, a missing guard, a twin that differs, and more)                                                                                                                                                                              |
+| `check-crash-share-label-table.sh`    | runs the crash-share PromQL against `client/testdata/labels.json`, the same label table the daemon, client and command tests use                                                                                                                                                                                                         |
+| `check-signals-registration.sh`       | catalogue against the Go `M*` constants, rule uids against `registeredRuleUIDs`, the twin, the dashboard and this section, with `--self-test`                                                                                                                                                                                            |
 
 Flake checks (build one with `nix build .#checks.<system>.<name>`): `test-pg-claude-code-recorder-alert-rules`,
 `test-pg-claude-code-recorder-alert-structure` and `test-pg-claude-code-recorder-signals-registration`. Every rule uid is also in
@@ -387,6 +396,29 @@ session. The catalogue file lists every name with its type and labels.
 Two exporter facts the alerts rely on: `bad_lines_total` and `unknown_keys_total` carry no `source` or `type` label (the design listed
 them by source and type; the exporter has none), and they are registered when first incremented rather than at zero, so a first burst
 that starts from an absent series reads as no increase until the second scrape.
+
+### Apply and restart
+
+`pn workspace apply` replaces the daemon, and the old daemon's `Close` runs `PRAGMA wal_checkpoint(TRUNCATE)` with
+no timeout or progress log. With a very large WAL (several GB) that can take minutes. During it the daemon serves
+no requests, so `conversation.show` clients see a stall or the daemon-offline error (not `not_found`), the
+`daemon-down` alert can page after 2 minutes (expect one page or silence it), and the disk is low, so watch free
+space. Do not kill the daemon: a SIGKILL leaves the WAL to be replayed on the next open. The checkpoint is done when
+`status` answers again and `wal_bytes` drops; the `wal_truncate_done` event (with `duration_ms`) says so in the log.
+The first apply after that change pays this once, and a rollback (revert the commit and apply again) pays it again.
+Launchd settings (`KeepAlive`, `ExitTimeOut`) live outside this package and were not checked. The operator runs the
+apply.
+
+### Recorder CPU is high: what to look at
+
+1. Open the dashboard panel `recorder cpu cores` (CPU in cores, with the GC pause share as a second series).
+2. Open `settle tick duration` and `loop runs by outcome`: a p99 near or over 60 s, or a loop with `error` runs,
+   points at the settle tick.
+3. `rg settle_tick` in the recorder log: `examined`, `unchanged`, `transitions` and `duration_ms` per tick.
+4. Take a 30 s profile with `scripts/profile-cpu.sh --sock SOCK --seconds 30` (pprof is on in the deployed
+   configuration).
+5. Compare with `wal size`: a WAL that keeps growing makes every read slower. Do not leave `status --watch` open
+   while profiling.
 
 ### Turning on `remove.enable`
 

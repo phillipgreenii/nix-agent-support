@@ -60,7 +60,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Conversations by stage",
-      "description": "Conversations per stage: live, quiet, held, settled, removal_pending, removed.",
+      "description": "Conversations per stage: live, quiet, held, settled, removal_pending, removed, as of the last settle tick, up to a minute old.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -341,6 +341,337 @@
           "expr": "sum by (client) (rate(pg_claude_code_recorder_requests_total[$__rate_interval]))",
           "range": true,
           "legendFormat": "{{client}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "settle tick duration",
+      "description": "Duration of one settle tick in seconds: p50 and p99 over a window of at least 5 minutes (a tick runs once a minute, so a shorter window holds about one sample) and the last tick. The line at 60 s is the one-minute tick interval. The settle-tick-slow alert covers this panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(pg_claude_code_recorder_settle_tick_duration_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pg_claude_code_recorder_settle_tick_duration_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_settle_tick_last_duration_seconds)",
+          "range": true,
+          "legendFormat": "last"
+        }
+      ],
+      "interval": "5m"
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "settle tick work",
+      "description": "Conversations examined and stage transitions made by the settle tick, per second. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(pg_claude_code_recorder_settle_tick_examined_total[$__rate_interval])",
+          "range": true,
+          "legendFormat": "examined"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(pg_claude_code_recorder_settle_tick_transitions_total[$__rate_interval])",
+          "range": true,
+          "legendFormat": "transitions"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "loop runs by outcome",
+      "description": "Runs of each periodic loop (settle_tick, refresh_gauges, wal_checkpoint) per second by outcome, ok or error. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (loop, outcome) (rate(pg_claude_code_recorder_loop_runs_total[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{loop}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "recorder cpu cores",
+      "description": "CPU the recorder process uses, in cores (1 is one full core), and the share of it spent in garbage-collection pauses. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(pg_claude_code_recorder_process_cpu_seconds_total[$__rate_interval])",
+          "range": true,
+          "legendFormat": "cpu cores"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(pg_claude_code_recorder_go_gc_pause_seconds_total[$__rate_interval])",
+          "range": true,
+          "legendFormat": "gc pause"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "go heap",
+      "description": "Live heap allocated by the Go runtime, in bytes. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_go_memstats_heap_alloc_bytes)",
+          "range": true,
+          "legendFormat": "heap alloc"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "go goroutines",
+      "description": "Number of goroutines in the recorder process. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_go_goroutines)",
+          "range": true,
+          "legendFormat": "goroutines"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "refresh gauges duration",
+      "description": "p99 duration of the gauge refresh loop in seconds. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pg_claude_code_recorder_refresh_gauges_duration_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "wal size",
+      "description": "Size of the SQLite write-ahead log file in bytes. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_wal_bytes)",
+          "range": true,
+          "legendFormat": "wal"
         }
       ]
     }
