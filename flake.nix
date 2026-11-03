@@ -615,6 +615,7 @@
               pkgs = final;
               inherit bashBuilders;
               pgNixLogWrapped = basePkgs.pg-nix-log-wrapped or null;
+              ccpool = final.ccpool or null;
               beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).pg-repo-runner.script;
           # pg-rescue-resolve-conflict (docket pg2-q6a96, design D4): the argv of the

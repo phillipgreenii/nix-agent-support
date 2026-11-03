@@ -23,6 +23,10 @@
 
 `PG_ROUTER_ITEM_ID={{repo-key}}@{{sha}} pg-repo-runner verify`
 
+- Emit the monitoring gauges (best effort, through `ccpool emit-gauge`; catalog in the package README, nothing is emitted without a ccpool and an `OTEL_EXPORTER_OTLP_ENDPOINT`):
+
+`PG_REPO_RUNNER_CCPOOL_BIN={{path/to/ccpool}} pg-repo-runner tips --repo {{repo-key}}`
+
 - Use another config file:
 
 `PG_REPO_RUNNER_CONFIG={{path/to/config.toml}} pg-repo-runner status`

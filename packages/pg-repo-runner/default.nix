@@ -4,6 +4,8 @@
   # pg-nix-log-wrapped (phillipg-nix-repo-base), passed by the overlay; null when
   # the locked base flake does not carry it.
   pgNixLogWrapped ? null,
+  # ccpool, for `ccpool emit-gauge` (best-effort gauges); null emits nothing.
+  ccpool ? null,
   # bd, for the test check ONLY (the real-bd throwaway-database fixture of the
   # failure-surfacing suite). At runtime the runner resolves `bd` from the
   # ambient machine PATH, like every other bd-calling script in this workspace,
@@ -20,7 +22,12 @@ let
   # throwaway-database fixture from ./test-support.
   pg-repo-runner = pkgs.callPackage ./pg-repo-runner {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs pgNixLogWrapped beads;
+    inherit
+      pkgs
+      pgNixLogWrapped
+      ccpool
+      beads
+      ;
     testSupport = ./test-support;
   };
 in

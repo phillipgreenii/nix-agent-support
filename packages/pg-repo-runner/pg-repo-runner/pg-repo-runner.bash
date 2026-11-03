@@ -1318,3 +1318,142 @@ rr_ws_remove_leftovers() {
   done < <(rr_ws_leftovers "$root")
   return "$rc"
 }
+
+# --- metrics (best-effort OTLP gauges) -------------------------------------
+#
+# The runner has no telemetry of its own: at the END of a run it hands each gauge
+# point to the generic `ccpool emit-gauge --name N --value V [--label k=v]...`,
+# which exports over OTLP from the inherited OTEL_* environment and is a silent
+# exit-0 no-op without one. Emission is best effort and invisible: it never
+# changes the exit status, never writes to stdout (stdout of `tips` is the JSONL
+# protocol to pg-router: the ccpool call has stdout and stderr sent to /dev/null),
+# bounds each call with a timeout, and a missing or failing ccpool is logged ONCE
+# per run and ends the emission. RR_CCPOOL_BIN is empty in a raw run, which emits
+# nothing at all. Every point is derived from the state files and the run's own
+# outcome, never from extra git or nix work.
+
+RR_M_PREFIX=pg_repo_runner
+RR_M_POINTS=()
+
+# rr_m_add NAME VALUE LABELS: queue one point (LABELS is `k=v,k=v`, may be empty).
+rr_m_add() {
+  RR_M_POINTS+=("$(printf '%s\t%s\t%s' "$1" "$2" "${3:-}")")
+}
+
+# rr_m_flush: emit every queued point, in a loop of ccpool calls. Always returns 0.
+rr_m_flush() {
+  local ccpool="${RR_CCPOOL_BIN:-}" line name value labels l rc secs
+  local -a pre=() labs=() args=()
+  ((${#RR_M_POINTS[@]} > 0)) || return 0
+  if [[ -z $ccpool ]]; then
+    RR_M_POINTS=()
+    return 0
+  fi
+  if ! command -v "$ccpool" >/dev/null 2>&1; then
+    rr_log "metrics: ccpool '$ccpool' is not runnable; no gauges emitted"
+    RR_M_POINTS=()
+    return 0
+  fi
+  secs="${PG_REPO_RUNNER_CCPOOL_TIMEOUT:-10}"
+  [[ $secs =~ ^[0-9]+$ ]] || secs=10
+  if [[ -n ${RR_TIMEOUT_BIN:-} ]]; then
+    pre=("$RR_TIMEOUT_BIN" "$secs")
+  elif command -v timeout >/dev/null 2>&1; then
+    pre=(timeout "$secs")
+  fi
+  for line in "${RR_M_POINTS[@]}"; do
+    IFS=$'\t' read -r name value labels <<<"$line"
+    args=(emit-gauge --name "$name" --value "$value")
+    labs=()
+    if [[ -n $labels ]]; then
+      IFS=',' read -ra labs <<<"$labels"
+      for l in "${labs[@]}"; do args+=(--label "$l"); done
+    fi
+    rc=0
+    "${pre[@]}" "$ccpool" "${args[@]}" </dev/null >/dev/null 2>&1 || rc=$?
+    if ((rc != 0)); then
+      rr_log "metrics: ccpool emit-gauge failed (exit $rc) at $name; the remaining gauges of this run are not emitted"
+      break
+    fi
+  done
+  RR_M_POINTS=()
+  return 0
+}
+
+# rr_m_state_points REPO: the points derived from the state files of one repo:
+# check verdicts, sync record, surface Mementos.
+rr_m_state_points() {
+  local repo="$1" v f kind open n val lab
+  v="$(rr_verdicts_json "$repo" 2>/dev/null)" || v='[]'
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  while IFS=$'\t' read -r n val lab; do
+    [[ -n $n ]] && rr_m_add "$n" "$val" "$lab"
+  done < <(rr_jq -r --arg r "$repo" --arg p "$RR_M_PREFIX" '
+    def pt(n; v; l): [$p + "_" + n, (v | tostring), l] | @tsv;
+    map(select(.kind == "check")) as $c
+    | ($c | sort_by(.finishedAt)) as $s
+    | ($s | map(select(.result != "superseded")) | last) as $l
+    | (["green", "red", "superseded", "error"][] as $res
+       | pt("check_verdicts"; ($c | map(select(.result == $res)) | length); "repo=\($r),result=\($res)")),
+      (["green", "red"][] as $res
+       | ($s | map(select(.result == $res)) | last) as $x
+       | select($x != null and ($x.finishedAt | type) == "string")
+       | pt("check_last_timestamp_seconds"; ($x.finishedAt | fromdateiso8601); "repo=\($r),result=\($res)")),
+      (select($l != null and ($l.durationS | type) == "number")
+       | pt("check_last_duration_seconds"; $l.durationS; "repo=\($r)")),
+      pt("check_latest_red"; (if $l != null and $l.result == "red" then 1 else 0 end); "repo=\($r)")
+  ' <<<"$v" 2>/dev/null)
+  f="$RR_STATE_DIR/sync/$repo.json"
+  if [[ -f $f ]]; then
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    while IFS=$'\t' read -r n val lab; do
+      [[ -n $n ]] && rr_m_add "$n" "$val" "$lab"
+    done < <(rr_jq -r --arg r "$repo" --arg p "$RR_M_PREFIX" '
+      def pt(n; v; l): [$p + "_" + n, (v | tostring), l] | @tsv;
+      (select(.ahead != null) | pt("sync_ahead"; .ahead; "repo=\($r)")),
+      (select(.behind != null) | pt("sync_behind"; .behind; "repo=\($r)")),
+      pt("sync_diverged"; (if .outcome == "diverged" then 1 else 0 end); "repo=\($r)"),
+      pt("push_withheld"; (if .outcome == "push-dry-run" or (.outcome == "ahead" and ((.detail // "") | startswith("push withheld"))) then 1 else 0 end); "repo=\($r)")
+    ' "$f" 2>/dev/null)
+  fi
+  for kind in red diverged needs-relock build-red; do
+    open=0
+    if rr_surface_enabled; then
+      [[ "$(rr_surface_load "$repo" "$kind" | rr_jq -r '.state // ""' 2>/dev/null)" == open ]] && open=1
+    fi
+    rr_m_add "${RR_M_PREFIX}_surface_open" "$open" "repo=$repo,kind=$kind"
+  done
+}
+
+# rr_m_tips_emit: the `tips` points for every repo processed (RR_TIPS_RESULTS holds
+# one `key<TAB>ok<TAB>unverified` line per repo), then the flush.
+rr_m_tips_emit() {
+  local key ok unv now_e
+  [[ -n ${RR_CCPOOL_BIN:-} && -n ${RR_TIPS_RESULTS:-} ]] || return 0
+  now_e="$(rr_epoch)"
+  while IFS=$'\t' read -r key ok unv; do
+    [[ -n $key ]] || continue
+    rr_m_add "${RR_M_PREFIX}_tips_ok" "$ok" "repo=$key"
+    rr_m_add "${RR_M_PREFIX}_tips_last_run_timestamp_seconds" "$now_e" "repo=$key"
+    [[ -z $unv ]] || rr_m_add "${RR_M_PREFIX}_unverified_tip" "$unv" "repo=$key"
+    rr_m_state_points "$key"
+  done <<<"$RR_TIPS_RESULTS"
+  rr_m_flush
+  return 0
+}
+
+# rr_m_run_emit ROLE REPO EXIT START_EPOCH: the points of one role run.
+rr_m_run_emit() {
+  local role="$1" repo="$2" rc="$3" t0="$4" now_e lab
+  [[ -n ${RR_CCPOOL_BIN:-} ]] || return 0
+  now_e="$(rr_epoch)"
+  lab="role=$role,repo=$repo"
+  rr_m_add "${RR_M_PREFIX}_last_run_exit" "$rc" "$lab"
+  rr_m_add "${RR_M_PREFIX}_last_run_timestamp_seconds" "$now_e" "$lab"
+  rr_m_add "${RR_M_PREFIX}_last_run_duration_seconds" "$((now_e - t0))" "$lab"
+  if ((rc == 9)) && [[ -n ${RR_BUSY_LOAD:-} ]]; then
+    rr_m_add "${RR_M_PREFIX}_last_busy_load" "$RR_BUSY_LOAD" "role=$role"
+  fi
+  rr_m_flush
+  return 0
+}

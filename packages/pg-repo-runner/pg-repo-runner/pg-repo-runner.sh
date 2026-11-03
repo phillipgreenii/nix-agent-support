@@ -39,6 +39,10 @@ export RR_PN_BIN="${PG_REPO_RUNNER_PN_BIN:-${RR_PN_BIN:-pn}}"
 # are the test seams for the failure-surfacing step: a real bd on a throwaway
 # tracker. The notifier seam is PG_OSX_NOTIFY_BIN, read directly by rr_notify.
 export RR_BD_BIN="${PG_REPO_RUNNER_BD_BIN:-${RR_BD_BIN:-bd}}"
+# ccpool (its `emit-gauge` command) carries the best-effort OTLP gauges, injected by
+# absolute store path; empty in a raw run, which emits nothing. PG_REPO_RUNNER_CCPOOL_BIN
+# replaces it (a test seam: the metrics suite records the calls with a fake).
+export RR_CCPOOL_BIN="${PG_REPO_RUNNER_CCPOOL_BIN:-${RR_CCPOOL_BIN:-}}"
 
 # The bare tool names the kernel still uses (sha256sum, nproc, sort -z, find,
 # sed, mktemp, ps, ...) must not depend on the caller's PATH: pg-router runs this
@@ -211,6 +215,8 @@ Files and environment:
   PG_REPO_RUNNER_NIX_BIN   replaces the nix binary (test seam)
   PG_REPO_RUNNER_GIT_BIN   replaces the git binary (test seam)
   PG_REPO_RUNNER_BD_BIN    replaces the bd binary (default: bd on PATH)
+  PG_REPO_RUNNER_CCPOOL_BIN      replaces the ccpool that emits the gauges (test seam)
+  PG_REPO_RUNNER_CCPOOL_TIMEOUT  seconds one gauge call may take (default 10)
   PG_OSX_NOTIFY_BIN              replaces the pg-osx-notify CLI (test seam)
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
                                 (else thresholds.retry_window, else 3600)
@@ -231,6 +237,30 @@ decline() {
   rr_err "busy: $1"
   rr_log "exit=$RR_EXIT_BUSY busy: $1"
   exit "$RR_EXIT_BUSY"
+}
+
+# --- run metrics (best effort, see the metrics section of pg-repo-runner.bash) --
+
+RR_EXIT_CLEANUP=()
+RR_M_REPO=""
+RR_BUSY_LOAD=""
+
+# rr_metrics_trap ROLE: installs the one EXIT trap of a role run. It runs the
+# cleanup the role registered (RR_EXIT_CLEANUP: lease release, throwaway set), then
+# emits the run's gauges. The exit status of the run is never changed.
+rr_metrics_trap() {
+  RR_M_ROLE="$1"
+  RR_M_T0="$(rr_epoch)"
+  trap 'rr_role_exit $?' EXIT
+}
+
+# shellcheck disable=SC2329  # invoked by the EXIT trap of rr_metrics_trap
+rr_role_exit() {
+  local rc="$1" fn
+  trap - EXIT
+  for fn in "${RR_EXIT_CLEANUP[@]}"; do "$fn" || true; done
+  rr_m_run_emit "$RR_M_ROLE" "$RR_M_REPO" "$rc" "$RR_M_T0" || true
+  return 0
 }
 
 # --- role bodies ------------------------------------------------------------
@@ -589,6 +619,7 @@ run_role() {
   local role="$1" scope="$2" root item key rc kill load max
   # shellcheck disable=SC2034  # read by rr_log in pg-repo-runner.bash
   RR_ROLE="$role"
+  rr_metrics_trap "$role"
   rr_init_state || die "cannot create the state directory" 1
   rr_load_config || die "cannot load the config" 1
   root="$(rr_cfg '.workspace_root // empty')"
@@ -602,6 +633,7 @@ run_role() {
     [[ -n $item ]] || die "PG_ROUTER_ITEM_ID is not set" 2
     rr_parse_item_id "$item" || die "malformed PG_ROUTER_ITEM_ID: $item" 2
     key="$RR_ITEM_REPO"
+    RR_M_REPO="$key"
     rr_repo_listed "$key" || die "repo '$key' is not in the allow-list" 2
     rc=0
     rr_workspace_has_key "$root" "$key" || rc=$?
@@ -633,6 +665,7 @@ run_role() {
     if ! rr_parse_item_id "$item" || [[ $RR_ITEM_REPO != workspace || ! $RR_ITEM_SHA =~ ^[0-9a-f]{64}$ ]]; then
       die "build needs an item id workspace@<64 hex digits>, got: $item" 2
     fi
+    RR_M_REPO="$RR_ITEM_REPO"
     if declare -F "early_$role" >/dev/null && "early_$role"; then
       exit 0
     fi
@@ -645,7 +678,11 @@ run_role() {
   # 5. load
   load="$(rr_loadavg1)" || die "cannot read the 1-minute load average" 1
   max="$(rr_max_load)" || die "cannot determine the load threshold" 1
-  rr_load_admits "$load" "$max" || decline "1-minute load $load is not below $max"
+  if ! rr_load_admits "$load" "$max"; then
+    # shellcheck disable=SC2034  # read by rr_m_run_emit in pg-repo-runner.bash
+    RR_BUSY_LOAD="$load"
+    decline "1-minute load $load is not below $max"
+  fi
   # 6. lease
   rc=0
   rr_lease_acquire || rc=$?
@@ -656,11 +693,11 @@ run_role() {
   esac
   if [[ $scope == workspace ]]; then
     # a signal ends the run through the EXIT trap, which removes the throwaway set
-    trap 'rr_ws_exit_cleanup; rr_lease_release' EXIT
+    RR_EXIT_CLEANUP=(rr_ws_exit_cleanup rr_lease_release)
     trap 'exit 143' TERM
     trap 'exit 130' INT
   else
-    trap 'rr_lease_release' EXIT
+    RR_EXIT_CLEANUP=(rr_lease_release)
   fi
 
   # 7. act
@@ -702,14 +739,28 @@ tips_one() {
     return 1
   fi
   if rr_verdict_exists "$key" "$tip" check; then
+    RR_TIP_UNV=0
     return 0
   fi
+  RR_TIP_UNV=1
   # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
   rr_jq -nc --arg repo "$key" --arg sha "$tip" --arg branch "$branch" \
     --arg at "$TIPS_AT" --arg exp "$TIPS_EXPIRES" \
     '{id: ($repo + "@" + $sha), type: "repo-tip", title: ($repo + " tip"),
       metadata: {repo: $repo, sha: $sha, branch: $branch}, at: $at, expiresAt: $exp}' ||
     die "cannot emit the item for '$key'" 1
+}
+
+# tips_probe KEY: tips_one, noting the outcome for the gauges (RR_TIPS_RESULTS holds
+# one `key<TAB>ok<TAB>unverified` line per repo processed).
+RR_TIPS_RESULTS=""
+tips_probe() {
+  local key="$1" rc=0 ok=1
+  RR_TIP_UNV=""
+  tips_one "$key" || rc=$?
+  ((rc == 0)) || ok=0
+  RR_TIPS_RESULTS+="$(printf '%s\t%s\t%s' "$key" "$ok" "$RR_TIP_UNV")"$'\n'
+  return "$rc"
 }
 
 # run_tips [--repo KEY]: one JSONL record per allow-listed repo (verify on) whose
@@ -749,16 +800,18 @@ run_tips() {
   if [[ -n $only ]]; then
     rr_repo_listed "$only" || die "tips --repo: '$only' is not in the allow-list" 2
     if rr_repo_flag "$only" verify; then
-      tips_one "$only" || failed=1
+      tips_probe "$only" || failed=1
     fi
   else
     keys="$(rr_cfg '(.repos // {}) | to_entries | map(select(.value.verify == true) | .key) | sort | .[]')" ||
       die "cannot read the allow-list" 1
     while IFS= read -r key; do
       [[ -n $key ]] || continue
-      tips_one "$key" || failed=1
+      tips_probe "$key" || failed=1
     done <<<"$keys"
   fi
+  # the gauges: after everything is read, before the exit; never touches stdout or the status
+  rr_m_tips_emit >/dev/null 2>&1 || true
   if ((failed != 0)); then
     rr_log "tips: done, at least one repo FAILED"
     exit 1
@@ -785,6 +838,7 @@ run_workspace_tips() {
   [[ $# -eq 0 ]] || die "workspace-tips takes no arguments" 2
   # shellcheck disable=SC2034  # read by rr_log in pg-repo-runner.bash
   RR_ROLE=workspace-tips
+  rr_metrics_trap workspace-tips
   rr_init_state || die "cannot create the state directory" 1
   rr_load_config || die "cannot load the config" 1
   root="$(rr_cfg '.workspace_root // empty')"

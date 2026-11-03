@@ -414,6 +414,45 @@ that locks `alpha`; real pn `0.0.0-16add71a`, nix 2.34.9, `aarch64-darwin`), nev
   `nix build` as the build command; a real `darwin-rebuild build --flake` writes its `result` the same way
   (out-link in the working directory) but that was not run (no darwin configuration in a throwaway).
 
+## Metrics
+
+The runner emits best-effort OTLP gauges so it can be monitored over time. Each point is one call of the
+generic `ccpool emit-gauge --name N --value V [--label k=v]...`, which exports from the inherited `OTEL_*`
+environment and is a silent no-op without one. The ccpool binary is injected by absolute store path
+(`RR_CCPOOL_BIN`); it is EMPTY in a raw run and under the bats suites, which then emit nothing, and
+`PG_REPO_RUNNER_CCPOOL_BIN` replaces it (a test seam). Emission is invisible: it never changes the exit
+status, never writes to stdout (stdout of `tips` is the JSONL protocol to pg-router; the ccpool call has
+stdout and stderr sent to `/dev/null`), bounds each call with `timeout` (10 s, `PG_REPO_RUNNER_CCPOOL_TIMEOUT`
+replaces it), and a missing or failing ccpool is logged once to `run.log` and ends that run's emission. All
+points of a run are emitted in a loop at the END of the run, derived from the state files and the run's own
+outcome, never from extra git or nix work. Every metric is a gauge; the label `repo` is the allow-list key.
+
+Emitted at the end of `tips` and `tips --repo KEY`, per repo processed (every 5 minutes in the deployment):
+
+| Metric                                           | Labels          | Meaning                                                                                                                                     |
+| ------------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg_repo_runner_tips_ok`                         | `repo`          | 1 when the repo was read, 0 when it failed (the run exits 1).                                                                               |
+| `pg_repo_runner_tips_last_run_timestamp_seconds` | `repo`          | Epoch seconds of the run.                                                                                                                   |
+| `pg_repo_runner_unverified_tip`                  | `repo`          | 1 when the primary tip has no check verdict, else 0 (omitted when the repo failed).                                                         |
+| `pg_repo_runner_check_verdicts`                  | `repo`,`result` | Count of stored check verdicts, for `result` = `green`, `red`, `superseded`, `error`.                                                       |
+| `pg_repo_runner_check_last_timestamp_seconds`    | `repo`,`result` | `finishedAt` of the latest `green` and of the latest `red` verdict (omitted when none).                                                     |
+| `pg_repo_runner_check_last_duration_seconds`     | `repo`          | `durationS` of the latest non-superseded verdict.                                                                                           |
+| `pg_repo_runner_check_latest_red`                | `repo`          | 1 when the latest non-superseded verdict is red, else 0.                                                                                    |
+| `pg_repo_runner_sync_ahead`                      | `repo`          | Commits ahead of the remote, from the sync record (omitted without a record).                                                               |
+| `pg_repo_runner_sync_behind`                     | `repo`          | Commits behind the remote, from the sync record (omitted without a record).                                                                 |
+| `pg_repo_runner_sync_diverged`                   | `repo`          | 1 when the sync record says `diverged`, else 0 (omitted without a record).                                                                  |
+| `pg_repo_runner_push_withheld`                   | `repo`          | 1 when the sync record says the push was withheld or a dry run, else 0 (no record: omitted).                                                |
+| `pg_repo_runner_surface_open`                    | `repo`,`kind`   | 1 when the transition Memento of `kind` (`red`, `diverged`, `needs-relock`, `build-red`) is open, else 0 (0 for all when surfacing is off). |
+
+Emitted at the end of every role run (`verify`, `sync`, `build`) and of `workspace-tips`:
+
+| Metric                                      | Labels        | Meaning                                                                               |
+| ------------------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `pg_repo_runner_last_run_exit`              | `role`,`repo` | The exit status; `repo` is the item's repo key (`workspace` for `build`), else empty. |
+| `pg_repo_runner_last_run_timestamp_seconds` | `role`,`repo` | Epoch seconds at the end of the run.                                                  |
+| `pg_repo_runner_last_run_duration_seconds`  | `role`,`repo` | Whole seconds the run took.                                                           |
+| `pg_repo_runner_last_busy_load`             | `role`        | Only on exit 9 caused by the load check: the 1-minute load average that deferred it.  |
+
 ## Configuration
 
 The home module renders `$XDG_CONFIG_HOME/pg-repo-runner/config.toml` (override with
@@ -456,21 +495,23 @@ package.
 
 ## Test seams (environment)
 
-| Variable                      | Effect                                                             |
-| ----------------------------- | ------------------------------------------------------------------ |
-| `PG_REPO_RUNNER_CONFIG`       | Path of the config file.                                           |
-| `PG_REPO_RUNNER_LOADAVG`      | Replaces the 1-minute load reading (the bats suites use this).     |
-| `PG_REPO_RUNNER_MAX_LOAD`     | Replaces the load threshold.                                       |
-| `PG_REPO_RUNNER_NCPU`         | Replaces the core count used as the default threshold.             |
-| `PG_REPO_RUNNER_NIX_BIN`      | Replaces the nix binary (the bats suites use it to classify).      |
-| `PG_REPO_RUNNER_GIT_BIN`      | Replaces the git binary (the sync suite records git calls).        |
-| `PG_REPO_RUNNER_PN_BIN`       | Replaces the pn binary (default: `pn` on PATH).                    |
-| `PG_REPO_RUNNER_EPOCH`        | Replaces the clock, in epoch seconds (the debounce tests).         |
-| `PG_REPO_RUNNER_QUIET_WINDOW` | Replaces the quiet window, in seconds.                             |
-| `PG_REPO_RUNNER_BD_BIN`       | Replaces the bd binary (default: `bd` on PATH).                    |
-| `PG_OSX_NOTIFY_BIN`           | Replaces the `pg-osx-notify` CLI (the surfacing suites record it). |
-| `PG_REPO_RUNNER_RETRY_WINDOW` | Replaces the tip item's retry window, in seconds.                  |
-| `XDG_STATE_HOME`              | Root of the state directory.                                       |
+| Variable                        | Effect                                                             |
+| ------------------------------- | ------------------------------------------------------------------ |
+| `PG_REPO_RUNNER_CONFIG`         | Path of the config file.                                           |
+| `PG_REPO_RUNNER_LOADAVG`        | Replaces the 1-minute load reading (the bats suites use this).     |
+| `PG_REPO_RUNNER_MAX_LOAD`       | Replaces the load threshold.                                       |
+| `PG_REPO_RUNNER_NCPU`           | Replaces the core count used as the default threshold.             |
+| `PG_REPO_RUNNER_NIX_BIN`        | Replaces the nix binary (the bats suites use it to classify).      |
+| `PG_REPO_RUNNER_GIT_BIN`        | Replaces the git binary (the sync suite records git calls).        |
+| `PG_REPO_RUNNER_PN_BIN`         | Replaces the pn binary (default: `pn` on PATH).                    |
+| `PG_REPO_RUNNER_EPOCH`          | Replaces the clock, in epoch seconds (the debounce tests).         |
+| `PG_REPO_RUNNER_QUIET_WINDOW`   | Replaces the quiet window, in seconds.                             |
+| `PG_REPO_RUNNER_BD_BIN`         | Replaces the bd binary (default: `bd` on PATH).                    |
+| `PG_REPO_RUNNER_CCPOOL_BIN`     | Replaces the ccpool that emits the gauges (the metrics suite).     |
+| `PG_REPO_RUNNER_CCPOOL_TIMEOUT` | Replaces the 10 s bound of one gauge call.                         |
+| `PG_OSX_NOTIFY_BIN`             | Replaces the `pg-osx-notify` CLI (the surfacing suites record it). |
+| `PG_REPO_RUNNER_RETRY_WINDOW`   | Replaces the tip item's retry window, in seconds.                  |
+| `XDG_STATE_HOME`                | Root of the state directory.                                       |
 
 ## Load threshold: the first calibration sample
 
@@ -546,7 +587,12 @@ measured duration and load of the real runner checks.
   removing the quiet-window wait, each fail it.
 - `pg-repo-runner/tests/test-pg-repo-runner-workspace-surface.bats`: a red build files one bead through F3
   (real bd over a throwaway database), deduplicated, commented on a newer red, closed by a green build.
-- `checks.<system>.test-pg-repo-runner`: all eight suites, built through `mkBashScript`.
+- `pg-repo-runner/tests/test-pg-repo-runner-metrics.bats`: the gauges. A fake ccpool that records argv (and
+  writes noise to its own stdout and stderr). Proves the points of a healthy and of a failing `tips --repo`,
+  that stdout stays the JSONL record, that a failing, missing or hanging ccpool changes no exit status and is
+  logged once, the run points and busy load of a role, and that an empty ccpool means no call. Negative control
+  2026-11-02: letting the ccpool call write to stdout fails the stdout, failing-ccpool and hanging-ccpool tests.
+- `checks.<system>.test-pg-repo-runner`: all nine suites, built through `mkBashScript`.
 - `checks.<system>.test-pg-repo-runner-hm-render`: evaluates the home module (push, verify and sync
   default to false for every repo, no case enables push, the assertions fire), builds the rendered
   `config.toml`, and runs the real package against it.

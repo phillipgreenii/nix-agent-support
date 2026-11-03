@@ -5,6 +5,10 @@
   # offers (rr_nix_run). null leaves the variable empty: rr_nix_run then runs nix
   # without the wrapper and says so (the workspace rule: never block on it).
   pgNixLogWrapped ? null,
+  # ccpool, by absolute store path, for its generic `emit-gauge` command (the
+  # best-effort OTLP gauges). null leaves the variable empty: the runner then emits
+  # nothing.
+  ccpool ? null,
   # bd, for the test check only (see ../default.nix).
   beads ? null,
   testSupport ? null,
@@ -48,6 +52,7 @@ mkBashScript {
     ];
     RR_NIX_LOG_WRAPPED_BIN =
       if pgNixLogWrapped == null then "" else "${pgNixLogWrapped}/bin/pg-nix-log-wrapped";
+    RR_CCPOOL_BIN = if ccpool == null then "" else "${ccpool}/bin/ccpool";
   };
   testDeps = [
     pkgs.coreutils
