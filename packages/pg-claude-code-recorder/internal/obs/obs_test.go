@@ -2,6 +2,7 @@ package obs
 
 import (
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -37,5 +38,32 @@ func TestRegisterStandardRegistersLoopMetrics(t *testing.T) {
 	}
 	if _, ok := o.Reg.Counter(MLoopRuns, map[string]string{"loop": LoopWALCheckpoint, "outcome": OutcomeOK}); ok {
 		t.Error("wal_checkpoint series belongs to the WAL checkpoint task")
+	}
+}
+
+func TestSetCounterNeverDecreasesAndIsRaceFree(t *testing.T) {
+	r := NewRegistry()
+	r.SetCounter("c", nil, 5)
+	r.SetCounter("c", nil, 3)
+	if v, ok := r.Counter("c", nil); !ok || v != 5 {
+		t.Fatalf("counter %v %v", v, ok)
+	}
+	r.SetCounter("c", nil, 7)
+	if v, _ := r.Counter("c", nil); v != 7 {
+		t.Fatalf("counter %v", v)
+	}
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				r.SetCounter("c", nil, float64(g*1000+i))
+			}
+		}(g)
+	}
+	wg.Wait()
+	if v, _ := r.Counter("c", nil); v != 7499 {
+		t.Fatalf("final %v", v)
 	}
 }

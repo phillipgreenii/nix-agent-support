@@ -485,6 +485,7 @@ func (d *Daemon) refreshGauges() {
 		d.obs.Reg.Observe(obs.MRefreshGaugesDuration, time.Since(start).Seconds())
 		d.obs.Reg.Add(obs.MLoopRuns, map[string]string{"loop": obs.LoopRefreshGauges, "outcome": obs.OutcomeOK}, 1)
 	}()
+	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
 	d.prs.UpdateGauges()
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)

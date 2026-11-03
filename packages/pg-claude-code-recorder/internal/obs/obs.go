@@ -97,6 +97,16 @@ const (
 	EvWALTruncateDone        = "wal_truncate_done"
 )
 
+// Metric names of the process, Go runtime and WAL-size collectors.
+const (
+	MProcessCPUSeconds = "process_cpu_seconds_total"
+	MGoGoroutines      = "go_goroutines"
+	MGoHeapAlloc       = "go_memstats_heap_alloc_bytes"
+	MGoAllocTotal      = "go_memstats_alloc_bytes_total"
+	MGoGCPauseSeconds  = "go_gc_pause_seconds_total"
+	MWALBytes          = "wal_bytes"
+)
+
 // Loop and outcome label values of loop_runs_total.
 const (
 	LoopSettleTick    = "settle_tick"
@@ -365,6 +375,18 @@ func key(name string, labels map[string]string) string {
 func (r *Registry) Add(name string, labels map[string]string, v float64) {
 	r.mu.Lock()
 	r.counters[key(name, labels)] += v
+	r.mu.Unlock()
+}
+
+// SetCounter sets a counter to the absolute value v, for a counter whose source
+// is itself cumulative (process CPU, GC pause). A v below the current value is
+// ignored so the counter never moves backwards.
+func (r *Registry) SetCounter(name string, labels map[string]string, v float64) {
+	k := key(name, labels)
+	r.mu.Lock()
+	if cur, ok := r.counters[k]; !ok || v > cur {
+		r.counters[k] = v
+	}
 	r.mu.Unlock()
 }
 

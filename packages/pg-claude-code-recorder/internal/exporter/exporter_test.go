@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -57,5 +59,67 @@ func TestStartRefusesNonLoopbackAndServesMetrics(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), Prefix+"dropped_bytes_total") || refreshed != 1 {
 		t.Fatalf("status %d refreshed %d body %q", resp.StatusCode, refreshed, body)
+	}
+}
+
+// checkExposition is a minimal Prometheus text-exposition grammar check: every
+// line is blank, a "# HELP|TYPE name ..." comment, or "name[{k="v",...}] value"
+// with a valid name, well-formed labels and a float value; each series has a
+// preceding # TYPE of its family and no family is typed twice.
+func checkExposition(t *testing.T, text string) {
+	t.Helper()
+	nameRe := `[a-zA-Z_:][a-zA-Z0-9_:]*`
+	typeRe := regexp.MustCompile(`^# TYPE (` + nameRe + `) (counter|gauge|histogram|summary|untyped)$`)
+	seriesRe := regexp.MustCompile(`^(` + nameRe + `)(\{([a-zA-Z_][a-zA-Z0-9_]*="[^"\\]*"(,[a-zA-Z_][a-zA-Z0-9_]*="[^"\\]*")*)?\})? (\S+)$`)
+	typed := map[string]bool{}
+	for i, line := range strings.Split(text, "\n") {
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "# HELP "):
+		case strings.HasPrefix(line, "# TYPE "):
+			m := typeRe.FindStringSubmatch(line)
+			if m == nil {
+				t.Errorf("line %d: bad TYPE line %q", i+1, line)
+				continue
+			}
+			if typed[m[1]] {
+				t.Errorf("line %d: family %s typed twice", i+1, m[1])
+			}
+			typed[m[1]] = true
+		case strings.HasPrefix(line, "#"):
+			t.Errorf("line %d: unknown comment %q", i+1, line)
+		default:
+			m := seriesRe.FindStringSubmatch(line)
+			if m == nil {
+				t.Errorf("line %d: bad series line %q", i+1, line)
+				continue
+			}
+			if _, err := strconv.ParseFloat(m[5], 64); err != nil && m[5] != "+Inf" && m[5] != "-Inf" && m[5] != "NaN" {
+				t.Errorf("line %d: bad value %q", i+1, m[5])
+			}
+			base := m[1]
+			for _, suf := range []string{"_bucket", "_sum", "_count"} {
+				if strings.HasSuffix(base, suf) && typed[strings.TrimSuffix(base, suf)] {
+					base = strings.TrimSuffix(base, suf)
+				}
+			}
+			if !typed[base] {
+				t.Errorf("line %d: series %s has no preceding # TYPE", i+1, m[1])
+			}
+		}
+	}
+}
+
+func TestRenderedExpositionPassesGrammarCheck(t *testing.T) {
+	o := obs.New(nil)
+	o.Reg.Add(obs.MRequestsTotal, map[string]string{"client": "other", "op": "status", "outcome": "ok"}, 2)
+	o.Reg.Observe(obs.MQueryDuration, 0.003)
+	o.Reg.SetCounter(obs.MProcessCPUSeconds, nil, 1.5)
+	o.Reg.Set(obs.MWALBytes, nil, 4096)
+	var b bytes.Buffer
+	Render(&b, o.Reg)
+	checkExposition(t, b.String())
+	if !strings.Contains(b.String(), "# TYPE "+Prefix+obs.MProcessCPUSeconds+" counter") {
+		t.Fatal("process cpu counter missing")
 	}
 }
