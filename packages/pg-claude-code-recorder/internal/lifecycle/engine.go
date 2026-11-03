@@ -331,14 +331,24 @@ func (m *model) conversation(session string) (Conversation, bool) {
 	return c, true
 }
 
+// cwdQuery finds the newest cwd of a session's transcript. CROSS JOIN makes
+// records the outer loop (records_session for the session, then the fields
+// primary key per record). The store has no sqlite_stat1, so the planner cannot
+// see that session=? is far more selective than the cwd name; on an earlier
+// schema it started from every cwd field in the store. CROSS JOIN pins the
+// order whatever the planner or schema does. INDEXED BY is avoided on
+// purpose: it can fail at prepare time. TestCwdQueryPlanStartsFromTheSessionIndex
+// guards the plan.
+const cwdQuery = `SELECT f.s FROM records r CROSS JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
+WHERE r.session=? AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
+
 // transcriptFacts fills what a transcript says: the newest cwd (when its files
 // disagree, the newest file's value), the last write, whether the originals
 // still exist, and the end time when nothing better is known.
 func (e *Engine) transcriptFacts(c *Conversation) error {
 	db := e.St.Read()
 	var cwd sql.NullString
-	err := db.QueryRow(`SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
-WHERE r.session=? AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`, c.SessionID).Scan(&cwd)
+	err := db.QueryRow(cwdQuery, c.SessionID).Scan(&cwd)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
