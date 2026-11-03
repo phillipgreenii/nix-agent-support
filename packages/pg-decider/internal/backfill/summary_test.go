@@ -247,3 +247,40 @@ func TestTheApplySummaryPassesWhenATrackedPRAbsentFromTheSetHasNoResidual(t *tes
 		t.Errorf("output:\n%s", out.String())
 	}
 }
+
+// An own-origin skip record that lands after a real run does not hide that run:
+// Latest ignores it, so the summary still shows the real run's residual, and the
+// resume check does not take the skip for a finished run.
+func TestASkipRecordAfterARealRunDoesNotHideItsResidual(t *testing.T) {
+	t0 := baseTime
+	for _, mode := range []string{ModePlan, ModeApply} {
+		t.Run(mode, func(t *testing.T) {
+			real := recLine{at: t0, pr: "o/r#1", mode: mode, residual: intp(2)}
+			skip := recLine{at: t0.Add(time.Hour), pr: "o/r#1", mode: mode, skipped: true, eventID: "o/r#1@0123456789ab"}
+			lg := readGolden(t, real, skip)
+			if len(lg.Records) != 2 || !lg.Records[1].Skipped {
+				t.Fatalf("records = %+v, want the real run then a skip", lg.Records)
+			}
+			got, ok := lg.Latest(mode, nil)["o/r#1"]
+			if !ok || got.Skipped || got.Seq != lg.Records[0].Seq {
+				t.Fatalf("Latest = %+v (found %v), want the real run", got, ok)
+			}
+			s := Summarize(lg, testSet("o/r#1"), mode, 0, t0.Add(2*time.Hour))
+			if mode == ModeApply {
+				if s.Residuals["o/r#1"] != 2 || s.OK() {
+					t.Fatalf("apply summary = %+v, want the real run's residual 2 and a problem", s)
+				}
+			} else if s.WithRecord != 1 || len(s.Missing) != 0 {
+				t.Fatalf("plan summary = %+v, want the real run's record", s)
+			}
+			// A PR whose only record is a skip has no record at all.
+			only := readGolden(t, skip)
+			if _, ok := only.Latest(mode, nil)["o/r#1"]; ok {
+				t.Fatal("a lone skip record counted as a run")
+			}
+			if finished(only, mode, "o/r#1", 0) {
+				t.Fatal("a lone skip record counted as a finished run for the resume check")
+			}
+		})
+	}
+}

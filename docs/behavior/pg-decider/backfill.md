@@ -140,7 +140,10 @@ refuses to start without limits unless `--no-create-limits` says so.
 
 ## The summary
 
-`summary` reads the run record and, for each enumerated PR, its latest record of the mode.
+`summary` reads the run record and, for each enumerated PR, its latest record of the mode. A skip line
+(an own-origin delivery the composed command ended before the lock, see
+[`pr-change.md`](pr-change.md)) is not a run and is ignored here, as it is by the resume check and the
+write listing: a skip after a real run cannot hide that run's residual.
 
 In `plan` mode it prints, as fixed `key: value` lines: the PRs enumerated and the PRs with a plan-mode
 record (which MUST be equal; every PR without a usable one is named, with the reason, including a

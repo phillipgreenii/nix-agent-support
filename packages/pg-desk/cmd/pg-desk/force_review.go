@@ -95,6 +95,7 @@ func runForceReview(cmd *cobra.Command, ref, actorFlag, origin string, clear boo
 		return err
 	}
 	// Only the request needs the lane to act; --clear is how a decider consumes
-	// the flag, so it prints no command.
+	// the flag, so it prints nothing. With the lane in plan or apply the write
+	// itself wakes the decider, so only the lane-off line can print.
 	return printComposedCommand(cmd.OutOrStdout(), cfg, entityTypePR, w.id, "")
 }

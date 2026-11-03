@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -486,28 +487,206 @@ func TestAnnotateRemoveConflictsWithValueAndNeedsOneOfThem(t *testing.T) {
 	}
 }
 
-// force-review prints the composed command after setting the flag; --clear (how
-// a decider consumes the flag) prints none.
-func TestForceReviewPrintsTheComposedCommandOnSetOnly(t *testing.T) {
-	open, seed := newStoreAt(t, "new")
-	seedForceReviewEntity(t, seed, "deadbeef")
-	cfg := linkTestConfig()
-	cfg.PRLane.Mode = "apply"
-	withOpenSeams(t, cfg, open)
+// force-review prints no command with the lane in plan or apply (the annotation
+// write wakes the decider itself) and keeps the lane-off line with the lane off;
+// --clear (how a decider consumes the flag) prints none.
+func TestForceReviewPrintsOnlyTheLaneOffLine(t *testing.T) {
+	const off = "next: the pr lane is off (pr_lane.mode), so nothing acts on it yet; when it runs: pg-pr-change plan o/r#1\n"
+	for _, tc := range []struct{ mode, want string }{
+		{"apply", ""}, {"plan", ""}, {"off", off}, {"", off},
+	} {
+		t.Run("lane "+tc.mode, func(t *testing.T) {
+			open, seed := newStoreAt(t, "new")
+			seedForceReviewEntity(t, seed, "deadbeef")
+			cfg := linkTestConfig()
+			cfg.PRLane.Mode = tc.mode
+			withOpenSeams(t, cfg, open)
 
-	out, err := runGroupCmd(t, forceReviewCmd, "pr", "1")
-	if err != nil {
-		t.Fatalf("force-review: %v", err)
+			out, err := runGroupCmd(t, forceReviewCmd, "pr", "1")
+			if err != nil {
+				t.Fatalf("force-review: %v", err)
+			}
+			want := "force-review requested on pr o/r#1 at deadbeef\n" + tc.want
+			if out != want {
+				t.Errorf("set output:\n%q\nwant:\n%q", out, want)
+			}
+			out, err = runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear")
+			if err != nil {
+				t.Fatalf("force-review --clear: %v", err)
+			}
+			if out != "force-review cleared on pr o/r#1\n" {
+				t.Errorf("clear output %q, want only the cleared line", out)
+			}
+		})
 	}
-	want := "force-review requested on pr o/r#1 at deadbeef\nnext: run pg-pr-change apply o/r#1 to have the lane act on it\n"
-	if out != want {
-		t.Errorf("set output:\n%q\nwant:\n%q", out, want)
+}
+
+// annotationVerbCase is one annotation-writing verb, with a first value, a
+// different second value and the annotation key it writes. Each run is one
+// invocation of the verb.
+type annotationVerbCase struct {
+	name     string
+	key      string
+	seedHead string // non-empty: seed o/r#1 with this head SHA (force-review)
+	first    func(t *testing.T, actor string) error
+	second   func(t *testing.T, actor string) error // a changed value; nil when the verb has none
+}
+
+func annotationVerbCases() []annotationVerbCase {
+	run := func(build func(string) *cobra.Command, args ...string) func(*testing.T, string) error {
+		return func(t *testing.T, actor string) error {
+			t.Helper()
+			_, err := runGroupCmd(t, build, "pr", append(append([]string{}, args...), "--actor", actor)...)
+			return err
+		}
 	}
-	out, err = runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear")
-	if err != nil {
-		t.Fatalf("force-review --clear: %v", err)
+	// hide, unhide and wip take no --actor: they stamp the configured actor.
+	noActor := func(build func(string) *cobra.Command, args ...string) func(*testing.T, string) error {
+		return func(t *testing.T, _ string) error {
+			t.Helper()
+			_, err := runGroupCmd(t, build, "pr", args...)
+			return err
+		}
 	}
-	if out != "force-review cleared on pr o/r#1\n" {
-		t.Errorf("clear output %q, want only the cleared line", out)
+	return []annotationVerbCase{
+		{
+			name: "hide", key: "hidden",
+			first:  noActor(typedHide, "1", "noisy"),
+			second: noActor(typedHide, "1", "very noisy"),
+		},
+		{
+			name: "wip", key: "wip",
+			first:  noActor(typedWIP, "on", "1"),
+			second: noActor(typedWIP, "off", "1"),
+		},
+		{
+			name: "suppress", key: "suppress.lint",
+			first: run(suppressCmd, "1", "--kind", "lint"),
+		},
+		{
+			name: "feedback set", key: "disposition.c1",
+			first:  run(typedFeedback, "set", "1", "c1", "--disposition", "will-fix"),
+			second: run(typedFeedback, "set", "1", "c1", "--disposition", "wont-fix"),
+		},
+		{
+			name: "force-review", key: "force_review", seedHead: "deadbeef",
+			first: run(forceReviewCmd, "1"),
+		},
+		{
+			name: "annotate", key: "free",
+			first:  run(newAnnotateCmd, "1", "--key", "free", "--value", "a"),
+			second: run(newAnnotateCmd, "1", "--key", "free", "--value", "b"),
+		},
+	}
+}
+
+// 4.1 (pg2-aoehwj): a same-value re-run of every annotation verb appends no
+// change_log record and leaves the stored origin, set_by and set_at; a
+// changed value appends exactly one. Tested per verb because a store-level
+// test would not catch a verb reverting to the unconditional write.
+func TestAnnotationVerbsSameValueRerunWritesNothing(t *testing.T) {
+	for _, tc := range annotationVerbCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			open, seed := seedLinkStore(t, [2]string{"pr", "o/r#1"})
+			if tc.seedHead != "" {
+				seedForceReviewEntity(t, seed, tc.seedHead)
+			}
+			if tc.name == "feedback set" {
+				seedFeedbackPR(t, seed, "o/r", "o/r#1", [][2]string{{"c1", dispositionOpen}})
+			}
+			withOpenSeams(t, linkTestConfig(), open)
+			clock := "2026-10-01T00:00:00Z"
+			orig := annotationNow
+			annotationNow = func() string { return clock }
+			t.Cleanup(func() { annotationNow = orig })
+
+			if err := tc.first(t, "alice"); err != nil {
+				t.Fatalf("first run: %v", err)
+			}
+			before, found, err := seed.GetKVAnnotation("o/r", "pr", "o/r#1", tc.key)
+			if err != nil || !found {
+				t.Fatalf("annotation %q after the first run: found=%v err=%v", tc.key, found, err)
+			}
+			kinds := kindsOf(t, seed, "pr", "o/r#1")
+
+			clock = "2026-10-02T00:00:00Z"
+			if err := tc.first(t, "bob"); err != nil {
+				t.Fatalf("same-value re-run: %v", err)
+			}
+			after, _, _ := seed.GetKVAnnotation("o/r", "pr", "o/r#1", tc.key)
+			if after != before {
+				t.Errorf("annotation after a same-value re-run = %+v, want unchanged %+v", after, before)
+			}
+			if got := kindsOf(t, seed, "pr", "o/r#1"); !equalStrings(got, kinds) {
+				t.Errorf("history after a same-value re-run = %v, want %v (no new record)", got, kinds)
+			}
+
+			if tc.second == nil {
+				return
+			}
+			if err := tc.second(t, "bob"); err != nil {
+				t.Fatalf("changed-value run: %v", err)
+			}
+			if got := kindsOf(t, seed, "pr", "o/r#1"); len(got) != len(kinds)+1 {
+				t.Errorf("history after a changed value = %v, want exactly one more record than %v", got, kinds)
+			}
+		})
+	}
+}
+
+// Removing an existing key appends one record; removing a missing key none
+// (unsuppress and force-review --clear).
+func TestAnnotationRemovalAppendsOneRecordOnlyForAnExistingKey(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#1"})
+	seedForceReviewEntity(t, seed, "deadbeef")
+	withOpenSeams(t, linkTestConfig(), open)
+
+	count := func() int { return len(kindsOf(t, seed, "pr", "o/r#1")) }
+	base := count()
+	if _, err := runGroupCmd(t, unsuppressCmd, "pr", "1", "--kind", "lint"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear"); err != nil {
+		t.Fatal(err)
+	}
+	if count() != base {
+		t.Fatalf("removing missing keys appended records: %v", kindsOf(t, seed, "pr", "o/r#1"))
+	}
+	if _, err := runGroupCmd(t, suppressCmd, "pr", "1", "--kind", "lint"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGroupCmd(t, unsuppressCmd, "pr", "1", "--kind", "lint"); err != nil {
+		t.Fatal(err)
+	}
+	if count() != base+2 {
+		t.Errorf("history = %v, want set + remove = two records", kindsOf(t, seed, "pr", "o/r#1"))
+	}
+}
+
+// Two concurrent same-value writes produce exactly one record: the read of
+// the stored value and the write share one transaction.
+func TestConcurrentSameValueAnnotationWritesProduceOneRecord(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#1"})
+	base := len(kindsOf(t, seed, "pr", "o/r#1"))
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st, err := open()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer func() { _ = st.Close() }()
+			w := &kvWrite{cmdName: "annotate", entityType: "pr", repo: "o/r", id: "o/r#1", key: "free", value: "same", origin: "pg-desk", by: "alice"}
+			if err := w.set(st); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := kindsOf(t, seed, "pr", "o/r#1"); len(got) != base+1 {
+		t.Errorf("history = %v, want exactly one new record", got)
 	}
 }

@@ -28,7 +28,7 @@ const (
 	logSkipsEnv  = "PG_PR_CHANGE_LOG_SKIPS"
 )
 
-const usage = `usage: pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] <plan|apply> <id> [<seq>]
+const usage = `usage: pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--origin TEXT] <plan|apply> <id> [<seq>]
 
 Hydrate one PR with "pg-desk pr refresh <id>" and then decide it with
 "pg-decider <mode> pr <id>", holding a per-PR lock for the whole run.
@@ -48,6 +48,13 @@ Hydrate one PR with "pg-desk pr refresh <id>" and then decide it with
   --lock-wait DURATION  longest wait for the lock (default 30s)
   --run-record FILE     file one JSON record per run is appended to
                         (env ` + runRecordEnv + `; default: $XDG_STATE_HOME/pg-pr-change/` + prchange.RunRecordFileName + `)
+  --origin TEXT         the origin of the annotation change that produced this
+                        delivery (the item's metadata.origin); empty, "<no value>"
+                        or "null" mean unknown. A delivery whose origin is the
+                        decider's own (decider:pr-decider) is skipped before the
+                        lock: nothing is hydrated or decided, the run record
+                        says skipped/own-origin, the skip counter is bumped, and
+                        the exit code is 0
   --log-skips           also log a line for every rule that skipped (debug level)
                         (env ` + logSkipsEnv + `, any value)
 
@@ -91,6 +98,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	lockDir := fs.String("lock-dir", defaultLockDir(), "")
 	lockWait := fs.Duration("lock-wait", prchange.DefaultLockWait, "")
 	runRecord := fs.String("run-record", defaultRunRecord(), "")
+	origin := fs.String("origin", "", "")
 	logSkips := fs.Bool("log-skips", os.Getenv(logSkipsEnv) != "", "")
 	showVersion := fs.Bool("version", false, "")
 	help := fs.Bool("help", false, "")
@@ -135,6 +143,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		LockDir:       *lockDir,
 		LockWait:      *lockWait,
 		Seq:           seq,
+		Origin:        *origin,
 		RunRecordPath: *runRecord,
 		LogSkips:      *logSkips,
 		Config:        cfg,

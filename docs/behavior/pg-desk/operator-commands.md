@@ -174,11 +174,20 @@ with the cutover message (exit `1`); neither calls the tracker or the connector.
 learn it, which keeps the recorded one), `last_outcome`, `decisions` (a list of `{rule, action, outcome,
 reason, count}`), `lookup_items` (the decider's lookup size), and `timings` (an object of whole
 milliseconds, each member optional: `lock_wait_ms`, `hydrate_ms`, `view_read_ms`, `decide_ms`, `lookup_ms`,
-`pre_plan_ms`, `apply_ms`, `residual_ms`; a document without it is accepted and records no timing). An unknown member
+`pre_plan_ms`, `apply_ms`, `residual_ms`; a document without it is accepted and records no timing) and
+`skip_reason` (the closed vocabulary `own-origin`, see "A skip document" below). An unknown member
 or a value outside its closed vocabulary rejects the whole document and writes nothing (exit `1`). On
 success it prints `recorded pr <id>: mode <mode>` and exits `0`. The mode rules, which decide what is
 written for a run whose mode differs from the configured `pr_lane.mode`, are those of
 [`store-schema.md`](store-schema.md).
+
+**A skip document.** A document with `skip_reason` set (with `pr` and `mode`, which are still required)
+records no run: the delivery ended before the lock because the decider itself wrote the annotation
+that caused it. The verb adds one to the lane skip counter of that reason, exported as
+`pg_desk_pr_lane_skips_total{reason}`, in one lock-free statement, and writes nothing else: no last-run
+time, no per-PR state, no lane-level mode, no run counter and no decisions counter, so a skip cannot
+disturb the state of the last real run. An older pg-desk refuses the unknown member; the composed
+command treats that as a failure to count, never as a failed run.
 
 `pg-desk pr mark-inactive <id>` sets the PR's `active` flag to `0` and adds one to the marked-inactive
 counter, in one transaction. A PR the source reports not found, with no open anchor, then drops out of the
@@ -460,7 +469,8 @@ can drift.
   a failure.
 - **INV-OPERATOR-10.** <!-- uuid: aef55489-c70e-4057-a04d-0cad4fd53595 --> `pr lane-record` MUST reject a document with an unknown member or a value outside a closed
   vocabulary without writing anything, and `pr mark-inactive` MUST work from a run in either lane mode and
-  count a PR once.
+  count a PR once. A document with a `skip_reason` MUST add one to that reason's skip counter and
+  write nothing else.
 
 - **INV-OPERATOR-11.** <!-- uuid: b0994b23-e3bf-4c10-a9fd-1194d541b6b7 --> `doctor` MUST NOT check, list or give a remedy for a `sync_error` row, and a line of the `focus:` block that is red for a known reason until the lane flips to `apply`
   (unminted PR selections) MUST carry an `expected until P6` tag without ceasing to be a gate.

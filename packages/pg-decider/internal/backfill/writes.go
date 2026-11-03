@@ -73,7 +73,7 @@ func FlipBound(lg *Log) (time.Time, bool) {
 		}
 	}
 	for _, r := range lg.Records {
-		if r.Mode != ModeApply || r.Seq <= after || r.Time.IsZero() {
+		if r.Skipped || r.Mode != ModeApply || r.Seq <= after || r.Time.IsZero() {
 			continue
 		}
 		if !have || r.Time.Before(bound) {

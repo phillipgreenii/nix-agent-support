@@ -261,7 +261,7 @@ func (o *RunOptions) setKey() string {
 // usable plan, so a resume runs the PR again.
 func finished(lg *Log, mode, pr string, since int) bool {
 	for _, r := range lg.Records {
-		if r.Mode != mode || r.Entity != pr || r.Seq <= since {
+		if r.Skipped || r.Mode != mode || r.Entity != pr || r.Seq <= since {
 			continue
 		}
 		if r.ExitCode == 0 && mode == ModePlan && decidePlanError(r) != "" {

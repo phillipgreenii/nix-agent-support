@@ -360,3 +360,60 @@ func TestEveryTimingStageHasAMemberAndTheMembersCoverTheVocabulary(t *testing.T)
 		}
 	}
 }
+
+// A skip document (skip_reason own-origin) bumps only the lane skip counter:
+// no last-run time, no PR state, no run or decision counters and no lane-level
+// mode, so a skip cannot disturb the state of the last real run (INV-SKIP-1).
+func TestASkipRecordBumpsOnlyTheSkipCounter(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	mustRecord(t, st, "apply", t0, RunInput{
+		PR: "o/r#1", Mode: "apply", Residual: intp(3), LastOutcome: "ok",
+		Decisions: []DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
+	})
+	before, err := st.ListMetaPrefix("pr_lane.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		mustRecord(t, st, "apply", t2, RunInput{PR: "o/r#1", Mode: "apply", SkipReason: "own-origin"})
+	}
+	snap := mustRead(t, st, t2)
+	if snap.Skips["own-origin"] != 2 {
+		t.Fatalf("skips = %v, want own-origin 2", snap.Skips)
+	}
+	after, err := st.ListMetaPrefix("pr_lane.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range before {
+		if after[k] != v {
+			t.Errorf("key %s changed from %q to %q by a skip", k, v, after[k])
+		}
+	}
+	if len(after) != len(before)+1 {
+		t.Errorf("a skip wrote %d new keys, want exactly the skip counter", len(after)-len(before))
+	}
+	if snap.LastRunAt != t0.Format(time.RFC3339) {
+		t.Errorf("last_run_at = %q, want the real run's %q", snap.LastRunAt, t0.Format(time.RFC3339))
+	}
+	if snap.ResidualPRs != 1 {
+		t.Errorf("residual PRs = %d, want the real run's 1", snap.ResidualPRs)
+	}
+}
+
+func TestASkipDocumentStillNeedsPRAndModeAndAKnownReason(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	for _, in := range []RunInput{
+		{Mode: "apply", SkipReason: "own-origin"},
+		{PR: "o/r#1", SkipReason: "own-origin"},
+		{PR: "o/r#1", Mode: "apply", SkipReason: "elsewhere"},
+	} {
+		if err := Record(st, "apply", t0, in); err == nil {
+			t.Errorf("Record(%+v) = nil, want a refusal", in)
+		}
+	}
+	if rows, _ := st.ListMetaPrefix("pr_lane."); len(rows) != 0 {
+		t.Errorf("a refused skip wrote %v", rows)
+	}
+}

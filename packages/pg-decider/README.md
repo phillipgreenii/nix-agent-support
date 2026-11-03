@@ -67,6 +67,13 @@ It ships in this package's output beside `pg-decider`, with `pg-desk`, `pg-conne
 `pg-decider` on its `PATH`. Exit codes, failure classes, the delivery key, the run record and the not-found escalation are in
 `docs/behavior/pg-decider/pr-change.md`.
 
+`--origin=<text>` is the origin of the annotation change that produced the delivery (the item's
+`metadata.origin` from the pg-desk annotation feed). A delivery whose origin is the decider's own,
+`apply.Origin("pr")` (`decider:pr-decider`), is skipped before the lock: no hydrate, no decide, no lane
+state, one run record line (`skipped`, `skip_reason` `own-origin`), the skip counter
+`pg_desk_pr_lane_skips_total{reason}` bumped through `pg-desk pr lane-record`, exit 0. That is what keeps
+the decider's own annotation writes from re-triggering it. Every other origin, and none, runs.
+
 ## `pg-pr-backfill`
 
 `cmd/pg-pr-backfill` and `internal/backfill` are the PR lane's backfill driver: `enumerate` lists the

@@ -100,11 +100,12 @@ func laneAge(seconds int) string {
 const composedCommandName = "pg-pr-change"
 
 // composedCommandHint is the line an annotation verb prints after it has
-// written its annotation. The verbs only write annotations and never call the
-// decider, so the operator is told which command makes the lane act on it. The
-// mode is the configured lane mode when it is plan or apply; with the lane off
-// (or no configuration) nothing runs the decider, which the line says, and the
-// plan form is the one to try first.
+// written its annotation, or "" when there is nothing to tell. The verbs only
+// write annotations and never call the decider, but with the lane in plan or
+// apply the annotation write itself wakes the decider (the pg-desk annotation
+// feed, `pg-desk pr annotation-items`, reaches the pr-change role), so no
+// command is printed. With the lane off (or no configuration) nothing runs the
+// decider, which the line says, and the plan form is the one to try first.
 func composedCommandHint(cfg *config.Config, id string) string {
 	mode := config.PRLaneModeOff
 	if cfg != nil {
@@ -112,15 +113,16 @@ func composedCommandHint(cfg *config.Config, id string) string {
 	}
 	switch mode {
 	case config.PRLaneModePlan, config.PRLaneModeApply:
-		return fmt.Sprintf("next: run %s %s %s to have the lane act on it", composedCommandName, mode, id)
+		return ""
 	default:
 		return fmt.Sprintf("next: the pr lane is off (pr_lane.mode), so nothing acts on it yet; when it runs: %s plan %s", composedCommandName, id)
 	}
 }
 
 // printComposedCommand prints, for a PR annotation verb that has just written
-// its annotation, the composed command to run (the verbs never call the
-// decider). It prints nothing for another entity type, which the lane does not
+// its annotation, the lane-off line when the lane is off (see
+// composedCommandHint; with the lane in plan or apply the write wakes the
+// decider and nothing is printed). It prints nothing for another entity type, which the lane does not
 // handle. The id is the PR's canonical OWNER/REPO#N, the form the composed
 // command takes; a reference that cannot be resolved again (it resolved a
 // moment ago, so this is a configuration reload failure) is printed as given.
@@ -138,6 +140,10 @@ func printComposedCommand(w io.Writer, cfg *config.Config, entityType, ref, pref
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(w, composedCommandHint(cfg, id))
+	hint := composedCommandHint(cfg, id)
+	if hint == "" {
+		return nil
+	}
+	_, err := fmt.Fprintln(w, hint)
 	return err
 }

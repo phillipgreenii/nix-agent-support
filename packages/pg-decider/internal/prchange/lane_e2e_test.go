@@ -36,7 +36,7 @@ const laneE2EScenariosFile = "testdata/lane-e2e-scenarios.txt"
 
 // minLaneE2EScenarios is the number of scenarios the soak must run; keep it
 // equal to MIN_SCENARIOS of the script.
-const minLaneE2EScenarios = 25
+const minLaneE2EScenarios = 26
 
 // laneE2ETools is the lane's tools over the real bd (and the git its init needs).
 func laneE2ETools(t *testing.T) e2eTools {
@@ -59,6 +59,7 @@ func TestLaneE2E(t *testing.T) {
 	driftScenarios(l)
 	reviewScenarios(l)
 	failureScenarios(l)
+	annotationLoopScenarios(l)
 	rollbackScenarios(l)
 	l.scenarioList(laneE2EScenariosFile, minLaneE2EScenarios)
 }

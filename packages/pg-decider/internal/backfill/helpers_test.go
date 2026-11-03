@@ -25,6 +25,8 @@ type recLine struct {
 	// eventID overrides the event id (default: the PR id, as the driver passes it);
 	// a router run carries `<entity>@<12 hex>`.
 	eventID string
+	// skipped marks an own-origin skip record: no decide, no residual, no hydrate.
+	skipped bool
 }
 
 func (r recLine) event() string {
@@ -43,6 +45,16 @@ func (r recLine) json(t *testing.T) []byte {
 	}
 	if r.class != "" {
 		m["error_class"] = r.class
+	}
+	if r.skipped {
+		m["skipped"], m["skip_reason"], m["origin"] = true, "own-origin", "decider:pr-decider"
+		m["hydrate"] = map[string]any{"result": "not_run"}
+		m["lane_record"] = map[string]any{"result": "not_run"}
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
 	}
 	if r.exit == 0 {
 		var rules []map[string]any

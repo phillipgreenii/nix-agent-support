@@ -46,6 +46,13 @@ does not restate it.
   per-PR hydration that pg-desk's own flow used for `pr` belong to the backend. pg-desk MUST NOT
   keep a baseline, run a sweep or hydrate entities in order to detect a PR or CI change, and the
   backend, not pg-desk, owns the consumers' cursors for those types.
+- **pg-desk still owns its local annotation changes.** The daemon cannot see pg-desk-owned data, so a
+  change of a PR's annotations (an operator hide, a decider's own write) is detected by pg-desk and
+  nobody else: the annotation write appends an `annotation_changed` record to pg-desk's change log, and
+  `pg-desk pr annotation-items` turns those records into router items (see
+  [`annotation-items.md`](annotation-items.md)). That is the one local change log and the one
+  consumer kind pg-desk keeps for `pr`; it does detection by no means: no baseline, no sweep, no
+  hydration.
 - **For `issue`, ownership is decided per backend.** pg-desk MUST NOT choose how to detect an issue
   change by type alone. Its configuration names, for each watched query, the backend instance that
   serves it and whether that backend owns its changes, rendered from the same source as the
@@ -727,7 +734,9 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   sweep, redrive or acknowledgement appends a row for it.
 - **INV-CHANGES-13.** <!-- uuid: 6c271805-3abc-49a8-b4c0-0ce3358d7433 --> For `pr` and `ci`, pg-desk MUST NOT own change detection: it MUST NOT keep a
   detection baseline, run an age sweep or hydrate entities in order to find a change, and the
-  backend that owns those changes, not pg-desk, MUST own the consumers' cursors.
+  backend that owns those changes, not pg-desk, MUST own the consumers' cursors. The one carve-out is
+  pg-desk's own annotation changes, which no backend can see: `annotation-items` reads them from the
+  local change log, under consumers whose names start with `annotations:`.
 - **INV-CHANGES-14.** <!-- uuid: bc6b61da-1a7b-4c42-b93d-98b89366cd8d --> A CI change behind an unchanged rollup MUST re-trigger categorization of the
   PR it belongs to, once per change and not once per feed.
 - **INV-CHANGES-15.** <!-- uuid: fffa7fca-0a84-4f3b-9815-24a3928e7379 --> A desk run that did not complete for a PR MUST still be recovered with no

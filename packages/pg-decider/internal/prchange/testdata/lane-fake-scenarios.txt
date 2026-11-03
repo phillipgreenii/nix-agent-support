@@ -24,5 +24,6 @@ the-same-race-against-a-double-that-skips-the-lock-yields-two-anchors
 a-duplicate-pr-changed-writes-nothing
 a-kill-between-a-tracker-create-and-its-audit-comment-then-a-rerun-creates-no-duplicate
 a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-bd
+a-decider-annotation-write-fed-back-through-the-annotation-feed-is-skipped-and-the-loop-ends
 the-scenario-list-is-the-list-the-gate-asserts
 a-rollback-drill-lists-every-write-since-the-flip-marker-by-timestamp-and-reverts-each

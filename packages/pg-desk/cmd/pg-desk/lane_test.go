@@ -159,3 +159,30 @@ func TestLaneRecordTakesTheWritersTimingsMemberAndStillTakesADocumentWithoutOne(
 		t.Errorf("timings = %+v, want all 8 stages from the one run", snap.Timings)
 	}
 }
+
+// A skip document through the verb: it bumps the skip counter and writes no run
+// state, and an unknown reason is refused with nothing written (pg2-aoehwj).
+func TestLaneRecordSkipDocumentBumpsOnlyTheSkipCounter(t *testing.T) {
+	open, seed := seedLinkStore(t)
+	cfg := openTestConfig("o/r")
+	cfg.PRLane.Mode = "apply"
+	withOpenSeams(t, cfg, open)
+	withLaneClock(t, time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC))
+
+	if _, err := execLaneRecord(t, `{"pr":"o/r#1","mode":"apply","skip_reason":"own-origin"}`); err != nil {
+		t.Fatalf("lane-record skip: %v", err)
+	}
+	snap, err := lanestate.Read(seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Skips["own-origin"] != 1 || snap.LastRunAt != "" || snap.FlipAt != "" || snap.LaneMode != "off" || len(snap.Runs) != 0 {
+		t.Errorf("snapshot after a skip: %+v", snap)
+	}
+	if v, found, _ := seed.GetMeta(lanestate.KeyPRPrefix + "o/r#1"); found {
+		t.Errorf("a skip wrote the PR's state: %q", v)
+	}
+	if _, err := execLaneRecord(t, `{"pr":"o/r#1","mode":"apply","skip_reason":"other"}`); err == nil {
+		t.Error("an unknown skip reason was accepted")
+	}
+}

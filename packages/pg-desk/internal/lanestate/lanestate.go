@@ -51,6 +51,12 @@ type RunInput struct {
 	// milliseconds). A record without it (an older writer) decodes and records
 	// no timing.
 	Timings *StageTimings `json:"timings,omitempty"`
+	// SkipReason, when set (one of SkipReasons), makes the document a SKIP: the
+	// delivery ended before the lock and no run happened. Record then bumps the
+	// skip counter of that reason and writes nothing else (no last-run time, no
+	// PR state, no run or decision counters), so a skip cannot disturb the
+	// state of the last real run. It still needs pr and mode.
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 // StageTimings is the per-stage wall time of one run in whole milliseconds; a
@@ -106,6 +112,9 @@ func (in RunInput) Validate() error {
 	if !contains(Modes, in.Mode) {
 		return fmt.Errorf("lanestate: mode %q is not one of %v", in.Mode, Modes)
 	}
+	if in.SkipReason != "" && !contains(SkipReasons, in.SkipReason) {
+		return fmt.Errorf("lanestate: skip reason %q is not one of %v", in.SkipReason, SkipReasons)
+	}
 	for _, e := range in.Events {
 		if !contains(Stages, e.Stage) {
 			return fmt.Errorf("lanestate: stage %q is not one of %v", e.Stage, Stages)
@@ -147,6 +156,8 @@ func decisionKey(d Decision) string {
 
 func timingKey(stage, field string) string { return KeyTimingsPrefix + stage + "." + field }
 
+func skipKey(reason string) string { return KeySkipsPrefix + reason }
+
 func runKey(stage, class string) string { return KeyRunsPrefix + stage + "." + class }
 
 // Record persists one run. configuredMode is the configured pr_lane.mode (the
@@ -160,6 +171,10 @@ func runKey(stage, class string) string { return KeyRunsPrefix + stage + "." + c
 func Record(st *store.Store, configuredMode string, now time.Time, in RunInput) error {
 	if err := in.Validate(); err != nil {
 		return err
+	}
+	if in.SkipReason != "" {
+		// One lock-free UPSERT and nothing else (see RunInput.SkipReason).
+		return st.IncrMeta(skipKey(in.SkipReason), 1)
 	}
 	stamp := now.UTC().Format(time.RFC3339)
 
@@ -279,6 +294,8 @@ type RunKey struct{ Stage, Class string }
 type Snapshot struct {
 	Runs      map[RunKey]int64
 	Decisions map[Decision]int64
+	// Skips counts the deliveries skipped before the lock, by reason.
+	Skips map[string]int64
 	// Timings is the per-stage duration aggregate, keyed by TimingStages name;
 	// a stage no run has reported is absent.
 	Timings        map[string]StageTiming
@@ -313,6 +330,7 @@ func Read(st *store.Store, now time.Time) (Snapshot, error) {
 	snap := Snapshot{
 		Runs:      map[RunKey]int64{},
 		Decisions: map[Decision]int64{},
+		Skips:     map[string]int64{},
 		Timings:   map[string]StageTiming{},
 		LaneMode:  config.PRLaneModeOff,
 		FlipAt:    rows[KeyStateFlipAt],
@@ -333,6 +351,8 @@ func Read(st *store.Store, now time.Time) (Snapshot, error) {
 			if ok {
 				snap.Runs[RunKey{stage, class}] = atoi(v)
 			}
+		case strings.HasPrefix(k, KeySkipsPrefix):
+			snap.Skips[strings.TrimPrefix(k, KeySkipsPrefix)] = atoi(v)
 		case strings.HasPrefix(k, KeyTimingsPrefix):
 			stage, field, ok := strings.Cut(strings.TrimPrefix(k, KeyTimingsPrefix), ".")
 			if !ok || !contains(TimingStages, stage) {

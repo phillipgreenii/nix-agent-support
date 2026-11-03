@@ -18,6 +18,12 @@ const (
 	// MetricPRLaneRuns counts the lane's non-clean run events by stage and
 	// class (exported as pg_desk_pr_lane_runs_total).
 	MetricPRLaneRuns = "pg_desk_pr_lane_runs"
+	// MetricPRLaneSkips counts the deliveries pg-pr-change ended before the lock,
+	// by reason in lanestate.SkipReasons (exported as
+	// pg_desk_pr_lane_skips_total). A skip is not a run: it is in no other
+	// lane family. A skip rate far above the run rate signals a loop or an
+	// impersonated origin.
+	MetricPRLaneSkips = "pg_desk_pr_lane_skips"
 	// MetricPRDecisions counts the decider's per-rule results by rule, action,
 	// outcome and reason (exported as pg_decider_decisions_total).
 	MetricPRDecisions = "pg_decider_decisions"
@@ -58,6 +64,11 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 
 	runs, err := m.Int64ObservableCounter(MetricPRLaneRuns,
 		metric.WithDescription("non-clean PR lane run events by stage and class (persisted by the composed command)"))
+	if err != nil {
+		return err
+	}
+	skips, err := m.Int64ObservableCounter(MetricPRLaneSkips,
+		metric.WithDescription("deliveries pg-pr-change skipped before the lock, by reason (persisted by the composed command)"))
 	if err != nil {
 		return err
 	}
@@ -117,6 +128,9 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 					metric.WithAttributes(attribute.String("stage", stage), attribute.String("class", class)))
 			}
 		}
+		for _, reason := range lanestate.SkipReasons {
+			o.ObserveInt64(skips, snap.Skips[reason], metric.WithAttributes(attribute.String("reason", reason)))
+		}
 		// The zero-filled set first, then any recorded series outside it, so
 		// nothing recorded is dropped.
 		seen := map[lanestate.Decision]bool{}
@@ -155,6 +169,6 @@ func RegisterPRLaneState(mp metric.MeterProvider, fn PRLaneStateFunc) error {
 			o.ObserveInt64(stageObs, t.Count, attr)
 		}
 		return nil
-	}, runs, decisions, marked, residual, oldest, items, stageLast, stageSum, stageObs)
+	}, runs, skips, decisions, marked, residual, oldest, items, stageLast, stageSum, stageObs)
 	return err
 }

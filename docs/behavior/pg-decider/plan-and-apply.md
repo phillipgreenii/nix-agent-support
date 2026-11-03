@@ -32,7 +32,10 @@ Deciding is a pure function of the view, plus, for a `pr`, the work-item listing
 "The work-item lookup"). It does not look at why pg-router routed the item, because delivery is
 at-least-once and possibly reordered, so the routed kind is only a hint that something changed. Every
 run re-derives the whole action set from current state, which is what makes a decider idempotent:
-re-running on an unchanged view and listing writes nothing.
+re-running on an unchanged view and listing writes nothing. The same holds for the annotations the
+decider itself writes: the composed command skips a delivery caused by the decider's own annotation
+write before it decides (see "Own-origin deliveries are skipped" in [`pr-change.md`](pr-change.md)),
+which is safe only because no rule needs to be woken by such a write (INV-SKIP-1 there).
 
 The result is an ordered list of actions plus the list of rules that produced no action.
 

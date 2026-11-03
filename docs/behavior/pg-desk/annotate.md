@@ -2,8 +2,12 @@
 
 The annotation verbs write the key/value `annotation` table of the migrated store
 (entity-change-flow design 6.9 and 9.6): one row per `(type, id, key)` holding `value`, `origin`,
-`set_by` and `set_at`. Every write appends one `annotation_changed` change-log record in the same
-transaction, so the change is never visible without its record. An annotation write does not bump
+`set_by` and `set_at`. Every write that changes the stored value, and every removal of an existing key,
+appends one `annotation_changed` change-log record in the same transaction, so the change is never
+visible without its record. A write of the value the key already holds writes nothing (no record, and the
+stored origin, writer and time stay as they were), so a re-run of a verb is idempotent and triggers
+nothing. The record is what wakes the entity's decider (see
+[`annotation-items.md`](annotation-items.md)). An annotation write does not bump
 the entity's version.
 
 ```mermaid
@@ -37,10 +41,11 @@ flowchart LR
   `0`. It is the only verb that consumes the flag. Whether and when to clear is the decider's
   choice; this verb is the mechanism.
 
-Setting the flag (and only setting it) also prints the composed command to run so the lane acts on it,
-`next: run pg-pr-change <mode> <id> to have the lane act on it` (the lane-off wording and the mode rule
-are those of `pr hide`, see [`hide-unhide-wip.md`](hide-unhide-wip.md), "What the verbs print"); the
-verb never calls the decider. `--clear` prints no command: a decider uses it to consume the flag.
+Re-running `force-review` at the same head while the flag is still set writes nothing and triggers
+nothing. Setting the flag prints no command to run: with the lane in `plan` or `apply` the write wakes the
+decider itself, and with the lane off it prints the lane-off line (its wording is that of `pr hide`, see
+[`hide-unhide-wip.md`](hide-unhide-wip.md), "What the verbs print"); the verb never calls the decider.
+`--clear` prints nothing: a decider uses it to consume the flag.
 
 - `<id>` is resolved as for the other typed verbs: a PR by number, `OWNER/REPO#N` or URL; an
   issue or thread id verbatim. An id with no stored entity fails and writes nothing.
@@ -66,9 +71,11 @@ fourth disposition the feedback verbs accept) as `disposition.<comment>` too.
 
 ## Invariants
 
-- **INV-ANNOTATE-1.** <!-- uuid: 5c655ee1-c779-4352-9f43-045b5f89b6c5 --> Every successful write or removal MUST append exactly one
+- **INV-ANNOTATE-1.** <!-- uuid: 5c655ee1-c779-4352-9f43-045b5f89b6c5 --> A write that changes the value, or a removal of an existing key, MUST append exactly one
   `annotation_changed` record in the same transaction as the row change; a failed write MUST leave
-  neither.
+  neither. A write of the value the key already holds MUST write nothing (no row change, no record:
+  the stored `origin`, `set_by` and `set_at` keep their earlier values), and a removal of a key that
+  does not exist MUST append nothing.
 - **INV-ANNOTATE-2.** <!-- uuid: 0205b2a7-eaff-4e2a-a174-bdf9df4c7daf --> A reserved key MUST be written only in its documented shape; for
   `focus_selected` that is a calendar date written exactly as `YYYY-MM-DD` (a period key) or the
   word `none`, and anything else (including the empty string) MUST be rejected with nothing written.

@@ -18,6 +18,23 @@ const (
 	laneRecorded = "recorded"
 	laneFailed   = "failed"
 	laneSkipped  = "skipped"
+	// laneNotRun marks a run that was skipped before the lock (an own-origin
+	// delivery): it touched no lane state. It is not laneSkipped, which means
+	// "ended at the lock".
+	laneNotRun = "not_run"
+)
+
+// The skip reasons of the run record and of pg-desk's lane-record skip_reason
+// member (a closed vocabulary: pg-desk refuses any other).
+const (
+	// SkipOwnOrigin: the delivery was caused by the decider's own annotation write.
+	SkipOwnOrigin = "own-origin"
+)
+
+// The skip counter outcomes of the run record.
+const (
+	skipCounterRecorded = "recorded"
+	skipCounterFailed   = "failed"
 )
 
 // laneInput is the JSON document `pg-desk pr lane-record` reads: pg-desk owns
@@ -34,6 +51,10 @@ type laneInput struct {
 	Decisions   []laneDecision `json:"decisions,omitempty"`
 	LookupItems *int64         `json:"lookup_items,omitempty"`
 	Timings     *laneTimings   `json:"timings,omitempty"`
+	// SkipReason, when set, makes the document a skip: pg-desk only bumps the
+	// lane skip counter and writes no run state (the rest of the members are
+	// then unused).
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 // laneTimings is pg-desk's lanestate.StageTimings (a copy; same members, whole
@@ -201,4 +222,47 @@ func (r *run) finish(code int) {
 	if err := AppendRunRecord(r.o.RunRecordPath, r.rec); err != nil {
 		r.note("run record not written (" + err.Error() + "): check " + r.o.RunRecordPath)
 	}
+}
+
+// normalizeOrigin reads the --origin argument: the empty text and the texts a
+// templating engine renders for a missing key or a null (see absentSeqTexts)
+// mean "unknown" and give "".
+func normalizeOrigin(raw string) string {
+	s := strings.TrimSpace(raw)
+	if absentSeqTexts[strings.ToLower(s)] {
+		return ""
+	}
+	return s
+}
+
+// skipOwnOrigin ends a run whose delivery was caused by the decider's own
+// annotation write (INV-SKIP-1). It runs after startRecord and before the lock:
+// it takes no lock, hydrates nothing, decides nothing and writes no lane state
+// of the PR. It records the run (skipped, skip_reason, origin), bumps the lane
+// skip counter through pg-desk and exits 0. A failure to bump the counter is
+// noted in the record and never fails the command.
+func (r *run) skipOwnOrigin(origin string) int {
+	r.rec.Skipped = true
+	r.rec.SkipReason = SkipOwnOrigin
+	r.rec.Origin = origin
+	// finish() is not used: it would write the PR's lane state. Its
+	// bookkeeping is done here.
+	laneStart := r.o.Clock()
+	in := laneInput{PR: r.id, Mode: r.o.Mode, SkipReason: SkipOwnOrigin}
+	if ok, detail := r.callLane(in); ok {
+		r.rec.SkipCounter = skipCounterRecorded
+	} else {
+		r.rec.SkipCounter = skipCounterFailed
+		r.note("skip counter not recorded (" + detail + ")")
+	}
+	r.timings().LaneRecordMs = r.ms(laneStart)
+	r.rec.ExitCode = ExitOK
+	r.rec.Lane = LaneRecord{Result: laneNotRun}
+	r.rec.FinishedAt = r.o.Clock().UTC().Format("2006-01-02T15:04:05Z")
+	if r.o.RunRecordPath != "" {
+		if err := AppendRunRecord(r.o.RunRecordPath, r.rec); err != nil {
+			r.note("run record not written (" + err.Error() + "): check " + r.o.RunRecordPath)
+		}
+	}
+	return ExitOK
 }

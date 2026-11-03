@@ -17,6 +17,7 @@ heartbeat
 heartbeat-item
 hide
 issue annotate
+issue annotation-items
 issue backfill-backend
 issue changes
 issue consumer forget
@@ -33,6 +34,7 @@ issue unsuppress
 issue wip
 links
 pr annotate
+pr annotation-items
 pr consumer forget
 pr consumer list
 pr feedback list
@@ -55,6 +57,7 @@ run
 serve
 status
 thread annotate
+thread annotation-items
 thread changes
 thread consumer forget
 thread consumer list

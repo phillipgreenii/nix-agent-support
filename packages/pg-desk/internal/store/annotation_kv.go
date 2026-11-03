@@ -175,6 +175,19 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
+	// Take the write lock BEFORE the first read. A deferred transaction that
+	// reads and then writes fails at once with SQLITE_BUSY (a stale snapshot,
+	// which busy_timeout does not wait out) when another writer commits in
+	// between; a no-op write first waits its turn instead, so two writers of one
+	// annotation (an operator verb and a decider run) serialize, and the second
+	// one reads what the first wrote. Nothing is changed: the version is set to
+	// itself.
+	if _, err := tx.Exec(
+		`UPDATE entity SET version = version WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
+		repo, entityType, entityID,
+	); err != nil {
+		return 0, false, wrap(err)
+	}
 	var version int64
 	err = tx.QueryRow(
 		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,

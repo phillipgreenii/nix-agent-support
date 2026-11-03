@@ -16,7 +16,11 @@ const forceReviewKey = "force_review"
 // deciderName is the decider's name for an entity type (pr -> pr-decider).
 func deciderName(typ string) string { return typ + "-decider" }
 
-func origin(typ string) string { return "decider:" + deciderName(typ) }
+// Origin is the origin every decider write of entity type typ carries
+// (decider:<type>-decider): the value of --origin on pg-desk annotate and
+// force-review --clear, and the one value pg-pr-change skips a delivery for
+// (INV-SKIP-1).
+func Origin(typ string) string { return "decider:" + deciderName(typ) }
 
 // desk runs pg-desk and returns an error carrying its stderr on failure.
 func desk(ctx context.Context, env Env, args ...string) error {
@@ -39,7 +43,7 @@ func actor(env Env) string { return env.Config.ActorOrDefault() }
 // Annotate execs `pg-desk <typ> annotate <id> --key K --value V --origin
 // decider:<name> --actor A`. For type pr the origin is decider:pr-decider.
 func Annotate(ctx context.Context, env Env, typ, id, key, value string) error {
-	return desk(ctx, env, typ, "annotate", id, "--key", key, "--value", value, "--origin", origin(typ), "--actor", actor(env))
+	return desk(ctx, env, typ, "annotate", id, "--key", key, "--value", value, "--origin", Origin(typ), "--actor", actor(env))
 }
 
 // clearAnnotation removes an annotation. Only force_review on a pr is
@@ -48,7 +52,7 @@ func clearAnnotation(ctx context.Context, env Env, typ, id, key string) error {
 	if typ != "pr" || key != forceReviewKey {
 		return fmt.Errorf("annotation %q cannot be cleared on a %s: only %s on a pr is clearable", key, typ, forceReviewKey)
 	}
-	return desk(ctx, env, "pr", "force-review", id, "--clear", "--origin", origin(typ), "--actor", actor(env))
+	return desk(ctx, env, "pr", "force-review", id, "--clear", "--origin", Origin(typ), "--actor", actor(env))
 }
 
 // refresh re-hydrates a work item in pg-desk after an external tracker write.

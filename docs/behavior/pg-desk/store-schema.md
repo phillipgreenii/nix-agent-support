@@ -209,9 +209,12 @@ the failed-ingest table and the feed markers (schema version 2)" below.
 
 ## Annotations and cross-reference links (schema version 2)
 
-- Every annotation write (set or delete of a key) MUST append one `change_log` record with kind
+- Every annotation write that CHANGES the stored value (a set of a different value, or a first set), and
+  every delete of an existing key, MUST append one `change_log` record with kind
   `annotation_changed` in the SAME transaction as the write; if the append fails the annotation
-  write is rolled back. The record carries the entity's CURRENT version (a version of 0, a migrated
+  write is rolled back. A set of the value the key already holds MUST write nothing and append no
+  record: the stored `origin`, `set_by` and `set_at` keep their earlier values (the read of the stored
+  value and the write share one transaction, so two concurrent writes of one value append one record). The record carries the entity's CURRENT version (a version of 0, a migrated
   never-rehydrated entity, is valid) and the annotation's `origin` and time. An annotation write
   MUST NOT bump `entity.version`. For an `issue` entity that is not watched the delivery gate
   withholds that record (the annotation itself is still written), and the write MUST report that it
@@ -405,6 +408,9 @@ configuration key `pr_lane.mode`, which keeps the rendered configuration as its 
 
 - **`pr_lane.runs.<stage>.<class>`** — one counter per lane-run series (see [`serve.md`](serve.md)).
 - **`pr_lane.decisions.<rule>|<action>|<outcome>|<reason>`** — one counter per decisions series.
+- **`pr_lane.skips.<reason>`** — one counter per skip reason (today `own-origin`): the deliveries the
+  composed command ended before the lock because the decider itself wrote the annotation that caused
+  them. A skip bumps only this counter and writes no other lane key.
 - **`pr_lane.marked_inactive`** — the count of PRs marked inactive.
 - **`pr_lane.state.mode`**, **`pr_lane.state.flip_at`**, **`pr_lane.state.last_run_at`** — the lane-level
   mode, the flip time (an RFC 3339 time) and the time of the last recorded run.

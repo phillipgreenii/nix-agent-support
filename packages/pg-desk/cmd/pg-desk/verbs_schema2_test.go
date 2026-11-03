@@ -89,21 +89,22 @@ func unsafe(reason string) verbClass { return verbClass{Reason: reason} }
 // entity type (pr, issue, thread), for the entity id id.
 func typedVerbs(typ, id string) map[string]verbClass {
 	out := map[string]verbClass{
-		typ + " annotate":        safe(id, "--key", "note", "--value", "x"),
-		typ + " changes":         safe("--consumer", "verb-test", "--cached"),
-		typ + " consumer forget": safe("verb-test"),
-		typ + " consumer list":   safe(),
-		typ + " hide":            safe(id, "test"),
-		typ + " history":         safe(id),
-		typ + " link add":        safe(id, "issue:other-1"),
-		typ + " link remove":     safe(id, "issue:other-1"),
-		typ + " open":            unsafe("execs the operator-configured browser opener"),
-		typ + " refresh":         safe(id),
-		typ + " show":            safe(id),
-		typ + " suppress":        safe(id, "--kind", "example-kind"),
-		typ + " unhide":          safe(id),
-		typ + " unsuppress":      safe(id, "--kind", "example-kind"),
-		typ + " wip":             safe("on", id),
+		typ + " annotate":         safe(id, "--key", "note", "--value", "x"),
+		typ + " annotation-items": safe("--consumer", "annotations:verb-test"),
+		typ + " changes":          safe("--consumer", "verb-test", "--cached"),
+		typ + " consumer forget":  safe("verb-test"),
+		typ + " consumer list":    safe(),
+		typ + " hide":             safe(id, "test"),
+		typ + " history":          safe(id),
+		typ + " link add":         safe(id, "issue:other-1"),
+		typ + " link remove":      safe(id, "issue:other-1"),
+		typ + " open":             unsafe("execs the operator-configured browser opener"),
+		typ + " refresh":          safe(id),
+		typ + " show":             safe(id),
+		typ + " suppress":         safe(id, "--kind", "example-kind"),
+		typ + " unhide":           safe(id),
+		typ + " unsuppress":       safe(id, "--kind", "example-kind"),
+		typ + " wip":              safe("on", id),
 	}
 	return out
 }

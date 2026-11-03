@@ -154,9 +154,11 @@ func newKVWrite(cfg *config.Config, cmdName, entityType, ref, key, value, origin
 }
 
 // set writes the annotation and its annotation_changed record (one
-// transaction, in the store).
+// transaction, in the store). A write of the value the key already holds
+// writes nothing and appends no record (INV-ANNOTATE-1); the stored origin,
+// set_by and set_at keep their earlier values.
 func (w *kvWrite) set(st *store.Store) error {
-	err := st.SetAnnotation(store.KVAnnotation{
+	_, _, err := st.SetAnnotationSeq(store.KVAnnotation{
 		Repo: w.repo, EntityType: w.entityType, EntityID: w.id,
 		Key: w.key, Value: w.value, Origin: w.origin, SetBy: w.by, SetAt: annotationNow(),
 	})

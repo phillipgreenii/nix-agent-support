@@ -26,7 +26,7 @@ const laneFakeScenariosFile = "testdata/lane-fake-scenarios.txt"
 
 // minLaneFakeScenarios is the number of scenarios the fast run must run; keep it
 // equal to minScenarios of the nix check pg-decider-lane-fake.
-const minLaneFakeScenarios = 24
+const minLaneFakeScenarios = 25
 
 // laneFakeTools is the lane's tools over the fake bd, built for this test.
 func laneFakeTools(t *testing.T) e2eTools {
@@ -62,6 +62,7 @@ func TestLaneFake(t *testing.T) {
 	driftScenarios(l)
 	reviewScenarios(l)
 	failureScenarios(l)
+	annotationLoopScenarios(l)
 	rollbackScenarios(l)
 	l.scenarioList(laneFakeScenariosFile, minLaneFakeScenarios)
 }

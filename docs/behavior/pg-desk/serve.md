@@ -266,6 +266,11 @@ before any run, so the first event is not lost to `increase()`:
   `decide`, `class` one of `not_found`, `transient`, `degraded`, `unhydrated`, `unauthenticated`,
   `hydrate_error`, `decide_partial` and `decide_failed` (there is no `retry_exhausted`: pg-router owns
   every retry). Every stage and class pair is emitted.
+- `pg_desk_pr_lane_skips_total{reason}` — the deliveries `pg-pr-change` ended before the lock because
+  the decider itself wrote the annotation that caused them (`reason` `own-origin`; see
+  [`../pg-decider/pr-change.md`](../pg-decider/pr-change.md), "Own-origin deliveries are skipped"). A skip
+  is not a run and is in no other lane family. A skip rate far above the run rate signals a loop or an
+  impersonated origin.
 - `pg_decider_decisions_total{rule,action,outcome,reason}` — the decider's per-rule results. `action`
   is `create`, `update`, `reopen`, `close`, `annotate`, `escalate` or `skip`; `outcome` is `planned`,
   `applied`, `deduped`, `skipped` or `failed`; `reason` is the decider's closed skip reason (carried only
@@ -448,6 +453,20 @@ deferred-registration allowlist names them.
 | `pg-desk-issue-hydration-failing` | `increase(pg_desk_hydration_failures_total{type="issue"}[30m])` over 5, or `pg_desk_repeated_degraded_entities{type="issue"}` above `0`      | `> 0`      | `15m` | issue hydrations fail or degrade repeatedly                                                                                    |
 | `pg-desk-pr-hydrate-dead-man`     | `pr-change` dispatches (`pg_router_throughput_total{role="pr-change"}`) in an hour with no increase of `pg_desk_hydrations_total{type="pr"}` | `> 0`      | `15m` | the role is dispatched but its hydrate stage never ran                                                                         |
 
+`pg-desk-pr-hydrate-dead-man` counts `pr-change` dispatches as throughput, and an own-origin skip (see
+[`../pg-decider/pr-change.md`](../pg-decider/pr-change.md), "Own-origin deliveries are skipped") is a
+dispatch without a hydration. That is safe today because each skip follows a run that hydrated the PR
+(the decider's own write is made by such a run); it stops being true if a deployment ever skips
+deliveries no run preceded.
+
+`pg-desk-pr-annotation-consumer-lag` (`max(pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane"})`,
+`> 50` for `30m`, a `warning` with `noDataState: OK`) is the health rule of the PR annotation feed (see
+[`annotation-items.md`](annotation-items.md)). The pg-router source alerts catch a failing
+`desk-pr-annotations` query but read an empty `[]` poll as success, so a stuck feed shows only as lag.
+The feed advances its cursor past the rows it scanned, so the lag stays near `0` however many pr rows are
+hydrations. Unlike the outcome rules it is suppressed while a `SYSTEM_PAUSE` gate is active, because the
+query does not run then and lag grows on purpose. The threshold is provisional.
+
 The two stale-anchor rules read the store's links, not the tracker and not the daemon, and are gated on
 `pg_desk_pr_lane_mode{mode="apply"} == 1` (`and on() (...)`): in `plan` mode no anchor is closed, and an
 absent mode gauge drops the result. The decisions metric `pg_decider_decisions_total` has a dashboard
@@ -489,7 +508,7 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
   the other two), and `pg_desk_pr_unhydrated` with its oldest-age companion MUST be emitted with a value
   whenever the store read succeeds on a store at schema 2 (`0` for an empty set), and MUST have no series,
   never `0`, when the store read fails or the store is not at schema 2.
-- **INV-SERVE-2.** <!-- uuid: c6c54f9d-a0fb-4544-b613-5c3fffdbd7db --> The persisted lane families (`pg_desk_pr_lane_runs_total`, `pg_decider_decisions_total`, the two
+- **INV-SERVE-2.** <!-- uuid: c6c54f9d-a0fb-4544-b613-5c3fffdbd7db --> The persisted lane families (`pg_desk_pr_lane_runs_total`, `pg_desk_pr_lane_skips_total`, `pg_decider_decisions_total`, the two
   residual gauges, `pg_desk_pr_marked_inactive_total` and the two lookup gauges) MUST be emitted with a value,
   `0` before any run, on every scrape of a store at schema 2, and MUST have no series when the store is not at
   schema 2 or the read fails. The residual gauges' `mode` label MUST be the lane-level mode, which follows the

@@ -49,6 +49,7 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 		`pg_decider_decisions_total{action="skip",outcome="skipped",reason="not matched",rule="all.closed"} 0`,
 		`pg_decider_decisions_total{action="close",outcome="applied",reason="",rule="all.closed"} 0`,
 		`pg_desk_pr_marked_inactive_total 0`,
+		`pg_desk_pr_lane_skips_total{reason="own-origin"} 0`,
 		`pg_desk_pr_lane_lookup_items 0`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="lock_wait"} 0`,
 		`pg_desk_pr_lane_stage_duration_seconds{stage="residual"} 0`,
@@ -73,9 +74,16 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 		t.Fatal(err)
 	}
 
+	if err := lanestate.Record(s, "apply", time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC), lanestate.RunInput{
+		PR: "o/r#1", Mode: "apply", SkipReason: "own-origin",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	body = scrapeWithConfig(t, s, cfg)
 	requireLines(
 		t, body,
+		`pg_desk_pr_lane_skips_total{reason="own-origin"} 1`,
 		`pg_desk_pr_lane_runs_total{class="transient",stage="hydrate"} 1`,
 		`pg_desk_pr_lane_residual_prs{mode="apply"} 1`,
 		`pg_desk_pr_lane_residual_prs{mode="plan"} 0`,

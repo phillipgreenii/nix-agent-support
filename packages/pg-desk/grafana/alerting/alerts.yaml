@@ -855,6 +855,56 @@ groups:
                     type: gt
                     params: [500]
 
+      # The PR annotation feed (pg2-aoehwj). `pg-desk pr annotation-items` turns a PR's
+      # annotation changes into pr.changed items, so the decider runs when an operator hides,
+      # annotates, ... a PR. The pg-router source alerts (source-failure-rate, source-backoff,
+      # source-persistent-failure) catch a failing query but read an empty `[]` poll as success, so
+      # a stuck feed shows ONLY as consumer lag: the type's highest change sequence minus the
+      # consumer's cursor. The verb advances the cursor to the last row it SCANNED, not the last item
+      # it printed, so a page of hydration rows cannot stall it and the lag stays near 0 however
+      # many pr rows are hydrations. The threshold (50) is PROVISIONAL, a sustained backlog rather
+      # than one scrape that caught a row between a poll and the scrape. While a pg-router
+      # SYSTEM_PAUSE gate blocks the query the lag grows on purpose, so the rule is suppressed.
+      - uid: pg-desk-pr-annotation-consumer-lag
+        title: pg-desk pr annotation feed is lagging
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The pr annotation feed (consumer annotations:pr-lane) is over 50 changes behind"
+          description: "pg_desk_consumer_lag for type pr and consumer annotations:pr-lane (highest pr change sequence minus the consumer cursor) has exceeded 50 for over 30 minutes, so annotation changes (hide, unhide, wip, annotate, suppress, feedback, force-review) are not reaching the pr-change role: the desk-pr-annotations query is failing or never runs. An empty poll is a success to the router source alerts, so this lag is the only signal of a stuck feed. The verb advances its cursor past the rows it scanned, so a feed that runs keeps the lag near 0 even when most pr rows are hydrations. The 50 threshold is provisional. Suppressed while a pg-router SYSTEM_PAUSE gate is active (the query does not run then, so lag grows on purpose)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane"}) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [50]
+
       # PR never hydrated (PR lane refactor: the P0b tripwire, finalized by P8a-1 with
       # its promtool rule test, grafana/alerting/rule-tests/, whose four states are
       # the gauge live and absent, live and 0, pg-desk liveness down and SYSTEM_PAUSE
@@ -1302,7 +1352,7 @@ groups:
           severity: warning
         annotations:
           summary: "The pr-change role was dispatched in the last hour but no PR was hydrated"
-          description: 'pg_router_throughput_total{role="pr-change"} increased in the last hour while pg_desk_hydrations_total{type="pr"} did not: the role is dispatched but its hydrate stage never ran. Run the composed command by hand in plan mode for one PR, and check the role definition and the lock directory. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'pg_router_throughput_total{role="pr-change"} increased in the last hour while pg_desk_hydrations_total{type="pr"} did not: the role is dispatched but its hydrate stage never ran. Run the composed command by hand in plan mode for one PR, and check the role definition and the lock directory. An own-origin skip (an annotation write by the decider itself coming back through the annotation feed) is a dispatch without a hydration; that is safe only because each skip follows a run that hydrated the PR. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
         data:
           - refId: A
             relativeTimeRange:

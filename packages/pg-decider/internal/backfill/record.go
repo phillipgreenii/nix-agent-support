@@ -43,6 +43,10 @@ type Record struct {
 	Entity     string `json:"entity"`
 	EventID    string `json:"event_id"`
 	Mode       string `json:"mode"`
+	// Skipped is true for a delivery the composed command ended before the lock
+	// (an own-origin skip): no run happened, so such a record says nothing about
+	// the PR's state. Latest and the resume check ignore it.
+	Skipped bool `json:"skipped"`
 
 	Hydrate struct {
 		Result string `json:"result"`
@@ -207,11 +211,13 @@ func ReadLog(path string) (*Log, error) {
 }
 
 // Latest returns, per PR, the latest record of mode among records for which keep
-// is true (nil keeps all). Ties on time go to the later line.
+// is true (nil keeps all). Ties on time go to the later line. A skip record (an
+// own-origin delivery the composed command ended before the lock) is ignored: it
+// is not a run, so it must not hide the residual of the real run before it.
 func (lg *Log) Latest(mode string, keep func(Record) bool) map[string]Record {
 	out := map[string]Record{}
 	for _, r := range lg.Records {
-		if r.Mode != mode || (keep != nil && !keep(r)) {
+		if r.Skipped || r.Mode != mode || (keep != nil && !keep(r)) {
 			continue
 		}
 		if cur, ok := out[r.Entity]; ok && r.Time.Before(cur.Time) {

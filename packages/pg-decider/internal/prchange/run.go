@@ -40,6 +40,12 @@ type Options struct {
 	// role's argv: a number (possibly in exponent form), or empty or `<no value>`
 	// when the item carries none. See ResolveKey.
 	Seq string
+	// Origin is the origin of the annotation change that produced the delivery,
+	// as the router rendered it into the role's argv (--origin): empty, or one of
+	// the absent texts (see IsAbsentText), when the item carries none (every
+	// GitHub daemon event). A delivery whose origin is the decider's own
+	// (apply.Origin("pr")) is skipped before the lock; see skipOwnOrigin.
+	Origin string
 	// RunRecordPath is the file one JSON record per run is appended to; empty
 	// means no record is written (only a test of the composition logic leaves it
 	// empty).
@@ -141,6 +147,9 @@ func (r *run) execute() int {
 	}
 	r.key = key
 	r.startRecord()
+	if o := normalizeOrigin(r.o.Origin); o == apply.Origin("pr") {
+		return r.skipOwnOrigin(o)
+	}
 
 	lockStart := r.o.Clock()
 	lock, err := AcquireLock(r.ctx, r.o.LockDir, id, r.o.LockWait)

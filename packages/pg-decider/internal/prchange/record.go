@@ -42,6 +42,17 @@ type RunRecord struct {
 	SeqSource string `json:"seq_source"`
 	Mode      string `json:"mode"`
 
+	// Skipped is true for a delivery the command ended before the lock because
+	// the decider itself wrote the annotation that caused it; SkipReason names
+	// why (own-origin) and Origin is the origin that caused the skip.
+	// SkipCounter says whether pg-desk's skip counter was bumped (recorded or
+	// failed). A skipped run has no Hydrate or Decide work, and its lane_record
+	// result is not_run.
+	Skipped     bool   `json:"skipped,omitempty"`
+	SkipReason  string `json:"skip_reason,omitempty"`
+	Origin      string `json:"origin,omitempty"`
+	SkipCounter string `json:"skip_counter,omitempty"`
+
 	Hydrate HydrateRecord `json:"hydrate"`
 	// ExitCode is the process exit code; ErrorClass and FailingStage are empty
 	// for a run that succeeded.
@@ -167,8 +178,9 @@ type AnchorCandidate struct {
 
 // LaneRecord is the outcome of the lane-record call.
 type LaneRecord struct {
-	// Result is recorded, failed or skipped (a run that ended at the lock holds no
-	// lock to write the PR's state under, so it records nothing there).
+	// Result is recorded, failed, skipped (a run that ended at the lock holds no
+	// lock to write the PR's state under, so it records nothing there) or
+	// not_run (an own-origin skip, which ended before the lock).
 	Result string `json:"result"`
 	Error  string `json:"error,omitempty"`
 	// DroppedDecisions is true when the write path refused the document with the

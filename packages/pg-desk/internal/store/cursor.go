@@ -58,6 +58,28 @@ func (s *Store) RegisterConsumer(name, entityType string, now time.Time) error {
 	return nil
 }
 
+// RegisterConsumerAtMax is RegisterConsumer for a consumer that must not
+// replay history: when (name, type) is absent it is created at the current
+// maximum change_log seq of entityType (0 when the type has no row), in one
+// statement, so records that already exist are not delivered. An existing
+// consumer keeps its cursor and only has its seen_at refreshed, so the call is
+// safe on every poll (the start-at-max rule applies to the first registration
+// only).
+func (s *Store) RegisterConsumerAtMax(name, entityType string, now time.Time) error {
+	if err := s.RequireNewSchema(); err != nil {
+		return err
+	}
+	if _, err := s.sql.Exec(
+		`INSERT INTO consumer (name, type, cursor, seen_at)
+		 SELECT ?, ?, COALESCE(MAX(seq), 0), ? FROM change_log WHERE entity_type = ?
+		 ON CONFLICT (name, type) DO UPDATE SET seen_at = excluded.seen_at`,
+		name, entityType, formatTime(now), entityType,
+	); err != nil {
+		return fmt.Errorf("store: register consumer at max (%s,%s): %w", name, entityType, err)
+	}
+	return nil
+}
+
 // ReadChanges registers the consumer if needed, stamps its seen_at with now,
 // and returns up to limit change_log records of entityType after its cursor
 // (limit <= 0 means no limit), ascending by seq. It does NOT advance the

@@ -94,6 +94,9 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 	if strings.TrimSpace(f.consumer) == "" {
 		return errors.New("changes: --consumer must not be empty")
 	}
+	if strings.HasPrefix(f.consumer, annotationConsumerPrefix) {
+		return fmt.Errorf("changes: consumer names starting %q are reserved for %s annotation-items, which keeps its own cursor", annotationConsumerPrefix, entityType)
+	}
 	if f.limit < 0 {
 		return fmt.Errorf("changes: --limit must be >= 0, got %d", f.limit)
 	}

@@ -191,8 +191,10 @@ func TestPRHideUnhidePrintTheComposedCommand(t *testing.T) {
 		laneMode string
 		next     string
 	}{
-		{"plan", "next: run pg-pr-change plan o/r#5 to have the lane act on it"},
-		{"apply", "next: run pg-pr-change apply o/r#5 to have the lane act on it"},
+		// With the lane in plan or apply the annotation write wakes the decider
+		// itself (the annotation feed): no command is printed.
+		{"plan", ""},
+		{"apply", ""},
 		{"off", "next: the pr lane is off (pr_lane.mode), so nothing acts on it yet; when it runs: pg-pr-change plan o/r#5"},
 		{"", "next: the pr lane is off (pr_lane.mode), so nothing acts on it yet; when it runs: pg-pr-change plan o/r#5"},
 	} {
@@ -206,7 +208,12 @@ func TestPRHideUnhidePrintTheComposedCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("pr hide: %v", err)
 			}
-			wantHide := "beads already open for a hidden PR stay open and claimable\n" + tc.next + "\n"
+			wantHide := "beads already open for a hidden PR stay open and claimable\n"
+			wantUnhide := ""
+			if tc.next != "" {
+				wantHide += tc.next + "\n"
+				wantUnhide = tc.next + "\n"
+			}
 			if out != wantHide {
 				t.Errorf("pr hide output:\n%q\nwant:\n%q", out, wantHide)
 			}
@@ -214,7 +221,7 @@ func TestPRHideUnhidePrintTheComposedCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("pr unhide: %v", err)
 			}
-			if want := tc.next + "\n"; out != want {
+			if want := wantUnhide; out != want {
 				t.Errorf("pr unhide output:\n%q\nwant:\n%q", out, want)
 			}
 			out, err = runGroupCmd(t, typedWIP, "pr", "on", "5")
@@ -255,8 +262,8 @@ func TestPRHideUnhidePrintTheComposedCommandOnAnOldSchemaStore(t *testing.T) {
 		args  []string
 		want  string
 	}{
-		{typedHide, []string{"42", "x"}, "beads already open for a hidden PR stay open and claimable\nnext: run pg-pr-change plan o/r#42 to have the lane act on it\n"},
-		{typedUnhide, []string{"42"}, "next: run pg-pr-change plan o/r#42 to have the lane act on it\n"},
+		{typedHide, []string{"42", "x"}, "beads already open for a hidden PR stay open and claimable\n"},
+		{typedUnhide, []string{"42"}, ""},
 	} {
 		out, err := runGroupCmd(t, tc.build, "pr", tc.args...)
 		if err != nil {

@@ -45,6 +45,13 @@ The run is a JSON document on standard input (or --input FILE):
    "timings": {"lock_wait_ms": 0, "hydrate_ms": 0, "view_read_ms": 0, "decide_ms": 0, "lookup_ms": 0,
                "pre_plan_ms": 0, "apply_ms": 0, "residual_ms": 0}}
 
+A document that carries "skip_reason": "own-origin" (with pr and mode) is a SKIP,
+not a run: the delivery ended before the lock because the decider itself wrote
+the annotation that caused it. It adds one to the pg_desk_pr_lane_skips_total
+counter of that reason and writes nothing else (no last-run time, no per-PR
+state, no run or decision counter), in one lock-free statement. An older
+pg-desk refuses the unknown member.
+
 pr accepts any reference "pr show" accepts and is stored normalized. A value
 outside its closed vocabulary rejects the whole document and writes nothing.
 Counters are incremented in one SQL statement each, so concurrent runs lose no

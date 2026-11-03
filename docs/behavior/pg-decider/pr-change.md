@@ -10,11 +10,14 @@ of this repo, not a shell snippet in a deployment's configuration, so its exit-c
 testable.
 
 ```text
-pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--log-skips] <plan|apply> <id> [<seq>]
+pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--origin TEXT] [--log-skips] <plan|apply> <id> [<seq>]
 ```
 
-**What triggers it.** The `pr-change` role binds `pr.changed`. Two things produce that event: a change
-of a watched PR (the connector daemon's feed), and the selection announcement of `pg-desk focus select`
+**What triggers it.** The `pr-change` role binds `pr.changed`. Three things produce that event: a change
+of a watched PR (the connector daemon's feed), a change of one of the PR's pg-desk annotations (the
+pg-desk annotation feed, `pg-desk pr annotation-items`, see
+[`annotation-items.md`](../pg-desk/annotation-items.md); its items carry `metadata.origin`, which the role
+renders into `--origin`), and the selection announcement of `pg-desk focus select`
 and `focus pull`, which injects one `pr.changed` event per newly selected PR so a selected PR that never
 changes again is still minted (bead `pg2-e5g9gx`; see `docs/behavior/pg-desk/focus.md`). The injected
 event's item id is `<repo>#<n>@<12 hex>`, so the delivery key is the id suffix as for any item with no
@@ -22,6 +25,9 @@ sequence.
 
 `<seq>` is the item's change sequence as the router renders it into the role's argv; the next
 sections say what it is for. An operator running the command by hand leaves it out.
+
+`--origin` is the origin of the annotation change that produced the delivery (the item's
+`metadata.origin`); the GitHub daemon's items carry none. See "Own-origin deliveries are skipped".
 
 ```mermaid
 flowchart TD
@@ -57,6 +63,48 @@ A caller that cannot get the lock within a bounded wait (`--lock-wait`, default 
 the transient class (stage `lock`, exit `40`), never `1` or `9`, so the router re-runs it. The lock
 directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`, else
 `$XDG_STATE_HOME/pg-pr-change/locks`.
+
+## Own-origin deliveries are skipped
+
+`decide(view)` never branches on why it was woken; this guard is a delivery filter in the composed
+command, the same layer as the per-PR lock, and it keys on WHO wrote the triggering change, not on its
+kind. It is the loop prevention of the annotation feed: a decider's own annotation writes (failure
+counters, `ready_to_land`, a consumed `force_review`) append `annotation_changed` records like any
+other, and those records come back through the feed as `pr.changed` items.
+
+- The command RUNS when the delivery has no origin (every GitHub daemon event) or an absent-meaning
+  text (empty, whitespace, `<no value>`, `<nil>`, `null`).
+- It RUNS when the origin is anything other than the decider's own: `pg-desk` (operator verbs and the
+  focus verbs), any other text, or another type's decider (`decider:issue-decider`).
+- It SKIPS only when the origin equals the PR decider's own origin, `decider:pr-decider`, exactly.
+
+A skip happens after the arguments are checked and the run record is started, and BEFORE the lock. It
+takes no lock, hydrates nothing, decides nothing and applies nothing, and it writes no per-PR lane
+state (no residual, last outcome, last-run time or run counter). It appends one run record line with
+`skipped` true, `skip_reason` `own-origin`, `origin`, `exit_code` `0`, a `lane_record` result of `not_run`
+(not `skipped`, which means the run ended at the lock) and `skip_counter` `recorded` or `failed`, and it
+adds one to the lane skip counter through the lane write path (a document carrying `skip_reason`; see
+`operator-commands.md` of the pg-desk set), which the serve endpoint exports as
+`pg_desk_pr_lane_skips_total{reason}`. A failure to bump the counter is noted in the run record and
+never fails the command; an older pg-desk that refuses the unknown member costs only the counter. The
+command exits `0`, so the router sees a delivered item and the dispatch-failed alert is unaffected.
+
+Why skipping is safe: an own-origin record is the output of a run that already read the complete view,
+so a re-run computes the same actions (idempotence) apart from failure-counter writes, which change on
+every failing run and would otherwise re-trigger it until `escalate_after`. The feed emits one item per
+record, so a skip cannot hide an operator change bundled into the same item. The decider does READ its
+own earlier writes on later runs (failure state, `ready_to_land`), but no rule needs to be WOKEN by
+them: each is read on the next run, whatever triggers it. A free-text `annotate --origin` could
+impersonate the decider's origin; no caller does today, and the skip counter makes it visible.
+
+```mermaid
+flowchart LR
+    I["pr.changed item with origin"] --> G{"origin is decider:pr-decider?"}
+    G -->|"yes"| S["run record skipped, skip counter, exit 0: no lock, no lane state"]
+    G -->|"no, or none"| R["lock, hydrate, decide, apply, lane-record"]
+    R -->|"annotate with origin decider:pr-decider"| W["annotation_changed record"]
+    W -->|"annotation feed"| I
+```
 
 ## Hydrate, then decide
 
@@ -163,6 +211,12 @@ exactly the registered path. The log source has no retention or rotation setting
 rotation list, so nothing removes it before the plan summary consumes it. A run given `--run-record`
 or `PG_PR_CHANGE_RUN_RECORD` writes elsewhere and is not collected.
 
+A skipped delivery (see "Own-origin deliveries are skipped") is one line too, carrying the additive
+members `skipped`, `skip_reason`, `origin` and `skip_counter`, no `decide`, `adoption` or `residual`, and
+a `lane_record` result of `not_run`. A reader of the run records that takes the latest record of a
+mode per PR (the backfill's plan summary) MUST ignore skip lines, so a skip after a real run cannot hide
+that run's residual.
+
 A line carries `contract` (`pg-pr-change.run-record/v1`), `run_id`, `at` and `finished_at`, `entity`
 (the normalized PR id), `event_id` (the item id as the router gave it), `seq` and `seq_source`
 (`sequence`, `id-suffix` or `none`: the delivery key), `mode`, `hydrate` (`result` ok, failed or
@@ -193,7 +247,8 @@ neither, and leaves the PR's persisted apply-mode residual alone. The residual p
 after an `apply` is passed as the residual OF that run, never as a run of its own; in `plan` mode the
 residual is the number of actions the plan lists, which is non-zero by definition when there is work.
 A run that ends at the lock is in the run record only: it holds no lock to write the PR's own state
-under. The decider's work-item lookup item count is forwarded too: the command reads
+under. A skipped own-origin delivery calls the lane write path once too, but with a skip document
+only: the lane-level counter of skips, and no run state. The decider's work-item lookup item count is forwarded too: the command reads
 `lookup_items` from the decider's run counters line (an `apply`, and a run that
 failed closed on the lookup, whose line carries the count when a listing was read), or, for a `plan` run, from the
 read-only `plan --json` it makes after the plan. A run that failed closed on the lookup (the decider
@@ -317,7 +372,8 @@ in `apply` mode.
 - **INV-PRCHANGE-2.** <!-- uuid: e4c1e1de-89ea-4bce-9fce-7da70f810300 --> The command MUST NOT run the decider after a refresh that exits `1`, `2` or `3`, and MUST
   NOT run it on a stored view whose version is `0` or that is marked stale.
 - **INV-PRCHANGE-3.** <!-- uuid: 577d7c69-d98d-4eb4-94fb-4cfe457f94ba --> The command MUST hold an exclusive per-PR lock, keyed by the normalized PR id so that
-  `<repo>#<n>` and `<entity>@<12 hex>` take the same lock, for the whole run. A holder that is
+  `<repo>#<n>` and `<entity>@<12 hex>` take the same lock, for the whole run (a skipped own-origin
+  delivery, INV-SKIP-2, is not a run and takes none). A holder that is
   killed MUST release it, and a caller that cannot get it within the bounded wait MUST exit with the
   transient class.
 - **INV-PRCHANGE-4.** <!-- uuid: 2e3c14ef-a56c-4f0a-9460-496bc9c8b00d --> The command's exit code MUST name the failing stage and class, MUST NOT be `1` or `9`, and
@@ -357,3 +413,13 @@ in `apply` mode.
   `lookup-unavailable` MUST end the delivery in the retryable class `transient` (exit `32`), with a
   failure line that carries the router's `unavailable` word; every other exit `4` MUST stay
   `decide_failed`.
+- **INV-SKIP-1.** <!-- uuid: 3cf2a556-a8b3-45d8-ac5d-b3ecba34d466 --> No decider rule may require being re-woken by an annotation the decider itself
+  wrote. A rule that needs that MUST compute the result in the same run, or the own-origin guard MUST
+  be revisited.
+- **INV-SKIP-2.** <!-- uuid: 06086d17-9f10-4c1a-898e-9673ba84a627 --> A delivery whose origin equals the PR decider's own origin (`decider:pr-decider`) MUST
+  end before the per-PR lock: no lock, no hydrate, no decide, no apply and no per-PR lane state is
+  taken or written, one run record line says `skipped` and `own-origin`, the lane skip counter goes up
+  by one, and the exit code is `0`. A delivery with no origin, an absent-meaning text, or any other
+  origin MUST run as before. A failure to bump the counter MUST NOT fail the command.
+- **INV-SKIP-3.** <!-- uuid: 3483af2a-1cc3-49bd-92cc-c965b28a4736 --> The decider's own origin MUST be defined once: every annotation write the decider makes and
+  the own-origin guard MUST use the same value.

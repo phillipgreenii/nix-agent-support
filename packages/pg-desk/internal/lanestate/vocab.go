@@ -12,6 +12,7 @@
 //	pr_lane.runs.<stage>.<class>                          counter
 //	pr_lane.decisions.<rule>|<action>|<outcome>|<reason>  counter
 //	pr_lane.timings.<stage>.<count|sum_ms|last_ms>        stage duration aggregate
+//	pr_lane.skips.<reason>                                counter of deliveries skipped before the lock
 //	pr_lane.marked_inactive                               counter
 //	pr_lane.state.mode                                    lane-level mode
 //	pr_lane.state.flip_at                                 flip time (RFC 3339)
@@ -27,6 +28,7 @@ const (
 	KeyRunsPrefix      = "pr_lane.runs."
 	KeyDecisionsPrefix = "pr_lane.decisions."
 	KeyTimingsPrefix   = "pr_lane.timings."
+	KeySkipsPrefix     = "pr_lane.skips."
 	KeyMarkedInactive  = "pr_lane.marked_inactive"
 	KeyStateMode       = "pr_lane.state.mode"
 	KeyStateFlipAt     = "pr_lane.state.flip_at"
@@ -48,6 +50,11 @@ var (
 	// Modes are the lane modes, in the order the gauges list them.
 	Modes = []string{config.PRLaneModeOff, config.PRLaneModePlan, config.PRLaneModeApply}
 )
+
+// SkipReasons is the closed vocabulary of the skip counter's reason label: the
+// reasons pg-pr-change ends a delivery before the lock. own-origin is a delivery
+// caused by the decider's own annotation write.
+var SkipReasons = []string{"own-origin"}
 
 // The stage-duration series' stage vocabulary (the pg-pr-change run record's
 // timings members without the _ms suffix), and the field names under a stage's

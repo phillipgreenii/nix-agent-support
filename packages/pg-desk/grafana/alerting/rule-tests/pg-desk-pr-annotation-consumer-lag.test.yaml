@@ -1,0 +1,81 @@
+# promtool unit tests for the pg-desk-pr-annotation-consumer-lag alert (pg2-aoehwj). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 50`, the
+# rule's `for: 30m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The lag of the pr annotation feed's consumer (annotations:pr-lane) above 50
+# for 30m fires; another consumer or type is out of scope; a SYSTEM_PAUSE gate suppresses it (the
+# query does not run then, so lag grows on purpose).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a stuck annotation feed fires after 30m, not before
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane",job="pg-desk"}
+        values: "80x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_desk_pr_annotation_consumer_lag)
+        eval_time: 40m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a healthy feed (lag 0, and exactly at the threshold) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane",job="pg-desk"}
+        values: "0x60 50x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+      - eval_time: 115m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+
+  - name: another consumer or another type is out of scope
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="pr",consumer="router",job="pg-desk"}
+        values: "900x120"
+      - series: pg_desk_consumer_lag{type="issue",consumer="annotations:pr-lane",job="pg-desk"}
+        values: "900x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane",job="pg-desk"}
+        values: "800x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []

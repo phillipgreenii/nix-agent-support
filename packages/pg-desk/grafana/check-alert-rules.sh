@@ -42,7 +42,7 @@ alerts="$1"
 tests_dir="$2"
 
 # Every rule uid this check wraps and tests. A rule added here extends the cases under rule-tests/.
-rule_uids='["pg-desk-pr-never-hydrated", "pg-desk-pr-residual-after-apply", "pg-desk-pr-stale-anchor", "pg-desk-pr-anchor-hydration-old", "pg-desk-pr-lane-hard-failure", "pg-desk-pr-lane-failure-rate", "pg-desk-pr-hydration-failing", "pg-desk-issue-hydration-failing", "pg-desk-pr-hydrate-dead-man", "pg-desk-pr-hidden-open-anchor", "pg-desk-sweep-bound-violated", "pg-desk-watch-listing-degraded", "pg-desk-ingest-failed-old", "pg-desk-watched-source-not-observed", "pg-desk-issue-unflagged-members", "pg-desk-issue-orphan-read-lag"]'
+rule_uids='["pg-desk-pr-never-hydrated", "pg-desk-pr-residual-after-apply", "pg-desk-pr-stale-anchor", "pg-desk-pr-anchor-hydration-old", "pg-desk-pr-lane-hard-failure", "pg-desk-pr-lane-failure-rate", "pg-desk-pr-hydration-failing", "pg-desk-issue-hydration-failing", "pg-desk-pr-hydrate-dead-man", "pg-desk-pr-hidden-open-anchor", "pg-desk-sweep-bound-violated", "pg-desk-watch-listing-degraded", "pg-desk-ingest-failed-old", "pg-desk-watched-source-not-observed", "pg-desk-issue-unflagged-members", "pg-desk-issue-orphan-read-lag", "pg-desk-pr-annotation-consumer-lag"]'
 
 fail() {
   echo "FAIL: $*" >&2

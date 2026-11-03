@@ -50,9 +50,9 @@
 set -euo pipefail
 
 # Keep equal to minLaneFakeScenarios in internal/prchange/lane_fake_test.go.
-MIN_SCENARIOS_FAKE=24
+MIN_SCENARIOS_FAKE=25
 # Keep equal to minLaneE2EScenarios in internal/prchange/lane_e2e_test.go.
-MIN_SCENARIOS_SOAK=25
+MIN_SCENARIOS_SOAK=26
 
 suite="soak"
 root=""
