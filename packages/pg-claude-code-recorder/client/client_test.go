@@ -162,7 +162,7 @@ func TestEveryWireErrorMapsToItsTypedError(t *testing.T) {
 	c := dial(t, f.sock, &sl)
 	for name, want := range map[string]error{
 		wire.ErrBadRequest: client.ErrBadRequest, wire.ErrNotFound: client.ErrNotFound, wire.ErrBusy: client.ErrBusy,
-		wire.ErrBehind: client.ErrBehind, wire.ErrUnavailable: client.ErrUnavailable, wire.ErrCursorExpired: client.ErrCursorExpired,
+		wire.ErrBehind: client.ErrBehind, wire.ErrQueryTimeout: client.ErrQueryTimeout, wire.ErrUnavailable: client.ErrUnavailable, wire.ErrCursorExpired: client.ErrCursorExpired,
 	} {
 		name := name
 		f.script(func([]byte) (any, *wire.Error) {
@@ -209,7 +209,7 @@ func TestBackoffStartsAtOneSecondDoublesAndStopsAtThirty(t *testing.T) {
 	if b.Next() != time.Second {
 		t.Fatal("reset")
 	}
-	for _, name := range []string{wire.ErrBusy, wire.ErrUnavailable, wire.ErrDaemonOffline} {
+	for _, name := range []string{wire.ErrBusy, wire.ErrUnavailable, wire.ErrDaemonOffline, wire.ErrQueryTimeout} {
 		if !client.Retryable(&client.Error{Name: name}) {
 			t.Errorf("%s must be retryable", name)
 		}

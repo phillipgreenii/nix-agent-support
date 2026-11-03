@@ -162,7 +162,7 @@ func (d *Daemon) opCoverage(_ context.Context, body []byte) (any, *wire.Error) {
 	}
 	cov, err := d.coverage(req.View)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	return cov, nil
 }
@@ -170,7 +170,7 @@ func (d *Daemon) opCoverage(_ context.Context, body []byte) (any, *wire.Error) {
 func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
 	cov, err := d.coverage("summary")
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	free, _ := FreeBytes(d.cfg.StateDir)
 	heldLong, counts := 0, map[string]int{}

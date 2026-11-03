@@ -47,3 +47,18 @@ func TestRemovalAndDoctorKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryTimeoutDefaultsTo30sAndIsConfigurable(t *testing.T) {
+	d := Defaults(env(map[string]string{"HOME": "/h"}))
+	if d.QueryTimeout != 30*time.Second {
+		t.Fatalf("default %v", d.QueryTimeout)
+	}
+	p := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(p, []byte("[query]\ntimeout = \"5s\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p, true, env(map[string]string{"HOME": "/h"}))
+	if err != nil || c.QueryTimeout != 5*time.Second {
+		t.Fatalf("%v %v", err, c.QueryTimeout)
+	}
+}

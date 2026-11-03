@@ -137,7 +137,7 @@ func Retryable(err error) bool {
 		return false
 	}
 	switch e.Name {
-	case wire.ErrBusy, wire.ErrUnavailable, wire.ErrDaemonOffline:
+	case wire.ErrBusy, wire.ErrUnavailable, wire.ErrDaemonOffline, wire.ErrQueryTimeout:
 		return true
 	}
 	return false

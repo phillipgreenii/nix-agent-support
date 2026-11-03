@@ -57,7 +57,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 	}
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	ans := &SearchAnswer{AsOf: e.asOf(tx), Hits: []Hit{}}
@@ -120,7 +120,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 	args = append(append(args, fieldArgs...), wargs...)
 	rs, qerr := tx.Query(q, args...)
 	if qerr != nil {
-		return nil, wire.Errf(wire.ErrInternal, qerr.Error())
+		return nil, wire.FromErr(qerr)
 	}
 	defer func() { _ = rs.Close() }()
 	limit := limitOf(req.Limit)
@@ -130,7 +130,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 		var gen, item, ln int
 		var sc float64
 		if err := rs.Scan(&field, &recID, &fid, &gen, &off, &item, &ln, &src, &session, &tns, &sc); err != nil {
-			return nil, wire.Errf(wire.ErrInternal, err.Error())
+			return nil, wire.FromErr(err)
 		}
 		var value string
 		if e.Res != nil {

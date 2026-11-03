@@ -42,6 +42,7 @@ type Config struct {
 	MinFreeBytes  int64
 	WaitMax       time.Duration
 	WaitMaxWaiter int
+	QueryTimeout  time.Duration // deadline of every read (query.timeout)
 	FeedRetention time.Duration
 	RemoveAfter   time.Duration
 	RemoveEnable  bool
@@ -99,6 +100,9 @@ type file struct {
 		Max        string `toml:"max"`
 		MaxWaiters *int   `toml:"maxWaiters"`
 	} `toml:"wait"`
+	Query struct {
+		Timeout string `toml:"timeout"`
+	} `toml:"query"`
 	Feed struct {
 		Retention string `toml:"retention"`
 	} `toml:"feed"`
@@ -201,6 +205,7 @@ func Defaults(getenv func(string) string) Config {
 		MinFreeBytes:      20 << 30,
 		WaitMax:           60 * time.Second,
 		WaitMaxWaiter:     256,
+		QueryTimeout:      30 * time.Second,
 		FeedRetention:     14 * 24 * time.Hour,
 		RemoveAfter:       30 * 24 * time.Hour,
 		RemoveMaxPerRun:   50,
@@ -302,6 +307,7 @@ func apply(c *Config, f file) error {
 	}{
 		{"sweep.interval", f.Sweep.Interval, &c.SweepInterval},
 		{"wait.max", f.Wait.Max, &c.WaitMax},
+		{"query.timeout", f.Query.Timeout, &c.QueryTimeout},
 		{"feed.retention", f.Feed.Retention, &c.FeedRetention},
 		{"remove.after", f.Remove.After, &c.RemoveAfter},
 		{"doctor.interval", f.Doctor.Interval, &c.DoctorInterval},

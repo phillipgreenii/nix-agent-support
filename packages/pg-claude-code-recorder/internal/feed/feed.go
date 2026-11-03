@@ -266,7 +266,7 @@ func (e *Engine) Feed(ctx context.Context, body []byte) (any, *wire.Error) {
 func (e *Engine) once(ctx context.Context, req Request) (*Answer, *wire.Error) {
 	tx, err := e.Q.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	epoch, head, maxRec := query.Head(tx)
@@ -337,7 +337,7 @@ func (e *Engine) resets(tx *sql.Tx, where *query.Filter, after, bound, epoch int
 	rs, err := tx.Query(`SELECT p.file_id,p.gen,p.parser,p.next_rec,COALESCE(f.source,'') FROM parse_resets p LEFT JOIN files f ON f.id=p.file_id
 WHERE 2*p.next_rec-1 > ? AND 2*p.next_rec-1 <= ? ORDER BY p.next_rec,p.id`, after, bound)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	type row struct {
 		file, next  int64
@@ -349,7 +349,7 @@ WHERE 2*p.next_rec-1 > ? AND 2*p.next_rec-1 <= ? ORDER BY p.next_rec,p.id`, afte
 		var r row
 		if err := rs.Scan(&r.file, &r.gen, &r.parser, &r.next, &r.src); err != nil {
 			_ = rs.Close()
-			return nil, wire.Errf(wire.ErrInternal, err.Error())
+			return nil, wire.FromErr(err)
 		}
 		all = append(all, r)
 	}
@@ -385,7 +385,7 @@ func (e *Engine) Snapshot(ctx context.Context, body []byte) (any, *wire.Error) {
 	}
 	tx, err := e.Q.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	epoch, head, maxRec := query.Head(tx)
@@ -453,7 +453,7 @@ func (e *Engine) Raw(ctx context.Context, body []byte) (any, *wire.Error) {
 			return nil, wire.Errf(wire.ErrNotFound, "no such record")
 		}
 		if err != nil {
-			return nil, wire.Errf(wire.ErrInternal, err.Error())
+			return nil, wire.FromErr(err)
 		}
 	case req.File != "":
 		f, ok := query.ParseFileRef(req.File)

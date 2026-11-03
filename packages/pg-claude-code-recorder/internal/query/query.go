@@ -143,7 +143,7 @@ func (e *Engine) Query(ctx context.Context, req Request) (*Answer, *wire.Error) 
 	}
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	ans := &Answer{AsOf: e.asOf(tx), Rows: [][]any{}}
@@ -203,7 +203,7 @@ func (e *Engine) rows(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
 	args := append(append(append([]any{}, b.joinArgs...), wargs...), limit+1)
 	rs, qerr := tx.Query(q, args...)
 	if qerr != nil {
-		return wire.Errf(wire.ErrInternal, qerr.Error())
+		return wire.FromErr(qerr)
 	}
 	type hit struct {
 		id       int64
@@ -228,7 +228,7 @@ func (e *Engine) rows(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
 		}
 		if err := rs.Scan(dest...); err != nil {
 			_ = rs.Close()
-			return wire.Errf(wire.ErrInternal, err.Error())
+			return wire.FromErr(err)
 		}
 		ref.File, ref.Item, h.file = FileRef(fid), item, fid
 		h.ref = ref
@@ -343,7 +343,7 @@ type tgt struct {
 func (e *Engine) scanTargets(tx *sql.Tx, q string, args []any) ([]tgt, *wire.Error) {
 	rs, err := tx.Query(q, args...)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	defer func() { _ = rs.Close() }()
 	var out []tgt
@@ -352,7 +352,7 @@ func (e *Engine) scanTargets(tx *sql.Tx, q string, args []any) ([]tgt, *wire.Err
 		var item int
 		var fid int64
 		if err := rs.Scan(&t.id, &fid, &t.ref.Gen, &t.ref.Offset, &item); err != nil {
-			return nil, wire.Errf(wire.ErrInternal, err.Error())
+			return nil, wire.FromErr(err)
 		}
 		t.file, t.ref.File, t.ref.Item = fid, FileRef(fid), item
 		out = append(out, t)
@@ -574,7 +574,7 @@ func (e *Engine) aggregate(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
 	q := "SELECT " + strings.Join(sel, ",") + base(req.OldGenerations) + " " + strings.Join(b.joins, " ") + " WHERE " + wsql
 	rs, qerr := tx.Query(q, append(append([]any{}, b.joinArgs...), wargs...)...)
 	if qerr != nil {
-		return wire.Errf(wire.ErrInternal, qerr.Error())
+		return wire.FromErr(qerr)
 	}
 	groups := map[string]*groupAcc{}
 	var order []string
@@ -586,7 +586,7 @@ func (e *Engine) aggregate(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
 		}
 		if err := rs.Scan(dest...); err != nil {
 			_ = rs.Close()
-			return wire.Errf(wire.ErrInternal, err.Error())
+			return wire.FromErr(err)
 		}
 		var kb strings.Builder
 		for _, k := range gIdx {

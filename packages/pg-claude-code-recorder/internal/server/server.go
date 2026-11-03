@@ -111,6 +111,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		ans, werr := s.call(r.Context(), op, body)
 		s.observe(op.kind, time.Since(start))
 		if werr != nil {
+			if werr.Name == wire.ErrQueryTimeout {
+				s.obs.Reg.Add(obs.MQueryTimeouts, map[string]string{"op": opLabel(name)}, 1)
+				s.obs.Event("query_timeout", "op", name, "client", client, "ms", fmt.Sprint(time.Since(start).Milliseconds()))
+			}
 			s.fail(w, name, client, start, werr)
 			return
 		}

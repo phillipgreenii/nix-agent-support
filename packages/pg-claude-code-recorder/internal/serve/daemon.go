@@ -106,7 +106,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild})
+	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild, ReadTimeout: cfg.QueryTimeout})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}

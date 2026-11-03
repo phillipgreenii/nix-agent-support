@@ -52,6 +52,10 @@ type Options struct {
 	// means "sqlite". A test registers a counting wrapper under another name
 	// (internal/store/countdriver) to count reads.
 	DriverName string
+	// ReadTimeout is the deadline of every read-pool statement and read
+	// transaction (DefaultReadTimeout when zero): no reader pins a WAL
+	// snapshot for longer.
+	ReadTimeout time.Duration
 }
 
 // SchemaNewerError is returned by Open when index.db carries a newer
@@ -66,6 +70,7 @@ func (e *SchemaNewerError) Error() string {
 // Store is an open state directory.
 type Store struct {
 	driverName string // database/sql driver name (Options.DriverName)
+	readTO     time.Duration
 	dir        string
 	fs         fsx.FS
 	obs        *obs.Obs
@@ -106,7 +111,10 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.DriverName == "" {
 		opt.DriverName = "sqlite"
 	}
-	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName}
+	if opt.ReadTimeout <= 0 {
+		opt.ReadTimeout = DefaultReadTimeout
+	}
+	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout}
 	for _, d := range []string{dir, filepath.Join(dir, CopiesDir), filepath.Join(dir, ArchivesDir)} {
 		if err := s.fs.MkdirAll(d, 0o700); err != nil {
 			return nil, err
@@ -220,11 +228,13 @@ func (s *Store) openDB(path string) error {
 		_ = w.Close()
 		return err
 	}
-	r, err := sql.Open(s.driverName, dsn+"&_pragma=query_only(1)")
+	r, err := openDeadlineDB(s.driverName, dsn+"&_pragma=query_only(1)", s.readTO)
 	if err != nil {
 		_ = w.Close()
 		return err
 	}
+	r.SetConnMaxLifetime(readConnMaxLifetime)
+	r.SetConnMaxIdleTime(readConnMaxIdleTime)
 	s.wdb, s.rdb = w, r
 	return nil
 }

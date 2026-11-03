@@ -195,6 +195,11 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
 - **Waiting**: the daemon admits `wait.maxWaiters` (default 256) waiters, then answers `busy` (429);
   a waiter wakes on a parse commit and answers only when a committed record matches its filter.
   `serve` closes waiting connections on shutdown, so a client reconnects with the same cursor.
+- **Read deadline**: every read (a socket query and every read-pool statement) runs under the deadline
+  `query.timeout` (default 30s), so no reader pins the WAL snapshot longer; a read transaction is never
+  held while a waiter waits (it reads, releases, waits, then reads again). A read that hits the
+  deadline answers `query_timeout` (504, exit 6, `client.ErrQueryTimeout`, retryable) and counts in
+  `query_timeouts_total{op}`.
 - **raw** answers a record (`{"record":{file,gen,offset,item}}`) or a file range. Every reader of
   stored bytes (raw, snippets, substring verification, field reads) goes through
   `Store.OpenPointer`, one abstraction over a copy, a snapshot version and an archive.
@@ -216,7 +221,7 @@ pg-claude-code-recorder raw --record f_5:1:0:-1
 `Hello`, `Query`, `Search`, `Feed(ctx, filter, after)` (an iterator: it applies a reset before
 de-duplicating by record id, backs off on busy and unavailable from 1 s doubling to 30 s, and
 reconnects with the same cursor after a daemon restart; persist `Cursor()`), `Snapshot` and `Raw`,
-and the typed errors `ErrDown`, `ErrBehind`, `ErrBusy`, `ErrUnavailable`, `ErrBadRequest`,
+and the typed errors `ErrDown`, `ErrBehind`, `ErrBusy`, `ErrQueryTimeout`, `ErrUnavailable`, `ErrBadRequest`,
 `ErrNotFound` and `ErrCursorExpired` (match with `errors.Is`; `*client.Error.Cursor` is the resync
 cursor). The socket is `PG_CLAUDE_CODE_RECORDER_SOCKET`, else `$XDG_STATE_HOME/pg-claude-code-recorder/recorder.sock`;
 connecting has a timeout. A higher `protocol_version` than the client knows is refused (`ErrProtocol`).

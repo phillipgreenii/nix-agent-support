@@ -4,7 +4,11 @@
 // and POST /v1/<operation>.
 package wire
 
-import "net/http"
+import (
+	"context"
+	"errors"
+	"net/http"
+)
 
 // ProtocolVersion is the wire protocol version reported by status and hello.
 const ProtocolVersion = 1
@@ -39,6 +43,8 @@ const (
 	ErrDaemonOffline = "daemon_offline"
 	ErrUsage         = "usage"
 	ErrWaitTimeout   = "wait_timeout"
+	// ErrQueryTimeout: a read hit the daemon deadline (query.timeout); retry, ideally narrower.
+	ErrQueryTimeout = "query_timeout"
 	// Exit 8 preconditions.
 	ErrRemovalDisabled = "removal_disabled"
 	ErrTargetExists    = "target_exists"
@@ -50,7 +56,7 @@ func ExitFor(name string) int {
 	switch name {
 	case ErrBadRequest, ErrUsage:
 		return ExitUsage
-	case ErrWaitTimeout:
+	case ErrWaitTimeout, ErrQueryTimeout:
 		return ExitTimeout
 	case ErrUnavailable, ErrDaemonOffline:
 		return ExitOffline
@@ -75,6 +81,8 @@ func HTTPStatus(name string) int {
 		return http.StatusNotFound
 	case ErrUnavailable:
 		return http.StatusServiceUnavailable
+	case ErrQueryTimeout:
+		return http.StatusGatewayTimeout
 	case ErrBusy, ErrBehind:
 		return http.StatusTooManyRequests
 	case ErrCursorExpired:
@@ -227,4 +235,13 @@ type Hello struct {
 	Capabilities    []string `json:"capabilities"`
 	CaughtUp        bool     `json:"caught_up"`
 	Degraded        bool     `json:"degraded"`
+}
+
+// FromErr maps an error from a read to its wire error: a context deadline is
+// the retryable query_timeout, anything else is internal.
+func FromErr(err error) *Error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return Errf(ErrQueryTimeout, "the read hit the daemon's query deadline: "+err.Error())
+	}
+	return Errf(ErrInternal, err.Error())
 }

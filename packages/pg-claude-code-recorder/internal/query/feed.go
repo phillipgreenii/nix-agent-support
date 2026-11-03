@@ -106,7 +106,7 @@ func (e *Engine) Select(tx *sql.Tx, sel Selection) ([]Selected, *wire.Error) {
 	args = append(append(args, wargs...), limitOf(sel.Limit)+1)
 	rs, qerr := tx.Query(q, args...)
 	if qerr != nil {
-		return nil, wire.Errf(wire.ErrInternal, qerr.Error())
+		return nil, wire.FromErr(qerr)
 	}
 	defer func() { _ = rs.Close() }()
 	var out []Selected
@@ -120,7 +120,7 @@ func (e *Engine) Select(tx *sql.Tx, sel Selection) ([]Selected, *wire.Error) {
 			dest = append(dest, &vals[i])
 		}
 		if err := rs.Scan(dest...); err != nil {
-			return nil, wire.Errf(wire.ErrInternal, err.Error())
+			return nil, wire.FromErr(err)
 		}
 		h.Ref.File, h.Ref.Item = FileRef(fid), item
 		h.Fields = make(map[string]any, len(cols))

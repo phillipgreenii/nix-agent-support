@@ -38,6 +38,7 @@ const (
 	MStateUsedBytes  = "state_used_bytes"
 	MRequestsTotal   = "requests_total"
 	MQueryDuration   = "query_duration_seconds"
+	MQueryTimeouts   = "query_timeouts_total"
 	MFeedDuration    = "feed_latency_seconds"
 	MWaitDuration    = "wait_duration_seconds"
 	MCopiedFiles     = "backfill_files_copied"
@@ -213,6 +214,7 @@ func (o *Obs) RegisterStandard() {
 		o.Reg.Add(MDroppedBytes, map[string]string{"reason": r}, 0)
 	}
 	o.Reg.Add(MIndexRebuilds, nil, 0)
+	o.Reg.Add(MQueryTimeouts, map[string]string{"op": "unknown"}, 0)
 	o.Reg.Add(MStaleDiscovery, nil, 0)
 	o.Reg.Add(MStaleFifosRemoved, nil, 0)
 	for _, rp := range boolLabelStrings {

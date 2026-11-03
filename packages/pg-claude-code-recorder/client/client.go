@@ -78,6 +78,8 @@ var (
 	ErrBehind = errors.New("recorder is behind")
 	// ErrBusy: the daemon's admission limit was reached.
 	ErrBusy = errors.New("recorder is busy")
+	// ErrQueryTimeout: the read hit the daemon deadline; retry, ideally narrower.
+	ErrQueryTimeout = errors.New("recorder query timed out")
 	// ErrUnavailable: the daemon could not answer (including a closed connection).
 	ErrUnavailable = errors.New("recorder unavailable")
 	// ErrBadRequest: the daemon refused the request as malformed.
@@ -117,6 +119,8 @@ func sentinelOf(name string) error {
 		return ErrBehind
 	case wire.ErrBusy:
 		return ErrBusy
+	case wire.ErrQueryTimeout:
+		return ErrQueryTimeout
 	case wire.ErrUnavailable:
 		return ErrUnavailable
 	case wire.ErrBadRequest:

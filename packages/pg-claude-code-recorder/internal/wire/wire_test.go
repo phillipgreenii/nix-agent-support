@@ -1,11 +1,15 @@
 package wire
 
-import "testing"
+import (
+	"context"
+	"fmt"
+	"testing"
+)
 
 func TestExitForFollowsTheDocumentedMapping(t *testing.T) {
 	for name, want := range map[string]int{
 		ErrBadRequest: 2, ErrUsage: 2, ErrUnavailable: 3, ErrDaemonOffline: 3, ErrNotFound: 4,
-		ErrBusy: 5, ErrBehind: 5, ErrWaitTimeout: 6, ErrCursorExpired: 7,
+		ErrBusy: 5, ErrBehind: 5, ErrWaitTimeout: 6, ErrQueryTimeout: 6, ErrCursorExpired: 7,
 		ErrRemovalDisabled: 8, ErrTargetExists: 8, ErrHeldByLive: 8,
 		ErrInternal: 1, "something_new": 1,
 	} {
@@ -18,7 +22,16 @@ func TestExitForFollowsTheDocumentedMapping(t *testing.T) {
 func TestHTTPStatusIsDistinctPerFamily(t *testing.T) {
 	if HTTPStatus(ErrNotFound) != 404 || HTTPStatus(ErrBadRequest) != 400 || HTTPStatus(ErrInternal) != 500 ||
 		HTTPStatus(ErrUnavailable) != 503 || HTTPStatus(ErrBusy) != 429 || HTTPStatus(ErrCursorExpired) != 410 ||
-		HTTPStatus(ErrRemovalDisabled) != 409 {
+		HTTPStatus(ErrRemovalDisabled) != 409 || HTTPStatus(ErrQueryTimeout) != 504 {
 		t.Fatal("unexpected status mapping")
+	}
+}
+
+func TestFromErrMapsADeadlineToTheRetryableTimeout(t *testing.T) {
+	if e := FromErr(fmt.Errorf("scan: %w", context.DeadlineExceeded)); e.Name != ErrQueryTimeout {
+		t.Fatalf("a wrapped deadline mapped to %q, want %q", e.Name, ErrQueryTimeout)
+	}
+	if e := FromErr(fmt.Errorf("disk on fire")); e.Name != ErrInternal {
+		t.Fatalf("another error mapped to %q, want internal", e.Name)
 	}
 }

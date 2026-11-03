@@ -23,7 +23,7 @@ func lifeErr(err error, what string) *wire.Error {
 	if errors.Is(err, lifecycle.ErrNotFound) {
 		return wire.Errf(wire.ErrNotFound, what)
 	}
-	return wire.Errf(wire.ErrInternal, err.Error())
+	return wire.FromErr(err)
 }
 
 // opConversationShow answers one Conversation: its state and stage, its end
@@ -82,7 +82,7 @@ func (d *Daemon) opProcessList(_ context.Context, body []byte) (any, *wire.Error
 	}
 	ps, err := d.eng.Processes(req)
 	if err != nil {
-		return nil, wire.Errf(wire.ErrInternal, err.Error())
+		return nil, wire.FromErr(err)
 	}
 	if ps == nil {
 		ps = []lifecycle.Process{}
