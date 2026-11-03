@@ -108,6 +108,16 @@ const (
 	MWALBytes          = "wal_bytes"
 )
 
+// Metric names of the passive WAL checkpoint loop. wal_frames and
+// wal_checkpointed_frames are in WAL pages (not bytes), as of the last passive
+// checkpoint, and are cumulative until the WAL restarts.
+const (
+	MWALFrames             = "wal_frames"
+	MWALCheckpointedFrames = "wal_checkpointed_frames"
+	MWALCheckpointLastTime = "wal_checkpoint_last_timestamp_seconds"
+	MWALCheckpointDuration = "wal_checkpoint_duration_seconds"
+)
+
 // Loop and outcome label values of loop_runs_total.
 const (
 	LoopSettleTick    = "settle_tick"
@@ -261,7 +271,7 @@ func (o *Obs) RegisterStandard() {
 			o.Reg.Set(g, nil, 0)
 		}
 	}
-	for _, l := range []string{LoopSettleTick, LoopRefreshGauges} {
+	for _, l := range []string{LoopSettleTick, LoopRefreshGauges, LoopWALCheckpoint} {
 		for _, out := range []string{OutcomeOK, OutcomeError} {
 			o.Reg.Add(MLoopRuns, map[string]string{"loop": l, "outcome": out}, 0)
 		}
@@ -270,6 +280,9 @@ func (o *Obs) RegisterStandard() {
 	o.Reg.Add(MSettleTickTransitions, nil, 0)
 	o.Reg.Set(MSettleTickLastDuration, nil, 0)
 	o.Reg.Set(MSettleTickLastTimestamp, nil, 0)
+	o.Reg.Set(MWALFrames, nil, 0)
+	o.Reg.Set(MWALCheckpointedFrames, nil, 0)
+	o.Reg.Set(MWALCheckpointLastTime, nil, 0)
 	for _, h := range []struct {
 		name   string
 		bounds []float64
@@ -280,6 +293,7 @@ func (o *Obs) RegisterStandard() {
 		{MWaitDuration, WaitBuckets},
 		{MSettleTickDuration, LoopBuckets},
 		{MRefreshGaugesDuration, LoopBuckets},
+		{MWALCheckpointDuration, LoopBuckets},
 	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}

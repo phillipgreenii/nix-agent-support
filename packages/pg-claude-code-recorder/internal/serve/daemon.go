@@ -80,12 +80,14 @@ type Daemon struct {
 	filesCopied  atomic.Int64
 	backfillAt   atomic.Int64 // unix ns the first sweep began
 
-	usedMu     sync.Mutex
-	usedBytes  int64
-	usedAt     time.Time
-	stop       chan struct{}
-	stopOnce   sync.Once
-	refreshing sync.WaitGroup
+	// lastCkptWarn is touched only by the WAL checkpoint loop.
+	lastCkptWarn time.Time
+	usedMu       sync.Mutex
+	usedBytes    int64
+	usedAt       time.Time
+	stop         chan struct{}
+	stopOnce     sync.Once
+	refreshing   sync.WaitGroup
 }
 
 // Open builds the daemon: it opens the store, probes the copy method, recovers
@@ -359,7 +361,8 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("start watcher: %w", err)
 	}
 	d.tr.Startup()
-	d.refreshing.Add(5)
+	d.refreshing.Add(6)
+	go d.walCheckpointLoop()
 	go d.settleLoop()
 	go d.doctorLoop()
 	go d.refreshLoop()

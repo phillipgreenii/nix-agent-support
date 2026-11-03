@@ -674,6 +674,84 @@
           "legendFormat": "wal"
         }
       ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "wal checkpoint frames",
+      "description": "Frames in the WAL and frames already checkpointed, as of the last passive checkpoint (pages, not bytes; both count up until the WAL restarts). A gap that stays open means a reader pins the WAL. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_wal_frames)",
+          "range": true,
+          "legendFormat": "wal frames"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_wal_checkpointed_frames)",
+          "range": true,
+          "legendFormat": "checkpointed"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "wal checkpoint duration",
+      "description": "p99 duration of the passive WAL checkpoint in seconds. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pg_claude_code_recorder_wal_checkpoint_duration_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "p99"
+        }
+      ]
     }
   ]
 }

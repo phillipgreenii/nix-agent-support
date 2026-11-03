@@ -23,21 +23,23 @@ func TestLoopBuckets(t *testing.T) {
 
 func TestRegisterStandardRegistersLoopMetrics(t *testing.T) {
 	o := New(nil)
-	for _, name := range []string{MSettleTickDuration, MRefreshGaugesDuration} {
+	for _, name := range []string{MSettleTickDuration, MRefreshGaugesDuration, MWALCheckpointDuration} {
 		h := o.Reg.Hist(name)
 		if h == nil || !slices.Equal(h.Bounds, LoopBuckets) {
 			t.Fatalf("%s: %+v", name, h)
 		}
 	}
-	for _, l := range []string{LoopSettleTick, LoopRefreshGauges} {
+	for _, l := range []string{LoopSettleTick, LoopRefreshGauges, LoopWALCheckpoint} {
 		for _, out := range []string{OutcomeOK, OutcomeError} {
 			if v, ok := o.Reg.Counter(MLoopRuns, map[string]string{"loop": l, "outcome": out}); !ok || v != 0 {
 				t.Errorf("loop_runs_total{%s,%s} = %v %v", l, out, v, ok)
 			}
 		}
 	}
-	if _, ok := o.Reg.Counter(MLoopRuns, map[string]string{"loop": LoopWALCheckpoint, "outcome": OutcomeOK}); ok {
-		t.Error("wal_checkpoint series belongs to the WAL checkpoint task")
+	for _, g := range []string{MWALFrames, MWALCheckpointedFrames, MWALCheckpointLastTime} {
+		if v, ok := o.Reg.Gauge(g, nil); !ok || v != 0 {
+			t.Errorf("%s = %v %v", g, v, ok)
+		}
 	}
 }
 

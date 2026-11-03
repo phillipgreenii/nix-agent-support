@@ -52,6 +52,9 @@ type Options struct {
 	// means "sqlite". A test registers a counting wrapper under another name
 	// (internal/store/countdriver) to count reads.
 	DriverName string
+	// JournalSizeLimit overrides the journal_size_limit pragma in bytes
+	// (JournalSizeLimit when zero); tests use a small value.
+	JournalSizeLimit int
 	// ReadTimeout is the deadline of every read-pool statement and read
 	// transaction (DefaultReadTimeout when zero): no reader pins a WAL
 	// snapshot for longer.
@@ -80,14 +83,16 @@ func (e *SchemaOlderError) Error() string {
 
 // Store is an open state directory.
 type Store struct {
-	driverName string // database/sql driver name (Options.DriverName)
-	readTO     time.Duration
-	dir        string
-	fs         fsx.FS
-	obs        *obs.Obs
+	driverName   string // database/sql driver name (Options.DriverName)
+	journalLimit int    // journal_size_limit in bytes
+	readTO       time.Duration
+	dir          string
+	fs           fsx.FS
+	obs          *obs.Obs
 
 	wdb *sql.DB // the one serialized write connection
 	rdb *sql.DB
+	cdb *sql.DB // the passive-checkpoint connection (own handle, never the write one)
 
 	mu       sync.Mutex // serializes every write
 	jf       fsx.File
@@ -125,7 +130,10 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.ReadTimeout <= 0 {
 		opt.ReadTimeout = DefaultReadTimeout
 	}
-	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout}
+	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, journalLimit: opt.JournalSizeLimit}
+	if s.journalLimit <= 0 {
+		s.journalLimit = JournalSizeLimit
+	}
 	for _, d := range []string{dir, filepath.Join(dir, CopiesDir), filepath.Join(dir, ArchivesDir)} {
 		if err := s.fs.MkdirAll(d, 0o700); err != nil {
 			return nil, err
@@ -225,7 +233,10 @@ func Open(dir string, opt Options) (*Store, error) {
 
 func (s *Store) openDB(path string) error {
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)"
-	w, err := sql.Open(s.driverName, dsn)
+	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
+	// it; it caps the WAL file left behind when the WAL restarts.
+	wdsn := dsn + "&_pragma=journal_size_limit(" + strconv.Itoa(s.journalLimit) + ")"
+	w, err := sql.Open(s.driverName, wdsn)
 	if err != nil {
 		return err
 	}
@@ -256,18 +267,54 @@ func (s *Store) openDB(path string) error {
 	}
 	r.SetConnMaxLifetime(readConnMaxLifetime)
 	r.SetConnMaxIdleTime(readConnMaxIdleTime)
-	s.wdb, s.rdb = w, r
+	// A passive checkpoint can run for minutes on a large backlog: it gets its
+	// own connection so it never holds the one write connection.
+	c, err := sql.Open(s.driverName, wdsn)
+	if err != nil {
+		_ = w.Close()
+		_ = r.Close()
+		return err
+	}
+	c.SetMaxOpenConns(1)
+	s.wdb, s.rdb, s.cdb = w, r, c
 	return nil
 }
 
+// JournalSizeLimit is the journal_size_limit pragma, in bytes: the WAL file is
+// truncated to at most this size when the WAL restarts.
+const JournalSizeLimit = 1073741824
+
+// Checkpoint runs one PASSIVE WAL checkpoint on its own connection and returns
+// the frames in the WAL (log) and the frames already moved into the database
+// (checkpointed). Both are cumulative until the WAL restarts; checkpointed ==
+// log means complete, less means partial (a reader pins the rest). It does not
+// take the write lock, so it is safe beside a writer. It returns an error
+// after Close.
+func (s *Store) Checkpoint() (log, checkpointed int, err error) {
+	s.mu.Lock()
+	c := s.cdb
+	s.mu.Unlock()
+	if c == nil {
+		return 0, 0, errors.New("store closed")
+	}
+	var busy int
+	if err := c.QueryRow(`PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &log, &checkpointed); err != nil {
+		return 0, 0, err
+	}
+	return log, checkpointed, nil
+}
+
 func (s *Store) closeDBs() {
+	if s.cdb != nil {
+		_ = s.cdb.Close()
+	}
 	if s.wdb != nil {
 		_ = s.wdb.Close()
 	}
 	if s.rdb != nil {
 		_ = s.rdb.Close()
 	}
-	s.wdb, s.rdb = nil, nil
+	s.wdb, s.rdb, s.cdb = nil, nil, nil
 }
 
 func (s *Store) metaInt(key string) int64 {
@@ -430,6 +477,10 @@ func (s *Store) Close() error {
 	if s.jf != nil {
 		first = s.jf.Close()
 		s.jf = nil
+	}
+	if s.cdb != nil {
+		_ = s.cdb.Close()
+		s.cdb = nil
 	}
 	if s.wdb != nil {
 		// Checkpoint so a reopen starts from a small WAL.
