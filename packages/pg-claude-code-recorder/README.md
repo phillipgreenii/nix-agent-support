@@ -280,8 +280,8 @@ in-process `/resume` has no end and is omitted by the crash query.
 in the registry is `cleared`; a typed `/exit` after the Process started is `exited`; an exit the recorder
 did not observe is `unknown`; the registry file still present at the exit is `crashed`; otherwise
 `closed` (normally). The mod's `end_reason` is detail only. The label table is
-`client/testdata/labels.json`, loaded by the daemon test (`internal/serve/labels_test.go`), the client test
-(`client/labels_test.go`) and the command test (`cmd/pg-claude-code-recorder/labels_test.go`); each calls
+`client/testdata/labels.json`, loaded by the daemon test (`internal/serve/labels_integration_test.go`), the client test
+(`client/labels_test.go`) and the command test (`cmd/pg-claude-code-recorder/labels_integration_test.go`); each calls
 `clienttest.Covered`, and a guard fails when a consumer stops loading every row.
 
 ```text

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
@@ -219,31 +218,5 @@ func TestLinksFollowAcrossSources(t *testing.T) {
 	}
 	if _, werr := e.d.opQuery(context.Background(), []byte(`{"follow":"nope"}`)); werr == nil || werr.Name != wire.ErrBadRequest {
 		t.Fatalf("unknown follow: %v", werr)
-	}
-}
-
-func TestHelloAndTheDaemonFeedOperations(t *testing.T) {
-	e := newEnv(t, false)
-	e.write(t, "projects/example-proj/example-session-1.jsonl", transcript)
-	d := e.open(t)
-	defer func() { _ = d.Close() }()
-	if err := d.Start(); err != nil {
-		t.Fatal(err)
-	}
-	e.settle(t)
-	h := d.hello().(wire.Hello)
-	if h.ProtocolVersion != wire.ProtocolVersion || h.SchemaVersion < 1 || h.Epoch < 1 || h.Service == "" {
-		t.Fatalf("hello %+v", h)
-	}
-	want := []string{"conversation.list", "conversation.show", "coverage", "doctor", "extract", "feed", "held", "hello", "process.list", "process.show", "query", "raw", "remove", "search", "snapshot", "status", "where"}
-	if strings.Join(h.Capabilities, ",") != strings.Join(want, ",") {
-		t.Fatalf("capabilities %v, want %v", h.Capabilities, want)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for !d.backfillDone.Load() && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if h2 := d.hello().(wire.Hello); !h2.CaughtUp || h2.Degraded {
-		t.Fatalf("after backfill: %+v", h2)
 	}
 }

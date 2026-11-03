@@ -66,9 +66,9 @@ func TestEndLabelTruthTableOverEveryEvidenceCombination(t *testing.T) {
 // stopped calling it (or was deleted).
 func TestEveryLabelTableConsumerChecksItsCoverage(t *testing.T) {
 	for consumer, file := range map[string]string{
-		"daemon": filepath.Join("..", "internal", "serve", "labels_test.go"),
+		"daemon": filepath.Join("..", "internal", "serve", "labels_integration_test.go"),
 		"client": "labels_test.go",
-		"cmd":    filepath.Join("..", "cmd", "pg-claude-code-recorder", "labels_test.go"),
+		"cmd":    filepath.Join("..", "cmd", "pg-claude-code-recorder", "labels_integration_test.go"),
 	} {
 		b, err := os.ReadFile(file)
 		if err != nil {

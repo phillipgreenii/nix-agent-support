@@ -32,8 +32,20 @@ var goMetaSubcommands = map[string]bool{"list": true, "env": true, "version": tr
 // nonUnitTags are the build tags that keep a file out of the unit tier.
 var nonUnitTags = []string{"integration", "faults", "soak"}
 
+// daemonPackages are the package directories (relative to the module package
+// root) whose untagged test files MUST NOT start a whole daemon. Other
+// packages have their own, unrelated Start methods.
+var daemonPackages = map[string]bool{
+	"internal/serve":              true,
+	"cmd/pg-claude-code-recorder": true,
+}
+
+// daemonStarters are helpers that start a whole in-process daemon.
+var daemonStarters = map[string]bool{"liveDaemon": true, "RunRow": true}
+
 // integrationMarkers returns one reason per integration-tier construct in src.
-func integrationMarkers(name string, src []byte) ([]string, error) {
+// daemonScope turns on the "starts a whole daemon" rule for the file.
+func integrationMarkers(name string, src []byte, daemonScope bool) ([]string, error) {
 	f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
 	if err != nil {
 		return nil, err
@@ -44,9 +56,22 @@ func integrationMarkers(name string, src []byte) ([]string, error) {
 		if !ok {
 			return true
 		}
+		if daemonScope {
+			if id, ok := call.Fun.(*ast.Ident); ok && daemonStarters[id.Name] {
+				reasons = append(reasons, "starts a whole daemon through "+id.Name+"()")
+			}
+		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok {
 			return true
+		}
+		if daemonScope {
+			if sel.Sel.Name == "Start" && len(call.Args) == 0 {
+				reasons = append(reasons, "starts a whole daemon (a zero-argument .Start())")
+			}
+			if daemonStarters[sel.Sel.Name] {
+				reasons = append(reasons, "starts a whole daemon through "+sel.Sel.Name+"()")
+			}
 		}
 		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "exec" &&
 			(sel.Sel.Name == "Command" || sel.Sel.Name == "CommandContext") {
@@ -134,12 +159,12 @@ func unitTierViolations(root string) ([]string, error) {
 		if carriesNonUnitTag(src) {
 			return nil
 		}
-		reasons, err := integrationMarkers(path, src)
+		rel, _ := filepath.Rel(root, path)
+		reasons, err := integrationMarkers(path, src, daemonPackages[filepath.ToSlash(filepath.Dir(rel))])
 		if err != nil {
 			return err
 		}
 		for _, r := range reasons {
-			rel, _ := filepath.Rel(root, path)
 			out = append(out, rel+": "+r)
 		}
 		return nil
@@ -180,5 +205,53 @@ func TestX(t *testing.T) { _ = exec.Command("go", "build", ".") }
 	}
 	if v, err = unitTierViolations(root); err != nil || len(v) != 0 {
 		t.Fatalf("tagged: violations=%v err=%v, want none", v, err)
+	}
+}
+
+// TestUnitTierGuardDetectsADaemonStartedInTheUnitTier proves the daemon rule
+// fires for an untagged test file in a daemon package, for each way a test
+// starts a whole daemon, stays quiet for a file outside those packages (their
+// Start is another method) and for a tagged file.
+func TestUnitTierGuardDetectsADaemonStartedInTheUnitTier(t *testing.T) {
+	cases := map[string]string{
+		"start":      "func TestX(t *testing.T) { d := open(); _ = d.Start() }",
+		"liveDaemon": "func TestX(t *testing.T) { liveDaemon(t) }",
+		"runRow":     "func TestX(t *testing.T) { clienttest.RunRow(t, row) }",
+	}
+	for name, fn := range cases {
+		t.Run(name, func(t *testing.T) {
+			body := "package x\n\nimport \"testing\"\n\n" + fn + "\n"
+			root := t.TempDir()
+			dir := filepath.Join(root, "internal", "serve")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(dir, "x_test.go")
+			if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if v, err := unitTierViolations(root); err != nil || len(v) != 1 {
+				t.Fatalf("untagged in a daemon package: violations=%v err=%v, want exactly one", v, err)
+			}
+			if err := os.WriteFile(file, []byte("//go:build integration\n\n"+body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if v, err := unitTierViolations(root); err != nil || len(v) != 0 {
+				t.Fatalf("tagged: violations=%v err=%v, want none", v, err)
+			}
+			other := filepath.Join(root, "internal", "other")
+			if err := os.MkdirAll(other, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(other, "x_test.go"), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+			if v, err := unitTierViolations(root); err != nil || len(v) != 0 {
+				t.Fatalf("untagged outside the daemon packages: violations=%v err=%v, want none", v, err)
+			}
+		})
 	}
 }

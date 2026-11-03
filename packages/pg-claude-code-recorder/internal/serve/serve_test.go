@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
@@ -75,57 +74,6 @@ func (e *env) transcript(name, content string, mtime time.Time) string {
 	_ = os.WriteFile(p, []byte(content), 0o600)
 	_ = os.Chtimes(p, mtime, mtime)
 	return p
-}
-
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.After(10 * time.Second)
-	for !cond() {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for %s", what)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-}
-
-func TestFixtureAppendAppearsInCoverageWithCopyOffsetEqualToSize(t *testing.T) {
-	e := newEnv(t, false)
-	p := e.transcript("a.jsonl", "{\"n\":1}\n", time.Now())
-	d := e.open(t)
-	if err := d.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	c := client.New(e.cfg.Socket, "example-check")
-	waitFor(t, "caught up", func() bool {
-		var cov wire.Coverage
-		return c.Post(context.Background(), "coverage", wire.CoverageRequest{View: "files"}, &cov) == nil && cov.CaughtUp
-	})
-	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
-	_, _ = f.WriteString("{\"n\":2}\n")
-	_ = f.Close()
-	d.Watcher().Wake(p)
-	var cov wire.Coverage
-	if err := c.Post(context.Background(), "coverage", wire.CoverageRequest{View: "files"}, &cov); err != nil {
-		t.Fatal(err)
-	}
-	if len(cov.FileList) != 1 {
-		t.Fatalf("files %+v", cov.FileList)
-	}
-	fc := cov.FileList[0]
-	if fc.Size != 16 || fc.CopyOffset != fc.Size || fc.CopyLagBytes != 0 || fc.Path != p || cov.Degraded {
-		t.Fatalf("coverage %+v", fc)
-	}
-	if cov.Files != 1 || cov.Worst != nil || cov.CopyLagBytesMax != 0 {
-		t.Fatalf("summary %+v", cov.CoverageSummary)
-	}
-	// The copy itself is byte-exact.
-	st, _ := d.Store().AllFiles()
-	cp, _ := os.ReadFile(d.Store().CopyPath(st[0].ID, st[0].CurGen))
-	if string(cp) != "{\"n\":1}\n{\"n\":2}\n" {
-		t.Fatalf("copy %q", cp)
-	}
 }
 
 func TestLagIsReportedWhenTheOriginalGrowsBeforeTheCopy(t *testing.T) {
@@ -222,64 +170,6 @@ func TestBlockListAdditionsAreNotIngested(t *testing.T) {
 	cov, _ := d.coverage("summary")
 	if cov.Files != 1 {
 		t.Fatalf("files %d, want 1", cov.Files)
-	}
-}
-
-func TestStatusOverTheWireHasTheStableShape(t *testing.T) {
-	e := newEnv(t, false)
-	e.transcript("a.jsonl", "x\n", time.Now())
-	d := e.open(t)
-	if err := d.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	c := client.New(e.cfg.Socket, "cli")
-	waitFor(t, "caught up", func() bool {
-		var st wire.Status
-		return c.Post(context.Background(), "status", nil, &st) == nil && st.CaughtUp
-	})
-	var raw map[string]json.RawMessage
-	if err := c.Post(context.Background(), "status", nil, &raw); err != nil {
-		t.Fatal(err)
-	}
-	for _, k := range []string{"healthy", "verdict", "copy_lag_s", "parse_lag_s", "held", "free_bytes", "stage_counts", "parser_versions", "schema_version", "protocol_version"} {
-		if _, ok := raw[k]; !ok {
-			t.Errorf("status lacks %q", k)
-		}
-	}
-	var st wire.Status
-	_ = c.Post(context.Background(), "status", nil, &st)
-	if !st.Healthy || st.Short != "ok" || st.SchemaVersion != 1 || st.ProtocolVer != 1 || st.FreeBytes <= 0 {
-		t.Fatalf("%+v", st)
-	}
-	if !strings.Contains(e.log.String(), `"client":"cli"`) {
-		t.Fatalf("request log lacks the client name:\n%s", e.log.String())
-	}
-}
-
-func TestMetricsExporterAndGauges(t *testing.T) {
-	e := newEnv(t, false)
-	e.transcript("a.jsonl", "x\n", time.Now())
-	e.cfg.MetricsAddr = "127.0.0.1:0"
-	d := e.open(t)
-	if err := d.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	waitFor(t, "first sweep", func() bool { return !d.Watcher().LastSweep().IsZero() })
-	d.refreshGauges()
-	reg := d.Obs().Reg
-	if v, ok := reg.Gauge(obs.MHeartbeat, nil); !ok || v <= 0 {
-		t.Fatalf("heartbeat %v", v)
-	}
-	if v, _ := reg.Gauge(obs.MStateFreeBytes, nil); v <= 0 {
-		t.Fatalf("free bytes %v", v)
-	}
-	if v, _ := reg.Gauge(obs.MStateUsedBytes, nil); v <= 0 {
-		t.Fatalf("used bytes %v", v)
-	}
-	if d.MetricsAddr() == "" {
-		t.Fatal("exporter not started")
 	}
 }
 

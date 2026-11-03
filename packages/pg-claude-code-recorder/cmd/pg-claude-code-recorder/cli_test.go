@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/serve"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/server"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -86,71 +84,6 @@ func TestOfflineStatusStillAnswersWithExit3AndAnActionableLine(t *testing.T) {
 	a, out, _ = testApp(nil)
 	if code := a.run([]string{"status", "--short", "--socket", sock, "--config", cfgPath}); code != 3 || strings.TrimSpace(out.String()) != "down" {
 		t.Fatalf("short: %d %q", code, out.String())
-	}
-}
-
-func liveDaemon(t *testing.T) (sock string, logbuf *serve.SyncBuffer, d *serve.Daemon) {
-	t.Helper()
-	root := shortDir(t)
-	claude := filepath.Join(root, "claude")
-	_ = os.MkdirAll(filepath.Join(claude, "projects", "example-proj"), 0o755)
-	tp := filepath.Join(claude, "projects", "example-proj", "a.jsonl")
-	_ = os.WriteFile(tp, []byte("{\"n\":1}\n"), 0o600)
-	cfg := config.Defaults(func(string) string { return "" })
-	cfg.ClaudeDir, cfg.StateDir, cfg.Socket = claude, filepath.Join(root, "state"), filepath.Join(root, "r.sock")
-	// The default floor is a production value (20 GiB); a test must not depend on the host's free space.
-	cfg.MinFreeBytes = 1
-	logbuf = &serve.SyncBuffer{}
-	var err error
-	d, err = serve.Open(serve.Options{Config: cfg, Logger: serve.NewLogger(logbuf), NoEvents: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	return cfg.Socket, logbuf, d
-}
-
-func TestStatusAndCoverageAgainstALiveDaemon(t *testing.T) {
-	sock, _, d := liveDaemon(t)
-	deadline := time.Now().Add(10 * time.Second)
-	for d.Watcher().LastSweep().IsZero() && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	a, out, _ := testApp(nil)
-	a.pollEvery = 5 * time.Millisecond
-	if code := a.run([]string{"coverage", "--socket", sock, "--wait-caught-up", "--view", "files", "--client", "example-check"}); code != 0 {
-		t.Fatalf("coverage exit %d\n%s", code, out)
-	}
-	if !strings.Contains(out.String(), "caught up: true") || !strings.Contains(out.String(), "copied=8") || !strings.Contains(out.String(), "root:") {
-		t.Fatalf("coverage:\n%s", out)
-	}
-	a, out, _ = testApp(nil)
-	if code := a.run([]string{"status", "--socket", sock}); code != 0 || !strings.HasPrefix(out.String(), "healthy:") {
-		t.Fatalf("status %d\n%s", code, out)
-	}
-	a, out, _ = testApp(nil)
-	if code := a.run([]string{"status", "--short", "--socket", sock}); code != 0 || strings.TrimSpace(out.String()) != "ok" {
-		t.Fatalf("short %d %q", code, out)
-	}
-	a, out, _ = testApp(nil)
-	if code := a.run([]string{"status", "--json", "--socket", sock}); code != 0 {
-		t.Fatal(code)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(out.Bytes(), &raw); err != nil || raw["healthy"] != true || raw["protocol_version"] != float64(1) {
-		t.Fatalf("%v %v", raw, err)
-	}
-}
-
-func TestClientNameReachesTheDaemonLog(t *testing.T) {
-	sock, logbuf, _ := liveDaemon(t)
-	a, _, _ := testApp(nil)
-	a.run([]string{"status", "--socket", sock, "--allow-partial", "--client", "example-check"})
-	if !strings.Contains(logbuf.String(), `"client":"example-check"`) {
-		t.Fatalf("log lacks the client name:\n%s", logbuf.String())
 	}
 }
 
