@@ -2338,63 +2338,110 @@
               # would silently render "No data"). The capacity instrument is
               # ccpool_pool_capacity (telemetry.PoolCapacityMetric).
               test-ccpool-pools-dashboard =
-                pkgs.runCommand "test-ccpool-pools-dashboard" { nativeBuildInputs = [ pkgs.jq ]; }
-                  ''
-                    f=${./packages/ccpool/grafana/ccpool-pools.json}
-                    # Every assertion lives in check(); it must pass on the real
-                    # dashboard and fail on each hand-edited mutant below.
-                    check() {
-                      g="$1"
-                      jq -e '.uid == "ccpool-pools"' "$g" >/dev/null || { echo "uid is not ccpool-pools" >&2; return 1; }
-                      allowed='^(ccpool_session_duration_seconds_(bucket|sum|count)|ccpool_sessions_closed_total|ccpool_session_output_tokens_total|ccpool_retries_total|ccpool_retry_exhausted_total|ccpool_launch_outcome_total|ccpool_cancel_total|ccpool_session_info|ccpool_session_states|ccpool_sessions_preserved_for_human|ccpool_pool_capacity|pa_monitor_session_tokens|pa_monitor_session_info)$'
-                      # recursive walk: panels nested in a (collapsed) row count too
-                      exprs="$(jq -r '[.. | objects | select(has("targets")) | .targets[]?.expr] | length' "$g")"
-                      [ "$exprs" -gt 0 ] || { echo "no panel queries found" >&2; return 1; }
-                      names="$(jq -r '.. | objects | select(has("targets")) | .targets[]?.expr' "$g" | grep -oE '\b(ccpool|pa_monitor|pg_router)_[a-z_]+' | sort -u)"
-                      for n in $names; do
-                        printf '%s\n' "$n" | grep -qE "$allowed" || { echo "unlisted metric $n" >&2; return 1; }
-                      done
-                      # (1) no expr references pg_router_ (owned by the pg-router dashboard)
-                      jq -e '[.. | objects | select(has("targets")) | .targets[]?.expr | select(contains("pg_router_"))] | length == 0' "$g" >/dev/null \
-                        || { echo "an expr references pg_router_" >&2; return 1; }
-                      # (2) every pa_monitor_session_tokens use is inside max by (session_id)
-                      jq -e '[.. | objects | select(has("targets")) | .targets[]?.expr
-                              | ([match("pa_monitor_session_tokens"; "g")] | length)
-                                == ([match("max by \\(session_id\\) \\(pa_monitor_session_tokens\\)"; "g")] | length)]
-                             | all' "$g" >/dev/null \
-                        || { echo "pa_monitor_session_tokens used outside max by (session_id)" >&2; return 1; }
-                      # (3) panel 8 applies the role variable
-                      jq -e --arg v 'pgrouter_role=~"$role"' '[.. | objects | select(.id? == 8) | .targets[0].expr | contains($v)] | all and length == 1' "$g" >/dev/null \
-                        || { echo "panel 8 does not apply pgrouter_role=~\"\$role\"" >&2; return 1; }
-                      # (4) the pool variable lists the pools that report capacity
-                      jq -e '[.templating.list[] | select(.name == "pool") | .query == "label_values(ccpool_pool_capacity, pool)"] == [true]' "$g" >/dev/null \
-                        || { echo "pool variable query is not label_values(ccpool_pool_capacity, pool)" >&2; return 1; }
-                      # (5) the stat panels dedupe and gate on exporter liveness
-                      jq -e --arg a 'max by (state, live, pool, pgrouter_role)' --arg b 'and on() (max(ccpool_pool_capacity) >= 0)' \
-                        '[.. | objects | select(.id? == 15 or .id? == 16) | .targets[0].expr | (contains($a) and contains($b))] | length == 2 and all' "$g" >/dev/null \
-                        || { echo "panels 15/16 lack the max by dedupe or the liveness gate" >&2; return 1; }
-                      return 0
-                    }
-                    check "$f" || exit 1
+                let
+                  # Allow-list of metric names the dashboard may query, as DATA: later
+                  # changes add names by adding entries. Includes names whose emitters
+                  # land in sibling changes (build_info, worktree_*).
+                  ccpoolDashboardMetrics = [
+                    "ccpool_session_duration_seconds_bucket"
+                    "ccpool_session_duration_seconds_sum"
+                    "ccpool_session_duration_seconds_count"
+                    "ccpool_sessions_closed_total"
+                    "ccpool_session_output_tokens_total"
+                    "ccpool_retries_total"
+                    "ccpool_retry_exhausted_total"
+                    "ccpool_launch_outcome_total"
+                    "ccpool_cancel_total"
+                    "ccpool_session_info"
+                    "ccpool_session_states"
+                    "ccpool_sessions_preserved_for_human"
+                    "ccpool_pool_capacity"
+                    "pa_monitor_session_tokens"
+                    "pa_monitor_session_info"
+                    "ccpool_janitor_last_run_seconds"
+                    "ccpool_janitor_deadline_hit"
+                    "ccpool_janitor_last_success_timestamp_seconds"
+                    "ccpool_janitor_pass_errors"
+                    "ccpool_janitor_candidates"
+                    "ccpool_janitor_examined"
+                    "ccpool_janitor_cached"
+                    "ccpool_janitor_kept"
+                    "ccpool_janitor_unexamined"
+                    "ccpool_janitor_reclaimed"
+                    "ccpool_janitor_phase_seconds"
+                    "ccpool_janitor_oldest_unexamined_age_seconds"
+                    "ccpool_orphan_last_event_timestamp_seconds"
+                    "ccpool_reap_closures_total"
+                    "ccpool_reap_phantom_pruned_total"
+                    "ccpool_build_info"
+                    "ccpool_worktree_count"
+                    "ccpool_worktree_bytes"
+                    "ccpool_worktree_scan_truncated"
+                    "ccpool_worktree_census_seconds"
+                  ];
+                in
+                pkgs.runCommand "test-ccpool-pools-dashboard" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  f=${./packages/ccpool/grafana/ccpool-pools.json}
+                  # Every assertion lives in check(); it must pass on the real
+                  # dashboard and fail on each hand-edited mutant below.
+                  check() {
+                    g="$1"
+                    jq -e '.uid == "ccpool-pools"' "$g" >/dev/null || { echo "uid is not ccpool-pools" >&2; return 1; }
+                    allowed='^(${lib.concatStringsSep "|" ccpoolDashboardMetrics})$'
+                    # recursive walk: panels nested in a (collapsed) row count too
+                    exprs="$(jq -r '[.. | objects | select(has("targets")) | .targets[]?.expr] | length' "$g")"
+                    [ "$exprs" -gt 0 ] || { echo "no panel queries found" >&2; return 1; }
+                    names="$(jq -r '.. | objects | select(has("targets")) | .targets[]?.expr' "$g" | grep -oE '\b(ccpool|pa_monitor|pg_router)_[a-z_]+' | sort -u)"
+                    for n in $names; do
+                      printf '%s\n' "$n" | grep -qE "$allowed" || { echo "unlisted metric $n" >&2; return 1; }
+                    done
+                    # annotation queries obey the same allow-list
+                    anames="$(jq -r '.annotations.list[]? | .expr? // empty' "$g" | grep -oE '\b(ccpool|pa_monitor|pg_router)_[a-z_]+' | sort -u)"
+                    for n in $anames; do
+                      printf '%s\n' "$n" | grep -qE "$allowed" || { echo "unlisted metric $n in an annotation expr" >&2; return 1; }
+                    done
+                    # (1) no expr references pg_router_ (owned by the pg-router dashboard)
+                    jq -e '[.. | objects | select(has("targets")) | .targets[]?.expr | select(contains("pg_router_"))] | length == 0' "$g" >/dev/null \
+                      || { echo "an expr references pg_router_" >&2; return 1; }
+                    # (2) every pa_monitor_session_tokens use is inside max by (session_id)
+                    jq -e '[.. | objects | select(has("targets")) | .targets[]?.expr
+                            | ([match("pa_monitor_session_tokens"; "g")] | length)
+                              == ([match("max by \\(session_id\\) \\(pa_monitor_session_tokens\\)"; "g")] | length)]
+                           | all' "$g" >/dev/null \
+                      || { echo "pa_monitor_session_tokens used outside max by (session_id)" >&2; return 1; }
+                    # (3) panel 8 applies the role variable
+                    jq -e --arg v 'pgrouter_role=~"$role"' '[.. | objects | select(.id? == 8) | .targets[0].expr | contains($v)] | all and length == 1' "$g" >/dev/null \
+                      || { echo "panel 8 does not apply pgrouter_role=~\"\$role\"" >&2; return 1; }
+                    # (4) the pool variable lists the pools that report capacity
+                    jq -e '[.templating.list[] | select(.name == "pool") | .query == "label_values(ccpool_pool_capacity, pool)"] == [true]' "$g" >/dev/null \
+                      || { echo "pool variable query is not label_values(ccpool_pool_capacity, pool)" >&2; return 1; }
+                    # (5) the stat panels dedupe and gate on exporter liveness
+                    jq -e --arg a 'max by (state, live, pool, pgrouter_role)' --arg b 'and on() (max(ccpool_pool_capacity) >= 0)' \
+                      '[.. | objects | select(.id? == 15 or .id? == 16) | .targets[0].expr | (contains($a) and contains($b))] | length == 2 and all' "$g" >/dev/null \
+                      || { echo "panels 15/16 lack the max by dedupe or the liveness gate" >&2; return 1; }
+                    return 0
+                  }
+                  check "$f" || exit 1
 
-                    # Negative controls: each hand-edited copy must be rejected.
-                    mutant() {
-                      name="$1"; prog="$2"
-                      jq "$prog" "$f" > mutant.json
-                      if check mutant.json 2>/dev/null; then echo "FAIL: mutant not rejected: $name" >&2; exit 1; fi
-                    }
-                    mutant "pg_router_ reference" '(.panels[] | select(.id == 6) | .targets[0].expr) += " + pg_router_failures_total"'
-                    mutant "pg_router_ reference nested in a row" '(.panels[] | select(.id == 6)) as $p | .panels |= (map(select(.id != 6)) | map(if .id == 12 then .panels += [$p | .targets[0].expr = "pg_router_failures_total"] else . end))'
-                    mutant "bare pa_monitor_session_tokens" '(.panels[] | select(.id == 8) | .targets[0].expr) |= sub("max by \\(session_id\\) \\(pa_monitor_session_tokens\\)"; "pa_monitor_session_tokens")'
-                    mutant "panel 8 ignores role" '(.panels[] | select(.id == 8) | .targets[0].expr) |= gsub("pgrouter_role=~\"\\$role\""; "pgrouter_role=~\".*\"")'
-                    mutant "pool variable from session_info" '(.templating.list[] | select(.name == "pool") | .query) = "label_values(ccpool_session_info, pool)"'
-                    mutant "panel 15 without liveness gate" '(.panels[] | select(.id == 15) | .targets[0].expr) |= sub(" and on\\(\\) \\(max\\(ccpool_pool_capacity\\) >= 0\\)"; "")'
-                    mutant "panel 16 without max by dedupe" '(.panels[] | select(.id == 16) | .targets[0].expr) |= sub("max by \\(state, live, pool, pgrouter_role\\)"; "max by (state, live)")'
-                    mutant "unlisted metric" '(.panels[] | select(.id == 5) | .targets[0].expr) += " + ccpool_invented_total"'
+                  # Negative controls: each hand-edited copy must be rejected.
+                  mutant() {
+                    name="$1"; prog="$2"
+                    jq "$prog" "$f" > mutant.json
+                    if check mutant.json 2>/dev/null; then echo "FAIL: mutant not rejected: $name" >&2; exit 1; fi
+                  }
+                  mutant "pg_router_ reference" '(.panels[] | select(.id == 6) | .targets[0].expr) += " + pg_router_failures_total"'
+                  mutant "pg_router_ reference nested in a row" '(.panels[] | select(.id == 6)) as $p | .panels |= (map(select(.id != 6)) | map(if .id == 12 then .panels += [$p | .targets[0].expr = "pg_router_failures_total"] else . end))'
+                  mutant "bare pa_monitor_session_tokens" '(.panels[] | select(.id == 8) | .targets[0].expr) |= sub("max by \\(session_id\\) \\(pa_monitor_session_tokens\\)"; "pa_monitor_session_tokens")'
+                  mutant "panel 8 ignores role" '(.panels[] | select(.id == 8) | .targets[0].expr) |= gsub("pgrouter_role=~\"\\$role\""; "pgrouter_role=~\".*\"")'
+                  mutant "pool variable from session_info" '(.templating.list[] | select(.name == "pool") | .query) = "label_values(ccpool_session_info, pool)"'
+                  mutant "panel 15 without liveness gate" '(.panels[] | select(.id == 15) | .targets[0].expr) |= sub(" and on\\(\\) \\(max\\(ccpool_pool_capacity\\) >= 0\\)"; "")'
+                  mutant "panel 16 without max by dedupe" '(.panels[] | select(.id == 16) | .targets[0].expr) |= sub("max by \\(state, live, pool, pgrouter_role\\)"; "max by (state, live)")'
+                  mutant "unlisted metric" '(.panels[] | select(.id == 5) | .targets[0].expr) += " + ccpool_invented_total"'
+                  mutant "unlisted metric in an annotation" '.annotations.list = ((.annotations.list // []) + [{"name": "m", "expr": "ccpool_invented_total"}])'
 
-                    echo "ok: uid ccpool-pools, $exprs queries, assertions pass, 8 mutants rejected"
-                    touch $out
-                  '';
+                  echo "ok: uid ccpool-pools, $exprs queries, assertions pass, 9 mutants rejected"
+                  touch $out
+                '';
 
               # pg-rescue-runs Grafana dashboard guard (bead pg2-lnfwd). The
               # panels read the run log (runs.jsonl, shipped raw to Loki) with
