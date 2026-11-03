@@ -813,7 +813,7 @@ retained events that are already expired but still owed to a listener, not only 
   - A handler error after accept counts as accepted (`INV-FAIL-1`), so failed work is **not** pending.
   - A decline, or a hand-back for a dispatch retry, stays pending until the single post-expiry attempt,
     then drops to 0, so a listener that declines for the whole time to live shows a sawtooth. The count
-    of events that reach their time to live still unsettled (bead `pg2-u1cxx0.5`) closes that gap.
+    of events that reach their time to live without the listener accepting them (`DEC-OBS-13`) closes that gap.
   - A pause gate, a `Matches` that is not yet met, or serialize occupancy (`INV-CONC-1`) keeps events
     pending, so a pause raises every listener's count and age. `Matches` is by type today; a payload
     narrowing would flow through automatically.
@@ -834,3 +834,29 @@ retained events that are already expired but still owed to a listener, not only 
   i don't want noise due to incorrect tuning. we might need have different values per listener." The
   existing `pg-router-queue-depth-growing` alert and the per-type `queue_depth`, `backlog` and
   `queue_oldest_age` gauges keep their behavior; only their descriptions say they count retained events.
+
+### `DEC-OBS-13` — a per-listener counter of events whose retention ended while a matching listener never accepted them <!-- uuid: 2c0e0f2d-0b7a-4487-9c1e-e44ca1ba4138 -->
+
+**Decided** (follow-up to `DEC-OBS-12`, which left the sawtooth of a listener that declines for the
+whole time to live open; operator, 2026-11-02, verbatim: "later, we should track those which fall off
+due to TTL without being processed"). `unconsumed_expired` cannot answer it: it carries a `type` label
+only, and it fires only when **no** listener accepted the event, so the partial case (one listener
+accepted, another never did) is not counted and a listener cannot be named.
+
+- **Metric.** `pg_router_listener_expired_pending` (a counter, unit `{event}`; Prometheus exposes it
+  as `pg_router_listener_expired_pending_total`), labels `role` (the listener id, `DEC-OBS-7`) and
+  `type` (the full event type, bounded as the timing histograms are, `DEC-OBS-9` "Bounds"). No event
+  id, session or bead is a label, so cardinality is bounded by configured roles times event types.
+- **Counted once per (event, listener).** When an event's retention ends, the queue counts every
+  listener that matches it and never **accepted** it. Retention waits for each matching listener's
+  final attempt (`INV-EVT-4`), so such a listener is already settled by then: it declined its
+  post-expiry attempt, or a gate dropped the event for it. An event is retired once, so a pair counts
+  once, whether the sweep (`Expire`) or a re-emit of the same id retires it.
+- **Counts nothing** when every matching listener accepted, for an event no listener matches (only
+  `unconsumed_expired` shows that), and for a Gate Registry record.
+- **Restart.** Only the retiring process counts, at retirement. A restart replays only retained events,
+  so a pair already retired is not recounted; a counter is also a process-lifetime total, so it resets
+  to 0 with the process and is read with `increase()` or `rate()`.
+- **Hook.** An optional queue observer extension, `ExpiredPendingObserver`, fired after `q.mu` is
+  released and opt-in like the other extensions; the metrics emitter implements it.
+- **No alert.** Operator ruling in the epic (`DEC-OBS-12`), unchanged: no rule reads this counter.

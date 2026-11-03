@@ -261,6 +261,54 @@ type TimingObserver interface {
 	OnAcceptTiming(t DispatchTiming)
 }
 
+// ExpiredPendingObserver is an OPTIONAL extension of Observer: an Observer that
+// also implements it is told, once per (event, listener) pair, when an event's
+// retention ends (it is swept by Expire, or retired by a re-emit of its id) while
+// a listener that Matches it never ACCEPTED it. Every matching listener is
+// settled by then (retention waits for each one's final attempt, INV-EVT-4), so
+// "unprocessed" means settled without accepting: it declined its post-expiry
+// attempt, or a gate dropped the event for it. It is the per-listener view
+// OnUnconsumedExpired lacks: that fires only when NO listener accepted and
+// carries no listener id. Gate Registry events and events no listener matches
+// fire nothing, and an event is retired exactly once, so a pair counts once; a
+// restart replays only retained events, so a pair already retired is not
+// recounted. It is a separate interface for the reason RestoreObserver is.
+type ExpiredPendingObserver interface {
+	OnExpiredPending(evtType, listenerID string)
+}
+
+// expiredPending is one unprocessed (event type, listener id) pair collected
+// under q.mu and fanned out after the lock is released.
+type expiredPending struct{ evtType, listenerID string }
+
+// unprocessedLocked returns the listeners that match e and never accepted it.
+// Caller holds q.mu.
+func (q *Queue) unprocessedLocked(e *entry) []expiredPending {
+	if IsGateEvent(e.evt.Type) {
+		return nil
+	}
+	var out []expiredPending
+	for _, ls := range q.listeners {
+		if lid := ls.l.ID(); !e.accepted[lid] && ls.l.Matches(e.evt) {
+			out = append(out, expiredPending{e.evt.Type, lid})
+		}
+	}
+	return out
+}
+
+// notifyExpiredPending fans pairs out to the observer when it implements
+// ExpiredPendingObserver. Caller MUST NOT hold q.mu.
+func (q *Queue) notifyExpiredPending(pairs []expiredPending) {
+	if len(pairs) == 0 {
+		return
+	}
+	if o, ok := q.obs.(ExpiredPendingObserver); ok {
+		for _, p := range pairs {
+			o.OnExpiredPending(p.evtType, p.listenerID)
+		}
+	}
+}
+
 type noopObserver struct{}
 
 func (noopObserver) OnEnqueue(Event)                   {}
@@ -848,6 +896,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 			return reject(classifyWriteErr(err))
 		}
 		staleMiss := len(e.accepted) == 0
+		stalePending := q.unprocessedLocked(e)
 		delete(q.entries, e.evt.ID)
 		q.publishCellLocked(e.evt.Type, evt.Type, evt.Type)
 		q.dropFromOrder(evt.ID)
@@ -857,6 +906,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 		if staleMiss {
 			q.obs.OnUnconsumedExpired(e.evt.Type)
 		}
+		q.notifyExpiredPending(stalePending)
 		q.obs.OnEnqueue(evt)
 		return Enqueued, nil
 	}
@@ -1873,6 +1923,7 @@ func (q *Queue) Expire() (dropped int) {
 	kept := q.order[:0:0]
 	var evicts []Record
 	var misses []string // evt types of unconsumed-expired misses this sweep found
+	var unprocessed []expiredPending
 	for _, id := range q.order {
 		e, ok := q.entries[id]
 		if !ok {
@@ -1882,6 +1933,7 @@ func (q *Queue) Expire() (dropped int) {
 			kept = append(kept, id)
 			continue
 		}
+		unprocessed = append(unprocessed, q.unprocessedLocked(e)...)
 		rec, unconsumedExpired := q.retireLocked(e)
 		evicts = append(evicts, rec)
 		// A Gate Registry record routed to no taker is not a MISS: gate events
@@ -1908,6 +1960,7 @@ func (q *Queue) Expire() (dropped int) {
 	for _, t := range misses {
 		q.obs.OnUnconsumedExpired(t)
 	}
+	q.notifyExpiredPending(unprocessed)
 	q.maybeCompact()
 	return dropped
 }

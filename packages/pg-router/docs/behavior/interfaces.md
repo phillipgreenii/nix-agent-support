@@ -735,7 +735,12 @@ sequenceDiagram
     **falling behind**, because a count alone cannot tell a listener that normally holds one event
     from one stuck on its first.
 
-  Both read the queue and are derived from it, so a restart does **not** reset them, and a scrape
+  **listener_expired_pending** is a counter per `role` and `type`: one for each event whose
+  retention ended while that handler matched it and never accepted it (a post-expiry decline, or a
+  gate drop), counted once per event and handler, so a handler that declines for the whole time to
+  live shows it where the gauges show a sawtooth (`DEC-OBS-13`; no alert).
+
+  Both gauges read the queue and are derived from it, so a restart does **not** reset them, and a scrape
   before the core has built its queue reads no series for them, not a zero (`DEC-OBS-12`).
 
   **Two alert levels** read the three progress gauges and nothing else (`INV-OBS-3`). Both require a **recent

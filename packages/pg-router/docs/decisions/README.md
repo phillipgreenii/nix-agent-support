@@ -84,6 +84,9 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-OBS-12`](observability.md) — per-listener pending count and oldest pending age gauges (pending
   = retained, matched, not settled; no expiry filter; no alert); the per-type depth counts retained
   events, not backlog.
+- [`DEC-OBS-13`](observability.md) — a per-listener counter of events whose retention ended while a
+  matching listener never accepted them (counted once per event and listener; `role` and `type`; no
+  alert).
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-RETRY-2`](retry.md) — a role MAY opt in to a bounded (hard cap 3), transient-class-only

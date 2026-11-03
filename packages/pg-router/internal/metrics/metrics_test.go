@@ -1763,3 +1763,27 @@ func TestNew_WithoutBuildInfo_RegistersNoBuildInfoGauge(t *testing.T) {
 		}
 	}
 }
+
+// OnExpiredPending counts per (role, type) and bounds the type label like the
+// timing histograms (DEC-OBS-13).
+func TestOnExpiredPendingCountsPerRoleAndType(t *testing.T) {
+	mp, reader := NewReadableProvider()
+	emitter, err := New(mp, func() map[string]int { return nil })
+	if err != nil {
+		t.Fatalf("New emitter: %v", err)
+	}
+	emitter.OnExpiredPending("pr.changed", "desk-pr")
+	emitter.OnExpiredPending("pr.changed", "desk-pr")
+	emitter.OnExpiredPending("pr.changed", "review")
+	rm, err := reader.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	m := findMetric(t, rm, MetricListenerExpiredPending)
+	if got := sumForBoth(m, "role", "desk-pr", "type", "pr.changed"); got != 2 {
+		t.Fatalf("desk-pr/pr.changed = %d, want 2", got)
+	}
+	if got := sumForBoth(m, "role", "review", "type", "pr.changed"); got != 1 {
+		t.Fatalf("review/pr.changed = %d, want 1", got)
+	}
+}

@@ -765,6 +765,17 @@ func (f fanOutObserver) OnAcceptTiming(t eventqueue.DispatchTiming) {
 	}
 }
 
+// OnExpiredPending forwards eventqueue.ExpiredPendingObserver's hook to whichever
+// arms implement it; only the metrics emitter counts it.
+func (f fanOutObserver) OnExpiredPending(evtType, listenerID string) {
+	if o, ok := f.a.(eventqueue.ExpiredPendingObserver); ok {
+		o.OnExpiredPending(evtType, listenerID)
+	}
+	if o, ok := f.b.(eventqueue.ExpiredPendingObserver); ok {
+		o.OnExpiredPending(evtType, listenerID)
+	}
+}
+
 func (f fanOutObserver) OnUnconsumedExpired(evtType string) {
 	f.a.OnUnconsumedExpired(evtType)
 	f.b.OnUnconsumedExpired(evtType)

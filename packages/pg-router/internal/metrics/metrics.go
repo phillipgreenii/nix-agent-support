@@ -95,6 +95,9 @@ const (
 	MetricQueueDepth        = "pg_router_queue_depth"
 	MetricFailures          = "pg_router_failures"
 	MetricUnconsumedExpired = "pg_router_unconsumed_expired"
+	// MetricListenerExpiredPending counts, per (role, type), events whose retention
+	// ended while a listener that matches them never accepted them (DEC-OBS-13).
+	MetricListenerExpiredPending = "pg_router_listener_expired_pending"
 	// MetricUnknownTypeRejected counts the ingest-time condition INV-DISP-3
 	// requires the core to record to logs AND metrics: an event rejected because no
 	// configured binding declares its type. It is the catalog member INTF-MON names
@@ -512,6 +515,7 @@ func IsTriagerRole(role string) bool {
 type Emitter struct {
 	failures        metric.Int64Counter
 	unconsumed      metric.Int64Counter
+	expiredPending  metric.Int64Counter
 	unknownType     metric.Int64Counter
 	throughput      metric.Int64Counter
 	skipped         metric.Int64Counter
@@ -624,11 +628,12 @@ type pendingDispatch struct {
 
 // Ensure the queue can drive it.
 var (
-	_ eventqueue.Observer        = (*Emitter)(nil)
-	_ eventqueue.GateObserver    = (*Emitter)(nil)
-	_ eventqueue.RestoreObserver = (*Emitter)(nil)
-	_ eventqueue.RejectObserver  = (*Emitter)(nil)
-	_ eventqueue.TimingObserver  = (*Emitter)(nil)
+	_ eventqueue.Observer               = (*Emitter)(nil)
+	_ eventqueue.GateObserver           = (*Emitter)(nil)
+	_ eventqueue.RestoreObserver        = (*Emitter)(nil)
+	_ eventqueue.RejectObserver         = (*Emitter)(nil)
+	_ eventqueue.TimingObserver         = (*Emitter)(nil)
+	_ eventqueue.ExpiredPendingObserver = (*Emitter)(nil)
 )
 
 // Option configures an optional catalog member at construction time
@@ -826,6 +831,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		MetricUnconsumedExpired,
 		metric.WithUnit("{event}"),
 		metric.WithDescription("events that expired with no handler accepting them, per type — under INV-EVT-4 a genuine miss (INV-DISP-3)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	expiredPending, err := m.Int64Counter(
+		MetricListenerExpiredPending,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("events whose retention ended while a matching listener never accepted them, per role and type, counted once per event and listener (DEC-OBS-13)"),
 	)
 	if err != nil {
 		return nil, err
@@ -1206,6 +1219,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 
 	e.failures = failures
 	e.unconsumed = unconsumed
+	e.expiredPending = expiredPending
 	e.unknownType = unknownType
 	e.throughput = throughput
 	e.skipped = skipped
@@ -1555,6 +1569,17 @@ func validEventTypeLabel(t string) bool {
 // queue's expiry-sweep path.
 func (e *Emitter) OnUnconsumedExpired(evtType string) {
 	e.unconsumed.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
+}
+
+// OnExpiredPending implements eventqueue.ExpiredPendingObserver (DEC-OBS-13): one
+// count per (event, listener) whose retention ended with the listener never having
+// accepted the event. role is the listener id; type is bounded like the timing
+// histograms' (eventTypeLabel).
+func (e *Emitter) OnExpiredPending(evtType, listenerID string) {
+	e.expiredPending.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("role", listenerID),
+		attribute.String("type", e.eventTypeLabel(evtType)),
+	))
 }
 
 // OnDeclined feeds the failure-rate counter from the queue's Dispatch path
