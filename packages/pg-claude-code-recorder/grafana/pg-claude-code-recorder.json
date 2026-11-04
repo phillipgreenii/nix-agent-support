@@ -571,7 +571,7 @@
       "id": 15,
       "type": "timeseries",
       "title": "refresh gauges duration",
-      "description": "p99 duration of the gauge refresh loop in seconds. no alert covers this panel yet",
+      "description": "p99 duration of the gauge refresh loop in seconds. Expected value: a few milliseconds (not seconds) now that the gauges are maintained from commits. no alert covers this panel yet",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

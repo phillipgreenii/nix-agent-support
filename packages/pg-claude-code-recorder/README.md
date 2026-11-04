@@ -214,6 +214,11 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   (up to `sweep.interval`); the `coverage` command still stats every file and shows it at once. `status` carries
   `stat_exceptions` (files stat-ed by the last pass) and `last_full_stat_age_s` (age of the last coverage run or
   watcher sweep), and a file entry's `size_source` is `recorded` or `stat`.
+  Sizes are as last recorded; run `coverage` for the on-disk truth.
+- The copy and parse lag gauges (`copy_lag_bytes`, `copy_lag_seconds`, parse lag) are maintained from commits: each
+  copier and parser commit adjusts the lag state, so a refresh reads no whole table. `lag_rebuild_total{result}`
+  (`match` or `drift`) counts the periodic reconcile against a full rebuild, and a `lag_drift` warning is logged when
+  the maintained state differed from the rebuilt one.
 
 ### pprof and the profiling harness
 
