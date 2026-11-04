@@ -29,7 +29,7 @@ func TestParseSearchArgs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			query, sessionID, _, _, err := parseSearchArgs(c.args, time.Now())
+			query, sessionID, _, _, _, err := parseSearchArgs(c.args, time.Now())
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got nil")
@@ -137,5 +137,16 @@ func TestParseTimeBound_DaysAcrossDST(t *testing.T) {
 				t.Errorf("elapsed = %v, want exactly %v", elapsed, want)
 			}
 		})
+	}
+}
+
+func TestParseSearchArgsSubstringFlag(t *testing.T) {
+	_, _, _, _, sub, err := parseSearchArgs([]string{"flak", "--substring"}, time.Now())
+	if err != nil || !sub {
+		t.Fatalf("--substring: sub=%v err=%v", sub, err)
+	}
+	_, _, _, _, sub, err = parseSearchArgs([]string{"flaky"}, time.Now())
+	if err != nil || sub {
+		t.Fatalf("default must be word search: sub=%v err=%v", sub, err)
 	}
 }

@@ -56,7 +56,7 @@ func TestSessionsAreReadFromTheRecorder(t *testing.T) {
 
 func TestSearchIsServedByTheRecorder(t *testing.T) {
 	_, f := recorderWithTranscript(t)
-	hits, err := f.Search(context.Background(), "registry", "", time.Time{}, time.Time{})
+	hits, err := f.Search(context.Background(), "registry", "", time.Time{}, time.Time{}, false)
 	if err != nil || len(hits) == 0 {
 		t.Fatalf("%v %v", hits, err)
 	}
@@ -73,7 +73,7 @@ func TestSessionsAndSearchReportDaemonOffline(t *testing.T) {
 	if _, err := f.Sessions(context.Background(), time.Time{}, time.Time{}); !errors.Is(err, session.ErrDaemonOffline) {
 		t.Errorf("Sessions err = %v", err)
 	}
-	if _, err := f.Search(context.Background(), "registry", "", time.Time{}, time.Time{}); !errors.Is(err, session.ErrDaemonOffline) {
+	if _, err := f.Search(context.Background(), "registry", "", time.Time{}, time.Time{}, false); !errors.Is(err, session.ErrDaemonOffline) {
 		t.Errorf("Search err = %v", err)
 	}
 }

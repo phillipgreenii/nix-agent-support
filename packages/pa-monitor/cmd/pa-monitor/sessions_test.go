@@ -81,7 +81,7 @@ func TestWriteSessionsEmptyWindowIsEmptyArrayNotNull(t *testing.T) {
 func TestSearchSessionsFromTheRecorder(t *testing.T) {
 	_, f := cliFacts(t)
 	var buf bytes.Buffer
-	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}); err != nil {
+	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}, false); err != nil {
 		t.Fatal(err)
 	}
 	var doc searchJSONDoc
@@ -102,7 +102,7 @@ func TestSessionsAndSearchSayDaemonOffline(t *testing.T) {
 	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10); err != session.ErrDaemonOffline {
 		t.Errorf("sessions err = %v", err)
 	}
-	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}); err != session.ErrDaemonOffline {
+	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}, false); err != session.ErrDaemonOffline {
 		t.Errorf("search err = %v", err)
 	}
 	if buf.Len() != 0 {
@@ -199,5 +199,36 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "daemon offline") {
 		t.Errorf("stderr %q should say daemon offline", stderr.String())
+	}
+}
+
+// TestSearchSubstringMatchesMidWordOnlyWhenAsked: the default is word search
+// (a fragment of a word finds nothing); --substring is answered by the
+// recorder scanning its copies of the tool-result bodies.
+func TestSearchSubstringMatchesMidWordOnlyWhenAsked(t *testing.T) {
+	e, f := cliFacts(t)
+	e.Write("projects/"+e.Project+"/example-s2.jsonl", `{"type":"user","uuid":"t1","sessionId":"example-s2","timestamp":"2026-10-29T11:00:00.000Z","cwd":"/example/work","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x1","content":"build output: examplelibrary-v2 linked"}]}}
+`)
+	e.Settle()
+	count := func(substring bool) int {
+		var buf bytes.Buffer
+		if err := searchSessions(&buf, f, "library-v2", "", time.Time{}, time.Time{}, substring); err != nil {
+			t.Fatal(err)
+		}
+		var doc searchJSONDoc
+		if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+			t.Fatal(err)
+		}
+		return len(doc.Matches)
+	}
+	if n := count(true); n != 1 {
+		t.Errorf("substring search found %d hits for a mid-word fragment, want 1", n)
+	}
+	var buf bytes.Buffer
+	if err := searchSessions(&buf, f, "lak", "", time.Time{}, time.Time{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "example-s1") {
+		t.Errorf("word search matched a mid-word fragment: %s", buf.String())
 	}
 }

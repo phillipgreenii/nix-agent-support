@@ -197,10 +197,11 @@ type SearchHit struct {
 	Time      time.Time
 }
 
-// Search finds query in the transcripts of the recorder's records (word mode),
+// Search finds query in the transcripts of the recorder's records (word mode, or
+// substring mode when substring is set: the recorder scans its copies),
 // optionally for one session and within [since, before). Newest matches are the
 // recorder's ranking; a recorder that is not answering is session.ErrDaemonOffline.
-func (f *Facts) Search(ctx context.Context, query, sessionID string, since, before time.Time) ([]SearchHit, error) {
+func (f *Facts) Search(ctx context.Context, query, sessionID string, since, before time.Time, substring bool) ([]SearchHit, error) {
 	c, err := f.Client(ctx)
 	if err != nil {
 		return nil, err
@@ -219,14 +220,20 @@ func (f *Facts) Search(ctx context.Context, query, sessionID string, since, befo
 		}
 		all = append(all, client.Filter{Field: "time", Range: r})
 	}
-	ans, err := c.Search(ctx, client.SearchRequest{Mode: "word", Q: query, Where: &client.Filter{All: all}, Fields: []string{"assistant_text", "user_text"}, Limit: 200})
+	req := client.SearchRequest{Mode: "word", Q: query, Where: &client.Filter{All: all}, Fields: []string{"assistant_text", "user_text"}, Limit: 200}
+	if substring {
+		// The recorder's substring scan reads its copies of the opaque fields
+		// (tool-result bodies); it names no prose field, so none is requested.
+		req.Mode, req.Fields = "substring", nil
+	}
+	ans, err := c.Search(ctx, req)
 	if err != nil {
 		return nil, f.wrap(err)
 	}
 	var out []SearchHit
 	for _, h := range ans.Hits {
 		role := "assistant"
-		if strings.HasPrefix(h.Field, "user") {
+		if strings.HasPrefix(h.Field, "user") || strings.HasPrefix(h.Field, "tool_result") {
 			role = "user"
 		}
 		t, _ := time.Parse(time.RFC3339Nano, h.Time)
