@@ -26,6 +26,10 @@ type Event struct {
 	Path string
 	Info FileInfo
 	Gone bool
+	// Sweep is true for an event a full sweep produced, false for one a
+	// filesystem hint produced. A sink MAY skip an unchanged file only for a
+	// sweep event: a hint always means something changed.
+	Sweep bool
 }
 
 // Config configures a Watcher. Sink is required and MUST NOT call back into
@@ -299,7 +303,7 @@ func (w *Watcher) sweepLocked() error {
 		w.cfg.OnSweep(files)
 	}
 	for _, fi := range files {
-		w.cfg.Sink(Event{Path: fi.Path, Info: fi})
+		w.cfg.Sink(Event{Path: fi.Path, Info: fi, Sweep: true})
 	}
 	return nil
 }

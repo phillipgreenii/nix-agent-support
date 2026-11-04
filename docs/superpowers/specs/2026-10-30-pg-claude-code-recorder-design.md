@@ -1986,6 +1986,17 @@ Agent's calls, for the operator to check:
 19. The quiet age reads file modification times, and removal holds a source whose bad-line or unknown-key rate exceeds `format.holdRate`.
 20. Error names are stable strings in `--json` output, because the two commands' exit-code tables are independent.
 21. No sixth end label for a reboot: the fact `registry_stale_at_discovery` and the `--suspected-crash` flag cover it.
+22. 2026-11-04, agent's call 16 re-measured: a 300 s pprof window on the real tree (about 25 GB) showed the watcher
+    sweep at 21.77 s of CPU, about 7.3% of one core, and the copier's ingest, 16.49 s, sits INSIDE that sweep (the
+    sweep sends every walked file to the copier as an event), so the two are not additive. The sweep runs once per
+    `sweep.interval` (15 min), so that window held one sweep; spread over a full interval the same cost is
+    21.77 / 900 = 2.4% of one core. The 5% bound is kept but is now defined as the average over one full sweep
+    interval, not over any shorter window. The per-sweep work is also cut: a sweep no longer re-ingests an
+    append-mode file whose size, mtime and inode match the walk and whose last ingest left it caught up (the parser
+    is still notified), and the whole cache is dropped every 24 hours so every file is ingested again. Known limit:
+    a rewrite that keeps size, mtime and inode is found only by that 24-hour verification. Not re-profiled after
+    the change (no dev launch is possible on this disk); the next real-tree profile over one full sweep interval is
+    the check.
 
 Operator rulings of 2026-10-30, which continue the numbered rulings above (a "Decisions item N" citation means
 these numbers, and "agent's call N" means the list above):

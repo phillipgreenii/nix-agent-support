@@ -272,13 +272,19 @@ func (d *Daemon) filter(p string) bool {
 // the light route: one histogram observation, no run count, last-timestamp or
 // in-flight write.
 func (d *Daemon) ingest(p string) copier.Result {
+	res, _ := d.ingestErr(p)
+	return res
+}
+
+// ingestErr is ingest that also reports the copier's error.
+func (d *Daemon) ingestErr(p string) (copier.Result, error) {
 	start := d.clock.Now()
 	res, err := d.cp.Ingest(p)
 	out := d.afterIngest(p, res, err)
 	end := d.clock.Now()
 	d.obs.Reg.ObserveL(obs.MLoopDuration, ingestLabels, end.Sub(start).Seconds())
 	d.loops.noteIngest(end.Sub(start), end, err != nil)
-	return out
+	return out, err
 }
 
 // afterIngest logs a failed ingest and tells the parser and the lifecycle
@@ -302,7 +308,11 @@ func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Resu
 
 func (d *Daemon) sink(e watcher.Event) {
 	d.noteSeen(e)
-	d.ingest(e.Path)
+	if e.Sweep && d.skipUnchanged(e) {
+		return
+	}
+	res, err := d.ingestErr(e.Path)
+	d.noteCaughtUp(e, res, err)
 }
 
 // onSweep runs under the watcher's lock before the sweep's events. It records
@@ -319,6 +329,7 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 		found[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}] = true
 	}
 	d.countSweepFiles(files)
+	d.verifyIfDue()
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}

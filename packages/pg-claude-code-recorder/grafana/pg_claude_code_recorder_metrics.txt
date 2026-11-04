@@ -24,7 +24,7 @@
 #   result (ingest_results_total)  copied new_generation unchanged skipped snapshot link missing tombstone raced error
 #                                  (the copier.Result.Action strings, hyphens mapped to underscores, plus error for an
 #                                  ingest that returned an error)
-#   outcome (sweep_files_total)    walked unchanged_candidate (observation only: nothing is skipped)
+#   outcome (sweep_files_total)    walked unchanged_candidate (a sweep skips an unchanged_candidate that was already caught up)
 #   state (control_inbox_state)    present gone never_loaded
 #   outcome (end_reason_source_files_total)  ingested removed invalid
 #   verb (control_requests_total)  submit interrupt run read ping other

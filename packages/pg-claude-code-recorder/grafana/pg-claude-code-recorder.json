@@ -971,7 +971,7 @@
       "id": 25,
       "type": "timeseries",
       "title": "sweep walked vs unchanged candidate",
-      "description": "Files per second the watcher sweep walked, and the share it found unchanged (candidates a later phase could skip; observation only, nothing is skipped today). no alert covers this panel yet",
+      "description": "Files per second the watcher sweep walked, and the share it found unchanged (a sweep skips the ones whose last ingest left them caught up). no alert covers this panel yet",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

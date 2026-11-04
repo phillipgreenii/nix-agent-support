@@ -64,8 +64,8 @@ func TestSweepCountersOverRealDirectoryAndStore(t *testing.T) {
 
 	sweep()
 	s2 := snap()
-	if got := delta(s1, s2, "unchanged"); got != 3 {
-		t.Errorf("second sweep unchanged = %v, want 3", got)
+	if got := delta(s1, s2, "unchanged"); got != 0 {
+		t.Errorf("second sweep ingested %v unchanged files, want 0 (skipped)", got)
 	}
 	if got := delta(s1, s2, "cand"); got != 3 {
 		t.Errorf("second sweep unchanged_candidate = %v, want 3", got)
@@ -87,8 +87,8 @@ func TestSweepCountersOverRealDirectoryAndStore(t *testing.T) {
 	if got := delta(s2, s3, "copied"); got != 1 {
 		t.Errorf("third sweep copied = %v, want 1", got)
 	}
-	if got := delta(s2, s3, "unchanged"); got != 2 {
-		t.Errorf("third sweep unchanged = %v, want 2", got)
+	if got := delta(s2, s3, "unchanged"); got != 0 {
+		t.Errorf("third sweep ingested %v unchanged files, want 0 (skipped)", got)
 	}
 	if got := delta(s2, s3, "cand"); got != 2 {
 		t.Errorf("third sweep unchanged_candidate = %v, want 2", got)
@@ -219,3 +219,46 @@ func TestIngestPathRegistryLocksAreMeasured(t *testing.T) {
 }
 
 func copierResult() copier.Result { return copier.Result{} }
+
+// A same-size, same-mtime rewrite is invisible to the incremental sweep; the
+// periodic full verification (the cache older than verifyEvery) ingests every
+// file again and so finds it.
+func TestSweepSkipsUnchangedUntilFullVerification(t *testing.T) {
+	e := newEnv(t, false)
+	old := time.Now().Add(-time.Hour)
+	p := e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
+	d := e.open(t)
+	sweep := func() {
+		t.Helper()
+		if err := d.Watcher().Rescan(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sweep() // first copy
+	sweep() // caught up: cached
+	before := ingestCount(d, "unchanged")
+	sweep()
+	if got := ingestCount(d, "unchanged") - before; got != 0 {
+		t.Fatalf("cached sweep ingested %v files, want 0", got)
+	}
+	// Same size and mtime, different bytes: not detected by a skipping sweep.
+	if err := os.WriteFile(p, []byte("{\"type\":\"asst\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	sweep()
+	if got := ingestCount(d, "unchanged") - before; got != 0 {
+		t.Fatalf("sweep ingested %v files after a same-size same-mtime rewrite, want 0 (documented limit)", got)
+	}
+	// Age the verification: the next sweep ingests everything again.
+	d.seen.mu.Lock()
+	d.seen.verifiedAt = d.clock.Now().Add(-verifyEvery - time.Minute)
+	d.seen.mu.Unlock()
+	sweep()
+	after := ingestCount(d, "unchanged") + ingestCount(d, "new_generation") + ingestCount(d, "copied")
+	if after-before < 1 {
+		t.Fatalf("verification sweep ingested nothing")
+	}
+}

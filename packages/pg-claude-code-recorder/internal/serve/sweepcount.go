@@ -2,9 +2,11 @@ package serve
 
 import (
 	"sync"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 )
 
@@ -23,6 +25,10 @@ type seenFile struct {
 type sweepSeen struct {
 	mu sync.Mutex
 	m  map[string]seenFile
+	// caught is the incremental sweep's cache (see skipUnchanged); verifiedAt
+	// is when it was last emptied for a full verification.
+	caught     map[string]caughtUp
+	verifiedAt time.Time
 }
 
 func seenOf(fi watcher.FileInfo) seenFile {
@@ -48,8 +54,8 @@ func (d *Daemon) noteSeen(e watcher.Event) {
 // directory walk reported; unchanged_candidate is every one whose size, mtime
 // and inode match the last observation of its path AND whose stored
 // files.last_size row (found by dev, inode and birth time) equals the walked
-// size. It only observes: nothing is skipped, so phase 4 can see the saving
-// before it takes it. It runs before the sweep's own events.
+// size. It only counts; skipUnchanged takes the saving.
+// It runs before the sweep's own events.
 func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 	d.seen.mu.Lock()
 	defer d.seen.mu.Unlock()
@@ -80,4 +86,66 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 	d.seen.m = next
 	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepWalked}, float64(len(files)))
 	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepUnchangedCandidate}, float64(candidates))
+}
+
+// verifyEvery is how long the incremental sweep trusts its caught-up cache. A
+// sweep that finds the cache older than this ingests every file again (a full
+// verification), which catches what size, mtime and inode cannot: a rewrite
+// that keeps all three.
+const verifyEvery = 24 * time.Hour
+
+// caughtUp is a path the copier ingested to "unchanged" (fully caught up) when
+// it last looked, with what the walk reported then.
+type caughtUp struct {
+	seen seenFile
+	file int64
+}
+
+// verifyIfDue empties the caught-up cache when the last full verification is
+// older than verifyEvery, so this sweep ingests everything. The cache starts
+// empty, so the first sweep after a start is always a full one. It runs under
+// the watcher's lock before the sweep's events.
+func (d *Daemon) verifyIfDue() {
+	now := d.clock.Now()
+	d.seen.mu.Lock()
+	defer d.seen.mu.Unlock()
+	if d.seen.verifiedAt.IsZero() || now.Sub(d.seen.verifiedAt) >= verifyEvery {
+		d.seen.caught = nil
+		d.seen.verifiedAt = now
+	}
+}
+
+// skipUnchanged reports whether a sweep event needs no ingest: the path was
+// ingested to "unchanged" and the walk reports the same size, mtime and inode.
+// A skipped file still tells the parser about itself, so a parse that failed
+// earlier is retried exactly as a full ingest would.
+func (d *Daemon) skipUnchanged(e watcher.Event) bool {
+	d.seen.mu.Lock()
+	c, ok := d.seen.caught[e.Path]
+	d.seen.mu.Unlock()
+	if !ok || c.seen != seenOf(e.Info) {
+		return false
+	}
+	d.prs.Notify(c.file)
+	return true
+}
+
+// noteCaughtUp records the outcome of an ingest. Only an append-mode file the
+// copier found already caught up is cached; anything else (a copy that may be
+// partial, an error, a snapshot or a link) is ingested again next sweep.
+func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
+	d.seen.mu.Lock()
+	defer d.seen.mu.Unlock()
+	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 {
+		delete(d.seen.caught, e.Path)
+		return
+	}
+	if _, mode := d.scope.Classify(e.Path); mode != scope.Append {
+		delete(d.seen.caught, e.Path)
+		return
+	}
+	if d.seen.caught == nil {
+		d.seen.caught = map[string]caughtUp{}
+	}
+	d.seen.caught[e.Path] = caughtUp{seen: seenOf(e.Info), file: res.File}
 }
