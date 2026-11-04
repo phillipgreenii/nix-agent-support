@@ -124,6 +124,10 @@ type Daemon struct {
 	statusLoopOn atomic.Bool
 	statusReady  chan struct{} // closed once the loop has stored its first snapshot
 	statusFirst  sync.Once
+	// statusRefreshMu guards the refresh bookkeeping below.
+	statusRefreshMu sync.Mutex
+	statusSweepAt   time.Time // last full pass over every file
+	statusHot       []int64   // files that were lagging at the last pass
 }
 
 // Open builds the daemon: it opens the store, probes the copy method, recovers

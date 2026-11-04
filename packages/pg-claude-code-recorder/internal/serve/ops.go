@@ -88,25 +88,8 @@ func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary 
 				break
 			}
 		}
-		fc := wire.FileCoverage{FileID: f.ID, Source: f.Source, Path: p, State: f.State}
-		if fi, err := os.Lstat(p); err == nil {
-			fc.Size = fi.Size()
-			if f.Mode == "append" && f.CurGen > 0 {
-				k := genKey{f.ID, f.CurGen}
-				fc.CopyOffset = byGen[k]
-				fc.ParseOffset = parse[k]
-				if lag := fc.Size - fc.CopyOffset; lag > 0 {
-					fc.CopyLagBytes = lag
-					if s := now.Sub(fi.ModTime()).Seconds(); s > 0 {
-						fc.CopyLagS = s
-					}
-				}
-			} else {
-				fc.CopyOffset = fc.Size // a snapshot file is copied whole, version by version
-			}
-		}
-		if f.Mode == "append" && d.prs.HasSource(f.Source) && fc.CopyOffset > fc.ParseOffset {
-			fc.ParseLagBytes = fc.CopyOffset - fc.ParseOffset
+		fc := d.fileCoverage(f, p, byGen[genKey{f.ID, f.CurGen}], parse[genKey{f.ID, f.CurGen}], now)
+		if fc.ParseLagBytes > 0 {
 			if fc.ParseLagBytes > cov.ParseLagBytesMax {
 				cov.ParseLagBytesMax = fc.ParseLagBytes
 			}
@@ -159,6 +142,31 @@ func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary 
 	cov.Degraded = !cov.CaughtUp
 	cov.Backfill = d.backfillProgress()
 	return cov, nil
+}
+
+// fileCoverage is one file's copy and parse state against the original on
+// disk. copyOff and parseOff are the offsets of the file's current generation.
+func (d *Daemon) fileCoverage(f store.File, p string, copyOff, parseOff int64, now time.Time) wire.FileCoverage {
+	fc := wire.FileCoverage{FileID: f.ID, Source: f.Source, Path: p, State: f.State}
+	if fi, err := os.Lstat(p); err == nil {
+		fc.Size = fi.Size()
+		if f.Mode == "append" && f.CurGen > 0 {
+			fc.CopyOffset = copyOff
+			fc.ParseOffset = parseOff
+			if lag := fc.Size - fc.CopyOffset; lag > 0 {
+				fc.CopyLagBytes = lag
+				if s := now.Sub(fi.ModTime()).Seconds(); s > 0 {
+					fc.CopyLagS = s
+				}
+			}
+		} else {
+			fc.CopyOffset = fc.Size // a snapshot file is copied whole, version by version
+		}
+	}
+	if f.Mode == "append" && d.prs.HasSource(f.Source) && fc.CopyOffset > fc.ParseOffset {
+		fc.ParseLagBytes = fc.CopyOffset - fc.ParseOffset
+	}
+	return fc
 }
 
 func (d *Daemon) backfillProgress() *wire.Backfill {
