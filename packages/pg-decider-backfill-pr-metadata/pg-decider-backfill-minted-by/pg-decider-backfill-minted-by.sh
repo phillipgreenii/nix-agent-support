@@ -79,6 +79,12 @@ Options:
                  id), for a small trial. The plan, COUNT and RESIDUAL lines still
                  cover everything; a SELECT<TAB>id<TAB>kind line names each bead
                  that would be written. A later run without it labels the rest.
+  --include-open-keyless
+                 Also label the OPEN keyless look-alikes (a keyless bead titled
+                 `<kind>: <repo>#<n>` or `<repo>#<n>: ...`), which the decider
+                 adopts on its next touch of the PR (operator ruling, Phillip,
+                 2026-11-04). Closed look-alikes and every other residual shape
+                 stay unlabelled. Pin the set with --expect.
   --apply        Perform the writes. Without it nothing is written.
   -h, --help     Show this help message
   -v, --version  Show version information
@@ -90,6 +96,7 @@ PB_ACTOR="${PG_BACKFILL_ACTOR:-}"
 PB_APPLY=0
 PB_EXPECT=""
 PB_LIMIT_PER_KIND=""
+PB_INCLUDE_OPEN_KEYLESS=0
 
 # need_value <option> <value...>: the option's value must exist and not look
 # like another option.
@@ -126,6 +133,7 @@ while [[ $# -gt 0 ]]; do
     PB_LIMIT_PER_KIND="$2"
     shift
     ;;
+  --include-open-keyless) PB_INCLUDE_OPEN_KEYLESS=1 ;;
   --apply) PB_APPLY=1 ;;
   *) die "unknown argument: $1" ;;
   esac
@@ -157,6 +165,9 @@ pb_verify_target || fail_run "tracker target check failed"
 
 snapshot="$(pb_snapshot)" || fail_run "listing failed"
 rows="$(pb_classify "$snapshot")" || fail_run "classification failed"
+if ((PB_INCLUDE_OPEN_KEYLESS)); then
+  rows="$(pb_include_open_keyless "$rows")" || fail_run "classification failed"
+fi
 
 # ---- Phase 1: plan (no writes) ----
 plan_rows=()

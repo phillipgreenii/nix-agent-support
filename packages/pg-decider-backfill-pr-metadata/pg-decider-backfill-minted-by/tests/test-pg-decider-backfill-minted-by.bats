@@ -330,6 +330,39 @@ SHIM
   [ "$status" -eq 2 ]
 }
 
+@test "--include-open-keyless labels only the open keyless look-alikes; closed and other residual shapes stay unlabelled" {
+  keyed="$(mk "org/repo#5: real" "$(key pr:N:anchor)")"
+  kt_open="$(mk "process-feedback: org/repo#9" '{"repo":"org/repo","pr_number":9}')"
+  at_open="$(mk "org/repo#9: legacy anchor" '{"repo":"org/repo","pr_number":9}')"
+  kt_closed="$(mk "fix-ci: org/repo#9" '{"repo":"org/repo","pr_number":9}')"
+  already="$(mk "review-pr: org/repo#9" '{"repo":"org/repo","pr_number":9}' "$LABEL")"
+  orphan="$(mk "pg-decider: rule x keeps failing on pr org/repo#9" '{}' "human")"
+  badkey="$(mk "bad key" "$(key pr:N:mystery)")"
+  unrelated="$(mk "an ordinary task" '{}')"
+  bd -C "$TDIR" close "$kt_closed" >/dev/null
+  # without the flag the open look-alikes stay residual
+  run --separate-stderr backfill --apply --expect 1
+  [ "$status" -eq 0 ]
+  lacks_label "$kt_open"
+  lacks_label "$at_open"
+  # with it, exactly the two unlabelled open look-alikes are planned
+  run --separate-stderr backfill --apply --include-open-keyless --expect 2
+  [ "$status" -eq 0 ]
+  [[ $output == *$'PLAN\t'"$kt_open"$'\tkeyless-kind-title\topen'* ]]
+  [[ $output == *$'PLAN\t'"$at_open"$'\tkeyless-anchor-title\topen'* ]]
+  [[ $output == *"updated=2 "* ]]
+  has_label "$keyed"
+  has_label "$kt_open"
+  has_label "$at_open"
+  has_label "$already"
+  for id in "$kt_closed" "$orphan" "$badkey" "$unrelated"; do lacks_label "$id"; done
+  # a second run plans nothing
+  run --separate-stderr backfill --apply --include-open-keyless --expect 0
+  [ "$status" -eq 0 ]
+  [[ $output == *"planned=0"* ]]
+  [[ $output == *"updated=0 "* ]]
+}
+
 @test "refuses a --bd-dir that is not a directory" {
   run --separate-stderr "$RUN" --bd-dir "$TDIR/nope" --actor a
   [ "$status" -eq 1 ]

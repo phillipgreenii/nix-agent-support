@@ -15,7 +15,7 @@ _pg_decider_backfill_minted_by() {
   esac
 
   if [[ $cur == -* ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "--bd-dir --actor --expect --limit-per-kind --apply --help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--bd-dir --actor --expect --limit-per-kind --include-open-keyless --apply --help -h --version -v" -- "$cur")
   fi
 }
 

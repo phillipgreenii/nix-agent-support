@@ -15,6 +15,10 @@
 
 `pg-decider-backfill-minted-by --bd-dir {{/path/to/tracker/root}} --actor {{session-id}} --expect {{539}} --limit-per-kind {{1}} --apply`
 
+- Also label the open keyless look-alikes (the earlier tool's open beads the decider will adopt):
+
+`pg-decider-backfill-minted-by --bd-dir {{/path/to/tracker/root}} --actor {{session-id}} --include-open-keyless --expect {{18}} --apply`
+
 - Refuse to continue unless exactly N beads are planned:
 
 `pg-decider-backfill-minted-by --bd-dir {{/path/to/tracker/root}} --actor {{session-id}} --expect {{539}}`

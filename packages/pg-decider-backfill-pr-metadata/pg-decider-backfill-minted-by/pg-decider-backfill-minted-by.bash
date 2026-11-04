@@ -59,7 +59,7 @@ pb_snapshot() {
 
 # PB_CLASSIFY is a jq program over the snapshot array. It prints one compact
 # JSON object per bead of interest:
-#   {id, status, title, decision, kind}
+#   {id, status, title, labelled, decision, kind}
 # decision is one of
 #   plan      the bead is the decider's with high confidence and lacks the label
 #   skip      the bead is the decider's and already carries the label
@@ -102,12 +102,25 @@ def has_key: ((.metadata.dedup_key // "") | tostring) != "";
    elif ($t | test("^[^ ]+/[^ ]+#[0-9]+: ")) then
      {decision: "residual", kind: "keyless-anchor-title"}
    else empty end)
-| {id: $b.id, status: ($b.status // ""), title: $t} + .
+| {id: $b.id, status: ($b.status // ""), title: $t, labelled: ($b | labelled)} + .
 '
 
 # pb_classify <snapshot-json>: one JSON object per bead of interest.
 pb_classify() {
   jq -c --arg label "$PB_LABEL" "$PB_ENVELOPE_ARRAY"' | '"$PB_CLASSIFY" <<<"$1"
+}
+
+# pb_include_open_keyless <rows>: the explicit, opt-in widening (operator ruling
+# on the adoption gap, Phillip, 2026-11-04): an OPEN bead with a decider-shaped
+# keyless title (the earlier tool's output the decider will adopt) moves from
+# residual to plan, or to skip when it already carries the label. Closed beads and
+# every other residual shape stay residual.
+pb_include_open_keyless() {
+  jq -c 'if .decision == "residual"
+            and (.kind == "keyless-kind-title" or .kind == "keyless-anchor-title")
+            and .status != "closed"
+         then .decision = (if .labelled then "skip" else "plan" end)
+         else . end' <<<"$1"
 }
 
 # pb_before <id>: the bead's current JSON (single object), either envelope.
