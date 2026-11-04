@@ -33,7 +33,7 @@ _wtaudit() {
 
   case "$sub" in
   scan) mapfile -t COMPREPLY < <(compgen -W "--repo --json --table --help -h" -- "$cur") ;;
-  remove) mapfile -t COMPREPLY < <(compgen -W "--repo --branch --expect-tip --help -h" -- "$cur") ;;
+  remove) mapfile -t COMPREPLY < <(compgen -W "--repo --branch --expect-tip --keep-branch --help -h" -- "$cur") ;;
   *) ;;
   esac
 }

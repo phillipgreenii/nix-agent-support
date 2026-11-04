@@ -38,7 +38,7 @@ wtaudit: Deterministic classifier and remover for worktrees and branches
 
 Usage:
   wtaudit scan   [--repo DIR]... [--json | --table]
-  wtaudit remove --repo DIR --branch NAME --expect-tip SHA
+  wtaudit remove --repo DIR --branch NAME --expect-tip SHA [--keep-branch]
   wtaudit --help | --version
 
 scan classifies every non-canonical worktree, coordinated-set member and
@@ -54,11 +54,20 @@ with `git update-ref -d refs/heads/<branch> <tip>` (compare-and-swap), never
 `git branch -D`. Its stdout is always one JSON object:
 {id, removed_worktree, removed_branch, exit, reason, message}.
 
+remove --keep-branch is the abandoned-row mode: the candidate must still
+classify as an `agent` row with a worktree (the caller has ruled the work
+abandoned from the bead; the tool cannot), the tip must equal --expect-tip, and
+the same dirty, anchored-process and claim guards apply (a guard hit makes the
+row `keep`, which is refused with exit 10). Only the worktree goes (through
+wtdone); the unlanded branch is left and its tip re-verified, never deleted:
+exit 0 reports removed_worktree true and removed_branch false.
+
 Actions (the `action` field): remove, reclaim, keep, agent.
 HELP
   local -a reasons
   local reason
   read -ra reasons <<<"$WTAUDIT_SCAN_REASONS"
+  # shellcheck disable=SC2016  # literal backticks in help text
   echo 'Verdict reasons (the `reason` field, a closed enum, in decision-table order):'
   for reason in "${reasons[@]}"; do printf '  %s\n' "$reason"; done
   printf 'Set-only reasons (sets[].reason): %s\n' "$WTAUDIT_SET_REASONS"
@@ -68,7 +77,8 @@ Exit codes:
   scan:   0 success (an unreadable repo or a failed bd call is a row, not an
           error); 2 usage error (or `pn workspace discover` failed); 3 a --repo
           argument is not a readable git repository
-  remove: 0 the worktree (if any) and the branch are gone; 2 usage error
+  remove: 0 the worktree (if any) and the branch are gone (with
+          --keep-branch: the worktree is gone and the branch is intact); 2 usage error
           (malformed --expect-tip, unreadable --repo); 10 refused before
           acting (reason verdict-changed or tip-moved; an unknown or vanished
           branch is verdict-changed); 11 the branch remains (reason
@@ -110,6 +120,7 @@ repos=()
 format="json"
 branch=""
 expect_tip=""
+keep_branch=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -143,6 +154,11 @@ while [[ $# -gt 0 ]]; do
     [[ -n ${2:-} ]] || usage_error "--expect-tip requires a value"
     expect_tip="$2"
     shift 2
+    ;;
+  --keep-branch)
+    [[ $subcommand == remove ]] || usage_error "--keep-branch is only valid for remove"
+    keep_branch=true
+    shift
     ;;
   *) usage_error "unknown argument: $1" ;;
   esac
@@ -206,5 +222,5 @@ fi
 rc=0
 # WTDONE_BIN is injected as config by the nix build (a raw run exports it); it is
 # read here, after the injected assignment, and handed to the function.
-wtaudit_remove "${repos[0]}" "$branch" "$expect_tip" "${WTDONE_BIN:-}" || rc=$?
+wtaudit_remove "${repos[0]}" "$branch" "$expect_tip" "${WTDONE_BIN:-}" "$keep_branch" || rc=$?
 exit "$rc"

@@ -31,6 +31,7 @@ _wtaudit() {
         '--repo[Repository holding the candidate]:directory:_files -/' \
         '--branch[Branch to remove]:branch:' \
         '--expect-tip[Branch tip sha from the scan row]:sha:' \
+        '--keep-branch[Abandoned agent row: remove only the worktree, keep the unlanded branch]' \
         '(-h --help)'{-h,--help}'[Show help message]'
       ;;
     esac

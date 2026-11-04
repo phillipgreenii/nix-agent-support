@@ -232,7 +232,7 @@ PN
     for word in scan remove; do
       grep -q -- "$word" "$f" || { echo "$f lacks $word" >&2; return 1; }
     done
-    for flag in --repo --json --table --branch --expect-tip; do
+    for flag in --repo --json --table --branch --expect-tip --keep-branch; do
       grep -q -- "$flag" "$f" || { echo "$f lacks $flag" >&2; return 1; }
     done
   done
@@ -479,4 +479,135 @@ SHIM
   mkdir -p "$FX/plain"
   run --separate-stderr "$WTAUDIT" scan --repo "$FX/plain"
   [ "$status" -eq 3 ]
+}
+
+# ---- remove --keep-branch: reclaim an abandoned agent row's worktree ---------
+
+# do_keep <repo> <branch> [<tip>]: run remove --keep-branch.
+do_keep() {
+  run --separate-stderr "$WTAUDIT" remove --repo "$1" --branch "$2" --expect-tip "${3:-$(tip_of "$1" "$2")}" --keep-branch
+}
+
+# unlanded_wt <branch>: a clean worktree whose branch has a commit not on main.
+unlanded_wt() {
+  local wt
+  wt="$(add_wt "$REPO" "$1")"
+  commit_in "$wt" f.txt "unlanded work"
+  printf '%s\n' "$wt"
+}
+
+@test "keep-branch: exit 0 removes the worktree of an unlanded agent row and keeps the branch at its tip" {
+  wt="$(unlanded_wt abandoned)"
+  tip="$(tip_of "$REPO" abandoned)"
+  do_keep "$REPO" abandoned "$tip"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '"\(.removed_worktree) \(.removed_branch) \(.exit) \(.reason)"' <<<"$output")" = "true false 0 unlanded-work" ]
+  [ ! -e "$wt" ]
+  [ "$(tip_of "$REPO" abandoned)" = "$tip" ]
+  [ -z "$(git -C "$REPO" worktree list --porcelain | grep -F "$wt" || true)" ]
+}
+
+@test "keep-branch: plain remove still refuses the same row (the new mode is opt-in)" {
+  wt="$(unlanded_wt abandoned)"
+  do_remove "$REPO" abandoned
+  [ "$status" -eq 10 ]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 10 tip-moved when the tip differs from --expect-tip" {
+  wt="$(unlanded_wt abandoned)"
+  stale="$(git -C "$REPO" rev-parse main)"
+  do_keep "$REPO" abandoned "$stale"
+  [ "$status" -eq 10 ]
+  [ "$(jq -r '.reason' <<<"$output")" = tip-moved ]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 10 verdict-changed when the worktree is dirty" {
+  wt="$(unlanded_wt abandoned)"
+  tip="$(tip_of "$REPO" abandoned)"
+  echo x >"$wt/untracked.txt"
+  do_keep "$REPO" abandoned "$tip"
+  [ "$status" -eq 10 ]
+  [ "$(jq -r '.reason' <<<"$output")" = verdict-changed ]
+  [[ "$(jq -r '.message' <<<"$output")" == *dirty* ]]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 10 verdict-changed when a blocking process is anchored in the worktree" {
+  wt="$(unlanded_wt abandoned)"
+  tip="$(tip_of "$REPO" abandoned)"
+  start_anchor "$wt"
+  do_keep "$REPO" abandoned "$tip"
+  [ "$status" -eq 10 ]
+  [[ "$(jq -r '.message' <<<"$output")" == *anchored-process* ]]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 10 verdict-changed when the bead is claimed" {
+  id="$(bd -C "$TDIR" create "abandoned but claimed" -p 2 --json | jq -r '.id')"
+  wt="$(add_wt "$REPO" "drain/$id")"
+  commit_in "$wt" f.txt "unlanded work"
+  tip="$(tip_of "$REPO" "drain/$id")"
+  bd -C "$TDIR" update "$id" --claim --actor wtaudit-test >/dev/null 2>&1
+  do_keep "$REPO" "drain/$id" "$tip"
+  [ "$status" -eq 10 ]
+  [[ "$(jq -r '.message' <<<"$output")" == *claimed* ]]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 10 verdict-changed for a row that is not an agent row (a landed ancestor must use plain remove)" {
+  wt="$(add_wt "$REPO" scratch)"
+  do_keep "$REPO" scratch
+  [ "$status" -eq 10 ]
+  [ "$(jq -r '.reason' <<<"$output")" = verdict-changed ]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 10 verdict-changed for a dangling branch with no worktree to reclaim" {
+  git -C "$REPO" branch dangler main~1
+  commit_in "$REPO" other.txt "advance main"
+  git -C "$REPO" branch -f dangler HEAD~1
+  do_keep "$REPO" dangler
+  [ "$status" -eq 10 ]
+  [ "$(jq -r '.reason' <<<"$output")" = verdict-changed ]
+}
+
+@test "keep-branch: exit 12 set-member for a coordinated set member" {
+  mkdir -p "$FX/ws/.workforests/setA"
+  git -C "$REPO" worktree add -q -b setA "$FX/ws/.workforests/setA/repo" >/dev/null
+  commit_in "$FX/ws/.workforests/setA/repo" f.txt "unlanded work"
+  do_keep "$REPO" setA
+  [ "$status" -eq 12 ]
+  [ "$(jq -r '.reason' <<<"$output")" = set-member ]
+  [ -e "$FX/ws/.workforests/setA/repo" ]
+}
+
+@test "keep-branch: exit 13 teardown-refused when wtdone leaves the worktree (fake wtdone: the refusal is the point)" {
+  wt="$(unlanded_wt abandoned)"
+  printf '#!/usr/bin/env bash\necho "wtdone: refusing" >&2\nexit 1\n' >"$FX/bin/wtdone-refuse"
+  chmod +x "$FX/bin/wtdone-refuse"
+  WTDONE_BIN="$FX/bin/wtdone-refuse" do_keep "$REPO" abandoned
+  [ "$status" -eq 13 ]
+  [ "$(jq -r '.reason' <<<"$output")" = teardown-refused ]
+  [ -e "$wt" ]
+}
+
+@test "keep-branch: exit 11 when the branch is missing after the teardown (fake wtdone deletes it)" {
+  wt="$(unlanded_wt abandoned)"
+  tip="$(tip_of "$REPO" abandoned)"
+  cat >"$FX/bin/wtdone-eager" <<EOF
+#!/usr/bin/env bash
+git -C "$REPO" worktree remove --force "$wt"
+git -C "$REPO" branch -D abandoned >/dev/null
+EOF
+  chmod +x "$FX/bin/wtdone-eager"
+  WTDONE_BIN="$FX/bin/wtdone-eager" do_keep "$REPO" abandoned "$tip"
+  [ "$status" -eq 11 ]
+  [ "$(jq -r '"\(.reason) \(.removed_worktree) \(.removed_branch)"' <<<"$output")" = "tip-moved-late true false" ]
+}
+
+@test "keep-branch: --keep-branch is rejected for scan (exit 2)" {
+  run --separate-stderr "$WTAUDIT" scan --repo "$REPO" --keep-branch
+  [ "$status" -eq 2 ]
 }

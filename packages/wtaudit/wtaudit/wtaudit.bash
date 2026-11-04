@@ -456,11 +456,15 @@ wtaudit_holder_of_branch() {
   '
 }
 
-# wtaudit_remove <repo_path> <branch> <expect_tip> <wtdone_bin>: the guarded remove. Prints
-# one JSON object on stdout and returns the documented exit code (10 refused,
-# 11 branch remains, 12 set member, 13 teardown refused, 0 done).
+# wtaudit_remove <repo_path> <branch> <expect_tip> <wtdone_bin> [<keep_branch>]: the guarded
+# remove. Prints one JSON object on stdout and returns the documented exit code
+# (10 refused, 11 branch remains, 12 set member, 13 teardown refused, 0 done).
+# With keep_branch=true (the abandoned-agent-row mode) the candidate must
+# instead classify as `agent` with a worktree; only the worktree is torn down
+# and the unlanded branch is left, its tip re-verified, so exit 0 means the
+# worktree is gone and the branch is intact (removed_branch false).
 wtaudit_remove() {
-  local repo_path="$1" branch="$2" expect_tip="$3" wtdone_bin="${4:-}"
+  local repo_path="$1" branch="$2" expect_tip="$3" wtdone_bin="${4:-}" keep_branch="${5:-false}"
   local repo_name primary top cand="" line id
   local kind set bname worktree wtstate detached head
   top="$(wtaudit_repo_toplevel "$repo_path")"
@@ -487,7 +491,12 @@ wtaudit_remove() {
   local action reason
   action="$(jq -r '.action' <<<"$cand")"
   reason="$(jq -r '.reason' <<<"$cand")"
-  if [[ $action != remove && $action != reclaim ]]; then
+  if [[ $keep_branch == true ]]; then
+    if [[ $action != agent || -z $(jq -r '.worktree // ""' <<<"$cand") ]]; then
+      wtaudit_remove_json "$id" false false 10 verdict-changed "verdict is $action: $reason, not an agent row with a worktree to reclaim: $(jq -r '.evidence' <<<"$cand")"
+      return 10
+    fi
+  elif [[ $action != remove && $action != reclaim ]]; then
     wtaudit_remove_json "$id" false false 10 verdict-changed "verdict is now $action: $reason: $(jq -r '.evidence' <<<"$cand")"
     return 10
   fi
@@ -512,6 +521,15 @@ wtaudit_remove() {
       return 13
     fi
     removed_wt=true
+  fi
+
+  if [[ $keep_branch == true ]]; then
+    if [[ $(git -C "$top" rev-parse --verify -q "refs/heads/$branch" 2>/dev/null || true) != "$expect_tip" ]]; then
+      wtaudit_remove_json "$id" "$removed_wt" false 11 tip-moved-late "branch $branch is missing or its tip moved after the worktree was removed"
+      return 11
+    fi
+    wtaudit_remove_json "$id" "$removed_wt" false 0 "$reason" "worktree removed; unlanded branch kept"
+    return 0
   fi
 
   if wtaudit_branch_exists "$top" "$branch"; then
