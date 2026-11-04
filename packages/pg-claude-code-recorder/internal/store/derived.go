@@ -241,6 +241,9 @@ var derivedIndexes = []struct{ name, sql string }{
 	// Serves every "WHERE source=? [AND type=?]" lookup (the lifecycle engine's
 	// registry, history and control-end reads); without it the planner scans every row.
 	{"records_source_type", `CREATE INDEX IF NOT EXISTS records_source_type ON records(source, type)`},
+	// Serves the feed retention-floor query (at_ns < cutoff) without a scan of
+	// feed_marks. The table is small and pruned, so building it is cheap.
+	{"feed_marks_at", `CREATE INDEX IF NOT EXISTS feed_marks_at ON feed_marks(at_ns)`},
 	{"session_files_file", `CREATE INDEX IF NOT EXISTS session_files_file ON session_files(file_id)`},
 	{"texts_rec", `CREATE INDEX IF NOT EXISTS texts_rec ON texts(rec_id)`},
 }

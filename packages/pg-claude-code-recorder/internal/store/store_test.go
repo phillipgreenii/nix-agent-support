@@ -467,3 +467,42 @@ func TestCloseLogsWALTruncateStartThenDone(t *testing.T) {
 		t.Fatalf("wal_truncate_done has no duration_ms: %v", done)
 	}
 }
+
+func TestFeedMarksAtIndexIsCreatedByOpenAndGainedByAnOlderDatabase(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	if !hasIndex(t, s, "feed_marks_at") {
+		t.Fatal("a new store lacks feed_marks_at")
+	}
+	if _, err := s.wdb.Exec(`DROP INDEX feed_marks_at`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s = open(t, dir)
+	defer func() { _ = s.Close() }()
+	if !hasIndex(t, s, "feed_marks_at") {
+		t.Fatal("reopening a database without the index did not create it")
+	}
+	if s.SchemaVersion() != SchemaVersion {
+		t.Fatalf("schema version %d, want %d", s.SchemaVersion(), SchemaVersion)
+	}
+}
+
+func TestBulkRebuildCreatesFeedMarksAtIndex(t *testing.T) {
+	s, err := Open(t.TempDir(), Options{Rebuild: true, BulkRebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.wdb.Exec(`DROP INDEX IF EXISTS feed_marks_at`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if !hasIndex(t, s, "feed_marks_at") {
+		t.Fatal("the bulk rebuild did not create feed_marks_at")
+	}
+}

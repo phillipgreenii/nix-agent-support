@@ -193,13 +193,18 @@ func bad(msg string) *wire.Error { return wire.Errf(wire.ErrBadRequest, msg) }
 
 func (e *Engine) behind() bool { return e.Behind != nil && e.Behind() }
 
+// FloorSQL is the retention-floor query. The unary plus on rec_id turns off
+// SQLite's min/max-by-rowid shortcut, which would otherwise walk every mark
+// backwards and ignore the at_ns index (feed_marks_at); the result is unchanged.
+const FloorSQL = `SELECT COALESCE(MAX(+rec_id),0) FROM feed_marks WHERE at_ns < ?`
+
 // floor returns the retention floor as a sequence: the greatest record id
 // committed before now minus the retention, doubled.
 func (e *Engine) floor(tx store.Querier) int64 {
 	e.init()
 	cutoff := e.Clock.Now().Add(-e.Retention).UnixNano()
 	var rec int64
-	_ = tx.QueryRow(`SELECT COALESCE(MAX(rec_id),0) FROM feed_marks WHERE at_ns < ?`, cutoff).Scan(&rec)
+	_ = tx.QueryRow(FloorSQL, cutoff).Scan(&rec)
 	return query.RecSeq(rec)
 }
 

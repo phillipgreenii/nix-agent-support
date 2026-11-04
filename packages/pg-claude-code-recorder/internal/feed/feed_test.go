@@ -2,8 +2,10 @@ package feed_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -462,5 +465,55 @@ func TestWhileBehindAnEveryOperationAnswersAnywayMarkedDegraded(t *testing.T) {
 	e.fe.Behind = func() bool { return false }
 	if a := e.mustFeed(`{}`); a.Degraded {
 		t.Fatalf("caught up but degraded: %+v", a)
+	}
+}
+
+func TestFloorQueryPlanUsesTheAtNsIndex(t *testing.T) {
+	e := newEnv(t)
+	rows, err := e.k.Store.Read().Query(`EXPLAIN QUERY PLAN `+feed.FloorSQL, int64(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if got := strings.Join(plan, "; "); !strings.Contains(got, "feed_marks_at") {
+		t.Fatalf("floor plan does not use feed_marks_at: %s", got)
+	}
+}
+
+// A clock step back leaves at_ns non-monotonic in rec_id; the floor must equal
+// what the plain MAX(rec_id) query returns.
+func TestFloorIsUnchangedWhenAtNsIsNotMonotonicInRecID(t *testing.T) {
+	e := newEnv(t)
+	db := e.k.Store.Read()
+	w, err := sql.Open("sqlite", filepath.Join(e.k.Store.Dir(), store.DBName)+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	for _, m := range [][2]int64{{1, 100}, {2, 500}, {3, 200}, {4, 900}, {5, 300}} {
+		if _, err := w.Exec(`INSERT INTO feed_marks(rec_id,at_ns) VALUES(?,?)`, m[0], m[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, cut := range []int64{50, 150, 250, 350, 600, 1000} {
+		var want, got int64
+		if err := db.QueryRow(`SELECT COALESCE(MAX(rec_id),0) FROM feed_marks WHERE at_ns < ?`, cut).Scan(&want); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(feed.FloorSQL, cut).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("cutoff %d: floor %d, original %d", cut, got, want)
+		}
 	}
 }
