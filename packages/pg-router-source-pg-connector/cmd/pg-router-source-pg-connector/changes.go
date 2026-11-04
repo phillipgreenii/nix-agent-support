@@ -141,6 +141,10 @@ type changeIdentity struct {
 	EntityID string          `json:"entity_id"`
 	HeadSHA  json.RawMessage `json:"head_sha,omitempty"`
 	Version  json.RawMessage `json:"version,omitempty"`
+	// EmittedAt is set only for an "added" row of an entity with neither
+	// head_sha nor version (see changeDigest), so a re-entry into the query is
+	// a new id; empty (omitted) for every other row.
+	EmittedAt string `json:"emitted_at,omitempty"`
 }
 
 // compactRaw returns raw as compact JSON, or nil when raw is empty or the
@@ -158,14 +162,25 @@ func compactRaw(raw json.RawMessage) json.RawMessage {
 
 // changeDigest returns the first retryIDHexLen hex characters of the SHA-256
 // over the canonical JSON of c's changeIdentity.
-func changeDigest(c changesEntry, id entityIdentity) (string, error) {
-	data, err := json.Marshal(changeIdentity{
+//
+// An "added" row of an entity that carries neither head_sha nor version (a
+// bead) also digests emittedAt: nothing else tells one entry into the query
+// from the next, and without it a re-entry would reuse the first entry's id
+// and the router would drop it as a duplicate (INV-EVT-3). Every other row,
+// "changed" included, is digested without it, so content-only changes of an
+// entity that stays in the query still coalesce.
+func changeDigest(c changesEntry, id entityIdentity, emittedAt string) (string, error) {
+	ident := changeIdentity{
 		Change:   c.Change,
 		Source:   c.Source,
 		EntityID: id.ID,
 		HeadSHA:  compactRaw(id.HeadSHA),
 		Version:  compactRaw(id.Version),
-	})
+	}
+	if c.Change == "added" && ident.HeadSHA == nil && ident.Version == nil {
+		ident.EmittedAt = emittedAt
+	}
+	data, err := json.Marshal(ident)
 	if err != nil {
 		return "", err
 	}
@@ -297,7 +312,7 @@ func newChangesCmd() *cobra.Command {
 				Metadata: metadata,
 			}
 			if retryWindow > 0 {
-				digest, err := changeDigest(c, id)
+				digest, err := changeDigest(c, id, emittedAt)
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), err)
 					return errFailed

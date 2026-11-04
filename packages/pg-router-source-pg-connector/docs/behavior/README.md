@@ -84,7 +84,17 @@ flowchart LR
     of the same row therefore get the same id (a crash re-report, or a repeated identical row,
     dedupes in the queue: "a duplicate, never a loss"), while a new head, a new change kind, or a
     different source gets a new id and is queued as a separate event even while the first is in
-    flight;
+    flight. One exception, so that an entity which leaves a query and later re-enters it is offered
+    again: for a row whose change kind is `added` and whose entity carries neither `head_sha` nor
+    `version` (an entity with no revision marker, such as a bead), the digest input also carries the
+    adapter's emit time, at millisecond precision (`emitted_at`, one instant per invocation), as a
+    last key `emitted_at`. Such a row has nothing else that tells one entry into the query from the
+    next, and the router never forgets an id it has delivered while it is retained (INV-EVT-3), so
+    without the emit time every re-entry would hash to the id of the first one and be dropped as a
+    duplicate. Every other row, including every `changed` row, is unaffected, so content-only changes
+    of an entity that stays in the query still coalesce into the earlier event. The invariant this
+    relies on: the cursor advances at emit (see above), so one `added` row is printed at most once
+    and a later `added` row for the same entity is always a new entry, never a re-report;
   - the item carries `at` (this invocation's emit time, UTC, whole seconds, one value for every
     item of the call) and `expiresAt` = `at` + window, so the router retries a failed dispatch of
     that event until `expiresAt` (INV-EVT-4) and dedupes the same id for as long as it is retained
@@ -117,6 +127,10 @@ flowchart LR
     report hashes to the first report's id and is deduped while that event is still retained: a
     rare lost update, caught by the next sweep. The emit time is deliberately NOT part of the
     digest, because it would defeat crash re-report dedup.
+  - **Re-entry of a revision-less entity.** An entity with no `head_sha` or `version` that leaves a
+    query and re-enters it (a bead escalated, handed away and escalated again) gets a new id on each
+    `added` row, because of the emit time above; a `changed` row of an entity that stays in the
+    query does not, and coalesces.
   - **Content-only changes on one head** (a comment, a label) are `changed` rows with the same
     head, so they share an id inside the window and coalesce into the first event; the next sweep
     picks up what the window absorbed.

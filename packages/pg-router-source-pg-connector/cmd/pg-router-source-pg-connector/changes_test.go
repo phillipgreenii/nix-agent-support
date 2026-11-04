@@ -547,7 +547,7 @@ func TestChanges_RetryWindow_ABAFlipHashesToTheFirstID(t *testing.T) {
 // silently change every id the router has retained.
 func TestChanges_RetryWindow_DigestRecipeIsPinned(t *testing.T) {
 	id := entityIdentity{ID: "o/r#1", HeadSHA: []byte(` "h1" `)}
-	got, err := changeDigest(changesEntry{Change: "changed", Source: "gh"}, id)
+	got, err := changeDigest(changesEntry{Change: "changed", Source: "gh"}, id, "2026-10-07T12:00:00.123Z")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +712,7 @@ func TestChanges_RetryWindow_SeqKindsFieldsDoNotReachTheDigest(t *testing.T) {
 	// entity_id, head_sha, version}, version a raw JSON number.
 	id := entityIdentity{ID: "o/r#1", HeadSHA: []byte(`"h1"`), Version: []byte(`7`)}
 	sum := func(c changesEntry) string {
-		d, err := changeDigest(c, id)
+		d, err := changeDigest(c, id, "2026-10-07T12:00:00.123Z")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -861,5 +861,62 @@ func TestChanges_EmittedAt_MillisecondPrecisionAndNotInTheEventID(t *testing.T) 
 	}
 	if first[0].Metadata["emitted_at"] == second[0].Metadata["emitted_at"] {
 		t.Fatalf("emitted_at did not follow the clock: %v", second[0].Metadata["emitted_at"])
+	}
+}
+
+// beadRow builds one change row of a revision-less entity (no head_sha, no
+// version), the shape of a bead, with the given change kind.
+func beadRow(kind string) string {
+	return fmt.Sprintf(`{"change":%q,"source":"beads","entity":{"id":"b-1","title":"A bead"}}`, kind)
+}
+
+// polledID runs one retry-windowed changes poll at the given emit-time skew
+// over rows and returns the single emitted id.
+func polledID(t *testing.T, skew time.Duration, row string) string {
+	t.Helper()
+	emitSkew = skew
+	t.Cleanup(func() { emitSkew = 0 })
+	_, items := poll(t, "6h", pollBody(row))
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	return items[0].ID
+}
+
+// A bead that leaves the query and re-enters it, twice, MUST be offered each
+// time: each "added" row of a revision-less entity gets its own dispatchable id.
+func TestChanges_RetryWindow_ReEnteringRevisionlessEntityGetsDistinctIDs(t *testing.T) {
+	first := polledID(t, 0, beadRow("added"))
+	second := polledID(t, 5*time.Hour, beadRow("added"))
+	third := polledID(t, 5*24*time.Hour, beadRow("added"))
+	if first == second || second == third || first == third {
+		t.Fatalf("re-entries share an id: %q %q %q, want three distinct ids", first, second, third)
+	}
+	for _, id := range []string{first, second, third} {
+		if m := suffixedID.FindStringSubmatch(id); m == nil || m[1] != "b-1" {
+			t.Fatalf("id %q, want b-1@<12 hex>", id)
+		}
+	}
+}
+
+// Content-only changes while the bead stays in the query MUST still coalesce:
+// "changed" rows of a revision-less entity share one id across polls.
+func TestChanges_RetryWindow_ChangedRowsOfRevisionlessEntityStillCoalesce(t *testing.T) {
+	first := polledID(t, 0, beadRow("changed"))
+	later := polledID(t, 2*time.Hour, beadRow("changed"))
+	if first != later {
+		t.Fatalf("changed ids %q and %q differ, want content-only changes to coalesce", first, later)
+	}
+	if added := polledID(t, 0, beadRow("added")); added == first {
+		t.Fatalf("added and changed share id %q", added)
+	}
+}
+
+// An "added" row that carries a head_sha or version keeps its revision-based
+// id regardless of emit time (no change for PR-like entities).
+func TestChanges_RetryWindow_AddedRowWithRevisionIgnoresEmitTime(t *testing.T) {
+	row := `{"change":"added","source":"gh","entity":{"id":"o/r#1","head_sha":"h1"}}`
+	if a, b := polledID(t, 0, row), polledID(t, time.Hour, row); a != b {
+		t.Fatalf("ids %q and %q differ for an added row with head_sha", a, b)
 	}
 }
