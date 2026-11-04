@@ -16163,5 +16163,100 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-3f9t5 guardrail: -v takes a variable name that may carry an arithmetic subscript (runs a command), so it stays unmodeled and abstains."
+  },
+  {
+    "case": "git_commit_dry_run_approve",
+    "tags": ["ceta-spec", "tc-iqhja"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit --dry-run"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-iqhja: --dry-run creates no commit and runs no hook (git commit -h)."
+  },
+  {
+    "case": "git_commit_no_verify_abstain",
+    "tags": ["ceta-spec", "tc-iqhja"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit --no-verify -m x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-iqhja: workspace rule, never --no-verify without explicit approval; stays unmodeled."
+  },
+  {
+    "case": "git_commit_short_n_abstain",
+    "tags": ["ceta-spec", "tc-iqhja"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit -n -m x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-iqhja: -n is --no-verify; stays unmodeled."
+  },
+  {
+    "case": "git_commit_unmodeled_flag_abstain",
+    "tags": ["ceta-spec", "tc-iqhja"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit --template msg.txt -m x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-iqhja: an unmodeled option (reads a file) still abstains."
+  },
+  {
+    "case": "git_commit_file_credential_store_reject",
+    "tags": ["ceta-spec", "tc-iqhja"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit -F ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "tc-iqhja: -F is a path read; a credential store is refused."
   }
 ]

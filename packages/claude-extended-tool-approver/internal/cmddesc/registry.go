@@ -1227,6 +1227,12 @@ var gitCommitSchema = CommandSchema{
 		"-F":            {Arity: ArityOne, Operand: PathRead}, "--file": {Arity: ArityOne, Operand: PathRead},
 		"--author": literal1,
 		"--verify": inert,
+		// tc-iqhja: --dry-run (decision DB) creates no commit and runs no hook;
+		// the rest are documented harmless siblings. -n/--no-verify, -C/-c,
+		// --date, -S, --template, --fixup/--squash, --cleanup, -i/-o and
+		// --pathspec-from-file stay unmodeled (abstain).
+		"--dry-run": inert, "--status": inert, "--no-status": inert,
+		"--allow-empty-message": inert, "--no-gpg-sign": inert,
 	},
 	Positionals: PositionalSpec{Rest: PathRead},
 	ImplicitEffects: []ImplicitEffect{

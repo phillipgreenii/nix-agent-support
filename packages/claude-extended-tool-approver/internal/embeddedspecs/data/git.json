@@ -1023,6 +1023,18 @@
               "source": "git commit -h: \"[-F <file> | -m <msg>] [--reset-author] [--allow-empty]\""
             }
           },
+          "--allow-empty-message": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git commit -h: \"[--allow-empty-message] [--no-verify] [-e] [--author=<author>]\""
+            }
+          },
           "--amend": {
             "arity": "none",
             "operand": {
@@ -1045,6 +1057,18 @@
             },
             "citation": {
               "source": "git commit -h: \"[--allow-empty-message] [--no-verify] [-e] [--author=<author>]\""
+            }
+          },
+          "--dry-run": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git commit -h: \"--[no-]dry-run        show what would be committed\""
             }
           },
           "--file": {
@@ -1083,6 +1107,30 @@
               "source": "git commit -h: \"-e, --[no-]edit force edit of commit\""
             }
           },
+          "--no-gpg-sign": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git commit -h: \"-S, --[no-]gpg-sign[=<key-id>]  GPG sign commit\""
+            }
+          },
+          "--no-status": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git commit -h: \"--[no-]status         include status in commit message template\""
+            }
+          },
           "--quiet": {
             "arity": "none",
             "operand": {
@@ -1105,6 +1153,18 @@
             },
             "citation": {
               "source": "git commit -h: \"-s, --[no-]signoff add a Signed-off-by trailer\""
+            }
+          },
+          "--status": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git commit -h: \"--[no-]status         include status in commit message template\""
             }
           },
           "--verbose": {
