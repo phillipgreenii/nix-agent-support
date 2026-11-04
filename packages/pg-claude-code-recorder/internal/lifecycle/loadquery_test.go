@@ -62,6 +62,9 @@ UPDATE records SET type='registry_deleted' WHERE source='session-registry' AND i
 		{"registry_deleted", registryDeletedQuery},
 		{"slash_command", slashCommandQuery},
 		{"end_reason", endReasonQuery},
+		{"registry_ref", viaSessionRef(registryQuery)},
+		{"slash_command_ref", viaSessionRef(slashCommandQuery)},
+		{"end_reason_ref", viaSessionRef(endReasonQuery)},
 	} {
 		t.Run(q.name, func(t *testing.T) {
 			plan := f.planOf(q.sql)

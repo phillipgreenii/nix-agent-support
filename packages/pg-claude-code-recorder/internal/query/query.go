@@ -32,6 +32,11 @@ type Engine struct {
 	// Behind reports whether the recorder is catching up (answers are marked
 	// degraded then).
 	Behind func() bool
+	// SessionRef reports whether every record carries a session_ref (the store's
+	// SessionRefReady); when true the session is read through the sessions table
+	// instead of records.session. Nil means false: a store that predates
+	// session_ref keeps the text column as its only source.
+	SessionRef func() bool
 	// ClaudeDir is the directory the recorded paths live under. When set,
 	// project and file_session are read back from the file's path; when empty
 	// they are read from stored fields only.
@@ -382,16 +387,28 @@ const targetHead = `SELECT r.id,r.file_id,r.gen,r.off,r.item FROM records r JOIN
 func (e *Engine) linkTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Error) {
 	if ls.bySession {
 		var session string
-		_ = tx.QueryRow(`SELECT session FROM records WHERE id=?`, id).Scan(&session)
+		var ref int64
+		byRef := e.sessionRefReady()
+		if byRef {
+			_ = tx.QueryRow(`SELECT COALESCE((SELECT s.session_id FROM sessions s WHERE s.session_ref=r2.session_ref),''), r2.session_ref FROM records r2 WHERE r2.id=?`, id).Scan(&session, &ref)
+		} else {
+			_ = tx.QueryRow(`SELECT session FROM records WHERE id=?`, id).Scan(&session)
+		}
 		if session == "" {
 			return nil, nil
 		}
 		ph := strings.TrimSuffix(strings.Repeat("?,", len(ls.toTypes)), ",")
-		args := []any{session}
+		var args []any
+		cond := ` WHERE r.session=?`
+		if byRef {
+			cond, args = ` WHERE r.session_ref=?`, []any{ref}
+		} else {
+			args = []any{session}
+		}
 		for _, t := range ls.toTypes {
 			args = append(args, t)
 		}
-		return e.scanTargets(tx, targetHead+` WHERE r.session=? AND r.type IN (`+ph+`) ORDER BY r.id LIMIT `+strconv.Itoa(defaultLimit), args)
+		return e.scanTargets(tx, targetHead+cond+` AND r.type IN (`+ph+`) ORDER BY r.id LIMIT `+strconv.Itoa(defaultLimit), args)
 	}
 	var key sql.NullString
 	_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name_id=(SELECT id FROM field_names WHERE name=?)`, id, ls.from).Scan(&key)
@@ -763,5 +780,16 @@ func Decode(body []byte, v any) *wire.Error {
 func (e *Engine) builder() *builder {
 	b := newBuilder(e.Catalog)
 	b.claudeDir = e.ClaudeDir
+	b.sessionRef = e.sessionRefReady()
 	return b
+}
+
+func (e *Engine) sessionRefReady() bool { return e.SessionRef != nil && e.SessionRef() }
+
+// sessionCol is the SQL expression of a record's session id for a hit.
+func (e *Engine) sessionCol() string {
+	if e.sessionRefReady() {
+		return sessionIDExpr
+	}
+	return "r.session"
 }

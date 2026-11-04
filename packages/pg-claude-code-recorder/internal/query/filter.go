@@ -53,7 +53,17 @@ type builder struct {
 	// no path derivation: those two fields are then read from fields only.
 	claudeDir string
 	pathJoin  bool
+	// sessionRef reads the session through records.session_ref and the sessions
+	// table instead of records.session (see Engine.SessionRef).
+	sessionRef bool
 }
+
+// sessionIDExpr reads a record's natural session id through its session_ref;
+// sessionRefOf is the reverse, from an id placeholder to the session_ref it names.
+const (
+	sessionIDExpr  = "(SELECT s.session_id FROM sessions s WHERE s.session_ref=r.session_ref)"
+	sessionRefOfID = "(SELECT session_ref FROM sessions WHERE session_id=?)"
+)
 
 func newBuilder(cat map[string]source.Kind) *builder {
 	return &builder{cat: cat, aliases: map[string]string{}, used: map[string]int{}}
@@ -101,6 +111,9 @@ func (b *builder) expr(name string) (string, source.Kind, *wire.Error) {
 	case "type":
 		return "r.type", kind, nil
 	case "session":
+		if b.sessionRef {
+			return sessionIDExpr, kind, nil
+		}
 		return "r.session", kind, nil
 	case "time":
 		return "r.time_ns", kind, nil
@@ -237,6 +250,13 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 	if err != nil {
 		return "", nil, err
 	}
+	// With session_ref an equality or membership test on the session compares
+	// the integer reference (records_session_ref_source_time) instead of
+	// reading the id of every candidate row.
+	byRef := false
+	if stored, _, rerr := b.resolve(f.Field); rerr == nil && stored == "session" && b.sessionRef {
+		byRef = true
+	}
 	switch {
 	case f.Eq != nil:
 		var v any
@@ -246,6 +266,9 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		cv, err := conv(kind, v)
 		if err != nil {
 			return "", nil, err
+		}
+		if byRef {
+			return "r.session_ref=" + sessionRefOfID, []any{cv}, nil
 		}
 		return e + "=?", []any{cv}, nil
 	case f.In != nil:
@@ -260,6 +283,9 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 				return "", nil, err
 			}
 			ph[i], args[i] = "?", cv
+		}
+		if byRef {
+			return "r.session_ref IN (SELECT session_ref FROM sessions WHERE session_id IN (" + strings.Join(ph, ",") + "))", args, nil
 		}
 		return e + " IN (" + strings.Join(ph, ",") + ")", args, nil
 	case f.Range != nil:

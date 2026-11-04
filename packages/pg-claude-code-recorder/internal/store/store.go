@@ -145,6 +145,7 @@ type Store struct {
 	// Bulk rebuild state (bulk.go), guarded by mu.
 	bulk        bool // opened for a bulk rebuild, not yet finished
 	deferIdx    bool // bulk rebuild whose secondary indexes are not built yet
+	sessionRef  bool // every records row carries a session_ref (metaSessionRef)
 	batching    bool // WithWrite calls join one open transaction
 	btx         *sql.Tx
 	bRecs       int
@@ -393,6 +394,20 @@ func (s *Store) openDB(path string, bulk bool) error {
 			ddl += unknownTotalBackfillSQL
 		}
 	}
+	// A database created empty by this code has session_ref on every row, so it
+	// is marked and gets the session_ref indexes with its (empty) records table;
+	// a database that already had rows is never marked (see metaSessionRef).
+	marked, err := sessionRefMarked(w)
+	if err != nil {
+		_ = w.Close()
+		return err
+	}
+	if marked {
+		ddl += `INSERT OR IGNORE INTO meta(key,value) VALUES('` + metaSessionRef + `','1');` + "\n"
+		if !bulk {
+			ddl += sessionRefIndexesSQL()
+		}
+	}
 	if err := execInTx(w, ddl); err != nil {
 		_ = w.Close()
 		return err
@@ -421,8 +436,38 @@ func (s *Store) openDB(path string, bulk bool) error {
 	c.SetMaxOpenConns(1)
 	s.wdb, s.rdb, s.cdb = w, r, c
 	s.deferIdx = bulk
+	s.sessionRef = marked
 	return nil
 }
+
+// sessionRefMarked reports whether the database being opened is marked, or is
+// new (no records table yet) and so is marked by this open.
+func sessionRefMarked(db *sql.DB) (bool, error) {
+	var tbl int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil {
+		return false, err
+	}
+	if tbl == 0 {
+		return true, nil
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='meta'`).Scan(&n); err != nil || n == 0 {
+		return false, err
+	}
+	var v string
+	err := db.QueryRow(`SELECT value FROM meta WHERE key=?`, metaSessionRef).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return v == "1", err
+}
+
+// SessionRefReady reports whether every records row of this store carries a
+// session_ref with a row in sessions, so a query may read session_ref instead of
+// records.session (and use the session_ref indexes). It is false for a database
+// that existed before session_ref was written: its older rows have session_ref 0
+// until it is rebuilt, and a query that read session_ref there would miss them.
+func (s *Store) SessionRefReady() bool { return s.sessionRef }
 
 // JournalSizeLimit is the journal_size_limit pragma, in bytes: the WAL file is
 // truncated to at most this size when the WAL restarts.

@@ -123,7 +123,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 	if !req.OldGenerations {
 		gen = " AND r.gen=fl.cur_gen"
 	}
-	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, r.session, r.time_ns, bm25(fts_word)" +
+	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, " + e.sessionCol() + ", r.time_ns, bm25(fts_word)" +
 		" FROM fts_word JOIN texts t ON t.id=fts_word.rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id" +
 		gen + " " + strings.Join(b.joins, " ") +
 		" WHERE fts_word MATCH ?" + fieldSQL + " AND (" + wsql + ") ORDER BY bm25(fts_word)"
@@ -215,7 +215,7 @@ func (e *Engine) substring(ctx context.Context, tx *sql.Tx, req SearchRequest, a
 	if !req.OldGenerations {
 		gen = " AND r.gen=fl.cur_gen"
 	}
-	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, r.session, r.time_ns" +
+	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, " + e.sessionCol() + ", r.time_ns" +
 		" FROM texts t JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id" +
 		gen + " " + strings.Join(b.joins, " ") +
 		" WHERE t.field IN (" + ph + ") AND (" + wsql + ") ORDER BY r.time_ns DESC, t.id DESC"

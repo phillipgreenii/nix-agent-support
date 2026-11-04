@@ -179,6 +179,8 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 	s := open(t, dir)
 	for _, q := range []string{
 		`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(1,1,1,0,-1,1,'claude-transcript','user',1,'example-session-1',5)`,
+		`DROP INDEX records_session_ref_source_time`,
+		`DELETE FROM meta WHERE key='session_ref_complete'`,
 		`ALTER TABLE records DROP COLUMN session_ref`,
 		`DROP TABLE session_files`, `DROP TABLE session_stats`, `DROP TABLE sessions`,
 	} {
@@ -198,11 +200,106 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions','session_stats','session_files')`).Scan(&tables); err != nil || tables != 3 {
 			t.Fatalf("open %d: %d session tables, %v", i, tables, err)
 		}
+		if s.SessionRefReady() {
+			t.Fatalf("open %d: a store with unreferenced older rows is marked ready", i)
+		}
 		if s.SchemaVersion() != 2 {
 			t.Fatalf("schema_version %d, the session tables must not change it", s.SchemaVersion())
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func hasIndex(t *testing.T, s *Store, name string) bool {
+	t.Helper()
+	var n int
+	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n > 0
+}
+
+// A database created empty by this code is marked as carrying session_ref on
+// every row and has the session_ref index from the start (the table is empty, so
+// building it costs nothing); the mark survives a reopen.
+func TestFreshStoreIsMarkedSessionRefReadyWithItsIndex(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 2; i++ {
+		s := open(t, dir)
+		if !s.SessionRefReady() {
+			t.Fatalf("open %d: a store created empty is not marked ready", i)
+		}
+		if !hasIndex(t, s, "records_session_ref_source_time") {
+			t.Fatalf("open %d: no session_ref index", i)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A database that already had a records table without the mark (rows written
+// before session_ref existed) is never marked at open and never gets the index:
+// building it over the live table would be a full pass for an index no query
+// may use until a rebuild.
+func TestExistingStoreWithoutTheMarkStaysOnTheTextSessionAndBuildsNoIndex(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	for _, q := range []string{
+		`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref) VALUES(1,1,1,0,-1,1,'claude-transcript','user',1,'example-session-1',5,0)`,
+		`DELETE FROM meta WHERE key='session_ref_complete'`,
+		`DROP INDEX records_session_ref_source_time`,
+	} {
+		if _, err := s.wdb.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		s = open(t, dir)
+		if s.SessionRefReady() {
+			t.Fatalf("open %d: an older store is marked ready", i)
+		}
+		if hasIndex(t, s, "records_session_ref_source_time") {
+			t.Fatalf("open %d: the session_ref index was built over the live table", i)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A bulk rebuild is a new file: it is marked, and its session_ref index is built
+// with the other deferred indexes at the end of the load.
+func TestBulkRebuildIsMarkedAndBuildsTheSessionRefIndexAfterTheLoad(t *testing.T) {
+	dir := seededDir(t)
+	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.SessionRefReady() {
+		t.Fatal("a rebuilt store is not marked ready")
+	}
+	if hasIndex(t, s, "records_session_ref_source_time") {
+		t.Fatal("the session_ref index exists before the load: it must be deferred")
+	}
+	if err := s.FinishRebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if !hasIndex(t, s, "records_session_ref_source_time") {
+		t.Fatal("FinishRebuild did not build the session_ref index")
+	}
+	_ = s.Close()
+	s2, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	if !s2.SessionRefReady() {
+		t.Fatal("the mark did not survive the rebuild")
 	}
 }

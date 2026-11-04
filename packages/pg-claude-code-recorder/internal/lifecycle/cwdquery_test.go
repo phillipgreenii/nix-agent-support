@@ -23,6 +23,7 @@ const transcript = "claude-transcript"
 
 type cwdFixture struct {
 	t  *testing.T
+	st *store.Store
 	db *sql.DB
 	id int64
 }
@@ -41,7 +42,21 @@ func newCwdFixture(t *testing.T) *cwdFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return &cwdFixture{t: t, db: db}
+	return &cwdFixture{t: t, st: st, db: db}
+}
+
+// ref returns the session_ref of a session id, creating its sessions row, the
+// way the parser does.
+func (f *cwdFixture) ref(session string) int64 {
+	f.t.Helper()
+	if _, err := f.db.Exec(`INSERT INTO sessions(session_id,first_time_ns) VALUES(?,0) ON CONFLICT(session_id) DO NOTHING`, session); err != nil {
+		f.t.Fatal(err)
+	}
+	var ref int64
+	if err := f.db.QueryRow(`SELECT session_ref FROM sessions WHERE session_id=?`, session).Scan(&ref); err != nil {
+		f.t.Fatal(err)
+	}
+	return ref
 }
 
 // rec inserts a record and the given (field name, value) pairs; a nil value
@@ -49,8 +64,8 @@ func newCwdFixture(t *testing.T) *cwdFixture {
 func (f *cwdFixture) rec(session, source string, timeNS int64, fields ...[2]any) {
 	f.t.Helper()
 	f.id++
-	if _, err := f.db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
-VALUES(?,1,1,?,0,1,?,'x',1,?,?)`, f.id, f.id, source, session, timeNS); err != nil {
+	if _, err := f.db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref)
+VALUES(?,1,1,?,0,1,?,'x',1,?,?,?)`, f.id, f.id, source, session, timeNS, f.ref(session)); err != nil {
 		f.t.Fatal(err)
 	}
 	for _, fv := range fields {
@@ -129,9 +144,12 @@ func TestCwdQueryEquivalentToTheOldQuery(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newCwdFixture(t)
 			c.build(f)
-			want, got := f.run(oldCwdQuery, "s"), f.run(cwdQuery, "s")
+			want, got, gotRef := f.run(oldCwdQuery, "s"), f.run(cwdQuery, "s"), f.run(cwdQueryRef, "s")
 			if got != want {
 				t.Errorf("cwdQuery returned %s, old query %s", got, want)
+			}
+			if gotRef != want {
+				t.Errorf("cwdQueryRef returned %s, old query %s", gotRef, want)
 			}
 		})
 	}
@@ -179,22 +197,27 @@ func TestCwdQueryPlanStartsFromTheSessionIndex(t *testing.T) {
 		t.Logf("old query plan already avoids fields_name_n (the guard pins the order, it does not prove a regression):\n%s", oldPlan)
 	}
 
-	newPlan := plan(cwdQuery)
-	search := regexp.MustCompile(`SEARCH.*USING (COVERING )?INDEX records_session`)
-	scan := regexp.MustCompile(`SCAN`)
-	var sawSearch bool
-	for _, d := range newPlan {
-		if search.MatchString(d) {
-			sawSearch = true
+	for _, c := range []struct{ name, q, index string }{
+		{"text", cwdQuery, "records_session"},
+		{"ref", cwdQueryRef, "records_session_ref_source_time"},
+	} {
+		newPlan := plan(c.q)
+		search := regexp.MustCompile(`SEARCH.*USING (COVERING )?INDEX ` + c.index)
+		scan := regexp.MustCompile(`SCAN`)
+		var sawSearch bool
+		for _, d := range newPlan {
+			if search.MatchString(d) {
+				sawSearch = true
+			}
+			if scan.MatchString(d) {
+				t.Errorf("%s: plan row scans: %q", c.name, d)
+			}
+			if strings.Contains(d, "fields_name_n") {
+				t.Errorf("%s: plan row uses fields_name_n: %q", c.name, d)
+			}
 		}
-		if scan.MatchString(d) {
-			t.Errorf("plan row scans: %q", d)
+		if !sawSearch {
+			t.Errorf("%s: no plan row matches %v; plan: %s", c.name, search, fmt.Sprint(newPlan))
 		}
-		if strings.Contains(d, "fields_name_n") {
-			t.Errorf("plan row uses fields_name_n: %q", d)
-		}
-	}
-	if !sawSearch {
-		t.Errorf("no plan row matches %v; plan: %s", search, fmt.Sprint(newPlan))
 	}
 }

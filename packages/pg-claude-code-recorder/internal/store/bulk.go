@@ -154,6 +154,13 @@ func (s *Store) buildIndexesLocked() error {
 			return fmt.Errorf("store: build index %s: %w", ix.name, err)
 		}
 	}
+	if s.sessionRef {
+		for _, ix := range sessionRefIndexes {
+			if _, err := conn.ExecContext(ctx, ix.sql); err != nil {
+				return fmt.Errorf("store: build index %s: %w", ix.name, err)
+			}
+		}
+	}
 	s.deferIdx = false
 	return nil
 }

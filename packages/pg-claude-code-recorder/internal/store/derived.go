@@ -31,9 +31,9 @@ import (
 // session_stats is its mutable sibling (written once per parse batch, an
 // upsert), and session_files fans a session out to the files that hold it. They
 // are derived from records and rebuildable from it. For now records.session
-// stays the column every query reads and records.session_ref is written beside
-// it: the swap, the index on session_ref and the version bump belong to later
-// slices. A database created before these tables existed gets them (and the
+// stays the column every older store reads and records.session_ref is written
+// beside it; a store created empty by this code is marked (metaSessionRef) and
+// is read through session_ref, the version bump belongs to a later slice. A database created before these tables existed gets them (and the
 // session_ref column, see addSessionRefColumn) at open, but its older rows keep
 // session_ref 0 and are absent from the session tables until it is rebuilt.
 // first_version_id, entrypoint_id and user_type_id stay NULL until the lookup
@@ -221,6 +221,31 @@ var derivedIndexes = []struct{ name, sql string }{
 	{"records_source_type", `CREATE INDEX IF NOT EXISTS records_source_type ON records(source, type)`},
 	{"session_files_file", `CREATE INDEX IF NOT EXISTS session_files_file ON session_files(file_id)`},
 	{"texts_rec", `CREATE INDEX IF NOT EXISTS texts_rec ON texts(rec_id)`},
+}
+
+// metaSessionRef is the meta key that marks a store whose every records row
+// carries a session_ref (see SessionRefReady). Only a database created empty by
+// code that writes session_ref gets it: a database that existed before has older
+// rows with session_ref 0 and no session rows until it is rebuilt, so it never
+// gets the key and keeps answering from records.session.
+const metaSessionRef = "session_ref_complete"
+
+// sessionRefIndexes are the indexes on records.session_ref. They exist only in
+// a store marked with metaSessionRef: building one over the live table of an
+// older store would cost a full pass over every row for an index no query could
+// use yet. The composite serves both a lookup by session_ref alone (it is the
+// prefix) and the per-session transcript facts, so no plain session_ref index is
+// kept beside it.
+var sessionRefIndexes = []struct{ name, sql string }{
+	{"records_session_ref_source_time", `CREATE INDEX IF NOT EXISTS records_session_ref_source_time ON records(session_ref, source, time_ns)`},
+}
+
+func sessionRefIndexesSQL() string {
+	var b strings.Builder
+	for _, ix := range sessionRefIndexes {
+		b.WriteString(ix.sql + ";\n")
+	}
+	return b.String()
 }
 
 // derivedIndexesSQL is every derivedIndexes statement as one script.

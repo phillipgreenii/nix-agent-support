@@ -40,8 +40,8 @@ func oldFileFacts(t *testing.T, db *sql.DB, session string) (int64, []int64) {
 func (f *cwdFixture) recFile(session, source string, fileID, timeNS int64) {
 	f.t.Helper()
 	f.id++
-	if _, err := f.db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
-VALUES(?,?,1,?,0,1,?,'x',1,?,?)`, f.id, fileID, f.id, source, session, timeNS); err != nil {
+	if _, err := f.db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref)
+VALUES(?,?,1,?,0,1,?,'x',1,?,?,?)`, f.id, fileID, f.id, source, session, timeNS, f.ref(session)); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -64,22 +64,24 @@ func TestSessionFileFactsEqualTheOldPerQueryResult(t *testing.T) {
 
 	for _, session := range []string{"s", "other", "registry-only", "absent", "many"} {
 		oldLast, oldIDs := oldFileFacts(t, f.db, session)
-		last, ids, err := sessionFileFacts(f.db, session)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if last != oldLast {
-			t.Errorf("%s: last write %d, old %d", session, last, oldLast)
-		}
-		if session == "many" {
-			// Both are capped at 50 of 60 files; which 50 is unspecified for the old query.
-			if len(ids) != 50 || len(oldIDs) != 50 {
-				t.Errorf("many: %d and %d ids, want 50", len(ids), len(oldIDs))
+		for _, byRef := range []bool{false, true} {
+			last, ids, err := sessionFileFacts(f.db, session, byRef)
+			if err != nil {
+				t.Fatal(err)
 			}
-			continue
-		}
-		if !reflect.DeepEqual(ids, oldIDs) && (len(ids) != 0 || len(oldIDs) != 0) {
-			t.Errorf("%s: files %v, old %v", session, ids, oldIDs)
+			if last != oldLast {
+				t.Errorf("%s byRef=%v: last write %d, old %d", session, byRef, last, oldLast)
+			}
+			if session == "many" {
+				// Both are capped at 50 of 60 files; which 50 is unspecified for the old query.
+				if len(ids) != 50 || len(oldIDs) != 50 {
+					t.Errorf("many byRef=%v: %d and %d ids, want 50", byRef, len(ids), len(oldIDs))
+				}
+				continue
+			}
+			if !reflect.DeepEqual(ids, oldIDs) && (len(ids) != 0 || len(oldIDs) != 0) {
+				t.Errorf("%s byRef=%v: files %v, old %v", session, byRef, ids, oldIDs)
+			}
 		}
 	}
 }
@@ -87,21 +89,27 @@ func TestSessionFileFactsEqualTheOldPerQueryResult(t *testing.T) {
 func TestFileFactsQueryUsesTheSessionSourceTimeIndex(t *testing.T) {
 	f := newCwdFixture(t)
 	f.recFile("s", transcript, 1, 10)
-	rows, err := f.db.Query(`EXPLAIN QUERY PLAN `+fileFactsQuery, "s")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	var plan []string
-	for rows.Next() {
-		var id, parent, unused int
-		var d string
-		if err := rows.Scan(&id, &parent, &unused, &d); err != nil {
+	for _, c := range []struct{ q, index string }{
+		{fileFactsQuery, "records_session_source_time"},
+		{fileFactsQueryRef, "records_session_ref_source_time"},
+	} {
+		rows, err := f.db.Query(`EXPLAIN QUERY PLAN `+c.q, "s")
+		if err != nil {
 			t.Fatal(err)
 		}
-		plan = append(plan, d)
-	}
-	if p := strings.Join(plan, "\n"); !strings.Contains(p, "records_session_source_time") {
-		t.Errorf("plan does not use records_session_source_time:\n%s", p)
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var d string
+			if err := rows.Scan(&id, &parent, &unused, &d); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, d)
+		}
+		_ = rows.Close()
+		p := strings.Join(plan, "\n")
+		if !strings.Contains(p, c.index) || strings.Contains(p, "SCAN") {
+			t.Errorf("plan does not search %s:\n%s", c.index, p)
+		}
 	}
 }

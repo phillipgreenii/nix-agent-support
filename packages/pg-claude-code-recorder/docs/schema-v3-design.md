@@ -372,6 +372,27 @@ for them until it is rebuilt. Left to later slices: the `records_session` index 
 build over the live table is the version-bump slice's job), the swap of `session` for `session_ref`, and the
 lookup ids on `sessions`, which stay NULL until the lookup tables exist.
 
+Slice 3 as built: the query layer and the lifecycle engine read `session_ref`, but only on a store that is
+marked ready. A database created empty by the new code gets the meta key `session_ref_complete` and, with its
+still empty `records` table, the index `records_session_ref_source_time` on `(session_ref, source, time_ns)`
+(a bulk rebuild builds it with the other deferred indexes after the load). A database that already had a
+`records` table is never marked and never gets the index, because its older rows have `session_ref` 0 and no
+`sessions` row until a rebuild, and building an index over the live table would cost a full pass for an index
+no query may use yet. `Store.SessionRefReady` reports the mark; `query.Engine.SessionRef` and the lifecycle
+engine choose between the two paths on it, so an unmarked store keeps answering from `records.session`
+exactly as before. A rebuild is a new file, so the rebuilt store is marked and the swap to `session_ref`
+happens with it; the version bump (slice 8) needs no further switch. The composite index serves a lookup
+by `session_ref` alone as its prefix, so no separate plain `session_ref` index is created; slice 8 drops
+`records_session` and `records_session_source_time` with the column. Tests compare both paths on a real store
+and the plan guards cover both.
+
+Two choices differ from the table in section 8. First, the lifecycle last-write time and file set still read
+`records` filtered to `source='claude-transcript'` (now by `session_ref`) instead of `session_stats` and
+`session_files`: those two tables cover every source that carries the session id (registry, history and
+control-end records too), so using them would change the answer. Second, `cwdQuery` stays a join to `fields`
+(the lookup tables do not exist yet); it gets the `lk_cwd` join with slice 4, and its plan guard already
+names the index each form must search.
+
 ## 12. Decision for the operator
 
 Fold S1 to S6, S8 and S9 (and S7 if wanted) into one schema v3 rebuild, or defer v3?

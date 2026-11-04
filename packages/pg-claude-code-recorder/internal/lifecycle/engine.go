@@ -109,6 +109,13 @@ FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.nam
 const slashCommandQuery = `SELECT r.session, r.time_ns, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='slash_command')
 WHERE r.source='claude-history'`
 
+// sessionRefExpr reads a record's session id through its session_ref; the
+// *Ref queries below are the text queries with it in place of r.session, used
+// when the store marks every row as carrying a session_ref.
+const sessionRefExpr = "(SELECT s.session_id FROM sessions s WHERE s.session_ref=r.session_ref)"
+
+func viaSessionRef(q string) string { return strings.ReplaceAll(q, "r.session,", sessionRefExpr+",") }
+
 const endReasonQuery = `SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='reason')
 WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`
 
@@ -130,7 +137,14 @@ func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
 		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
 	}
 	db := rd.Q()
-	rows, err := db.Query(registryQuery)
+	ready := e.St.SessionRefReady()
+	pick := func(q string) string {
+		if ready {
+			return viaSessionRef(q)
+		}
+		return q
+	}
+	rows, err := db.Query(pick(registryQuery))
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +208,7 @@ func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
 	if err := drows.Close(); err != nil {
 		return nil, err
 	}
-	hrows, err := db.Query(slashCommandQuery)
+	hrows, err := db.Query(pick(slashCommandQuery))
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +229,7 @@ func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
 	if err := hrows.Close(); err != nil {
 		return nil, err
 	}
-	erows, err := db.Query(endReasonQuery)
+	erows, err := db.Query(pick(endReasonQuery))
 	if err != nil {
 		return nil, err
 	}
@@ -372,14 +386,31 @@ WHERE r.session=? AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id
 // records_session_source_time index replaces a MAX query and a DISTINCT query.
 const fileFactsQuery = `SELECT file_id, MAX(time_ns) FROM records WHERE session=? AND source='claude-transcript' GROUP BY file_id ORDER BY file_id`
 
+// cwdQueryRef and fileFactsQueryRef are the same two queries over session_ref,
+// used when the store marks every row as carrying one (store.SessionRefReady).
+// The session id resolves to its reference once, in a scalar subquery, and
+// records_session_ref_source_time serves the rest.
+// session_files and session_stats are not used here on purpose: they cover every
+// source of a session (registry, history and control-end records carry the id
+// too), while these facts are about the transcript only, so reading them would
+// change the answer.
+const cwdQueryRef = `SELECT f.s FROM records r CROSS JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
+WHERE r.session_ref=(SELECT session_ref FROM sessions WHERE session_id=?) AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
+
+const fileFactsQueryRef = `SELECT file_id, MAX(time_ns) FROM records WHERE session_ref=(SELECT session_ref FROM sessions WHERE session_id=?) AND source='claude-transcript' GROUP BY file_id ORDER BY file_id`
+
 // maxTranscriptFiles bounds how many of a session's files are checked for
 // surviving originals.
 const maxTranscriptFiles = 50
 
 // sessionFileFacts returns the newest transcript write time in nanoseconds (0
 // when there is none) and up to maxTranscriptFiles file ids of the session.
-func sessionFileFacts(db *sql.DB, session string) (last int64, ids []int64, err error) {
-	rows, err := db.Query(fileFactsQuery, session)
+func sessionFileFacts(db *sql.DB, session string, byRef bool) (last int64, ids []int64, err error) {
+	q := fileFactsQuery
+	if byRef {
+		q = fileFactsQueryRef
+	}
+	rows, err := db.Query(q, session)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -406,14 +437,19 @@ func sessionFileFacts(db *sql.DB, session string) (last int64, ids []int64, err 
 func (e *Engine) transcriptFacts(c *Conversation) error {
 	db := e.St.Read()
 	var cwd sql.NullString
-	err := db.QueryRow(cwdQuery, c.SessionID).Scan(&cwd)
+	byRef := e.St.SessionRefReady()
+	cq := cwdQuery
+	if byRef {
+		cq = cwdQueryRef
+	}
+	err := db.QueryRow(cq, c.SessionID).Scan(&cwd)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if cwd.Valid && cwd.String != "" {
 		c.Cwd = cwd.String
 	}
-	last, ids, err := sessionFileFacts(db, c.SessionID)
+	last, ids, err := sessionFileFacts(db, c.SessionID, byRef)
 	if err != nil {
 		return err
 	}
