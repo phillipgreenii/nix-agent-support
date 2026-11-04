@@ -173,6 +173,11 @@ type Settler struct {
 	gcache map[string]*conv
 	owner  map[int64]string // file id to the session it is placed in
 
+	// seen holds, during Tick's evaluate phase, the newest recorded change
+	// time of every file about to be evaluated (see prefetchLastSeen); nil
+	// otherwise. Guarded by run.
+	seen map[int64]int64
+
 	mu        sync.Mutex
 	phases    TickPhases // the last Tick's phase durations
 	removedAt []time.Time
@@ -523,6 +528,7 @@ func (s *Settler) Tick() (TickStats, error) {
 	}
 	sort.Strings(sessions)
 	var first error
+	s.prefetchLastSeen(groups, live, unchanged)
 	for _, session := range sessions {
 		if unchanged[session] {
 			// Already settled, no live process, nothing written since: what
@@ -536,6 +542,7 @@ func (s *Settler) Tick() (TickStats, error) {
 		}
 		stats.add(out, before[session])
 	}
+	s.seen = nil
 	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable {
 		if _, err := s.removeLocked(RemoveOptions{}, now, nil); err != nil && first == nil {
@@ -603,6 +610,41 @@ func (s *Settler) settledPrefilter(groups map[string]*conv, live map[string]bool
 		}
 	}
 	return before, unchanged
+}
+
+// prefetchLastSeen loads, in one statement, the last-seen time of every file
+// of the Conversations the evaluate loop will examine (not live, not skipped by
+// the prefilter), so lastSeen costs no statement per file. Files with no
+// commit, snapshot or tombstone are recorded as zero, which lastSeen reads as
+// "FirstSeen". On a read error the cache stays empty and lastSeen reads per
+// file as before. The caller holds the run lock and clears s.seen afterwards.
+func (s *Settler) prefetchLastSeen(groups map[string]*conv, live map[string]bool, unchanged map[string]bool) {
+	s.seen = nil
+	var ids []int64
+	for session, c := range groups {
+		if live[session] || unchanged[session] {
+			continue
+		}
+		for _, f := range c.files {
+			ids = append(ids, f.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var got map[int64]int64
+	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+		got, err = rd.LastSeenByFile(ids)
+		return err
+	}); err != nil {
+		return
+	}
+	for _, id := range ids {
+		if _, ok := got[id]; !ok {
+			got[id] = 0
+		}
+	}
+	s.seen = got
 }
 
 // add folds one evaluation Outcome into the stats. prior is the persisted
@@ -720,6 +762,9 @@ func (s *Settler) newest(c *conv) time.Time {
 
 func (s *Settler) lastSeen(f store.File) time.Time {
 	ns := f.FirstSeen
+	if v, ok := s.seen[f.ID]; ok {
+		return time.Unix(0, max(ns, v))
+	}
 	if cc, err := s.st.CopyCommits(f.ID); err == nil {
 		for _, c := range cc {
 			if c.SeenNS > ns {

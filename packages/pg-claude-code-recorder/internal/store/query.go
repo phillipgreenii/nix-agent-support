@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -358,6 +359,39 @@ func (s *Reader) CopyCommits(file int64) ([]CopyCommit, error) {
 			return nil, err
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// LastSeenByFile returns, in one aggregate statement, the newest time the
+// recorder saw each of the given files change: the latest of its copy commits,
+// snapshot versions and tombstones. A file with none of those is absent from
+// the map. The ids travel as one JSON array parameter, so the statement count
+// does not depend on how many files are asked for.
+func (s *Reader) LastSeenByFile(ids []int64) (map[int64]int64, error) {
+	out := map[int64]int64{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	arg, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.Query(`SELECT file_id, MAX(ns) FROM (
+SELECT file_id, seen_ns AS ns FROM commits WHERE file_id IN (SELECT value FROM json_each(?1))
+UNION ALL SELECT file_id, seen_ns FROM snapshots WHERE file_id IN (SELECT value FROM json_each(?1))
+UNION ALL SELECT file_id, at_ns FROM tombstones WHERE file_id IN (SELECT value FROM json_each(?1))
+) GROUP BY file_id`, string(arg))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var f, ns int64
+		if err := rows.Scan(&f, &ns); err != nil {
+			return nil, err
+		}
+		out[f] = ns
 	}
 	return out, rows.Err()
 }
