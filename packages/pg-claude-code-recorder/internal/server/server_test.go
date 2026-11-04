@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -142,5 +145,52 @@ func TestOfflineClientReportsDaemonOffline(t *testing.T) {
 	var we *wire.Error
 	if !errors.As(err, &we) || we.Name != wire.ErrDaemonOffline {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A timed-out request logs one query_timeout carrying its request id, the kind
+// and key arguments, and how its time split between running and waiting. The
+// handler advances an injected clock and charges the trace, so nothing sleeps.
+func TestQueryTimeoutLogsKindArgsAndWaitVersusExec(t *testing.T) {
+	o := obs.New(nil)
+	s := New(o, nil, func() any { return nil })
+	clk := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return clk }
+	s.Register("query", KindQuery, func(ctx context.Context, _ []byte) (any, *wire.Error) {
+		clk = clk.Add(1500 * time.Millisecond)
+		obs.TraceFrom(ctx).AddExec(400 * time.Millisecond)
+		return nil, wire.Errf(wire.ErrQueryTimeout, "deadline")
+	})
+	body := `{"op":"select","from":"records","limit":5,"api_token":"hunter2","where":{"session":"abc"}}`
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest("POST", "/v1/query", strings.NewReader(body))
+		r.Header.Set(wire.ClientHeader, "swiftbar")
+		s.Handler().ServeHTTP(httptest.NewRecorder(), r)
+	}
+	evs := o.EventsNamed(obs.EvQueryTimeout)
+	if len(evs) != 2 {
+		t.Fatalf("%d query_timeout events, want one per timeout", len(evs))
+	}
+	a := evs[0].Attrs
+	for k, want := range map[string]string{
+		"op": "query", "client": "swiftbar", "ms": "1500", "wait_ms": "1100", "exec_ms": "400",
+		"query_kind": "query/select/records",
+		"args":       `api_token=` + "", // replaced below
+	} {
+		if k == "args" {
+			continue
+		}
+		if a[k] != want {
+			t.Errorf("%s = %q, want %q", k, a[k], want)
+		}
+	}
+	if want := `from=records limit=5 op=select where={"session":"abc"}`; a["args"] != want {
+		t.Errorf("args = %q, want %q", a["args"], want)
+	}
+	if strings.Contains(a["args"], "hunter2") {
+		t.Error("a credential-named argument was logged")
+	}
+	if a["request_id"] == "" || a["request_id"] == evs[1].Attrs["request_id"] {
+		t.Errorf("request ids %q and %q must be set and distinct", a["request_id"], evs[1].Attrs["request_id"])
 	}
 }

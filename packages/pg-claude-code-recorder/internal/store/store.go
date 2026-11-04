@@ -82,6 +82,9 @@ type Options struct {
 	// transaction (DefaultReadTimeout when zero): no reader pins a WAL
 	// snapshot for longer.
 	ReadTimeout time.Duration
+	// Phase, when set, is called as a startup phase begins (name is a stable
+	// phase name) and its result is called when the phase ends; nil is a no-op.
+	Phase func(name string) (done func())
 	// ReadCacheKiB is the page cache of each read connection in KiB
 	// (DefaultReadCacheKiB when zero). SQLite allocates it lazily, so it is a
 	// ceiling per connection, not a reservation.
@@ -194,7 +197,9 @@ func Open(dir string, opt Options) (*Store, error) {
 		}
 	}
 	jpath := filepath.Join(dir, JournalName)
+	endPhase := phaseOf(opt.Phase, "store_journal_read")
 	recs, good, torn, err := readJournal(jpath)
+	endPhase()
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +235,10 @@ func Open(dir string, opt Options) (*Store, error) {
 		}
 		dbExisted = false
 	}
-	if err := s.openDB(dbPath, opt.BulkRebuild); err != nil {
+	endPhase = phaseOf(opt.Phase, "store_open_db")
+	err = s.openDB(dbPath, opt.BulkRebuild)
+	endPhase()
+	if err != nil {
 		var older *SchemaOlderError
 		if !dbExisted || errors.As(err, &older) {
 			return nil, err
@@ -269,7 +277,10 @@ func Open(dir string, opt Options) (*Store, error) {
 		_ = s.Close()
 		return nil, &SchemaNewerError{Found: int(v), Known: SchemaVersion}
 	}
-	if err := s.replay(recs); err != nil {
+	endPhase = phaseOf(opt.Phase, "store_replay")
+	err = s.replay(recs)
+	endPhase()
+	if err != nil {
 		_ = s.Close()
 		return nil, err
 	}
@@ -293,6 +304,18 @@ func Open(dir string, opt Options) (*Store, error) {
 		}
 	}
 	return s, nil
+}
+
+// phaseOf starts the named startup phase on hook (nil is a no-op) and returns
+// its end function.
+func phaseOf(hook func(string) func(), name string) func() {
+	if hook == nil {
+		return func() {}
+	}
+	if done := hook(name); done != nil {
+		return done
+	}
+	return func() {}
 }
 
 func (s *Store) openDB(path string, bulk bool) error {

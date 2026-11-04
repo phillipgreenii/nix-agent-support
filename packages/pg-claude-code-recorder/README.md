@@ -105,7 +105,10 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `level`, `event`, and where they apply `file_id`, `session`, `generation`, `offset`,
   `parser_version`, `cursor`, `stage`. Each request logs `request` with the caller's `--client`. Each settle tick
   logs `settle_tick` (`outcome`, `duration_ms`, `examined`, `unchanged`, `settled_now`, `transitions`) and a tick
-  over one minute also logs `settle_tick_slow`.
+  over one minute also logs `settle_tick_slow` with `duration_ms`, `examined` and the phase breakdown
+  (`reads_ms`, `prefilter_ms`, `evaluate_ms`, `removal_ms`, `refresh_ms`). A start logs one `startup_phase`
+  (`phase`, `duration_ms`) per phase, a `startup_phase_begin` first for the phases that can run long, and one
+  `startup_complete` (`duration_ms`, `phases`) when it serves.
 - Known limitation: `status` `stage_counts` omits `live` and `quiet`, while the dashboard and the metrics include
   them (phase 1). `status --watch` runs an O(files) loop on the daemon every 2 s, so do not leave it open while
   profiling.
@@ -212,7 +215,9 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   `query.timeout` (default 30s), so no reader pins the WAL snapshot longer; a read transaction is never
   held while a waiter waits (it reads, releases, waits, then reads again). A read that hits the
   deadline answers `query_timeout` (504, exit 6, `client.ErrQueryTimeout`, retryable) and counts in
-  `query_timeouts_total{op}`.
+  `query_timeouts_total{op}`; it also logs one `query_timeout` with `request_id`, `query_kind`, `args` (the key
+  arguments, credential-named keys omitted), `wait_ms` (elapsed time not spent running in SQLite: the wait for a
+  read slot plus the handler's own work) and `exec_ms` (time statements and transactions ran).
 - **Read connection memory and batching**: read connections use a larger SQLite page cache and a bounded memory map, because every fresh connection
   to a file of tens of gigabytes starts cold: `query.readCacheMiB` (default 64) is the per-connection
   `cache_size` ceiling and `query.readMmapMiB` (default 512, 0 disables) the per-connection `mmap_size`

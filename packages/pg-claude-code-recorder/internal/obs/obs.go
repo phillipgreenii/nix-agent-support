@@ -65,6 +65,17 @@ const (
 	EvProcessExit      = "process_exit"
 )
 
+// Event names of the daemon's start: one startup_phase per phase (with
+// startup_phase_begin before a phase that can run long) and one
+// startup_complete when the daemon serves.
+const (
+	EvStartupPhaseBegin = "startup_phase_begin"
+	EvStartupPhase      = "startup_phase"
+	EvStartupComplete   = "startup_complete"
+	// EvQueryTimeout is a request that hit the query deadline.
+	EvQueryTimeout = "query_timeout"
+)
+
 // Metric and event names of the settle stage.
 const (
 	MConversationsByStage = "conversations_by_stage"
@@ -95,6 +106,7 @@ const (
 	MSettleTickLastDuration  = "settle_tick_last_duration_seconds"
 	MSettleTickLastTimestamp = "settle_tick_last_timestamp_seconds"
 	EvSettleTick             = "settle_tick"
+	EvSettleTickSlow         = "settle_tick_slow"
 	EvWALTruncateStart       = "wal_truncate_start"
 	EvWALTruncateDone        = "wal_truncate_done"
 )

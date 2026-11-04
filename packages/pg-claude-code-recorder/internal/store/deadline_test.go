@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
 // slowQuery runs for far longer than any test waits: a recursive count that also reads a table, so it holds a read snapshot.
@@ -112,5 +115,63 @@ func TestReopenedReadConnectionsKeepTheirPragmas(t *testing.T) {
 	}
 	if _, err := s.Read().Exec(`INSERT INTO meta(key,value) VALUES('x','y')`); err == nil {
 		t.Fatal("the read pool accepted a write")
+	}
+}
+
+// Statements and transactions on the read pool charge their run time to the
+// request trace in their context, so a timed-out request can split its time
+// into running and waiting; a context with no trace costs nothing.
+func TestReadPoolChargesRunTimeToTheRequestTrace(t *testing.T) {
+	s, err := Open(t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	tr := &obs.ReqTrace{ID: "r1"}
+	ctx := obs.WithTrace(context.Background(), tr)
+	var n int
+	if err := s.Read().QueryRowContext(ctx, `SELECT count(*) FROM meta`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	afterStmt := tr.Exec()
+	if afterStmt <= 0 {
+		t.Fatalf("a statement outside a transaction was not charged: %v", afterStmt)
+	}
+	tx, err := s.Read().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM meta`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.Exec(); got != afterStmt {
+		t.Fatalf("charged while the transaction was open: %v then %v", afterStmt, got)
+	}
+	_ = tx.Rollback()
+	if tr.Exec() <= afterStmt {
+		t.Fatalf("the transaction was not charged at its end: %v", tr.Exec())
+	}
+	other := &obs.ReqTrace{}
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT count(*) FROM meta`).Scan(&n); err != nil || other.Exec() != 0 {
+		t.Fatalf("untraced read: %v %v", err, other.Exec())
+	}
+}
+
+// Open reports each store start phase to Options.Phase, in order, with the
+// phase ended before the next begins.
+func TestOpenReportsStartPhases(t *testing.T) {
+	var log []string
+	s, err := Open(t.TempDir(), Options{Phase: func(name string) func() {
+		log = append(log, "begin "+name)
+		return func() { log = append(log, "end "+name) }
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	want := []string{"begin store_journal_read", "end store_journal_read", "begin store_open_db", "end store_open_db", "begin store_replay", "end store_replay"}
+	if strings.Join(log, ",") != strings.Join(want, ",") {
+		t.Fatalf("phases %v, want %v", log, want)
 	}
 }

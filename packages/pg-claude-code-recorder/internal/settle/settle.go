@@ -164,6 +164,7 @@ type Settler struct {
 	run sync.Mutex // one pass at a time
 
 	mu        sync.Mutex
+	phases    TickPhases // the last Tick's phase durations
 	removedAt []time.Time
 	last      map[string]string
 	reasons   map[string]string
@@ -316,13 +317,42 @@ type TickStats struct {
 	Transitions int // stage changes made by this tick
 }
 
+// TickPhases is how long each part of the last Tick took, for the slow-tick log
+// line: Reads is the live-process and file-group reads, Prefilter the one
+// transaction that skips settled Conversations, Evaluate the per-Conversation
+// loop (its reads and writes), Removal the removal pass and Refresh the final
+// stage and gauge refresh.
+type TickPhases struct {
+	Reads, Prefilter, Evaluate, Removal, Refresh time.Duration
+}
+
+// LastPhases returns the phase durations of the most recent Tick (zero before
+// the first).
+func (s *Settler) LastPhases() TickPhases {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.phases
+}
+
 // Tick runs one pass: it evaluates every Conversation that is not live, moves
 // the ones whose Process came back to Live, and refreshes the gauges.
 func (s *Settler) Tick() (TickStats, error) {
 	s.run.Lock()
 	defer s.run.Unlock()
 	var stats TickStats
+	var ph TickPhases
+	defer func() {
+		s.mu.Lock()
+		s.phases = ph
+		s.mu.Unlock()
+	}()
 	now := s.cfg.Clock.Now()
+	t0 := now
+	lap := func(into *time.Duration) {
+		n := s.cfg.Clock.Now()
+		*into = n.Sub(t0)
+		t0 = n
+	}
 	s.checkLow()
 	live, err := s.cfg.Live()
 	if err != nil {
@@ -333,7 +363,9 @@ func (s *Settler) Tick() (TickStats, error) {
 		return stats, err
 	}
 	stats.Examined = len(groups)
+	lap(&ph.Reads)
 	before, unchanged := s.settledPrefilter(groups, live)
+	lap(&ph.Prefilter)
 	sessions := make([]string, 0, len(groups))
 	for k := range groups {
 		sessions = append(sessions, k)
@@ -353,6 +385,7 @@ func (s *Settler) Tick() (TickStats, error) {
 		}
 		stats.add(out, before[session])
 	}
+	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable {
 		if _, err := s.removeLocked(RemoveOptions{}, now); err != nil && first == nil {
 			first = fmt.Errorf("removal pass: %w", err)
@@ -362,7 +395,9 @@ func (s *Settler) Tick() (TickStats, error) {
 		}
 	}
 	// A persisted stage whose Conversation has no files any more is dropped from view.
+	lap(&ph.Removal)
 	s.refresh(groups, live, now)
+	lap(&ph.Refresh)
 	return stats, first
 }
 

@@ -81,6 +81,9 @@ type Daemon struct {
 	clock clock.Clock
 
 	startedAt time.Time
+	su        *startupTimer
+	// tickPhases returns the phase breakdown of the settle tick that just ran.
+	tickPhases func() settle.TickPhases
 
 	backfillDone atomic.Bool
 	filesTotal   atomic.Int64
@@ -119,21 +122,27 @@ func Open(opt Options) (*Daemon, error) {
 	}
 	o := obs.New(opt.Logger)
 	o.DisableCapture()
+	su := newStartupTimer(o, opt.Clock)
+	endPhase := su.begin("state_dir", false)
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB)})
+	endPhase()
+	st, err := store.Open(cfg.StateDir, store.Options{Phase: su.storeHook, Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB)})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), stop: make(chan struct{}), statusReady: make(chan struct{})}
+	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, stop: make(chan struct{}), statusReady: make(chan struct{})}
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
 	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
 	if err != nil {
 		_ = st.Close()
 		return nil, err
 	}
-	if err := d.cp.Recover(); err != nil {
+	endPhase = su.begin("copier_recover", true)
+	err = d.cp.Recover()
+	endPhase()
+	if err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover copies: %w", err)
 	}
@@ -161,12 +170,19 @@ func Open(opt Options) (*Daemon, error) {
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
 		HoldRate: cfg.FormatHoldRate,
 	})
+	d.tickPhases = d.sett.LastPhases
+	endPhase = su.begin("doctor_gauges", false)
 	d.loadDoctorGauges()
-	if err := d.sett.Recover(); err != nil {
+	endPhase()
+	endPhase = su.begin("settle_recover", true)
+	err = d.sett.Recover()
+	endPhase()
+	if err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover settle: %w", err)
 	}
 	d.ckpt = newFileCheckpoint(cfg.StateDir)
+	endPhase = su.begin("watcher_new", false)
 	d.w, err = watcher.New(watcher.Config{
 		Roots:         cfg.Roots(),
 		Filter:        d.filter,
@@ -178,6 +194,7 @@ func Open(opt Options) (*Daemon, error) {
 		Logger:        o.Log,
 		DisableEvents: opt.NoEvents,
 	})
+	endPhase()
 	if err != nil {
 		_ = st.Close()
 		return nil, err
@@ -355,14 +372,17 @@ func (d *Daemon) Start() error {
 	d.srv.Register("remove", server.KindQuery, d.opRemove)
 	d.srv.Register("extract", server.KindQuery, d.opExtract)
 	d.srv.Register("doctor", server.KindQuery, d.opDoctor)
+	endPhase := d.su.begin("listener_bind", false)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	endPhase()
 	addr := d.opt.MetricsAddr
 	if addr == "" {
 		addr = d.cfg.MetricsAddr
 	}
 	if addr != "" {
+		endPhase = d.su.begin("metrics_listen", false)
 		exp, err := exporter.Start(addr, d.obs.Reg, d.scrapeRefresh)
 		if err != nil {
 			d.obs.Log.Warn("metrics_exporter_failed", "err", err.Error())
@@ -370,12 +390,17 @@ func (d *Daemon) Start() error {
 			d.exp = exp
 			d.obs.Event("metrics_listening", "addr", exp.Addr())
 		}
+		endPhase()
 	}
+	endPhase = d.su.begin("watcher_start", true)
 	if err := d.w.Start(); err != nil {
 		d.srv.Close()
 		return fmt.Errorf("start watcher: %w", err)
 	}
+	endPhase()
+	endPhase = d.su.begin("tracker_startup", true)
 	d.tr.Startup()
+	endPhase()
 	d.refreshing.Add(7)
 	d.statusLoopOn.Store(true)
 	go d.statusLoop()
@@ -387,6 +412,7 @@ func (d *Daemon) Start() error {
 	go d.trackLoop()
 	d.obs.Event("serving", "socket", d.cfg.Socket, "claude_dir", d.cfg.ClaudeDir, "state_dir", d.cfg.StateDir,
 		"version", d.opt.Version)
+	d.su.complete()
 	return nil
 }
 
@@ -462,7 +488,15 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 		"settled_now", strconv.Itoa(stats.SettledNow),
 		"transitions", strconv.Itoa(stats.Transitions))
 	if dur > settleTickSlow {
-		d.obs.Log.Warn("settle_tick_slow", "duration_ms", dur.Milliseconds())
+		attrs := []any{"duration_ms", dur.Milliseconds(), "examined", stats.Examined}
+		if d.tickPhases != nil {
+			p := d.tickPhases()
+			attrs = append(attrs,
+				"reads_ms", p.Reads.Milliseconds(), "prefilter_ms", p.Prefilter.Milliseconds(),
+				"evaluate_ms", p.Evaluate.Milliseconds(), "removal_ms", p.Removal.Milliseconds(),
+				"refresh_ms", p.Refresh.Milliseconds())
+		}
+		d.obs.Log.Warn(obs.EvSettleTickSlow, attrs...)
 	}
 }
 

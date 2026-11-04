@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
 // DefaultReadTimeout is the deadline every read-pool statement and read
@@ -90,6 +92,37 @@ type dconn struct {
 
 	mu    sync.Mutex
 	txEnd time.Time // end of the open transaction's deadline; zero outside one
+
+	// txTrace and txStart account the open transaction's run time to its request.
+	txTrace *obs.ReqTrace
+	txStart time.Time
+}
+
+// stmtTrace returns the request trace to charge a statement to, with its
+// start time; nil when the statement runs inside a transaction (the
+// transaction is charged as a whole) or the request carries no trace.
+func (cn *dconn) stmtTrace(ctx context.Context) (*obs.ReqTrace, time.Time) {
+	cn.mu.Lock()
+	inTx := !cn.txEnd.IsZero()
+	cn.mu.Unlock()
+	if inTx {
+		return nil, time.Time{}
+	}
+	if tr := obs.TraceFrom(ctx); tr != nil {
+		return tr, time.Now()
+	}
+	return nil, time.Time{}
+}
+
+// endTx charges the open transaction's run time to its request.
+func (cn *dconn) endTx() {
+	cn.mu.Lock()
+	tr, t0 := cn.txTrace, cn.txStart
+	cn.txTrace, cn.txStart = nil, time.Time{}
+	cn.mu.Unlock()
+	if tr != nil {
+		tr.AddExec(time.Since(t0))
+	}
 }
 
 // bound derives the context a statement runs under: the open transaction's
@@ -153,6 +186,11 @@ func (cn *dconn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx,
 		return nil, err
 	}
 	cn.setTxEnd(time.Now().Add(cn.timeout))
+	if tr := obs.TraceFrom(ctx); tr != nil {
+		cn.mu.Lock()
+		cn.txTrace, cn.txStart = tr, time.Now()
+		cn.mu.Unlock()
+	}
 	return &dtx{Tx: tx, cn: cn}, nil
 }
 
@@ -161,14 +199,16 @@ func (cn *dconn) QueryContext(ctx context.Context, query string, args []driver.N
 	if !ok {
 		return nil, driver.ErrSkip
 	}
+	tr, t0 := cn.stmtTrace(ctx)
 	bctx, cancel := cn.bound(ctx)
 	rs, err := q.QueryContext(bctx, query, args)
 	if err != nil {
 		err = fixErr(bctx, err)
 		cancel()
+		tr.AddExec(time.Since(t0))
 		return nil, err
 	}
-	return &drows{Rows: rs, ctx: bctx, cancel: cancel}, nil
+	return &drows{Rows: rs, ctx: bctx, cancel: cancel, tr: tr, t0: t0}, nil
 }
 
 func (cn *dconn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -176,8 +216,10 @@ func (cn *dconn) ExecContext(ctx context.Context, query string, args []driver.Na
 	if !ok {
 		return nil, driver.ErrSkip
 	}
+	tr, t0 := cn.stmtTrace(ctx)
 	bctx, cancel := cn.bound(ctx)
 	defer cancel()
+	defer func() { tr.AddExec(time.Since(t0)) }()
 	res, err := e.ExecContext(bctx, query, args)
 	return res, fixErr(bctx, err)
 }
@@ -197,6 +239,7 @@ func (cn *dconn) CheckNamedValue(nv *driver.NamedValue) error {
 }
 
 func (cn *dconn) ResetSession(ctx context.Context) error {
+	cn.endTx()
 	cn.setTxEnd(time.Time{})
 	if r, ok := cn.Conn.(driver.SessionResetter); ok {
 		return r.ResetSession(ctx)
@@ -210,11 +253,13 @@ type dtx struct {
 }
 
 func (t *dtx) Commit() error {
+	t.cn.endTx()
 	t.cn.setTxEnd(time.Time{})
 	return t.Tx.Commit()
 }
 
 func (t *dtx) Rollback() error {
+	t.cn.endTx()
 	t.cn.setTxEnd(time.Time{})
 	return t.Tx.Rollback()
 }
@@ -225,8 +270,10 @@ type dstmt struct {
 }
 
 func (s *dstmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	tr, t0 := s.cn.stmtTrace(ctx)
 	bctx, cancel := s.cn.bound(ctx)
 	defer cancel()
+	defer func() { tr.AddExec(time.Since(t0)) }()
 	var res driver.Result
 	var err error
 	if e, ok := s.Stmt.(driver.StmtExecContext); ok {
@@ -238,6 +285,7 @@ func (s *dstmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driv
 }
 
 func (s *dstmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	tr, t0 := s.cn.stmtTrace(ctx)
 	bctx, cancel := s.cn.bound(ctx)
 	var rs driver.Rows
 	var err error
@@ -249,9 +297,10 @@ func (s *dstmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 	if err != nil {
 		err = fixErr(bctx, err)
 		cancel()
+		tr.AddExec(time.Since(t0))
 		return nil, err
 	}
-	return &drows{Rows: rs, ctx: bctx, cancel: cancel}, nil
+	return &drows{Rows: rs, ctx: bctx, cancel: cancel, tr: tr, t0: t0}, nil
 }
 
 func (s *dstmt) CheckNamedValue(nv *driver.NamedValue) error {
@@ -274,6 +323,8 @@ type drows struct {
 	driver.Rows
 	ctx    context.Context
 	cancel context.CancelFunc
+	tr     *obs.ReqTrace // charged the statement's run time at Close; nil when untraced
+	t0     time.Time
 }
 
 func (r *drows) Next(dest []driver.Value) error {
@@ -287,5 +338,9 @@ func (r *drows) Next(dest []driver.Value) error {
 func (r *drows) Close() error {
 	err := r.Rows.Close()
 	r.cancel()
+	if r.tr != nil {
+		r.tr.AddExec(time.Since(r.t0))
+		r.tr = nil
+	}
 	return err
 }

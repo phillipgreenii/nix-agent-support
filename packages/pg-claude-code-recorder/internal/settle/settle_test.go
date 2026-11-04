@@ -544,3 +544,23 @@ func TestTickReturnsStats(t *testing.T) {
 		t.Fatalf("second tick %+v, want %+v", got, want)
 	}
 }
+
+// A tick reports how long each of its parts took: a slow live-process read
+// (the injected Live advances the fake clock) lands in the reads phase and
+// nowhere else.
+func TestTickRecordsPhaseDurations(t *testing.T) {
+	e := newEnv(t, false)
+	e.seed(5, time.Hour)
+	if got := e.sett.LastPhases(); got != (TickPhases{}) {
+		t.Fatalf("phases before any tick: %+v", got)
+	}
+	live := e.sett.cfg.Live
+	e.sett.cfg.Live = func() (map[string]bool, error) {
+		e.clk.Advance(7 * time.Second)
+		return live()
+	}
+	e.tick()
+	if got, want := e.sett.LastPhases(), (TickPhases{Reads: 7 * time.Second}); got != want {
+		t.Fatalf("phases = %+v, want %+v", got, want)
+	}
+}
