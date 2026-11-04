@@ -830,6 +830,322 @@
           "legendFormat": "new keys per interval"
         }
       ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "loop duration p99 by loop",
+      "description": "p99 duration of one pass of each periodic loop (all 11: settle_tick, refresh_gauges, wal_checkpoint, watcher_sweep, copier_ingest, parser_drain, tracker_tick, tracker_poll, status_refresh, doctor, removal_pass), in seconds, over a window of at least 5 minutes. removal_pass is nested inside settle_tick, not additive. The loop-stalled alert covers loops that stop or hang, not a slow pass; no alert covers a slow pass yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 80,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, loop) (rate(pg_claude_code_recorder_loop_duration_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "{{loop}}"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "loop runs by loop and outcome",
+      "description": "Passes per second of each periodic loop by outcome, ok or error (copier_ingest is per event and is counted by ingest results instead). The loop-stalled alert covers a loop whose passes stop.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 80,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (loop, outcome) (rate(pg_claude_code_recorder_loop_runs_total[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{loop}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "loop in flight",
+      "description": "Age in seconds of the oldest pass of each loop that is running now (0 when idle). A pass over 600 s is stalled. The loop-stalled alert covers this panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 88,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (loop) (pg_claude_code_recorder_loop_in_flight_seconds)",
+          "range": true,
+          "legendFormat": "{{loop}}"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "ingest results",
+      "description": "Copier ingests per second by result: copied, new_generation, unchanged, skipped, snapshot, link, missing, tombstone, raced, error. A high unchanged share means events that did no work. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 88,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(pg_claude_code_recorder_ingest_results_total[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "sweep walked vs unchanged candidate",
+      "description": "Files per second the watcher sweep walked, and the share it found unchanged (candidates a later phase could skip; observation only, nothing is skipped today). no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 96,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(pg_claude_code_recorder_sweep_files_total[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "lock waits",
+      "description": "p99 time in seconds spent waiting for the copier lock and for the store write lock (only contended acquisitions are observed, so an empty panel means no contention). no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 96,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pg_claude_code_recorder_copier_lock_wait_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "copier p99"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pg_claude_code_recorder_store_write_lock_wait_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "store write p99"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "request duration p99 by op",
+      "description": "p99 duration in seconds of requests to the recorder by operation name (anything unregistered is unknown), over a window of at least 5 minutes. The slow_request log line names the op, client and duration of each request over 10 s. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 104,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(pg_claude_code_recorder_query_duration_seconds_bucket[$__rate_interval])))",
+          "range": true,
+          "legendFormat": "{{op}}"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "requests in flight by op",
+      "description": "Requests being served now, by operation name. A count that stays above 0 means a request is stuck. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 104,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (op) (pg_claude_code_recorder_requests_inflight)",
+          "range": true,
+          "legendFormat": "{{op}}"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "slow requests (over 10 s) by op",
+      "description": "Requests that took over 10 s in the last hour, by operation name: all requests minus those in the le=10 bucket. Each also logs a slow_request line. The request-slow alert covers this panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (op) (increase(pg_claude_code_recorder_query_duration_seconds_count[1h])) - sum by (op) (increase(pg_claude_code_recorder_query_duration_seconds_bucket{le=\"10\"}[1h]))",
+          "range": true,
+          "legendFormat": "{{op}}"
+        }
+      ]
     }
   ]
 }
