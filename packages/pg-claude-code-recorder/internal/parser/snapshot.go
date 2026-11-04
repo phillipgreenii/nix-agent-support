@@ -105,6 +105,12 @@ func (p *Parser) reparseSnapshots(f store.File) error {
 }
 
 func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captures, sn store.Snapshot, replace bool) (int, error) {
+	if replace {
+		// Replacing deletes by (file_id, gen): that needs the deferred indexes.
+		if err := p.cfg.Store.EnsureIndexes(); err != nil {
+			return 0, err
+		}
+	}
 	fh, err := p.cfg.Store.OpenPointer(f.ID, sn.Version)
 	if err != nil {
 		return 0, err
@@ -157,6 +163,12 @@ func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tomb
 	ats, err := p.cfg.Store.Tombstones(f.ID)
 	if err != nil {
 		return 0, err
+	}
+	if len(ats) > 0 {
+		// The look-up by key below needs records_ident (deferred in a bulk rebuild).
+		if err := p.cfg.Store.EnsureIndexes(); err != nil {
+			return 0, err
+		}
 	}
 	var lastRaw []byte
 	if fh, err := p.cfg.Store.OpenPointer(f.ID, last.Version); err == nil {

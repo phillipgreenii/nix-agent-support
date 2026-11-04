@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 )
@@ -87,7 +89,97 @@ func (s *Store) beginRebuild() error {
 	return nil
 }
 
-// FinishRebuild completes a bulk rebuild: it commits what is open, restores
+// DuplicateRecordsError means the deferred build of the unique index
+// records_ident found rows that share (file_id, gen, off, item). The load did
+// not check that inline; the rebuild fails and reports the rows rather than
+// dropping any. The unfinished-rebuild marker stays, so index.db is refused
+// until the rebuild is rerun.
+type DuplicateRecordsError struct {
+	// Rows are the duplicated keys (at most duplicateReportRows of them).
+	Rows []DuplicateRecord
+}
+
+// DuplicateRecord is one duplicated records key and how many rows hold it.
+type DuplicateRecord struct {
+	File, Gen, Off, Item int64
+	Count                int
+}
+
+const duplicateReportRows = 20
+
+func (e *DuplicateRecordsError) Error() string {
+	var b strings.Builder
+	b.WriteString("rebuild: cannot build the unique index records_ident, these records share a key (file_id gen off item x rows):")
+	for _, r := range e.Rows {
+		fmt.Fprintf(&b, " (%d %d %d %d x%d)", r.File, r.Gen, r.Off, r.Item, r.Count)
+	}
+	return b.String()
+}
+
+// EnsureIndexes builds the secondary indexes of a bulk rebuild now if they are
+// still deferred. The parser calls it before the few paths that look records
+// up by key (a re-parse, a tombstone check), which would otherwise scan the
+// whole table; it does nothing for a store that is not deferring. It commits
+// the open batch first and MUST NOT be called inside WithWrite.
+func (s *Store) EnsureIndexes() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.deferIdx {
+		return nil
+	}
+	if err := s.commitBatchLocked(); err != nil {
+		return err
+	}
+	return s.buildIndexesLocked()
+}
+
+// buildIndexesLocked runs the deferred index statements, largest first, one
+// transaction each, and reports a records_ident violation as a
+// DuplicateRecordsError.
+func (s *Store) buildIndexesLocked() error {
+	ctx := context.Background()
+	conn, err := s.wdb.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	for _, ix := range derivedIndexes {
+		if _, err := conn.ExecContext(ctx, ix.sql); err != nil {
+			if ix.name == "records_ident" {
+				if dup := duplicateRecords(ctx, conn); dup != nil {
+					return dup
+				}
+			}
+			return fmt.Errorf("store: build index %s: %w", ix.name, err)
+		}
+	}
+	s.deferIdx = false
+	return nil
+}
+
+func duplicateRecords(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `SELECT file_id,gen,off,item,COUNT(*) FROM records
+GROUP BY file_id,gen,off,item HAVING COUNT(*)>1 ORDER BY file_id,gen,off,item LIMIT `+strconv.Itoa(duplicateReportRows))
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+	var e DuplicateRecordsError
+	for rows.Next() {
+		var r DuplicateRecord
+		if rows.Scan(&r.File, &r.Gen, &r.Off, &r.Item, &r.Count) != nil {
+			return nil
+		}
+		e.Rows = append(e.Rows, r)
+	}
+	if len(e.Rows) == 0 {
+		return nil
+	}
+	return &e
+}
+
+// FinishRebuild completes a bulk rebuild: it commits what is open, builds the
+// deferred secondary indexes, restores
 // synchronous=FULL, the default FTS5 automerge and autocheckpoint, merges the
 // FTS5 segments, checkpoints the WAL into the database file, and only then
 // clears the unfinished marker. A store not opened for a bulk rebuild is left
@@ -102,6 +194,11 @@ func (s *Store) FinishRebuild() error {
 	ctx := context.Background()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.deferIdx {
+		if err := s.buildIndexesLocked(); err != nil {
+			return err
+		}
+	}
 	conn, err := s.wdb.Conn(ctx)
 	if err != nil {
 		return err

@@ -105,6 +105,7 @@ type Store struct {
 
 	// Bulk rebuild state (bulk.go), guarded by mu.
 	bulk        bool // opened for a bulk rebuild, not yet finished
+	deferIdx    bool // bulk rebuild whose secondary indexes are not built yet
 	batching    bool // WithWrite calls join one open transaction
 	btx         *sql.Tx
 	bRecs       int
@@ -295,7 +296,12 @@ func (s *Store) openDB(path string, bulk bool) error {
 	}
 	// One transaction: with synchronous=FULL each statement of a multi-statement
 	// Exec would otherwise sync on its own (the FTS5 tables add many).
-	if err := execInTx(w, schemaSQL+derivedSQL); err != nil {
+	ddl := schemaSQL + derivedSQL()
+	if bulk {
+		// A bulk rebuild creates the secondary indexes after the load.
+		ddl = schemaSQL + derivedTablesSQL
+	}
+	if err := execInTx(w, ddl); err != nil {
 		_ = w.Close()
 		return err
 	}
@@ -320,6 +326,7 @@ func (s *Store) openDB(path string, bulk bool) error {
 	}
 	c.SetMaxOpenConns(1)
 	s.wdb, s.rdb, s.cdb = w, r, c
+	s.deferIdx = bulk
 	return nil
 }
 
@@ -620,9 +627,9 @@ var errNotFound = errors.New("store: not found")
 var ErrNotFound = errNotFound
 
 // dropFullFieldsIndex drops fields_name_n when an earlier build of the version
-// 2 schema created it as a full index: CREATE INDEX IF NOT EXISTS in derivedSQL
+// 2 schema created it as a full index: CREATE INDEX IF NOT EXISTS in derivedIndexes
 // would keep it, and the full index is the size the partial one exists to
-// avoid. derivedSQL then recreates it partial. A partial index (its SQL has a
+// avoid. derivedIndexes then recreates it partial. A partial index (its SQL has a
 // WHERE clause) is left alone, so a normal open costs one catalog read.
 func dropFullFieldsIndex(db *sql.DB) error {
 	var def sql.NullString

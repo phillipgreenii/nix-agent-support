@@ -143,3 +143,35 @@ func TestCrashMidBatchLeavesAFileTheNextStartRefuses(t *testing.T) {
 		t.Fatalf("next start after a crash mid-rebuild: %v, want UnfinishedRebuildError", err)
 	}
 }
+
+// A deferred build of the unique index must fail loudly on duplicate records,
+// name the rows, and leave the file marked unfinished (never drop a row).
+func TestDeferredUniqueIndexViolationFailsTheRebuildAndReportsTheRows(t *testing.T) {
+	dir := seededDir(t)
+	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	ins := `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version) VALUES(7,1,100,0,5,'src','t',1)`
+	for i := 0; i < 2; i++ {
+		if _, err := s.wdb.Exec(ins); err != nil {
+			t.Fatalf("a deferred load must accept the duplicate inline: %v", err)
+		}
+	}
+	err = s.FinishRebuild()
+	var dup *DuplicateRecordsError
+	if !errors.As(err, &dup) {
+		t.Fatalf("FinishRebuild: %v, want DuplicateRecordsError", err)
+	}
+	if len(dup.Rows) != 1 || dup.Rows[0] != (DuplicateRecord{File: 7, Gen: 1, Off: 100, Item: 0, Count: 2}) {
+		t.Fatalf("reported rows %+v", dup.Rows)
+	}
+	var n int
+	if err := s.wdb.QueryRow(`SELECT COUNT(*) FROM records`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("rows after the failure: %d %v, want both kept", n, err)
+	}
+	if s.metaString(metaRebuildUnfinished) != "1" {
+		t.Fatal("the unfinished marker must stay after a failed index build")
+	}
+}

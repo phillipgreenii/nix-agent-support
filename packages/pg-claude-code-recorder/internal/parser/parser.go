@@ -313,6 +313,13 @@ type badLine struct {
 // parseGen parses a generation from its parse offset (from 0 for a re-parse,
 // which also replaces what was stored) to the last newline in the copy.
 func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, reparse bool) (int, error) {
+	if reparse {
+		// Clearing the generation deletes by (file_id, gen): that needs the
+		// secondary indexes a bulk rebuild defers.
+		if err := p.cfg.Store.EnsureIndexes(); err != nil {
+			return 0, err
+		}
+	}
 	rel, ok := p.relPath(f.ID)
 	if !ok {
 		return 0, nil

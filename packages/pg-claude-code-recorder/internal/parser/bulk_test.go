@@ -2,6 +2,7 @@ package parser_test
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -112,4 +113,74 @@ func TestBulkRebuildCommitsFarFewerTimesPerRecord(t *testing.T) {
 	}
 	t.Logf("commits per record: default %.4f, bulk %.4f (%.0fx fewer)",
 		float64(defCommits)/float64(records), float64(bulkCommits)/float64(records), float64(defCommits)/float64(bulkCommits))
+}
+
+// schemaAndPlans is the sorted sqlite_master (type, name, tbl_name, sql) and the
+// query plan of one query per secondary index, so two builds compare equal only
+// when they have the same objects and the planner picks the same indexes.
+func schemaAndPlans(t *testing.T, k *testkit.Kit) string {
+	t.Helper()
+	db := k.Store.Read()
+	var out []string
+	rows, err := db.Query(`SELECT type||' '||name||' '||tbl_name||' '||COALESCE(sql,'') FROM sqlite_master`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	_ = rows.Close()
+	sort.Strings(out)
+	for _, q := range []string{
+		`SELECT id FROM records WHERE session='s'`,
+		`SELECT id FROM records WHERE time_ns>5`,
+		`SELECT id FROM records WHERE type='text'`,
+		`SELECT id FROM records WHERE file_id=1 AND gen=1 AND off=0 AND item=0`,
+		`SELECT rec_id FROM fields WHERE name_id=1 AND n>3`,
+		`SELECT id FROM texts WHERE rec_id=1`,
+	} {
+		prows, err := db.Query(`EXPLAIN QUERY PLAN ` + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for prows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := prows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, "plan "+q+" -> "+detail)
+		}
+		_ = prows.Close()
+	}
+	return strings.Join(out, "\n")
+}
+
+func TestDeferredIndexRebuildHasTheSchemaAndPlansOfAnInlineBuild(t *testing.T) {
+	def := bulkCorpus(t, 10)
+	def.Parse()
+	want := schemaAndPlans(t, def)
+	for _, n := range []string{"records_ident", "records_session", "records_time", "records_type", "fields_name_n", "texts_rec"} {
+		if !strings.Contains(want, "index "+n+" ") {
+			t.Fatalf("the inline build lacks %s:\n%s", n, want)
+		}
+	}
+
+	bulk := bulkCorpus(t, 10)
+	bulk.StoreOptions = store.Options{Rebuild: true, BulkRebuild: true, BulkRecords: 50}
+	bulk.Reopen()
+	bulk.Parse()
+	if n := bulk.Count(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('records_ident','fields_name_n','texts_rec')`); n != 0 {
+		t.Fatalf("%d secondary indexes exist before the rebuild finishes; they must be deferred", n)
+	}
+	if err := bulk.Store.FinishRebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if got := schemaAndPlans(t, bulk); got != want {
+		t.Fatalf("a deferred-index rebuild differs from an inline build\n--- deferred\n%s\n--- inline\n%s", got, want)
+	}
 }
