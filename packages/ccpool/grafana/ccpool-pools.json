@@ -1907,7 +1907,7 @@
       "id": 16,
       "type": "stat",
       "title": "Dead-but-working",
-      "description": "Sessions recorded as working whose process is gone. Any value above 0 means a session died without being closed. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
+      "description": "Sessions recorded as working whose process is gone and that nobody closed (rows closed by the pg-router handler or a reap are excluded). Any value above 0 means a session died without being closed. Zero is shown only while the exporter is reporting capacity; a dead exporter shows No data, not a green 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1998,6 +1998,47 @@
       }
     },
     {
+      "id": 57,
+      "type": "timeseries",
+      "title": "Session records by kind",
+      "description": "Registry records per kind, summed over the selected pools. live: tmux session present. dead_closed: not live and closed since its last activity (deleted after the closed-row retention). dead_unclosed: not live and nobody closed it, the fault signal. Any dead_unclosed above 0 for an hour is worth reading.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 102,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (kind) (max by (kind, pool, pgrouter_role) (last_over_time(ccpool_session_records{pool=~\"$pool\"}[35m])))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
       "id": 56,
       "type": "logs",
       "title": "Error log (raw sources)",
@@ -2008,7 +2049,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 94,
+        "y": 110,
         "w": 24,
         "h": 8
       },

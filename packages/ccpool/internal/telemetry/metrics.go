@@ -51,6 +51,7 @@ type metricsInstruments struct {
 	sessionsPreservedForHuman metric.Int64Gauge
 	launchOutcomeTotal        metric.Int64Counter
 	sessionStates             metric.Int64Gauge
+	sessionRecords            metric.Int64Gauge
 	sessionInfo               metric.Int64Gauge
 	sessionDuration           metric.Float64Histogram
 	sessionsClosedTotal       metric.Int64Counter
@@ -113,6 +114,12 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 		metric.WithDescription("Sessions in the registry by store state and tmux liveness (live=true|false), snapshotted at each reap. live=false,state=working is dead-but-working; live=true,state=needs_input is a stuck/parked session."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_session_states: %w", err)
+	}
+	if m.sessionRecords, err = meter.Int64Gauge(
+		"ccpool_session_records",
+		metric.WithDescription("Registry records per pool by kind, snapshotted at each reap: live, dead_closed (not live, closed since last activity) and dead_unclosed (not live, nobody closed it: the fault signal). The kinds sum to the pool's row count."),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_session_records: %w", err)
 	}
 	if m.sessionInfo, err = meter.Int64Gauge(
 		"ccpool_session_info",
@@ -311,6 +318,15 @@ func (m metricsInstruments) states(ctx context.Context, counts []SessionStateCou
 	}
 }
 
+func (m metricsInstruments) records(ctx context.Context, counts []SessionRecordCount, attrs []attribute.KeyValue) {
+	if m.sessionRecords == nil {
+		return
+	}
+	for _, c := range counts {
+		m.sessionRecords.Record(ctx, c.Count, withAttrs(attrs, attribute.String("kind", c.Kind)))
+	}
+}
+
 func (m metricsInstruments) info(ctx context.Context, claudeSessionID string, attrs []attribute.KeyValue) {
 	if m.sessionInfo == nil || claudeSessionID == "" {
 		return
@@ -443,6 +459,21 @@ type SessionStateCount struct {
 // on a synchronous gauge: no polling, no tracking state.
 func RecordSessionStates(counts []SessionStateCount, attrs []attribute.KeyValue) {
 	ensureInstruments().states(context.Background(), counts, attrs)
+}
+
+// SessionRecordCount is one kind bucket of the registry snapshot fed to
+// RecordSessionRecords.
+type SessionRecordCount struct {
+	Kind  string
+	Count int64
+}
+
+// RecordSessionRecords records ccpool_session_records: one gauge point per
+// supplied kind (live, dead_closed, dead_unclosed), each also carrying attrs
+// (the pool). The caller MUST pass every kind including zeros so a dashboard
+// sees an explicit 0 rather than a stale prior value.
+func RecordSessionRecords(counts []SessionRecordCount, attrs []attribute.KeyValue) {
+	ensureInstruments().records(context.Background(), counts, attrs)
 }
 
 // RecordSessionInfo records ccpool_session_info = 1 for one live session:

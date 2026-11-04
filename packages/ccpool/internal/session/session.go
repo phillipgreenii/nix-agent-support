@@ -39,6 +39,7 @@ var (
 	recordSessionsPreservedForHuman = telemetry.RecordSessionsPreservedForHuman
 	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
 	recordSessionStates             = telemetry.RecordSessionStates
+	recordSessionRecords            = telemetry.RecordSessionRecords
 	recordSessionInfo               = telemetry.RecordSessionInfo
 	recordSessionClosed             = telemetry.RecordSessionClosed
 	recordSessionOutputTokens       = telemetry.RecordSessionOutputTokens

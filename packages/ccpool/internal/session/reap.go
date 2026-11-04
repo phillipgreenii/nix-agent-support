@@ -126,6 +126,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		return err
 	}
 	recordSessionStates(sessionStateCounts(live, deadKept), s.poolMetricAttrs())
+	recordSessionRecords(sessionRecordCounts(live, deadKept), s.poolMetricAttrs())
 
 	// Keep only live sessions (derived liveness), oldest-activity first.
 	sort.Slice(live, func(i, j int) bool { return live[i].LastActivityAt < live[j].LastActivityAt })
@@ -486,7 +487,9 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string, now time.T
 // live=false,state=working is the dead-but-working signal; live=true,
 // state=needs_input is a session parked for a human; live=false,
 // state=needs_input is a dead row still awaiting one (awaitingHumanDead), and
-// drops out of that bucket once it is closed (ADR 0086).
+// drops out of that bucket once it is closed (ADR 0086). Every closed dead row
+// (closedSinceActivity) is excluded from every state bucket (ADR 0119 D3), so
+// live=false,state=working counts only dead rows nobody closed.
 func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCount {
 	states := []store.State{store.Starting, store.Ready, store.Working, store.NeedsInput, store.Idle, store.Errored}
 	counts := map[store.State][2]int64{} // [0]=dead, [1]=live
@@ -496,8 +499,8 @@ func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCoun
 		counts[r.State] = c
 	}
 	for _, r := range dead {
-		if r.State == store.NeedsInput && !awaitingHumanDead(r) {
-			continue // closed: no longer awaiting a human (ADR 0086)
+		if closedSinceActivity(r) {
+			continue // closed: not a fault or a pending question (ADR 0086, ADR 0119 D3)
 		}
 		c := counts[r.State]
 		c[0]++
@@ -510,4 +513,32 @@ func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCoun
 			telemetry.SessionStateCount{State: string(st), Live: false, Count: counts[st][0]})
 	}
 	return out
+}
+
+// Record kinds of ccpool_session_records.
+const (
+	recordKindLive         = "live"
+	recordKindDeadClosed   = "dead_closed"
+	recordKindDeadUnclosed = "dead_unclosed"
+)
+
+// sessionRecordCounts buckets the surviving registry rows by kind for
+// ccpool_session_records: live, dead_closed (closedSinceActivity) and
+// dead_unclosed (dead and nobody closed it). The three kinds partition the
+// rows, so they sum to the pool's row count; every kind is emitted, zeros
+// included.
+func sessionRecordCounts(live, dead []store.Session) []telemetry.SessionRecordCount {
+	var closed, unclosed int64
+	for _, r := range dead {
+		if closedSinceActivity(r) {
+			closed++
+		} else {
+			unclosed++
+		}
+	}
+	return []telemetry.SessionRecordCount{
+		{Kind: recordKindLive, Count: int64(len(live))},
+		{Kind: recordKindDeadClosed, Count: closed},
+		{Kind: recordKindDeadUnclosed, Count: unclosed},
+	}
 }

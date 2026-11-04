@@ -564,3 +564,46 @@ func TestSessionOutputTokens_counterCarriesOnlyPoolAndLabels(t *testing.T) {
 		t.Errorf("attrs = %v, want exactly pool and pgrouter.role", dps[0].Attributes)
 	}
 }
+
+// TestSessionRecords_GaugePerKind asserts ccpool_session_records registers as a
+// gauge and carries one point per kind recorded.
+func TestSessionRecords_GaugePerKind(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	inst, err := newMetricsInstruments(mp.Meter("test"))
+	if err != nil {
+		t.Fatalf("newMetricsInstruments: %v", err)
+	}
+	ctx := context.Background()
+	inst.records(ctx, []SessionRecordCount{{Kind: "live", Count: 1}, {Kind: "dead_closed", Count: 2}, {Kind: "dead_unclosed", Count: 0}}, nil)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "ccpool_session_records" {
+				continue
+			}
+			g, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok {
+				t.Fatalf("ccpool_session_records: got %T, want Gauge[int64]", m.Data)
+			}
+			if len(g.DataPoints) != 3 {
+				t.Fatalf("got %d data points, want 3", len(g.DataPoints))
+			}
+			for _, dp := range g.DataPoints {
+				if !dp.Attributes.HasValue("kind") {
+					t.Errorf("data point missing kind label: %v", dp.Attributes)
+				}
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("ccpool_session_records not collected")
+	}
+}
