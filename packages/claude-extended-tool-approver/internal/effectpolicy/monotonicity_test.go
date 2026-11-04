@@ -51,12 +51,11 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/pathspec"
 )
 
-// monotonicityDefaultPairs is the default pair count: the Phase 2 exit
-// criterion's 10^4 (about 10s of CPU; measured 9.4s for 10^4 on the dev host;
-// without the realpath memo below it took 107s to 230s under host load).
-// CETA_MONOTONICITY_PAIRS overrides it (a smaller number for a quick local
-// run, a larger one for a deeper sweep).
-const monotonicityDefaultPairs = 10000
+// monotonicityDefaultPairs (defined per build tier in
+// monotonicity_pairs_default_test.go and monotonicity_pairs_integration_test.go)
+// is the default pair count: a small sample in the unit tier, the Phase 2 exit
+// criterion's 10^4 under -tags integration. CETA_MONOTONICITY_PAIRS overrides
+// it (a smaller number for a quick local run, a larger one for a deeper sweep).
 
 // strictness orders decisions: Approve < Abstain < Reject.
 func strictness(d evalcontract.Decision) int {
