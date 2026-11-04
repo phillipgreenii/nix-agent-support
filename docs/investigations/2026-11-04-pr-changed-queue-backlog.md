@@ -239,3 +239,45 @@ so the rule works. No alert gap in this window.
 - Start the observability stack and router at boot rather than at console login (or document
   auto-login as an accepted operator decision), size M, operator decision first.
 - Investigate the unclean 03:xx reboots (10-21, 11-03) including disk pressure, size S.
+
+## Addendum 2026-11-04: did the `queue_depth` alerts fire on retention growth?
+
+Read-only, localhost only: the Grafana annotation (state history) API on `127.0.0.1:3000` for
+2026-11-02 06:03Z to 2026-11-04 12:00Z, and Prometheus on `127.0.0.1:9090`.
+`pg_router_listener_pending` and `pg_router_listener_oldest_pending_age_seconds` have samples only
+from 2026-11-03 (first sample about 11-03 09:30Z in the hourly `query_range`), so firings on 11-02
+cannot be classified against them.
+
+Alerting transitions for `pr.changed` in the window:
+
+| Rule                            | Alerting transitions (UTC)                                                       | Pending gauge readable? |
+| ------------------------------- | -------------------------------------------------------------------------------- | ----------------------- |
+| `pg-router-queue-depth-growing` | 11-02 14:03, 11-02 15:49, 11-03 15:22, 11-03 18:17                               | 11-02 17:30Z onward     |
+| `pg-router-queue-stalled`       | 11-02 12:32, 13:21, 14:29, 20:02, 22:23; 11-03 03:01, 04:45, 06:41, 07:25, 14:24 | 11-02 17:30Z onward     |
+| `pg-router-queue-slow-growth`   | none for `pr.changed` (its Alerting rows were `review.ready` and `repo.tip`)     | n/a                     |
+
+Findings:
+
+- `pg-router-queue-stalled` fired spuriously on retention. At the 11-03 14:24Z transition the role's
+  `pg_router_listener_pending` read 0 on every scrape from 14:09Z to 14:23Z and `in_flight` read 0,
+  while `pg_router_queue_depth{type="pr.changed"}` read 50 to 63. Nothing was owed; the depth was
+  settled events waiting out their 6 h retention. The rule is re-keyed (see Change below). The other
+  `pr.changed` stalled firings after the gauge existed read: 11-02 20:02Z pending 0 on every scrape of
+  the 15 minutes before (retention only); 11-03 04:45Z the same; 11-02 22:23Z, 11-03 03:01Z, 06:41Z and
+  07:25Z had pending of 1 or 2 on a few scrapes with a 0 elsewhere in the window, so a backlog was
+  intermittent at most. Before 11-02 17:30Z (five firings) the gauge does not exist.
+- `pg-router-queue-depth-growing` fired on genuine consumer lag on 11-03. In the 14:50Z to 15:25Z
+  window `pending` reached 65 and the oldest pending age 1889 s; in the 17:40Z to 18:20Z window
+  `pending` reached 99 and the oldest age 1155 s. The depth rose by more than the pending count
+  (retention adds to it), but the lane did have a backlog growing at the time, so these are not
+  spurious firings and the rule is left unchanged. Its 11-02 firings predate the gauge and are not
+  classified.
+- `pg-router-queue-slow-growth` did not fire for `pr.changed`; it counts arrivals against
+  completions, and an event that expires unconsumed is subtracted, so retention does not feed it.
+  Its `min_over_time(pg_router_queue_depth[1h]) >= 5` floor is only an extra gate.
+
+Change: `pg-router-queue-stalled` now also drops a role whose `pg_router_listener_pending` read 0 on
+any scrape of the 10 minute window (`unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0)`).
+It is an exclusion, so a scrape with no pending series leaves the rule as it was. Covered by a
+promtool case in `grafana/alerting/rule-tests/pg-router-queue-stalled.test.yaml` and by
+`TestStalledRetentionOnlyDepthDoesNotPage` in `internal/alertrules/queue_stalled_test.go`.

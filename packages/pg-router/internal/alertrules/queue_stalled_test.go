@@ -106,7 +106,7 @@ func wantStalledExpr() string {
 	for _, r := range stalledRoles {
 		fmt.Fprintf(&b, `, "role", %q, "type", %q)`, r.role, r.typeRE)
 	}
-	b.WriteString(` and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)`)
+	b.WriteString(` and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)`)
 	return b.String()
 }
 
@@ -136,14 +136,17 @@ func stalledCondRun(series []obs, t time.Time, run int) bool {
 // increase() over the window is above 0 when any scrape has it.
 func stalledCondWith(series []obs, t time.Time, minPresent, run int) bool {
 	present, gated, completed := 0, false, false
+	zeroed := false
 	for _, o := range obsIn(series, t.Add(-stalledWindow), t) {
+		zeroed = zeroed || (o.pendingSeen && o.pending == 0)
 		if o.depth > 0 {
 			present++
 		}
 		gated = gated || o.gate
 		completed = completed || o.settled
 	}
-	return present >= minPresent && !inFlightRun(series, t, run) && !completed && !gated
+	// min_over_time(pending[10m]) == 0 drops the role; an absent series drops nothing.
+	return present >= minPresent && !inFlightRun(series, t, run) && !completed && !gated && !zeroed
 }
 
 // inFlightRun reports whether the role read in flight on run consecutive scrapes
@@ -955,9 +958,36 @@ func TestStalledAnnotationsDescribeIdleWithBacklog(t *testing.T) {
 	r := ruleBlock(t, "pg-router-queue-stalled")
 	i, j := strings.Index(r, "annotations:"), strings.Index(r, "data:")
 	ann := r[i:j]
-	for _, need := range []string{"has a backlog but nothing is processing it", "pg_router_listener_in_flight", "pg-router status", "gate"} {
+	for _, need := range []string{"has a backlog but nothing is processing it", "pg_router_listener_in_flight", "pg_router_listener_pending", "pg-router status", "gate"} {
 		if !strings.Contains(ann, need) {
 			t.Errorf("annotations lost %q", need)
 		}
+	}
+}
+
+// Retention is not a backlog (DEC-OBS-12): a type whose events were all settled
+// still reads depth above 0 for their time to live. The 2026-11-03 14:24Z pr.changed
+// firing had the role's pending gauge at 0 on every scrape of the window before it
+// went Pending. A pending gauge that reads 0 on any scrape of the window keeps the rule
+// quiet; the same lane with events owed on every scrape, or with no pending series at
+// all, still pages.
+func TestStalledRetentionOnlyDepthDoesNotPage(t *testing.T) {
+	start := parseUTC("2026-11-03T14:00:00Z")
+	build := func(seen bool, pending float64) []obs {
+		var series []obs
+		for i := 0; i < 120; i++ { // 1h of an idle role, depth 50 of retained events
+			series = append(series, obs{at: start.Add(time.Duration(i) * scrape), depth: 50, pendingSeen: seen, pending: pending})
+		}
+		return series
+	}
+	at := start.Add(30 * time.Minute)
+	if stalledCond(build(true, 0), at) {
+		t.Error("depth made only of settled retained events (pending 0) evaluated true")
+	}
+	if !stalledCond(build(true, 3), at) {
+		t.Error("an idle role with events owed (pending 3) no longer evaluates true")
+	}
+	if !stalledCond(build(false, 0), at) {
+		t.Error("a scrape with no pending series must leave the rule as it was")
 	}
 }

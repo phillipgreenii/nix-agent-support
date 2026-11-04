@@ -367,6 +367,33 @@ tests:
               job: pg-router
               severity: warning
 
+  - name: a depth made only of settled retained events is not a backlog, the role's pending gauge at 0 keeps the rule quiet
+    interval: 30s
+    input_series:
+      # The 2026-11-03 pr.changed shape: depth 50 held by events every listener already
+      # settled (retained for their time to live), the role idle, nothing pending.
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "50x240"
+      - series: pg_router_listener_in_flight{role="pr-change",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_listener_pending{role="pr-change",job="pg-router"}
+        values: "0x240"
+      # The same idle lane with events actually owed still pages.
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "50x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_listener_pending{role="drain-pg2",job="pg-router"}
+        values: "4x240"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+
   - name: pr-change binds pr.changed only, so it covers that type whether busy or idle and the retired pr.reconcile is not covered
     interval: 30s
     input_series:

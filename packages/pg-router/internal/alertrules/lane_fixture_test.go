@@ -174,6 +174,10 @@ type obs struct {
 	inFlight float64
 	gate     bool // pg_router_gates_active has a series (a gate is in force)
 	settled  bool // pg_router_throughput_total advanced since the previous scrape
+	// pendingSeen is whether pg_router_listener_pending{role} has a series on this scrape;
+	// pending is its value. The zero obs has no series, as on a router build without it.
+	pendingSeen bool
+	pending     float64
 }
 
 // scrapes is what a 30s scraper would have recorded in [from, to]: nothing while
