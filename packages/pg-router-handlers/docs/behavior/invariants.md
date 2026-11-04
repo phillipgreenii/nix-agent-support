@@ -322,6 +322,12 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   (or its bead) must not delete the working directory out from under a peer. If the session list
   cannot be read the worktree is left in place. This extends the same sharing rule that
   `INV-CCH-14` and the closed-bead reconcile apply to their own purges (bead `pg2-aqpqx`).
+  The same worktree MUST also be kept while a live process anywhere on the machine, whichever
+  role, pool or handler owns it, has it or a directory inside it as its working directory (the
+  process-working-directory guard of `INV-CCH-19`), and kept when the process listing cannot be
+  read. The dispatch's own settled session is closed (`INV-CCH-17`) BEFORE that check and before
+  the removal, so its own idle process never counts as a holder; a session whose close was
+  deferred or failed is still running, so its process then keeps the worktree.
 - **`INV-CCH-16`** — when a ccpool-backed handler session runs under `permissionMode=dontAsk`, the
   prompt the handler sends it MUST carry, ahead of the role's task text, a code-owned notice (not
   editable through any role's prompt file) that writes to the agent runtime's protected paths --
@@ -361,6 +367,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   carries a close reason but whose session is still live is a failed teardown, and is closed
   again. A worktree that an earlier dispatch already removed is reported once as already removed,
   not as a failed cleanup left for the sweep.
+  Order: when the dispatch's worktree is eligible for removal (`INV-CCH-15`'s row and quiet
+  checks have passed), the settled-session close comes first and the worktree removal after it,
+  so the session's own process is gone when the process-working-directory guard looks.
 - **`INV-CCH-18`** <!-- uuid: ac18ca7c-745d-476c-b9a0-f568e673fda6 --> — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
   stamped when the session's row is created, before the launch wait (`ccpool new --meta` writes the
@@ -528,7 +537,11 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   isolation, an unrelated path, or a `bead-worktree` session's drain worktree, which is never
   removed, `INV-CCH-39`) is purged in one step, as is a session whose worktree another
   live session of the pool still uses (`INV-CCH-15`; any state, since a redispatch for the bead
-  reuses the directory). A failed or interrupted removal leaves the record in place. Each
+  reuses the directory), and as is a session whose worktree a live process anywhere on the
+  machine has, or a directory inside it, as its working directory, or whose process listing
+  cannot be read (the guard of `INV-CCH-19`; the session's own process is already gone, because
+  the non-purge close precedes the removal): the record is purged and the worktree and its
+  anchor branch are kept. A failed or interrupted removal leaves the record in place. Each
   closed-bead reconcile of the pool (a janitor run, or a dispatch at capacity pressure,
   `INV-CCH-41`) MUST first retry at most one such record, whether or not its
   session is still live (a live one that is not `starting`, `ready` or `working` is closed again

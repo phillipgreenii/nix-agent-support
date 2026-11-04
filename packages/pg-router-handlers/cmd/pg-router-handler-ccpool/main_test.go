@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"regexp"
 	"strings"
@@ -51,6 +52,9 @@ func TestMain(m *testing.M) {
 		os.Exit(runBareWrite())
 	}
 	isolateAmbientEnv()
+	// No test depends on lsof: the closed-bead teardown sees no live process
+	// unless a test sets its own probe.
+	teardownProbe = func(context.Context) ([]string, error) { return nil, nil }
 	dir, err := os.MkdirTemp("", "ccpool-adapter-state-")
 	if err != nil {
 		panic(err)

@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
+
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
@@ -686,8 +688,14 @@ func budgetUnlimited(b budget.Budget) bool {
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
 	r.finished, r.waitErr = true, werr
 	r.recordDispatchFailure(d, name, werr)
-	q := r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
+	// The settled session is closed BEFORE the worktree is removed, so its own idle
+	// process is gone when the process-working-directory guard looks (INV-CCH-15,
+	// INV-CCH-17); the quiet verdict computed by the first step is passed on.
+	q, proceed := r.prepareWorktreeCleanup(ctx, cc, name, wt)
 	r.closeSettledSession(ctx, cc, d.Item.ID, name, werr, q)
+	if proceed {
+		r.removeWorktree(ctx, name, d.Item.ID, wt)
+	}
 	if errors.Is(werr, ErrPeerHeld) {
 		// Another actor holds the bead (close-or-release, INV-CCH-28): the dispatch
 		// wrote nothing to it and clears nothing on it, and it is not a failure of
@@ -758,53 +766,86 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // worktree path, or pg-disk-reclaimer's independent belt-and-suspenders
 // sweep, decision item 4) rather than force-removing.
 //
+// Process guard (INV-CCH-15): the removal also keeps the worktree while a live
+// process anywhere on the machine has it as its working directory, and when the
+// process listing cannot be read. finishWait closes the settled session between
+// the guards (prepareWorktreeCleanup) and the removal (removeWorktree), so the
+// dispatch's own idle process is not counted.
+//
 // The returned quietResult reports whether this call already ran
 // waitSessionQuiet (and what it found), so finishWait's following
 // closeSettledSession reuses the verdict instead of polling a second time.
 func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, beadID, wt string) quietResult {
+	q, proceed := r.prepareWorktreeCleanup(ctx, cc, name, wt)
+	if proceed {
+		r.removeWorktree(ctx, name, beadID, wt)
+	}
+	return q
+}
+
+// prepareWorktreeCleanup is cleanupWorktree's decision half: the isolation,
+// needs_input, live-peer and quiet-window guards. proceed reports whether the
+// worktree may now be removed (removeWorktree); the quietResult is as
+// cleanupWorktree's.
+func (r *ccpoolRun) prepareWorktreeCleanup(ctx context.Context, cc *roles.CCPoolConfig, name, wt string) (q quietResult, proceed bool) {
 	if wt == "" || !usesWorktreeIsolation(cc.Isolation) {
-		return quietResult{}
+		return quietResult{}, false
 	}
 	if r.needsInputAlive(ctx, name) {
 		slog.Info("dispatch: worktree cleanup deferred -- session still needs_input",
 			"session", name, "worktree", wt)
-		return quietResult{}
+		return quietResult{}, false
 	}
 	if r.worktreeSharedWithLivePeer(ctx, name, wt) {
 		slog.Info("dispatch: worktree cleanup deferred -- another live session still uses it",
 			"session", name, "worktree", wt)
-		return quietResult{}
+		return quietResult{}, false
 	}
 	if !r.waitSessionQuiet(ctx, name, r.quietWindow(cc)) {
 		slog.Warn("dispatch: worktree cleanup deferred -- session or its subagents still active (left for next sweep)",
 			"session", name, "worktree", wt, "quietWindow", r.quietWindow(cc))
-		return quietResult{checked: true, quiet: false}
+		return quietResult{checked: true, quiet: false}, false
 	}
-	q := quietResult{checked: true, quiet: true}
+	return quietResult{checked: true, quiet: true}, true
+}
+
+// removeWorktree is cleanupWorktree's removal half, run once
+// prepareWorktreeCleanup said to proceed. It keeps the worktree while a live
+// process anywhere on the machine has it, or a directory inside it, as its
+// working directory, and when that cannot be determined (INV-CCH-15).
+func (r *ccpoolRun) removeWorktree(ctx context.Context, name, beadID, wt string) {
+	if keep, err := procprobe.Keep(ctx, r.deps.processProbe(), wt); err != nil {
+		slog.Warn("dispatch: worktree cleanup: live-process probe failed; keeping the worktree (left for next sweep)",
+			"session", name, "worktree", wt, "err", err)
+		return
+	} else if keep {
+		slog.Info("dispatch: worktree cleanup deferred -- a live process has it as its working directory (left for next sweep)",
+			"session", name, "worktree", wt)
+		return
+	}
 	wm, err := r.deps.gitOpener()(ctx, wt)
 	if errors.Is(err, fs.ErrNotExist) {
 		// The path is already gone (an earlier dispatch of this bead removed the
 		// worktree, and this one absorbed that dispatch's row): there is nothing to
 		// remove and nothing a later sweep could retry, so say so once at INFO
 		// instead of a failed open that every re-dispatch repeats as "left for next
-		// sweep" (bead pg2-92rfu). No branch is touched: a concurrent dispatch of
-		// the same bead owns the anchor branch it is creating.
+		// sweep". No branch is touched: a concurrent dispatch of the same bead owns
+		// the anchor branch it is creating.
 		slog.Info("dispatch: worktree cleanup: already removed", "session", name, "worktree", wt)
-		return q
+		return
 	}
 	if err != nil {
 		slog.Warn("dispatch: worktree cleanup: open failed (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)
-		return q
+		return
 	}
 	if err := wm.RemoveWorktree(ctx, wt, false); err != nil {
 		slog.Warn("dispatch: worktree cleanup: remove failed (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)
-		return q
+		return
 	}
 	slog.Info("dispatch: worktree removed", "session", name, "worktree", wt)
 	r.deleteBranch(ctx, name, beadID)
-	return q
 }
 
 // quietResult is cleanupWorktree's report of whether it already ran

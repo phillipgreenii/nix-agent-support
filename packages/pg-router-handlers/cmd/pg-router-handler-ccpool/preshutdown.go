@@ -416,6 +416,9 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 			"session", s.ExternalID, "cwd", s.CWD)
 		return true
 	}
+	if worktreeHeldByStranger(ctx, s) {
+		return true
+	}
 	if wm, err := open(ctx, s.CWD); errors.Is(err, gitclient.ErrNotARepository) {
 		// cwd is not inside any git repository (pg2-tp8rx: the non-git
 		// workspace root a drain session runs in), so there is no worktree to

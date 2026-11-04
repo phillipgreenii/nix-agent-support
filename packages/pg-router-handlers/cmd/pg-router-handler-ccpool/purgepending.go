@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
+
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 )
@@ -95,6 +97,8 @@ func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, re
 	} else if keepWorktree {
 		slog.Info("teardown: worktree kept -- another live session still uses it",
 			"session", s.ExternalID, "cwd", s.CWD)
+	} else if worktreeHeldByStranger(ctx, s) {
+		// kept: the row is still purged (the sweep reclaims the worktree later).
 	} else if !removeWorktreeForPurge(ctx, open, repoRoot, worktreeDir, s) {
 		return false
 	}
@@ -256,4 +260,31 @@ func retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Open
 	slog.Info("reconcile: purge_pending teardown completed",
 		"session", s.ExternalID, "cwd", s.CWD, "attempt", attempt, "elapsed", time.Since(start))
 	return true, true
+}
+
+// teardownProbe is the live-process probe the closed-bead teardown uses; nil
+// means the production probe (procprobe.CWDs). Tests substitute a fake.
+var teardownProbe cwdProbe
+
+// worktreeHeldByStranger reports whether the teardown of s MUST keep its
+// worktree because a live process has it, or a directory inside it, as its
+// working directory, or because that cannot be determined (a failed probe
+// keeps it). The session's own process is already gone: every caller has
+// closed the session (non-purge) before it removes the worktree. A session
+// without a working directory has nothing to protect.
+func worktreeHeldByStranger(ctx context.Context, s ccpool.Session) bool {
+	if s.CWD == "" {
+		return false
+	}
+	keep, err := procprobe.Keep(ctx, teardownProbe, s.CWD)
+	if err != nil {
+		slog.Warn("teardown: live-process probe failed; keeping the worktree",
+			"session", s.ExternalID, "cwd", s.CWD, "err", err)
+		return true
+	}
+	if keep {
+		slog.Info("teardown: worktree kept -- a live process has it as its working directory",
+			"session", s.ExternalID, "cwd", s.CWD)
+	}
+	return keep
 }

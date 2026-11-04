@@ -57,15 +57,14 @@ import (
 // a per-bead worktree is shared by every role's session for the bead. A session
 // of another role whose handler is gone (spared at a daemon restart, so its flock
 // died with the handler) is invisible to the row and lock guards even though
-// claude is still running in the worktree; bead pg2-e5yw3 observed exactly that
-// (a spared escalation-triager reclaimed from under a live claude, left running
+// claude is still running in the worktree (a spared escalation-triager reclaimed from under a live claude, left running
 // in a deleted directory). The live-process guard closes it without needing to
 // know any other pool: a session that is alive has a claude process whose
 // working directory is the worktree, whichever pool or handler owns it. A
 // session whose process is gone is not protected, and rightly so; the clean-tree
-// and no-unique-commits guards still bound what is lost then. The same blind
-// spot remains in cleanupWorktree and the closed-bead reconcile (not changed
-// here).
+// and no-unique-commits guards still bound what is lost then. The guard is shared (internal/procprobe) with the dispatch-time cleanup and the
+// closed-bead teardown, which keep a worktree a live process holds in the same
+// way.
 //
 // Best effort: every failure is logged and leaves the worktree for the next
 // dispatch; it never fails the dispatch.
