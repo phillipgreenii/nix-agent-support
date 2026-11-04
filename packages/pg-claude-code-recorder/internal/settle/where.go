@@ -97,8 +97,7 @@ var clearBy = map[string]string{
 // Where reports a Conversation's stage, what blocks its removal and the command
 // that clears the first blocker.
 func (s *Settler) Where(session string) (WhereInfo, error) {
-	s.run.Lock()
-	defer s.run.Unlock()
+	defer s.lockRun("where")()
 	now := s.cfg.Clock.Now()
 	info := WhereInfo{Session: session, BlockedBy: []string{}, RemovalEnabled: s.cfg.RemoveEnable}
 	live, err := s.cfg.Live()
@@ -137,7 +136,7 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 		info.Manifest = json.RawMessage(settled.Manifest)
 	}
 	if c != nil {
-		blocked, next := s.blockers(c, row, hasRow, live[session], now)
+		blocked, next := s.blockers(c, row, hasRow, live[session], now, nil)
 		info.BlockedBy = blocked
 		if !next.IsZero() {
 			info.NextEligible = &next

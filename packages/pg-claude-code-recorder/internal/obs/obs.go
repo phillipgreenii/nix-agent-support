@@ -105,10 +105,14 @@ const (
 	MSettleTickTransitions   = "settle_tick_transitions_total"
 	MSettleTickLastDuration  = "settle_tick_last_duration_seconds"
 	MSettleTickLastTimestamp = "settle_tick_last_timestamp_seconds"
-	EvSettleTick             = "settle_tick"
+	// The wait for the settler's run lock (label op: tick, remove, where, extract,
+	// recheck, recover): how long a caller queued behind another holder.
+	MSettleRunLockWaits       = "settle_run_lock_wait_total"
+	MSettleRunLockWaitSeconds = "settle_run_lock_wait_seconds_total"
+	EvSettleTick              = "settle_tick"
 	EvSettleTickSlow         = "settle_tick_slow"
-	EvWALTruncateStart       = "wal_truncate_start"
-	EvWALTruncateDone        = "wal_truncate_done"
+	EvWALTruncateStart        = "wal_truncate_start"
+	EvWALTruncateDone         = "wal_truncate_done"
 )
 
 // Metric names of the process, Go runtime and WAL-size collectors.

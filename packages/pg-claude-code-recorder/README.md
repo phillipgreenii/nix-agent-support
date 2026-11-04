@@ -93,7 +93,9 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `query_duration_seconds`, `feed_latency_seconds`, `wait_duration_seconds`, `backfill_files_*`,
   `caught_up`, and the loop and process series: `settle_tick_duration_seconds`,
   `settle_tick_examined_total`, `settle_tick_transitions_total`, `settle_tick_last_duration_seconds`,
-  `settle_tick_last_timestamp_seconds`, `refresh_gauges_duration_seconds`, `loop_runs_total{loop,outcome}`,
+  `settle_tick_last_timestamp_seconds`, `settle_run_lock_wait_total{op}` and
+  `settle_run_lock_wait_seconds_total{op}` (time callers queued for the settler's run lock; a `settle_run_lock_wait_slow`
+  warning is logged for a wait of 5 s or more), `refresh_gauges_duration_seconds`, `loop_runs_total{loop,outcome}`,
   `process_cpu_seconds_total`, `go_goroutines`, `go_memstats_heap_alloc_bytes`,
   `go_memstats_alloc_bytes_total`, `go_gc_pause_seconds_total`, `wal_bytes` and the database/sql pool figures `db_open_connections`,
   `db_in_use_connections`, `db_idle_connections`, `db_wait_total`, `db_wait_seconds_total`,
@@ -354,7 +356,7 @@ Removal takes a settled Conversation's files out of the Claude directory once it
 `remove.after` (30 days). It is **off by default** (`remove.enable = false`), and there is **no undo
 except `extract`**. Keys (all in `config.toml`): `remove.enable`, `remove.after`, `remove.maxPerRun` (50),
 `remove.maxPerHour` (200), `held.recheck`, `format.holdRate` (0.01: a source whose bad-line or unknown-key
-rate over the last day is above it is not removed) and `doctor.interval` (24h; doctor also runs from a timer
+rate over the last day is above it is not removed; the scan runs before `remove` takes the settler's run lock, so a slow scan cannot hold up the settle tick, and it is re-read under the lock right before any removal) and `doctor.interval` (24h; doctor also runs from a timer
 inside the daemon, so no external scheduler is needed).
 
 The order, so a crash at any point loses nothing: re-run the check and compare each Claude file's full hash

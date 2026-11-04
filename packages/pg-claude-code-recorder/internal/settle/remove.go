@@ -127,10 +127,21 @@ func (s *Settler) cfs() fsx.FS {
 
 // Remove removes the selected Conversations (or reports what it would remove on
 // a dry run, which works while removal is disabled and changes nothing).
+//
+// The format-hold scan (a read over the last day's commits and records) runs
+// BEFORE the run lock is taken, so a slow scan never makes the settle tick wait
+// behind a remove. The verdicts it produced may be stale by the time the lock is
+// held, so removeLocked re-runs the scan for the sources of the Conversations it
+// is about to remove, under the lock and right before the removal (see
+// formatHeldNow); the early verdicts only decide what a dry run reports and
+// which Conversations are worth considering.
 func (s *Settler) Remove(opt RemoveOptions) (RemoveReport, error) {
-	s.run.Lock()
-	defer s.run.Unlock()
-	return s.removeLocked(opt, s.cfg.Clock.Now())
+	early := s.prescanFormat(s.cfg.Clock.Now())
+	if h := s.cfg.Hooks.AfterFormatPrescan; h != nil {
+		h()
+	}
+	defer s.lockRun("remove")()
+	return s.removeLocked(opt, s.cfg.Clock.Now(), early)
 }
 
 func (s *Settler) hourCount(now time.Time) int {
@@ -146,7 +157,14 @@ func (s *Settler) hourCount(now time.Time) int {
 	return len(kept)
 }
 
-func (s *Settler) removeLocked(opt RemoveOptions, now time.Time) (RemoveReport, error) {
+// removeLocked runs the removal pass with the run lock held. early holds the
+// format verdicts computed before the lock (nil: the caller holds the lock for
+// the whole pass, as the tick does, and the verdicts are computed on first use).
+func (s *Settler) removeLocked(opt RemoveOptions, now time.Time, early *formatCache) (RemoveReport, error) {
+	fc := early
+	if fc == nil {
+		fc = newFormatCache(false)
+	}
 	rep := RemoveReport{
 		Enabled: s.cfg.RemoveEnable, DryRun: opt.DryRun,
 		Candidates: []RemoveCandidate{}, Removed: []string{}, Skipped: []RemoveSkip{}, SkipCounts: map[string]int{},
@@ -207,7 +225,7 @@ func (s *Settler) removeLocked(opt RemoveOptions, now time.Time) (RemoveReport, 
 			skip(session, BlockNoFiles)
 			continue
 		}
-		blocked, _ := s.blockers(c, row, hasRow, live[session], now)
+		blocked, _ := s.blockers(c, row, hasRow, live[session], now, fc)
 		if len(blocked) > 0 {
 			if len(opt.Sessions) == 0 && onlyAgeOrState(blocked) {
 				// A Conversation that is simply not due is not worth a line in the
@@ -232,6 +250,10 @@ func (s *Settler) removeLocked(opt RemoveOptions, now time.Time) (RemoveReport, 
 	}
 	runCount := 0
 	var first error
+	// Verdicts from before the lock are re-read once per source, here, under the
+	// lock and ahead of the first removal: a bad-line rate that rose since the
+	// early scan must still keep the files.
+	fresh := newFormatCache(false)
 	for _, c := range todo {
 		switch {
 		case runCount >= s.cfg.MaxPerRun:
@@ -240,6 +262,12 @@ func (s *Settler) removeLocked(opt RemoveOptions, now time.Time) (RemoveReport, 
 		case s.hourCount(now) >= s.cfg.MaxPerHour:
 			skip(c.session, BlockHourCap)
 			continue
+		}
+		if fc.early {
+			if held, _ := s.formatHeld(c, now, fresh); held {
+				skip(c.session, BlockFormat)
+				continue
+			}
 		}
 		var removed bool
 		var reason string
@@ -295,7 +323,7 @@ func (s *Settler) fileBytes(f store.File) int64 {
 // blockers lists why the Conversation is not removable now (the stable
 // blocked_by list; removal_disabled is reported by the caller, not here) and the
 // earliest time the age gate opens.
-func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now time.Time) ([]string, time.Time) {
+func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now time.Time, fc *formatCache) ([]string, time.Time) {
 	var out []string
 	var next time.Time
 	if live {
@@ -321,7 +349,7 @@ func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now t
 		out = append(out, BlockQuietAge)
 		next = due
 	}
-	if held, _ := s.formatHeld(c, now); held {
+	if held, _ := s.formatHeld(c, now, fc); held {
 		out = append(out, BlockFormat)
 	}
 	return out, next
@@ -335,38 +363,115 @@ func (s *Settler) registryNames(session string) bool {
 	return err == nil
 }
 
+// formatVerdict is the format-hold answer for one source.
+type formatVerdict struct {
+	held bool
+	why  string
+}
+
+// formatCache memoizes the format-hold verdict per source for one pass: the
+// answer depends on the source and the cutoff only, never on the Conversation,
+// so a pass over thousands of Conversations needs one scan per source. early
+// marks verdicts computed before the run lock was taken.
+type formatCache struct {
+	early bool
+	m     map[string]formatVerdict
+}
+
+func newFormatCache(early bool) *formatCache {
+	return &formatCache{early: early, m: map[string]formatVerdict{}}
+}
+
+// prescanFormat computes the verdict of every source the index has files for,
+// without the run lock.
+func (s *Settler) prescanFormat(now time.Time) *formatCache {
+	fc := newFormatCache(true)
+	rows, err := s.st.Read().Query(`SELECT DISTINCT source FROM files`)
+	if err != nil {
+		return fc // verdicts are computed on first use, under the lock
+	}
+	var sources []string
+	for rows.Next() {
+		var src string
+		if rows.Scan(&src) == nil {
+			sources = append(sources, src)
+		}
+	}
+	_ = rows.Close()
+	for _, src := range sources {
+		if s.cfg.Parser.HasSource(src) {
+			fc.m[src] = s.sourceFormatHeld(src, now)
+		}
+	}
+	return fc
+}
+
+// The three counts behind the format hold. Each is driven by the small table
+// (files of the source, then their commits through the primary key) and reaches
+// records only through records_ident, by file, generation and an offset range,
+// so none of them scans records (TestFormatHeldQueryPlansUseIndexes guards it).
+const (
+	formatLinesQuery = `SELECT COUNT(*) FROM (SELECT DISTINCT r.file_id, r.gen, r.off
+FROM files f CROSS JOIN commits c ON c.file_id=f.id
+CROSS JOIN records r ON r.file_id=c.file_id AND r.gen=c.gen AND r.off>=c.from_off AND r.off<c.to_off
+WHERE f.source=? AND c.seen_ns>=?)`
+	formatBadQuery = `SELECT COUNT(*) FROM files f CROSS JOIN bad_lines b ON b.file_id=f.id
+CROSS JOIN commits c ON c.file_id=b.file_id AND c.gen=b.gen AND c.from_off<=b.off AND b.off<c.to_off
+WHERE f.source=? AND c.seen_ns>=?`
+	formatUnknownQuery = `SELECT COALESCE(SUM(u.count),0) FROM unknown_keys u JOIN files f ON f.id=u.file_id
+WHERE u.source=? AND EXISTS(SELECT 1 FROM commits c WHERE c.file_id=u.file_id AND c.gen=u.gen AND c.seen_ns>=?)`
+)
+
 // formatHeld reports whether a source of the Conversation has a bad-line or
 // unknown-key rate over the last day above format.holdRate, so files are never
-// removed on the strength of a parse that was wrong for a new format.
-func (s *Settler) formatHeld(c *conv, now time.Time) (bool, string) {
-	cutoff := now.Add(-24 * time.Hour).UnixNano()
+// removed on the strength of a parse that was wrong for a new format. fc may be
+// nil (nothing is remembered).
+func (s *Settler) formatHeld(c *conv, now time.Time, fc *formatCache) (bool, string) {
 	seen := map[string]bool{}
 	for _, f := range c.files {
 		if seen[f.Source] || !s.cfg.Parser.HasSource(f.Source) {
 			continue
 		}
 		seen[f.Source] = true
-		var lines, bad, unknown int64
-		_ = s.st.Read().QueryRow(`SELECT COUNT(DISTINCT r.file_id||'-'||r.gen||'-'||r.off) FROM records r JOIN files f ON f.id=r.file_id
-JOIN commits c ON c.file_id=r.file_id AND c.gen=r.gen AND c.from_off<=r.off AND r.off<c.to_off
-WHERE f.source=? AND c.seen_ns>=?`, f.Source, cutoff).Scan(&lines)
-		_ = s.st.Read().QueryRow(`SELECT COUNT(*) FROM bad_lines b JOIN files f ON f.id=b.file_id
-JOIN commits c ON c.file_id=b.file_id AND c.gen=b.gen AND c.from_off<=b.off AND b.off<c.to_off
-WHERE f.source=? AND c.seen_ns>=?`, f.Source, cutoff).Scan(&bad)
-		_ = s.st.Read().QueryRow(`SELECT COALESCE(SUM(u.count),0) FROM unknown_keys u JOIN files f ON f.id=u.file_id
-WHERE u.source=? AND EXISTS(SELECT 1 FROM commits c WHERE c.file_id=u.file_id AND c.gen=u.gen AND c.seen_ns>=?)`, f.Source, cutoff).Scan(&unknown)
-		total := lines + bad
-		if total == 0 {
-			continue
+		var v formatVerdict
+		var ok bool
+		if fc != nil {
+			v, ok = fc.m[f.Source]
 		}
-		if float64(bad)/float64(total) > s.cfg.HoldRate {
-			return true, fmt.Sprintf("%s: %d bad lines of %d over the last day", f.Source, bad, total)
+		if !ok {
+			v = s.sourceFormatHeld(f.Source, now)
+			if fc != nil {
+				fc.m[f.Source] = v
+			}
 		}
-		if float64(unknown)/float64(total) > s.cfg.HoldRate {
-			return true, fmt.Sprintf("%s: %d unknown keys over %d lines in the last day", f.Source, unknown, total)
+		if v.held {
+			return true, v.why
 		}
 	}
 	return false, ""
+}
+
+// sourceFormatHeld scans one source's last day.
+func (s *Settler) sourceFormatHeld(source string, now time.Time) formatVerdict {
+	if h := s.cfg.Hooks.InFormatScan; h != nil {
+		h(source)
+	}
+	cutoff := now.Add(-24 * time.Hour).UnixNano()
+	var lines, bad, unknown int64
+	_ = s.st.Read().QueryRow(formatLinesQuery, source, cutoff).Scan(&lines)
+	_ = s.st.Read().QueryRow(formatBadQuery, source, cutoff).Scan(&bad)
+	_ = s.st.Read().QueryRow(formatUnknownQuery, source, cutoff).Scan(&unknown)
+	total := lines + bad
+	if total == 0 {
+		return formatVerdict{}
+	}
+	if float64(bad)/float64(total) > s.cfg.HoldRate {
+		return formatVerdict{true, fmt.Sprintf("%s: %d bad lines of %d over the last day", source, bad, total)}
+	}
+	if float64(unknown)/float64(total) > s.cfg.HoldRate {
+		return formatVerdict{true, fmt.Sprintf("%s: %d unknown keys over %d lines in the last day", source, unknown, total)}
+	}
+	return formatVerdict{}
 }
 
 func (s *Settler) holdsSession(session string) string {

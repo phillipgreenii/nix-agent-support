@@ -56,3 +56,29 @@ and the newest-cwd lookup runs on the same new index. The index is `records_sess
   `sqlite3 index.db "SELECT name FROM sqlite_master WHERE name='records_session_source_time'"`.
 - Verify afterwards: `query_duration_seconds` observations over 10 s for `conversation.list` and
   `conversation.show` should stop, and `query_timeouts_total` should stop growing on them.
+
+## A slow `remove` no longer starves the settle tick
+
+Observed live: after a 9.4 s tick no tick finished for about 512 s, and a 30 s CPU profile put 72 percent of
+the samples in the `remove` request path (`Settler.Remove`, `removeLocked`, `blockers`, `formatHeld`, one SQLite
+`QueryRow`). `Remove` held the settler's run lock (the lock `Tick` also takes) for the whole pass, and the pass ran
+the format-hold scan once per Conversation (about 8,000) even though the answer depends on the source and the
+last day only. The settle tick timestamp that stayed frozen for 15 minutes is explained by the same holder: the
+tick was waiting for the run lock, so `settle_tick_last_timestamp_seconds` could not advance.
+
+Changes (no schema change, no new index):
+
+- The scan is computed once per source per pass (a verdict cache), not once per Conversation.
+- `Remove` computes the per-source verdicts before it asks for the run lock, so a slow scan no longer blocks a
+  tick. Safety is kept by repeating the scan, once per source, under the lock and right before the first removal
+  of the pass: a rate that rose after the early scan still keeps the files. The early verdicts only decide what a
+  dry run reports and which Conversations are worth considering. (The tick's own removal pass already holds the
+  lock and scans once per source, as before the removal.)
+- The three counts no longer scan `records`: they start from the source's files, take their commits through the
+  primary key and reach `records` through `records_ident` by file, generation and an offset range. The commits of
+  the source's files are still read, because `commits.seen_ns` has no index; that is the remaining cost, bounded
+  by the commit count rather than the record count. An index on `commits(seen_ns)` would remove it and belongs
+  with the schema v3 rebuild.
+- New counters `settle_run_lock_wait_total{op}` and `settle_run_lock_wait_seconds_total{op}` count the time callers
+  queue for the run lock, and a wait of 5 s or more logs `settle_run_lock_wait_slow` with the operation, so a
+  starved tick shows up as a lock wait instead of only as a missing tick.

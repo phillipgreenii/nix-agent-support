@@ -78,8 +78,7 @@ func (s *Settler) sessionExists(session string) (string, bool) {
 
 // Extract restores the Conversation. to is "" for the Claude directory.
 func (s *Settler) Extract(session, to string) (ExtractResult, error) {
-	s.run.Lock()
-	defer s.run.Unlock()
+	defer s.lockRun("extract")()
 	res := ExtractResult{Session: session, Paths: []string{}}
 	if !uuidRe.MatchString(session) {
 		return res, store.ErrNotFound

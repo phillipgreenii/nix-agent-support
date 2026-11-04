@@ -118,6 +118,11 @@ type Hooks struct {
 	BeforeQuarantine func(session, path string)
 	AfterQuarantine  func(session, path string)
 	BeforeUnlink     func(session, path string)
+	// InFormatScan runs at the start of each per-source format-hold scan (a test
+	// makes the scan slow here); AfterFormatPrescan runs in Remove after the
+	// early scan and before the run lock is requested.
+	InFormatScan       func(source string)
+	AfterFormatPrescan func()
 }
 
 // Config configures a Settler.
@@ -300,6 +305,26 @@ func (s *Settler) groups() (map[string]*conv, error) {
 	return out, nil
 }
 
+// slowRunLockWait is the wait for the run lock above which a warning is logged.
+const slowRunLockWait = 5 * time.Second
+
+// lockRun takes the run lock for op and returns its unlock. The time spent
+// waiting is counted (settle_run_lock_wait_total, settle_run_lock_wait_seconds_total,
+// label op) and a wait of slowRunLockWait or more is logged, so a long holder that
+// starves the tick shows up as the waiter's wait, not only as a missing tick.
+func (s *Settler) lockRun(op string) func() {
+	t0 := time.Now()
+	s.run.Lock()
+	w := time.Since(t0)
+	lbl := map[string]string{"op": op}
+	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaits, lbl, 1)
+	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaitSeconds, lbl, w.Seconds())
+	if w >= slowRunLockWait {
+		s.cfg.Obs.Log.Warn("settle_run_lock_wait_slow", "op", op, "wait_ms", w.Milliseconds())
+	}
+	return s.run.Unlock
+}
+
 // Outcome is what one evaluation of a Conversation did.
 type Outcome struct {
 	Session  string
@@ -337,8 +362,7 @@ func (s *Settler) LastPhases() TickPhases {
 // Tick runs one pass: it evaluates every Conversation that is not live, moves
 // the ones whose Process came back to Live, and refreshes the gauges.
 func (s *Settler) Tick() (TickStats, error) {
-	s.run.Lock()
-	defer s.run.Unlock()
+	defer s.lockRun("tick")()
 	var stats TickStats
 	var ph TickPhases
 	defer func() {
@@ -387,7 +411,7 @@ func (s *Settler) Tick() (TickStats, error) {
 	}
 	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable {
-		if _, err := s.removeLocked(RemoveOptions{}, now); err != nil && first == nil {
+		if _, err := s.removeLocked(RemoveOptions{}, now, nil); err != nil && first == nil {
 			first = fmt.Errorf("removal pass: %w", err)
 		}
 		if groups, err = s.groups(); err == nil {
@@ -476,8 +500,7 @@ func (t *TickStats) add(out Outcome, prior string) {
 // Recheck is the on-demand re-check entry point (held --retry): it evaluates
 // one Conversation now, without waiting for held.recheck.
 func (s *Settler) Recheck(session string) (Outcome, error) {
-	s.run.Lock()
-	defer s.run.Unlock()
+	defer s.lockRun("recheck")()
 	now := s.cfg.Clock.Now()
 	s.checkLow()
 	live, err := s.cfg.Live()
@@ -1372,8 +1395,7 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 // segments that were renamed into place but never committed, removes leftover
 // temporary files, and finishes the delete a crash after "settled" cut short.
 func (s *Settler) Recover() error {
-	s.run.Lock()
-	defer s.run.Unlock()
+	defer s.lockRun("recover")()
 	root := filepath.Join(s.st.Dir(), store.ArchivesDir)
 	ents, err := s.fs.ReadDir(root)
 	if err != nil {
