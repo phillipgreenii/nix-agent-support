@@ -173,3 +173,51 @@ func TestPprofIsOffByDefaultAndFlagOpensTheSocketUnderStateHome(t *testing.T) {
 		t.Fatal("pprofSocket mismatch")
 	}
 }
+
+// TestStatusAnswersFastWhenTheCrashQueriesAreSlow pins the cause of the 30 s
+// status: the cached status op answers at once, but the two conversation.list
+// reads behind crashed_recent and suspected_recent each take as long as the
+// request deadline on a large index (here, while the daemon is busy, they block
+// until the test ends). status must give up on them after its budget and answer
+// without the counts.
+func TestStatusAnswersFastWhenTheCrashQueriesAreSlow(t *testing.T) {
+	release := make(chan struct{})
+	sock := filepath.Join(shortDir(t), "r.sock")
+	s := server.New(obs.New(nil), nil, func() any { return map[string]any{} })
+	s.Register("status", server.KindQuery, func(context.Context, []byte) (any, *wire.Error) {
+		return wire.Status{Healthy: true, Short: "ok", Verdict: "healthy", CaughtUp: true, StatusAgeS: 2}, nil
+	})
+	s.Register("conversation.list", server.KindQuery, func(ctx context.Context, _ []byte) (any, *wire.Error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		case <-time.After(20 * time.Second):
+		}
+		return map[string]any{}, nil
+	})
+	if err := s.Listen(sock); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	t.Cleanup(func() { close(release) })
+
+	a, out, _ := testApp(nil)
+	start := time.Now()
+	code := a.run([]string{"status", "--json", "--socket", sock})
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("status took %s with slow crash queries, want under 1s", el)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	var st wire.Status
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if st.CrashedRecent != nil || st.SuspectedRecent != nil {
+		t.Fatalf("the counts must be absent when the queries miss the budget: %v %v", st.CrashedRecent, st.SuspectedRecent)
+	}
+	if st.StatusAgeS != 2 {
+		t.Fatalf("the cached figures were lost: %+v", st)
+	}
+}

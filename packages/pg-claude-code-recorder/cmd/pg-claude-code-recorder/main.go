@@ -29,6 +29,8 @@ type app struct {
 	ctx         context.Context
 	// pollEvery is how often coverage --wait-caught-up polls (1s when zero).
 	pollEvery time.Duration
+	// recentBudget bounds how long status waits for the crash counts (500ms when zero).
+	recentBudget time.Duration
 	// isTTY reports whether the command runs interactively (standard input is a
 	// terminal when nil), which decides whether remove may ask.
 	isTTY func() bool
