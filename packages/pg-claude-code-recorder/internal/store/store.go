@@ -48,6 +48,15 @@ type Options struct {
 	// It is also the way past a database whose schema_version is newer than
 	// this binary knows.
 	Rebuild bool
+	// BulkRebuild (with Rebuild) opens the new index in bulk rebuild mode (see
+	// bulk.go): batched commits, relaxed durability, and an unfinished-rebuild
+	// marker that FinishRebuild clears. The caller MUST call FinishRebuild
+	// after a successful parse.
+	BulkRebuild bool
+	// BulkRecords and BulkBytes override the batch commit budgets
+	// (DefaultBulkRecords and DefaultBulkBytes when zero); tests use small ones.
+	BulkRecords int
+	BulkBytes   int64
 	// DriverName is the database/sql driver name for both handles; empty
 	// means "sqlite". A test registers a counting wrapper under another name
 	// (internal/store/countdriver) to count reads.
@@ -94,6 +103,16 @@ type Store struct {
 	rdb *sql.DB
 	cdb *sql.DB // the passive-checkpoint connection (own handle, never the write one)
 
+	// Bulk rebuild state (bulk.go), guarded by mu.
+	bulk        bool // opened for a bulk rebuild, not yet finished
+	batching    bool // WithWrite calls join one open transaction
+	btx         *sql.Tx
+	bRecs       int
+	bBytes      int64
+	bCommits    int
+	bulkRecords int
+	bulkBytes   int64
+
 	mu       sync.Mutex // serializes every write
 	jf       fsx.File
 	nextSeq  int64
@@ -130,7 +149,13 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.ReadTimeout <= 0 {
 		opt.ReadTimeout = DefaultReadTimeout
 	}
-	s := &Store{dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, journalLimit: opt.JournalSizeLimit}
+	if opt.BulkRecords <= 0 {
+		opt.BulkRecords = DefaultBulkRecords
+	}
+	if opt.BulkBytes <= 0 {
+		opt.BulkBytes = DefaultBulkBytes
+	}
+	s := &Store{bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -176,7 +201,7 @@ func Open(dir string, opt Options) (*Store, error) {
 		}
 		dbExisted = false
 	}
-	if err := s.openDB(dbPath); err != nil {
+	if err := s.openDB(dbPath, opt.BulkRebuild); err != nil {
 		var older *SchemaOlderError
 		if !dbExisted || errors.As(err, &older) {
 			return nil, err
@@ -190,7 +215,17 @@ func Open(dir string, opt Options) (*Store, error) {
 			return nil, err
 		}
 		dbExisted = false
-		if err := s.openDB(dbPath); err != nil {
+		if err := s.openDB(dbPath, opt.BulkRebuild); err != nil {
+			return nil, err
+		}
+	}
+	if !opt.BulkRebuild && s.metaString(metaRebuildUnfinished) != "" {
+		s.closeDBs()
+		return nil, &UnfinishedRebuildError{}
+	}
+	if opt.BulkRebuild {
+		if err := s.beginRebuild(); err != nil {
+			s.closeDBs()
 			return nil, err
 		}
 	}
@@ -231,11 +266,15 @@ func Open(dir string, opt Options) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) openDB(path string) error {
+func (s *Store) openDB(path string, bulk bool) error {
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)"
 	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
 	// it; it caps the WAL file left behind when the WAL restarts.
 	wdsn := dsn + "&_pragma=journal_size_limit(" + strconv.Itoa(s.journalLimit) + ")"
+	cdsn := wdsn
+	if bulk {
+		wdsn += bulkDSNPragmas()
+	}
 	w, err := sql.Open(s.driverName, wdsn)
 	if err != nil {
 		return err
@@ -273,7 +312,7 @@ func (s *Store) openDB(path string) error {
 	r.SetConnMaxIdleTime(readConnMaxIdleTime)
 	// A passive checkpoint can run for minutes on a large backlog: it gets its
 	// own connection so it never holds the one write connection.
-	c, err := sql.Open(s.driverName, wdsn)
+	c, err := sql.Open(s.driverName, cdsn)
 	if err != nil {
 		_ = w.Close()
 		_ = r.Close()
@@ -309,6 +348,10 @@ func (s *Store) Checkpoint() (log, checkpointed int, err error) {
 }
 
 func (s *Store) closeDBs() {
+	if s.btx != nil {
+		_ = s.btx.Rollback()
+		s.btx = nil
+	}
 	if s.cdb != nil {
 		_ = s.cdb.Close()
 	}

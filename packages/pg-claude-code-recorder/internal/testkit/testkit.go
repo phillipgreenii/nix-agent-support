@@ -30,8 +30,11 @@ type Kit struct {
 	// Clk is the parser's clock (the real one unless NewWithClock was used).
 	Clk   clock.Clock
 	clock int64
-	sizes map[int64]int64
-	gens  map[int64]int
+	// StoreOptions are merged into the store options on the next open (Obs is
+	// always the kit's).
+	StoreOptions store.Options
+	sizes        map[int64]int64
+	gens         map[int64]int
 }
 
 // New returns a Kit over a fresh state directory.
@@ -49,7 +52,9 @@ func NewWithClock(t *testing.T, clk clock.Clock) *Kit {
 func (k *Kit) open() {
 	k.T.Helper()
 	k.Obs = obs.New(nil)
-	st, err := store.Open(k.Dir, store.Options{Obs: k.Obs})
+	opt := k.StoreOptions
+	opt.Obs = k.Obs
+	st, err := store.Open(k.Dir, opt)
 	if err != nil {
 		k.T.Fatal(err)
 	}

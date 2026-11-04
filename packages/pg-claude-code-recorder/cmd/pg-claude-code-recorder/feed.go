@@ -237,17 +237,22 @@ func (a *app) rebuild(args []string) int {
 	if cl.Do(a.ctx, "GET", "/v1/hello", nil, &h) == nil {
 		return a.emitErrorFor(c.jsonOut, wire.ErrBusy, "the daemon is running on "+cfg.Socket+"; stop it first, or restart it with serve --rebuild", cfg.Socket)
 	}
-	d, err := serve.Open(serve.Options{Config: cfg, Logger: serve.NewLogger(a.errw), Version: Version, Rebuild: true})
+	d, err := serve.Open(serve.Options{Config: cfg, Logger: serve.NewLogger(a.errw), Version: Version, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		return a.emitError(c.jsonOut, wire.ErrUnavailable, fmt.Sprintf("cannot rebuild: %v", err))
 	}
 	perr := d.Parser().ParseAll()
+	if perr == nil {
+		// Clears the unfinished-rebuild marker; on any failure it stays and
+		// the next start refuses this index until the rebuild is rerun.
+		perr = d.Store().FinishRebuild()
+	}
 	epoch := d.Store().Epoch()
 	if err := d.Close(); err != nil && perr == nil {
 		perr = err
 	}
 	if perr != nil {
-		return a.emitError(c.jsonOut, wire.ErrInternal, "re-parse: "+perr.Error())
+		return a.emitError(c.jsonOut, wire.ErrInternal, "re-parse: "+perr.Error()+" (index.db is left marked as an unfinished rebuild; run rebuild again)")
 	}
 	_, _ = fmt.Fprintf(a.out, "rebuilt index.db in %s: epoch %d; clients with an older cursor resync from snapshot\n", cfg.StateDir, epoch)
 	return wire.ExitOK

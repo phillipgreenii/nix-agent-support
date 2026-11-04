@@ -226,7 +226,14 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   refused the same way, untouched and not migrated in place: stop the daemon and run `rebuild` (or
   `serve --rebuild`), which re-derives records, fields and text indexes from the journal and the
   copies into a new file and keeps the old one as `index.db.pre-rebuild`; nothing is deleted before
-  the operator has checked the new file. `feed_waiters` is the gauge of waiters in progress.
+  the operator has checked the new file. The `rebuild` command (not `serve --rebuild`) runs in bulk
+  mode: one write transaction spans many files and commits at 100,000 records or 64 MiB of parsed
+  copy bytes, with `synchronous=OFF`, a 256 MiB page cache, a 1 GiB WAL autocheckpoint and FTS5
+  automerge off; at the end it restores `synchronous=FULL` and the default automerge, merges the FTS5
+  segments and runs `wal_checkpoint(TRUNCATE)`. A rebuild is repeatable, so a crash in the middle
+  may leave an unusable half file: a marker row (`meta.rebuild_unfinished`) is written durably first
+  and cleared last, and `serve` (and every other start) refuses a file that still has it, telling
+  the operator to run `rebuild` again. `feed_waiters` is the gauge of waiters in progress.
 
 ```sh
 pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'

@@ -49,6 +49,10 @@ type Options struct {
 	// Rebuild forces index.db to be rebuilt from the journal (serve --rebuild,
 	// the rebuild command); it is also the way past a newer schema_version.
 	Rebuild bool
+	// BulkRebuild (with Rebuild) runs the offline rebuild command in bulk mode
+	// (store.Options.BulkRebuild): the caller MUST call Store().FinishRebuild
+	// after a successful ParseAll. serve --rebuild does not use it.
+	BulkRebuild bool
 	// Procs is the process table (the ProcessTable seam; the real one when nil).
 	Procs proc.System
 }
@@ -108,7 +112,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild, ReadTimeout: cfg.QueryTimeout})
+	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, ReadTimeout: cfg.QueryTimeout})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}

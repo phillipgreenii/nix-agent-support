@@ -113,6 +113,9 @@ CREATE TABLE IF NOT EXISTS unknown_keys(
 func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.batching {
+		return s.bulkWriteLocked(point, fn)
+	}
 	tx, err := s.wdb.Begin()
 	if err != nil {
 		return err

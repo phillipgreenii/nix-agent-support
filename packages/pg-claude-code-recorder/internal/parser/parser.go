@@ -121,17 +121,30 @@ func (p *Parser) Drain() error {
 
 // ParseAll parses every file with unparsed bytes and re-parses generations
 // stored under an older parser version.
-func (p *Parser) ParseAll() error {
+//
+// On a store opened for a bulk rebuild the writes of many files share one
+// transaction that commits on a record or byte budget (see store.BulkBegin);
+// otherwise each chunk of a file commits on its own.
+func (p *Parser) ParseAll() (first error) {
 	files, err := p.cfg.Store.AllFiles()
 	if err != nil {
 		return err
 	}
-	var first error
+	p.cfg.Store.BulkBegin()
+	defer func() {
+		if err := p.cfg.Store.BulkEnd(); err != nil && first == nil {
+			first = err
+		}
+	}()
 	for _, f := range files {
 		if !p.HasSource(f.Source) {
 			continue
 		}
 		if f.Mode == "snapshot" {
+			// Snapshot parsing reads back what it stored: commit the batch first.
+			if err := p.cfg.Store.BulkFlush(); err != nil && first == nil {
+				first = err
+			}
 			if _, err := p.ParseFile(f.ID); err != nil && first == nil {
 				first = err
 			}
@@ -363,9 +376,13 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 	// A normal parse commits a bounded run of lines per transaction; a re-parse
 	// is one transaction so the new records appear together.
 	if reparse {
-		return count, p.cfg.Store.WithWrite("parse.before-commit", run)
+		if err := p.cfg.Store.WithWrite("parse.before-commit", run); err != nil {
+			return count, err
+		}
+		return count, p.cfg.Store.BulkAdd(count, end-start)
 	}
 	for start < end {
+		before := count
 		var advanced int64
 		one := func(rawTx *sql.Tx) error {
 			tx := newPS(rawTx)
@@ -395,6 +412,9 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		}
 		if advanced == 0 {
 			break
+		}
+		if err := p.cfg.Store.BulkAdd(count-before, advanced); err != nil {
+			return count, err
 		}
 		start += advanced
 	}
