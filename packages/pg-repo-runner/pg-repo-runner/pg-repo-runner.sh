@@ -53,6 +53,9 @@ export RR_CCPOOL_BIN="${PG_REPO_RUNNER_CCPOOL_BIN:-${RR_CCPOOL_BIN:-}}"
 if [[ -n ${RR_TOOLS_PATH:-} ]]; then
   export PATH="$RR_TOOLS_PATH:$PATH"
 fi
+# A launchd job has no profile directories on PATH, so a bare `pn` would not be found:
+# resolve it to an absolute path once, for every pn call of the run.
+rr_resolve_pn
 
 # Exit status of a "not now" answer: pg-router re-offers the item.
 RR_EXIT_BUSY=9
@@ -303,6 +306,13 @@ rr_verify_override() {
   local repo="$1" sha="$2" root="$3" olog started finished rc=0 res
   olog="$RR_STATE_DIR/logs/$repo/$sha.override.log"
   started="$(rr_now)"
+  rr_resolve_pn
+  if rr_pn_missing; then
+    mkdir -p "$(dirname "$olog")"
+    printf 'prerequisite missing: pn (%s) is not on the service PATH and not in a profile bin directory; the sibling-override check cannot run\n' "$RR_PN_BIN" >"$olog"
+    rr_log "override check: prerequisite missing: pn ($RR_PN_BIN) not found on PATH or in a profile bin dir; no verdict (see $olog)"
+    return 1
+  fi
   PN_WORKSPACE_ROOT="$root" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
     env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY \
     "${RR_PN_BIN:-pn}" workspace flake-check --no-build --rev "$sha" "$repo" >"$olog" 2>&1 || rc=$?

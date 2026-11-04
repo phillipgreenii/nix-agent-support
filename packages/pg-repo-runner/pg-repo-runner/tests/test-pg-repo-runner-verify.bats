@@ -391,6 +391,29 @@ hold_lease() {
   [[ $output == *$'check\tgreen\toverride'* ]]
 }
 
+@test "a bare pn missing from the service PATH is found in a profile bin directory" {
+  mkdir -p "$TEST_DIR/profile/bin"
+  cp "$TEST_DIR/pn-shim" "$TEST_DIR/profile/bin/pn-rr-test"
+  # a bare name that no PATH directory holds, as pn is not on a launchd job PATH
+  export PG_REPO_RUNNER_PN_BIN=pn-rr-test
+  export PG_REPO_RUNNER_PN_SEARCH_DIRS="$TEST_DIR/profile/bin"
+  SHIM_EXIT=1 PN_SHIM_EXIT=0 verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(override_file nix-alpha "$ALPHA_SHA")")" = green ]
+  [ "$(pn_runs)" -eq 1 ]
+}
+
+@test "pn absent everywhere: no override verdict and a log naming the missing prerequisite" {
+  export PG_REPO_RUNNER_PN_BIN=pn-rr-test
+  export PG_REPO_RUNNER_PN_SEARCH_DIRS="$TEST_DIR/no-such-dir"
+  SHIM_EXIT=1 verify
+  [ "$status" -eq 0 ]
+  [ ! -e "$(override_file nix-alpha "$ALPHA_SHA")" ]
+  [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
+  grep -q 'prerequisite missing: pn' "$STATE/logs/nix-alpha/$ALPHA_SHA.override.log"
+  ! grep -q "No such file" "$STATE/logs/nix-alpha/$ALPHA_SHA.override.log"
+}
+
 @test "locked red and override red is a defect" {
   SHIM_EXIT=1 PN_SHIM_EXIT=10 verify
   [ "$status" -eq 0 ]

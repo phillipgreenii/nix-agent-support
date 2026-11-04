@@ -1235,6 +1235,41 @@ rr_pn() {
     -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY "${RR_PN_BIN:-pn}" "$@"
 }
 
+# rr_resolve_pn: makes RR_PN_BIN usable under a thin service PATH (a launchd job
+# carries no profile directories, so a bare `pn` is not found). A value with a slash
+# is left alone. A bare name found on PATH is left alone. Otherwise the profile bin
+# directories a nix-darwin host puts pn in are tried in order
+# (PG_REPO_RUNNER_PN_SEARCH_DIRS, a colon list, replaces them: a test seam), and the
+# first one holding an executable of that name makes RR_PN_BIN absolute. When none
+# does RR_PN_BIN is left bare and rr_pn_missing reports it. Always returns 0.
+rr_resolve_pn() {
+  local bin="${RR_PN_BIN:-pn}" dirs d
+  RR_PN_BIN="$bin"
+  [[ $bin == */* ]] && return 0
+  command -v "$bin" >/dev/null 2>&1 && return 0
+  dirs="${PG_REPO_RUNNER_PN_SEARCH_DIRS-/etc/profiles/per-user/${USER:-$(id -un)}/bin:${HOME:-/nonexistent}/.nix-profile/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin}"
+  local IFS=:
+  for d in $dirs; do
+    if [[ -n $d && -x $d/$bin && ! -d $d/$bin ]]; then
+      RR_PN_BIN="$d/$bin"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# rr_pn_missing: succeeds (returns 0) when pn cannot be run: a bare name that is not
+# on PATH, or a path that is not executable.
+rr_pn_missing() {
+  local bin="${RR_PN_BIN:-pn}"
+  if [[ $bin == */* ]]; then
+    [[ -x $bin ]] && return 1
+    return 0
+  fi
+  command -v "$bin" >/dev/null 2>&1 && return 1
+  return 0
+}
+
 # rr_quiet_window: how long the tip tuple must stay unchanged before it is offered, in
 # seconds (PG_REPO_RUNNER_QUIET_WINDOW, else thresholds.quiet_window, else 900: 3 ticks
 # of 5 minutes). 0 is allowed.

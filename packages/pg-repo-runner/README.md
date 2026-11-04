@@ -415,9 +415,15 @@ closes the runner's own bead. The bead carries `surface.repo_labels.workspace` w
 workspace's terminal repo (the repo whose host closure the build realizes), else none (the bead stays
 pending, BF-1).
 
-The deployment MUST give the role a PATH that provides `pn`, `nix` and `darwin-rebuild`
+The deployment SHOULD give the role a PATH that provides `pn`, `nix` and `darwin-rebuild`
 (`PG_REPO_RUNNER_PN_BIN` replaces `pn`), and the canonical workspace MUST have been trusted once with
 `pn workspace allow` (a set inherits the trust).
+
+As a safety net for a thin service PATH, the kernel resolves a bare `pn` that is not on PATH to the first
+executable `pn` in `/etc/profiles/per-user/$USER/bin`, `~/.nix-profile/bin`, `/run/current-system/sw/bin`,
+`/nix/var/nix/profiles/default/bin` (`PG_REPO_RUNNER_PN_SEARCH_DIRS`, a colon list, replaces them). When no
+`pn` is found anywhere, the sibling-override check stores no verdict and its log
+(`logs/<repo>/<sha>.override.log`) says `prerequisite missing: pn`; the red check stays unclassified.
 
 ### Known limit: pn's workspace id check
 
