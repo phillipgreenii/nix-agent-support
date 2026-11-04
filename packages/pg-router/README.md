@@ -295,6 +295,33 @@ default), no listener opens and the package's own read-back `ManualReader` defau
 stands unchanged. `run-until-idle` defines no such flag — a drain-and-exit pass has
 nothing long-lived to scrape.
 
+### Reading backlog in a health review
+
+A router health review MUST NOT read `pg_router_queue_depth{type}` as a backlog. That gauge counts
+events the queue still **retains**: a handled (settled) event stays until its time to live ends, so on a
+busy weekday it climbs while every listener is caught up (for `pr.changed` it is roughly the last six
+hours of arrivals). The same holds for the `backlog` sum. Retention, not backlog.
+
+The backlog signals are the per-listener gauges, one series per registered role:
+
+- `pg_router_listener_pending{role}`: how many retained, matching events the listener has not yet
+  settled (0 when caught up). A normally busy listener shows 1 or 2.
+- `pg_router_listener_oldest_pending_age_seconds{role}`: age in seconds of the oldest of those (0 when
+  nothing is pending).
+
+Example for the `pr-change` role (the listener of `pr.changed` events):
+
+```promql
+max_over_time(pg_router_listener_pending{role="pr-change"}[1h])
+max_over_time(pg_router_listener_oldest_pending_age_seconds{role="pr-change"}[1h])
+```
+
+A high `queue_depth` with `listener_pending` at 0 is retention. A rising `listener_pending` together
+with a growing oldest pending age is a real backlog (a saturated handler, a pause or other gate, or
+serialize occupancy). No alert reads the per-listener gauges. The decision and its consequences:
+`DEC-OBS-12` in `docs/decisions/observability.md`; a worked example is
+`docs/investigations/2026-11-04-pr-changed-queue-backlog.md` at the repository root.
+
 ### Queue log compaction
 
 `<LogDir>/queue.jsonl` is the append-only write-ahead log behind both the event queue and the
