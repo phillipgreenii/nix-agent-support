@@ -20,7 +20,7 @@ func runReply(args []string) int {
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")
 	queue := fs.Bool("queue-message", false, "deliver into Claude's native queue (fire-and-forget)")
 	interrupt := fs.Bool("interrupt", false, "cancel the current turn, then deliver")
-	confirmIngest := fs.Duration("confirm-ingest", 0, "after a fire-and-forget delivery, confirm the model started a turn within this window; exit 7 if not (0 = no check)")
+	confirmIngest := fs.Duration("confirm-ingest", 0, "after a fire-and-forget delivery, confirm the model started a turn within this window; exit 7 if not, exit 9 if the recorder could not say (0 = no check)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id/prompt
 	if len(pos) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: ccpool reply <external_id> <prompt> [--no-wait] [--queue-message] [--interrupt] [--confirm-ingest dur]")
@@ -131,6 +131,8 @@ func replyExitCode(err error) int {
 		return 6
 	case errors.Is(err, session.ErrPromptNotIngested):
 		return 7
+	case errors.Is(err, session.ErrIngestUnknown):
+		return 9
 	default:
 		return 1
 	}

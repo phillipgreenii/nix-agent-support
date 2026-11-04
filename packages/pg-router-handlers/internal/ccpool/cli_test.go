@@ -236,6 +236,21 @@ func TestSend_notIngestedExit7(t *testing.T) {
 	}
 }
 
+func TestSend_ingestUnknownExit9(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.ConfirmIngest = 90 * time.Second
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("could not confirm"), &fakeExit{code: 9}
+	}
+	err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait)
+	if !errors.Is(err, ErrIngestUnknown) || !IsIngestUnknown(err) {
+		t.Errorf("exit 9 should map to ErrIngestUnknown, got %v", err)
+	}
+	if IsNotIngested(err) {
+		t.Errorf("an unknown ingestion must not read as a definitive not-ingested; got %v", err)
+	}
+}
+
 func TestCancelCloseList_argv(t *testing.T) {
 	cli, got, setOut := newSpy()
 	_ = cli.Cancel(context.Background(), "s")

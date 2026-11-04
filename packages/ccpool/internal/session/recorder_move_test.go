@@ -16,13 +16,23 @@ type feedTranscript struct {
 	fakeTranscript
 	appeared bool
 	markErr  error
-	waited   *time.Duration
-	marked   *bool
+	// markErrAfter, when set, fails every Mark after the first (the post-window probe).
+	markErrAfter error
+	waitErr      error
+	marks        *int
+	waited       *time.Duration
+	marked       *bool
 }
 
 func (f feedTranscript) Mark(context.Context) (string, error) {
 	if f.marked != nil {
 		*f.marked = true
+	}
+	if f.marks != nil {
+		*f.marks++
+		if *f.marks > 1 && f.markErrAfter != nil {
+			return "", f.markErrAfter
+		}
 	}
 	return "1:5", f.markErr
 }
@@ -34,7 +44,7 @@ func (f feedTranscript) WaitMessage(_ context.Context, _, mark string, window ti
 	if mark != "1:5" {
 		return false, errors.New("wait did not use the mark taken before delivery")
 	}
-	return f.appeared, nil
+	return f.appeared, f.waitErr
 }
 
 func feedService(t *testing.T, tr Transcript, tm *sendTmux) *Service {
@@ -63,6 +73,28 @@ func TestSend_confirmIngest_feedNoMatchIsNotIngested(t *testing.T) {
 	_, err := s.SendWithConfirm(context.Background(), "a", "do it", ModeNoWait, 20*time.Millisecond)
 	if !errors.Is(err, ErrPromptNotIngested) {
 		t.Fatalf("err = %v; want ErrPromptNotIngested", err)
+	}
+}
+
+// A feed that fails while waiting says nothing about the prompt: unknown, never
+// "not ingested".
+func TestSend_confirmIngest_feedErrorIsUnknown(t *testing.T) {
+	s := feedService(t, feedTranscript{waitErr: errors.New("recorder unavailable")}, &sendTmux{live: true})
+	_, err := s.SendWithConfirm(context.Background(), "a", "do it", ModeNoWait, 20*time.Millisecond)
+	if !errors.Is(err, ErrIngestUnknown) || errors.Is(err, ErrPromptNotIngested) {
+		t.Fatalf("err = %v; want ErrIngestUnknown only", err)
+	}
+}
+
+// A window that passes with no record while the recorder no longer answers is a
+// feed timeout, not a verdict: unknown.
+func TestSend_confirmIngest_timeoutWithRecorderDownIsUnknown(t *testing.T) {
+	var marks int
+	tr := feedTranscript{appeared: false, marks: &marks, markErrAfter: errors.New("recorder unavailable")}
+	s := feedService(t, tr, &sendTmux{live: true})
+	_, err := s.SendWithConfirm(context.Background(), "a", "do it", ModeNoWait, 20*time.Millisecond)
+	if !errors.Is(err, ErrIngestUnknown) || errors.Is(err, ErrPromptNotIngested) {
+		t.Fatalf("err = %v; want ErrIngestUnknown only", err)
 	}
 }
 

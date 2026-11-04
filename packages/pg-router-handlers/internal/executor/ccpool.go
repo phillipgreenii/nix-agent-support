@@ -452,6 +452,18 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		slog.Warn("nudge not sent: the session is not live", "session", r.deps.ExternalID, "bead", d.Item.ID)
 		err = errSessionNotLive
 	}
+	if err != nil && ccpool.IsIngestUnknown(err) {
+		// The recorder could not confirm or refute ingestion (feed timeout, or the
+		// recorder unavailable or lagging under load): the prompt was delivered and
+		// the model may already be working, so this is neither a dropped nudge nor
+		// a send failure. Closing the session and unclaiming the bead on it killed
+		// working sessions and re-dispatched the same bead. Carry on as if the send
+		// succeeded: the wait and the budget watchdog below catch a session that
+		// really never started.
+		slog.Warn("nudge ingestion unknown: the recorder could not confirm it; leaving the session and the claim intact",
+			"session", r.deps.ExternalID, "bead", d.Item.ID, "err", err)
+		err = nil
+	}
 	if err != nil {
 		var res report.Result
 		// A confirmed dropped nudge (exit 7): the model never ingested the task, so
@@ -464,7 +476,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// the CLI runner) so a ready-but-empty row does not hold a
 			// counted slot until idle_ttl — cap eviction no longer reclaims
 			// ready rows (ADR 0072's Decision item 2).
-			_ = r.deps.CC.Close(ctx, r.deps.ExternalID, false)
+			r.closeFailedDispatchSession(ctx, d.Item.ID)
 			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
 			// The session did nothing, so the worktree created for it is
 			// reclaimed too (pg2-w3usi); reclaimAbandonedWorktree skips it if
@@ -510,6 +522,27 @@ func (r *ccpoolRun) purgeAbandonedSession(ctx context.Context, beadID string) {
 		"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
 	if err = r.deps.CC.Close(cctx, r.deps.ExternalID, true); err != nil {
 		slog.Error("purge-close of abandoned session failed after retry; session may still be live and reach ready",
+			"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	}
+}
+
+// closeFailedDispatchSession closes the session of a dispatch whose nudge never
+// took, and unlike a best-effort close does NOT discard the result: a failed
+// close leaves a ready-but-empty session holding a pool slot until idle_ttl (it
+// also depends on the recorder), so a failure is logged with its error and
+// retried once; one that still fails is logged at Error level. The close runs on
+// a context detached from ctx's cancellation, as in purgeAbandonedSession.
+func (r *ccpoolRun) closeFailedDispatchSession(ctx context.Context, beadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
+	defer cancel()
+	err := r.deps.CC.Close(cctx, r.deps.ExternalID, false)
+	if err == nil {
+		return
+	}
+	slog.Warn("close of the session after a failed dispatch failed; retrying once",
+		"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	if err = r.deps.CC.Close(cctx, r.deps.ExternalID, false); err != nil {
+		slog.Error("close of the session after a failed dispatch failed after retry; session may still hold a pool slot",
 			"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
 	}
 }

@@ -22,6 +22,15 @@ var ErrBusy = errors.New("session busy")
 // DISTINCT from a turn that started but timed out (TimedOut) or refused (ErrBusy).
 var ErrPromptNotIngested = errors.New("prompt delivered but model never started a turn (not ingested)")
 
+// ErrIngestUnknown is returned by SendWithConfirm when the ingestion confirmation
+// could not reach a verdict: the recorder was unreachable or its feed failed while
+// waiting, or it could not be reached once the window passed with no record. The
+// prompt was delivered and the model may well be working (a recorder that lags
+// under load looks the same), so callers MUST NOT treat this as a dropped prompt.
+// Callers map it to the dedicated exit code 9. Only ErrPromptNotIngested, returned
+// with the recorder confirmed reachable, is a definitive "not ingested".
+var ErrIngestUnknown = errors.New("could not confirm whether the prompt was ingested (recorder unavailable)")
+
 // Send delivers prompt to the live session externalID and (unless ModeNoWait)
 // blocks for the turn outcome, returning the assistant reply.
 func (s *Service) Send(ctx context.Context, externalID, prompt string, mode Mode) (Result, error) {
@@ -86,7 +95,8 @@ type FeedWaiter interface {
 }
 
 // confirmIngestedFeed is confirmIngested on the feed: one wait that returns on the
-// matching record, or ErrPromptNotIngested when the window passes without one.
+// matching record, ErrPromptNotIngested when the window passes without one while
+// the recorder still answers, or ErrIngestUnknown when the recorder cannot say.
 func (s *Service) confirmIngestedFeed(ctx context.Context, fw FeedWaiter, externalID, mark string, window time.Duration) error {
 	row, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
 	if err != nil {
@@ -98,9 +108,16 @@ func (s *Service) confirmIngestedFeed(ctx context.Context, fw FeedWaiter, extern
 	}
 	started, err := fw.WaitMessage(ctx, row.TranscriptPath, mark, window)
 	if err != nil {
-		return fmt.Errorf("confirm ingest: %w", err)
+		// The feed failed: nothing was observed either way.
+		return fmt.Errorf("%w: %v", ErrIngestUnknown, err)
 	}
 	if !started {
+		// A window that passes with no record proves "not ingested" only if the
+		// recorder is itself answering; a recorder that lags or is down looks the
+		// same. Probe it (a fresh feed position) before giving the verdict.
+		if _, perr := fw.Mark(ctx); perr != nil {
+			return fmt.Errorf("%w: no record within %s and the recorder did not answer afterwards: %v", ErrIngestUnknown, window, perr)
+		}
 		return ErrPromptNotIngested
 	}
 	return nil

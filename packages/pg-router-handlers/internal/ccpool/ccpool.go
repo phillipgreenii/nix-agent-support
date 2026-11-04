@@ -30,6 +30,21 @@ func IsNotIngested(err error) bool {
 	return errors.As(err, &ec) && ec.ExitCode() == 7
 }
 
+// ErrIngestUnknown mirrors ccpool's exit code 9: a fire-and-forget delivery whose
+// ingestion the recorder could not confirm or refute (feed failed, or the
+// recorder did not answer once the window passed). The prompt was delivered and
+// the model may be working, so it is NOT a dropped nudge.
+var ErrIngestUnknown = errors.New("ccpool: prompt ingestion unknown")
+
+// IsIngestUnknown reports whether err is (or wraps) a ccpool exit-code-9 outcome.
+func IsIngestUnknown(err error) bool {
+	if errors.Is(err, ErrIngestUnknown) {
+		return true
+	}
+	var ec exitCoder
+	return errors.As(err, &ec) && ec.ExitCode() == 9
+}
+
 // SessionLive reports whether the session addressed by externalID is present in
 // the pool's list and live (`tmux has-session`). Every send through ccpool reply
 // checks it first: reply resumes a cold session with an empty environment, so a

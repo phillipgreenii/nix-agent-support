@@ -263,6 +263,10 @@ func (c *CLIRunner) Send(ctx context.Context, externalID, prompt string, mode Se
 		if errors.As(err, &ec) && ec.ExitCode() == 7 {
 			return fmt.Errorf("%w: %s", ErrPromptNotIngested, externalID)
 		}
+		// Exit 9: the recorder could not say whether the prompt was ingested.
+		if errors.As(err, &ec) && ec.ExitCode() == 9 {
+			return fmt.Errorf("%w: %s", ErrIngestUnknown, externalID)
+		}
 		return err
 	}
 	return nil

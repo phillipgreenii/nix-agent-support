@@ -29,4 +29,9 @@ func TestReplyExitCode(t *testing.T) {
 	if c := replyExitCode(session.ErrPromptNotIngested); c != 7 {
 		t.Errorf("ErrPromptNotIngested -> %d, want 7", c)
 	}
+	// A recorder that could not say whether the prompt was ingested gets exit 9,
+	// distinct from the definitive 7.
+	if c := replyExitCode(fmt.Errorf("confirm ingest: %w", session.ErrIngestUnknown)); c != 9 {
+		t.Errorf("ErrIngestUnknown -> %d, want 9", c)
+	}
 }
