@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -127,6 +128,34 @@ func tryFlock(dir, externalID string, how int) (*Lock, error) {
 // SweepStale may remove it.
 const DefaultStaleAge = 7 * 24 * time.Hour
 
+// StampedStaleAge is the shorter idle age that applies to a per-attempt lock: a
+// name whose final "-"-separated token is a "<yyyymmddThhmmss[.fffffffff]>"
+// stamp (the handler mints one external id per attempt, so nothing reuses the
+// name after the attempt ends). It mirrors the ccpool pool lock GC's 24h rule.
+// The pool GC also requires that no session row exists; the handler has no
+// session store, but it does not need that check: a lock file holds no state,
+// removal happens only under the exclusive flock with openers re-verifying the
+// inode, and a reclaimer that later wants the id simply recreates the file (and
+// its acquisition refreshes the mtime, so a recently reclaimed id is never old).
+const StampedStaleAge = 24 * time.Hour
+
+// Unstamped names are NEVER shortened, in particular worktree--<bead>.lock: the
+// bead id is reused (re-dispatch, retries), so those files are reacquired and
+// their mtime tracks the last use; they are removed only after DefaultStaleAge
+// of idleness, which a live worktree's dispatch cadence keeps refreshed and a
+// dead bead's lock ages out of. The worktree's own existence is not consulted:
+// the worktree sweep owns worktrees, and an idle lock for a still-existing one
+// is recreated harmlessly on its next dispatch.
+var stampRe = regexp.MustCompile(`-\d{8}T\d{6}(\.\d+)?\.lock$`)
+
+// staleAgeFor is the idle age after which the lock file name may be removed.
+func staleAgeFor(name string, olderThan time.Duration) time.Duration {
+	if stampRe.MatchString(name) && StampedStaleAge < olderThan {
+		return StampedStaleAge
+	}
+	return olderThan
+}
+
 // SweepStale removes lock files under dir that nobody has acquired for longer
 // than olderThan and that nobody holds right now; it returns how many it
 // removed. Best effort: any file it cannot prove safe is left for a later pass.
@@ -160,11 +189,12 @@ func SweepStale(dir string, olderThan time.Duration, now time.Time) int {
 		if !strings.HasSuffix(name, ".lock") || len(name) == len(".lock") {
 			continue
 		}
+		age := staleAgeFor(name, olderThan)
 		fi, err := de.Info()
-		if err != nil || !fi.Mode().IsRegular() || now.Sub(fi.ModTime()) <= olderThan {
+		if err != nil || !fi.Mode().IsRegular() || now.Sub(fi.ModTime()) <= age {
 			continue
 		}
-		if removeIfIdle(filepath.Join(dir, name), olderThan, now) {
+		if removeIfIdle(filepath.Join(dir, name), age, now) {
 			removed++
 		}
 	}

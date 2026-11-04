@@ -341,3 +341,35 @@ func TestTryLock_retriesWhenFileUnlinkedBetweenOpenAndFlock(t *testing.T) {
 		t.Fatalf("second TryLock after a raced first = %v, want ErrHeld (first holds a dead inode)", err)
 	}
 }
+
+func TestSweepStale_stampedAttemptLocksUseShortAge(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	stamp := func(d time.Duration) string { return now.Add(-d).UTC().Format("20060102T150405") + ".530794000" }
+	oldStamped := mkIdle(t, dir, "pg-router-pg2-escalation-triager-pg2-x-"+stamp(30*time.Hour), 30*time.Hour)
+	freshStamped := mkIdle(t, dir, "pg-router-pg2-escalation-triager-pg2-y-"+stamp(2*time.Hour), 2*time.Hour)
+	heldID := "pg-router-worker-pg2-z-" + stamp(30*time.Hour)
+	held, err := TryLock(dir, heldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Unlock()
+	heldPath := backdate(t, dir, heldID, 30*time.Hour)
+	// Unstamped worktree locks keep the long age: 30h idle is kept, 8d is removed.
+	wtRecent := mkIdle(t, dir, WorktreeKey("zr-recent"), 30*time.Hour)
+	wtOld := mkIdle(t, dir, WorktreeKey("zr-old"), 8*24*time.Hour)
+
+	if n := SweepStale(dir, DefaultStaleAge, now); n != 2 {
+		t.Fatalf("SweepStale removed %d, want 2 (old stamped, old worktree)", n)
+	}
+	for _, p := range []string{oldStamped, wtOld} {
+		if present(p) {
+			t.Errorf("%s should have been removed", p)
+		}
+	}
+	for _, p := range []string{freshStamped, heldPath, wtRecent} {
+		if !present(p) {
+			t.Errorf("%s should have been kept", p)
+		}
+	}
+}
