@@ -69,6 +69,18 @@ type poolReconciler struct {
 	role roles.Role
 	cfg  config.Config
 	deps executor.Deps
+	// cwds overrides the live-process probe on the dispatch path (tests only);
+	// nil means the production probe, processCWDs. It never means "no probe": a
+	// failed or unavailable probe keeps the directory.
+	cwds cwdProbe
+}
+
+// probe returns the live-process probe for the dispatch path.
+func (p poolReconciler) probe() cwdProbe {
+	if p.cwds != nil {
+		return p.cwds
+	}
+	return processCWDs
 }
 
 func newPoolReconciler(role roles.Role, cfg config.Config, deps executor.Deps) executor.Reconciler {
@@ -162,7 +174,7 @@ func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string
 		// removal, which would otherwise fail this dispatch's `git worktree add`
 		// with "already exists" (leftoverdir.go).
 		if l, isLeftover := leftoverCandidate(filepath.Join(dir, beadID), beadID, p.cfg.RepoRoot, p.now(), worktreeSweepGrace(p.deps)); isLeftover {
-			reclaimLeftoverDir(ctx, p.role, p.deps, orphanEnv{open: worktree.GitOpener, cwds: processCWDs, lockDir: p.deps.LockDir}, l)
+			reclaimLeftoverDir(ctx, p.role, p.deps, orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir}, l)
 		}
 		return nil
 	}
@@ -173,7 +185,7 @@ func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string
 	if worktreeHeldByRow(sessions, c) {
 		return nil
 	}
-	env := orphanEnv{open: worktree.GitOpener, cwds: processCWDs, lockDir: p.deps.LockDir}
+	env := orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir}
 	if env.cwds != nil {
 		cwds, err := env.cwds(ctx)
 		if err != nil {

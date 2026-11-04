@@ -55,7 +55,14 @@ func (h *sweepHarness) trashEntries() []string {
 func (h *sweepHarness) reconciler() poolReconciler {
 	d := h.deps
 	d.LockDir = h.lockDir
-	return poolReconciler{role: h.role, cfg: d.Cfg, deps: d}
+	// The dispatch path probes live processes through lsof, which a sandbox may
+	// lack (a failed probe rightly keeps the directory). Tests inject the probe:
+	// the case's own, else "no process is inside any directory".
+	probe := h.env.cwds
+	if probe == nil {
+		probe = func(context.Context) ([]string, error) { return nil, nil }
+	}
+	return poolReconciler{role: h.role, cfg: d.Cfg, deps: d, cwds: probe}
 }
 
 // tree snapshots every path under root without following symlinks, so a test
@@ -263,11 +270,6 @@ func TestLeftover_refusesAndDeletesNothing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, via := range []string{"sweep", "dispatch"} {
 				t.Run(via, func(t *testing.T) {
-					// The dispatch path probes real processes (processCWDs), which a test
-					// cannot inject into; the probe guard is exercised through the sweep.
-					if via == "dispatch" && (tc.name == "a live process is inside it" || tc.name == "the process probe fails") {
-						t.Skip("process probe is injectable only on the sweep path")
-					}
 					h := newSweepHarness(t)
 					path := tc.setup(t, h)
 					before := snapshot(t, h.wtDir)
