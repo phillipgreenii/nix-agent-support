@@ -108,7 +108,7 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `parser_version`, `cursor`, `stage`. Each request logs `request` with the caller's `--client`. Each settle tick
   logs `settle_tick` (`outcome`, `duration_ms`, `examined`, `unchanged`, `settled_now`, `transitions`) and a tick
   over one minute also logs `settle_tick_slow` with `duration_ms`, `examined` and the phase breakdown
-  (`reads_ms`, `prefilter_ms`, `evaluate_ms`, `removal_ms`, `refresh_ms`). A start logs one `startup_phase`
+  (`reads_ms`, `prefilter_ms`, `evaluate_ms`, `removal_ms`, `refresh_ms`). A tick still running after a minute logs `settle_tick_stuck` (`in_flight_ms`) while it is stuck, and the gauge `settle_tick_in_flight_seconds` is the age of the running tick (0 when none; the last-timestamp gauge only moves when a tick ends). A start logs one `startup_phase`
   (`phase`, `duration_ms`) per phase, a `startup_phase_begin` first for the phases that can run long, and one
   `startup_complete` (`duration_ms`, `phases`) when it serves.
 - Known limitation: `status` `stage_counts` omits `live` and `quiet`, while the dashboard and the metrics include

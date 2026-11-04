@@ -84,6 +84,9 @@ type Daemon struct {
 	su        *startupTimer
 	// tickPhases returns the phase breakdown of the settle tick that just ran.
 	tickPhases func() settle.TickPhases
+	// tickStartNS is when the running settle tick began (clock UnixNano), 0 when
+	// none runs; the in-flight gauge and the stuck-tick log read it.
+	tickStartNS atomic.Int64
 
 	backfillDone atomic.Bool
 	filesTotal   atomic.Int64
@@ -465,7 +468,12 @@ const settleTickSlow = time.Minute
 // settle_tick event (duration_ms in milliseconds; the metrics are in seconds).
 func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 	start := d.clock.Now()
+	d.tickStartNS.Store(start.UnixNano())
+	watchdog := time.AfterFunc(settleTickSlow, d.logStuckTick)
 	stats, err := step()
+	watchdog.Stop()
+	d.tickStartNS.Store(0)
+	d.setTickInFlight()
 	end := d.clock.Now()
 	dur := end.Sub(start)
 	outcome := obs.OutcomeOK
@@ -497,6 +505,31 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 				"refresh_ms", p.Refresh.Milliseconds())
 		}
 		d.obs.Log.Warn(obs.EvSettleTickSlow, attrs...)
+	}
+}
+
+// tickInFlightAge is how long the running settle tick has been going (it
+// includes its wait for the run lock), 0 when none is.
+func (d *Daemon) tickInFlightAge() time.Duration {
+	ns := d.tickStartNS.Load()
+	if ns == 0 {
+		return 0
+	}
+	return d.clock.Now().Sub(time.Unix(0, ns))
+}
+
+// setTickInFlight sets settle_tick_in_flight_seconds: the age of the running
+// tick, so a tick that never finishes is visible while it is stuck (the
+// last-timestamp gauge only moves when a tick ends).
+func (d *Daemon) setTickInFlight() {
+	d.obs.Reg.Set(obs.MSettleTickInFlight, nil, d.tickInFlightAge().Seconds())
+}
+
+// logStuckTick is the watchdog timer's callback: a tick still running after
+// settleTickSlow is logged while it is stuck, not only when it ends.
+func (d *Daemon) logStuckTick() {
+	if age := d.tickInFlightAge(); age > 0 {
+		d.obs.Log.Warn(obs.EvSettleTickStuck, "in_flight_ms", age.Milliseconds())
 	}
 }
 
@@ -541,6 +574,7 @@ func (d *Daemon) refreshLoop() {
 // settle tick holds and made a scrape take 14 s or hang. The heavier gauges
 // come from refreshGauges, which the refresh loop runs every 5 seconds.
 func (d *Daemon) scrapeRefresh() {
+	d.setTickInFlight()
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
 	if d.st != nil {
 		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
@@ -551,6 +585,7 @@ func (d *Daemon) scrapeRefresh() {
 // state directory's free and used bytes. Used bytes walk the directory, so they
 // are recomputed at most once a minute.
 func (d *Daemon) refreshGauges() {
+	d.setTickInFlight()
 	start := time.Now()
 	defer func() {
 		d.obs.Reg.Observe(obs.MRefreshGaugesDuration, time.Since(start).Seconds())

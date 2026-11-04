@@ -118,3 +118,28 @@ func TestRefreshGaugesBodyIsTimed(t *testing.T) {
 		t.Fatalf("refresh_gauges ok runs %v", v)
 	}
 }
+
+// While a tick runs, the in-flight gauge is its age; when it ends the gauge is 0.
+func TestRunTickInFlightGaugeAndStuckLog(t *testing.T) {
+	d, clk, buf := tickEnv()
+	d.runTick(func() (settle.TickStats, error) {
+		clk.Advance(90 * time.Second)
+		d.setTickInFlight()
+		if v, _ := d.obs.Reg.Gauge(obs.MSettleTickInFlight, nil); v != 90 {
+			t.Errorf("in flight %v, want 90", v)
+		}
+		d.logStuckTick() // what the watchdog timer runs after a minute
+		return settle.TickStats{}, nil
+	})
+	if v, _ := d.obs.Reg.Gauge(obs.MSettleTickInFlight, nil); v != 0 {
+		t.Fatalf("in flight after the tick %v, want 0", v)
+	}
+	ev := logLines(t, buf, obs.EvSettleTickStuck)
+	if len(ev) != 1 || ev[0]["in_flight_ms"] != float64(90000) {
+		t.Fatalf("stuck events %v", ev)
+	}
+	d.logStuckTick() // no tick running: silent
+	if got := len(logLines(t, buf, obs.EvSettleTickStuck)); got != 1 {
+		t.Fatalf("%d stuck events after the tick ended", got)
+	}
+}
