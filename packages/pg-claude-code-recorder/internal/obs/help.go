@@ -35,6 +35,7 @@ var helpTexts = map[string]string{
 	MEndFiles:                 "End-reason source files handled, by outcome.",
 	MControlRequests:          "Control requests, by verb and outcome.",
 	MStaleFifosRemoved:        "Stale control FIFOs removed.",
+	MRequestsJSONReads:        "Reads of the control mod request window, by path (tail: incremental read from the cursor; full: whole-file read).",
 	MConversationsByStage:     "Conversations by lifecycle stage as of the last settle tick.",
 	MHeldConversations:        "Conversations held back from settling, by reason.",
 	MOldestHeldAge:            "Age in seconds of the oldest held conversation.",

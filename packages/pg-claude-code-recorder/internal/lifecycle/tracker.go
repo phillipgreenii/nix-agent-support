@@ -5,15 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"hash/fnv"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudecontrolend"
@@ -50,6 +55,9 @@ type TrackerConfig struct {
 	// Conversations are live (a Process discovered or exited); a commit of only
 	// liveness refreshes does not run it. It MUST NOT block.
 	OnChange func()
+	// FS is the file system requests.jsonl is read through (default the real
+	// one); tests pass a counting wrapper.
+	FS fsx.FS
 }
 
 type tracked struct {
@@ -92,6 +100,7 @@ type Tracker struct {
 
 	endSeen map[string]bool
 	reqSeen map[string]bool
+	reqCur  reqCursor
 }
 
 // NewTracker returns a Tracker.
@@ -554,16 +563,138 @@ func bucket(v string, known []string) string {
 	return obs.ClientOther
 }
 
+// reqHashLen is how many bytes the request-window cursor hashes at each end.
+const reqHashLen = 64
+
+// reqCursor remembers where the last read of requests.jsonl stopped. The mod
+// keeps the last 1,000 lines, so the file is rewritten or truncated as well as
+// appended to; the tail path is taken only when every field still matches.
+type reqCursor struct {
+	valid bool
+	ino   uint64
+	size  int64
+	off   int64
+	// headBuf holds the first min(64, off) bytes and tailBuf the up-to-64 bytes
+	// before off, as last read; head and tail are their hashes. Keeping the
+	// bytes lets a tail read extend the cursor without re-reading them.
+	headBuf, tailBuf []byte
+	head, tail       uint64
+}
+
+func hashBytes(b []byte) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write(b)
+	return h.Sum64()
+}
+
+func fileIno(fi fs.FileInfo) uint64 {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return uint64(st.Ino)
+	}
+	return 0
+}
+
+// extend returns the cursor after consuming consumed (complete lines) that
+// start at the old cursor's offset; a zero cursor starts at offset 0. It is
+// invalid when nothing has been consumed yet.
+func (c reqCursor) extend(ino uint64, size int64, consumed []byte) reqCursor {
+	n := reqCursor{ino: ino, size: size, off: c.off + int64(len(consumed))}
+	n.headBuf = append([]byte(nil), c.headBuf...)
+	if room := reqHashLen - len(n.headBuf); room > 0 {
+		if room > len(consumed) {
+			room = len(consumed)
+		}
+		n.headBuf = append(n.headBuf, consumed[:room]...)
+	}
+	tail := append(append([]byte(nil), c.tailBuf...), consumed...)
+	if len(tail) > reqHashLen {
+		tail = tail[len(tail)-reqHashLen:]
+	}
+	n.tailBuf = tail
+	n.head, n.tail = hashBytes(n.headBuf), hashBytes(n.tailBuf)
+	n.valid = n.off > 0
+	return n
+}
+
+// matches reports whether the first off bytes of f still hash as they did when
+// the cursor was taken: it reads the head window and the window before off.
+func (c reqCursor) matches(f fsx.File) bool {
+	head := make([]byte, len(c.headBuf))
+	if _, err := f.ReadAt(head, 0); err != nil || hashBytes(head) != c.head {
+		return false
+	}
+	tail := make([]byte, len(c.tailBuf))
+	if _, err := f.ReadAt(tail, c.off-int64(len(tail))); err != nil {
+		return false
+	}
+	return hashBytes(tail) == c.tail
+}
+
 // readRequests counts each line of the mod's request window once, keyed by ts, id
 // and verb. It reads beyond the ends/ root (requests.jsonl), may undercount under
 // a burst of more than 1,000 requests between two polls (the mod keeps the last
-// 1,000), and buckets an unknown verb or outcome as other.
+// 1,000), and buckets an unknown verb or outcome as other. An unchanged file is
+// not read; a grown file with an intact prefix is read from the cursor only; any
+// other change (shrink, new inode, rewritten prefix) is a full read, whose keyed
+// dedup keeps a line from being counted twice.
 func (t *Tracker) readRequests() {
-	b, err := os.ReadFile(filepath.Join(t.cfg.ControlDir, "requests.jsonl"))
+	path := filepath.Join(t.cfg.ControlDir, "requests.jsonl")
+	fi, err := t.reqFS().Stat(path)
 	if err != nil {
+		t.reqCur = reqCursor{}
 		return
 	}
+	ino, size := fileIno(fi), fi.Size()
+	c := t.reqCur
+	if c.valid && c.ino == ino && c.size == size {
+		return
+	}
+	f, err := t.reqFS().OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		t.reqCur = reqCursor{}
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if c.valid && c.ino == ino && size > c.off && c.matches(f) {
+		t.readRequestsTail(f, ino, size, c.off)
+		return
+	}
+	t.readRequestsFull(f, ino, size)
+}
+
+func (t *Tracker) readRequestsTail(f fsx.File, ino uint64, size, off int64) {
+	buf := make([]byte, size-off)
+	n, err := f.ReadAt(buf, off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.reqCur = reqCursor{}
+		return
+	}
+	buf = buf[:n]
+	end := bytes.LastIndexByte(buf, '\n') + 1
+	t.cfg.Obs.Reg.Add(obs.MRequestsJSONReads, map[string]string{"path": "tail"}, 1)
+	t.countRequestLines(buf[:end], t.reqSeen)
+	t.reqCur = t.reqCur.extend(ino, size, buf[:end])
+}
+
+func (t *Tracker) readRequestsFull(f fsx.File, ino uint64, size int64) {
+	buf := make([]byte, size)
+	n, err := f.ReadAt(buf, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.reqCur = reqCursor{}
+		return
+	}
+	buf = buf[:n]
+	t.cfg.Obs.Reg.Add(obs.MRequestsJSONReads, map[string]string{"path": "full"}, 1)
+	end := bytes.LastIndexByte(buf, '\n') + 1
 	next := map[string]bool{}
+	t.countRequestLines(buf[:end], t.reqSeen, next)
+	t.reqSeen = next
+	t.reqCur = reqCursor{}.extend(ino, int64(n), buf[:end])
+}
+
+// countRequestLines counts each complete line whose key is not in seen. A key is
+// added to seen, and to every extra map (the rebuilt set of a full read).
+func (t *Tracker) countRequestLines(b []byte, seen map[string]bool, extra ...map[string]bool) {
 	for _, ln := range bytes.Split(b, []byte("\n")) {
 		if len(bytes.TrimSpace(ln)) == 0 {
 			continue
@@ -573,8 +704,12 @@ func (t *Tracker) readRequests() {
 			continue
 		}
 		key := string(r.TS) + "|" + string(r.ID) + "|" + r.Verb
-		next[key] = true
-		if t.reqSeen[key] {
+		dup := seen[key]
+		seen[key] = true
+		for _, m := range extra {
+			m[key] = true
+		}
+		if dup {
 			continue
 		}
 		outcome := r.Outcome
@@ -585,7 +720,13 @@ func (t *Tracker) readRequests() {
 			"verb": bucket(r.Verb, obs.ControlVerbs), "outcome": bucket(outcome, obs.ControlOutcomes),
 		}, 1)
 	}
-	t.reqSeen = next
+}
+
+func (t *Tracker) reqFS() fsx.FS {
+	if t.cfg.FS != nil {
+		return t.cfg.FS
+	}
+	return fsx.OS{}
 }
 
 // Close stops the watches and journals each live Process's last-seen-alive time.

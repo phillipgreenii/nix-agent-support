@@ -76,6 +76,7 @@ const (
 	MEndFiles          = "end_reason_source_files_total"
 	MControlRequests   = "control_requests_total"
 	MStaleFifosRemoved = "stale_fifos_removed_total"
+	MRequestsJSONReads = "requests_json_reads_total"
 	EvStartupStale     = "startup_stale_registries"
 	EvProcessExit      = "process_exit"
 )
@@ -410,6 +411,9 @@ func (o *Obs) RegisterStandard() {
 	o.Reg.Add(MQueryTimeouts, map[string]string{"op": "unknown"}, 0)
 	o.Reg.Add(MStaleDiscovery, nil, 0)
 	o.Reg.Add(MStaleFifosRemoved, nil, 0)
+	for _, p := range []string{"tail", "full"} {
+		o.Reg.Add(MRequestsJSONReads, map[string]string{"path": p}, 0)
+	}
 	for _, rp := range boolLabelStrings {
 		for _, eo := range boolLabelStrings {
 			for _, ce := range boolLabelStrings {
