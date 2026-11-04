@@ -34,7 +34,7 @@ import (
 // Scope: it runs against ONE pool -- the runner it is handed. From
 // dispatch.go's runDispatch that is the dispatching role's own pool
 // (deps.CC, scoped by dispatchlib.BuildDeps), so a role reconciles only its own pool's
-// sessions; query.go's call is the guarded default-pool pass. It handles closed
+// sessions; query.go's call is the guarded default-pool pass. Role pools take the work-preserving guard (newWorkPreservingGuard). It handles closed
 // beads only; sessions whose HANDLER died while the bead is still open are the
 // separate, role-scoped orphan reconcile (orphan.go, INV-CCH-18), which
 // runDispatch runs right after this one.
@@ -89,7 +89,18 @@ import (
 // window is skipped this sweep (idle-with-running-subagents, pg2-9fwft) and
 // retried by the next one. nil disables the guard.
 func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck) (closed int) {
-	return reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, nil, "reconcile: list failed")
+	return reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, newWorkPreservingGuard(open, repoRoot), "reconcile: list failed")
+}
+
+// newWorkPreservingGuard is the role-pool guard: the clean-and-pushed part of the
+// default pool's guard (worktreeSafeToClose) with no idle wait, so a closed-bead
+// session whose worktree is dirty or holds commits beyond its upstream (or, with
+// no upstream, beyond the canonical clone's HEAD) is kept and re-examined by the
+// next run instead of having its worktree force-removed.
+func newWorkPreservingGuard(open worktree.Opener, repoRoot string) sessionGuard {
+	return func(ctx context.Context, s ccpool.Session) (bool, string) {
+		return worktreeSafeToClose(ctx, open, repoRoot, s.CWD)
+	}
 }
 
 // sessionGuard is an extra, caller-supplied precondition on closing a

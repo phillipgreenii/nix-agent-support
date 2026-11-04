@@ -1417,7 +1417,13 @@ changes a core gate or `INV-LIFE-2`.
     (`INV-CCH-14`, `INV-CCH-20`), the default-pool stale-session pass and the lock-file collection
     (`INV-CCH-24`); and, per ccpool role, the orphan reconcile (`INV-CCH-18`) and, for a role with
     worktree isolation, the worktree-keyed sweep (`INV-CCH-19`). It applies the rules of those
-    invariants unchanged; this invariant adds only where and when they run. The pool-level passes
+    invariants unchanged; this invariant adds only where and when they run.
+  - **A closed-bead session that holds work is kept.** The closed-bead reconcile, in every pool,
+    MUST NOT tear down a session whose worktree is dirty, or holds a commit beyond its upstream
+    (or, with no upstream, beyond the canonical clone's HEAD), or whose state it cannot read. It
+    keeps the session and examines it again on the next run. A role pool takes only this
+    clean-and-pushed check; the 7 day idle wait stays specific to the default pool, whose rows may
+    belong to a person. The pool-level passes
     run once per distinct pool however many roles share it, including a role on the default pool
     and a role whose own pool is unset.
   - **Single-flight.** At most one janitor run is active on a machine. A run that finds another

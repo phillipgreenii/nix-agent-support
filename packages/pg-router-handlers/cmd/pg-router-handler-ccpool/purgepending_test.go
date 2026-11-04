@@ -130,6 +130,9 @@ func TestReconcileClosedBeadSessions_twoPhaseOrder(t *testing.T) {
 	e := newTPEnv(t)
 	e.removingWorktree()
 	e.cc.ListSeq = [][]ccpool.Session{{e.session}}
+	// The work-preserving guard opens the session's cwd first; the fake reports it
+	// as outside any repository (nothing to lose), so the teardown proceeds.
+	e.open.OpenErrAt = map[string]bool{e.cwd: true}
 	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, closedBead, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if n != 1 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 1", n)

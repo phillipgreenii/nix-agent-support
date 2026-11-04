@@ -149,7 +149,7 @@ Ship D2 and D3 first. Turning the inline sweeps off (so the janitor is the only 
 
 ### D7. Role pools keep a worktree that holds unpushed work
 
-`closed_bead_reconcile` MUST NOT force-remove a role pool session's worktree when that worktree is dirty or holds commits not on any remote branch. It keeps the session, counts the candidate as `kept`, and examines it again on the next run. Role pools take only this part of the default pool's guard: the 7 day idle wait stays specific to the default pool, whose rows may belong to a person.
+`closed_bead_reconcile` MUST NOT force-remove a role pool session's worktree when that worktree is dirty or holds a commit beyond its upstream (or, with no upstream, beyond the canonical clone's HEAD), the same check the default pool runs. It keeps the session, counts the candidate as `kept`, and examines it again on the next run. Role pools take only this part of the default pool's guard: the 7 day idle wait stays specific to the default pool, whose rows may belong to a person.
 
 ## Alternatives considered
 
@@ -172,7 +172,7 @@ When this is accepted, the same change MUST update `packages/pg-router-handlers/
 - The oldest-unexamined age grows while a candidate is not reached and resets when it is examined.
 - The new alert rule has promtool tests for a stuck pass and for a pass that advances.
 - If D5 is taken: a scan with more kept candidates than the examination cap, placed first in name order, still reaches a later removable candidate within a bounded number of runs.
-- D7: a role pool session whose bead is closed and whose worktree is dirty, or holds an unpushed commit, is kept and counted; a clean, pushed one is torn down (real git over a throwaway repository).
+- D7: a role pool session whose bead is closed and whose worktree is dirty, or holds a commit beyond its upstream (or the canonical clone's HEAD), is kept and counted; a clean, pushed one is torn down (real git over a throwaway repository).
 - No mutation testing tool is part of this plan.
 
 ## Open questions
