@@ -41,6 +41,15 @@ type Engine struct {
 	// project and file_session are read back from the file's path; when empty
 	// they are read from stored fields only.
 	ClaudeDir string
+	// Storage is the record: and ext: declaration of every catalogued field that
+	// has one (sources.Storage); with TypedStorage it routes those fields to
+	// their typed columns.
+	Storage map[string]source.Storage
+	// TypedStorage reports whether this index.db is in the new layout, where
+	// record: and ext: fields live in their typed columns (the store's HasExt).
+	// Nil means false: the fields table is the only source, as in the running
+	// layout.
+	TypedStorage func() bool
 	// FilterFields, when set, is told after each request whose filter compiled
 	// which catalogued field names the filter named and how many leaves each
 	// had (op is query, search or feed). Names only: never values or text.
@@ -781,6 +790,8 @@ func (e *Engine) builder() *builder {
 	b := newBuilder(e.Catalog)
 	b.claudeDir = e.ClaudeDir
 	b.sessionRef = e.sessionRefReady()
+	b.typed = e.TypedStorage != nil && e.TypedStorage()
+	b.storage = e.Storage
 	return b
 }
 

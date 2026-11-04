@@ -38,3 +38,21 @@ func Catalog(srcs []source.Source) map[string]source.Kind {
 	}
 	return out
 }
+
+// Storage merges the record: and ext: storage declarations of every source
+// (field name to declaration). A field a source leaves in the fields table is
+// not listed; a name two sources declare differently is a programming error
+// that a test of this package catches.
+func Storage(srcs []source.Source) map[string]source.Storage {
+	out := map[string]source.Storage{}
+	for _, s := range srcs {
+		if st, ok := s.(source.Stored); ok {
+			for k, v := range st.Storage() {
+				if v.Kind != source.StoreFields {
+					out[k] = v
+				}
+			}
+		}
+	}
+	return out
+}

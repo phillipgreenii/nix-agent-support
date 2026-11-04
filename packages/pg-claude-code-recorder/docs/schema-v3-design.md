@@ -418,6 +418,23 @@ again by parsing the copies, so nothing else holds them. Left to later slices: t
 (a file with the ext layout does not answer `usage.*` filters until then), the type-mismatch fallback row (nothing
 yet produces a mismatch for a typed Go struct field), and interning the three strings.
 
+Slice 6 as built: the query layer reads `record:` and `ext:` fields from their typed storage in a file in the new
+layout (`Store.HasExt`, wired as `Engine.TypedStorage`, with the merged declarations of `sources.Storage` as
+`Engine.Storage`) and keeps reading `fields` for the running layout, so the wire protocol, field names and answers
+do not change. In the new layout: `eq` and `in` on a `record:` field resolve the interned id first
+(`r.cwd_id=(SELECT id FROM lk_cwd WHERE v=?)`); `contains`, `under`, `range`, select, group and order join the `lk_`
+table once and use its value, so order sorts by `v`, never by id; an `ext:` field joins its `ext_` table once on
+`rec_id`, and its `eq`, `in` and `range` compare the typed column. Reader rule for a mismatch (section 6, rule 3):
+select, group, order and `exists` read the typed value and, when it is NULL, the value of a `fields` row of the same
+name (a raw value stays present, never missing); a typed comparison (`eq`, `in`, `range`, and the id route) never
+matches a raw value. The same fallback also answers a name that one source stores in `fields` while another declares a
+typed column. Plan tests (`EXPLAIN QUERY PLAN`) assert that every join is a key seek and that the `eq` id lookup uses
+the `lk_` table's unique index; the optional partial indexes on `cwd_id` and `branch_id` still wait for the
+version-bump slice. Answer parity between the two layouts is tested on real stores for filter, group, order and
+select. Left to later slices: the parser still writes the `fields` rows of `record:` fields in the new layout,
+because the lifecycle and settle readers (`cwdQuery`, the registry queries) still read them; dropping those rows
+belongs with moving those readers to the ids.
+
 ## 12. Decision for the operator
 
 Fold S1 to S6, S8 and S9 (and S7 if wanted) into one schema v3 rebuild, or defer v3?

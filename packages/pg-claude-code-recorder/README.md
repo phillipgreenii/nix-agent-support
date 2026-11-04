@@ -167,6 +167,12 @@ index for them and its word search does not reach tool bodies). Exact-punctuatio
 opaque fields use `mode=substring`, which scans the copies (see "Substring search" below); no file contents are
 stored in `index.db`.
 
+In an `index.db` of the next schema layout (built with extension tables), a field a source declares with `record:`
+or `ext:` storage (`cwd`, `git_branch`, `version`, `entrypoint`, `user_type`, and the `usage.*` counters) is
+filtered, grouped, ordered and selected through its typed column, with the same field names and answers as the
+running layout, which keeps reading `fields`. A raw value that did not convert to the column's type is kept in a
+`fields` row; it counts as present for `exists`, select, group and order, and never matches a typed comparison.
+
 Typed scalars live in `fields(rec_id, name_id, s, n, f)`, `WITHOUT ROWID`, keyed `(rec_id, name_id)`;
 the field name is stored once in `field_names(id, name UNIQUE)` and the query layer resolves a name to
 its id (`name_id = (SELECT id FROM field_names WHERE name = ?)`). Invariants: a record has at most one

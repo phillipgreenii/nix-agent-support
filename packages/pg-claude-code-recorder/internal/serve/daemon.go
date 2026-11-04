@@ -151,7 +151,7 @@ func Open(opt Options) (*Daemon, error) {
 	}
 	srcs := sources.All()
 	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, EndsDir: cfg.EndsDir(), Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes, FeedRetention: cfg.FeedRetention})
-	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), ClaudeDir: cfg.ClaudeDir, Res: d.prs, SessionRef: st.SessionRefReady, Behind: func() bool { return !d.backfillDone.Load() }}
+	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), ClaudeDir: cfg.ClaudeDir, Res: d.prs, SessionRef: st.SessionRefReady, Storage: sources.Storage(srcs), TypedStorage: st.HasExt, Behind: func() bool { return !d.backfillDone.Load() }}
 	d.fe = &feed.Engine{
 		Q: d.qe, Store: st, Clock: opt.Clock, Obs: o, Retention: cfg.FeedRetention, WaitMax: cfg.WaitMax,
 		MaxWaiters: cfg.WaitMaxWaiter, Behind: d.qe.Behind,

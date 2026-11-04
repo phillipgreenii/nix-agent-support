@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -56,6 +57,11 @@ type builder struct {
 	// sessionRef reads the session through records.session_ref and the sessions
 	// table instead of records.session (see Engine.SessionRef).
 	sessionRef bool
+	// typed reads the fields a source declares with record: or ext: storage
+	// (storage) from their typed columns instead of from fields rows; set only
+	// for an index.db in the new layout (Engine.TypedStorage).
+	typed   bool
+	storage map[string]source.Storage
 }
 
 // sessionIDExpr reads a record's natural session id through its session_ref;
@@ -128,6 +134,9 @@ func (b *builder) expr(name string) (string, source.Kind, *wire.Error) {
 	}
 	if kind.Searchable() {
 		return "", kind, badf("field %q is %s: use exists, match or the search operation", name, kind)
+	}
+	if t, ok := b.typedField(stored, kind); ok {
+		return t.read, kind, nil
 	}
 	a := b.alias(stored)
 	if d, ok := b.pathFact(stored); ok {
@@ -257,6 +266,17 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 	if stored, _, rerr := b.resolve(f.Field); rerr == nil && stored == "session" && b.sessionRef {
 		byRef = true
 	}
+	// A typed field compares through its column (ext) or its interned id
+	// (record); a raw value in a fields row (the mismatch fallback) is read by
+	// select, group, order and exists but never satisfies a typed comparison.
+	var tf typedField
+	var isTyped bool
+	if stored, _, rerr := b.resolve(f.Field); rerr == nil && !kind.Searchable() {
+		tf, isTyped = b.typedField(stored, kind)
+	}
+	if isTyped && tf.ext {
+		e = tf.typed
+	}
 	switch {
 	case f.Eq != nil:
 		var v any
@@ -269,6 +289,9 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		}
 		if byRef {
 			return "r.session_ref=" + sessionRefOfID, []any{cv}, nil
+		}
+		if isTyped && !tf.ext {
+			return tf.idCol + "=(SELECT id FROM " + tf.table + " WHERE v=?)", []any{cv}, nil
 		}
 		return e + "=?", []any{cv}, nil
 	case f.In != nil:
@@ -286,6 +309,9 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		}
 		if byRef {
 			return "r.session_ref IN (SELECT session_ref FROM sessions WHERE session_id IN (" + strings.Join(ph, ",") + "))", args, nil
+		}
+		if isTyped && !tf.ext {
+			return tf.idCol + " IN (SELECT id FROM " + tf.table + " WHERE v IN (" + strings.Join(ph, ",") + "))", args, nil
 		}
 		return e + " IN (" + strings.Join(ph, ",") + ")", args, nil
 	case f.Range != nil:
@@ -338,6 +364,8 @@ func (b *builder) exists(field string, want bool) (string, []any, *wire.Error) {
 	default:
 		if kind.Searchable() {
 			cond, args = "EXISTS(SELECT 1 FROM texts t WHERE t.rec_id=r.id AND t.field=?)", []any{stored}
+		} else if t, ok := b.typedField(stored, kind); ok {
+			cond = t.present
 		} else if d, ok := b.pathFact(stored); ok {
 			cond = "COALESCE(" + b.alias(stored) + ".s," + d + ") IS NOT NULL"
 		} else {
@@ -454,4 +482,92 @@ func (b *builder) addPathJoin() {
 		`ORDER BY p.closed_ns IS NOT NULL, CASE WHEN p.closed_ns IS NULL THEN p.path END, p.first_seen_ns, p.path LIMIT 1)`)
 	pre := strings.TrimRight(b.claudeDir, "/") + "/"
 	b.joinArgs = append(b.joinArgs, len(pre), pre)
+}
+
+// lookupTables maps the records lookup-id columns to their lookup tables.
+var lookupTables = map[string]string{
+	"cwd_id":        "lk_cwd",
+	"branch_id":     "lk_branch",
+	"version_id":    "lk_version",
+	"entrypoint_id": "lk_entrypoint",
+	"user_type_id":  "lk_user_type",
+}
+
+// typedField is how a field declared with record: or ext: storage is read in
+// the new layout.
+type typedField struct {
+	// read is the value expression: the typed value, else (the mismatch rule) the
+	// raw value of a fields row, so a value that did not convert is never hidden.
+	read string
+	// typed is the typed value alone (the lookup value or the ext column).
+	typed string
+	// present is true when the field has a value of either kind.
+	present string
+	// ext is true for an extension-table column; otherwise the field is an
+	// interned record column: idCol is the records column and table its lookup.
+	ext   bool
+	idCol string
+	table string
+}
+
+// typedField returns the typed read of the stored field name when this index.db
+// is in the new layout and the field declares record: or ext: storage. The
+// joins it needs are added once per field (the lookup table or extension table
+// on its key, and the generic fields row for the fallback).
+func (b *builder) typedField(stored string, kind source.Kind) (typedField, bool) {
+	if !b.typed {
+		return typedField{}, false
+	}
+	st, ok := b.storage[stored]
+	if !ok {
+		return typedField{}, false
+	}
+	var t typedField
+	switch st.Kind {
+	case source.StoreRecord:
+		tbl, ok := lookupTables[st.Column]
+		if !ok {
+			return typedField{}, false
+		}
+		a := b.joinOnce("lk:"+tbl, "LEFT JOIN "+tbl+" %s ON %[1]s.id=r."+st.Column)
+		t = typedField{typed: a + ".v", idCol: "r." + st.Column, table: tbl}
+	case source.StoreExt:
+		et, ok := store.LookupExt(st.Table)
+		if !ok {
+			return typedField{}, false
+		}
+		if _, ok := et.Column(st.Column); !ok {
+			return typedField{}, false
+		}
+		a := b.joinOnce("ext:"+et.Table(), "LEFT JOIN "+et.Table()+" %s ON %[1]s.rec_id=r.id")
+		t = typedField{typed: a + "." + st.Column, ext: true}
+	default:
+		return typedField{}, false
+	}
+	f := b.alias(stored)
+	var raw string
+	switch kind {
+	case source.KindInt, source.KindBool, source.KindTime:
+		raw = f + ".n," + f + ".s"
+	case source.KindFloat:
+		raw = f + ".f," + f + ".s"
+	default:
+		raw = f + ".s"
+	}
+	t.read = "COALESCE(" + t.typed + "," + raw + ")"
+	t.present = "(" + t.typed + " IS NOT NULL OR " + f + ".rec_id IS NOT NULL)"
+	return t, true
+}
+
+// joinOnce adds the join (format has one %s for the alias) once per key and
+// returns its alias. These joins take no arguments, so they never disturb
+// joinArgs.
+func (b *builder) joinOnce(key, format string) string {
+	if a, ok := b.aliases[key]; ok {
+		return a
+	}
+	a := fmt.Sprintf("f%d", len(b.aliases))
+	b.aliases[key] = a
+	b.joins = append(b.joins, fmt.Sprintf(format, a))
+	return a
 }
