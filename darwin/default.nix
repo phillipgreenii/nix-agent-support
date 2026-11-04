@@ -7,6 +7,7 @@
     ./modules/claude-code
     ./modules/pa-monitor
     ./modules/pg-router
+    ./modules/pg-router-heartbeat
     ./modules/pg-connector-github
     ./modules/pg-connector-thread-slack
     ./modules/pg-connector-issue-jira
