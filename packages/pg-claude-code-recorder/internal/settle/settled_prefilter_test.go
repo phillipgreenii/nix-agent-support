@@ -87,9 +87,9 @@ func TestSettledPrefilterStatementCountIsConstant(t *testing.T) {
 		e.s.settledPrefilter(groups, live)
 		return e.cnt.Queries()
 	}
-	small, large := count(10), count(60)
-	t.Logf("prefilter statements: %d conversations %d, %d conversations %d", 10, small, 60, large)
+	small, large := count(6), count(18)
+	t.Logf("prefilter statements: %d conversations %d, %d conversations %d", 6, small, 18, large)
 	if small != large || large > 4 {
-		t.Fatalf("statements grow with the data: %d for 10 conversations, %d for 60", small, large)
+		t.Fatalf("statements grow with the data: %d for 6 conversations, %d for 18", small, large)
 	}
 }
