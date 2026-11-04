@@ -306,3 +306,32 @@ func withLockDir(d executor.Deps, dir string) executor.Deps {
 	d.LockDir = dir
 	return d
 }
+
+// Design D5: kept candidates that sort first by name, more than the examination
+// cap, must not starve a later removable one. Real git over a throwaway repo;
+// the keep cache is off so every kept worktree costs the cap again each run.
+func TestSweep_oldestExaminedFirstReachesLaterRemovable(t *testing.T) {
+	h := newSweepHarness(t)
+	h.deps.Cfg.WorktreeKeepRecheck = 0
+	total := worktreeSweepMaxExamined + 2
+	for i := 0; i < total; i++ {
+		h.makeDirty(h.leak(fmt.Sprintf("a-%02d", i)))
+	}
+	clean := h.leak("z-removable")
+
+	const bound = 3
+	for run := 1; run <= bound && h.exists(clean); run++ {
+		h.sweep()
+	}
+	if h.exists(clean) {
+		t.Fatalf("z-removable still present after %d runs; kept candidates starved it", bound)
+	}
+	if got := len(h.examFiles()); got != total {
+		t.Errorf("last-examined records = %d, want one per kept worktree (%d)", got, total)
+	}
+}
+
+func (h *sweepHarness) examFiles() []string {
+	m, _ := filepath.Glob(filepath.Join(h.lockDir, examFilePrefix+"*"+examFileSuffix))
+	return m
+}

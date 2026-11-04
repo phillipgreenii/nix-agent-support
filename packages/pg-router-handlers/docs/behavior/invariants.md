@@ -451,6 +451,13 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   - one scan MUST examine at most a fixed number of candidates with git (twenty), counting kept and
     removed ones alike but not ones skipped through the record above, in addition to the removal
     cap;
+  - candidates MUST be taken oldest-examined-first, so kept worktrees that sort first by name cannot
+    keep a later candidate from ever being reached under that cap: a candidate never examined comes
+    first, then the one examined longest ago, ties broken by name. The time each candidate was last
+    examined with git MUST be recorded per candidate (one entry per worktree, never a cursor per pass
+    or per role), in the same directory as the record above and shared by every role, written
+    atomically, with a torn or unreadable one counting as absent, and removed by the garbage collection
+    of `INV-CCH-24` once its worktree is gone;
   - the whole scan MUST run under a deadline (default sixty seconds, configurable, zero means none);
     when it expires the scan logs, stops, and returns what it had done, without failing the
     dispatch or janitor run. Under the janitor this deadline nests inside the per-role share of

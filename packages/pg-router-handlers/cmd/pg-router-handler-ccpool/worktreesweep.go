@@ -185,6 +185,9 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 	scanStart := time.Now()
 	reached := map[string]bool{}
 	examined := 0
+	// Oldest-examined-first (design D5), so kept candidates that sort first by
+	// name cannot starve a later one behind the examination cap.
+	orderOldestExamined(env.lockDir, candidates)
 	for _, c := range candidates {
 		if removed >= worktreeSweepMaxPerPass || examined >= worktreeSweepMaxExamined || ctx.Err() != nil {
 			break
@@ -201,6 +204,9 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 		}
 		if didGit {
 			examined++
+			if !ok {
+				noteExamined(env.lockDir, c, orphanNow(deps))
+			}
 		}
 	}
 	counts.setPhase(phaseScan, time.Since(scanStart))

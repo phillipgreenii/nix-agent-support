@@ -140,7 +140,8 @@ func sweepKeepCache(lockDir string, now time.Time) int {
 	for _, de := range des {
 		name := de.Name()
 		isKeep, isSeen := strings.HasPrefix(name, keepFilePrefix), strings.HasPrefix(name, seenFilePrefix)
-		if !isKeep && !isSeen {
+		isExam := strings.HasPrefix(name, examFilePrefix)
+		if !isKeep && !isSeen && !isExam {
 			continue
 		}
 		p := filepath.Join(lockDir, name)
@@ -152,6 +153,16 @@ func sweepKeepCache(lockDir string, now time.Time) int {
 		case isSeen && strings.HasSuffix(name, seenFileSuffix):
 			// A first-seen record outlives its candidate only until the worktree is gone.
 			if e, ok := readSeen(p); ok {
+				if _, err := os.Lstat(e.Path); err == nil {
+					continue
+				}
+			}
+			if os.Remove(p) == nil {
+				removed++
+			}
+		case isExam && strings.HasSuffix(name, examFileSuffix):
+			// A last-examined record lives as long as its worktree.
+			if e, ok := readExam(p); ok {
 				if _, err := os.Lstat(e.Path); err == nil {
 					continue
 				}
