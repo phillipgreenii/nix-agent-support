@@ -201,6 +201,7 @@ type Store struct {
 	hooks       []func()
 	wrHooks     []func()
 	offHooks    []OffsetsHook
+	fileHooks   []FileStateHook
 	pendMu      sync.Mutex // guards pendOff (a parse transaction may note from workers)
 	pendOff     []offNote  // offset changes of an open write, fired after its commit
 
@@ -666,6 +667,22 @@ type offNote struct {
 	copy, parse int64
 	at          time.Time
 	read        bool // copy and parse still to be read from the database
+	fileRec     bool // a file-row change: the file's source and state are read after the commit
+}
+
+// FileStateHook is called, inside the locked apply that creates a file row or
+// changes its state, with the committed source and state of the file (state
+// "deleted" included). A hook MUST NOT block and MUST be idempotent.
+type FileStateHook func(file int64, source, state string)
+
+// OnFileState registers a hook for file-row changes: a file record (TFile), a
+// state change (TState), a tombstone (TTomb), a snapshot (TSnap) or an identity
+// update (TIdent, which revives a deleted file). Journal replay at open is
+// excepted: a subscriber seeds itself.
+func (s *Store) OnFileState(fn FileStateHook) {
+	s.mu.Lock()
+	s.fileHooks = append(s.fileHooks, fn)
+	s.mu.Unlock()
 }
 
 // OnOffsets registers a hook called inside the locked apply that changes a
@@ -709,10 +726,23 @@ func (s *Store) pendTrunc(n int) {
 // write lock, no transaction of its own is open on the write handle that would
 // block a read, and the notes' writes are committed.
 func (s *Store) fireOffsets(notes []offNote) {
-	if len(s.offHooks) == 0 {
+	if len(s.offHooks) == 0 && len(s.fileHooks) == 0 {
 		return
 	}
 	for _, n := range notes {
+		if n.fileRec {
+			if s.wdb == nil || len(s.fileHooks) == 0 {
+				continue
+			}
+			var src, state string
+			if err := s.wdb.QueryRow(`SELECT source,state FROM files WHERE id=?`, n.file).Scan(&src, &state); err != nil {
+				continue
+			}
+			for _, h := range s.fileHooks {
+				h(n.file, src, state)
+			}
+			continue
+		}
 		if n.read {
 			if s.wdb == nil {
 				continue
@@ -1015,6 +1045,17 @@ func resRows(res sql.Result, err error) (int64, error) {
 }
 
 func apply(tx *sql.Tx, r *Rec, notes *[]offNote) error {
+	err := applyRec(tx, r, notes)
+	if err == nil {
+		switch r.T {
+		case TFile, TState, TTomb, TSnap, TIdent:
+			*notes = append(*notes, offNote{file: r.File, fileRec: true})
+		}
+	}
+	return err
+}
+
+func applyRec(tx *sql.Tx, r *Rec, notes *[]offNote) error {
 	var err error
 	switch r.T {
 	case TEpoch:

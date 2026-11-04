@@ -73,15 +73,18 @@ type Daemon struct {
 	prs   *parser.Parser
 	// lag is the maintained parse-lag state, fed by the store's OnOffsets hook and
 	// seeded once at start; the gauge and status refreshes read it.
-	lag   *parser.Lag
-	qe    *query.Engine
-	fe    *feed.Engine
-	srv   *server.Server
-	exp   *exporter.Server
-	eng   *lifecycle.Engine
-	tr    *lifecycle.Tracker
-	sett  *settle.Settler
-	clock clock.Clock
+	lag *parser.Lag
+	// unknown is the maintained unknown-kinds set (sources with files but no
+	// parser), fed by the store's OnFileState hook and seeded once at start.
+	unknown *parser.Unknown
+	qe      *query.Engine
+	fe      *feed.Engine
+	srv     *server.Server
+	exp     *exporter.Server
+	eng     *lifecycle.Engine
+	tr      *lifecycle.Tracker
+	sett    *settle.Settler
+	clock   clock.Clock
 
 	// loops tracks the passes now running (loop_in_flight_seconds). tickerFn and
 	// timerFn, when set (tests), replace the real tickers and timers behind
@@ -194,6 +197,10 @@ func Open(opt Options) (*Daemon, error) {
 	if d.lag, err = d.prs.StartLag(); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("seed parse-lag state: %w", err)
+	}
+	if d.unknown, err = d.prs.StartUnknown(); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("seed unknown-kinds set: %w", err)
 	}
 	st.OnOffsets(d.noteTouched)
 	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), ClaudeDir: cfg.ClaudeDir, Res: d.prs, SessionRef: st.SessionRefReady, Storage: sources.Storage(srcs), TypedStorage: st.HasExt, Behind: func() bool { return !d.backfillDone.Load() }}
