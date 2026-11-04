@@ -53,6 +53,7 @@ var knownSubcommands = map[string]bool{
 	"mark-excluded":        true,
 	"report":               true,
 	"set-correct-decision": true,
+	"shapes":               true,
 	"show":                 true,
 	"spec-drift-check":     true,
 	"specs":                true,
@@ -89,6 +90,7 @@ and analyzing the decision log.`,
 	root.AddCommand(newMarkExcludedCmd())
 	root.AddCommand(newReportCmd())
 	root.AddCommand(newSetCorrectDecisionCmd())
+	root.AddCommand(newShapesCmd())
 	root.AddCommand(newShowCmd())
 	root.AddCommand(newSpecDriftCheckCmd())
 	root.AddCommand(newSpecsCmd())
