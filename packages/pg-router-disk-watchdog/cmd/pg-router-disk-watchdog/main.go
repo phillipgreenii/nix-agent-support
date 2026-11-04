@@ -3,6 +3,9 @@
 // its own: gates are generic TYPE-keyed records, and this binary is an ordinary
 // pg-router role bound to the timer emitter that sets LOW_DISK_USAGE when free
 // space is low and clears it on recovery, by shelling out to `pg-router gate`.
+// It also trips the SAME gate on host resource pressure (1-minute load per
+// core, or swap in use while free disk is low): see
+// docs/superpowers/specs/2026-11-04-pg-router-resource-pressure-gate-design.md.
 //
 // The role MUST be registered with non_blocking_gates = ["LOW_DISK_USAGE"] (and
 // is driven by a type = "timer" query, which no gate ever blocks), otherwise the
@@ -33,10 +36,17 @@ var Version = "dev"
 // cadence plus a 2 minute margin, so one missed or slow check does not drop the
 // gate. Recovery needs min * 5/4 (25 GiB by default) to avoid flapping.
 const (
-	defaultMinFree = "20GiB"
+	defaultMinFree = "30GiB"
 	defaultGate    = "LOW_DISK_USAGE"
 	defaultOwner   = "pg-router-disk-watchdog"
 	defaultTTL     = 7 * time.Minute
+	// Pressure rules (see the 2026-11-04 resource-pressure design note). Load:
+	// the 2026-11-03 incident held 6.9 per core; 4 is well above a busy but
+	// healthy agent host. Swap: 10 GiB in use is the incident-class level, and
+	// it only counts while free disk is below 20 GiB.
+	defaultMaxLoadPerCore = 4.0
+	defaultSwapMax        = "10GiB"
+	defaultSwapDiskFree   = "20GiB"
 )
 
 // multiFlag collects a repeatable string flag.
@@ -50,7 +60,7 @@ func main() {
 }
 
 func realDeps(stdout, stderr io.Writer) deps {
-	return deps{freeBytes: statfsFree, run: execRun, stdout: stdout, stderr: stderr}
+	return deps{freeBytes: statfsFree, loadAvg1: sysctlLoadAvg1, swapUsed: sysctlSwapUsed, run: execRun, stdout: stdout, stderr: stderr}
 }
 
 func run(args []string, stdout, stderr io.Writer, mkDeps func(io.Writer, io.Writer) deps) int {
@@ -60,6 +70,9 @@ func run(args []string, stdout, stderr io.Writer, mkDeps func(io.Writer, io.Writ
 	fs.Var(&paths, "path", "path whose filesystem is measured; repeatable, the lowest free space wins (default \"/\")")
 	minFree := fs.String("min-free", defaultMinFree, "set the gate when free space is below this (e.g. 20GiB, 512MiB; IEC units or bytes)")
 	recoverFree := fs.String("recover-free", "", "clear the gate only at or above this free space (default: --min-free * 1.25)")
+	maxLoad := fs.Float64("max-load-per-core", defaultMaxLoadPerCore, "set the gate when 1-minute load average per core is above this (0 disables)")
+	swapMax := fs.String("swap-max", defaultSwapMax, "set the gate when swap in use is above this AND free space is below --swap-disk-free (0 disables)")
+	swapDiskFree := fs.String("swap-disk-free", defaultSwapDiskFree, "free-space ceiling for the swap rule")
 	gateType := fs.String("gate", defaultGate, "gate TYPE to set and clear")
 	owner := fs.String("owner", defaultOwner, "owner recorded on the gate; only a gate with this owner is ever cleared")
 	ttl := fs.Duration("ttl", defaultTTL, "lease on the gate; must be longer than the check interval")
@@ -81,7 +94,7 @@ func run(args []string, stdout, stderr io.Writer, mkDeps func(io.Writer, io.Writ
 		return exitUsage
 	}
 
-	cfg, err := buildConfig(paths, *minFree, *recoverFree, *gateType, *owner, *ttl, *pgRouter, *execTimeout)
+	cfg, err := buildConfig(paths, *minFree, *recoverFree, *maxLoad, *swapMax, *swapDiskFree, *gateType, *owner, *ttl, *pgRouter, *execTimeout)
 	if err != nil {
 		fmt.Fprintln(stderr, "pg-router-disk-watchdog:", err)
 		return exitUsage
@@ -89,7 +102,7 @@ func run(args []string, stdout, stderr io.Writer, mkDeps func(io.Writer, io.Writ
 	return check(context.Background(), cfg, mkDeps(stdout, stderr))
 }
 
-func buildConfig(paths []string, minFree, recoverFree, gateType, owner string, ttl time.Duration, pgRouter string, execTimeout time.Duration) (config, error) {
+func buildConfig(paths []string, minFree, recoverFree string, maxLoad float64, swapMax, swapDiskFree, gateType, owner string, ttl time.Duration, pgRouter string, execTimeout time.Duration) (config, error) {
 	if len(paths) == 0 {
 		paths = []string{"/"}
 	}
@@ -109,6 +122,17 @@ func buildConfig(paths []string, minFree, recoverFree, gateType, owner string, t
 			return config{}, errors.New("--recover-free must not be below --min-free")
 		}
 	}
+	if maxLoad < 0 {
+		return config{}, errors.New("--max-load-per-core must not be negative")
+	}
+	swapLimit, err := parseSize(swapMax)
+	if err != nil {
+		return config{}, fmt.Errorf("--swap-max: %w", err)
+	}
+	swapFree, err := parseSize(swapDiskFree)
+	if err != nil {
+		return config{}, fmt.Errorf("--swap-disk-free: %w", err)
+	}
 	if gateType == "" || strings.ToUpper(gateType) != gateType {
 		return config{}, fmt.Errorf("--gate %q must be an ALL-CAPS gate TYPE", gateType)
 	}
@@ -119,7 +143,7 @@ func buildConfig(paths []string, minFree, recoverFree, gateType, owner string, t
 		return config{}, errors.New("--ttl must be positive")
 	}
 	return config{
-		paths: paths, minFree: floor, recoverFree: rec, gateType: gateType, owner: owner,
+		paths: paths, minFree: floor, recoverFree: rec, maxLoadPerCore: maxLoad, cores: numCPU(), swapMax: swapLimit, swapDiskFree: swapFree, gateType: gateType, owner: owner,
 		ttl: ttl, pgRouterPath: pgRouter, execTimeout: execTimeout,
 	}, nil
 }

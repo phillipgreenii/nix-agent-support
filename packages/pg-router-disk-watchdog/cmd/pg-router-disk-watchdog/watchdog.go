@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,14 @@ type config struct {
 	// the threshold does not flap the gate (and drop events) every 5 minutes.
 	recoverFree uint64
 	gateType    string
+	// maxLoadPerCore: 1-minute load average divided by cores strictly above
+	// this sets the gate (0 disables the rule). Recovery needs 80% of it.
+	maxLoadPerCore float64
+	cores          int
+	// swapMax and swapDiskFree: swap in use strictly above swapMax while free
+	// space is below swapDiskFree sets the gate (swapMax 0 disables the rule).
+	swapMax      uint64
+	swapDiskFree uint64
 	// owner is recorded on the gate (debug only in pg-router) and is how this
 	// watchdog recognises its OWN gate, so a LOW_DISK_USAGE an operator set by
 	// hand (a different owner) is never cleared out from under them.
@@ -47,6 +56,10 @@ type config struct {
 type deps struct {
 	// freeBytes reports the space available to unprivileged writers at path.
 	freeBytes func(path string) (uint64, error)
+	// loadAvg1 and swapUsed are the optional pressure probes; nil disables
+	// the matching reading (a probe error skips it for that pass).
+	loadAvg1 func() (float64, error)
+	swapUsed func() (uint64, error)
 	// run executes bin with args and returns its stdout; a non-zero exit is an
 	// error carrying the child's stderr.
 	run    func(ctx context.Context, bin string, args ...string) ([]byte, error)
@@ -60,21 +73,25 @@ type gateEntry struct {
 	Owner string `json:"owner"`
 }
 
-// check performs ONE watchdog pass:
+// check performs ONE watchdog pass. The rules (see pressure) are evaluated at
+// their trip thresholds, then at their recovery thresholds:
 //
-//	free <  minFree                -> set the gate (renewing its lease if ours), unless another owner holds it
-//	free >= recoverFree            -> clear the gate if THIS watchdog owns it
-//	minFree <= free < recoverFree  -> hold: renew our gate if we own one, else nothing
+//	any rule trips at trip thresholds   -> set the gate (renewing its lease if ours), unless another owner holds it
+//	no rule holds at recovery thresholds -> clear the gate if THIS watchdog owns it
+//	otherwise (the hysteresis band)     -> hold: renew our gate if we own one, else nothing
 //
-// While low the gate is re-set on every pass: that is the lease renewal.
+// While tripped the gate is re-set on every pass: that is the lease renewal.
 func check(ctx context.Context, cfg config, d deps) int {
 	free, where, err := lowestFree(cfg.paths, d.freeBytes)
 	if err != nil {
 		fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)
 		return exitError
 	}
+	r := readings{free: free, where: where}
+	readPressure(d, &r)
 
-	if free < cfg.minFree {
+	if tripped := pressure(cfg, r, false); len(tripped) > 0 {
+		desc := strings.Join(tripped, "; ")
 		// pg-router's gate set is last-writer-wins, so setting while an operator
 		// holds the gate would take it over (and the recovery branch would later
 		// clear it). Look first. If the owner cannot be determined, fail toward
@@ -83,10 +100,9 @@ func check(ctx context.Context, cfg config, d deps) int {
 		if err != nil {
 			fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)
 		} else if other {
-			fmt.Fprintf(d.stdout, "pg-router-disk-watchdog: %s free on %s (minimum %s); %s is held by another owner, leaving it\n", formatSize(free), where, formatSize(cfg.minFree), cfg.gateType)
+			fmt.Fprintf(d.stdout, "pg-router-disk-watchdog: %s; %s is held by another owner, leaving it\n", desc, cfg.gateType)
 			return exitOK
 		}
-		desc := fmt.Sprintf("low disk space: %s free on %s (minimum %s)", formatSize(free), where, formatSize(cfg.minFree))
 		if err := setGate(ctx, cfg, d, desc); err != nil {
 			fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)
 			return exitError
@@ -95,7 +111,7 @@ func check(ctx context.Context, cfg config, d deps) int {
 		return exitOK
 	}
 
-	// Space is adequate. Whether there is anything to do depends on whether the
+	// Nothing trips. Whether there is anything to do depends on whether the
 	// gate is ours, so ask pg-router; this is also what keeps a healthy pass
 	// from writing a "clear" record to the event log every 5 minutes.
 	ours, other, err := ownGate(ctx, cfg, d)
@@ -103,15 +119,16 @@ func check(ctx context.Context, cfg config, d deps) int {
 		fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)
 		return exitError
 	}
+	holding := pressure(cfg, r, true)
 	switch {
-	case ours && free >= cfg.recoverFree:
+	case ours && len(holding) == 0:
 		if _, err := pgr(ctx, cfg, d, "gate", "clear", cfg.gateType, "--by", cfg.owner); err != nil {
 			fmt.Fprintln(d.stderr, "pg-router-disk-watchdog: gate clear:", err)
 			return exitError
 		}
-		fmt.Fprintf(d.stdout, "pg-router-disk-watchdog: %s free on %s (recover at %s) -> %s cleared\n", formatSize(free), where, formatSize(cfg.recoverFree), cfg.gateType)
+		fmt.Fprintf(d.stdout, "pg-router-disk-watchdog: %s free on %s, load and swap clear -> %s cleared\n", formatSize(free), where, cfg.gateType)
 	case ours:
-		desc := fmt.Sprintf("low disk space: %s free on %s (recovering; clears at %s)", formatSize(free), where, formatSize(cfg.recoverFree))
+		desc := strings.Join(holding, "; ")
 		if err := setGate(ctx, cfg, d, desc); err != nil {
 			fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)
 			return exitError

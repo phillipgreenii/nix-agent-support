@@ -260,9 +260,9 @@ func TestRun_defaultsAndFlagValidation(t *testing.T) {
 		t.Errorf("default path = %v, want [/]", gotCfg.paths)
 	}
 
-	cfg, err := buildConfig(nil, defaultMinFree, "", defaultGate, defaultOwner, defaultTTL, "pg-router", time.Second)
-	if err != nil || cfg.minFree != 20*gib || cfg.recoverFree != 25*gib || cfg.ttl != 7*time.Minute || cfg.gateType != "LOW_DISK_USAGE" {
-		t.Errorf("defaults = %+v, %v; want 20GiB min, 25GiB recover, 7m ttl, LOW_DISK_USAGE", cfg, err)
+	cfg, err := buildConfig(nil, defaultMinFree, "", defaultMaxLoadPerCore, defaultSwapMax, defaultSwapDiskFree, defaultGate, defaultOwner, defaultTTL, "pg-router", time.Second)
+	if err != nil || cfg.minFree != 30*gib || cfg.recoverFree != 30*gib+30*gib/4 || cfg.ttl != 7*time.Minute || cfg.gateType != "LOW_DISK_USAGE" {
+		t.Errorf("defaults = %+v, %v; want 30GiB min, 37.5GiB recover, 7m ttl, LOW_DISK_USAGE", cfg, err)
 	}
 
 	for name, args := range map[string][]string{
@@ -274,6 +274,9 @@ func TestRun_defaultsAndFlagValidation(t *testing.T) {
 		"stray positional":  {"extra"},
 		"unknown flag":      {"--nope"},
 		"empty owner":       {"--owner", ""},
+		"negative load":     {"--max-load-per-core", "-1"},
+		"bad swap size":     {"--swap-max", "lots"},
+		"bad swap disk":     {"--swap-disk-free", "lots"},
 	} {
 		if code := run(args, io.Discard, io.Discard, capture); code != exitUsage {
 			t.Errorf("%s: exit = %d, want %d", name, code, exitUsage)
