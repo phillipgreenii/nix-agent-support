@@ -601,3 +601,43 @@ func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
 		t.Errorf("body missing pg_desk_sources_stale 0:\n%s", body)
 	}
 }
+
+// TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel pins that the payload
+// reads the key/value hidden annotation of a schema-2 store: a PR with
+// hidden=true lands in Hidden, a PR with no annotation stays in its panel.
+func TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel(t *testing.T) {
+	s := store.OpenNewSchemaForTest(t)
+	for _, id := range []string{"9", "10"} {
+		if err := s.UpsertEntity(store.Entity{
+			Repo: "acme/widgets", EntityType: "pr", EntityID: id,
+			Facts: `{}`, AsOf: "2026-09-16T10:00:00Z",
+		}); err != nil {
+			t.Fatalf("UpsertEntity %s: %v", id, err)
+		}
+		mustUpsertInterpretation(t, s, store.Interpretation{
+			Repo: "acme/widgets", EntityType: "pr", EntityID: id,
+			Panel: PanelMineAwaitingTeam, Approvals: "{}", MatchReasons: "[]", Enrichment: "{}",
+			Urgency: "{}", Dispositions: "[]", AsOf: "2026-09-16T10:00:00Z",
+		})
+	}
+	if err := s.SetAnnotation(store.KVAnnotation{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: "9",
+		Key: store.AnnotationHidden, Value: `{"value":true,"reason":"waiting"}`,
+		Origin: "pg-desk", SetBy: "operator", SetAt: "2026-09-16T09:00:00Z",
+	}); err != nil {
+		t.Fatalf("SetAnnotation: %v", err)
+	}
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T10:00:00Z")
+	setClock(t, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
+
+	payload, err := BuildPayload(s, testConfig(), nowUTC())
+	if err != nil {
+		t.Fatalf("BuildPayload: %v", err)
+	}
+	if len(payload.Hidden) != 1 || payload.Hidden[0]["entity_id"] != "9" {
+		t.Fatalf("Hidden = %+v, want exactly PR 9", payload.Hidden)
+	}
+	if len(payload.MineAwaitingTeam) != 1 || payload.MineAwaitingTeam[0]["entity_id"] != "10" {
+		t.Fatalf("MineAwaitingTeam = %+v, want exactly PR 10", payload.MineAwaitingTeam)
+	}
+}

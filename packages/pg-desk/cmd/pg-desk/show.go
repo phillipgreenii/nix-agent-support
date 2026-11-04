@@ -81,17 +81,9 @@ func runShow(cmd *cobra.Command, ref string) error {
 		return fmt.Errorf("show: %s does not resolve", ref)
 	}
 
-	hidden, hiddenReason, wip := false, "", false
-	if ann, found, aerr := st.GetPRAnnotation(repo, entityTypePR, id); aerr != nil {
-		return fmt.Errorf("show: read annotation: %w", aerr)
-	} else if found {
-		if ann.Hidden != nil {
-			hidden = *ann.Hidden
-		}
-		hiddenReason = ann.HiddenReason
-		if ann.WIP != nil {
-			wip = *ann.WIP
-		}
+	hidden, hiddenReason, wip, err := st.PRHiddenWIP(repo, entityTypePR, id)
+	if err != nil {
+		return fmt.Errorf("show: read annotation: %w", err)
 	}
 
 	payload := showPayload{

@@ -152,3 +152,84 @@ func TestShowHasNoRefreshFlag(t *testing.T) {
 		t.Fatalf("show still has a --refresh flag: %+v", f)
 	}
 }
+
+// seedShowNewSchema cuts a real store over to schema 2 and seeds one PR with
+// an interpretation plus the given key/value annotations.
+func seedShowNewSchema(t *testing.T, anns map[string]string) {
+	t.Helper()
+	open, seed := seedLinkStore(t, [2]string{entityTypePR, "o/r#42"})
+	withOpenSeams(t, linkTestConfig(), open)
+	if err := seed.UpsertInterpretation(store.Interpretation{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
+		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
+		AsOf: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed interpretation: %v", err)
+	}
+	for k, v := range anns {
+		if err := seed.SetAnnotation(store.KVAnnotation{
+			Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
+			Key: k, Value: v, Origin: "pg-desk", SetBy: "alice", SetAt: "2026-09-16T00:00:00Z",
+		}); err != nil {
+			t.Fatalf("seed annotation %s: %v", k, err)
+		}
+	}
+}
+
+func TestShowOnNewSchemaReadsKeyValueAnnotations(t *testing.T) {
+	seedShowNewSchema(t, map[string]string{
+		store.AnnotationHidden: `{"value":true,"reason":"noisy PR"}`,
+		store.AnnotationWIP:    "true",
+	})
+
+	stdout, err := runShowCmd(t, "42", showCmdFlags{})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if !strings.Contains(stdout, "hidden=true") || !strings.Contains(stdout, "wip=true") {
+		t.Errorf("stdout missing hidden=true/wip=true: %s", stdout)
+	}
+
+	stdout, err = runShowCmd(t, "42", showCmdFlags{jsonOut: true})
+	if err != nil {
+		t.Fatalf("show --json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["hidden"] != true || payload["hidden_reason"] != "noisy PR" || payload["wip"] != true {
+		t.Errorf("payload = %v, want hidden=true hidden_reason=noisy PR wip=true", payload)
+	}
+}
+
+func TestShowOnNewSchemaWithoutAnnotations(t *testing.T) {
+	seedShowNewSchema(t, nil)
+
+	stdout, err := runShowCmd(t, "42", showCmdFlags{})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if !strings.Contains(stdout, "hidden=false") || !strings.Contains(stdout, "wip=false") {
+		t.Errorf("stdout missing hidden=false/wip=false: %s", stdout)
+	}
+}
+
+func TestShowOnNewSchemaUnhiddenAnnotation(t *testing.T) {
+	seedShowNewSchema(t, map[string]string{store.AnnotationHidden: `{"value":false,"reason":null}`})
+
+	stdout, err := runShowCmd(t, "42", showCmdFlags{jsonOut: true})
+	if err != nil {
+		t.Fatalf("show --json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["hidden"] != false || payload["wip"] != false {
+		t.Errorf("payload = %v, want hidden=false wip=false", payload)
+	}
+	if _, has := payload["hidden_reason"]; has {
+		t.Errorf("hidden_reason present for an unhidden PR: %v", payload)
+	}
+}

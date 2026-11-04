@@ -20,6 +20,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	_ "modernc.org/sqlite"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -135,11 +137,10 @@ func verbClasses() map[string]verbClass {
 		"open":              unsafe("execs the operator-configured browser opener"),
 		"run":               safe("issue", "1"),
 		"serve":             {Safe: true, Args: []string{"--addr", "127.0.0.1:0"}, Daemon: true},
-		"show": unsafe("reads the old per-column annotation table and the ledger, which schema 2 replaced or " +
-			"dropped; pr show is the schema-2 verb"),
-		"status": safe(),
-		"unhide": safe("1"),
-		"wip":    safe("on", "1"),
+		"show":              safe("1"),
+		"status":            safe(),
+		"unhide":            safe("1"),
+		"wip":               safe("on", "1"),
 	}
 	for k, v := range typedVerbs("pr", "1") {
 		m[k] = v
@@ -723,24 +724,28 @@ func TestSchemaErrorDetectionRejectsAMigrationBreak(t *testing.T) {
 }
 
 // TestHarnessSeesARealMigrationBreak is the negative control for the whole
-// walk: the legacy top-level show reads the old per-column annotation table that the
-// schema-2 cutover replaced, so running it on the migrated store MUST be flagged. It proves the
-// fixture really is at schema 2 and the check really reads the verbs' output;
-// without it a harness that ran nothing would pass every verb. If show is
-// ever ported to schema 2, point this at another verb the table marks unsafe
-// for a dropped-table or dropped-column reason (it was reconcile until the
-// sync stage was deleted, and hide until pg2-ifsje ported the top-level hide,
-// unhide, wip and feedback verbs).
+// walk: it breaks the migrated fixture store the way a migration bug would
+// (the key/value annotation table is dropped), so a verb that reads
+// annotations MUST then be flagged. It proves the fixture really is at schema
+// 2 and the check really reads the verbs' output; without it a harness that
+// ran nothing would pass every verb.
 func TestHarnessSeesARealMigrationBreak(t *testing.T) {
-	classes := verbClasses()
-	if classes["show"].Safe {
-		t.Fatal("this control needs show to be classified unsafe")
+	f := newVerbFixture(t)
+	db, err := sql.Open("sqlite", filepath.Join(f.dir, "state", "pg-desk", "store.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	res := newVerbFixture(t).run("show", []string{"1"})
+	if _, err := db.Exec("DROP TABLE annotation"); err != nil {
+		t.Fatalf("drop annotation: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	res := f.run("show", []string{"1"})
 	if res.err != nil {
 		t.Fatal(res.err)
 	}
 	if schemaOrLedgerError(res) == "" {
-		t.Errorf("legacy show ran clean on a schema-2 store; the check would miss a migration break:\nstdout: %s\nstderr: %s", res.stdout, res.stderr)
+		t.Errorf("show ran clean on a store with no annotation table; the check would miss a migration break:\nstdout: %s\nstderr: %s", res.stdout, res.stderr)
 	}
 }

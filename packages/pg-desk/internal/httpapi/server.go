@@ -295,9 +295,9 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 	for _, interp := range interps {
 		row := buildRow(interp)
 
-		hidden := false
-		if ann, found, aerr := st.GetPRAnnotation(interp.Repo, interp.EntityType, interp.EntityID); aerr == nil && found && ann.Hidden != nil {
-			hidden = *ann.Hidden
+		hidden, _, _, aerr := st.PRHiddenWIP(interp.Repo, interp.EntityType, interp.EntityID)
+		if aerr != nil {
+			hidden = false
 		}
 		// An annotation-read error is treated as "not hidden" (fail open
 		// toward visible, not silently dropped): a store read glitch must

@@ -55,6 +55,7 @@ pr unsuppress
 pr wip
 run
 serve
+show
 status
 thread annotate
 thread annotation-items
