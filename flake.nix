@@ -6607,10 +6607,6 @@
                   # programs.<f> feature: pn comes from repo-base's phillipgreenii.pn,
                   # pg-go-mutate from phillipgreenii.pg-go-mutate, bash-language-server
                   # from no module in this repo).
-                  # NOTE pg-claude-control: owned by feature pg-claude-control, but that
-                  # plugin.json is NOT yet annotated -- touching the plugin dir triggers the
-                  # commit-time bats gate, whose listen.bats "stale FIFO" test fails on a
-                  # pristine checkout here. Follow-up: annotate requires, then flip its owner.
                   binaryOwners = pkgs.writeText "binary-owners" ''
                     bd beads
                     pb pb
@@ -6620,7 +6616,7 @@
                     integrate-branch-support integrate-branch-support
                     claude-extended-tool-approver claude-extended-tool-approver
                     claude-tool-tracker claude-tool-tracker
-                    pg-claude-control -
+                    pg-claude-control pg-claude-control
                     pg-wi-flow pg-wi-flow
                     pn -
                     pg-git-lander pg-git-lander
