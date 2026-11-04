@@ -25,6 +25,20 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   errored), oldest-activity first, and MUST leave the pool above its cap when only spared or
   still-working sessions remain (ADR 0072). A session belonging to a run that no longer exists
   MUST NOT accumulate across restarts; the next sweep MUST reclaim it.
+- **`INV-POOL-6`** <!-- uuid: 5c0e0d3a-8f4b-4f0e-9a52-3b7c1d6e2a91 --> — **A closed session record
+  MUST NOT be kept forever.** "Closed" is derived: a record is closed when its close time is at or
+  after its last activity, and reap MUST NOT rewrite any stored state to say so (ADR 0015, ADR
+  0086). Once the session is no longer live and its close is older than the pool's closed-row
+  retention (default 7 days; 0 disables), the sweep MUST delete the record, finishing its open run
+  first and re-checking under the session's lock, and MUST leave the conversation transcript alone.
+  A record whose session died without anyone closing it MUST NOT be deleted by this rule, and a
+  dead `needs_input` record keeps its own path (ADR 0086). The cap is unaffected: it counts only
+  live, non-spared sessions (`INV-POOL-3`, ADR 0072). (ADR 0119)
+- **`INV-POOL-7`** <!-- uuid: 8e2b6f14-1c7d-4a3e-b0d9-6f5a4c9e7b28 --> — **The status metric MUST
+  separate dead records nobody closed from dead records someone closed.** The per-state counts
+  MUST exclude every dead closed record, so a not-live `working` count holds only records nobody
+  closed. A per-pool count of records by kind (live, dead closed, dead unclosed) MUST be served
+  alongside it. (ADR 0119, ADR 0086)
 
 - **`INV-POOL-4`** <!-- uuid: 627882d5-f2ad-4be6-97be-f24e6963f0c1 --> — **A pool MUST NOT accept
   work while the account's usage window is at its limit.** Whenever the co-resident monitor's

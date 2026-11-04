@@ -94,6 +94,18 @@ deployment-specific workflow built on top of ccpool, are out of this set's exten
   alike, even if that leaves the pool briefly over its cap. A human-awaited session whose session has since died (it is no longer
   live) is the one exception: reap MAY close it, keeping its record and conversation, once it has
   waited far longer than any plausible response (ADR 0086).
+- **Closed row** — a session record whose `closed_at` is at or after its last activity. Closed is
+  derived from those two facts, never stored as a state, and reap and reconcile MUST NOT rewrite
+  the stored state of any row (ADR 0015, ADR 0086). A resume that moves last activity past the
+  close makes the row open again.
+- **Dead closed row** — a closed row whose session is no longer live. It costs no capacity
+  (ADR 0072) and is not counted in the per-state buckets of the status metric.
+- **Dead unclosed row** — a row whose session is no longer live and that nobody closed. It is the
+  fault signal: it stays in the state buckets and MUST NOT be deleted by retention.
+- **Closed-row retention** — the pool setting `closed_row_retention` (default `7d`; `0` disables).
+  Reap MUST delete a dead closed row once its close is older than the retention, and MUST leave the
+  conversation transcript alone. A dead unclosed row and a live row are never deleted by it
+  (ADR 0119). Not yet realized (`## Realization gaps`).
 
 ## Notification
 
