@@ -17,6 +17,21 @@
       },
       "unknownFlag": {
         "source": "bash builtin: help test: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      },
+      "dangerFlagInert:-c": {
+        "source": "bash builtin: help test: \"-c FILE        True if file is character special.\" -- a unary file-type query that stats its operand; not an output/config/exec flag despite the spelling"
+      },
+      "dangerFlagInert:-e": {
+        "source": "bash builtin: help test: \"-e FILE        True if file exists.\" -- a unary existence query; not an exec flag despite the spelling"
+      },
+      "dangerFlagInert:-f": {
+        "source": "bash builtin: help test: \"-f FILE        True if file exists and is a regular file.\" -- a unary file-type query; not a force flag despite the spelling"
+      },
+      "dangerFlagInert:-o": {
+        "source": "bash builtin: help test: \"-o OPTION      True if the shell option OPTION is enabled.\" and \"EXPR1 -o EXPR2 True if either expr1 OR expr2 is true.\" -- a query/OR connective; not an output flag despite the spelling"
+      },
+      "dangerFlagInert:-r": {
+        "source": "bash builtin: help test: \"-r FILE        True if the file is readable by you.\" -- a unary access query (access(2)); not a recursive flag despite the spelling"
       }
     },
     "flags": {

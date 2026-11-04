@@ -16106,5 +16106,62 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-cw7sf: --parseopt stays unmodeled."
+  },
+  {
+    "case": "test_file_probe_home_dotfile_chain_approve",
+    "tags": ["ceta-spec", "tc-3f9t5"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "test -d ~/.config/tc-secrets && echo yes || echo no\ntest -f ~/.vault-token && echo \"vault-token-exists\" || echo \"no-vault-token\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-3f9t5 (absorbs Bash(test:*)): test file-query operands are Literal, never path effects, so probes of unlisted home paths approve without a settings rule."
+  },
+  {
+    "case": "test_dir_probe_claude_rules_approve",
+    "tags": ["ceta-spec", "tc-3f9t5"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "test -d ~/.claude/rules && echo \"rules_dir_exists=yes\" || echo \"rules_dir_exists=no\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-3f9t5: pure existence query."
+  },
+  {
+    "case": "test_v_subscript_guardrail_not_approve",
+    "tags": ["ceta-spec", "tc-3f9t5"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "test -v 'a[$(id)]'"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-3f9t5 guardrail: -v takes a variable name that may carry an arithmetic subscript (runs a command), so it stays unmodeled and abstains."
   }
 ]
