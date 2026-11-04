@@ -351,3 +351,48 @@ func TestGit_Chdir_ReconcileCommands_CanonicalClone(t *testing.T) {
 		}
 	}
 }
+
+// TestGit_Chdir_WorktreeVerbGrants pins CETA's verdict for the `git -C <wt> <verb>`
+// shapes that the per-verb permission grants for worker roles rely on. The
+// permission pattern matcher is broad (`git -C * <verb> *`), so these rules are
+// the only guard for the denied forms. Expected verdicts are recorded from the
+// rule's behavior at the time the table was written.
+func TestGit_Chdir_WorktreeVerbGrants(t *testing.T) {
+	r := newWithProject(t)
+	wt := projectCWD + "/.worktrees/x"
+	cases := []struct {
+		name string
+		cmd  string
+		want hookio.Decision
+	}{
+		// -c placed AFTER -C must still hit the config-key injection reject.
+		{"c after C fsmonitor", "git -C " + wt + " -c core.fsmonitor=x status", hookio.Reject},
+		{"c after C hooksPath", "git -C " + wt + " -c core.hooksPath=/dev/null status", hookio.Reject},
+		// Destructive verbs are not approved (abstain defers to the prompt).
+		{"reset hard", "git -C " + wt + " reset --hard", hookio.NoOpinion},
+		{"clean fdx", "git -C " + wt + " clean -fdx", hookio.NoOpinion},
+		{"force push", "git -C " + wt + " push --force origin x", hookio.Reject},
+		{"config write", "git -C " + wt + " config user.name x", hookio.Reject},
+		{"gc", "git -C " + wt + " gc", hookio.NoOpinion},
+		{"prune", "git -C " + wt + " prune", hookio.NoOpinion},
+		// FLAGGED: approved today although a denied-form candidate. The force-push
+		// reject message explicitly steers to --force-with-lease, so this one is
+		// probably intended; filter-branch rewrites history and is not.
+		// Recommended rule change (operator decision): make filter-branch
+		// abstain/reject like reset --hard.
+		{"force-with-lease push (approved today, likely intended)", "git -C " + wt + " push --force-with-lease origin x", hookio.Approve},
+		{"filter-branch (approved today, FLAGGED)", "git -C " + wt + " filter-branch", hookio.Approve},
+		// Positive controls that must stay approved.
+		{"checkout detach FETCH_HEAD", "git -C " + wt + " checkout --detach FETCH_HEAD", hookio.Approve},
+		{"add -A", "git -C " + wt + " add -A", hookio.Approve},
+		{"commit -q -F", "git -C " + wt + " commit -q -F f", hookio.Approve},
+		{"status", "git -C " + wt + " status", hookio.Approve},
+		{"push HEAD to explicit ref", "git push origin HEAD:refs/heads/x", hookio.Approve},
+	}
+	for _, tc := range cases {
+		got := hookio.Verdict(r.Evaluate(chdirInput(tc.cmd, projectCWD)))
+		if got.Decision != tc.want {
+			t.Errorf("%s: cmd %q: got %s (%s), want %s", tc.name, tc.cmd, got.Decision, got.Reason, tc.want)
+		}
+	}
+}
