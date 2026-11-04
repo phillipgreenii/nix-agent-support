@@ -11966,6 +11966,28 @@
                     touch $out
                   '';
 
+              # test-host-forensics: the retained-crash-evidence script (copies new panic
+              # reports, daily disk/swap/load/wired snapshot) run for real against fixture
+              # directories with stub df/sysctl/vm_stat (tests/host-forensics.bats).
+              test-host-forensics =
+                pkgs.runCommand "test-host-forensics"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                    ];
+                    HF_SCRIPT = ./home/programs/host-forensics/host-forensics.bash;
+                  }
+                  ''
+                    bats --tap ${./tests/host-forensics.bats} >hf.tap || { cat hf.tap; exit 1; }
+                    cat hf.tap
+                    touch $out
+                  '';
+
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
               # paths.defaults wiring actually evaluates and renders the

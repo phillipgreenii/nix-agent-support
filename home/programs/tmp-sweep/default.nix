@@ -108,8 +108,13 @@ in
             # The CLI reads the registry from
             # ${XDG_CONFIG_HOME:-$HOME/.config}/pg-disk-reclaimer/registry.json and
             # runs level 1 without a prompt (the confirmation gate is level 4).
+            #
+            # Every output line is prefixed with a UTC timestamp, so the log keeps
+            # WHEN each sweep ran after launchd's own logs have rotated away. The
+            # pipeline keeps the CLI's exit status (pipefail).
             script = ''
-              exec ${cfg.package}/bin/pg-disk-reclaimer reclaim --aggressiveness 1 ${lib.concatStringsSep " " ids} --apply
+              set -o pipefail
+              ${cfg.package}/bin/pg-disk-reclaimer reclaim --aggressiveness 1 ${lib.concatStringsSep " " ids} --apply 2>&1 | while IFS= read -r line; do printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line"; done
             '';
             # A daily calendar job that exits between runs. runAtLoad covers a
             # machine that was powered off at 03:30 (launchd runs a missed calendar

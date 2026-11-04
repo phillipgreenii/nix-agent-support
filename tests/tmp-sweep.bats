@@ -106,10 +106,10 @@ populate() {
 }
 
 @test "the rendered scripts are the exact command lines, one per enabled-roots combination" {
-  [ "$(grep -c . "$SCRIPT_BOTH")" -eq 1 ]
-  grep -qE '^exec /nix/store/[^ ]+/bin/pg-disk-reclaimer reclaim --aggressiveness 1 build-tmp claude-code-tmp --apply$' "$SCRIPT_BOTH"
-  grep -qE '^exec /nix/store/[^ ]+/bin/pg-disk-reclaimer reclaim --aggressiveness 1 build-tmp --apply$' "$SCRIPT_BUILD"
-  grep -qE '^exec /nix/store/[^ ]+/bin/pg-disk-reclaimer reclaim --aggressiveness 1 claude-code-tmp --apply$' "$SCRIPT_CLAUDE"
+  [ "$(grep -c . "$SCRIPT_BOTH")" -eq 2 ]
+  grep -qE '^/nix/store/[^ ]+/bin/pg-disk-reclaimer reclaim --aggressiveness 1 build-tmp claude-code-tmp --apply 2>&1 \| while ' "$SCRIPT_BOTH"
+  grep -qE '^/nix/store/[^ ]+/bin/pg-disk-reclaimer reclaim --aggressiveness 1 build-tmp --apply 2>&1 \| while ' "$SCRIPT_BUILD"
+  grep -qE '^/nix/store/[^ ]+/bin/pg-disk-reclaimer reclaim --aggressiveness 1 claude-code-tmp --apply 2>&1 \| while ' "$SCRIPT_CLAUDE"
 }
 
 @test "both roots: idle build-tmp entry and idle claude-code-tmp session removed; fresh and live kept" {
@@ -129,6 +129,10 @@ populate() {
   # each root's marker survives (the root guard needs it on every later run)
   [ -f "$B/.build-tmp-root" ] && [ -f "$C/.claude-code-tmp-root" ]
   [[ $output == *"total reclaimed"* ]]
+  # every output line starts with a UTC timestamp
+  while IFS= read -r l; do
+    [[ -z $l || $l =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\  ]] || { echo "untimestamped: $l" >&2; return 1; }
+  done <<<"$output"
 }
 
 @test "level 1 only: a build_tmp entry idle 2 h (past the level 3 cutoff, not level 1) is kept" {

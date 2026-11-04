@@ -196,21 +196,26 @@ let
   # the script's non-empty lines
   scriptLines = c: lib.filter (l: l != "") (lib.splitString "\n" (agent c).script);
   pkgBin = "${pkgs.pg-disk-reclaimer}/bin/pg-disk-reclaimer";
-  lineFor = ids: "exec ${pkgBin} reclaim --aggressiveness 1 ${ids} --apply";
+  tsLoop = ''while IFS= read -r line; do printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line"; done'';
+  lineFor = ids: "${pkgBin} reclaim --aggressiveness 1 ${ids} --apply 2>&1 | ${tsLoop}";
+  scriptFor = ids: [
+    "set -o pipefail"
+    (lineFor ids)
+  ];
   sc = c: (agent c).serviceConfig;
 
   cases = [
     {
       name = "both roots enabled: the exact command line names both ids explicitly";
-      ok = scriptLines bothC == [ (lineFor "build-tmp claude-code-tmp") ];
+      ok = scriptLines bothC == scriptFor "build-tmp claude-code-tmp";
     }
     {
       name = "only build-tmp enabled: only its id appears";
-      ok = scriptLines buildC == [ (lineFor "build-tmp") ];
+      ok = scriptLines buildC == scriptFor "build-tmp";
     }
     {
       name = "only claude-code-tmp enabled: only its id appears";
-      ok = scriptLines claudeC == [ (lineFor "claude-code-tmp") ];
+      ok = scriptLines claudeC == scriptFor "claude-code-tmp";
     }
     {
       name = "neither root enabled: no agent, and forcing the sweep on renders none and fails nothing";
@@ -241,7 +246,7 @@ let
     {
       name = "the script runs the ABSOLUTE store path of pg-disk-reclaimer at level 1 only, with explicit ids";
       ok =
-        lib.all (c: has "exec /nix/store/" (agent c).script && has "-pg-disk-reclaimer-" (agent c).script) [
+        lib.all (c: has "\n/nix/store/" (agent c).script && has "-pg-disk-reclaimer-" (agent c).script) [
           bothC
           buildC
           claudeC
@@ -256,6 +261,17 @@ let
           buildC
           claudeC
         ];
+    }
+    {
+      name = "every output line of the sweep is timestamped and the CLI exit status is kept (pipefail)";
+      ok =
+        lib.all
+          (c: has "date -u +%Y-%m-%dT%H:%M:%SZ" (agent c).script && has "set -o pipefail" (agent c).script)
+          [
+            bothC
+            buildC
+            claudeC
+          ];
     }
     {
       name = "a daily calendar interval at 03:30 passes through serviceConfig";
