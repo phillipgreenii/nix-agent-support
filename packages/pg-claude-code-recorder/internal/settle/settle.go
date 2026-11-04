@@ -175,6 +175,13 @@ type Settler struct {
 	reasons   map[string]string
 	checkedAt map[string]time.Time
 	low       bool
+
+	// The quarantine directory list the gauge refresh reuses between ticks.
+	qmu            sync.Mutex
+	qdirs          []string
+	qdirsValid     bool
+	qdirsAge       int
+	walkQuarantine func() []string // test seam; nil walks projects/
 }
 
 // New returns a Settler.

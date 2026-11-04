@@ -637,6 +637,7 @@ func (s *Settler) quarantineAvailable(orig string, st fileStat) bool {
 		return false
 	}
 	q := filepath.Join(filepath.Dir(orig), scope.QuarantineDir)
+	s.invalidateQuarantineDirs()
 	if err := s.cfs().MkdirAll(q, 0o700); err != nil {
 		return false
 	}
@@ -980,6 +981,36 @@ func (s *Settler) recoverRemoval() error {
 	return s.logOrphans()
 }
 
+// quarantineRewalkTicks is how many ticks the gauge refresh reuses its list of
+// quarantine directories before walking projects/ again, to pick up a
+// directory created outside this process.
+const quarantineRewalkTicks = 30
+
+// gaugeQuarantineDirs returns the quarantine directories for the gauge refresh.
+// It walks projects/ only on the first call, after a removal may have created a
+// directory, and every quarantineRewalkTicks ticks.
+func (s *Settler) gaugeQuarantineDirs() []string {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if s.qdirsValid && s.qdirsAge+1 < quarantineRewalkTicks {
+		s.qdirsAge++
+		return s.qdirs
+	}
+	walk := s.quarantineDirs
+	if s.walkQuarantine != nil {
+		walk = s.walkQuarantine
+	}
+	s.qdirs, s.qdirsValid, s.qdirsAge = walk(), true, 0
+	return s.qdirs
+}
+
+// invalidateQuarantineDirs makes the next gauge refresh walk projects/ again.
+func (s *Settler) invalidateQuarantineDirs() {
+	s.qmu.Lock()
+	s.qdirsValid = false
+	s.qmu.Unlock()
+}
+
 // quarantineDirs lists every quarantine directory under projects/.
 func (s *Settler) quarantineDirs() []string {
 	var out []string
@@ -1016,7 +1047,7 @@ func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]
 	var files int
 	var bytes int64
 	var oldest float64
-	for _, d := range s.quarantineDirs() {
+	for _, d := range s.gaugeQuarantineDirs() {
 		ents, err := os.ReadDir(d)
 		if err != nil {
 			continue
