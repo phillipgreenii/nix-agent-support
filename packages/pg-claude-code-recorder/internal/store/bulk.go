@@ -296,6 +296,7 @@ func (s *Store) commitBatchLocked() error {
 	committed := false
 	defer func() {
 		if !committed {
+			s.rbEpoch.Add(1)
 			_ = tx.Rollback()
 		}
 	}()
@@ -326,6 +327,7 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 		return err
 	}
 	if err := fn(tx); err != nil {
+		s.rbEpoch.Add(1)
 		_, _ = tx.Exec(`ROLLBACK TO bulk_write`)
 		_, _ = tx.Exec(`RELEASE bulk_write`)
 		return err
@@ -334,5 +336,8 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 		faults.At(point)
 	}
 	_, err := tx.Exec(`RELEASE bulk_write`)
+	if err != nil {
+		s.rbEpoch.Add(1)
+	}
 	return err
 }

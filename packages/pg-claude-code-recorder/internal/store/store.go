@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
@@ -115,6 +116,7 @@ type Store struct {
 	bulkBytes   int64
 
 	mu       sync.Mutex // serializes every write
+	rbEpoch  atomic.Uint64
 	jf       fsx.File
 	nextSeq  int64
 	nextFile int64
@@ -356,6 +358,7 @@ func (s *Store) Checkpoint() (log, checkpointed int, err error) {
 
 func (s *Store) closeDBs() {
 	if s.btx != nil {
+		s.rbEpoch.Add(1)
 		_ = s.btx.Rollback()
 		s.btx = nil
 	}

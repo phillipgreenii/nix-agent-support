@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -19,6 +20,29 @@ import (
 type Counter struct {
 	queries atomic.Int64
 	rows    atomic.Int64
+
+	mu    sync.Mutex
+	texts []string // the text of every counted statement, in order
+}
+
+func (c *Counter) note(query string) {
+	c.queries.Add(1)
+	c.mu.Lock()
+	c.texts = append(c.texts, query)
+	c.mu.Unlock()
+}
+
+// Matching is the number of counted statements whose text contains substr.
+func (c *Counter) Matching(substr string) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var n int64
+	for _, q := range c.texts {
+		if strings.Contains(q, substr) {
+			n++
+		}
+	}
+	return n
 }
 
 // Queries is the number of statements passed to QueryContext, ExecContext and
@@ -32,6 +56,9 @@ func (c *Counter) RowsRead() int64 { return c.rows.Load() }
 func (c *Counter) Reset() {
 	c.queries.Store(0)
 	c.rows.Store(0)
+	c.mu.Lock()
+	c.texts = nil
+	c.mu.Unlock()
 }
 
 var (
@@ -79,7 +106,7 @@ type conn struct {
 }
 
 func (cn *conn) Prepare(query string) (driver.Stmt, error) {
-	cn.c.queries.Add(1)
+	cn.c.note(query)
 	st, err := cn.Conn.Prepare(query)
 	if err != nil {
 		return nil, err
@@ -88,7 +115,7 @@ func (cn *conn) Prepare(query string) (driver.Stmt, error) {
 }
 
 func (cn *conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	cn.c.queries.Add(1)
+	cn.c.note(query)
 	var st driver.Stmt
 	var err error
 	if p, ok := cn.Conn.(driver.ConnPrepareContext); ok {
@@ -114,7 +141,7 @@ func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.Na
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	cn.c.queries.Add(1)
+	cn.c.note(query)
 	rs, err := q.QueryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
@@ -127,7 +154,7 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	cn.c.queries.Add(1)
+	cn.c.note(query)
 	return e.ExecContext(ctx, query, args)
 }
 

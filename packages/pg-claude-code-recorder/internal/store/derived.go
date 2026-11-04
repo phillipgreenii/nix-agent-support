@@ -118,16 +118,19 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 	done := false
 	defer func() {
 		if !done {
+			s.rbEpoch.Add(1)
 			_ = tx.Rollback()
 		}
 	}()
 	if err := fn(tx); err != nil {
+		s.rbEpoch.Add(1)
 		return err
 	}
 	if point != "" {
 		faults.At(point)
 	}
 	if err := tx.Commit(); err != nil {
+		s.rbEpoch.Add(1)
 		return err
 	}
 	done = true
@@ -136,6 +139,13 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 	}
 	return nil
 }
+
+// RollbackEpoch counts the times rows this store accepted may have been undone:
+// a write that failed (the whole transaction or just its savepoint in bulk
+// mode), a panic, and a batch that did not commit. A cache of ids read from a
+// table is valid only while this number is unchanged; a holder compares it
+// under the write lock (inside WithWrite) and reloads when it moved.
+func (s *Store) RollbackEpoch() uint64 { return s.rbEpoch.Load() }
 
 // Read returns the read-only connection pool (queries read committed state).
 func (s *Store) Read() *sql.DB { return s.rdb }

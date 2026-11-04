@@ -55,6 +55,14 @@ type Parser struct {
 	pmu     sync.Mutex
 	pending map[int64]bool
 	wake    chan struct{}
+
+	// names interns field names for the parser's lifetime. It is touched only
+	// inside a Store.WithWrite (the write lock), and is valid only while
+	// namesEpoch equals Store.RollbackEpoch: any rolled-back write (a whole
+	// transaction or one bulk savepoint) may have undone a name's row, and
+	// field_names ids are reused after a rollback.
+	names      map[string]int64
+	namesEpoch uint64
 }
 
 // New returns a Parser.
@@ -580,23 +588,7 @@ func derivable(fl source.Field, caps source.Captures) bool {
 
 func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
 	unk := map[[2]string]int{}
-	// Field names are interned per call: the cache lives no longer than the
-	// transaction's statements, so a rolled-back insert cannot leave a stale id.
-	nameIDs := map[string]int64{}
-	nameID := func(name string) (int64, error) {
-		if id, ok := nameIDs[name]; ok {
-			return id, nil
-		}
-		if _, err := tx.Exec(`INSERT INTO field_names(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name); err != nil {
-			return 0, err
-		}
-		var id int64
-		if err := tx.QueryRow(`SELECT id FROM field_names WHERE name=?`, name).Scan(&id); err != nil {
-			return 0, err
-		}
-		nameIDs[name] = id
-		return id, nil
-	}
+	nameID := func(name string) (int64, error) { return p.fieldNameID(tx, name) }
 	for _, r := range recs {
 		tns := seen
 		if !r.Time.IsZero() {
@@ -844,6 +836,60 @@ func (p *Parser) Line(file int64, gen int, off int64, ln int) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimRight(buf, "\n"), nil
+}
+
+// fieldNameID returns the id of a field name, creating its row on first sight.
+// The name cache survives across lines and transactions, so a name costs
+// statements only the first time. Called inside a write transaction.
+func (p *Parser) fieldNameID(tx *pstx, name string) (int64, error) {
+	if ep := p.cfg.Store.RollbackEpoch(); p.names == nil || p.namesEpoch != ep {
+		m := map[string]int64{}
+		rows, err := tx.Query(`SELECT id, name FROM field_names`)
+		if err != nil {
+			return 0, err
+		}
+		for rows.Next() {
+			var id int64
+			var n string
+			if err := rows.Scan(&id, &n); err != nil {
+				_ = rows.Close()
+				return 0, err
+			}
+			m[n] = id
+		}
+		if err := rows.Close(); err != nil {
+			return 0, err
+		}
+		if err := rows.Err(); err != nil {
+			return 0, err
+		}
+		p.names, p.namesEpoch = m, ep
+	}
+	if id, ok := p.names[name]; ok {
+		return id, nil
+	}
+	if _, err := tx.Exec(`INSERT INTO field_names(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name); err != nil {
+		return 0, err
+	}
+	var id int64
+	if err := tx.QueryRow(`SELECT id FROM field_names WHERE name=?`, name).Scan(&id); err != nil {
+		return 0, err
+	}
+	p.names[name] = id
+	return id, nil
+}
+
+// QueryRow runs a single-row query on a statement prepared once per transaction.
+func (p *pstx) QueryRow(q string, args ...any) *sql.Row {
+	st, ok := p.st[q]
+	if !ok {
+		var err error
+		if st, err = p.Tx.Prepare(q); err != nil {
+			return p.Tx.QueryRow(q, args...) // reports the same error from Scan
+		}
+		p.st[q] = st
+	}
+	return st.QueryRow(args...)
 }
 
 // pstx is a transaction whose Exec statements are prepared once and reused
