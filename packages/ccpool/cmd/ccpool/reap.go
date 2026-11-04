@@ -24,7 +24,8 @@ func runReap(args []string) int {
 	// reap runs unattended (timer) — surface failures so the pool doesn't sit
 	// silently ungoverned.
 	if err := svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL),
-		session.WithDeadNeedsInputTTL(time.Duration(cfg.Pool.DeadNeedsInputTTL))); err != nil {
+		session.WithDeadNeedsInputTTL(time.Duration(cfg.Pool.DeadNeedsInputTTL)),
+		session.WithClosedRowRetention(time.Duration(cfg.Pool.ClosedRowRetention))); err != nil {
 		slog.Error("reap: failed", "err", err)
 		return 1
 	}

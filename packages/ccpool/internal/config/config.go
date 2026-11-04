@@ -72,6 +72,12 @@ type Pool struct {
 	// backstop. 0 disables the backstop (the dead row is then kept indefinitely).
 	// A non-zero value must be at least MinDeadNeedsInputTTL; negative is invalid.
 	DeadNeedsInputTTL Duration `toml:"dead_needs_input_ttl"`
+	// ClosedRowRetention is how long a dead row that someone closed (close_reason
+	// set, closed_at at or after last activity, e.g. a handler close after a
+	// failed dispatch) is kept before reap deletes it. Default 168h (7 days). The
+	// transcript is never deleted, and a dead row nobody closed is never deleted.
+	// 0 disables the deletion. Negative is invalid.
+	ClosedRowRetention Duration `toml:"closed_row_retention"`
 }
 
 // MinDeadNeedsInputTTL is the shortest non-zero Pool.DeadNeedsInputTTL accepted.
@@ -81,6 +87,9 @@ const MinDeadNeedsInputTTL = 24 * time.Hour
 
 // validate rejects values that would make a reap duration meaningless or unsafe.
 func (c Config) validate() error {
+	if r := time.Duration(c.Pool.ClosedRowRetention); r < 0 {
+		return fmt.Errorf("pool.closed_row_retention %s is negative (use 0 to disable)", r)
+	}
 	ttl := time.Duration(c.Pool.DeadNeedsInputTTL)
 	if ttl < 0 {
 		return fmt.Errorf("pool.dead_needs_input_ttl %s is negative (use 0 to disable)", ttl)
@@ -170,7 +179,7 @@ func (d *Duration) UnmarshalText(text []byte) error {
 
 func defaults() Config {
 	return Config{
-		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute), AutoReap: true, DeadNeedsInputTTL: Duration(30 * 24 * time.Hour)},
+		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute), AutoReap: true, DeadNeedsInputTTL: Duration(30 * 24 * time.Hour), ClosedRowRetention: Duration(7 * 24 * time.Hour)},
 		Tmux:   Tmux{Socket: "ccpool", Prefix: "cc-"},
 		Claude: Claude{Bin: "claude"},
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},

@@ -78,5 +78,6 @@ func reapOnePool(root string) error {
 		_ = st.Close()
 	}()
 	return svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL),
-		session.WithDeadNeedsInputTTL(time.Duration(cfg.Pool.DeadNeedsInputTTL)))
+		session.WithDeadNeedsInputTTL(time.Duration(cfg.Pool.DeadNeedsInputTTL)),
+		session.WithClosedRowRetention(time.Duration(cfg.Pool.ClosedRowRetention)))
 }

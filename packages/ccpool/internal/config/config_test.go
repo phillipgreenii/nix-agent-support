@@ -586,3 +586,28 @@ func TestLoad_deadNeedsInputTTLValidation(t *testing.T) {
 		t.Error("an unparseable duration must be rejected")
 	}
 }
+
+// TestLoad_closedRowRetention: default 7 days, override decodes, 0 disables,
+// negative is rejected with an error naming the key.
+func TestLoad_closedRowRetention(t *testing.T) {
+	cfg, err := loadWithPoolBlock(t, "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := time.Duration(cfg.Pool.ClosedRowRetention); got != 7*24*time.Hour {
+		t.Errorf("default ClosedRowRetention = %v, want 168h", got)
+	}
+	for body, want := range map[string]time.Duration{`closed_row_retention = "24h"`: 24 * time.Hour, `closed_row_retention = "0s"`: 0} {
+		cfg, err := loadWithPoolBlock(t, body+"\n")
+		if err != nil {
+			t.Fatalf("%s: Load: %v", body, err)
+		}
+		if got := time.Duration(cfg.Pool.ClosedRowRetention); got != want {
+			t.Errorf("%s: got %v, want %v", body, got, want)
+		}
+	}
+	_, err = loadWithPoolBlock(t, "closed_row_retention = \"-1h\"\n")
+	if err == nil || !strings.Contains(err.Error(), "closed_row_retention") {
+		t.Errorf("negative retention: err = %v, want one naming closed_row_retention", err)
+	}
+}

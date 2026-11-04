@@ -106,7 +106,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		}
 		// The classification above was made without the lock; the decision to
 		// finalize or delete is re-read under the per-external_id lock.
-		kind, cur, err := s.reapDeadRow(ctx, r.ExternalID)
+		kind, cur, err := s.reapDeadRow(ctx, r.ExternalID, now, o.closedRowRetention)
 		if err != nil {
 			return err
 		}
@@ -296,7 +296,24 @@ func (s *Service) recordPreservedForHuman(live, deadKept []store.Session) {
 type ReapOption func(*reapOptions)
 
 type reapOptions struct {
-	deadNeedsInputTTL time.Duration
+	deadNeedsInputTTL  time.Duration
+	closedRowRetention time.Duration
+}
+
+// WithClosedRowRetention enables deletion of closed dead rows: a row that is not
+// live, was closed by ccpool or an operator (closedSinceActivity) and whose
+// closed_at is older than retention is deleted (its open run finalized first;
+// the transcript is never removed). A dead row nobody closed is never deleted,
+// and a dead needs_input row keeps its ADR 0086 path. A retention of 0 (or
+// negative) disables it, which is also what omitting the option means.
+func WithClosedRowRetention(retention time.Duration) ReapOption {
+	return func(o *reapOptions) { o.closedRowRetention = retention }
+}
+
+// expiredClosedRow is the pure eligibility test for closed-row deletion, applied
+// to the row re-read under the lock. It does NOT test liveness.
+func expiredClosedRow(r store.Session, now time.Time, retention time.Duration) bool {
+	return retention > 0 && closedSinceActivity(r) && now.Sub(time.Unix(r.ClosedAt, 0)) > retention
 }
 
 // WithDeadNeedsInputTTL enables the dead-needs_input backstop: a row that is
@@ -409,7 +426,7 @@ const (
 // any, else `exited`, end_source=reaper, ended_at=last_activity_at) BEFORE the
 // row is deleted. A dead-but-kept row is finalized the same way unless it is a
 // fresh `starting` row.
-func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKind, store.Session, error) {
+func (s *Service) reapDeadRow(ctx context.Context, externalID string, now time.Time, retention time.Duration) (deadRowKind, store.Session, error) {
 	kind := deadGone
 	var out store.Session
 	err := s.withLock(externalID, func() error {
@@ -443,6 +460,18 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKi
 			}
 			recordReapPhantomPruned(attrs)
 			slog.Info("ccpool: reap pruned phantom session", logArgs...)
+			return nil
+		}
+		if !fresh && expiredClosedRow(r, now, retention) {
+			// A row someone closed (closed_at >= last_activity_at) and nothing has
+			// touched since, past the retention: delete the row. The run was
+			// finalized above and deleteSessionLocked re-finalizes (a no-op) and
+			// emits its run metrics. The transcript is never touched.
+			logArgs := append([]any{"closed_for", now.Sub(time.Unix(r.ClosedAt, 0)).String()}, sessionLogArgs(externalID)...)
+			if err := s.deleteSessionLocked(ctx, externalID); err != nil {
+				return err
+			}
+			slog.Info("ccpool: reap deleted closed row past retention", logArgs...)
 			return nil
 		}
 		kind, out = deadKeptRow, r
