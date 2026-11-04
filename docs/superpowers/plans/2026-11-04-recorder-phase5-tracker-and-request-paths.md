@@ -51,7 +51,7 @@ shared state.
 - T2 (M): `ends/` by event with a slow fallback; remove the per-poll per-file SQL.
 - T3 (S): FIFO sweep keyed on process exit events plus a slow fallback; `Procs()` out of the 5 s path.
 - T4 (S): `feed_marks(at_ns)` index.
-- T5 (M): request-scoped cancellation (context through the read pool) and the client deadline header.
+- T5 (L, split T5a and T5b): request-scoped cancellation (context through the read pool) and the client deadline header.
 - T6 (S): defaults (`query.timeout` below the client timeout) and README.
 - T7 (S, gated follow-up): verification after apply.
 
@@ -159,6 +159,48 @@ request deadline text. Check the module tests render the new keys.
 After apply and one hour: requests over 10 s by op (phase 1 panel) versus the 109 per 66 minutes figure;
 `request_cancelled_total`; the tracker loops' p99 and a 30 s profile showing `Tracker.Poll` below 1% of samples. If
 slow requests remain, the per-op histogram names the operation and a bead is filed against it (do not guess here).
+
+## Review findings folded in (corrections to the sections above; where they disagree, this section wins)
+
+1. T5 is larger than drafted (size L, not M). `Store.ReadTx` begins its transaction with a background context and the
+   `Reader` methods take no context, so `ReadTxCtx(ctx, fn)` alone cancels only the `BeginTx`; statements inside `fn`
+   keep running, and the transaction's cancel-rollback waits for an in-flight statement. Real cancellation needs
+   context variants of the `Reader` methods used by each operation and of `computeCoverageFrom`. T5 is split: T5a
+   (M) adds the ctx-taking `Reader` methods and `ReadTxCtx`, converting operations one at a time starting from the
+   ones that already take `ctx` (`feed.once`, `Snapshot`, `Raw`); T5b (M) the server-level cancellation mapping,
+   the header and the metrics. The deadline wrapper (`dconn.bound` already takes the earlier of the two deadlines;
+   inside a transaction the end is fixed at `BeginTx`, so a per-request deadline works only through the `BeginTx`
+   context, which T5a guarantees) needs no change beyond that statement and a test.
+2. Error classes. `wire.FromErr` maps only `DeadlineExceeded` to `query_timeout`; `context.Canceled` would become
+   `internal`. T5b adds a `cancelled` mapping that is kept out of `query_timeouts_total` and the `internal`
+   metrics, and tells `client_gone` from `deadline` by checking the request context's own error before the
+   store's (the store collapses both to the context error). A cancelled request logs a `request_cancelled` event next
+   to the existing `query_timeout` event.
+3. The deadline header is clamped: at least 1 s, never above `query.timeout`; the client sets it per request from
+   its own HTTP timeout minus 1 s (`client.go`), and the server reads it in `route`. Both files are in T5b's list. A
+   25 s default turns some 25 to 30 s answers into `query_timeout`; the README and runbook say so.
+4. T3 is reworded: `onExit` already removes a FIFO (`removeFifo`); the work is only to drop `sweepFifos` and the
+   `Procs()` table read from the 5 s path and keep the full sweep at start and every `fifo.sweep_every`, including
+   the branch for a FIFO whose process was never tracked (the `StartTime`/`ErrGone` case).
+5. T1 specifics: the cursor is `(inode, size, offset, hash of the 64 bytes before offset, hash of the first 64
+bytes)`; the tail path is taken only when all match; `reqSeen` is updated incrementally on a tail read (new keys
+   added, none dropped) and rebuilt on a fallback full read, so a later fallback cannot re-count. `readRequests`
+   reads through a small `fs` seam (default `os`) so tests count bytes read; today it calls `os.ReadFile`.
+6. T2 specifics: `ObserveEnd` needs a matching `scope` class for `ends/` paths (check `scope.Classify`); the copier's
+   result does not say whether the JSON is valid, so the file is read once at event time (one read per file ever,
+   not per poll), and the plan no longer claims validation comes from the copier's result.
+7. Config and wiring: `ends.sweep_every`, `fifo.sweep_every`, `query.timeout` default and the header need keys in
+   `internal/config` (pattern at `config.go`), the Nix module option and `tests/pg-claude-code-recorder-hm-launchd.nix`;
+   the new timers use the tracker's injected `Clock`; start-up runs each fallback once, `Close` stops them.
+8. Dependencies: T5b and T7 hard-depend on phase 1's T4 (`op` label); the "technically independent" wording is
+   dropped. The query counting driver is the phase 0 task's `internal/store/countdriver` package. The operation count
+   is whatever `rg -n 'srv.Register' internal/serve` lists (the audit table is generated from it, not from the
+   number 16).
+9. Observability added: `requests_json_reads_total{path}` with `path` in `tail full` (tail fast-path hits versus
+   full fallbacks), `tracker_fallback_found_total{kind}` with `kind` in `ends fifos` (a find by the fallback scan
+   means the event path missed one), `tracker_poll_duration_seconds` (through phase 1's loop wrapper, loop
+   `tracker_poll`), and the `request_cancelled` event. T5b's test covers the server-level `cancelled` mapping for
+   every registered operation.
 
 ## Risks and rollback
 

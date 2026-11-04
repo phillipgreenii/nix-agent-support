@@ -201,6 +201,62 @@ above 1 s during it (phase 1 metric); `wal_bytes` stays under `wal.truncate_abov
 `TRUNCATE` per hour; `query.max_connections` honoured (`db_open_connections{pool="read"}` never above it); the
 before and after plan and timing table for T2 and T3 filled in from the same commands as T1.
 
+## Review findings folded in (corrections to the sections above; where they disagree, this section wins)
+
+1. T7 cycle-end checks are NOT cheap and not lock-free: `doctorJournal` freezes the journal under the store mutex
+   (copying it and running a dump) and replays the entire journal into a temporary store; `doctorArchives` hashes
+   every settled archive file. They become their own sliced phases of the cycle: the archive hashing goes through
+   the same byte budget as copy hashing; the journal check runs once per cycle, off the unlocked path, with its
+   freeze duration measured in T1 and bounded in the task (if the freeze exceeds 5 s on the copy, the task stops and
+   reports instead of shipping).
+2. Cursor and findings. The cursor file persists the `DoctorMismatch` entries (with `Repaired`) found so far, so a
+   restart or the cycle end loses nothing; `doctor_mismatch_files` is updated per slice (a find is visible in
+   minutes, not at cycle end, so the critical alert keeps its latency); `doctor.json` is still written at cycle end.
+   The CLI `doctor` runs inside the daemon (`opDoctor`), so a single-flight mutex covers the cursor: a CLI run
+   during a rolling cycle takes over the remaining work synchronously and completes the cycle, and prints the cycle
+   state when it is mid-way.
+3. Reclaim and removal: copy bytes can be deleted by reclaim and the removal stages, so the unlocked hash window can
+   hit a missing copy. New outcome `skipped_gone` (file or copy reclaimed: requeue once, then drop), plus the
+   generation/offset re-check; a mismatch is always re-hashed under the lock before it is repaired. Negative
+   controls: reclaim between snapshot and hash; a cursor that drops findings.
+4. T6 pruning rule is time-dependent and uses parse offsets that a journal replay cannot know. The only consistent
+   rule is a pure `seen_ns` cutoff fixed per comparison and applied to both sides; rows the unparsed-keep rule would
+   retain beyond the cutoff stay outside the comparison. The spec decision is a PRECONDITION: a spec-question bead is
+   filed and answered BEFORE T6 starts (T6 is blocked on it), not mid-task. The draft sentence about one chunk per
+   run per minute is replaced: chunks of 10,000 rows run from the rolling doctor's idle slices, at most one chunk per
+   minute.
+5. T3 mechanics: `derivedSQL` (normal open) and `buildIndexesLocked` (bulk) both iterate `derivedIndexes`; the split
+   changes both, and "new database" is a bulk or empty-database open (detected by the absence of any `records` rows
+   at open), so a normal open of an existing database never builds the optional index. The task also weighs write
+   amplification on ingest and whether `records_session` becomes redundant (a prefix of the new index) and may be
+   dropped by `rebuild-indexes`. The `rebuild-indexes` daemon check uses the store's existing single-process lock
+   on the state directory (the task names the mechanism it finds; if none, it uses the daemon socket probe).
+6. T4: the key is validated as at least 2 and `0` means unbounded (the draft contradicted itself; `0` is the
+   documented escape, 1 is rejected). A bounded pool can deadlock if a reader holds rows open and issues another
+   query; the task first audits nested reads (`rg -n 'QueryContext|Query\(' internal` inside `Rows` loops) and adds
+   the audit table to its commit message. `db_wait_*` are labelled by pool (`pool="read"`).
+7. T5: the all-frames condition uses a fresh passive checkpoint taken just before the TRUNCATE, not the minute-old
+   gauge; the wal events `wal_truncate_*` exist today only for `Close`, so the periodic path adds them with a
+   `source` field; the "not mid-backfill" signal is `caught_up == 1`. A `Checkpoint` seam (`func` field on the
+   daemon, as `checkpointOnce` already takes a function) is the test hook. Metrics: `wal_truncate_total{outcome}`
+   with `outcome` in `ok busy error` and `wal_truncate_duration_seconds`. The T9 WAL check is vacuous at 88 MB; it
+   is replaced by a soak-tagged test (not in the unit gate) that grows a WAL past a lowered threshold, and T9
+   records only that no truncate stalled writers.
+8. T7 sizing: a metric `doctor_projected_cycle_seconds` (total copy bytes divided by the budget per slice, times the
+   slice interval) and a rule that startup fails config validation when the projection exceeds `doctor.interval`
+   unless `doctor.allow_slow_cycle = true`; the budget counts bytes of ONE side (the copy), stated in the README;
+   deferred slices (copy lag) extend the cycle and show in `doctor_slices_total{outcome="deferred"}`.
+9. T2: `PRAGMA optimize` on close runs under the store mutex in `Close`, and the daily call takes the write
+   connection; both are short with the default analysis limit, measured in T1 (time of `optimize` on the copy) and
+   skipped when it exceeds 5 s.
+10. Rollback: `bytes_per_slice = 0` keeps the old synchronous code path alive (the old function stays in the tree
+    until T9 passes, and the old tests run against it as the oracle); removing it is a follow-up bead after one
+    successful cycle.
+11. Docs: T8 also updates the removal-readiness checklist and `help.go` text for `doctor`, `rebuild-indexes` and the
+    new keys; key naming is consistent under `doctor.`, `wal.`, `query.` prefixes as listed. `doctor_slice_duration_seconds`
+    is a plain histogram (not a series of phase 1's `loop_duration_seconds`) and adds `doctor_race_skips_total`,
+    `doctor_cursor_age_seconds`.
+
 ## Risks and rollback
 
 - Index build on 30 GB blocks writers: mitigated by the stop-the-daemon `rebuild-indexes` command and the free-space
