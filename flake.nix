@@ -11944,6 +11944,8 @@
                       pkgs.pg-disk-reclaimer
                       # `validate` checks each registry command's leading token exists
                       pkgs.pg-claude-code-recorder
+                      pkgs.pg-ccaudit
+                      pkgs.claude-extended-tool-approver
                     ];
                   }
                   ''
