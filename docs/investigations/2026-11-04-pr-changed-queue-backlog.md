@@ -148,3 +148,94 @@ tail -c 45000000 events.jsonl | rg '"role":"pr-change"' | jq -r 'select(.msg=="d
 
 No code or config change. The behavior is already specified (`DEC-OBS-12`); the misreading is in the
 health review's use of `queue_depth` as a backlog. Follow-ups are filed by the orchestrator, not here.
+
+## Addendum 2026-11-04: the two silent windows
+
+Read-only, localhost only. Times are UTC unless marked EST (host clock is EST, UTC-5).
+
+**Cause.** The two windows have different causes, and neither is "the `pr-changes` source failing".
+
+1. 11-03 09:00Z to 11:59Z (really 08:32Z to 12:49Z): a host reboot, then no user session. Not sleep,
+   not a router-only stall.
+2. 11-03 22:00Z to 11-04 00:59Z (really 21:53Z to 01:16Z): an operator `SYSTEM_PAUSE` gate, so the
+   router was up and scraped but dispatched nothing. The "no Prometheus samples" in the table above
+   were only the idle counters, not the scrape.
+
+### Window 1: reboot at 03:31 EST, login at 07:45 EST
+
+| Evidence                                                   | Value                                                                                                                                                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sysctl -n kern.boottime`                                  | `Tue Nov 3 03:31:06 2026` (08:31:06Z)                                                                                                                                                |
+| `last reboot console`                                      | reboot 11-03 03:31; the console session before it (from 10-21 09:30) ended in `crash`, i.e. an unclean end; new console login 11-03 07:45                                            |
+| Last daemon log line before the gap (`launchd-stderr.log`) | `2026-11-03T03:28:34.886-05:00` (exporter export timeout)                                                                                                                            |
+| Next daemon lines                                          | `2026-11-03T07:47:36` config load, `07:47:38` `msg=starting` (12:47Z)                                                                                                                |
+| Hours with daemon log lines                                | EST hours 04, 05, 06 have none (`rg -o '^time=2026-11-03T[0-9]{2}' \| uniq -c`)                                                                                                      |
+| `pmset -g log` Sleep/Wake lines                            | none between 11-02 19:58:02 and 11-03 08:00:11 EST: the host was not asleep in the gap (the first sleep after is 08:00 EST, i.e. 13:00Z, matching the 13:04Z to 13:18Z scrape holes) |
+| Prometheus `up` per job, step 60, 11-03 04:00Z onward      | every job including `prometheus`, `otelcol-self` and `loki` has no sample from 08:32Z to 12:49Z: the whole stack was absent (12:49Z - 08:32Z = 4 h 17 m)                             |
+| `loki`, `grafana-notifier` process start                   | `Tue Nov 3 07:47:29 2026`                                                                                                                                                            |
+
+The router daemon, Prometheus, otelcol, Grafana and the exporters are user LaunchAgents (inferred:
+their processes all start at 07:47 EST, two minutes after the 07:45 console login, and nothing
+logs between the reboot and the login). So after the 03:31 reboot the whole observability stack and
+the router were down until login: 4 h 17 m (12:49Z - 08:32Z). The router's queue-side gate records
+(`LOW_DISK_USAGE` sets) skip this span as well. Whether `/` filling up (7.2 GiB free now, 99 % used)
+caused the unclean end is NOT DETERMINED.
+
+Should an alert have fired? No alert could: Grafana, Prometheus and the exporters were all down,
+so there was nothing to evaluate or notify. `pg-router liveness is down` also would not page, by design
+(`noDataState: OK`, gated on host-activity awake gauges that were absent). This is the
+"everything including the monitor is down" case that only an external dead-man's switch can cover.
+
+### Window 2: operator `SYSTEM_PAUSE` 16:52 EST to about 20:16 EST
+
+| Evidence                                                                                                                                                                                           | Value                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg_router_gates_active{type="SYSTEM_PAUSE"}`, step 60, merged runs                                                                                                                                | `2026-11-03T21:53Z -> 2026-11-04T01:16Z` and `2026-11-04T02:52Z -> 03:17Z`                                                                    |
+| `queue.jsonl` gate notice                                                                                                                                                                          | `gated by SYSTEM_PAUSE (owner operator, set 2026-11-03T16:52:15-05:00)` (21:52:15Z); second pause `set 2026-11-03T21:51:37-05:00` (02:51:37Z) |
+| `up{job="pg-router"}`, `pg_router_liveness`, `pg_router_queue_depth{type="pr.changed"}`, `pg_router_listener_pending`, `pg_router_listener_in_flight{role="pr-change"}`, step 60, 20:00Z to 03:00Z | 421 samples each, no gap (7 h x 60 = 420 steps, plus one)                                                                                     |
+| `pg_router_listener_pending{role="pr-change"}` 22:00Z to 01:15Z                                                                                                                                    | 0 on every 15-minute point; 117 at 01:30Z after the pause lifted                                                                              |
+| `pg_router_throughput_total{role="pr-change"}` and `pg_router_enqueued_total{type="pr.changed"}`                                                                                                   | no series from 21:53Z to 01:21Z (counters are only exported while they move), which is what the table above recorded as "no sample"           |
+| `queue_depth` 22:00Z to 01:15Z                                                                                                                                                                     | 643, 629, ... 237 (retention drain, not pending, see cause 1 above)                                                                           |
+| `pg_router_source_last_success_age_seconds{source="pr-changes"}`                                                                                                                                   | 1.7 s on every 15-minute point: the source kept succeeding, so no source failure                                                              |
+| `source failed` lines for `pr-changes`                                                                                                                                                             | first at 2026-11-04T02:36 EST, after both windows                                                                                             |
+| `events.jsonl`                                                                                                                                                                                     | no `pr-change` dispatch in 22Z, 23Z, 00Z; any-role lines also stop in those hours                                                             |
+
+A pause is a gate: emitters are not polled and listeners not dispatched to, so events pile up
+until resume (pending 0 at 01:15Z, then 117 at 01:30Z and 133 dispatches in 01Z). The "135 pending
+at 01:00Z" is that hour's maximum, reached right after the pause was cleared.
+
+Should an alert have fired? `pg-router-gate-held` (`alerts.yaml`, uid `pg-router-gate-held`,
+`for: 30m`, `noDataState: OK`, `severity: warning`, expression
+`max by (type)(last_over_time(pg_router_gates_active[10m])) > 0`) covers exactly this: the gauge
+was continuous for 3 h 23 m (21:53Z to 01:16Z = 203 min) against a 30 min `for`, so it would
+have gone pending at 21:53Z and firing at about 22:23Z. It is a warning by design (an operator
+pause is usually deliberate), and `pg-router-queue-stalled` is deliberately suppressed under any
+gate. The live rule currently shows `state=firing` for `LOW_DISK_USAGE` (activeAt 04:06:40 EST),
+so the rule works. No alert gap in this window.
+
+### Sleep, scrape gap, source failure: ruled out
+
+- Sleep: `pmset -g log` has Sleep/Wake lines only from 11-03 08:00 EST, none in either window.
+- Scrape gap: in window 2 `up` is continuous; in window 1 every job is missing (stack down), which
+  is not a scrape fault either.
+- `pr-changes` failing: `source_last_success_age_seconds` 1.7 s in window 2; no failure lines before
+  02:36 EST on 11-04.
+- Router down: true only for window 1 (and only as a consequence of no login).
+
+### NOT DETERMINED
+
+- Why the host ended its session uncleanly at about 03:30 EST on 11-03 (`last` reports `crash`); the
+  same word appears for the 10-21 reboot at 03:10 EST. No panic log was read.
+- Whether the Grafana rule `pg-router-gate-held` actually reached `Alerting` and notified during
+  window 2: the Grafana state-history annotation API returned no rows, and only the current rule
+  state was read.
+- Who ran the 16:52 EST `pg-router pause` and why it lasted 3 h 23 m.
+
+### Proposed follow-ups (not filed here)
+
+- Detect "stack absent" from outside the stack (dead-man's switch), size M. Acceptance: an
+  independent heartbeat that pages when no Prometheus sample for any job arrives for 30 minutes
+  while the host reports awake, with a test.
+- Start the observability stack and router at boot rather than at console login (or document
+  auto-login as an accepted operator decision), size M, operator decision first.
+- Investigate the unclean 03:xx reboots (10-21, 11-03) including disk pressure, size S.
