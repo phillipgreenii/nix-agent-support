@@ -862,8 +862,8 @@ list of capabilities.
 
 **Filter language.** A filter is JSON: a leaf `{"field": F, <operator>: V}` with operators `eq`,
 `in`, `range`, `under` (path), `exists`, `contains` (substring) and `match` (word), combined with
-`all`, `any` and `not`. ccaudit's coarse filter (below) is two feed subscriptions, each with its own
-cursor.
+`all`, `any` and `not`. ccaudit's coarse filter (see "Queries and results") is a small set of feed
+subscriptions, each with its own cursor.
 
 **Field names.** A query field is the snake_case form of a struct field's JSON key, with dots for nesting (`usage.output_tokens`, `session_id`); the Go struct tags fix it, and the excerpt in "Sources in Go" shows the file's own key names. `from` names a record set: `records` is every record type, narrowed with `type`. A source MAY declare a derived field computed from one direct read, such as `body_length` (the byte length of a body); it is not an interpretation. `hello` lists the capabilities the daemon supports, drawn from the operation names above.
 
@@ -1118,10 +1118,30 @@ Coverage, summary first with the full per-file view behind `--json`:
 }
 ```
 
-Example: ccaudit's coarse filter is two feed subscriptions. One takes every `tool_use` and every
-`tool_result` with `tool_use_id`, `is_error` and body length but no body (its rate denominators);
-the other takes bodies only where `is_error` is true. Its "drop success bodies" rule becomes a filter
-it sends.
+Example: ccaudit's coarse filter is a set of feed subscriptions (reconciled 2026-11-04; it supersedes
+the first draft's two subscriptions, which left the user and assistant text, the thinking blocks and the
+hook fields of ccaudit's 25 queries unfed). Every subscription names `source` `claude-transcript`, so status
+files are never ingested, and has its own cursor persisted by ccaudit:
+
+1. **Lines**: every transcript line record, with its indexed scalar fields and no bodies (the fields
+   behind ccaudit's `events` rows: uuid, parent uuid, session id, time, type, sidechain flag, cwd,
+   git branch, permission mode, duration, prompt source, user type, source tool uuid, prompt id,
+   entrypoint).
+2. **Tool calls and results without bodies**: every `tool_use` and every `tool_result` with
+   `tool_use_id`, `is_error` and body length but no body (its rate denominators); a `tool_use` also
+   carries its name and its input, which ccaudit's `lead_cmd` reads.
+3. **Error bodies**: the body of a `tool_result` only where `is_error` is true. Its "drop success bodies"
+   rule becomes a filter it sends.
+4. **Text**: the text of the human turns and of the assistant replies (`user_text`, `assistant_text`),
+   and the thinking blocks only while ccaudit's thinking capture flag is on.
+
+The keys the recorder does not index (`hookCount`, `hookErrors`, listed as known but not indexed in
+the transcript source) cannot be filtered or projected by the feed: ccaudit gets them from `raw`, one
+read per `system` line record, which is where those keys sit. Measured 2026-11-04 over the 24 GB
+`projects/` tree: 62,631 `system` lines of about 102 MB in all (0.4 percent of the tree), 27,447 of them
+carrying a `hookErrors` key. A first sync therefore costs about 62,000 small reads, and later syncs one
+read per new `system` line; if the builder measures a materially higher cost it MUST report it as a
+decision and not widen the filter by guessing.
 
 ### Recorder command
 
@@ -1720,6 +1740,42 @@ ccusage; `pg2-cg8hff` disables codeburn; `pg2-qnjkqa` (blocks `pg2-97op8h`) drop
 claude-activity's agent-activity scripts; `pg2-rpo30t` makes beads-exporter judge stranded claims by
 bd fields alone.
 
+#### pg-ccaudit: the feed contract
+
+Reconciled 2026-11-04 after the first build of the move (two subscriptions) regressed ccaudit's census:
+the user and assistant text rows were not filled for lines without a tool call or an errored result.
+The subscriptions ccaudit binds are the four listed at the end of "Queries and results" (lines, tool
+calls and results without bodies, error bodies, text). The rest of the contract:
+
+- Per-file order. ccaudit's `seq` and its adjacency joins (an error and the narration next to it, the
+  nearest tool call before a human turn) are derived from the record id: the order of `offset` within one
+  file id and generation, with the item index inside a line. ccaudit's own schema, including how it stores
+  that order, is the builder's choice.
+- Unindexed keys (`hookCount`, `hookErrors`) come from `raw`, one read per `system` line record, as
+  measured at the end of "Queries and results"; they are not filter or projection fields.
+- A new subscriber starts from `snapshot`, `cursor_expired` resyncs from `snapshot`, and a `reset` entry is
+  applied before de-duplication by record id.
+- Recorder down: ccaudit polls again later and never reads Claude's files.
+
+#### pa-monitor: two moves and their order
+
+Reconciled 2026-11-04 after the first build of the move reached only part of its scope. pa-monitor moves
+in two beads. **Part 1** covers the registry and liveness, the GC keep-set, the `sessions` and `search`
+commands, the nudges through `pg-claude-control`, and the "daemon offline" display. **Part 2** covers the
+corpus Monitor and the poller's change source, moved onto `feed` and `raw`: a bytes entry point on the
+transcript accumulator (the one that today folds a file) and a per-file offset cursor kept by pa-monitor,
+the 5 to 10 second cadence, the live trigger, the re-profile that closes `pg2-w6x9y`, and the removal of
+the delivery adapters nothing then calls.
+
+- Order. Part 1 gives pa-monitor no fallback to Claude's files, so neither part MUST be applied to a
+  machine before the recorder is deployed there and answering (the Home Manager module applied and
+  `pg-claude-code-recorder status` reporting a live daemon). Part 2 needs part 1 landed.
+- `search` (operator, 2026-11-04: "i think was already decided that default is word-only, unless the
+  substring flag is enabled which will do substring over the copies"): the default is word search over
+  prose; mid-word matching is a substring flag, answered by the recorder scanning its copies. No trigram
+  index serves prose. The `line` field of a hit is no longer filled.
+- `sessions` counts a user turn as a user transcript line, tool results included.
+
 ## Testing
 
 Mutation testing is not part of this plan. The tiers:
@@ -1826,7 +1882,9 @@ Reuse the patterns of `claude-transcript/sessions_test.go` and `pg-ccaudit` `ing
    independent of phases 1 to 7 and can run in parallel; its end files feed phase 4, which ingests them.
 9. Client moves, each its own bead: pa-monitor (policy only; closes `pg2-w6x9y`), ccpool and the
    pg-router handlers, ccaudit, beads-exporter; and the retirement of pg-connector's `agentsession`
-   (S to L each). There is no resume-list command: the crash query of phase 4 replaces it.
+   (S to L each). pa-monitor's move is two beads (reconciled 2026-11-04, see "Client migration"): part 1
+   (registry, liveness, sessions, search, nudges) and part 2 (the corpus and poller onto the feed and
+   `raw`, with the re-profile that closes `pg2-w6x9y`). There is no resume-list command: the crash query of phase 4 replaces it.
 
 **Dependencies and acceptance.** Phase 2 needs 1, 3 needs 2, and 4 needs 1 and 3 (the end-label function in the Go client package belongs to phase 4, because it needs the Process facts). Phase 5 needs 4 (a live Process blocks settling), 6 needs 5, and 7 needs the metrics from 1 to 6 (7a, the module, needs only 1a to 1d; 7b needs 7a; 7c needs 7a, 7b and the metrics of 1 to 6); the daemon runs from a dev launch until phase 7 adds the module. Phase 8 is independent. Phase 9 needs 3 and 4 for the client moves; the `agentsession` retirement beads need only their own discovery bead (and the recorder's `conversation` data only if pg-desk needs it). Phase 3's wire contract suite covers the operations other than `conversation` and `process`; phase 4 extends it with those two. The registry-versus-exit order is measured in a `human` verification bead that phase 4's crash query depends on for being trusted; it passed (bead pg2-8wt1uz, 2026-10-30), so the grace-window fallback is off by default and kept as an option. Phase 4 tests the `claude-control-end` source against fixture files, so it does not wait for phase 8; the real-output check is in phase 8's real-Claude tier.
 
@@ -1938,6 +1996,9 @@ these numbers, and "agent's call N" means the list above):
     whether anything calls the `search`, `activity` or `attention` capabilities of its backend, and applies
     the `conversation` and `process` split to those only if something does.
 25. 2026-10-30: there is no resume-list command; the recorder's crash query replaces it.
+26. 2026-11-04: pa-monitor search is word-only by default, with a substring flag answered by scanning the
+    recorder's copies (operator: "i think was already decided that default is word-only, unless the
+    substring flag is enabled which will do substring over the copies"); no trigram index serves prose.
 
 The operator confirmed calls 3, 4, 5, 6, 13, 14 and 18 on 2026-10-30; the other agent's calls above are tunable or reversible, and the builder may tune them.
 
