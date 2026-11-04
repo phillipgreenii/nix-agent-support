@@ -90,7 +90,8 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   (every reason registered at zero), `copy_lag_bytes`, `copy_lag_seconds`,
   `copy_lag_seconds_histogram`, `last_sweep_timestamp_seconds` (the heartbeat),
   `state_free_bytes`, `state_used_bytes`, `requests_total{client,op,outcome}`,
-  `query_duration_seconds`, `feed_latency_seconds`, `wait_duration_seconds`, `backfill_files_*`,
+  `query_duration_seconds{op}`, `feed_latency_seconds{op}` (no unlabelled series: use `sum without (op)`),
+  `requests_inflight{op}`, `wait_duration_seconds`, `backfill_files_*`,
   `caught_up`, and the loop and process series: `settle_tick_duration_seconds`,
   `settle_tick_examined_total`, `settle_tick_transitions_total`, `settle_tick_last_duration_seconds`,
   `settle_tick_last_timestamp_seconds`, `settle_run_lock_wait_total{op}` and

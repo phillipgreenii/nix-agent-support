@@ -31,7 +31,9 @@
 #   outcome (control_requests_total)  ok rejected duplicate refused other
 #   registry_present, exit_observed, clear_entry, exit_entry (conversation_end_total)  true false
 #   client (requests_total)        a whitelisted client name, otherwise other
-#   op (requests_total)            the registered operation name, otherwise unknown
+#   op (requests_total, query_duration_seconds, feed_latency_seconds, requests_inflight)
+#                                  the registered operation name, otherwise unknown (the duration histograms
+#                                  and requests_inflight have no unlabelled series; sum without (op) for a total)
 #   op (query_filter_fields_total) query search feed
 #   field (query_filter_fields_total) a catalogued field name (bounded by the catalog)
 #   source (torn_tail_age_seconds) the source name (about 10 values)
@@ -45,9 +47,10 @@ pg_claude_code_recorder_last_sweep_timestamp_seconds gauge -
 pg_claude_code_recorder_state_free_bytes gauge -
 pg_claude_code_recorder_state_used_bytes gauge -
 pg_claude_code_recorder_requests_total counter client,op,outcome
-pg_claude_code_recorder_query_duration_seconds histogram -
+pg_claude_code_recorder_query_duration_seconds histogram op
 pg_claude_code_recorder_query_filter_fields_total counter op,field
-pg_claude_code_recorder_feed_latency_seconds histogram -
+pg_claude_code_recorder_feed_latency_seconds histogram op
+pg_claude_code_recorder_requests_inflight gauge op
 pg_claude_code_recorder_wait_duration_seconds histogram -
 pg_claude_code_recorder_backfill_files_copied gauge -
 pg_claude_code_recorder_backfill_files_total gauge -

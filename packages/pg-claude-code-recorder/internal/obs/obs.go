@@ -41,13 +41,17 @@ const (
 	MQueryTimeouts  = "query_timeouts_total"
 	MFilterFields   = "query_filter_fields_total"
 	MFeedDuration   = "feed_latency_seconds"
-	MWaitDuration   = "wait_duration_seconds"
-	MCopiedFiles    = "backfill_files_copied"
-	MBackfillFiles  = "backfill_files_total"
-	MCaughtUp       = "caught_up"
-	MFeedWaiters    = "feed_waiters"
-	MIndexRebuilds  = "index_rebuilds_total"
-	EvIndexRebuilt  = "index_rebuilt"
+	// MRequestsInFlight is the requests being served now, by op; EvSlowRequest is
+	// the rate-capped WARN for a request over the slow threshold.
+	MRequestsInFlight = "requests_inflight"
+	EvSlowRequest     = "slow_request"
+	MWaitDuration     = "wait_duration_seconds"
+	MCopiedFiles      = "backfill_files_copied"
+	MBackfillFiles    = "backfill_files_total"
+	MCaughtUp         = "caught_up"
+	MFeedWaiters      = "feed_waiters"
+	MIndexRebuilds    = "index_rebuilds_total"
+	EvIndexRebuilt    = "index_rebuilt"
 	// EvRebuildRefused and MRebuildRefused: a rebuild stopped by the free-space
 	// preflight before it moved anything. EvRebuildPreflight is a passed check.
 	EvRebuildRefused   = "rebuild_refused_low_space"
@@ -405,8 +409,6 @@ func (o *Obs) RegisterStandard() {
 		bounds []float64
 	}{
 		{MCopyLagHistogram, LagBuckets},
-		{MQueryDuration, RequestBuckets},
-		{MFeedDuration, RequestBuckets},
 		{MWaitDuration, WaitBuckets},
 		{MSettleTickDuration, LoopBuckets},
 		{MRefreshGaugesDuration, LoopBuckets},
@@ -416,6 +418,10 @@ func (o *Obs) RegisterStandard() {
 	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}
+	// The request histograms are labelled by op only: the bounds are registered
+	// here and each op's series is registered when the operation is (the server).
+	o.Reg.RegisterHistL(MQueryDuration, RequestBuckets, nil)
+	o.Reg.RegisterHistL(MFeedDuration, RequestBuckets, nil)
 	for name, text := range helpTexts {
 		o.Reg.Help(name, text)
 	}
@@ -555,6 +561,13 @@ func (r *Registry) Counter(name string, labels map[string]string) (float64, bool
 func (r *Registry) Set(name string, labels map[string]string, v float64) {
 	r.lock()
 	r.gauges[key(name, labels)] = v
+	r.mu.Unlock()
+}
+
+// AddGauge adds delta to a gauge (registering it at zero first when absent).
+func (r *Registry) AddGauge(name string, labels map[string]string, delta float64) {
+	r.lock()
+	r.gauges[key(name, labels)] += delta
 	r.mu.Unlock()
 }
 

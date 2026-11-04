@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http/httptest"
 	"os"
@@ -76,7 +78,7 @@ func TestSocketIs0600AndServesHelloAndOperations(t *testing.T) {
 	if v, _ := o.Reg.Counter(obs.MRequestsTotal, map[string]string{"client": "swiftbar", "op": "echo", "outcome": "ok"}); v != 1 {
 		t.Fatalf("request counter %v", v)
 	}
-	if h := o.Reg.Hist(obs.MQueryDuration); h == nil || h.Samples != 1 {
+	if h := o.Reg.HistL(obs.MQueryDuration, map[string]string{"op": "echo"}); h == nil || h.Samples != 1 {
 		t.Fatalf("query histogram %+v", h)
 	}
 }
@@ -192,5 +194,102 @@ func TestQueryTimeoutLogsKindArgsAndWaitVersusExec(t *testing.T) {
 	}
 	if a["request_id"] == "" || a["request_id"] == evs[1].Attrs["request_id"] {
 		t.Errorf("request ids %q and %q must be set and distinct", a["request_id"], evs[1].Attrs["request_id"])
+	}
+}
+
+func logServer(t *testing.T) (*Server, *obs.Obs, *bytes.Buffer, *time.Time) {
+	var buf bytes.Buffer
+	o := obs.New(slog.New(slog.NewTextHandler(&buf, nil)))
+	s := New(o, nil, func() any { return nil })
+	clock := time.Unix(1_000_000, 0)
+	s.now = func() time.Time { return clock }
+	return s, o, &buf, &clock
+}
+
+func post(t *testing.T, s *Server, op string) {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/v1/"+op, strings.NewReader("{}"))
+	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func TestRequestHistogramsCarryOnlyTheOpLabel(t *testing.T) {
+	s, o, _, _ := logServer(t)
+	s.Register("alpha", KindQuery, func(context.Context, []byte) (any, *wire.Error) { return 1, nil })
+	s.Register("beta", KindQuery, func(context.Context, []byte) (any, *wire.Error) { return 1, nil })
+	s.Register("gamma", KindFeed, func(context.Context, []byte) (any, *wire.Error) { return 1, nil })
+	post(t, s, "alpha")
+	post(t, s, "alpha")
+	post(t, s, "beta")
+	post(t, s, "gamma")
+	for op, want := range map[string]uint64{"alpha": 2, "beta": 1} {
+		if h := o.Reg.HistL(obs.MQueryDuration, map[string]string{"op": op}); h == nil || h.Samples != want {
+			t.Errorf("query op %s: %+v, want %d samples", op, h, want)
+		}
+	}
+	if h := o.Reg.HistL(obs.MFeedDuration, map[string]string{"op": "gamma"}); h == nil || h.Samples != 1 {
+		t.Errorf("feed gamma: %+v", h)
+	}
+	if h := o.Reg.HistL(obs.MFeedDuration, map[string]string{"op": "alpha"}); h != nil && h.Samples != 0 {
+		t.Errorf("alpha leaked into feed: %+v", h)
+	}
+	for _, n := range []string{obs.MQueryDuration, obs.MFeedDuration} {
+		if h := o.Reg.Hist(n); h != nil {
+			t.Errorf("%s has an unlabelled series: %+v", n, h)
+		}
+	}
+}
+
+func TestRequestsInFlightIsDecrementedOnEveryExitPath(t *testing.T) {
+	s, o, _, _ := logServer(t)
+	var seen float64
+	l := func(op string) map[string]string { return map[string]string{"op": op} }
+	s.Register("ok", KindQuery, func(context.Context, []byte) (any, *wire.Error) {
+		seen, _ = o.Reg.Gauge(obs.MRequestsInFlight, l("ok"))
+		return 1, nil
+	})
+	s.Register("panics", KindQuery, func(context.Context, []byte) (any, *wire.Error) { panic("kaput") })
+	s.Register("times_out", KindQuery, func(context.Context, []byte) (any, *wire.Error) {
+		return nil, wire.Errf(wire.ErrQueryTimeout, "deadline")
+	})
+	for _, op := range []string{"ok", "panics", "times_out"} {
+		post(t, s, op)
+		if v, ok := o.Reg.Gauge(obs.MRequestsInFlight, l(op)); !ok || v != 0 {
+			t.Errorf("%s: requests_inflight %v (set %v) after the request, want 0", op, v, ok)
+		}
+	}
+	if seen != 1 {
+		t.Errorf("requests_inflight during the handler = %v, want 1", seen)
+	}
+}
+
+func TestSlowRequestLogsOncePerOpPerMinute(t *testing.T) {
+	s, _, buf, clock := logServer(t)
+	s.Register("slow", KindQuery, func(context.Context, []byte) (any, *wire.Error) {
+		*clock = clock.Add(11 * time.Second)
+		return 1, nil
+	})
+	s.Register("quick", KindQuery, func(context.Context, []byte) (any, *wire.Error) { return 1, nil })
+	count := func() int { return strings.Count(buf.String(), "slow_request") }
+	post(t, s, "quick")
+	if count() != 0 {
+		t.Fatalf("a quick request logged slow_request:\n%s", buf)
+	}
+	post(t, s, "slow")
+	if count() != 1 {
+		t.Fatalf("want one slow_request, got:\n%s", buf)
+	}
+	for _, want := range []string{"level=WARN", "op=slow", "client=", "ms=11000"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("slow_request line lacks %q:\n%s", want, buf)
+		}
+	}
+	post(t, s, "slow") // 11 s later: inside the minute
+	if count() != 1 {
+		t.Fatalf("second slow request within a minute logged again:\n%s", buf)
+	}
+	*clock = clock.Add(time.Minute)
+	post(t, s, "slow")
+	if count() != 2 {
+		t.Fatalf("a slow request after the minute should log again:\n%s", buf)
 	}
 }

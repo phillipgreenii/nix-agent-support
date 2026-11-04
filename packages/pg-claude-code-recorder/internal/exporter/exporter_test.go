@@ -16,7 +16,7 @@ import (
 func TestRenderPrefixesSeriesAndRegistersReasonsAtZero(t *testing.T) {
 	o := obs.New(nil)
 	o.Reg.Add(obs.MRequestsTotal, map[string]string{"client": "other", "op": "status", "outcome": "ok"}, 2)
-	o.Reg.Observe(obs.MQueryDuration, 0.003)
+	o.Reg.ObserveL(obs.MQueryDuration, map[string]string{"op": "status"}, 0.003)
 	var b bytes.Buffer
 	Render(&b, o.Reg)
 	out := b.String()
@@ -24,9 +24,8 @@ func TestRenderPrefixesSeriesAndRegistersReasonsAtZero(t *testing.T) {
 		`pg_claude_code_recorder_dropped_bytes_total{reason="file_vanished"} 0`,
 		`pg_claude_code_recorder_dropped_bytes_total{reason="removal_race"} 0`,
 		`pg_claude_code_recorder_requests_total{client="other",op="status",outcome="ok"} 2`,
-		`pg_claude_code_recorder_query_duration_seconds_bucket{le="0.005"} 1`,
-		`pg_claude_code_recorder_query_duration_seconds_count 1`,
-		`pg_claude_code_recorder_feed_latency_seconds_count 0`,
+		`pg_claude_code_recorder_query_duration_seconds_bucket{op="status",le="0.005"} 1`,
+		`pg_claude_code_recorder_query_duration_seconds_count{op="status"} 1`,
 		`pg_claude_code_recorder_state_free_bytes 0`,
 		`# TYPE pg_claude_code_recorder_last_sweep_timestamp_seconds gauge`,
 	} {
@@ -114,7 +113,7 @@ func checkExposition(t *testing.T, text string) {
 func TestRenderedExpositionPassesGrammarCheck(t *testing.T) {
 	o := obs.New(nil)
 	o.Reg.Add(obs.MRequestsTotal, map[string]string{"client": "other", "op": "status", "outcome": "ok"}, 2)
-	o.Reg.Observe(obs.MQueryDuration, 0.003)
+	o.Reg.ObserveL(obs.MQueryDuration, map[string]string{"op": "status"}, 0.003)
 	o.Reg.SetCounter(obs.MProcessCPUSeconds, nil, 1.5)
 	o.Reg.Set(obs.MWALBytes, nil, 4096)
 	var b bytes.Buffer
@@ -177,19 +176,19 @@ func TestRenderEveryStandardMetricHasHelpBeforeType(t *testing.T) {
 	checkExposition(t, b.String())
 }
 
-// TestRenderUnlabelledHistogramsGolden pins the phase 0 histogram series names
-// and layout: the unlabelled histograms render exactly as before labelled ones
-// existed.
-func TestRenderUnlabelledHistogramsGolden(t *testing.T) {
+// TestRenderHistogramsGolden pins the histogram series names and layout: the
+// copy lag histogram is unlabelled, the request duration is labelled by op only
+// (it has no unlabelled series).
+func TestRenderHistogramsGolden(t *testing.T) {
 	r := obs.NewRegistry()
 	r.RegisterHist(obs.MCopyLagHistogram, obs.LagBuckets)
-	r.RegisterHist(obs.MQueryDuration, obs.RequestBuckets)
+	r.RegisterHistL(obs.MQueryDuration, obs.RequestBuckets, []map[string]string{{"op": "status"}})
 	r.Observe(obs.MCopyLagHistogram, 0.3)
-	r.Observe(obs.MQueryDuration, 0.003)
-	r.Observe(obs.MQueryDuration, 3)
+	r.ObserveL(obs.MQueryDuration, map[string]string{"op": "status"}, 0.003)
+	r.ObserveL(obs.MQueryDuration, map[string]string{"op": "status"}, 3)
 	var b bytes.Buffer
 	Render(&b, r)
-	want, err := os.ReadFile("testdata/unlabelled_histograms.golden")
+	want, err := os.ReadFile("testdata/histograms.golden")
 	if err != nil {
 		t.Fatal(err)
 	}

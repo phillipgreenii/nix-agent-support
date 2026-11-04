@@ -59,15 +59,18 @@ type Server struct {
 	done chan struct{}
 
 	// now is the clock the request timings use (time.Now unless a test sets it).
-	now   func() time.Time
-	reqID atomic.Uint64
-	boot  string
+	now func() time.Time
+	// slowMu guards slowLogged, the last slow_request log time per op.
+	slowMu     sync.Mutex
+	slowLogged map[string]time.Time
+	reqID      atomic.Uint64
+	boot       string
 }
 
 // New returns a Server. clients is the metric-label whitelist; hello builds the
 // GET /v1/hello answer.
 func New(o *obs.Obs, clients []string, hello func() any) *Server {
-	s := &Server{obs: o, clients: clients, hello: hello, ops: map[string]operation{}, now: time.Now}
+	s := &Server{obs: o, clients: clients, hello: hello, ops: map[string]operation{}, slowLogged: map[string]time.Time{}, now: time.Now}
 	s.boot = strconv.FormatInt(time.Now().UnixNano()/1e6%0xffffff, 16)
 	return s
 }
@@ -78,6 +81,17 @@ func (s *Server) Register(name string, kind Kind, h Handler) {
 	s.mu.Lock()
 	s.ops[name] = operation{h: h, kind: kind}
 	s.mu.Unlock()
+	// Register the op's series at zero so a scrape sees it before its first request.
+	l := map[string]string{"op": opLabel(name)}
+	switch kind {
+	case KindQuery:
+		s.obs.Reg.RegisterHistL(obs.MQueryDuration, obs.RequestBuckets, []map[string]string{l})
+	case KindFeed:
+		s.obs.Reg.RegisterHistL(obs.MFeedDuration, obs.RequestBuckets, []map[string]string{l})
+	}
+	if _, ok := s.obs.Reg.Gauge(obs.MRequestsInFlight, l); !ok {
+		s.obs.Reg.Set(obs.MRequestsInFlight, l, 0)
+	}
 }
 
 // Operations lists the registered operation names (hello is always served), the
@@ -111,6 +125,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		start := s.now()
+		inflight := map[string]string{"op": opLabel(name)}
+		s.obs.Reg.AddGauge(obs.MRequestsInFlight, inflight, 1)
+		// Every exit path, the panic and timeout paths included, decrements.
+		defer s.obs.Reg.AddGauge(obs.MRequestsInFlight, inflight, -1)
 		tr := &obs.ReqTrace{ID: s.boot + "-" + strconv.FormatUint(s.reqID.Add(1), 10)}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 		if err != nil {
@@ -118,7 +136,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ans, werr := s.call(obs.WithTrace(r.Context(), tr), op, body)
-		s.observe(op.kind, s.now().Sub(start))
+		s.observe(name, op.kind, s.now().Sub(start))
+		s.warnIfSlow(name, client, s.now().Sub(start))
 		if werr != nil {
 			if werr.Name == wire.ErrQueryTimeout {
 				s.obs.Reg.Add(obs.MQueryTimeouts, map[string]string{"op": opLabel(name)}, 1)
@@ -142,15 +161,40 @@ func (s *Server) call(ctx context.Context, op operation, body []byte) (ans any, 
 	return op.h(ctx, body)
 }
 
-func (s *Server) observe(k Kind, d time.Duration) {
+func (s *Server) observe(name string, k Kind, d time.Duration) {
+	l := map[string]string{"op": opLabel(name)}
 	switch k {
 	case KindQuery:
-		s.obs.Reg.Observe(obs.MQueryDuration, d.Seconds())
+		s.obs.Reg.ObserveL(obs.MQueryDuration, l, d.Seconds())
 	case KindFeed:
-		s.obs.Reg.Observe(obs.MFeedDuration, d.Seconds())
+		s.obs.Reg.ObserveL(obs.MFeedDuration, l, d.Seconds())
 	case KindWait:
 		s.obs.Reg.Observe(obs.MWaitDuration, d.Seconds())
 	}
+}
+
+// Slow request thresholds: a request over slowRequest logs a WARN, at most one
+// line per op per slowRequestEvery on the server's clock.
+const (
+	slowRequest      = 10 * time.Second
+	slowRequestEvery = time.Minute
+)
+
+func (s *Server) warnIfSlow(name, client string, d time.Duration) {
+	if d <= slowRequest {
+		return
+	}
+	op := opLabel(name)
+	now := s.now()
+	s.slowMu.Lock()
+	last, seen := s.slowLogged[op]
+	if seen && now.Sub(last) < slowRequestEvery {
+		s.slowMu.Unlock()
+		return
+	}
+	s.slowLogged[op] = now
+	s.slowMu.Unlock()
+	s.obs.Log.Warn(obs.EvSlowRequest, "op", op, "client", client, "ms", strconv.FormatInt(d.Milliseconds(), 10))
 }
 
 func (s *Server) finish(w http.ResponseWriter, op, client, outcome string, start time.Time, status int, v any) {
