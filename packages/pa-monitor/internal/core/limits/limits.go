@@ -97,6 +97,13 @@ func ReadStatusRecords(path string) []Record {
 	if err != nil {
 		return nil
 	}
+	return ParseStatusRecords(data)
+}
+
+// ParseStatusRecords parses status.jsonl bytes the way ReadStatusRecords does,
+// for a caller that already holds the bytes (pa-monitor reads them from the
+// recorder).
+func ParseStatusRecords(data []byte) []Record {
 	var out []Record
 	start := 0
 	for i := 0; i <= len(data); i++ {

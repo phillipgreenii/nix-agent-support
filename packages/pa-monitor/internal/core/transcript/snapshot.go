@@ -464,3 +464,17 @@ func ScanIncremental(path string, prev *Accumulator) (Snapshot, *Accumulator, Sc
 	}
 	return acc.st.finalize(), acc, ScanStats{BytesFolded: n, Mode: mode}, nil
 }
+
+// NewAccumulator returns an empty Accumulator for the bytes entry point: a
+// caller that reads lines from somewhere other than a file (pa-monitor reads
+// them from the recorder) folds them with FoldLine and reads the result with
+// Snapshot. It is the same fold ScanIncremental performs, so the file path and
+// the bytes path cannot diverge.
+func NewAccumulator() *Accumulator { return newAccumulator() }
+
+// FoldLine folds one transcript line (without its newline) into the
+// accumulator.
+func (a *Accumulator) FoldLine(line []byte) { a.st.feed(line) }
+
+// Snapshot returns the Snapshot of every line folded so far.
+func (a *Accumulator) Snapshot() Snapshot { return a.st.finalize() }

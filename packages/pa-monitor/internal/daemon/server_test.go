@@ -442,7 +442,7 @@ func newTestServerWithNudger(t *testing.T, sid string) *server {
 	// noopSignaler is wrapped in inDaemonDeliverer (not nudger's unexported
 	// signalerDeliverer, which is inaccessible from this package) since New
 	// now takes a Deliverer directly.
-	n := nudger.New(&inDaemonDeliverer{sig: noopSignaler{}}, wm, nil, nil)
+	n := nudger.New(sigDeliverer{noopSignaler{}}, wm, nil, nil)
 
 	state := newSharedState()
 	state.mu.Lock()
@@ -767,4 +767,12 @@ func TestServerSetAutoResumePersistsToToggleStore(t *testing.T) {
 	if !val {
 		t.Error("auto_resume_enabled = false in ToggleStore, want true")
 	}
+}
+
+// sigDeliverer adapts a signal.Signaler to nudger.Deliverer for tests that need
+// a Deliverer with no transport behind it.
+type sigDeliverer struct{ sig nudger.Signaler }
+
+func (d sigDeliverer) Deliver(_ context.Context, targetPID int, text string) error {
+	return d.sig.Send(targetPID, text)
 }

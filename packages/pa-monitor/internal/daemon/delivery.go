@@ -1,23 +1,10 @@
 package daemon
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
-
-	"github.com/phillipgreenii/pa-monitor/internal/bridge"
-	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
-	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
-
-// errDeliverTimeout is returned by bridgeDeliverer.Deliver when no
-// DeliverResult arrives for a pending id before its timeout elapses.
-var errDeliverTimeout = errors.New("delivery timed out waiting for bridge ack")
 
 // deliverOutcome is the terminal result of a single tracked delivery,
 // correlated by id via tracker.
@@ -124,105 +111,4 @@ func (t *tracker) failServer(serverPID int) {
 	for _, p := range toFail {
 		p.ch <- deliverOutcome{ok: false, err: "bridge stream closed"}
 	}
-}
-
-// bridgeDeliverer delivers nudge text to a target PID via that target's
-// cmux server's live bridge stream: it resolves the target's cmux server
-// ancestor, pushes a Deliver over that server's live bridge entry, and
-// blocks until a correlated DeliverResult arrives (via tracker), ctx is
-// done, or timeout elapses.
-type bridgeDeliverer struct {
-	reg      *bridge.Registry
-	ancestor func(pid int) (serverPID int, ok bool)
-	tr       *tracker
-	timeout  time.Duration
-}
-
-var _ nudger.Deliverer = (*bridgeDeliverer)(nil)
-
-func (d *bridgeDeliverer) Deliver(ctx context.Context, targetPID int, text string) error {
-	serverPID, ok := d.ancestor(targetPID)
-	if !ok {
-		return nudger.ErrNoBridge
-	}
-	entry, ok := d.reg.LiveBridge(serverPID)
-	if !ok {
-		return nudger.ErrNoBridge
-	}
-
-	id := d.tr.nextID()
-	ch := d.tr.add(id, serverPID)
-
-	msg := &pb.DaemonMsg{
-		Kind: &pb.DaemonMsg_Deliver{
-			Deliver: &pb.Deliver{
-				Id:        id,
-				TargetPid: int32(targetPID),
-				Text:      text,
-			},
-		},
-	}
-
-	if err := entry.Send(msg); err != nil {
-		d.tr.cancel(id)
-		return err
-	}
-
-	select {
-	case o := <-ch:
-		if o.ok {
-			return nil
-		}
-		if o.err == "" {
-			return errors.New("delivery failed")
-		}
-		msg := fmt.Sprintf("delivery failed: %s", o.err)
-		// When the bridge classified the failure typed (pg2-p1q00), rebuild a
-		// typed error carrying reason/timed_out so downstream classification
-		// (signal.ClassifyCmuxFailure) reads the fields instead of re-parsing the
-		// text. Error() stays byte-identical to the old fmt.Errorf message, so
-		// the nudge.send_failed log's "error" field is unchanged. Empty reason
-		// (old bridge) falls back to the text path.
-		if o.reason != "" {
-			return &signal.WireCmuxError{Reason: signal.CmuxFailureReason(o.reason), TimedOut: o.timedOut, Msg: msg}
-		}
-		return errors.New(msg)
-	case <-ctx.Done():
-		d.tr.cancel(id)
-		return ctx.Err()
-	case <-time.After(d.timeout):
-		d.tr.cancel(id)
-		return errDeliverTimeout
-	}
-}
-
-// inDaemonDeliverer wraps the existing synchronous in-daemon signal path
-// (tmux/ghostty/vscode, resolved via nudger.Signaler) behind the async
-// Deliverer interface.
-type inDaemonDeliverer struct {
-	sig nudger.Signaler
-}
-
-var _ nudger.Deliverer = (*inDaemonDeliverer)(nil)
-
-func (d *inDaemonDeliverer) Deliver(_ context.Context, targetPID int, text string) error {
-	return d.sig.Send(targetPID, text)
-}
-
-// compositeDeliverer routes each Deliver call to the bridge path when the
-// target PID resolves to a cmux server ancestor, and to the in-daemon path
-// otherwise.
-type compositeDeliverer struct {
-	ancestor func(pid int) (serverPID int, ok bool)
-	bridge   nudger.Deliverer
-	inDaemon nudger.Deliverer
-}
-
-var _ nudger.Deliverer = (*compositeDeliverer)(nil)
-
-func (d *compositeDeliverer) Deliver(ctx context.Context, targetPID int, text string) error {
-	if _, ok := d.ancestor(targetPID); ok {
-		return d.bridge.Deliver(ctx, targetPID, text)
-	}
-	return d.inDaemon.Deliver(ctx, targetPID, text)
 }
