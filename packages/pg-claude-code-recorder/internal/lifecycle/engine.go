@@ -91,19 +91,34 @@ func tp(t int64) *time.Time {
 	return &v
 }
 
+// The queries of load. Each filters records by source (and type) and then reads
+// fields by (rec_id, name_id): records_source_type serves the first step and
+// the fields primary key the second. Without that index the planner scans every
+// fields row of the store. TestLoadQueryPlansUseTheSourceIndex guards the plans.
+const registryQuery = `SELECT r.id, r.session, r.time_ns,
+  MAX(CASE WHEN fn.name='pid' THEN f.n END), MAX(CASE WHEN fn.name='proc_start' THEN f.s END),
+  MAX(CASE WHEN fn.name='cwd' THEN f.s END), MAX(CASE WHEN fn.name='started_at' THEN f.n END),
+  MAX(CASE WHEN fn.name='name' THEN f.s END), MAX(CASE WHEN fn.name='status' THEN f.s END),
+  MAX(CASE WHEN fn.name='waiting_for' THEN f.s END)
+FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.name_id
+WHERE r.source='session-registry' AND r.type='registry' GROUP BY r.id ORDER BY r.id`
+
+const registryDeletedQuery = `SELECT r.time_ns, MAX(CASE WHEN fn.name='pid' THEN f.n END), MAX(CASE WHEN fn.name='proc_start' THEN f.s END)
+FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.name_id WHERE r.source='session-registry' AND r.type='registry_deleted' GROUP BY r.id`
+
+const slashCommandQuery = `SELECT r.session, r.time_ns, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='slash_command')
+WHERE r.source='claude-history'`
+
+const endReasonQuery = `SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='reason')
+WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`
+
 func (e *Engine) load() (*model, error) {
 	m := &model{
 		vers: map[pkey][]regRow{}, segs: map[string][]seg{}, deleted: map[pkey]int64{}, procs: map[pkey]store.Proc{},
 		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
 	}
 	db := e.St.Read()
-	rows, err := db.Query(`SELECT r.id, r.session, r.time_ns,
-  MAX(CASE WHEN fn.name='pid' THEN f.n END), MAX(CASE WHEN fn.name='proc_start' THEN f.s END),
-  MAX(CASE WHEN fn.name='cwd' THEN f.s END), MAX(CASE WHEN fn.name='started_at' THEN f.n END),
-  MAX(CASE WHEN fn.name='name' THEN f.s END), MAX(CASE WHEN fn.name='status' THEN f.s END),
-  MAX(CASE WHEN fn.name='waiting_for' THEN f.s END)
-FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.name_id
-WHERE r.source='session-registry' AND r.type='registry' GROUP BY r.id ORDER BY r.id`)
+	rows, err := db.Query(registryQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -147,8 +162,7 @@ WHERE r.source='session-registry' AND r.type='registry' GROUP BY r.id ORDER BY r
 	for _, ss := range m.segs {
 		sort.SliceStable(ss, func(i, j int) bool { return ss[i].start < ss[j].start })
 	}
-	drows, err := db.Query(`SELECT r.time_ns, MAX(CASE WHEN fn.name='pid' THEN f.n END), MAX(CASE WHEN fn.name='proc_start' THEN f.s END)
-FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.name_id WHERE r.source='session-registry' AND r.type='registry_deleted' GROUP BY r.id`)
+	drows, err := db.Query(registryDeletedQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +182,7 @@ FROM records r JOIN fields f ON f.rec_id=r.id JOIN field_names fn ON fn.id=f.nam
 	if err := drows.Close(); err != nil {
 		return nil, err
 	}
-	hrows, err := db.Query(`SELECT r.session, r.time_ns, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='slash_command')
-WHERE r.source='claude-history'`)
+	hrows, err := db.Query(slashCommandQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -190,8 +203,7 @@ WHERE r.source='claude-history'`)
 	if err := hrows.Close(); err != nil {
 		return nil, err
 	}
-	erows, err := db.Query(`SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='reason')
-WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`)
+	erows, err := db.Query(endReasonQuery)
 	if err != nil {
 		return nil, err
 	}

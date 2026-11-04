@@ -164,6 +164,20 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 // Claude Code version that wrote them (the registry's version field).
 func (s *Settler) fillVersions(info *WhereInfo, session string) {
 	_ = s.st.Read().QueryRow(`SELECT COALESCE(MAX(parser_version),0) FROM records WHERE session=?`, session).Scan(&info.ParserVersion)
-	_ = s.st.Read().QueryRow(`SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='version')
-WHERE r.source='session-registry' AND r.session=? ORDER BY r.id DESC LIMIT 1`, session).Scan(&info.ClaudeCodeVersion)
+	_ = s.st.Read().QueryRow(claudeVersionQuery, session).Scan(&info.ClaudeCodeVersion)
 }
+
+// The three registry reads below filter records by session and by source. The
+// leading + on r.source keeps the planner on records_session (a handful of rows
+// for one session); with records_source_type it would start from every registry
+// record of the store. TestRegistryQueryPlansStartFromTheSessionIndex guards it.
+const claudeVersionQuery = `SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='version')
+WHERE +r.source='session-registry' AND r.session=? ORDER BY r.id DESC LIMIT 1`
+
+const registryVersionsQuery = `SELECT DISTINCT r.file_id, r.gen, sn.size FROM records r
+JOIN snapshots sn ON sn.file_id=r.file_id AND sn.version=r.gen
+WHERE r.session=? AND +r.source='session-registry' ORDER BY r.file_id, r.gen`
+
+const registryNamesQuery = `SELECT 1 FROM records r JOIN files f ON f.id=r.file_id
+JOIN paths p ON p.file_id=f.id AND p.closed_ns IS NULL
+WHERE +r.source='session-registry' AND r.session=? AND r.gen=f.cur_gen LIMIT 1`

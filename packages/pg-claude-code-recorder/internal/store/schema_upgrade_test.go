@@ -71,6 +71,29 @@ func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
 	}
 }
 
+// A v2 store written before records_source_type existed gets the index at the
+// next open, and an open of a store that has it changes nothing.
+func TestOpenCreatesTheSourceTypeIndexOnAnExistingStore(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	if _, err := s.wdb.Exec(`DROP INDEX records_source_type`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		s = open(t, dir)
+		var def string
+		if err := s.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name='records_source_type'`).Scan(&def); err != nil || !strings.Contains(def, "records(source, type)") {
+			t.Fatalf("open %d: records_source_type is %q, %v", i, def, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestOlderSchemaIsRefusedUntouchedAndRebuildKeepsTheOldFile(t *testing.T) {
 	dir := t.TempDir()
 	path := legacyIndex(t, dir)

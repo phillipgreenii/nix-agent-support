@@ -330,9 +330,7 @@ func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now t
 // session (a Process may still be running it, or just left it behind).
 func (s *Settler) registryNames(session string) bool {
 	var one int
-	err := s.st.Read().QueryRow(`SELECT 1 FROM records r JOIN files f ON f.id=r.file_id
-JOIN paths p ON p.file_id=f.id AND p.closed_ns IS NULL
-WHERE r.source='session-registry' AND r.session=? AND r.gen=f.cur_gen LIMIT 1`, session).Scan(&one)
+	err := s.st.Read().QueryRow(registryNamesQuery, session).Scan(&one)
 	return err == nil
 }
 

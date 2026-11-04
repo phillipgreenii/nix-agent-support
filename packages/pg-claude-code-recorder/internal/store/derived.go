@@ -47,6 +47,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS records_ident ON records(file_id, gen, off, it
 CREATE INDEX IF NOT EXISTS records_session ON records(session);
 CREATE INDEX IF NOT EXISTS records_time ON records(time_ns);
 CREATE INDEX IF NOT EXISTS records_type ON records(type);
+-- Serves every "WHERE source=? [AND type=?]" lookup (the lifecycle engine's
+-- registry, history and control-end reads). Without it the planner starts from
+-- fields, which has no name-only index for string values, and scans every row.
+CREATE INDEX IF NOT EXISTS records_source_type ON records(source, type);
 CREATE TABLE IF NOT EXISTS field_names(
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE

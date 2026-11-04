@@ -923,9 +923,7 @@ func (s *Settler) hold(c *conv, fails []Failure, now time.Time, wasHeld bool) (O
 // registryVersions returns the registry file versions whose records name the
 // session.
 func (s *Settler) registryVersions(session string) ([]store.ManifestRegistry, error) {
-	rows, err := s.st.Read().Query(`SELECT DISTINCT r.file_id, r.gen, sn.size FROM records r
-JOIN snapshots sn ON sn.file_id=r.file_id AND sn.version=r.gen
-WHERE r.session=? AND r.source='session-registry' ORDER BY r.file_id, r.gen`, session)
+	rows, err := s.st.Read().Query(registryVersionsQuery, session)
 	if err != nil {
 		return nil, err
 	}
