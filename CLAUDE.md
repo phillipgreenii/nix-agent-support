@@ -550,7 +550,8 @@ Verified against Claude Code 2.1.186:
   `config.phillipgreenii.programs.<f>.enable or false`, so an undeclared feature reads off) AND
   (override or `defaultEnabled`); an override cannot enable a plugin whose required feature is off.
   Effect on a machine that does not enable the feature (for example cb00): the pb, beads family,
-  pg-ccaudit and ceta plugins turn off. A machine MUST set the feature enables directly (the
+  pg-ccaudit and ceta plugins turn off, as do plan-decompose and session-wrapup (both
+  `requires` `beads`, tc-5urm4; they have no beads-free mode). A machine MUST set the feature enables directly (the
   `cetaCutover`-style block) or those plugins go off. `bash-lsp` and `pg-go-mutate` declare no
   `requires` because no `programs.<f>` feature owns `bash-language-server` or `pg-go-mutate`
   (owner `-` in the check's `binaryOwners`).
