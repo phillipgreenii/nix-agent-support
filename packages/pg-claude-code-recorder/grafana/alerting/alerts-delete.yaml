@@ -47,3 +47,11 @@ deleteRules:
     uid: pg-ccrec-unknown-key-burst
   - orgId: 1
     uid: pg-ccrec-field-type-mismatch
+  - orgId: 1
+    uid: pg-ccrec-cpu-high
+  - orgId: 1
+    uid: pg-ccrec-wal-large
+  - orgId: 1
+    uid: pg-ccrec-loop-stalled
+  - orgId: 1
+    uid: pg-ccrec-request-slow

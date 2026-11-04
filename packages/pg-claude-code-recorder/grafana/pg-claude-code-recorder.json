@@ -499,7 +499,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "recorder cpu cores",
-      "description": "CPU the recorder process uses, in cores (1 is one full core), and the share of it spent in garbage-collection pauses. no alert covers this panel yet",
+      "description": "CPU the recorder process uses, in cores (1 is one full core), and the share of it spent in garbage-collection pauses. The cpu-high alert fires above 1 core for 30 minutes.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -645,7 +645,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "wal size",
-      "description": "Size of the SQLite write-ahead log file in bytes. no alert covers this panel yet",
+      "description": "Size of the SQLite write-ahead log file in bytes. The wal-large alert fires above 256 MiB for 15 minutes.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

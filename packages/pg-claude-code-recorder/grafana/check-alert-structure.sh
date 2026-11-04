@@ -10,7 +10,7 @@
 # Needs yq (mikefarah), jq, grep. Every failure line starts with RULE-Sn so a mutant can assert the
 # exact rule that fired.
 #
-#   S1  exactly the fifteen expected uids, each once, each of the form pg-ccrec-<name> and at most
+#   S1  exactly the nineteen expected uids, each once, each of the form pg-ccrec-<name> and at most
 #       40 characters (Grafana's cap)
 #   S2  one group pg-claude-code-recorder in folder Claude Agents, no folderUid anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description (the
@@ -67,7 +67,8 @@ EXPECTED_UIDS=(
   pg-ccrec-held-old pg-ccrec-free-space pg-ccrec-unknown-key-burst pg-ccrec-data-loss
   pg-ccrec-removal-backlog pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
   pg-ccrec-crash-share pg-ccrec-removal-stuck pg-ccrec-settle-tick-slow
-  pg-ccrec-field-type-mismatch
+  pg-ccrec-field-type-mismatch pg-ccrec-cpu-high pg-ccrec-wal-large pg-ccrec-loop-stalled
+  pg-ccrec-request-slow
 )
 NODATA_ALERTING=(pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-free-space pg-ccrec-doctor-mismatch)
 
@@ -88,7 +89,7 @@ check() {
       ([.groups[].rules[].uid] | sort) as $u
       | ($u == $exp)
         and ($u | all(. | test("^pg-ccrec-[a-z0-9-]+$") and (length <= 40)))' >/dev/null; then
-    rule_fail "RULE-S1: the rule uids are not exactly the fifteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
+    rule_fail "RULE-S1: the rule uids are not exactly the nineteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
   fi
   # S2
   if ! printf '%s' "$j" | jq -e '
@@ -151,8 +152,10 @@ check() {
       and (expr("doctor-mismatch") | contains($up) and contains("or vector(0)"))
       and (expr("free-space") | (contains("up{") | not) and (contains("SYSTEM_PAUSE") | not))
       and (expr("control-inbox-gone") | contains("state=\"gone\"") and (contains("never_loaded") | not))
-      and (expr("crash-share") | contains("> 20") and contains("registry_stale_at_discovery_total"))' >/dev/null; then
-    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; free-space unguarded; control-inbox-gone state gone; crash-share floor)"
+      and (expr("crash-share") | contains("> 20") and contains("registry_stale_at_discovery_total"))
+      and (expr("loop-stalled") | contains("{loop=\"watcher_sweep\"} > 0)) > 2700 or") and contains("loop=~\"tracker_tick|tracker_poll\"} > 0)) > 120 or") and contains("{loop=\"status_refresh\"} > 0)) > 60 or") and contains("loop_in_flight_seconds > 600)") and (contains("parser_drain") | not))
+      and (expr("request-slow") | contains("> 50)") and contains("{le=\"10\"}"))' >/dev/null; then
+    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; free-space unguarded; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket)"
   fi
   # S8
   local ruids
@@ -224,6 +227,12 @@ mutant RULE-S7 "heartbeat-stale without the up guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-heartbeat-stale") | .data[0].model.expr) = "(time() - max(pg_claude_code_recorder_last_sweep_timestamp_seconds))"'
 mutant RULE-S7 "daemon-down back on the empty-under-pause unless form" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"}) unless on() (pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1)"'
+mutant RULE-S7 "loop-stalled with a changed watcher_sweep bound" \
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-loop-stalled") | .data[0].model.expr) |= sub("> 2700"; "> 270")'
+mutant RULE-S7 "loop-stalled covering parser_drain" \
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-loop-stalled") | .data[0].model.expr) |= sub("status_refresh"; "parser_drain")'
+mutant RULE-S7 "request-slow without the request floor" \
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-request-slow") | .data[0].model.expr) |= sub("> 50[)]"; "> 0)")'
 mutant RULE-S8 "a twin uid that differs" \
   '.' '(.deleteRules[0].uid) = "pg-ccrec-other"'
 mutant RULE-S8 "a twin with a group" '.' '.groups = []'

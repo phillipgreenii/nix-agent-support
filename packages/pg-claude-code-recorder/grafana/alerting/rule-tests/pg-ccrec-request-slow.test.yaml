@@ -1,0 +1,116 @@
+# promtool unit tests for the pg-ccrec-request-slow alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Requests over 10 s divided by all requests over 1 hour, summed over every op: (sum of the
+# histogram count - sum of the le="10" bucket) / (sum of the count, only above 50 requests), above 0.02,
+# for 15 minutes. Counters rise linearly from t=0, so the 1h window is full from 60m.
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a share of 2 slow of 12 requests a minute summed over two ops fires (0.17)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_query_duration_seconds_count{job="pg-claude-code-recorder",op="query"}
+        values: "0+10x200"
+      - series: pg_claude_code_recorder_query_duration_seconds_bucket{job="pg-claude-code-recorder",op="query",le="10"}
+        values: "0+10x200"
+      - series: pg_claude_code_recorder_query_duration_seconds_count{job="pg-claude-code-recorder",op="conversation.show"}
+        values: "0+2x200"
+      - series: pg_claude_code_recorder_query_duration_seconds_bucket{job="pg-claude-code-recorder",op="conversation.show",le="10"}
+        values: "0x200"
+    promql_expr_test:
+      - expr: round(wrapped:pg_ccrec_request_slow, 0.01)
+        eval_time: 120m
+        exp_samples:
+          - labels: "{}"
+            value: 0.17
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: pg-ccrec-request-slow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: the baseline share of 1 percent never fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_query_duration_seconds_count{job="pg-claude-code-recorder",op="query"}
+        values: "0+100x200"
+      - series: pg_claude_code_recorder_query_duration_seconds_bucket{job="pg-claude-code-recorder",op="query",le="10"}
+        values: "0+99x200"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []
+
+  - name: the request floor - every request slow but only 30 requests an hour does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_query_duration_seconds_count{job="pg-claude-code-recorder",op="query"}
+        values: "0+0.5x200"
+      - series: pg_claude_code_recorder_query_duration_seconds_bucket{job="pg-claude-code-recorder",op="query",le="10"}
+        values: "0x200"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_request_slow)
+        eval_time: 150m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []
+
+  - name: a breach shorter than the for resolves without firing (100 slow requests in one minute, then 10 times the traffic dilutes the share below 2 percent within 3 minutes)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_query_duration_seconds_count{job="pg-claude-code-recorder",op="query"}
+        values: "0+100x60 6200+2000x100"
+      - series: pg_claude_code_recorder_query_duration_seconds_bucket{job="pg-claude-code-recorder",op="query",le="10"}
+        values: "0+99x60 6040+1980x100"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []
+
+  - name: stale data - the counters stop while above the threshold and the alert resolves once the 1h window holds no sample
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_query_duration_seconds_count{job="pg-claude-code-recorder",op="query"}
+        values: "0+10x100 stale"
+      - series: pg_claude_code_recorder_query_duration_seconds_bucket{job="pg-claude-code-recorder",op="query",le="10"}
+        values: "0+5x100 stale"
+    alert_rule_test:
+      - eval_time: 95m
+        alertname: pg-ccrec-request-slow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      - eval_time: 170m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []
+
+  - name: absent histograms give no sample and no alert (noDataState OK in Grafana)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x200"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_request_slow)
+        eval_time: 120m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: pg-ccrec-request-slow
+        exp_alerts: []

@@ -1,0 +1,212 @@
+# promtool unit tests for the pg-ccrec-loop-stalled alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Per loop: time() - loop_last_timestamp_seconds above the loop's literal bound (watcher_sweep 2700 s,
+# tracker_tick and tracker_poll 120 s, status_refresh 60 s; parser_drain and the other loops none), or
+# loop_in_flight_seconds above 600, for 10 minutes, only while the daemon is scraped.
+# Time model: one sample per 1m scrape, so the timestamp series "0+60x30" reads t in seconds (the loop
+# just finished a pass) and a value held constant is a loop that stopped; the series names carry the
+# pg_claude_code_recorder_ prefix. The alert keeps the loop and job labels of its series.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: status_refresh stopped 21 minutes in fires past its 60 s bound and the for, naming the loop
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="status_refresh"}
+        values: "0+60x20 1200x80"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-claude-code-recorder
+              loop: status_refresh
+
+  - name: a loop that keeps finishing passes never fires (age 0 for every bounded loop)
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="status_refresh"}
+        values: "0+60x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="tracker_tick"}
+        values: "0+60x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="watcher_sweep"}
+        values: "0+60x100"
+      - series: pg_claude_code_recorder_loop_in_flight_seconds{job="pg-claude-code-recorder",loop="watcher_sweep"}
+        values: "300x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+
+  - name: watcher_sweep has its own bound - 2400 s old is quiet at 50m and 3600 s old fires at 70m
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="watcher_sweep"}
+        values: "0+60x10 600x90"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-claude-code-recorder
+              loop: watcher_sweep
+
+  - name: tracker_poll stopped fires on the 120 s bound while tracker_tick, still running, does not
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="tracker_tick"}
+        values: "0+60x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="tracker_poll"}
+        values: "0+60x10 600x90"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-claude-code-recorder
+              loop: tracker_poll
+
+  - name: a pass in flight over 600 s fires for a loop with no age bound (doctor), one under 600 s does not
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_in_flight_seconds{job="pg-claude-code-recorder",loop="doctor"}
+        values: "700x100"
+      - series: pg_claude_code_recorder_loop_in_flight_seconds{job="pg-claude-code-recorder",loop="removal_pass"}
+        values: "500x100"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-claude-code-recorder
+              loop: doctor
+
+  - name: loops with no age bound are not judged by age (settle_tick, refresh_gauges, wal_checkpoint, copier_ingest, doctor, removal_pass, parser_drain)
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="settle_tick"}
+        values: "0+60x10 600x90"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="refresh_gauges"}
+        values: "0+60x10 600x90"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="wal_checkpoint"}
+        values: "0+60x10 600x90"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="parser_drain"}
+        values: "0+60x10 600x90"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="doctor"}
+        values: "0+60x10 600x90"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="removal_pass"}
+        values: "0+60x10 600x90"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+
+  - name: a loop that never completed a pass reads 0 and is skipped
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="status_refresh"}
+        values: "0x100"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_loop_stalled)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+
+  - name: a stall shorter than the for resolves without firing (status_refresh stopped about 6 minutes)
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="status_refresh"}
+        values: "0+60x10 600x7 1140+60x80"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+
+  - name: stale data - the loop series vanishes while stalled and the alert resolves
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="status_refresh"}
+        values: "0+60x10 600x30 stale"
+    alert_rule_test:
+      - eval_time: 38m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-claude-code-recorder
+              loop: status_refresh
+      - eval_time: 60m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+
+  - name: a daemon that is not scraped (up 0) never pages this rule, daemon-down covers it
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x15 0x85"
+      - series: pg_claude_code_recorder_loop_last_timestamp_seconds{job="pg-claude-code-recorder",loop="status_refresh"}
+        values: "0+60x10 600x90"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []
+
+  - name: absent loop series give no sample and no alert (noDataState OK in Grafana)
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder"}
+        values: "1x100"
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x100"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_loop_stalled)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-loop-stalled
+        exp_alerts: []

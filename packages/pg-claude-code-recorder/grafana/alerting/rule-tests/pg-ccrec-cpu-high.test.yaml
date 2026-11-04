@@ -1,0 +1,98 @@
+# promtool unit tests for the pg-ccrec-cpu-high alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# The process CPU rate over 10 minutes above 1.0 core for 30 minutes. The counter counts CPU
+# seconds, so +90 per 1m scrape is 1.5 cores, +60 is exactly 1.0 (not above), +24 is 0.4 (the
+# baseline). Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_
+# prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: 1.5 cores held past the 10m window and the for fires with severity warning only
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_process_cpu_seconds_total{job="pg-claude-code-recorder"}
+        values: "0+90x100"
+    promql_expr_test:
+      - expr: round(wrapped:pg_ccrec_cpu_high, 0.01)
+        eval_time: 60m
+        exp_samples:
+          - labels: "{}"
+            value: 1.5
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: the baseline 0.4 cores never fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_process_cpu_seconds_total{job="pg-claude-code-recorder"}
+        values: "0+24x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []
+
+  - name: exactly 1.0 core is not above the threshold
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_process_cpu_seconds_total{job="pg-claude-code-recorder"}
+        values: "0+60x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []
+
+  - name: a 12 minute burst at 3 cores resolves without firing (shorter than the for)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_process_cpu_seconds_total{job="pg-claude-code-recorder"}
+        values: "0+24x20 480+180x12 2640+24x100"
+    alert_rule_test:
+      - eval_time: 33m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []
+
+  - name: stale data - the series stops while above the threshold and the alert resolves
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_process_cpu_seconds_total{job="pg-claude-code-recorder"}
+        values: "0+90x60 stale"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      - eval_time: 75m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []
+
+  - name: an absent series gives no sample and no alert (noDataState OK in Grafana; daemon-down covers a daemon that is not scraped)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x100"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_cpu_high)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-ccrec-cpu-high
+        exp_alerts: []

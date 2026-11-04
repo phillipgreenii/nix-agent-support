@@ -4,9 +4,9 @@
 # packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
-# Fifteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# Nineteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
 # parse-stuck, held-old, free-space, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
-# control-inbox-gone) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch. Each uid is
+# control-inbox-gone) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow). Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
 # packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
@@ -679,3 +679,191 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # CPU high. The process CPU rate over 10 minutes above 1.0 core for 30 minutes. Value: the
+      # baseline captured after the phase 1 apply was 0.405 cores averaged over the hour (highest
+      # 5-minute slice 0.48); the planned rule (baseline times 2, rounded up to a whole core) gives 1.0.
+      # Operator ruling (Phillip, 2026-11-04): keep 1.0 and revisit after a day of data. noDataState OK:
+      # a daemon that is not scraped is covered by pg-ccrec-daemon-down.
+      - uid: pg-ccrec-cpu-high
+        title: pg-claude-code-recorder CPU use is high
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder has used over 1 CPU core for 30 minutes"
+          description: "The rate of process_cpu_seconds_total over 10 minutes has been above 1.0 core for 30 minutes. The baseline after the phase 1 apply was 0.405 cores averaged over an hour (highest 5-minute slice 0.48), so 1.0 is the baseline times 2 rounded up to a whole core (operator ruling, Phillip, 2026-11-04: keep 1.0 and revisit after a day of data). Run pg-claude-code-recorder status to see which loop is busy, then take a 30 s CPU profile from the pprof socket (pprof.sock in the state directory)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(rate(pg_claude_code_recorder_process_cpu_seconds_total[10m]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+
+      # WAL large. The write-ahead log above 256 MiB (268435456 bytes) for 15 minutes. Value: the
+      # baseline captured after the phase 1 apply was flat at 24.3 MiB (phase 0 left it at 88 MB; before
+      # the checkpoint loop it reached 13.9 GB), so this is a ceiling for runaway growth, not a typical
+      # value. Operator ruling (Phillip, 2026-11-04): 256 MiB, replacing the earlier 1 GiB.
+      - uid: pg-ccrec-wal-large
+        title: pg-claude-code-recorder write-ahead log is large
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder write-ahead log is over 256 MiB"
+          description: "wal_bytes has been above 256 MiB (268435456 bytes) for 15 minutes: the WAL checkpoint loop is not keeping the log small. The baseline after the phase 1 apply was flat at 24.3 MiB, so 256 MiB is a ceiling for runaway growth (operator ruling, Phillip, 2026-11-04). Run pg-claude-code-recorder status, then read the recorder log for wal_checkpoint_failed lines (a long reader holds the checkpoint back)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_claude_code_recorder_wal_bytes)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [268435456]
+
+      # Loop stalled, per loop (the loop label stays on the result, so the alert names the loop). A loop
+      # is stalled when a pass has run over 600 s (loop_in_flight_seconds, every loop) or, for the loops
+      # with a bound, the time since its last pass ended is over that loop's literal bound, for 10m. The
+      # literals equal the bounds defined once in code (internal/obs/stall.go), which a Go test
+      # compares with this expression:
+      #   watcher_sweep   2700 s: 3 x the default sweep.interval of 15m; a literal that ASSUMES the
+      #                   default (raise it with sweep.interval). Operator ruling (Phillip, 2026-11-04).
+      #   tracker_tick, tracker_poll   120 s: a literal, many times the process.livenessInterval default of 5 s the tracker loops tick at.
+      #   status_refresh  60 s: a literal, over the status_refresh pause (statusRefreshEvery in internal/serve) plus a pass.
+      # parser_drain has no age bound (it is event-driven and may idle indefinitely); settle_tick,
+      # refresh_gauges, wal_checkpoint, copier_ingest, doctor and removal_pass have none either and are
+      # judged by the in-flight clause alone (settle-tick-slow stays the settle-specific rule). A loop
+      # that has not completed a pass yet reads 0 and is skipped (the `> 0` filter). The `up` guard
+      # keeps the rule from paging beside daemon-down while the lookback still serves old samples.
+      # Each clause is a filter, so a result is the age or in-flight seconds of a stalled loop only.
+      - uid: pg-ccrec-loop-stalled
+        title: pg-claude-code-recorder a loop is stalled
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder loop {{ $labels.loop }} is stalled"
+          description: "The {{ $labels.loop }} loop has a pass running over 600 s, or its last pass ended longer ago than its bound (watcher_sweep 2700 s, which assumes the default sweep.interval of 15m times 3; tracker_tick and tracker_poll 120 s; status_refresh 60 s), for 10 minutes. Run pg-claude-code-recorder status to see the loop table, then take a pprof goroutine dump (pprof.sock in the state directory) to see where {{ $labels.loop }} is blocked."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((time() - (pg_claude_code_recorder_loop_last_timestamp_seconds{loop="watcher_sweep"} > 0)) > 2700 or (time() - (pg_claude_code_recorder_loop_last_timestamp_seconds{loop=~"tracker_tick|tracker_poll"} > 0)) > 120 or (time() - (pg_claude_code_recorder_loop_last_timestamp_seconds{loop="status_refresh"} > 0)) > 60 or pg_claude_code_recorder_loop_in_flight_seconds > 600) and on() (max(up{job="pg-claude-code-recorder"}) == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Request slow, a ratio: requests over 10 s divided by all requests over 1 h, summed over every
+      # op, above 2 percent, with a floor of 50 requests in the hour (the divisor is filtered, so a quiet
+      # hour is empty, never a division of small numbers). Value: the baseline after the phase 1 apply
+      # was 5 of 417 requests (1.2 percent) over 10 s, so 2 percent is within a factor of 2 of it.
+      - uid: pg-ccrec-request-slow
+        title: pg-claude-code-recorder requests are slow
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder over 2 percent of requests took over 10 seconds in the last hour"
+          description: "Requests that took over 10 s are above 2 percent of all requests in the last hour (at least 50 requests, summed over every op). The baseline after the phase 1 apply was 1.2 percent (5 of 417), so this can fire now; it is meant to stop firing after phases 2, 3 and 5 of the recorder's design. Run pg-claude-code-recorder status, then read the recorder log for slow_request lines, which name the op."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((sum(increase(pg_claude_code_recorder_query_duration_seconds_count[1h])) - sum(increase(pg_claude_code_recorder_query_duration_seconds_bucket{le="10"}[1h]))) / (sum(increase(pg_claude_code_recorder_query_duration_seconds_count[1h])) > 50))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.02]
