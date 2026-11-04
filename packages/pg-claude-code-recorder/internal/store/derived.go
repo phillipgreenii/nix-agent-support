@@ -233,4 +233,19 @@ func derivedIndexesSQL() string {
 }
 
 // derivedSQL is the tables and then the indexes: what a normal open runs.
+// derivedTables is derivedTablesSQL, without the trigram table when tri is false
+// (the layout of a new index.db built with Options.NoTrigramIndex).
+func derivedTables(tri bool) string {
+	if tri {
+		return derivedTablesSQL
+	}
+	var b strings.Builder
+	for _, l := range strings.SplitAfter(derivedTablesSQL, "\n") {
+		if !strings.Contains(l, "VIRTUAL TABLE IF NOT EXISTS fts_tri ") {
+			b.WriteString(l)
+		}
+	}
+	return b.String()
+}
+
 func derivedSQL() string { return derivedTablesSQL + derivedIndexesSQL() }

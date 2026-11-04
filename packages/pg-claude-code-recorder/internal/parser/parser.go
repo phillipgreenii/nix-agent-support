@@ -652,9 +652,15 @@ func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {
 	if err != nil {
 		return err
 	}
+	wordOpaque, triStmt := ",'opaque'", ""
+	if p.cfg.Store.HasTrigram() {
+		wordOpaque = ""
+		triStmt = `DELETE FROM fts_tri WHERE rowid IN (SELECT t.id FROM texts t JOIN records r ON r.id=t.rec_id WHERE r.file_id=?1 AND r.gen=?2 AND t.kind='opaque')`
+	}
 	stmts := []string{
-		`DELETE FROM fts_word WHERE rowid IN (SELECT t.id FROM texts t JOIN records r ON r.id=t.rec_id WHERE r.file_id=?1 AND r.gen=?2 AND t.kind='text')`,
-		`DELETE FROM fts_tri WHERE rowid IN (SELECT t.id FROM texts t JOIN records r ON r.id=t.rec_id WHERE r.file_id=?1 AND r.gen=?2 AND t.kind='opaque')`,
+		// Opaque fields are in fts_tri when the index has it and in fts_word
+		// otherwise, so fts_word is cleared of every kind it can hold.
+		`DELETE FROM fts_word WHERE rowid IN (SELECT t.id FROM texts t JOIN records r ON r.id=t.rec_id WHERE r.file_id=?1 AND r.gen=?2 AND t.kind IN ('text'` + wordOpaque + `))`,
 		`DELETE FROM texts WHERE rec_id IN (SELECT id FROM records WHERE file_id=?1 AND gen=?2)`,
 		`DELETE FROM fields WHERE rec_id IN (SELECT id FROM records WHERE file_id=?1 AND gen=?2)`,
 		`DELETE FROM records WHERE file_id=?1 AND gen=?2`,
@@ -665,6 +671,9 @@ WHERE u.file_id=?1 AND u.gen=?2 AND u.source=unknown_keys_total.source AND u.rty
 WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.source=unknown_keys_total.source AND u.rtype=unknown_keys_total.rtype AND u.path=unknown_keys_total.path)`,
 		`DELETE FROM unknown_keys_total WHERE count<=0`,
 		`DELETE FROM unknown_keys WHERE file_id=?1 AND gen=?2`,
+	}
+	if triStmt != "" {
+		stmts = append([]string{triStmt}, stmts...)
 	}
 	for _, s := range stmts {
 		if _, err := tx.Exec(s, file, gen); err != nil {
@@ -839,7 +848,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 				}
 				tid, _ := tr.LastInsertId()
 				tbl := "fts_word"
-				if fl.Kind == source.KindOpaque {
+				if fl.Kind == source.KindOpaque && p.cfg.Store.HasTrigram() {
 					tbl = "fts_tri"
 				}
 				if _, err := tx.Exec(`INSERT INTO `+tbl+`(rowid, body) VALUES(?,?)`, tid, fl.S); err != nil {

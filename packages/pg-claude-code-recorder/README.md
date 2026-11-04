@@ -161,8 +161,10 @@ Sources are compiled in (`internal/source`): `claude-transcript` (session and su
 and `claude-history`. The parser (`internal/parser`) reads each copy from its parse offset to the
 last newline within the copy offset and commits records, typed fields, text indexes and the new
 parse offset in one transaction; a re-parse replaces a file generation atomically behind a
-`parse_resets` marker. `text` fields are search-indexed in the FTS5 word index; `opaque` fields are
-searched by `mode=substring`, which scans the copies (see "Substring search" below); no file contents are
+`parse_resets` marker. `text` fields are search-indexed in the FTS5 word index, and so are `opaque` fields in an `index.db` built
+without the trigram table (the layout of the next schema; the running `schema_version` 2 still keeps a trigram
+index for them and its word search does not reach tool bodies). Exact-punctuation and partial-token lookups over
+opaque fields use `mode=substring`, which scans the copies (see "Substring search" below); no file contents are
 stored in `index.db`.
 
 Typed scalars live in `fields(rec_id, name_id, s, n, f)`, `WITHOUT ROWID`, keyed `(rec_id, name_id)`;
@@ -180,6 +182,16 @@ echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[
 echo '{"mode":"substring","q":"--no-verify","fields":["tool_use.input"]}' | pg-claude-code-recorder search
 pg-claude-code-recorder find <session-id|text>
 ```
+
+### Word search over tool bodies
+
+In an `index.db` built without the trigram table, `mode=word` reaches the opaque fields too (`tool_use.input`,
+`tool_result.body`, saved tool-result bodies, pasted contents), by name in `fields` or, with no `fields`, along
+with the prose fields. A query is a word or phrase match over case-insensitive tokens: several words are an AND,
+a double-quoted string is a phrase. Punctuation splits tokens, so `--no-verify` matches the phrase `no verify`
+(and `git commit --no-verify` and `no-verify` alike) but not the exact characters, and a partial token such as
+`verif` matches nothing. Use `mode=substring` for exact punctuation and partial tokens. With the trigram table
+present (`schema_version` 2) a word search over an opaque field returns no hits.
 
 ### Substring search
 

@@ -48,8 +48,18 @@ func NewWithClock(t testing.TB, clk clock.Clock) *Kit { return NewInDir(t, t.Tem
 // empty, so it can read and parse what the directory holds but Append only to
 // files it added itself.
 func NewInDir(t testing.TB, dir string, clk clock.Clock) *Kit {
+	return newInDir(t, dir, clk, store.Options{})
+}
+
+// NewWithStoreOptions is New with store options applied from the first open
+// (a layout option only matters before the database exists).
+func NewWithStoreOptions(t testing.TB, opt store.Options) *Kit {
+	return newInDir(t, t.TempDir(), nil, opt)
+}
+
+func newInDir(t testing.TB, dir string, clk clock.Clock, opt store.Options) *Kit {
 	t.Helper()
-	k := &Kit{T: t, Dir: dir, Clk: clk, sizes: map[int64]int64{}, gens: map[int64]int{}}
+	k := &Kit{T: t, Dir: dir, Clk: clk, StoreOptions: opt, sizes: map[int64]int64{}, gens: map[int64]int{}}
 	k.open()
 	t.Cleanup(func() { _ = k.Store.Close() })
 	return k

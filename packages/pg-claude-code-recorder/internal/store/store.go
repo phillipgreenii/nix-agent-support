@@ -93,6 +93,12 @@ type Options struct {
 	// (DefaultReadMmapBytes when zero, negative disables mapping). Mapped pages
 	// are shared, evictable file cache, not private memory.
 	ReadMmapBytes int64
+	// NoTrigramIndex builds a NEW index.db without the trigram table fts_tri:
+	// the parser then indexes opaque fields (tool bodies) in the word index
+	// fts_word. An existing index.db that already has fts_tri keeps it and its
+	// routing, so the running schema is unchanged; the option only picks the
+	// layout of a file that has none.
+	NoTrigramIndex bool
 }
 
 // SchemaNewerError is returned by Open when index.db carries a newer
@@ -125,6 +131,10 @@ type Store struct {
 	dir          string
 	fs           fsx.FS
 	obs          *obs.Obs
+	// trigram is whether this index.db has the trigram table fts_tri (set by
+	// openDB); without it opaque fields are indexed in fts_word.
+	trigram   bool
+	noTrigram bool // Options.NoTrigramIndex
 
 	Reader // the read methods over the read pool (ReadTx hands out one over a transaction)
 
@@ -190,7 +200,7 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.BulkBytes <= 0 {
 		opt.BulkBytes = DefaultBulkBytes
 	}
-	s := &Store{bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
+	s := &Store{noTrigram: opt.NoTrigramIndex, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -354,10 +364,17 @@ func (s *Store) openDB(path string, bulk bool) error {
 	}
 	// One transaction: one commit for the whole script instead of one per
 	// statement (the FTS5 tables add many).
-	ddl := schemaSQL + derivedSQL()
+	var hasTri int
+	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='fts_tri'`).Scan(&hasTri); err != nil {
+		_ = w.Close()
+		return err
+	}
+	s.trigram = hasTri > 0 || !s.noTrigram
+	tables := derivedTables(s.trigram)
+	ddl := schemaSQL + tables + derivedIndexesSQL()
 	if bulk {
 		// A bulk rebuild creates the secondary indexes after the load.
-		ddl = schemaSQL + derivedTablesSQL
+		ddl = schemaSQL + tables
 	}
 	// An index.db from before unknown_keys_total existed gets the aggregate
 	// backfilled in the transaction that creates the table.
@@ -471,6 +488,10 @@ func (s *Store) Epoch() int { return int(s.metaInt("epoch")) }
 func (s *Store) LastSeq() int64 { return s.metaInt("last_seq") }
 
 // SchemaVersion returns the schema_version recorded in index.db.
+// HasTrigram reports whether this index.db has the trigram table fts_tri. When
+// it does not, opaque fields are indexed in the word index.
+func (s *Store) HasTrigram() bool { return s.trigram }
+
 func (s *Store) SchemaVersion() int { return int(s.metaInt("schema_version")) }
 
 // OnCommit registers a hook called after each successful database commit (the

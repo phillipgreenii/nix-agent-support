@@ -157,8 +157,10 @@ the subtype keyed by the supertype's key). Existing tables are not renamed.
 
 Unchanged: every capture-side table in `internal/store/schema.go` (`meta`, `files`, `paths`, `generations`,
 `commits`, `snapshots`, `tombstones`, `procs`, `resets`, `conv_stage`, `settled`, `ranges`, `torn_tails`), and
-`field_names`, `fields`, `texts`, `fts_word`, `fts_tri`, `parse_state`, `parse_resets`, `feed_marks`,
-`bad_lines`, `unknown_keys`, `unknown_keys_total`. `conv_stage`, `settled` and `ranges` keep the natural
+`field_names`, `fields`, `texts`, `fts_word`, `parse_state`, `parse_resets`, `feed_marks`,
+`bad_lines`, `unknown_keys`, `unknown_keys_total`. `fts_tri` is not in the new file: opaque fields (tool bodies)
+are indexed in `fts_word` (the store builds that layout with `Options.NoTrigramIndex`; the running v2 file keeps
+`fts_tri`). `conv_stage`, `settled` and `ranges` keep the natural
 session id as TEXT: they are small (one row per session), belong to the lifecycle side, and keeping the text
 there means the capture side carries no link to the derived `session_ref`.
 

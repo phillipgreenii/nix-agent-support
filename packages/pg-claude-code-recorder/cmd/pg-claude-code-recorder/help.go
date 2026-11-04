@@ -43,6 +43,10 @@ Examples:
   pg-claude-code-recorder coverage --view files     per-file copy and parse offsets and lag
   echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"count"}]}' | pg-claude-code-recorder query
   echo '{"mode":"word","q":"registry file"}' | pg-claude-code-recorder search --limit 5
+  echo '{"mode":"word","q":"\"no verify\"","fields":["tool_use.input"]}' | pg-claude-code-recorder search
+                                                     word search reaches tool bodies when the index has no trigram table: case-insensitive
+                                                     tokens, AND, a quoted phrase; punctuation splits tokens (--no-verify is "no verify"),
+                                                     so use mode=substring for exact punctuation or a partial token
   echo '{"mode":"substring","q":"--no-verify","where":{"field":"session_id","eq":"<session>"}}' | pg-claude-code-recorder search
                                                      substring scans the copies (tool input and bodies), literal and case sensitive,
                                                      3 characters minimum, newest first, at most 256 MiB read per request; a request

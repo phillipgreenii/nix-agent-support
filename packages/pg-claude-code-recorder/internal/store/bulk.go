@@ -73,14 +73,15 @@ func (s *Store) beginRebuild() error {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	for _, q := range []string{
+	qs := []string{
 		`PRAGMA synchronous=FULL`,
 		`INSERT INTO meta(key,value) VALUES('` + metaRebuildUnfinished + `','1') ON CONFLICT(key) DO UPDATE SET value='1'`,
 		`PRAGMA wal_checkpoint(FULL)`,
 		`INSERT INTO fts_word(fts_word,rank) VALUES('automerge',0)`,
 		`INSERT INTO fts_tri(fts_tri,rank) VALUES('automerge',0)`,
 		`PRAGMA synchronous=OFF`,
-	} {
+	}
+	for _, q := range s.withoutTrigram(qs) {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
 			return err
 		}
@@ -205,14 +206,14 @@ func (s *Store) FinishRebuild() error {
 	}
 	defer func() { _ = conn.Close() }()
 	exec := func(q string) error { _, err := conn.ExecContext(ctx, q); return err }
-	for _, q := range []string{
+	for _, q := range s.withoutTrigram([]string{
 		`PRAGMA synchronous=FULL`,
 		`PRAGMA wal_autocheckpoint=1000`,
 		`INSERT INTO fts_word(fts_word,rank) VALUES('automerge',4)`,
 		`INSERT INTO fts_tri(fts_tri,rank) VALUES('automerge',4)`,
 		`INSERT INTO fts_word(fts_word) VALUES('optimize')`,
 		`INSERT INTO fts_tri(fts_tri) VALUES('optimize')`,
-	} {
+	}) {
 		if err := exec(q); err != nil {
 			return err
 		}
@@ -353,4 +354,19 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 		s.rbEpoch.Add(1)
 	}
 	return err
+}
+
+// withoutTrigram drops the statements that touch fts_tri when this index.db
+// has no trigram table.
+func (s *Store) withoutTrigram(qs []string) []string {
+	if s.trigram {
+		return qs
+	}
+	out := qs[:0:0]
+	for _, q := range qs {
+		if !strings.Contains(q, "fts_tri") {
+			out = append(out, q)
+		}
+	}
+	return out
 }
