@@ -3654,6 +3654,34 @@
                     touch $out
                   '';
 
+              # Import-coverage guard for darwin/default.nix: every directory under
+              # darwin/modules MUST be listed in its imports. A module that exists but is
+              # not imported passes its own eval test while production never loads it (the
+              # recorder's observability module went unregistered that way). Reads the
+              # module directory names and the import lines as values, so removing an
+              # import (or adding an unimported module directory) fails evaluation.
+              test-darwin-modules-all-imported =
+                let
+                  moduleDirs = lib.attrNames (
+                    lib.filterAttrs (_: t: t == "directory") (builtins.readDir ./darwin/modules)
+                  );
+                  importLines = lib.splitString "\n" (builtins.readFile ./darwin/default.nix);
+                  imported = lib.concatMap (
+                    l:
+                    let
+                      m = builtins.match "[[:space:]]*\\./modules/([^[:space:]]+)[[:space:]]*" l;
+                    in
+                    if m == null then [ ] else m
+                  ) importLines;
+                  missing = lib.subtractLists imported moduleDirs;
+                in
+                assert moduleDirs != [ ];
+                assert imported != [ ];
+                assert
+                  missing == [ ]
+                  || throw "darwin/default.nix does not import darwin/modules/{${lib.concatStringsSep "," missing}}";
+                pkgs.runCommand "test-darwin-modules-all-imported-ok" { } "touch $out";
+
               # darwin/modules/pg-claude-code-recorder (bead pg2-v77tsx.11, phase 7b):
               # registers the recorder's metrics target, two log sources, alert rules
               # file (or its deleteRules-only twin) and dashboard, following the Home

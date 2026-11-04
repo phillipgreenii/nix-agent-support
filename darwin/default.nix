@@ -24,5 +24,6 @@
     ./modules/ollama
     ./modules/codeburn
     ./modules/pg-disk-reclaimer
+    ./modules/pg-claude-code-recorder
   ];
 }
