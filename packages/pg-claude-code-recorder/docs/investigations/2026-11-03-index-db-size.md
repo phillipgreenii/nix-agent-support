@@ -4,9 +4,10 @@ The recorder's `index.db` was 8,255,949 pages x 4,096 bytes = 33,816,367,104 byt
 free pages, so it is almost all live data, not slack. Row counts read by maximum rowid on 2026-11-03:
 `fields` 152,741,348; `records` 13,099,000; `texts` 3,869,108; `files` 73,076; `generations` 40,808.
 
-This finding is built from a SYNTHETIC fixture written through the real parser and store, never from the
-live database. The live scan is explicitly deferred (see "What a live scan must measure"). This repo is
-public: the fixture has no real transcript content, names or paths.
+The sections up to "Live scan" are built from a SYNTHETIC fixture written through the real parser and store.
+The "Live scan" section then records the read-only measurement of the live database (30.65 GB by then, already
+on the slim `fields` schema) and re-prices the variants; where the two disagree, the live scan wins. This
+repo is public: the fixture has no real transcript content, names or paths.
 
 ## Summary
 
@@ -229,30 +230,147 @@ Arithmetic for the two end states: keep trigram, slim B: 33.82 - 8.32 = 25.5 GB;
 5. Run the live scan first (deferred below) so the constants, the text lengths and the query usage are
    measured, not assumed.
 
-## What a live scan must measure (deferred)
+## Live scan (2026-11-03, evening)
 
-The live scan is deliberately NOT run now. It MUST NOT run until the read-deadline change and the WAL fix
-are applied (a multi-minute `dbstat` reader would pin the WAL, the defect those fix), and either a copy fits
-(18 GB free is below the 33.8 GB file) or the scan runs on the live file after those fixes with the WAL
-small. It MUST read `dbstat` per object, and additionally:
+The scan ran after the read-deadline and WAL fixes were applied. Method: read-only opens
+(`file:...index.db?mode=ro`) through the system `sqlite3`, one background job per query with a hard `timeout`
+(900 to 1,200 s) and a 2 s busy timeout, nothing written. The WAL was 88 MB before the scan, grew to 173 MB
+during the roughly 22 minutes the three jobs ran, and stopped growing once the readers ended; it did not
+climb toward the old multi-gigabyte sizes. Host load average was 50 to 77 throughout. Text body lengths were
+NOT measured (the full-text tables are contentless, so that needs the copies), and the daemon's query log
+does not exist, so which fields clients filter on is still unknown.
 
-| Unknown                                               | Query to run on the live file                                                              |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Exact bytes per table and index, and unused bytes     | `SELECT name, SUM(pgsize), SUM(unused) FROM dbstat GROUP BY name`                          |
-| Per field NAME: rows and bytes                        | `SELECT name, COUNT(*), SUM(length(s)) FROM fields GROUP BY name`                          |
-| Which constant fields really vary within a session    | distinct values per `(session, name)` for the candidates                                   |
-| Average and tail length of text bodies by kind        | `SELECT kind, COUNT(*), AVG(length(...))` needs the copies, since FTS is contentless       |
-| Which field names clients actually filter on          | the daemon's query log (not kept today: that is itself a gap)                              |
-| Duplicates of `(rec_id, name)` blocking WITHOUT ROWID | `SELECT COUNT(*) FROM (SELECT rec_id, name FROM fields GROUP BY 1, 2 HAVING COUNT(*) > 1)` |
+### The live file is already on the slim schema
+
+The file measured here is not the one the fixture was extrapolated to. It has 7,483,490 pages x 4,096 =
+30.65 GB (426 free pages), and its schema already has `field_names` (interned names), `fields` as
+`WITHOUT ROWID` keyed `(rec_id, name_id)`, and the partial index `fields_name_n ... WHERE n IS NOT NULL`:
+variants B and C of the table above are already in force. Live row counts (`count(*)`): `fields`
+196,306,009; `records` 16,993,912; `texts` 5,097,894 (3,286,645 opaque, 1,812,241 text); `files` 86,237;
+`generations` 53,278; `field_names` 77.
+
+Duplicates of `(rec_id, name)` that would block `WITHOUT ROWID` are moot: the primary key
+`(rec_id, name_id)` already enforces uniqueness on the live table.
+
+### Exact bytes per object (`dbstat`)
+
+| Object                                                               |    Bytes (pgsize) | Unused bytes | Per unit                                          |
+| -------------------------------------------------------------------- | ----------------: | -----------: | ------------------------------------------------- |
+| `fts_tri` (data 16,674,889,728 + docsize 49,598,464 + idx 5,091,328) |    16,729,579,520 |  111,752,570 | 16,729,579,520 / 3,286,645 opaque texts = 5,090 B |
+| `fts_word` (data 1,502,556,160 + docsize 26,284,032 + idx 815,104)   |     1,529,655,296 |   11,021,143 | 1,529,655,296 / 1,812,241 text texts = 844 B      |
+| `fields` (table, WITHOUT ROWID)                                      |     7,022,608,384 |  846,909,139 | 7,022,608,384 / 196,306,009 rows = 35.8 B/row     |
+| `fields_name_n` (partial)                                            |       646,107,136 |   77,985,013 | 157,741 pages                                     |
+| `records` (table plus 5 indexes, listed below)                       |     4,222,296,064 |  234,150,876 | 4,222,296,064 / 16,993,912 = 248 B/record         |
+| `texts` plus `texts_rec`                                             |       244,875,264 |    9,893,738 | 171,876,352 + 72,998,912                          |
+| `unknown_keys` plus its autoindex                                    |       151,117,824 |   12,942,982 | 73,392,128 + 77,725,696                           |
+| Everything else                                                      | under 0.1 GB each |            - | small                                             |
+
+`records` objects: table 1,680,785,408; `records_session` 870,182,912; `records_source_type` 623,489,024;
+`records_ident` 367,738,880; `records_time` 340,836,352; `records_type` 339,263,488 (sum 4,222,296,064).
+Unused figures for grouped rows are the sums of their objects.
+
+Totals: all objects sum to 30,650,707,968 bytes. The two FTS indexes are 18,259,234,816 (59.6 percent) and
+everything else 12,391,473,152 (40.4 percent). Unused space inside pages is 1,318,112,588 bytes (4.3
+percent), 846,909,139 of it in `fields` (12.1 percent of that table's pages). That slack is fragmentation,
+not freed pages (the freelist is 426 pages), and only a rebuild into a new file reclaims it.
+
+### How the fixture predictions held
+
+| Quantity                           | Fixture prediction                      | Live                                                                    |
+| ---------------------------------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| `fields` plus index, bytes per row | variant B: 38.5 B (4,698,112 / 122,079) | (7,022,608,384 + 646,107,136) / 196,306,009 = 39.1 B (1.5 percent high) |
+| `fts_tri` bytes per opaque text    | 4,060 B                                 | 5,090 B (1.25 times)                                                    |
+| `fts_word` bytes per text          | 306 B                                   | 844 B (2.8 times)                                                       |
+| Trigram share of the FTS bytes     | 97.2 percent                            | 16,729,579,520 / 18,259,234,816 = 91.6 percent                          |
+| `fields` rows per record           | 11.66                                   | 196,306,009 / 16,993,912 = 11.55                                        |
+
+The per-row cost of the slim `fields` layout was predicted well; both FTS costs were underestimated (live
+bodies are longer, and the word index is heavier than a fixture of invented words). The calibrated split
+("live `fts_word` about 0.48 GB") was wrong: it is 1.53 GB.
+
+### Field census (rows and string bytes per name)
+
+Rows per field name, from `fields` joined to `field_names` (77 names; string bytes are `SUM(length(s))`):
+
+| Name                                      |           Rows |                String bytes | Name                                       |      Rows | String bytes |
+| ----------------------------------------- | -------------: | --------------------------: | ------------------------------------------ | --------: | -----------: |
+| `project`                                 |     11,992,411 |                 388,122,487 | `message.usage.*` (6 token counters, each) | 2,755,447 |            0 |
+| `file_session`                            |     11,929,653 |                 429,467,508 | `message.model`                            | 2,755,447 |   44,116,486 |
+| `session_id`                              |     11,918,633 |                 429,070,788 | `message.id`                               | 2,755,447 |   77,174,244 |
+| `type`                                    |     11,803,890 |                 108,289,732 | `request_id`                               | 2,754,917 |   77,137,676 |
+| `timestamp` (integer)                     |     10,193,429 |                           0 | `tool_use_id`                              | 3,251,167 |   97,535,010 |
+| `version`                                 |      9,918,292 |                  69,428,044 | `agent_id`                                 | 5,906,326 |  100,407,542 |
+| `entrypoint`                              |      9,574,399 |                  29,780,308 | `uuid`                                     | 9,573,572 |  344,648,592 |
+| `cwd`                                     |      9,574,399 |                 419,014,966 | `parent_uuid`                              | 9,526,893 |  342,968,148 |
+| `user_type`, `git_branch`, `is_sidechain` | 9,573,572 each | 76,588,576 / 65,001,914 / 0 | `message.role`                             | 4,772,352 |   33,544,924 |
+
+The other 47 names have 1,630,728 rows or fewer (`body_length`, `name`, `slug`, `is_error`, then a long
+tail down to 1 row). Constant-per-session candidates are the top of the table by string bytes: `cwd`,
+`file_session`, `session_id`, `project`, `uuid`, `parent_uuid` carry 2.35 GB of string bytes between them
+(388,122,487 + 429,467,508 + 429,070,788 + 419,014,966 + 344,648,592 + 342,968,148 = 2,353,292,489), but the
+`uuid` and `parent_uuid` values are unique per record and are not candidates for removal.
+
+### Constant fields really are constant per session
+
+Distinct values per `(session, name)` over the live table (`records.session` is the session key):
+
+| Name           | Rows (sum) | Sessions | Distinct (session, value) pairs | Sessions with more than one value | Max values in one session |
+| -------------- | ---------: | -------: | ------------------------------: | --------------------------------: | ------------------------: |
+| `cwd`          |  9,575,762 |    7,898 |                          13,207 |                             1,637 |                        31 |
+| `entrypoint`   |  9,575,762 |    7,898 |                           7,910 |                                12 |                         2 |
+| `git_branch`   |  9,574,921 |    7,890 |                           8,698 |                               597 |                         9 |
+| `user_type`    |  9,574,921 |    7,890 |                           7,890 |                                 0 |                         1 |
+| `version`      |  9,919,829 |    7,898 |                           7,932 |                                34 |                         2 |
+| `slug`         |  1,530,658 |      532 |                             532 |                                 0 |                         1 |
+| `file_session` | 11,929,653 |    8,001 |                           8,001 |                                 0 |                         1 |
+| `project`      | 11,992,419 |   11,583 |                          15,846 |                             4,034 |                         9 |
+
+Those six per-session candidates (`cwd`, `entrypoint`, `git_branch`, `user_type`, `version`, `slug`) hold
+9,575,762 + 9,575,762 + 9,574,921 + 9,574,921 + 9,919,829 + 1,530,658 = 49,751,853 rows (25.3 percent of
+196,306,009) and collapse to 13,207 + 7,910 + 8,698 + 7,890 + 7,932 + 532 = 46,169 distinct pairs. A
+change of value inside a session (a branch switch, a `cd`) is real (1,637 sessions change `cwd`), so the
+replacement MUST keep one row per change, not one per session. Together with the five fields that
+duplicate a `records` column or a `files` fact (`type` 11,803,890, `session_id` 11,918,633, `timestamp`
+10,193,429, `file_session` 11,929,653, `project` 11,992,411; sum 57,838,016), 57,838,016 + 49,751,853 =
+107,589,869 rows (54.8 percent) are redundant or constant, near the fixture's 52.8 percent.
+
+### Re-priced variants (live)
+
+| Variant                                                      | Live bytes                                                                         | Saves                                                                                                    |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| A, B, C (intern, WITHOUT ROWID, partial index)               | in force: `fields` plus index 7.67 GB                                              | already taken                                                                                            |
+| D (drop the 107,589,869 redundant or constant rows)          | (196,306,009 - 107,589,869) x 35.78 B = 88,716,140 x 35.78 = 3.17 GB for the table | 7.02 - 3.17 = 3.85 GB or more (the dropped rows carry the longest strings, so the true saving is larger) |
+| Word index instead of trigram for opaque bodies              | 16.73 GB x 0.201 = 3.36 GB                                                         | 13.37 GB                                                                                                 |
+| Word index with `detail=none`                                | 16.73 GB x 0.099 = 1.66 GB                                                         | 15.07 GB                                                                                                 |
+| Rebuild into a new file, same schema (reclaim fragmentation) | 30.65 - 1.32 = 29.33 GB                                                            | 1.32 GB                                                                                                  |
+
+End states: keep trigram and apply D only, 30.65 - 3.85 = 26.8 GB, about 25.5 GB after a dense rebuild
+(26.8 - 1.32); word index for opaque plus D, 30.65 - 13.37 - 3.85 = 13.43 GB, about 12.1 GB after a dense
+rebuild. The ratios 0.201 and 0.099 come from the fixture and MUST be re-measured on a sample of live
+bodies before the operator ruling, because live bodies were 1.25 to 2.8 times heavier than the fixture's.
+Free disk on the volume was 31 GB at scan time, so a same-schema rebuild (29.33 GB plus WAL) barely fits and
+is not advisable; a rebuild that applies D or the word index fits comfortably.
+
+```mermaid
+flowchart TD
+  A["index.db 30.65 GB, slim fields schema already live"] --> B{"Operator rules on substring search over tool output"}
+  B -->|"Keep trigram"| C["FTS stays 16.7 GB: after D about 26.8 GB, dense rebuild about 25.5 GB"]
+  B -->|"Word index instead"| D["FTS about 3.4 GB: after D about 13.4 GB, dense rebuild about 12.1 GB"]
+  C --> E["Rebuild once into a new file, swap"]
+  D --> E
+```
+
+The recommendation changes in one respect: step 2 (slim `fields`) is done. What remains is the product
+ruling on substring search (13.4 GB), dropping redundant and constant `fields` rows (3.85 GB or more), then
+one rebuild into a new file that also reclaims the 1.32 GB of slack.
 
 ## Proposed fix items
 
-| Title                                                                                    | Scope                                                                                                                                          | Size |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| recorder: intern field names and store `fields` WITHOUT ROWID                            | New `field_names` table, `fields(rec_id, name_id, s, n, f)` keyed `(rec_id, name_id)`, query layer and catalog updated, duplicate rule defined | L    |
-| recorder: make the numeric field index partial                                           | `fields_name_n` becomes `WHERE n IS NOT NULL`; a test proves the planner uses it for numeric filters                                           | S    |
-| recorder: stop storing fields that duplicate record columns or file facts                | Drop `type`, `session_id`, `timestamp`, `file_session`, `project` rows; serve them from `records`, `files` and `paths`                         | M    |
-| recorder: rule on substring search over tool output (trigram or word index)              | Operator decision recorded as an ADR with the measured 16.8 GB versus 3.4 GB and the phrase-query trade-off                                    | M    |
-| recorder: rebuild command that parses the copies into a new file and swaps               | Offline or double-write rebuild, free-space preflight, parity check against the old file, no deletion of the old file                          | L    |
-| recorder: live `dbstat` scan and field census (gated on the read-deadline and WAL fixes) | Run the table above on the live file, record the answers here, re-price variants B to D                                                        | S    |
-| recorder: log the field names clients filter on                                          | Count filtered field names so unused fields can be dropped or moved to on-demand copy reads                                                    | S    |
+| Title                                                                       | Scope                                                                                                                                          | Size |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| recorder: intern field names and store `fields` WITHOUT ROWID               | New `field_names` table, `fields(rec_id, name_id, s, n, f)` keyed `(rec_id, name_id)`, query layer and catalog updated, duplicate rule defined | L    |
+| recorder: make the numeric field index partial                              | `fields_name_n` becomes `WHERE n IS NOT NULL`; a test proves the planner uses it for numeric filters                                           | S    |
+| recorder: stop storing fields that duplicate record columns or file facts   | Drop `type`, `session_id`, `timestamp`, `file_session`, `project` rows; serve them from `records`, `files` and `paths`                         | M    |
+| recorder: rule on substring search over tool output (trigram or word index) | Operator decision recorded as an ADR with the measured 16.8 GB versus 3.4 GB and the phrase-query trade-off                                    | M    |
+| recorder: rebuild command that parses the copies into a new file and swaps  | Offline or double-write rebuild, free-space preflight, parity check against the old file, no deletion of the old file                          | L    |
+| recorder: log the field names clients filter on                             | Count filtered field names so unused fields can be dropped or moved to on-demand copy reads                                                    | S    |
