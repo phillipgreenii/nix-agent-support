@@ -229,6 +229,14 @@ groups:
       # (packages/pg-router/docs/decisions/observability.md). Not tightened here: the
       # ratio term is the pg2-7xvn8 plateau-noise guard, and loosening it needs
       # operator approval.
+      # Retention is not a backlog (DEC-OBS-12), same as pg-router-queue-stalled: a depth
+      # that rises only because events every listener already settled are retained for
+      # their time to live (pr.changed, 6 hours) is not a queue falling behind. The rule
+      # therefore maps type to role with the same label_replace chain as queue-stalled and
+      # applies `unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0)`,
+      # which drops a role whose pending gauge read 0 on every scrape of 10 minutes. It is an
+      # exclusion, not a requirement: a type no role binds, or a scrape with no pending
+      # series, leaves the rule as it was. The rise, ratio and presence terms are unchanged.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -239,7 +247,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue depth for type {{ $labels.type }} has been growing"
-          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} while the type stayed non-empty on every scrape of the window (it never drained to zero) -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm. Boundary with pg-router-queue-slow-growth (the two are complementary, by ruling pg2-24s66z): this rule compares the rise with the backlog (a rise of more than a quarter of the 30 minute average depth), so it catches growth from a small or empty queue and does not fire on a large standing backlog (about 200 or more events at 113 events an hour); pg-router-queue-slow-growth has no ratio against the backlog and is the rule that catches growth on a large standing backlog."
+          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} while the type stayed non-empty on every scrape of the window (it never drained to zero), and the role bound to the type had events pending on at least one scrape of the last 10 minutes (a depth that grows only through settled, retained events is not a backlog) -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm. Boundary with pg-router-queue-slow-growth (the two are complementary, by ruling pg2-24s66z): this rule compares the rise with the backlog (a rise of more than a quarter of the 30 minute average depth), so it catches growth from a small or empty queue and does not fire on a large standing backlog (about 200 or more events at 113 events an hour); pg-router-queue-slow-growth has no ratio against the backlog and is the rule that catches growth on a large standing backlog."
         data:
           - refId: A
             relativeTimeRange:
@@ -250,7 +258,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick") unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))
           - refId: B
             datasourceUid: __expr__
             model:

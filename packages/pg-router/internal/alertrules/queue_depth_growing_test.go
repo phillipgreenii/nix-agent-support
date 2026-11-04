@@ -6,6 +6,7 @@
 package alertrules
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -14,8 +15,10 @@ import (
 )
 
 const (
-	// wantExpr MUST equal the expr of rule pg-router-queue-depth-growing.
-	wantExpr = `delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54`
+	// growthCore is the modelled part of rule pg-router-queue-depth-growing: the rise,
+	// ratio and presence terms. The rule wraps it in the type-to-role join and the
+	// retained-settled exclusion (wantExpr).
+	growthCore = `delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54`
 
 	window      = 30 * time.Minute
 	minSamples  = 54   // 90% of the 60 samples a 30s scrape yields over 30m
@@ -27,6 +30,21 @@ const (
 	evalEvery   = time.Minute
 	scrape      = 30 * time.Second
 )
+
+// wantExpr is the expr of rule pg-router-queue-depth-growing: growthCore with the same
+// type-to-role chain as pg-router-queue-stalled (stalledRoles), minus the roles whose
+// pending gauge read 0 on every scrape of 10 minutes (settled, retained events only).
+func wantExpr() string {
+	var b strings.Builder
+	b.WriteString("max without (role) (")
+	b.WriteString(strings.Repeat("label_replace(", len(stalledRoles)))
+	b.WriteString(growthCore)
+	for _, r := range stalledRoles {
+		fmt.Fprintf(&b, `, "role", %q, "type", %q)`, r.role, r.typeRE)
+	}
+	b.WriteString(` unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))`)
+	return b.String()
+}
 
 type sample struct {
 	at time.Time
@@ -112,8 +130,8 @@ func TestRuleExprMatchesModel(t *testing.T) {
 	if m == nil {
 		t.Fatal("no expr in rule")
 	}
-	if m[1] != wantExpr {
-		t.Errorf("rule expr drifted from the modelled one:\n got %q\nwant %q", m[1], wantExpr)
+	if m[1] != wantExpr() {
+		t.Errorf("rule expr drifted from the modelled one:\n got %q\nwant %q", m[1], wantExpr())
 	}
 	for _, need := range []string{"for: 15m", "noDataState: OK", "execErrState: Error", "severity: warning"} {
 		if !strings.Contains(rest, need) {

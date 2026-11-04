@@ -104,3 +104,26 @@ tests:
       - eval_time: 4h
         alertname: pg-router-queue-depth-growing
         exp_alerts: []
+
+  - name: a depth rising only through settled retained events is not a backlog, pending at 0 keeps the rule quiet
+    interval: 30s
+    input_series:
+      # The pr.changed shape under a 6 hour retention window: depth climbs 113 an hour while
+      # every event is already settled, so the role's pending gauge reads 0 throughout.
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "2+0.941667x1440"
+      - series: pg_router_listener_pending{role="pr-change",job="pg-router"}
+        values: "0x1440"
+      # The same rise with events actually owed still pages.
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "2+0.941667x1440"
+      - series: pg_router_listener_pending{role="issue-decider",job="pg-router"}
+        values: "3x1440"
+    alert_rule_test:
+      - eval_time: 1h30m
+        alertname: pg-router-queue-depth-growing
+        exp_alerts:
+          - exp_labels:
+              job: pg-router
+              type: issue.changed
+              severity: warning
