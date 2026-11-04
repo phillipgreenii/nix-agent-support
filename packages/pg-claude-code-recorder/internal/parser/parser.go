@@ -37,6 +37,17 @@ type Config struct {
 	MaxLineBytes int
 	// ChunkBytes bounds the bytes parsed per transaction (tests shrink it).
 	ChunkBytes int
+	// BatchRecords and BatchBytes bound one group-commit transaction of a live
+	// parse: it stops taking chunks once it holds this many records or parsed
+	// bytes (50000 records and 16 MiB when zero), then commits and goes on.
+	BatchRecords int
+	BatchBytes   int64
+	// GroupWindow is the quiet time Coalesce waits after a wake-up for more
+	// files to become dirty (300 ms when zero); GroupMaxWait caps the whole wait
+	// from the first wake-up (5 s when zero), which keeps the parse lag far
+	// under the 60 s health threshold.
+	GroupWindow  time.Duration
+	GroupMaxWait time.Duration
 	// FeedRetention is feed.retention: the feed marks older than it (bar the
 	// newest) are pruned. 14 days when zero.
 	FeedRetention time.Duration
@@ -76,6 +87,18 @@ func New(cfg Config) *Parser {
 	}
 	if cfg.ChunkBytes <= 0 {
 		cfg.ChunkBytes = 8 << 20
+	}
+	if cfg.BatchRecords <= 0 {
+		cfg.BatchRecords = 50_000
+	}
+	if cfg.BatchBytes <= 0 {
+		cfg.BatchBytes = 16 << 20
+	}
+	if cfg.GroupWindow <= 0 {
+		cfg.GroupWindow = 300 * time.Millisecond
+	}
+	if cfg.GroupMaxWait <= 0 {
+		cfg.GroupMaxWait = 5 * time.Second
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = clock.Real{}
@@ -122,13 +145,37 @@ func (p *Parser) Drain() error {
 	p.pending = map[int64]bool{}
 	p.pmu.Unlock()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	var first error
-	for _, id := range ids {
-		if _, err := p.ParseFile(id); err != nil && first == nil {
-			first = err
+	_, err := p.parseFiles(ids)
+	return err
+}
+
+// Coalesce is called after a wake-up and returns once the wake-ups have settled:
+// no further Notify for GroupWindow, or GroupMaxWait since the first, whichever
+// is first. A Drain after it then parses every file that became dirty in the
+// window in one transaction. It returns false when stop closed first.
+func (p *Parser) Coalesce(stop <-chan struct{}) bool {
+	maxWait := time.NewTimer(p.cfg.GroupMaxWait)
+	defer maxWait.Stop()
+	quiet := time.NewTimer(p.cfg.GroupWindow)
+	defer quiet.Stop()
+	for {
+		select {
+		case <-stop:
+			return false
+		case <-maxWait.C:
+			return true
+		case <-quiet.C:
+			return true
+		case <-p.wake:
+			if !quiet.Stop() {
+				select {
+				case <-quiet.C:
+				default:
+				}
+			}
+			quiet.Reset(p.cfg.GroupWindow)
 		}
 	}
-	return first
 }
 
 // ParseAll parses every file with unparsed bytes and re-parses generations
@@ -241,36 +288,215 @@ func (p *Parser) Reparse(sourceName string, files ...int64) error {
 
 // ParseFile parses the unparsed bytes of every generation of a file and
 // returns the number of records committed.
-func (p *Parser) ParseFile(file int64) (int, error) {
+func (p *Parser) ParseFile(file int64) (int, error) { return p.parseFiles([]int64{file}) }
+
+// genWork is one generation with bytes to parse: everything a transaction needs
+// to continue it from start.
+type genWork struct {
+	f       store.File
+	src     source.Source
+	caps    source.Captures
+	g       store.Generation
+	fh      *store.Pointer
+	commits []store.CopyCommit
+	start   int64
+	end     int64
+}
+
+// parseFiles parses the unparsed bytes of every generation of the files, in one
+// group-commit transaction per batch budget (a snapshot file keeps its own
+// transactions), and returns the number of records committed.
+func (p *Parser) parseFiles(ids []int64) (int, error) {
 	p.run.Lock()
 	defer p.run.Unlock()
-	f, err := p.cfg.Store.File(file)
-	if err != nil {
-		return 0, err
-	}
-	src, ok := p.bySrc[f.Source]
-	if ok && f.Mode == "snapshot" {
-		return p.parseSnapshots(f, src, false)
-	}
-	if !ok || f.Mode != "append" {
-		return 0, nil
-	}
-	gens, err := p.cfg.Store.Generations(file)
-	if err != nil {
-		return 0, err
-	}
+	var work []*genWork
+	defer func() {
+		for _, w := range work {
+			_ = w.fh.Close()
+		}
+	}()
 	total := 0
-	for _, g := range gens {
-		if g.ParseOffset >= g.CopyOffset {
+	var first error
+	for _, id := range ids {
+		f, err := p.cfg.Store.File(id)
+		if err != nil {
+			if first == nil {
+				first = err
+			}
 			continue
 		}
-		n, err := p.parseGen(f, src, g, false)
-		total += n
+		src, ok := p.bySrc[f.Source]
+		if ok && f.Mode == "snapshot" {
+			n, err := p.parseSnapshots(f, src, false)
+			total += n
+			if err != nil && first == nil {
+				first = err
+			}
+			continue
+		}
+		if !ok || f.Mode != "append" {
+			continue
+		}
+		gens, err := p.cfg.Store.Generations(id)
 		if err != nil {
-			return total, err
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		for _, g := range gens {
+			if g.ParseOffset >= g.CopyOffset {
+				continue
+			}
+			w, err := p.prepGen(f, src, g)
+			if err != nil {
+				if first == nil {
+					first = err
+				}
+				continue
+			}
+			if w != nil {
+				work = append(work, w)
+			}
 		}
 	}
-	return total, nil
+	n, err := p.runWork(work)
+	total += n
+	if err != nil && first == nil {
+		first = err
+	}
+	return total, first
+}
+
+// prepGen opens a generation's copy for a live parse. It returns nil when the
+// file has no path under the Claude directory or no source matches it.
+func (p *Parser) prepGen(f store.File, src source.Source, g store.Generation) (*genWork, error) {
+	rel, ok := p.relPath(f.ID)
+	if !ok {
+		return nil, nil
+	}
+	caps, ok := src.Match(rel)
+	if !ok {
+		return nil, nil
+	}
+	fh, err := p.cfg.Store.OpenPointer(f.ID, g.Gen)
+	if err != nil {
+		return nil, err
+	}
+	commits, _ := p.cfg.Store.CopyCommits(f.ID)
+	return &genWork{f: f, src: src, caps: caps, g: g, fh: fh, commits: commits, start: g.ParseOffset, end: g.CopyOffset}, nil
+}
+
+// runWork parses the generations in group-commit transactions. When a
+// multi-generation transaction fails it retries each generation alone, so one
+// bad file cannot hold the others back.
+func (p *Parser) runWork(work []*genWork) (int, error) {
+	n, err := p.runBatches(work)
+	if err == nil || len(work) < 2 {
+		return n, err
+	}
+	var first error
+	for _, w := range work {
+		if w.start >= w.end {
+			continue
+		}
+		m, err := p.runBatches([]*genWork{w})
+		n += m
+		if err != nil && first == nil {
+			first = err
+		}
+	}
+	return n, first
+}
+
+// runBatches loops transactions until every generation is parsed to its end (or
+// to a torn line). Each transaction takes chunks, generation by generation,
+// until it holds BatchRecords records or BatchBytes parsed bytes, then writes
+// the parse offsets and parse state of what it touched, bumps parse_seq ONCE and
+// commits.
+func (p *Parser) runBatches(work []*genWork) (int, error) {
+	total := 0
+	next := make([]int64, len(work))
+	for {
+		pending := false
+		for _, w := range work {
+			if w.start < w.end {
+				pending = true
+			}
+		}
+		if !pending {
+			return total, nil
+		}
+		cnt := 0
+		var bytes int64
+		advancedAny := false
+		finished := make([]bool, len(work))
+		fn := func(rawTx *sql.Tx) error {
+			tx := newPS(rawTx)
+			defer tx.Close()
+			cnt, bytes, advancedAny = 0, 0, false
+			for i, w := range work {
+				next[i] = w.start
+				finished[i] = false
+			}
+			for i, w := range work {
+				cur := w.start
+				for cur < w.end {
+					if cnt >= p.cfg.BatchRecords || bytes >= p.cfg.BatchBytes {
+						break
+					}
+					if err := p.genReset(tx, w.f, w.src, w.g, cur); err != nil {
+						return err
+					}
+					n, err := p.chunk(tx, w.fh, w.f, w.src, w.caps, w.g, w.commits, cur, w.end, &cnt)
+					if err != nil {
+						return err
+					}
+					if n == 0 { // a torn line waits for its newline
+						finished[i] = true
+						break
+					}
+					cur += n
+					bytes += n
+					advancedAny = true
+				}
+				next[i] = cur
+				if cur >= w.end {
+					finished[i] = true
+				}
+				if cur == w.start {
+					continue
+				}
+				if _, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, cur, w.f.ID, w.g.Gen, cur); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(`INSERT INTO parse_state(file_id,gen,version) VALUES(?,?,?) ON CONFLICT(file_id,gen) DO UPDATE SET version=excluded.version`,
+					w.f.ID, w.g.Gen, w.src.Version()); err != nil {
+					return err
+				}
+			}
+			if !advancedAny {
+				return nil
+			}
+			if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
+				return err
+			}
+			return p.mark(tx)
+		}
+		if err := p.cfg.Store.WithWrite("parse.before-commit", fn); err != nil {
+			return total, err
+		}
+		if err := p.cfg.Store.BulkAdd(cnt, bytes); err != nil {
+			return total, err
+		}
+		total += cnt
+		for i, w := range work {
+			w.start = next[i]
+			if finished[i] {
+				w.end = w.start // done for this pass (a torn tail waits)
+			}
+		}
+	}
 }
 
 // ReparseGen replaces the records of one file generation atomically under the
@@ -402,52 +628,11 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		}
 		return p.mark(tx)
 	}
-	// A normal parse commits a bounded run of lines per transaction; a re-parse
-	// is one transaction so the new records appear together.
-	if reparse {
-		if err := p.cfg.Store.WithWrite("parse.before-commit", run); err != nil {
-			return count, err
-		}
-		return count, p.cfg.Store.BulkAdd(count, end-start)
+	// A re-parse is one transaction so the new records appear together.
+	if err := p.cfg.Store.WithWrite("parse.before-commit", run); err != nil {
+		return count, err
 	}
-	for start < end {
-		before := count
-		var advanced int64
-		one := func(rawTx *sql.Tx) error {
-			tx := newPS(rawTx)
-			defer tx.Close()
-			if err := p.genReset(tx, f, src, g, start); err != nil {
-				return err
-			}
-			n, err := p.chunk(tx, fh, f, src, caps, g, commits, start, end, &count)
-			if err != nil {
-				return err
-			}
-			advanced = n
-			if _, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, start+n, f.ID, g.Gen, start+n); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(`INSERT INTO parse_state(file_id,gen,version) VALUES(?,?,?) ON CONFLICT(file_id,gen) DO UPDATE SET version=excluded.version`,
-				f.ID, g.Gen, src.Version()); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
-				return err
-			}
-			return p.mark(tx)
-		}
-		if err := p.cfg.Store.WithWrite("parse.before-commit", one); err != nil {
-			return count, err
-		}
-		if advanced == 0 {
-			break
-		}
-		if err := p.cfg.Store.BulkAdd(count-before, advanced); err != nil {
-			return count, err
-		}
-		start += advanced
-	}
-	return count, nil
+	return count, p.cfg.Store.BulkAdd(count, end-start)
 }
 
 func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {

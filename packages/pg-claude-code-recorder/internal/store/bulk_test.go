@@ -52,7 +52,7 @@ func TestUnfinishedBulkRebuildIsRefusedAndRebuildRecovers(t *testing.T) {
 	}
 }
 
-func TestFinishBulkRebuildClearsTheMarkerAndRestoresDurability(t *testing.T) {
+func TestFinishBulkRebuildClearsTheMarkerAndRestoresTheRunningSetting(t *testing.T) {
 	dir := seededDir(t)
 	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
 	if err != nil {
@@ -64,8 +64,8 @@ func TestFinishBulkRebuildClearsTheMarkerAndRestoresDurability(t *testing.T) {
 	if err := s.FinishRebuild(); err != nil {
 		t.Fatal(err)
 	}
-	if got := syncMode(t, s); got != 2 {
-		t.Fatalf("synchronous after finishing is %d, want 2 (FULL)", got)
+	if got := syncMode(t, s); got != 1 {
+		t.Fatalf("synchronous after finishing is %d, want 1 (NORMAL, the running setting; FULL only for the final checkpoint)", got)
 	}
 	if s.metaString(metaRebuildUnfinished) != "" {
 		t.Fatal("the marker survived FinishRebuild")

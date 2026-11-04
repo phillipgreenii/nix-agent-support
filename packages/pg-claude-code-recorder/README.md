@@ -383,6 +383,19 @@ Signals: `quarantine_files`, `quarantine_bytes`, `quarantine_oldest_age_seconds`
 `doctor_last_run_timestamp` and `doctor_mismatch_files` (from `doctor.json`); events `quarantined`,
 `quarantine_restored`, `quarantine_orphan_found_on_start`. The alert rules are phase 7c.
 
+### Durability in normal running, group commit and the removal barrier
+
+`index.db` runs at `synchronous=NORMAL` in WAL mode: a process crash loses nothing and an OS crash or power
+loss can only roll back the newest commits, which the journal, the copies and the stored parse offsets
+re-derive. The parse worker coalesces wake-ups (`Parser.Coalesce`, a 300 ms quiet window capped at 5 s) and
+`Drain` then parses every dirty file in one transaction bounded by 50,000 records or 16 MiB, bumping
+`parse_seq` once per transaction. Only the commits a delete depends on (`CommitFull`) are FULL. Before any
+original is quarantined, removal runs `Store.Barrier` (journal, TRUNCATE checkpoint under FULL and
+`fullfsync`, `index.db` flush) after flushing the archive, and refuses with `durability_barrier` on any
+failure. The table-by-table reasoning, the macOS `fullfsync` answer and the benchmark are in
+`docs/investigations/2026-11-04-index-durability-and-group-commit.md`. The benchmark is
+`go test -tags soak -run '^$' -bench BenchmarkLiveCommit ./internal/parser/`.
+
 ## Signals, alerts and the dashboard (phase 7c)
 
 Files under `grafana/` (the location follows `packages/pg-connector/grafana`):

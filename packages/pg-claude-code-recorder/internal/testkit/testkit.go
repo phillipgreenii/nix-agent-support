@@ -21,7 +21,7 @@ const ClaudeDir = "/claude"
 
 // Kit is the assembled fixture.
 type Kit struct {
-	T      *testing.T
+	T      testing.TB
 	Dir    string
 	Store  *store.Store
 	Obs    *obs.Obs
@@ -38,12 +38,18 @@ type Kit struct {
 }
 
 // New returns a Kit over a fresh state directory.
-func New(t *testing.T) *Kit { return NewWithClock(t, nil) }
+func New(t testing.TB) *Kit { return NewWithClock(t, nil) }
 
 // NewWithClock is New with the parser's clock (feed retention reads it).
-func NewWithClock(t *testing.T, clk clock.Clock) *Kit {
+func NewWithClock(t testing.TB, clk clock.Clock) *Kit { return NewInDir(t, t.TempDir(), clk) }
+
+// NewInDir is NewWithClock over an existing state directory dir (a restart of
+// a kit another process left behind). The kit's own file bookkeeping starts
+// empty, so it can read and parse what the directory holds but Append only to
+// files it added itself.
+func NewInDir(t testing.TB, dir string, clk clock.Clock) *Kit {
 	t.Helper()
-	k := &Kit{T: t, Dir: t.TempDir(), Clk: clk, sizes: map[int64]int64{}, gens: map[int64]int{}}
+	k := &Kit{T: t, Dir: dir, Clk: clk, sizes: map[int64]int64{}, gens: map[int64]int{}}
 	k.open()
 	t.Cleanup(func() { _ = k.Store.Close() })
 	return k

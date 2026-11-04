@@ -19,7 +19,7 @@ import (
 //
 // Failure semantics: a marker row (meta key metaRebuildUnfinished) is written
 // and made durable BEFORE any of that is relaxed, and cleared LAST by
-// FinishRebuild once synchronous is back to FULL and the FTS5 indexes are
+// FinishRebuild once synchronous is FULL for the final checkpoint and the FTS5 indexes are
 // merged. A rebuild killed in between leaves the marker, and Open refuses the
 // file with an UnfinishedRebuildError until the operator reruns the rebuild.
 
@@ -230,6 +230,10 @@ func (s *Store) FinishRebuild() error {
 		return err
 	}
 	if err := exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return err
+	}
+	// Back to the normal running setting (the rebuild was the one FULL window).
+	if err := exec(`PRAGMA synchronous=NORMAL`); err != nil {
 		return err
 	}
 	s.bulk = false

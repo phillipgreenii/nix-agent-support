@@ -402,6 +402,11 @@ func (d *Daemon) parseLoop() {
 		case <-d.stop:
 			return
 		case <-d.prs.Wake():
+			// Group commit: let the wake-ups of a burst settle, then parse every
+			// dirty file in one transaction.
+			if !d.prs.Coalesce(d.stop) {
+				return
+			}
 			if err := d.prs.Drain(); err != nil {
 				d.obs.Log.Warn("parse_failed", "err", err.Error())
 			}

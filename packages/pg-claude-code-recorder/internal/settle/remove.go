@@ -57,6 +57,7 @@ const (
 	BlockHourCap         = "hour_cap"
 	BlockNewWrites       = "new_writes"
 	BlockNoArchive       = "no_archive"
+	BlockBarrier         = "durability_barrier"
 	BlockUnavailable     = obs.ReasonQuarantineUnavl
 )
 
@@ -417,6 +418,13 @@ func (s *Settler) removeConversation(c *conv, now time.Time) (bool, string, erro
 	if err != nil || pl == nil {
 		return false, reason, err
 	}
+	// The durability barrier: nothing leaves Claude's directories until the
+	// archive and every index commit so far are on disk. A failure refuses the
+	// removal and changes nothing.
+	if err := s.durabilityBarrier(pl); err != nil {
+		s.cfg.Obs.Log.Warn("removal_barrier_failed", "session", pl.Session, "err", err.Error())
+		return false, BlockBarrier, nil
+	}
 	if err := s.commitPending(pl, now, true); err != nil {
 		return false, "", err
 	}
@@ -720,6 +728,21 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// durabilityBarrier runs before any original is quarantined. listFiles has just
+// read every archive segment back and proved it byte-equal (by hash and size) to
+// its original; the barrier makes that archive durable (F_FULLFSYNC of every
+// segment, the manifest and the directory) and then the index: the journal, a
+// TRUNCATE checkpoint under synchronous=FULL with fullfsync, and a flush of
+// index.db itself. The index runs at synchronous=NORMAL otherwise, so without
+// this the "removal pending" decision could rest on commits that a power loss
+// would roll back.
+func (s *Settler) durabilityBarrier(pl *pendingList) error {
+	if err := s.flushArchive(pl.Session); err != nil {
+		return err
+	}
+	return s.st.Barrier()
 }
 
 // flushArchive flushes the archive that holds the Conversation's bytes (the

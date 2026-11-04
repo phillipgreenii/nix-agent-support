@@ -8,17 +8,30 @@
 // lost or corrupt index.db is rebuilt from the journal, and a journal record
 // the database never saw (a crash between the two) is applied on the next open.
 //
-// Durability note: the copier's appends use plain fsync, which on darwin does
-// not flush the drive's cache. They are therefore weaker than the settle and
-// removal path, which commits with PRAGMA fullfsync=ON and flushes with
-// F_FULLFSYNC before anything is deleted (later packets). A power loss can leave
-// a copy shorter than its committed offset; Recover detects that and marks the
-// file copy_mismatch.
+// Durability note. index.db runs at synchronous=NORMAL in WAL mode: it never
+// corrupts, but a power loss or OS crash may roll back the last commits (a
+// process crash loses nothing; the WAL survives). That is acceptable because
+// every table is re-derivable. The capture-side tables (files, paths,
+// generations, the commits list, the copy offset, last_seq, the epoch) are
+// written from journal records that are fsynced BEFORE the database commit, and
+// Open replays every journal record past last_seq idempotently, so a rolled
+// back capture write is re-applied from the journal. The derived tables
+// (records, fields, texts, parse offsets, parse_seq) commit with their parse
+// offset in one transaction and roll back together; the parser resumes from the
+// stored offset. A commit a delete depends on (CommitFull) and the removal
+// Barrier are synchronous=FULL with F_FULLFSYNC.
+//
+// The copier's appends use plain fsync, which on darwin does not flush the
+// drive's cache. They are therefore weaker than the settle and removal path,
+// which flushes with F_FULLFSYNC before anything is deleted. A power loss can
+// leave a copy shorter than its committed offset; Recover detects that and marks
+// the file copy_mismatch.
 //
 // Full file contents are never stored in the database.
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -283,7 +296,7 @@ func Open(dir string, opt Options) (*Store, error) {
 }
 
 func (s *Store) openDB(path string, bulk bool) error {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)"
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
 	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
 	// it; it caps the WAL file left behind when the WAL restarts.
 	wdsn := dsn + "&_pragma=journal_size_limit(" + strconv.Itoa(s.journalLimit) + ")"
@@ -309,8 +322,8 @@ func (s *Store) openDB(path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
-	// One transaction: with synchronous=FULL each statement of a multi-statement
-	// Exec would otherwise sync on its own (the FTS5 tables add many).
+	// One transaction: one commit for the whole script instead of one per
+	// statement (the FTS5 tables add many).
 	ddl := schemaSQL + derivedSQL()
 	if bulk {
 		// A bulk rebuild creates the secondary indexes after the load.
@@ -506,12 +519,21 @@ func (s *Store) commit(full bool, recs []*Rec) error {
 	}
 	faults.At("store.after-journal")
 	if full {
-		if _, err := s.wdb.Exec(`PRAGMA fullfsync=ON`); err != nil {
+		// The index runs at synchronous=NORMAL; a commit a delete depends on is
+		// FULL on a pinned connection, so the setting cannot land on a different
+		// pooled connection than the transaction.
+		ctx := context.Background()
+		conn, err := s.wdb.Conn(ctx)
+		if err != nil {
 			return err
 		}
-		defer func() { _, _ = s.wdb.Exec(`PRAGMA fullfsync=OFF`) }()
-	}
-	if err := s.applyAll(recs); err != nil {
+		defer func() { _ = conn.Close() }()
+		restore := s.durabilityPragmas(ctx, conn, true)
+		defer restore()
+		if err := s.applyAllOn(conn, recs); err != nil {
+			return err
+		}
+	} else if err := s.applyAll(recs); err != nil {
 		return err
 	}
 	for _, h := range s.hooks {
@@ -520,8 +542,41 @@ func (s *Store) commit(full bool, recs []*Rec) error {
 	return nil
 }
 
-func (s *Store) applyAll(recs []*Rec) error {
-	tx, err := s.wdb.Begin()
+// txBeginner is what applyAll opens its transaction on: the write handle, or a
+// pinned connection of it.
+type txBeginner interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+}
+
+// durabilityPragmas makes conn FULL-synchronous with F_FULLFSYNC for the
+// database file and for checkpoints (the sync of a checkpoint is its own pragma
+// on darwin), and returns the function that puts the connection back to the
+// store's running setting (NORMAL, or OFF during a bulk rebuild).
+func (s *Store) durabilityPragmas(ctx context.Context, conn *sql.Conn, withCheckpoint bool) func() {
+	on := []string{`PRAGMA synchronous=FULL`, `PRAGMA fullfsync=ON`}
+	off := []string{`PRAGMA fullfsync=OFF`}
+	if withCheckpoint {
+		on = append(on, `PRAGMA checkpoint_fullfsync=ON`)
+		off = append(off, `PRAGMA checkpoint_fullfsync=OFF`)
+	}
+	rest := `PRAGMA synchronous=NORMAL`
+	if s.bulk {
+		rest = `PRAGMA synchronous=OFF`
+	}
+	for _, q := range on {
+		_, _ = conn.ExecContext(ctx, q)
+	}
+	return func() {
+		for _, q := range append(off, rest) {
+			_, _ = conn.ExecContext(ctx, q)
+		}
+	}
+}
+
+func (s *Store) applyAll(recs []*Rec) error { return s.applyAllOn(s.wdb, recs) }
+
+func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err
 	}
@@ -541,6 +596,64 @@ func (s *Store) applyAll(recs []*Rec) error {
 	}
 	s.lastSeq = last
 	return nil
+}
+
+// ErrBarrierBusy means the removal barrier could not checkpoint the whole WAL
+// because a reader still pins an older snapshot of it.
+var ErrBarrierBusy = errors.New("store: the WAL could not be fully checkpointed (a reader pins it)")
+
+// barrierBusyTimeoutMS bounds how long the barrier waits for a reader before it
+// reports ErrBarrierBusy, so the removal pass is refused, not stalled.
+const barrierBusyTimeoutMS = 250
+
+// Barrier is the durability barrier that runs before the recorder lets an
+// original be removed from Claude's directories. Normal running keeps the index
+// at synchronous=NORMAL, so the tail of recent commits may sit only in the WAL
+// and the OS cache; the barrier makes everything committed so far durable: the
+// journal (F_FULLFSYNC), then a TRUNCATE checkpoint under synchronous=FULL with
+// fullfsync and checkpoint_fullfsync, then F_FULLFSYNC of the database file
+// itself. It returns ErrBarrierBusy when a reader keeps the checkpoint from
+// finishing; the caller MUST NOT remove anything on any error.
+func (s *Store) Barrier() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.wdb == nil {
+		return errors.New("store closed")
+	}
+	if s.jf != nil {
+		if err := fsx.FullSync(s.jf); err != nil {
+			return err
+		}
+	}
+	faults.At("store.before-barrier-checkpoint")
+	ctx := context.Background()
+	conn, err := s.wdb.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	restore := s.durabilityPragmas(ctx, conn, true)
+	defer restore()
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout=`+strconv.Itoa(barrierBusyTimeoutMS)); err != nil {
+		return err
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA busy_timeout=5000`) }()
+	var busy, log, ckpt int
+	if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &log, &ckpt); err != nil {
+		return err
+	}
+	if busy != 0 {
+		return ErrBarrierBusy
+	}
+	f, err := s.fs.OpenFile(filepath.Join(s.dir, DBName), os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	err = fsx.FullSync(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // replay applies journal records the database has not seen. It is idempotent.

@@ -53,7 +53,7 @@ FROM records r ORDER BY r.file_id, r.gen, r.off, r.item`)
 		`SELECT COUNT(*) FROM bad_lines`,
 		`SELECT COUNT(*) FROM unknown_keys`,
 		`SELECT COUNT(*) FROM unknown_keys_total`,
-		`SELECT SUM(count) FROM unknown_keys_total`,
+		`SELECT COALESCE(SUM(count),0) FROM unknown_keys_total`,
 	} {
 		fmt.Fprintf(&b, "%s -> %d\n", q, k.Count(q))
 	}
