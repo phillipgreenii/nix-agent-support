@@ -17504,5 +17504,68 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "operator-class"
+  },
+  {
+    "case": "statedep-min-2",
+    "tags": ["state-dependent", "family:bash"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .env"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "git_tracked": [],
+      "gitignored": [".env"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "minimum case 2"
+  },
+  {
+    "case": "statedep-min-4",
+    "tags": ["state-dependent", "family:bash"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > .git/hooks/pre-commit"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/tmp/ceta-fixture-repo",
+      "project_root": "/tmp/ceta-fixture-repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "minimum case 4"
+  },
+  {
+    "case": "statedep-abf8827cc5b9",
+    "tags": [
+      "state-dependent",
+      "family:pwd",
+      "shape:tool=Bash|prog=pwd|sub=|seq=cd/>cd/>pwd/>integrate-branch-support/>git/rev-parse>git/status>head/>git/rev-parse|flags=--abbrev-ref,--facts,--git-path,--porcelain,-C|paths=home,system,word|env="
+    ],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /repo/wt 2>/dev/null || cd /repo; pwd; integrate-branch-support --facts; git -C . rev-parse --git-path rebase-merge; git -C /repo status --porcelain | head; git -C /repo rev-parse --abbrev-ref HEAD"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "shape tool=Bash|prog=pwd|sub=|seq=cd/>cd/>pwd/>integrate-branch-support/>git/rev-parse>git/status>head/>git/rev-parse|flags=--abbrev-ref,--facts,--git-path,--porcelain,-C|paths=home,system,word|env="
   }
 ]

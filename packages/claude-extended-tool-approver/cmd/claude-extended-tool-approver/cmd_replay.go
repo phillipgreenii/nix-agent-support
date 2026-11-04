@@ -261,7 +261,7 @@ func buildReplay(shs []shapeEntry, old map[string]string, rep map[int]repRow, rp
 }
 
 // writeReplaySummary prints the stdout summary in the pinned order.
-func writeReplaySummary(w io.Writer, entries []replayEntry) {
+func writeReplaySummary(w io.Writer, entries []replayEntry, covered map[string]bool) {
 	type agg struct{ shapes, rows int }
 	var total, lr, unm, sd agg
 	unreadable := 0
@@ -306,11 +306,62 @@ func writeReplaySummary(w io.Writer, entries []replayEntry) {
 	_, _ = fmt.Fprintf(w, "unreadable shapes=%d\n", unreadable)
 	_, _ = fmt.Fprintln(w, "## State-dependent (excluded from gates)")
 	_, _ = fmt.Fprintf(w, "state-dependent shapes=%d rows=%d\n", sd.shapes, sd.rows)
+	_, _ = fmt.Fprintf(w, "fixture-covered shapes=%d of %d\n", countFixtureCovered(entries, covered), sd.shapes)
 	for _, e := range entries {
 		if e.StateDependent {
 			_, _ = fmt.Fprintf(w, "state-dependent %s rows=%d consulted=%s\n", e.ShapeKey, e.Rows, strings.Join(e.StateConsulted, ","))
 		}
 	}
+}
+
+// defaultReplayCorpus is the golden corpus the state-dependent section
+// consults, relative to the module root (where the replay is run from).
+const defaultReplayCorpus = "internal/goldencorpus/testdata/corpus.json"
+
+// fixtureCoveredKeys returns the shape keys that have a corpus row carrying
+// both the "state-dependent" tag and a "shape:<shape_key>" tag. An unreadable
+// corpus (for example the command run outside the module root) is reported on
+// stderr and covers nothing.
+func fixtureCoveredKeys(path string, stderr io.Writer) map[string]bool {
+	if path == "" {
+		path = defaultReplayCorpus
+	}
+	rows, err := loadCorpusRows([]string{path})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "fixture-covered: %v\n", err)
+		return nil
+	}
+	covered := map[string]bool{}
+	for _, r := range rows {
+		stateDependent := false
+		var keys []string
+		for _, tag := range r.Tags {
+			if tag == "state-dependent" {
+				stateDependent = true
+			} else if k, ok := strings.CutPrefix(tag, "shape:"); ok {
+				keys = append(keys, k)
+			}
+		}
+		if !stateDependent {
+			continue
+		}
+		for _, k := range keys {
+			covered[k] = true
+		}
+	}
+	return covered
+}
+
+// countFixtureCovered counts the state-dependent shapes in entries that have a
+// fixture golden in covered.
+func countFixtureCovered(entries []replayEntry, covered map[string]bool) int {
+	n := 0
+	for _, e := range entries {
+		if e.StateDependent && covered[e.ShapeKey] {
+			n++
+		}
+	}
+	return n
 }
 
 func writeReplayJSONL(w io.Writer, entries []replayEntry) error {
@@ -330,6 +381,7 @@ type replayOpts struct {
 	db     string
 	shapes string
 	out    string
+	corpus string
 	src    sourceFlags
 }
 
@@ -363,6 +415,7 @@ state twins temporarily change the process environment.`,
 	cmd.Flags().StringVar(&o.db, "db", "", "Ask-log database path for --source ceta (default: the ask log's own default path)")
 	cmd.Flags().StringVar(&o.shapes, "shapes", "", "Shapes file (default: ART/shapes.jsonl)")
 	cmd.Flags().StringVar(&o.out, "out", "", "Output file (default: ART/replay.jsonl)")
+	cmd.Flags().StringVar(&o.corpus, "corpus", "", "Golden corpus read for the fixture-covered count (default: "+defaultReplayCorpus+")")
 	addSourceFlags(cmd, &o.src)
 	return cmd
 }
@@ -426,6 +479,6 @@ func runReplay(stdout, stderr io.Writer, o replayOpts) error {
 		return fmt.Errorf("close %s: %w", out, err)
 	}
 	_, _ = fmt.Fprintf(stderr, "wrote %s\n", out)
-	writeReplaySummary(stdout, entries)
+	writeReplaySummary(stdout, entries, fixtureCoveredKeys(o.corpus, stderr))
 	return nil
 }
