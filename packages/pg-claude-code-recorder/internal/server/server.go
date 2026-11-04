@@ -65,6 +65,36 @@ type Server struct {
 	slowLogged map[string]time.Time
 	reqID      atomic.Uint64
 	boot       string
+	// queryTimeout is query.timeout, the ceiling of a client-supplied deadline
+	// (zero: no ceiling).
+	queryTimeout time.Duration
+}
+
+// SetQueryTimeout tells the server the daemon's query.timeout, which caps the
+// deadline a client may ask for with wire.DeadlineHeader.
+func (s *Server) SetQueryTimeout(d time.Duration) { s.queryTimeout = d }
+
+// requestDeadline reads wire.DeadlineHeader: ok is false when the header is
+// absent, malformed, or not shorter than query.timeout (the store's own
+// deadline then applies, as for an old client). The value is clamped to at
+// least wire.MinDeadline and never above query.timeout.
+func (s *Server) requestDeadline(r *http.Request) (time.Duration, bool) {
+	raw := strings.TrimSpace(r.Header.Get(wire.DeadlineHeader))
+	if raw == "" {
+		return 0, false
+	}
+	ms, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || ms <= 0 {
+		return 0, false
+	}
+	d := max(time.Duration(ms)*time.Millisecond, wire.MinDeadline)
+	if s.queryTimeout > 0 {
+		d = min(d, s.queryTimeout)
+		if d >= s.queryTimeout {
+			return 0, false
+		}
+	}
+	return d, true
 }
 
 // New returns a Server. clients is the metric-label whitelist; hello builds the
@@ -88,6 +118,9 @@ func (s *Server) Register(name string, kind Kind, h Handler) {
 		s.obs.Reg.RegisterHistL(obs.MQueryDuration, obs.RequestBuckets, []map[string]string{l})
 	case KindFeed:
 		s.obs.Reg.RegisterHistL(obs.MFeedDuration, obs.RequestBuckets, []map[string]string{l})
+	}
+	for _, reason := range []string{"client_gone", "deadline"} {
+		s.obs.Reg.Add(obs.MRequestCancelled, map[string]string{"op": opLabel(name), "reason": reason}, 0)
 	}
 	if _, ok := s.obs.Reg.Gauge(obs.MRequestsInFlight, l); !ok {
 		s.obs.Reg.Set(obs.MRequestsInFlight, l, 0)
@@ -135,13 +168,24 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, name, client, start, wire.Errf(wire.ErrBadRequest, err.Error()))
 			return
 		}
-		ans, werr := s.call(obs.WithTrace(r.Context(), tr), op, body)
+		ctx := r.Context()
+		if d, ok := s.requestDeadline(r); ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, d)
+			defer cancel()
+		}
+		ans, werr := s.call(obs.WithTrace(ctx, tr), op, body)
 		s.observe(name, op.kind, s.now().Sub(start))
 		s.warnIfSlow(name, client, s.now().Sub(start))
 		if werr != nil {
-			if werr.Name == wire.ErrQueryTimeout {
+			werr = s.classify(r.Context(), werr)
+			switch werr.Name {
+			case wire.ErrQueryTimeout:
 				s.obs.Reg.Add(obs.MQueryTimeouts, map[string]string{"op": opLabel(name)}, 1)
 				s.logQueryTimeout(name, client, tr, body, s.now().Sub(start))
+				s.countCancelled(name, client, "deadline", s.now().Sub(start))
+			case wire.ErrCancelled:
+				s.countCancelled(name, client, "client_gone", s.now().Sub(start))
 			}
 			s.fail(w, name, client, start, werr)
 			return
@@ -150,6 +194,33 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.fail(w, "unknown", client, s.now(), wire.Errf(wire.ErrBadRequest, r.Method+" "+r.URL.Path+" is not an operation"))
 	}
+}
+
+// classify settles what ended a failed request. The HTTP request's own context
+// is checked before the store's error, because the store collapses a client
+// disconnect and a deadline to the context error: a request whose own context is
+// cancelled is cancelled (client_gone), whatever name the handler gave it; a
+// request whose context is merely past its deadline stays query_timeout.
+func (s *Server) classify(reqCtx context.Context, werr *wire.Error) *wire.Error {
+	switch {
+	case errors.Is(reqCtx.Err(), context.Canceled):
+		// Nobody reads the answer of a request whose client left, and a handler may
+		// have named the cancel something else (bad_request, not_found, internal).
+		return wire.Errf(wire.ErrCancelled, "the request was cancelled: the client went away")
+	case errors.Is(reqCtx.Err(), context.DeadlineExceeded):
+		if werr.Name == wire.ErrCancelled {
+			return wire.Errf(wire.ErrQueryTimeout, "the read hit the request deadline")
+		}
+	}
+	return werr
+}
+
+// countCancelled counts one cancelled request (reason is client_gone or
+// deadline) and logs the request_cancelled event.
+func (s *Server) countCancelled(op, client, reason string, elapsed time.Duration) {
+	s.obs.Reg.Add(obs.MRequestCancelled, map[string]string{"op": opLabel(op), "reason": reason}, 1)
+	s.obs.Event(obs.EvRequestCancelled, "op", opLabel(op), "client", client, "reason", reason,
+		"ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
 }
 
 func (s *Server) call(ctx context.Context, op operation, body []byte) (ans any, werr *wire.Error) {

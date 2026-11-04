@@ -293,3 +293,114 @@ func TestSlowRequestLogsOncePerOpPerMinute(t *testing.T) {
 		t.Fatalf("a slow request after the minute should log again:\n%s", buf)
 	}
 }
+
+func TestRequestDeadlineClampsTheHeader(t *testing.T) {
+	s := New(obs.New(nil), nil, func() any { return nil })
+	s.SetQueryTimeout(25 * time.Second)
+	for _, tc := range []struct {
+		name, header string
+		want         time.Duration
+		ok           bool
+	}{
+		{"absent", "", 0, false},
+		{"malformed", "soon", 0, false},
+		{"zero", "0", 0, false},
+		{"negative", "-5", 0, false},
+		{"below the floor is raised to 1s", "50", time.Second, true},
+		{"inside the range", "5000", 5 * time.Second, true},
+		{"equal to query.timeout is not shorter", "25000", 0, false},
+		{"above query.timeout is not shorter", "600000", 0, false},
+	} {
+		r := httptest.NewRequest("POST", "/v1/echo", nil)
+		if tc.header != "" {
+			r.Header.Set(wire.DeadlineHeader, tc.header)
+		}
+		d, ok := s.requestDeadline(r)
+		if d != tc.want || ok != tc.ok {
+			t.Errorf("%s: got %v %v, want %v %v", tc.name, d, ok, tc.want, tc.ok)
+		}
+	}
+	// With no ceiling configured only the floor applies.
+	s.SetQueryTimeout(0)
+	r := httptest.NewRequest("POST", "/v1/echo", nil)
+	r.Header.Set(wire.DeadlineHeader, "600000")
+	if d, ok := s.requestDeadline(r); !ok || d != 600*time.Second {
+		t.Fatalf("no ceiling: got %v %v", d, ok)
+	}
+}
+
+// A header at the floor ends a handler that only stops with its context, with
+// the deadline reason: the request answers query_timeout, counts in both the
+// timeout and the cancelled series, and logs both events.
+func TestHeaderDeadlineEndsTheRequestAsQueryTimeout(t *testing.T) {
+	o := obs.New(nil)
+	s := New(o, nil, func() any { return nil })
+	s.SetQueryTimeout(25 * time.Second)
+	s.Register("hang", KindQuery, func(ctx context.Context, _ []byte) (any, *wire.Error) {
+		<-ctx.Done()
+		return nil, wire.FromErr(ctx.Err())
+	})
+	r := httptest.NewRequest("POST", "/v1/hang", strings.NewReader("{}"))
+	r.Header.Set(wire.DeadlineHeader, "1")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, r)
+	if rec.Code != 504 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	op := map[string]string{"op": "hang"}
+	if v, _ := o.Reg.Counter(obs.MQueryTimeouts, op); v != 1 {
+		t.Fatalf("query_timeouts_total %v", v)
+	}
+	if v, _ := o.Reg.Counter(obs.MRequestCancelled, map[string]string{"op": "hang", "reason": "deadline"}); v != 1 {
+		t.Fatalf("request_cancelled_total deadline %v", v)
+	}
+	if v, _ := o.Reg.Counter(obs.MRequestCancelled, map[string]string{"op": "hang", "reason": "client_gone"}); v != 0 {
+		t.Fatalf("request_cancelled_total client_gone %v", v)
+	}
+	if !hasEvent(o, obs.EvQueryTimeout) || !hasEvent(o, obs.EvRequestCancelled) {
+		t.Fatalf("events %+v", o.Events())
+	}
+}
+
+// A request whose own context is cancelled (the client went away) maps to the
+// cancelled class: no query_timeouts_total, no internal outcome, reason
+// client_gone, and the store's own error (deadline or cancel) does not change it.
+func TestCancelledRequestIsClientGoneNotATimeout(t *testing.T) {
+	for _, handlerErr := range []error{context.Canceled, context.DeadlineExceeded, errors.New("boom")} {
+		o := obs.New(nil)
+		s := New(o, nil, func() any { return nil })
+		s.Register("hang", KindQuery, func(ctx context.Context, _ []byte) (any, *wire.Error) {
+			<-ctx.Done()
+			return nil, wire.FromErr(handlerErr)
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		r := httptest.NewRequest("POST", "/v1/hang", strings.NewReader("{}")).WithContext(ctx)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, r)
+		if rec.Code != 499 || !strings.Contains(rec.Body.String(), wire.ErrCancelled) {
+			t.Fatalf("%v: status %d: %s", handlerErr, rec.Code, rec.Body.String())
+		}
+		if v, _ := o.Reg.Counter(obs.MQueryTimeouts, map[string]string{"op": "hang"}); v != 0 {
+			t.Fatalf("%v: query_timeouts_total %v", handlerErr, v)
+		}
+		if v, _ := o.Reg.Counter(obs.MRequestCancelled, map[string]string{"op": "hang", "reason": "client_gone"}); v != 1 {
+			t.Fatalf("%v: client_gone %v", handlerErr, v)
+		}
+		if v, _ := o.Reg.Counter(obs.MRequestsTotal, map[string]string{"client": obs.ClientLabel("", nil), "op": "hang", "outcome": wire.ErrInternal}); v != 0 {
+			t.Fatalf("%v: counted internal %v", handlerErr, v)
+		}
+		if !hasEvent(o, obs.EvRequestCancelled) || hasEvent(o, obs.EvQueryTimeout) {
+			t.Fatalf("%v: events %+v", handlerErr, o.Events())
+		}
+	}
+}
+
+func hasEvent(o *obs.Obs, name string) bool {
+	for _, e := range o.Events() {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
+}

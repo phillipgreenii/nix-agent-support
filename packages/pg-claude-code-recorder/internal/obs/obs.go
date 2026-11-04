@@ -41,8 +41,12 @@ const (
 	MRequestsTotal  = "requests_total"
 	MQueryDuration  = "query_duration_seconds"
 	MQueryTimeouts  = "query_timeouts_total"
-	MFilterFields   = "query_filter_fields_total"
-	MFeedDuration   = "feed_latency_seconds"
+	// MRequestCancelled counts requests the server stopped early, by op and reason
+	// (client_gone or deadline); EvRequestCancelled is the log event.
+	MRequestCancelled  = "request_cancelled_total"
+	EvRequestCancelled = "request_cancelled"
+	MFilterFields      = "query_filter_fields_total"
+	MFeedDuration      = "feed_latency_seconds"
 	// MRequestsInFlight is the requests being served now, by op; EvSlowRequest is
 	// the rate-capped WARN for a request over the slow threshold.
 	MRequestsInFlight = "requests_inflight"

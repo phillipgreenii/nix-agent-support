@@ -464,6 +464,7 @@ func (d *Daemon) registerOps() {
 // Start opens the listener and the exporter and starts the watcher.
 func (d *Daemon) Start() error {
 	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
+	d.srv.SetQueryTimeout(d.cfg.QueryTimeout)
 	d.registerOps()
 	endPhase := d.su.begin("listener_bind", false)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {

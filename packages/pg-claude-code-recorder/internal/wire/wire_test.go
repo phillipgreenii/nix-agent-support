@@ -80,3 +80,15 @@ func TestStatusJSONGolden(t *testing.T) {
 		t.Fatalf("status JSON differs from %s (rerun with -update and review the diff as additive only):\n%s", golden, b)
 	}
 }
+
+func TestFromErrMapsCancelledApartFromTimeout(t *testing.T) {
+	if e := FromErr(fmt.Errorf("scan: %w", context.Canceled)); e.Name != ErrCancelled {
+		t.Fatalf("a wrapped cancel mapped to %q, want %q", e.Name, ErrCancelled)
+	}
+	if HTTPStatus(ErrCancelled) != 499 {
+		t.Fatalf("status %d", HTTPStatus(ErrCancelled))
+	}
+	if ExitFor(ErrCancelled) == ExitTimeout {
+		t.Fatal("cancelled must not exit like a timeout")
+	}
+}

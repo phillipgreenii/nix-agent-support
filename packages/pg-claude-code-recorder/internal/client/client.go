@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -61,6 +62,13 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	}
 	if c.Name != "" {
 		req.Header.Set(wire.ClientHeader, c.Name)
+	}
+	// The client's own budget minus a second, so the daemon answers
+	// query_timeout before the client gives up on the connection.
+	if c.HTTP.Timeout > 0 {
+		if ms := (c.HTTP.Timeout - time.Second).Milliseconds(); ms > 0 {
+			req.Header.Set(wire.DeadlineHeader, strconv.FormatInt(ms, 10))
+		}
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

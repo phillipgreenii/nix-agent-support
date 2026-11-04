@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 )
 
 // ProtocolVersion is the wire protocol version reported by status and hello.
@@ -15,6 +16,15 @@ const ProtocolVersion = 1
 
 // ClientHeader carries the caller's --client name.
 const ClientHeader = "X-Recorder-Client"
+
+// DeadlineHeader carries the client's own budget for the request in
+// milliseconds (additive: an old client sends none). The server clamps it to at
+// least MinDeadline and never above query.timeout, and applies it as the
+// request deadline when it is shorter than query.timeout.
+const DeadlineHeader = "X-Recorder-Deadline-Ms"
+
+// MinDeadline is the floor of an accepted DeadlineHeader.
+const MinDeadline = time.Second
 
 // Exit codes of the recorder command (independent of the control command's).
 const (
@@ -45,6 +55,9 @@ const (
 	ErrWaitTimeout   = "wait_timeout"
 	// ErrQueryTimeout: a read hit the daemon deadline (query.timeout); retry, ideally narrower.
 	ErrQueryTimeout = "query_timeout"
+	// ErrCancelled: the request was cancelled (the client went away). It is not a
+	// timeout and not an internal failure.
+	ErrCancelled = "cancelled"
 	// Exit 8 preconditions.
 	ErrRemovalDisabled = "removal_disabled"
 	ErrTargetExists    = "target_exists"
@@ -85,6 +98,9 @@ func HTTPStatus(name string) int {
 		return http.StatusGatewayTimeout
 	case ErrBusy, ErrBehind:
 		return http.StatusTooManyRequests
+	case ErrCancelled:
+		// 499: the nginx convention for a client that closed the request.
+		return 499
 	case ErrCursorExpired:
 		return http.StatusGone
 	case ErrRemovalDisabled, ErrTargetExists, ErrHeldByLive:
@@ -279,10 +295,14 @@ type Hello struct {
 }
 
 // FromErr maps an error from a read to its wire error: a context deadline is
-// the retryable query_timeout, anything else is internal.
+// the retryable query_timeout, a cancelled context is cancelled, anything else
+// is internal.
 func FromErr(err error) *Error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return Errf(ErrQueryTimeout, "the read hit the daemon's query deadline: "+err.Error())
+	}
+	if errors.Is(err, context.Canceled) {
+		return Errf(ErrCancelled, "the request was cancelled: "+err.Error())
 	}
 	return Errf(ErrInternal, err.Error())
 }

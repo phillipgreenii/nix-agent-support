@@ -17,6 +17,7 @@ var helpTexts = map[string]string{
 	MRequestsTotal:            "Requests served, by client, op and outcome.",
 	MQueryDuration:            "Distribution of query request durations in seconds, by op.",
 	MQueryTimeouts:            "Requests that hit the query deadline, by op.",
+	MRequestCancelled:         "Requests stopped early, by op and reason (client_gone or deadline).",
 	MFilterFields:             "Filter fields used in query requests, by op and field.",
 	MFeedDuration:             "Distribution of feed request latencies in seconds, by op.",
 	MRequestsInFlight:         "Requests being served now, by op.",

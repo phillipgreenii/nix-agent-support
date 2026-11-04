@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/server"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
 // cancelBodies maps every operation whose reads run under the request context
@@ -79,6 +82,94 @@ func TestEveryOperationStopsOnACancelledRequestContext(t *testing.T) {
 			if code == http.StatusOK {
 				t.Fatalf("%s answered 200 under a cancelled context: %s", op, got)
 			}
+			// The server-level mapping: a cancelled request is the cancelled class,
+			// never query_timeout or internal, and counts as client_gone.
+			if code != 499 || !strings.Contains(got, wire.ErrCancelled) {
+				t.Fatalf("%s under a cancelled context answered %d %s, want 499 %s", op, code, got, wire.ErrCancelled)
+			}
+			if v, _ := d.obs.Reg.Counter(obs.MRequestCancelled, map[string]string{"op": op, "reason": "client_gone"}); v < 1 {
+				t.Fatalf("%s: request_cancelled_total client_gone %v", op, v)
+			}
+			if v, _ := d.obs.Reg.Counter(obs.MQueryTimeouts, map[string]string{"op": op}); v != 0 {
+				t.Fatalf("%s: query_timeouts_total %v for a cancel", op, v)
+			}
 		})
+	}
+}
+
+// spinOp registers an operation that runs a statement which never ends on its
+// own (a recursive count with no bound), so only the request context or the
+// store's read deadline can stop it: real SQLite, no sleeping in the test body.
+func spinOp(d *Daemon) {
+	d.srv.Register("test.spin", server.KindQuery, func(ctx context.Context, _ []byte) (any, *wire.Error) {
+		err := d.st.ReadTxCtx(ctx, func(r *store.Reader) error {
+			var n int64
+			return r.Q().QueryRow(`WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c`).Scan(&n)
+		})
+		if err != nil {
+			return nil, wire.FromErr(err)
+		}
+		return map[string]bool{"ok": true}, nil
+	})
+}
+
+func postHeader(d *Daemon, op, deadlineMs string) (int, string) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/"+op, strings.NewReader("{}"))
+	if deadlineMs != "" {
+		req.Header.Set(wire.DeadlineHeader, deadlineMs)
+	}
+	rec := httptest.NewRecorder()
+	d.srv.Handler().ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String()
+}
+
+// A header at the clamp floor ends a statement that never returns with
+// query_timeout, well before query.timeout, and counts as a deadline cancel.
+func TestDeadlineHeaderAtTheFloorTimesOutARealStatement(t *testing.T) {
+	e := newEnv(t, false)
+	d := e.open(t)
+	defer func() { _ = d.Close() }()
+	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
+	d.srv.SetQueryTimeout(d.cfg.QueryTimeout)
+	spinOp(d)
+
+	code, body := postHeader(d, "test.spin", "1")
+	if code != http.StatusGatewayTimeout || !strings.Contains(body, wire.ErrQueryTimeout) {
+		t.Fatalf("answered %d %s, want query_timeout", code, body)
+	}
+	if v, _ := d.obs.Reg.Counter(obs.MRequestCancelled, map[string]string{"op": "test.spin", "reason": "deadline"}); v != 1 {
+		t.Fatalf("deadline cancels %v", v)
+	}
+	if v, _ := d.obs.Reg.Counter(obs.MQueryTimeouts, map[string]string{"op": "test.spin"}); v != 1 {
+		t.Fatalf("query_timeouts_total %v", v)
+	}
+	// The connection went back to the pool clean: a read after it succeeds.
+	if err := d.st.ReadTx(func(r *store.Reader) error {
+		var n int
+		return r.Q().QueryRow(`SELECT 1`).Scan(&n)
+	}); err != nil {
+		t.Fatalf("read after the timeout: %v", err)
+	}
+}
+
+// Without the header the daemon's own query.timeout ends the request.
+func TestWithoutTheHeaderQueryTimeoutApplies(t *testing.T) {
+	e := newEnv(t, false)
+	e.cfg.QueryTimeout = time.Second
+	d := e.open(t)
+	defer func() { _ = d.Close() }()
+	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
+	d.srv.SetQueryTimeout(d.cfg.QueryTimeout)
+	spinOp(d)
+
+	// A header not shorter than query.timeout is ignored too.
+	for _, hdr := range []string{"", "60000"} {
+		code, body := postHeader(d, "test.spin", hdr)
+		if code != http.StatusGatewayTimeout || !strings.Contains(body, wire.ErrQueryTimeout) {
+			t.Fatalf("header %q answered %d %s, want query_timeout", hdr, code, body)
+		}
+	}
+	if v, _ := d.obs.Reg.Counter(obs.MQueryTimeouts, map[string]string{"op": "test.spin"}); v != 2 {
+		t.Fatalf("query_timeouts_total %v", v)
 	}
 }
