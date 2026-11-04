@@ -770,6 +770,9 @@ const (
 	MParseLagBytes = "parse_lag_bytes"
 	MParseProgress = "parse_progress"
 	MUnknownKinds  = "unknown_kinds"
+	// MFieldTypeMismatch counts a declared field whose value did not convert
+	// losslessly to its declared type, by source, record type and field name.
+	MFieldTypeMismatch = "field_type_mismatch_total"
 )
 
 // derivable reports whether a typed field's value is already answered by
@@ -851,6 +854,7 @@ ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded
 		for _, u := range r.Unknown {
 			unk[[2]string{r.Type, u}]++
 		}
+		p.countMismatches(src.Name(), r)
 	}
 	for k, c := range unk {
 		p.cfg.Obs.Reg.Add(MUnknownKeys, nil, float64(c))
@@ -1136,5 +1140,13 @@ func (p *pstx) Exec(q string, args ...any) (sql.Result, error) {
 func (p *pstx) Close() {
 	for _, st := range p.st {
 		_ = st.Close()
+	}
+}
+
+// countMismatches counts each field of r that did not convert losslessly to
+// its declared type. It never blocks ingest and stores nothing.
+func (p *Parser) countMismatches(srcName string, r source.Record) {
+	for _, name := range r.Mismatches {
+		p.cfg.Obs.Reg.Add(MFieldTypeMismatch, map[string]string{"source": srcName, "type": r.Type, "field": name}, 1)
 	}
 }

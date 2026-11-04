@@ -79,6 +79,10 @@ type Record struct {
 	Time    time.Time
 	Fields  []Field
 	Unknown []string // dotted paths of keys the parser did not recognize
+	// Mismatches names the catalogued fields whose value did not convert
+	// losslessly to the declared type (see Convert); the parser counts each in
+	// field_type_mismatch_total. Nothing in the stored output depends on it.
+	Mismatches []string `json:"-"`
 }
 
 // Source is the contract every recorder source implements.
