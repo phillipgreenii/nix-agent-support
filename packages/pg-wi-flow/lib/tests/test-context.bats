@@ -364,6 +364,24 @@ lessons_fixture() {
   [[ "$output" == *"WI_PREMISE_STALE=false"* ]]
 }
 
+@test "context: a premise named only in a closed kind:remove item's description is flagged stale (tc-owjik)" {
+  repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"work":{"order":1,"entry":true,"closes":true,"concerns":[]}}}}}'
+  show_fixture tc-1 '{"id":"tc-1","title":"depends on grafana-old","labels":[],"metadata":{"premise":"grafana-old","groomed_at":"2026-01-01T00:00:00Z"}}'
+  list_fixture "kind:remove" '[{"id":"tc-r1","title":"retire legacy dashboards","description":"Drop the Grafana-Old instance.","status":"closed","closed_at":"2026-02-01T00:00:00Z"}]'
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_PREMISE_STALE=true"* ]]
+}
+
+@test "context: a premise named nowhere in a closed kind:remove item is not flagged stale (tc-owjik)" {
+  repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"work":{"order":1,"entry":true,"closes":true,"concerns":[]}}}}}'
+  show_fixture tc-1 '{"id":"tc-1","title":"depends on grafana-old","labels":[],"metadata":{"premise":"grafana-old","groomed_at":"2026-01-01T00:00:00Z"}}'
+  list_fixture "kind:remove" '[{"id":"tc-r1","title":"retire legacy dashboards","description":"Drop the prometheus-legacy instance.","status":"closed","closed_at":"2026-02-01T00:00:00Z"}]'
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_PREMISE_STALE=false"* ]]
+}
+
 @test "context: no premise at all is never flagged stale" {
   repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"work":{"order":1,"entry":true,"closes":true,"concerns":[]}}}}}'
   show_fixture tc-1 '{"id":"tc-1","title":"plain item","labels":[],"metadata":{}}'

@@ -366,10 +366,12 @@ pgwf_context_premise() {
 # kind:remove classification and groom itself are phase-2/homelab-workflow
 # concerns]. "Last groom" = metadata.groomed_at, falling back to
 # created_at when groom (phase 2) has never annotated it. "Names the same
-# target" = the closed item's title or its own premise metadata contains
-# PREMISE as a case-insensitive substring -- this matching rule, like the
-# docs-search one above, is this packet's own choice absent a mandated
-# algorithm.
+# target" = the closed item's title, its description, or its own premise
+# metadata contains PREMISE as a case-insensitive substring (an empty
+# PREMISE never matches; a missing field is treated as empty). Decided in
+# tc-owjik: the description is searched too because a removal bead often
+# names its target only in the body. Recorded in the design doc under
+# "Stage: verify".
 pgwf_context_premise_stale() {
   local config_json="$1" item_json="$2" premise="$3" kind_prefix remove_label last_groom lower_premise closed_hits
   [[ -z $premise ]] && return 1
@@ -381,6 +383,7 @@ pgwf_context_premise_stale() {
   jq -e --arg cutoff "$last_groom" --arg p "$lower_premise" \
     '[.[] | select((.closed_at // .updated_at // "") > $cutoff) |
        select(((.title // "") | ascii_downcase | contains($p)) or
+              ((.description // "") | ascii_downcase | contains($p)) or
               ((.metadata.premise // "") | ascii_downcase | contains($p)))] | length > 0' \
     <<<"$closed_hits" >/dev/null
 }
