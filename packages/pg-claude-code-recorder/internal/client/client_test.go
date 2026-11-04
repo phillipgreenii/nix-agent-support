@@ -66,3 +66,39 @@ func TestDoSendsNoDeadlineHeaderWithoutAUsableTimeout(t *testing.T) {
 		}
 	}
 }
+
+// A daemon that answers after the client's own timeout is a query_timeout, not unavailable
+// (callers read unavailable as "daemon offline").
+func TestDoNamesAClientTimeoutQueryTimeout(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "ccrec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "r.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-done
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { close(done); _ = srv.Close() })
+
+	c := New(sock, "test")
+	c.HTTP.Timeout = 100 * time.Millisecond
+	err = c.Post(context.Background(), "echo", nil, nil)
+	we, ok := err.(*wire.Error)
+	if !ok || we.Name != wire.ErrQueryTimeout {
+		t.Fatalf("err = %v, want a query_timeout wire error", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	c.HTTP.Timeout = 0
+	err = c.Post(ctx, "echo", nil, nil)
+	if we, ok := err.(*wire.Error); !ok || we.Name != wire.ErrQueryTimeout {
+		t.Fatalf("ctx deadline: err = %v, want a query_timeout wire error", err)
+	}
+}
