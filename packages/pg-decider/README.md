@@ -225,3 +225,38 @@ PG_DECIDER_FOCUS_PG_DESK_BIN="$(nix build ../..#pg-desk --no-link --print-out-pa
 
 The test does not depend on `pg-desk` behavior (a failed refresh only prints a warning), so a stub
 is enough for `PG_DECIDER_FOCUS_PG_DESK_BIN`.
+
+## The `minted-by:pg-decider` stamp and the watched feed
+
+Every bead the decider creates (all six kinds and its `human` escalation beads) carries the label
+`minted-by:pg-decider` (`workitem.MintedByLabel`), added once at creation by `apply.createArgs` and never
+by an update, so a `human` item's labels are never changed by the decider. Existing beads are labeled
+by the one-off `pg-decider-backfill-minted-by` script (dry-run by default). Behavior:
+`docs/behavior/pg-decider/work-items.md`.
+
+A deployment's watched open-PR-work feed MAY replace its three title/type scans with one label query.
+The label lives only in deployment config; pg-desk MUST NOT learn it.
+
+Before (three scans, unioned and de-duplicated by id):
+
+```text
+list --type merge-request --status open,in_progress,blocked
+list --type task --title-contains process-feedback: --status open,in_progress,blocked
+list --type task --title-contains review-pr: --status open,in_progress,blocked
+```
+
+After (one expression; the stamp also sits on kinds the old feed never listed, so two filters keep the
+set exact):
+
+```text
+list --label minted-by:pg-decider --has-metadata-key pr_number --exclude-label worker-ready --status open,in_progress,blocked
+```
+
+Parity check, which MUST pass before the switch and be re-run after it:
+
+1. Run the backfill to completion (`--apply`), then a dry run that reports nothing left to label.
+2. Run the three old expressions and the new one against the tracker with `--json`, and compare the
+   sorted, de-duplicated id sets of open, in-progress and blocked beads: they MUST be identical.
+3. Any id only in the old set is an unlabeled decider bead (re-run the backfill); any id only in the new
+   set is a stamped bead the extra filters should have dropped (fix the filters, do not switch).
+4. Roll back by restoring the three scans; the set is the same, at three calls per poll.

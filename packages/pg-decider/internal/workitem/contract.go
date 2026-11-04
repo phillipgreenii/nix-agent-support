@@ -26,6 +26,13 @@ const (
 	KindFocusItem Kind = "focus-item"
 )
 
+// MintedByLabel is the cross-kind stamp on every bead the decider creates,
+// whatever its kind and including its `human` escalation beads (spec 9.8,
+// "minted-by"). It is written once at creation and never added to an existing
+// bead by the decider (INV-DECIDER-4). It is not a row of the table below: the
+// per-kind Labels list what each kind needs and the stamp rides on top.
+const MintedByLabel = "minted-by:pg-decider"
+
 // KindContract is one row of the spec 9.8 work-item contract table.
 //
 // Encodings pinned for the packets that read and write these values:

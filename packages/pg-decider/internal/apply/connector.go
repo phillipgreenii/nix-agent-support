@@ -76,8 +76,9 @@ func metadataFlags(md map[string]string) []string {
 
 // MintedByLabel is the coarse label every bead the decider creates carries, so a
 // reader that wants the whole decider set can ask for one label instead of
-// scanning titles (bead pg2-eclw3j.11). Per-PR detail stays in metadata.
-const MintedByLabel = "minted-by:pg-decider"
+// scanning titles. Per-PR detail stays in metadata. The value is the work-item
+// contract's (workitem.MintedByLabel).
+const MintedByLabel = workitem.MintedByLabel
 
 // MintedBy returns labels plus MintedByLabel, sorted and de-duplicated.
 func MintedBy(labels []string) []string {
