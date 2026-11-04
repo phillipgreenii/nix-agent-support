@@ -112,6 +112,7 @@ type Store struct {
 	bRecs       int
 	bBytes      int64
 	bCommits    int
+	bTotalRecs  int64 // records counted into the bulk batch since it began
 	bulkRecords int
 	bulkBytes   int64
 

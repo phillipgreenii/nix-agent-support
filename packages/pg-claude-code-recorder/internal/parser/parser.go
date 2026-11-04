@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
@@ -47,6 +48,9 @@ type Parser struct {
 	bySrc map[string]source.Source
 
 	run sync.Mutex // one parse at a time
+
+	// filesDone and filesTotal track ParseAll for a progress reader.
+	filesDone, filesTotal atomic.Int64
 
 	// drain serializes Drain callers, so a Drain that finds nothing pending
 	// returns only after the Drain that took the pending files has finished them.
@@ -138,13 +142,17 @@ func (p *Parser) ParseAll() (first error) {
 	if err != nil {
 		return err
 	}
+	p.filesDone.Store(0)
+	p.filesTotal.Store(int64(len(files)))
 	p.cfg.Store.BulkBegin()
 	defer func() {
+		p.filesDone.Store(int64(len(files)))
 		if err := p.cfg.Store.BulkEnd(); err != nil && first == nil {
 			first = err
 		}
 	}()
-	for _, f := range files {
+	for i, f := range files {
+		p.filesDone.Store(int64(i))
 		if !p.HasSource(f.Source) {
 			continue
 		}
@@ -169,6 +177,12 @@ func (p *Parser) ParseAll() (first error) {
 		}
 	}
 	return first
+}
+
+// FileProgress reports how many files ParseAll has finished and how many it
+// has to visit (both 0 before it runs).
+func (p *Parser) FileProgress() (done, total int) {
+	return int(p.filesDone.Load()), int(p.filesTotal.Load())
 }
 
 func (p *Parser) reparseStale(f store.File) error {

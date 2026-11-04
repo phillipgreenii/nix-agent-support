@@ -255,6 +255,7 @@ func (s *Store) BulkAdd(records int, bytes int64) error {
 		return nil
 	}
 	s.bRecs += records
+	s.bTotalRecs += int64(records)
 	s.bBytes += bytes
 	if s.bRecs >= s.bulkRecords || s.bBytes >= s.bulkBytes {
 		return s.commitBatchLocked()
@@ -277,6 +278,14 @@ func (s *Store) BulkEnd() error {
 	err := s.commitBatchLocked()
 	s.batching = false
 	return err
+}
+
+// BulkTotals returns the records counted into the bulk batch and the batch
+// transactions committed so far (a progress reader, safe during the rebuild).
+func (s *Store) BulkTotals() (records int64, commits int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bTotalRecs, s.bCommits
 }
 
 // BulkCommits returns how many batch transactions a bulk rebuild committed.

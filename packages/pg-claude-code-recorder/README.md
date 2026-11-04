@@ -233,7 +233,11 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   segments and runs `wal_checkpoint(TRUNCATE)`. A rebuild is repeatable, so a crash in the middle
   may leave an unusable half file: a marker row (`meta.rebuild_unfinished`) is written durably first
   and cleared last, and `serve` (and every other start) refuses a file that still has it, telling
-  the operator to run `rebuild` again. `feed_waiters` is the gauge of waiters in progress.
+  the operator to run `rebuild` again. The `rebuild` command logs a `rebuild_progress` line every 30
+  seconds (`--progress-interval` changes it) with `records_parsed`, `records_per_sec` and
+  `commits_per_sec` over the interval, `files_done` of `files_total`, and the byte sizes of `index.db`
+  and its WAL, then a `rebuild_summary` with the totals and `wall_sec`; these are log fields only (the
+  command opens no metrics endpoint). `feed_waiters` is the gauge of waiters in progress.
 
 ```sh
 pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'

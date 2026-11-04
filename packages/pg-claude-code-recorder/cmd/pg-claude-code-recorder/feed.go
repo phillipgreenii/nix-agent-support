@@ -226,8 +226,12 @@ func (a *app) rebuild(args []string) int {
 	var c common
 	fs := newFlagSet("rebuild", a.errw)
 	c.bind(fs)
+	every := fs.Duration("progress-interval", defaultRebuildProgressEvery, "how often to log rebuild progress")
 	if err := fs.Parse(args); err != nil {
 		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+	}
+	if *every <= 0 {
+		return a.emitError(c.jsonOut, wire.ErrUsage, "--progress-interval must be positive")
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
@@ -237,11 +241,18 @@ func (a *app) rebuild(args []string) int {
 	if cl.Do(a.ctx, "GET", "/v1/hello", nil, &h) == nil {
 		return a.emitErrorFor(c.jsonOut, wire.ErrBusy, "the daemon is running on "+cfg.Socket+"; stop it first, or restart it with serve --rebuild", cfg.Socket)
 	}
-	d, err := serve.Open(serve.Options{Config: cfg, Logger: serve.NewLogger(a.errw), Version: Version, Rebuild: true, BulkRebuild: true})
+	log := serve.NewLogger(a.errw)
+	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		return a.emitError(c.jsonOut, wire.ErrUnavailable, fmt.Sprintf("cannot rebuild: %v", err))
 	}
+	rep := startRebuildReporter(log, cfg.StateDir, *every, func() rebuildSample {
+		recs, commits := d.Store().BulkTotals()
+		done, total := d.Parser().FileProgress()
+		return rebuildSample{records: recs, commits: commits, filesDone: done, filesTotal: total}
+	})
 	perr := d.Parser().ParseAll()
+	rep.finish()
 	if perr == nil {
 		// Clears the unfinished-rebuild marker; on any failure it stays and
 		// the next start refuses this index until the rebuild is rerun.
