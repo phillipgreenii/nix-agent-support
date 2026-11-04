@@ -158,6 +158,12 @@ func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string
 	}
 	c, ok := sweepCandidate(filepath.Join(dir, beadID), beadID, p.now(), worktreeSweepGrace(p.deps))
 	if !ok {
+		// Not a linked worktree: heal the unregistered leftover of a killed
+		// removal, which would otherwise fail this dispatch's `git worktree add`
+		// with "already exists" (leftoverdir.go).
+		if l, isLeftover := leftoverCandidate(filepath.Join(dir, beadID), beadID, p.cfg.RepoRoot, p.now(), worktreeSweepGrace(p.deps)); isLeftover {
+			reclaimLeftoverDir(ctx, p.role, p.deps, orphanEnv{open: worktree.GitOpener, cwds: processCWDs, lockDir: p.deps.LockDir}, l)
+		}
 		return nil
 	}
 	sessions, err := p.deps.CC.List(ctx)

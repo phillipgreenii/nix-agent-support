@@ -144,12 +144,19 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 	now := orphanNow(deps)
 	grace := worktreeSweepGrace(deps)
 	var candidates []leakedWorktree
+	var leftovers []leftoverDir
+	purgeTrash(dir, now, grace)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		c, ok := sweepCandidate(filepath.Join(dir, e.Name()), e.Name(), now, grace)
 		if !ok {
+			// Not a linked worktree: it may be the unregistered leftover of a killed
+			// removal (leftoverdir.go).
+			if l, isLeftover := leftoverCandidate(filepath.Join(dir, e.Name()), e.Name(), deps.Cfg.RepoRoot, now, grace); isLeftover {
+				leftovers = append(leftovers, l)
+			}
 			continue
 		}
 		if worktreeHeldByRow(sessions, c) {
@@ -207,6 +214,14 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 			if !ok {
 				noteExamined(env.lockDir, c, orphanNow(deps))
 			}
+		}
+	}
+	for _, l := range leftovers {
+		if removed >= worktreeSweepMaxPerPass || ctx.Err() != nil {
+			break
+		}
+		if reclaimLeftoverDir(ctx, role, deps, env, l) {
+			removed++
 		}
 	}
 	counts.setPhase(phaseScan, time.Since(scanStart))

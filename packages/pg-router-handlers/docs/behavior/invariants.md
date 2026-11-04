@@ -450,6 +450,23 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     the operating system drops it when its holder dies, so a killed handler stops protecting its
     worktree at the moment it dies.
 
+  A removal can be killed at its deadline (a very large checkout outlasts any fixed deadline),
+  leaving a partial checkout at the bead's path that git no longer registers: no `.git` entry and
+  no admin directory naming the path. Such an unregistered leftover directory MUST NOT make every
+  later dispatch of the bead fail with "already exists". The scan, and a dispatch's own-bead
+  examination before it prepares the worktree, MUST reclaim it only when ALL hold, each re-checked
+  under the same exclusive per-bead lock: it is a real, non-empty directory (never a symlink) older
+  than the grace window; it holds no `.git` entry at any depth and nothing but regular files and
+  directories (a symlink or special file anywhere keeps it, and nothing is ever followed); no admin
+  directory under the repository's worktrees directory names it, and an unreadable one keeps it;
+  no open or live session row names its bead or path; no live process has it, or a directory
+  inside it, as its working directory, and an unreadable process listing keeps it. Reclaiming MUST
+  first move the directory aside into a trash directory under the worktree directory and only then
+  delete it, so a delete killed part-way leaves a trash entry and never a half-deleted tree at the
+  bead's path; the scan purges trash entries older than the grace window. The interrupted removal
+  itself is not changed: it is healed by this reclaim on the next dispatch or scan. Each reclaim
+  is logged and recorded as a reclaimed-worktree event marked as a leftover.
+
   The scan MUST stay cheap when worktrees are kept, because the handler is one short-lived process
   per request and would otherwise re-run `git status` and a commit count on every kept worktree
   on every scan (each janitor run and, while `inlineSweeps` is on, each dispatch):
