@@ -13,7 +13,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
 )
 
-// The maintained lag state against the oracle (Parser.UpdateGauges) on one real
+// The maintained lag state against the oracle (Parser.RebuildLag) on one real
 // store: lag bytes, lag seconds and progress are equal after every step,
 // compared exactly (the clock is injected, so lag seconds is the same float
 // expression on both sides). unknown_kinds is compared by the unknown-kinds
@@ -46,11 +46,8 @@ func newLagKit(t *testing.T) *testkit.Kit {
 
 // lagGauges returns the oracle's three gauges.
 func lagGauges(k *testkit.Kit) (b, s, p float64) {
-	k.Parser.UpdateGauges()
-	reg := k.Obs.Reg
-	b, _ = reg.Gauge(parser.MParseLagBytes, nil)
-	s, _ = reg.Gauge(parser.MParseLagSecs, nil)
-	p, _ = reg.Gauge(parser.MParseProgress, nil)
+	r, _ := k.Parser.RebuildLag()
+	return float64(r.LagBytes), r.LagSecs, r.Progress
 	return b, s, p
 }
 

@@ -171,11 +171,15 @@ const (
 const (
 	MIngestResults          = "ingest_results_total"
 	MSweepFiles             = "sweep_files_total"
+	MLagRebuild             = "lag_rebuild_total"
 	MCopierLockWait         = "copier_lock_wait_seconds"
 	MStoreWriteLockWait     = "store_write_lock_wait_seconds"
 	SweepWalked             = "walked"
 	SweepUnchangedCandidate = "unchanged_candidate"
 )
+
+// LagRebuildResults are the values of the result label of lag_rebuild_total.
+var LagRebuildResults = []string{"match", "drift"}
 
 // IngestResults are the values of the result label of ingest_results_total:
 // the copier.Result.Action strings with hyphens mapped to underscores, plus
@@ -382,6 +386,9 @@ func (o *Obs) RegisterStandard() {
 	}
 	for _, r := range IngestResults {
 		o.Reg.Add(MIngestResults, map[string]string{"result": r}, 0)
+	}
+	for _, r := range LagRebuildResults {
+		o.Reg.Add(MLagRebuild, map[string]string{"result": r}, 0)
 	}
 	for _, oc := range SweepOutcomes {
 		o.Reg.Add(MSweepFiles, map[string]string{"outcome": oc}, 0)

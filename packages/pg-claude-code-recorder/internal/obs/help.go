@@ -48,6 +48,7 @@ var helpTexts = map[string]string{
 	MLoopLastTimestamp:        "Unix time the last pass of the loop finished.",
 	MLoopInFlight:             "Seconds the oldest running pass of the loop has been in flight, 0 when idle.",
 	MIngestResults:            "Ingest calls by result (the copier action, or error); also the count of copier_ingest passes.",
+	MLagRebuild:               "Lag reconcile runs (maintained parse-lag figures against a whole-table rebuild), by result (match, drift).",
 	MSweepFiles:               "Files per sweep by outcome: walked (seen by the directory walk) and unchanged_candidate (size, mtime and inode match the last observation and the stored size; a sweep skips such a file once its last ingest left it caught up, and re-ingests everything every 24 hours).",
 	MCopierLockWait:           "Seconds callers queued for the copier lock; contended acquisitions only.",
 	MStoreWriteLockWait:       "Seconds callers queued for the store's single write lock; contended acquisitions only.",

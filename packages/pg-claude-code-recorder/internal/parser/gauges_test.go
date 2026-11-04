@@ -57,24 +57,25 @@ func oracleGauges(t *testing.T, k *testkit.Kit, now int64) (lagBytes, lagSecs, p
 	return float64(lb), ls, prog
 }
 
-func TestUpdateGaugesMatchesTheAllGenerationsComputation(t *testing.T) {
+func TestRebuildLagMatchesTheAllGenerationsComputation(t *testing.T) {
 	now := time.Unix(0, 1_700_000_000_000_000_000+3_600_000_000_000)
 	k := testkit.NewWithClock(t, clock.NewFake(now))
 	a := k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
 	k.Add("example-proj", "history.jsonl", `{"display":"one","timestamp":1761768000000}`+"\n")
 	k.Parse()
 	// Fully parsed: nothing lags.
-	k.Parser.UpdateGauges()
 	check := func(label string) {
 		t.Helper()
 		wb, ws, wp := oracleGauges(t, k, now.UnixNano())
-		reg := k.Obs.Reg
-		for name, want := range map[string]float64{
-			parser.MParseLagBytes: wb, parser.MParseLagSecs: ws, parser.MParseProgress: wp,
+		r, ok := k.Parser.RebuildLag()
+		if !ok {
+			t.Fatalf("%s: rebuild failed", label)
+		}
+		for name, c := range map[string][2]float64{
+			parser.MParseLagBytes: {float64(r.LagBytes), wb}, parser.MParseLagSecs: {r.LagSecs, ws}, parser.MParseProgress: {r.Progress, wp},
 		} {
-			got, ok := reg.Gauge(name, nil)
-			if !ok || got != want {
-				t.Errorf("%s: %s = %v (set %v), want %v", label, name, got, ok, want)
+			if c[0] != c[1] {
+				t.Errorf("%s: %s = %v, want %v", label, name, c[0], c[1])
 			}
 		}
 	}
@@ -84,13 +85,11 @@ func TestUpdateGaugesMatchesTheAllGenerationsComputation(t *testing.T) {
 	k.Append(a, transcriptFixture)
 	k.NewGeneration(a, transcriptFixture)
 	k.Add("example-proj", "other.jsonl", transcriptFixture)
-	k.Parser.UpdateGauges()
-	if got, _ := k.Obs.Reg.Gauge(parser.MParseLagBytes, nil); got <= 0 {
+	if got, _ := k.Parser.RebuildLag(); got.LagBytes <= 0 {
 		t.Fatalf("fixture has no lag: %v", got)
 	}
 	check("lagging")
 	k.Parse()
 	k.Append(a, transcriptFixture)
-	k.Parser.UpdateGauges()
 	check("lagging again")
 }

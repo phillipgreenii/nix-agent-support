@@ -5,27 +5,16 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
 )
 
-func oracleKinds(t *testing.T, k interface {
-	UpdateGauges()
-}, gauge func() float64,
-) int {
-	t.Helper()
-	k.UpdateGauges()
-	return int(gauge())
-}
-
-func unknownEqual(t *testing.T, kit interface {
-	UpdateGauges()
-}, gauge func() float64, u *parser.Unknown, want int, label string,
-) {
+func unknownEqual(t *testing.T, kit *testkit.Kit, u *parser.Unknown, want int, label string) {
 	t.Helper()
 	if got := u.Count(); got != want {
 		t.Fatalf("%s: maintained count %d, want %d", label, got, want)
 	}
-	if o := oracleKinds(t, kit, gauge); o != want {
-		t.Fatalf("%s: oracle %d, want %d", label, o, want)
+	if r, _ := kit.Parser.RebuildLag(); r.Kinds != want {
+		t.Fatalf("%s: rebuildLag %d, want %d", label, r.Kinds, want)
 	}
 }
 
@@ -44,43 +33,42 @@ func TestUnknownKindsMaintained(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gauge := func() float64 { v, _ := k.Obs.Reg.Gauge(parser.MUnknownKinds, nil); return v }
-	unknownEqual(t, k.Parser, gauge, u, 0, "empty")
+	unknownEqual(t, k, u, 0, "empty")
 
 	k.Add("example-proj", "example-session-1.jsonl", "")
-	unknownEqual(t, k.Parser, gauge, u, 0, "known source only")
+	unknownEqual(t, k, u, 0, "known source only")
 
 	a := addUnknown(t, k.Store, "no-such-source", 10)
-	unknownEqual(t, k.Parser, gauge, u, 1, "one unknown file")
+	unknownEqual(t, k, u, 1, "one unknown file")
 	b := addUnknown(t, k.Store, "no-such-source", 11)
 	c := addUnknown(t, k.Store, "other-unknown", 12)
-	unknownEqual(t, k.Parser, gauge, u, 2, "distinct sources")
+	unknownEqual(t, k, u, 2, "distinct sources")
 
 	// A duplicate file record is ignored by the store and changes nothing.
 	if err := k.Store.Commit(&store.Rec{T: store.TFile, At: 13, File: a, Source: "no-such-source", Mode: "append", Dev: 1, Ino: uint64(a)}); err != nil {
 		t.Fatal(err)
 	}
-	unknownEqual(t, k.Parser, gauge, u, 2, "duplicate record")
+	unknownEqual(t, k, u, 2, "duplicate record")
 
 	// Deleting one of two files of a source keeps the source; deleting the
 	// last one removes it.
 	if err := k.Store.Commit(&store.Rec{T: store.TState, At: 14, File: a, State: "deleted"}); err != nil {
 		t.Fatal(err)
 	}
-	unknownEqual(t, k.Parser, gauge, u, 2, "one of two deleted")
+	unknownEqual(t, k, u, 2, "one of two deleted")
 	if err := k.Store.Commit(&store.Rec{T: store.TState, At: 15, File: b, State: "deleted"}); err != nil {
 		t.Fatal(err)
 	}
-	unknownEqual(t, k.Parser, gauge, u, 1, "source's files all deleted")
+	unknownEqual(t, k, u, 1, "source's files all deleted")
 	// A tombstone deletes too, and a state change back revives.
 	if err := k.Store.Commit(&store.Rec{T: store.TTomb, At: 16, File: c, Path: "/x"}); err != nil {
 		t.Fatal(err)
 	}
-	unknownEqual(t, k.Parser, gauge, u, 0, "tombstoned")
+	unknownEqual(t, k, u, 0, "tombstoned")
 	if err := k.Store.Commit(&store.Rec{T: store.TState, At: 17, File: c, State: "ok"}); err != nil {
 		t.Fatal(err)
 	}
-	unknownEqual(t, k.Parser, gauge, u, 1, "revived")
+	unknownEqual(t, k, u, 1, "revived")
 }
 
 // A restart: files of an unknown source that exist before the set is started
@@ -96,8 +84,7 @@ func TestUnknownKindsSeededAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gauge := func() float64 { v, _ := k.Obs.Reg.Gauge(parser.MUnknownKinds, nil); return v }
-	unknownEqual(t, k.Parser, gauge, u, 1, "after seed")
+	unknownEqual(t, k, u, 1, "after seed")
 	addUnknown(t, k.Store, "third", 13)
-	unknownEqual(t, k.Parser, gauge, u, 2, "after new file")
+	unknownEqual(t, k, u, 2, "after new file")
 }

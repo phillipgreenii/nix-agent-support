@@ -959,20 +959,31 @@ ON CONFLICT(source,rtype,path) DO UPDATE SET count=count+excluded.count`, src.Na
 	return nil
 }
 
-// UpdateGauges sets the parse-lag gauges, parse progress and the unknown-kinds
-// gauge from the store.
-func (p *Parser) UpdateGauges() {
+// Rebuilt is the lag figures RebuildLag computes from the whole tables.
+type Rebuilt struct {
+	LagBytes int64
+	LagSecs  float64
+	Progress float64
+	Kinds    int // distinct sources with a live file but no parser
+}
+
+// RebuildLag computes the parse-lag figures, parse progress and the unknown
+// kinds count from the whole tables (AllFiles, the lagging generations and
+// their copy commits). It is the reference the maintained state is compared
+// against: run once at start and again by the reconcile, never by a gauge
+// refresh. It sets no gauge. ok is false when a store read failed.
+func (p *Parser) RebuildLag() (r Rebuilt, ok bool) {
 	files, err := p.cfg.Store.AllFiles()
 	if err != nil {
-		return
+		return r, false
 	}
 	totals, err := p.cfg.Store.OffsetTotalsByFile()
 	if err != nil {
-		return
+		return r, false
 	}
 	lagging, err := p.cfg.Store.LaggingGenerations()
 	if err != nil {
-		return
+		return r, false
 	}
 	kinds := map[string]bool{}
 	var copied, parsed int64
@@ -987,33 +998,37 @@ func (p *Parser) UpdateGauges() {
 		copied += t.Copy
 		parsed += t.Parse
 	}
-	var lagBytes int64
-	var lagSecs float64
 	now := p.cfg.Clock.Now().UnixNano()
 	for _, g := range lagging {
-		f, ok := fileByID(files, g.File)
-		if !ok || !p.HasSource(f.Source) {
+		f, found := fileByID(files, g.File)
+		if !found || !p.HasSource(f.Source) {
 			continue
 		}
-		if lag := g.CopyOffset - g.ParseOffset; lag > lagBytes {
-			lagBytes = lag
+		if lag := g.CopyOffset - g.ParseOffset; lag > r.LagBytes {
+			r.LagBytes = lag
 		}
 		cc, _ := p.cfg.Store.CopyCommits(g.File)
 		if s := seenAt(cc, g.Gen, g.ParseOffset); s > 0 {
-			if d := float64(now-s) / 1e9; d > lagSecs {
-				lagSecs = d
+			if d := float64(now-s) / 1e9; d > r.LagSecs {
+				r.LagSecs = d
 			}
 		}
 	}
-	prog := 1.0
+	r.Progress = 1.0
 	if copied > 0 {
-		prog = float64(parsed) / float64(copied)
+		r.Progress = float64(parsed) / float64(copied)
 	}
+	r.Kinds = len(kinds)
+	return r, true
+}
+
+// SetLagGauges sets the four gauges from one set of figures.
+func (p *Parser) SetLagGauges(lagBytes int64, lagSecs, progress float64, kinds int) {
 	r := p.cfg.Obs.Reg
 	r.Set(MParseLagBytes, nil, float64(lagBytes))
 	r.Set(MParseLagSecs, nil, lagSecs)
-	r.Set(MParseProgress, nil, prog)
-	r.Set(MUnknownKinds, nil, float64(len(kinds)))
+	r.Set(MParseProgress, nil, progress)
+	r.Set(MUnknownKinds, nil, float64(kinds))
 }
 
 // noteParseOffset tells the store's OnOffsets subscribers that the UPDATE just

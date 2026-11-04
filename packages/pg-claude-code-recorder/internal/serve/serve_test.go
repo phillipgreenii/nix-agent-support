@@ -284,7 +284,7 @@ func TestParsedRecordsAnswerQueryAndSearchThroughTheDaemonOps(t *testing.T) {
 	if cov.BadLines != 1 || cov.ParseLagBytesMax != 0 || len(cov.FileList) != 1 || cov.FileList[0].ParseOffset != cov.FileList[0].CopyOffset {
 		t.Fatalf("coverage %+v", cov)
 	}
-	d.Parser().UpdateGauges()
+	d.refreshGauges()
 	if v, ok := d.Obs().Reg.Gauge("parse_progress", nil); !ok || v != 1 {
 		t.Fatalf("parse_progress %v %v", v, ok)
 	}

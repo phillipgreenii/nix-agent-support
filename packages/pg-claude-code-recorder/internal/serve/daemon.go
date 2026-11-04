@@ -494,7 +494,9 @@ func (d *Daemon) Start() error {
 	endPhase = d.su.begin("tracker_startup", true)
 	d.tr.Startup()
 	endPhase()
-	d.refreshing.Add(7)
+	d.startLagRebuild()
+	d.refreshing.Add(8)
+	go d.lagReconcileLoop()
 	d.statusLoopOn.Store(true)
 	go d.statusLoop()
 	go d.walCheckpointLoop()
@@ -695,13 +697,76 @@ func (d *Daemon) refreshGauges() {
 	d.obs.Reg.Observe(obs.MRefreshGaugesDuration, d.clock.Now().Sub(start).Seconds())
 }
 
+// setMaintainedLagGauges sets the four parse gauges from the maintained state:
+// no whole-table read.
+func (d *Daemon) setMaintainedLagGauges() {
+	b, secs, prog := d.lag.Gauges(d.clock.Now())
+	d.prs.SetLagGauges(b, secs, prog, d.unknown.Count())
+}
+
+// startLagRebuild is the one whole-table rebuild at start: it sets the gauges
+// from the rebuilt figures, which the first reconcile then compares against.
+func (d *Daemon) startLagRebuild() {
+	if r, ok := d.prs.RebuildLag(); ok {
+		d.prs.SetLagGauges(r.LagBytes, r.LagSecs, r.Progress, r.Kinds)
+	}
+}
+
+// Lag reconcile cadence: the first run 5 minutes after start (bounding a missed
+// hook), then hourly.
+const (
+	lagReconcileFirst = 5 * time.Minute
+	lagReconcileEvery = time.Hour
+)
+
+// lagReconcileLoop re-runs the whole-table rebuild on the reconcile cadence and
+// compares it with the maintained values.
+func (d *Daemon) lagReconcileLoop() {
+	defer d.refreshing.Done()
+	wait := lagReconcileFirst
+	for {
+		tick, stop := d.timer("lag_reconcile", wait)
+		select {
+		case <-d.stop:
+			stop()
+			return
+		case <-tick:
+			d.reconcileLag()
+		}
+		stop()
+		wait = lagReconcileEvery
+	}
+}
+
+// reconcileLag compares the maintained lag figures with a whole-table rebuild:
+// bytes and unknown kinds exactly, lag seconds within one second. A difference
+// logs WARN lag_drift with both values and counts result=drift, else match.
+func (d *Daemon) reconcileLag() {
+	r, ok := d.prs.RebuildLag()
+	if !ok {
+		return
+	}
+	b, secs, _ := d.lag.Gauges(d.clock.Now())
+	kinds := d.unknown.Count()
+	dsec := secs - r.LagSecs
+	if b != r.LagBytes || kinds != r.Kinds || dsec > 1 || dsec < -1 {
+		d.obs.Log.Warn("lag_drift",
+			"maintained_lag_bytes", b, "rebuilt_lag_bytes", r.LagBytes,
+			"maintained_lag_seconds", secs, "rebuilt_lag_seconds", r.LagSecs,
+			"maintained_unknown_kinds", kinds, "rebuilt_unknown_kinds", r.Kinds)
+		d.obs.Reg.Add(obs.MLagRebuild, map[string]string{"result": "drift"}, 1)
+		return
+	}
+	d.obs.Reg.Add(obs.MLagRebuild, map[string]string{"result": "match"}, 1)
+}
+
 // refreshGaugesPass is the body of one refresh_gauges pass.
 func (d *Daemon) refreshGaugesPass() {
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
 	if d.st != nil {
 		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
 	}
-	d.prs.UpdateGauges()
+	d.setMaintainedLagGauges()
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)
 	}
