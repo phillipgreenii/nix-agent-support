@@ -292,6 +292,20 @@ subagent. The rejecting condition is being ALREADY a dispatched subagent, not be
 `subagent_type: "fork"`. 77 retry chains (70 FAILED retries) show workers re-issuing the identical
 rejected call instead of adapting.
 
+## Estimates and Progress (E-1..E-5)
+
+The original rule banned all time estimates because agents kept volunteering unhelpful ones nobody
+asked for. Side effect: agents also refused ("I can't provide an estimate") when asked directly, and
+when a running migration had plenty of progress data. Operator rulings (Phillip, 2026-11-04): a
+direct question about a duration, even for a bead that has not started, gets a best-effort estimate;
+unprompted durations in plans, scopes and decompositions stay unwanted, and agents should not spend
+reasoning on "1 hour or 2 weeks"; projecting from measured progress is wanted (23 minutes elapsed at
+10% done gives about 23 x 9 more minutes, adjusted when the agent knows the work is uneven).
+
+The test is whether a measurement exists, not whether the word "estimate" appears. E-3 states
+0 < f <= 1 because the formula divides by zero at f = 0; E-4 covers f = 0 or unknown. "Unstarted"
+is defined as "no measurable progress yet" so a claimed bead with no commits is not misread.
+
 ## Beads / Dolt no-autostart
 
 See ADR 0032 (`docs/adr/0032-beads-dolt-no-autostart.md`). The runtime text keeps three bullets:

@@ -155,9 +155,13 @@ Primary branch = `pgii-integrate-branch.primaryBranch` (git config) → `git sym
 
 - **CRITICAL**: NEVER include calculated numbers without showing calculation method
 
-#### Estimates
+#### Estimates and Progress
 
-- **CRITICAL**: NEVER provide time estimates; signal effort with t-shirt sizes (S/M/L/XL)
+- **E-1** MUST NOT volunteer a duration for work with no measurable progress yet. In plans, scopes and decompositions, size work S/M/L/XL and spend no reasoning converting sizes to time.
+- **E-2** When asked (by the user or a caller) how long work will take or remain, MUST give a best-effort estimate with a range, even for unstarted work; MUST NOT reply "I can't estimate". Show the calculation.
+- **E-3** With measured progress (f = fraction done, 0 < f <= 1), project `remaining = elapsed x (1 - f) / f`, adjusted for any known uneven work. Status reports on running work MAY include this.
+- **E-4** With f = 0 or unknown, base the estimate on named similar finished work (e.g. closed beads' claim-to-close) and name the cheapest way to get a progress signal (a count, a log line, a first batch).
+- **E-5** State the key assumption (e.g. constant rate).
 
 ## Rules for Interactive Sessions Only
 
