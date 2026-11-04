@@ -162,9 +162,30 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 // fillVersions sets the parser version of the Conversation's records and the
 // Claude Code version that wrote them (the registry's version field).
 func (s *Settler) fillVersions(info *WhereInfo, session string) {
-	_ = s.st.Read().QueryRow(`SELECT COALESCE(MAX(parser_version),0) FROM records WHERE session=?`, session).Scan(&info.ParserVersion)
-	_ = s.st.Read().QueryRow(claudeVersionQuery, session).Scan(&info.ClaudeCodeVersion)
+	byRef := s.st.SessionRefReady()
+	_ = s.st.Read().QueryRow(pick(byRef, parserVersionQuery, parserVersionQueryRef), session).Scan(&info.ParserVersion)
+	_ = s.st.Read().QueryRow(pick(byRef, claudeVersionQuery, claudeVersionQueryRef), session).Scan(&info.ClaudeCodeVersion)
 }
+
+// pick returns the session_ref form of a query on a store marked ready for it
+// (store.SessionRefReady) and the text form otherwise, which is what a store
+// that predates session_ref still answers from until it is rebuilt.
+func pick(byRef bool, text, ref string) string {
+	if byRef {
+		return ref
+	}
+	return text
+}
+
+// sessionRefExpr resolves the session id bound to the one placeholder to its
+// reference, once, in a scalar subquery; records_session_ref_source_time then
+// serves the rest. An unknown id yields NULL and matches no row.
+const sessionRefExpr = `(SELECT session_ref FROM sessions WHERE session_id=?)`
+
+const (
+	parserVersionQuery    = `SELECT COALESCE(MAX(parser_version),0) FROM records WHERE session=?`
+	parserVersionQueryRef = `SELECT COALESCE(MAX(parser_version),0) FROM records WHERE session_ref=` + sessionRefExpr
+)
 
 // The three registry reads below filter records by session and by source. The
 // leading + on r.source keeps the planner on records_session (a handful of rows
@@ -180,3 +201,17 @@ WHERE r.session=? AND +r.source='session-registry' ORDER BY r.file_id, r.gen`
 const registryNamesQuery = `SELECT 1 FROM records r JOIN files f ON f.id=r.file_id
 JOIN paths p ON p.file_id=f.id AND p.closed_ns IS NULL
 WHERE +r.source='session-registry' AND r.session=? AND r.gen=f.cur_gen LIMIT 1`
+
+// The same three reads over session_ref, used on a store marked ready for it.
+// The session_ref index carries source as its second key, so the source
+// condition is part of the search and needs no leading +.
+const claudeVersionQueryRef = `SELECT f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='version')
+WHERE r.session_ref=` + sessionRefExpr + ` AND r.source='session-registry' ORDER BY r.id DESC LIMIT 1`
+
+const registryVersionsQueryRef = `SELECT DISTINCT r.file_id, r.gen, sn.size FROM records r
+JOIN snapshots sn ON sn.file_id=r.file_id AND sn.version=r.gen
+WHERE r.session_ref=` + sessionRefExpr + ` AND r.source='session-registry' ORDER BY r.file_id, r.gen`
+
+const registryNamesQueryRef = `SELECT 1 FROM records r JOIN files f ON f.id=r.file_id
+JOIN paths p ON p.file_id=f.id AND p.closed_ns IS NULL
+WHERE r.session_ref=` + sessionRefExpr + ` AND r.source='session-registry' AND r.gen=f.cur_gen LIMIT 1`

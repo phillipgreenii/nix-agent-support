@@ -1224,7 +1224,7 @@ func (s *Settler) hold(c *conv, fails []Failure, now time.Time, wasHeld bool) (O
 // registryVersions returns the registry file versions whose records name the
 // session.
 func (s *Settler) registryVersions(session string) ([]store.ManifestRegistry, error) {
-	rows, err := s.st.Read().Query(registryVersionsQuery, session)
+	rows, err := s.st.Read().Query(pick(s.st.SessionRefReady(), registryVersionsQuery, registryVersionsQueryRef), session)
 	if err != nil {
 		return nil, err
 	}

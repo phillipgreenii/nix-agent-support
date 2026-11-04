@@ -251,9 +251,22 @@ func (s *Reader) TornTailOf(file int64, gen int) (TornTail, bool) {
 	return x, err == nil
 }
 
-// SessionOfFile is the sorted distinct session ids the records of a file carry.
-func (s *Reader) SessionsOfFile(file int64) ([]string, error) {
-	rows, err := s.q.Query(`SELECT DISTINCT session FROM records WHERE file_id=? AND session<>''`, file)
+// SessionsOfFile is the sorted distinct session ids the records of a file carry,
+// read through session_ref and sessions on a store marked ready for it
+// (SessionRefReady) and from records.session otherwise.
+func (s *Store) SessionsOfFile(file int64) ([]string, error) {
+	if s.SessionRefReady() {
+		return s.Reader.sessionsOfFile(sessionsOfFileRefQuery, file)
+	}
+	return s.Reader.sessionsOfFile(sessionsOfFileQuery, file)
+}
+
+const sessionsOfFileQuery = `SELECT DISTINCT session FROM records WHERE file_id=? AND session<>''`
+
+const sessionsOfFileRefQuery = `SELECT DISTINCT s.session_id FROM records r JOIN sessions s ON s.session_ref=r.session_ref WHERE r.file_id=? AND s.session_id<>''`
+
+func (s *Reader) sessionsOfFile(q string, file int64) ([]string, error) {
+	rows, err := s.q.Query(q, file)
 	if err != nil {
 		return nil, err
 	}

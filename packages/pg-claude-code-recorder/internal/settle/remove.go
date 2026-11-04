@@ -359,7 +359,7 @@ func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now t
 // session (a Process may still be running it, or just left it behind).
 func (s *Settler) registryNames(session string) bool {
 	var one int
-	err := s.st.Read().QueryRow(registryNamesQuery, session).Scan(&one)
+	err := s.st.Read().QueryRow(pick(s.st.SessionRefReady(), registryNamesQuery, registryNamesQueryRef), session).Scan(&one)
 	return err == nil
 }
 
