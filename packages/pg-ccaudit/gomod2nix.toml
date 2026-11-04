@@ -9,7 +9,6 @@ cachePackages = [
   'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest',
-  'github.com/phillipgreenii/x/pprofserver',
   'github.com/remyoudompheng/bigfft',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
@@ -58,6 +57,10 @@ cachePackages = [
     version = 'v1.1.0'
     hash = 'sha256-Qa7BSAXtgH7CB5STBiXTTOCgivWUiA65u3KxDOSZCkQ='
 
+  [mod.'github.com/gofrs/flock']
+    version = 'v0.13.0'
+    hash = 'sha256-5imm90Iqstu+PnSX9RLZMHUG7qW2KX2t3xIpZ2cXSco='
+
   [mod.'github.com/google/uuid']
     version = 'v1.6.0'
     hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
@@ -69,10 +72,6 @@ cachePackages = [
   [mod.'github.com/ncruces/go-strftime']
     version = 'v1.1.0'
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
-
-  [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261015022436-7b4c351b3c34'
-    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -97,7 +96,3 @@ cachePackages = [
   [mod.'modernc.org/sqlite']
     version = 'v1.61.0'
     hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='
-
-  [mod.'github.com/gofrs/flock']
-    version = 'v0.13.0'
-    hash = 'sha256-5imm90Iqstu+PnSX9RLZMHUG7qW2KX2t3xIpZ2cXSco='

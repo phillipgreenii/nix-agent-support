@@ -28,7 +28,7 @@ func writeParsed(ctx context.Context, tx *sql.Tx, path string, parsed parsedFile
 	}
 	defer func() { _ = evStmt.Close() }()
 	for _, e := range parsed.events {
-		if _, err := evStmt.ExecContext(ctx, path, e.seq, e.uuid, e.parentUUID, e.sessionID, e.ts,
+		if _, err := evStmt.ExecContext(ctx, path, e.seq, e.uuid, e.parentUUID, e.sessionID, normTS(e.ts),
 			e.typ, e.isSidechain, e.cwd, e.gitBranch, e.permissionMode, e.durationMs, e.hookCount,
 			e.hookErrors, e.promptSource, e.userType, e.sourceToolAssistantUUID, e.promptID,
 			e.entrypoint); err != nil {
@@ -119,4 +119,13 @@ func writeParsed(ctx context.Context, tx *sql.Tx, path string, parsed parsedFile
 	}
 
 	return nil
+}
+
+// normTS gives every events.ts one spelling (UTC, millisecond precision), so a
+// row written from a feed field and one written from a raw line sort alike.
+func normTS(ts *string) any {
+	if ts == nil {
+		return nil
+	}
+	return isoMillis(*ts)
 }

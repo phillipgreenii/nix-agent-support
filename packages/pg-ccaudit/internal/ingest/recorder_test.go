@@ -92,7 +92,7 @@ func TestRecorderIngestSnapshotThenOnlyNewRecords(t *testing.T) {
 	env.Append(rel, `{"type":"assistant","uuid":"a5","sessionId":"example-session-1","timestamp":"2026-10-29T20:00:04Z","message":{"id":"m3","role":"assistant","content":[{"type":"tool_use","id":"tu_3","name":"Bash","input":{"command":"ls"}}]}}`+"\n")
 	env.Settle()
 	third := recSweep(t, db, c)
-	if third.Entries != 1 || third.ToolCalls != 1 {
+	if third.Entries != 2 || third.ToolCalls != 1 {
 		t.Fatalf("third sweep: %+v", third)
 	}
 	if n := rowCount(t, db, `SELECT COUNT(*) FROM tool_calls`); n != 3 {
@@ -153,7 +153,7 @@ func TestRecorderIngestResyncsOnAnExpiredCursor(t *testing.T) {
 	if n := rowCount(t, db, `SELECT COUNT(*) FROM tool_calls`); n != 1 {
 		t.Fatalf("tool_calls=%d after resync, want 1", n)
 	}
-	if cur := rowCount(t, db, `SELECT COUNT(*) FROM feed_cursors WHERE cursor <> '999:1'`); cur != 2 {
+	if cur := rowCount(t, db, `SELECT COUNT(*) FROM feed_cursors WHERE cursor <> '999:1'`); cur != 4 {
 		t.Fatalf("cursors were not replaced: %d", cur)
 	}
 }
@@ -178,3 +178,70 @@ func TestRecorderDownIsReportedNotFallenBack(t *testing.T) {
 }
 
 func isDown(err error) bool { return errors.Is(err, client.ErrDown) }
+
+const (
+	userTyped  = `{"type":"user","uuid":"u1","sessionId":"example-session-1","timestamp":"2026-10-29T19:59:58Z","promptSource":"typed","message":{"role":"user","content":"please list the example files"}}` + "\n"
+	asstPlain  = `{"type":"assistant","uuid":"a0","parentUuid":"u1","sessionId":"example-session-1","timestamp":"2026-10-29T19:59:59Z","message":{"id":"m0","role":"assistant","content":[{"type":"text","text":"Sure, listing now."}]}}` + "\n"
+	systemHook = `{"type":"system","uuid":"s1","sessionId":"example-session-1","timestamp":"2026-10-29T20:00:05Z","hookCount":3,"hookErrors":["example hook failed"]}` + "\n"
+)
+
+func TestRecorderIngestFillsEveryKindOfRow(t *testing.T) {
+	env := clienttest.Start(t)
+	env.Write(rel, userTyped+asstPlain+callOne+resErr+callTwo+resOK+systemHook)
+	env.Write("projects/example-proj/example-session-1.status.jsonl", `{"rate_limits":{"five_hour":{"used_percentage":3}}}`+"\n")
+	env.Settle()
+	db := openDB(t)
+	recSweep(t, db, env.Dial(context.Background()))
+
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM events`); n != 7 {
+		t.Fatalf("events=%d, want 7 (one per transcript line, none for the status file)", n)
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM files`); n != 1 {
+		t.Fatalf("files=%d, want only the transcript", n)
+	}
+	var txt, src string
+	var ln int
+	if err := db.QueryRow(`SELECT text, text_len FROM user_text`).Scan(&txt, &ln); err != nil || txt != "please list the example files" {
+		t.Fatalf("user_text: %q %v", txt, err)
+	}
+	if err := db.QueryRow(`SELECT prompt_source FROM events WHERE uuid='u1'`).Scan(&src); err != nil || src != "typed" {
+		t.Fatalf("prompt_source=%q err=%v", src, err)
+	}
+	if err := db.QueryRow(`SELECT text FROM assistant_text`).Scan(&txt); err != nil || txt != "Sure, listing now." {
+		t.Fatalf("assistant_text without a tool call: %q %v", txt, err)
+	}
+	var hc int
+	var he string
+	if err := db.QueryRow(`SELECT hook_count, hook_errors FROM events WHERE uuid='s1'`).Scan(&hc, &he); err != nil || hc != 3 || he != `["example hook failed"]` {
+		t.Fatalf("hook keys: %d %q %v", hc, he, err)
+	}
+	var ts string
+	if err := db.QueryRow(`SELECT ts FROM events WHERE uuid='a0'`).Scan(&ts); err != nil || ts != "2026-10-29T19:59:59.000Z" {
+		t.Fatalf("ts=%q err=%v", ts, err)
+	}
+	// Per-file order is the record offset: a line's seq grows with its position.
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM events a JOIN events b ON a.uuid='a0' AND b.uuid='u1' WHERE a.seq > b.seq AND a.path = b.path`); n != 1 {
+		t.Fatalf("seq does not follow the file order")
+	}
+	// The adjacency join: the error result and the narration line beside it.
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM tool_results r JOIN events e ON e.path=r.path AND e.seq=r.seq WHERE r.is_error=1 AND e.uuid='a2'`); n != 1 {
+		t.Fatalf("error result is not on its line's event row")
+	}
+}
+
+func TestRecorderIngestRerunKeepsRawDerivedColumns(t *testing.T) {
+	env := clienttest.Start(t)
+	env.Write(rel, userTyped+systemHook)
+	env.Settle()
+	db := openDB(t)
+	c := env.Dial(context.Background())
+	recSweep(t, db, c)
+	if _, err := db.Exec(`UPDATE feed_cursors SET cursor = '999:1' WHERE name = 'lines'`); err != nil {
+		t.Fatal(err)
+	}
+	recSweep(t, db, c) // the lines subscription resyncs and upserts every event again
+	var src string
+	if err := db.QueryRow(`SELECT prompt_source FROM events WHERE uuid='u1'`).Scan(&src); err != nil || src != "typed" {
+		t.Fatalf("a replayed line event dropped prompt_source: %q %v", src, err)
+	}
+}

@@ -26,9 +26,9 @@ func cmdIngest(ctx context.Context, args []string, stdout, stderr *os.File) erro
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `pg-ccaudit ingest — index new tool calls and results from the recorder
 
-Reads the recorder daemon's change feed through two subscriptions (every tool
-call and result without bodies; bodies only for errored results), each with its
-own cursor kept in the database. A new subscriber starts from a snapshot; an
+Reads the recorder daemon's change feed through four subscriptions (the
+transcript lines; tool calls and results without bodies; error bodies; user and
+assistant text), each with its own cursor kept in the database. A new subscriber starts from a snapshot; an
 expired cursor resyncs from a snapshot. Claude's own files are never read: with
 the recorder down this prints "recorder offline" and exits 0, and the next tick
 polls again.

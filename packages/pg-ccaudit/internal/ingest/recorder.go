@@ -14,19 +14,35 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
-// The two feed subscriptions of the recorder-backed ingest. Each keeps its own
+// The four feed subscriptions of the recorder-backed ingest. Every one names
+// source claude-transcript (so a status file is never ingested) and keeps its own
 // cursor, persisted in the feed_cursors table.
 //
-//	SubAllTools   every tool_use and every tool_result with its id, is_error and
-//	              body length, no body: the denominators of every rate.
-//	SubErrorBodies  only the tool_results where is_error is true; their bodies
-//	              (and the line around them) are read from the recorder's copy.
+//	SubLines   every transcript line record with its indexed scalar fields and no
+//	           bodies: the events rows. A system line also gets one raw read, for
+//	           hookCount and hookErrors, which the recorder does not index.
+//	SubTools   every tool_use and tool_result with its id, is_error and body
+//	           length, no body (the denominators of every rate). A tool_use's input
+//	           is an opaque field the feed cannot project, so its line is read once.
+//	SubErrors  the tool_results where is_error is true; their bodies are read from
+//	           the recorder's copy (a body is not a projectable field).
+//	SubText    the human and assistant text records (and thinking blocks only while
+//	           the thinking capture flag is on); the text is not projectable either,
+//	           so the line is read once and parsed with the same code the file
+//	           reader used.
 //
-// The recorder does the coarse filtering; everything else (signature, lead_cmd,
-// the line parse) stays here.
+// Per-file order: ccaudit's seq is the record id's offset within one file id and
+// generation (path is "<file>/g<gen>"). The item index inside a line is not
+// needed in the schema: every ccaudit table keeps one row per line per kind, or is
+// keyed by tool_use_id.
+//
+// The recorder does the coarse filtering; the signature, lead_cmd and the line
+// parse stay here.
 const (
-	SubAllTools    = "all-tools"
-	SubErrorBodies = "error-bodies"
+	SubLines  = "lines"
+	SubTools  = "tools"
+	SubErrors = "errors"
+	SubText   = "text"
 )
 
 // ErrRecorderDown means the recorder daemon is not answering. The ingest does
@@ -53,6 +69,8 @@ type RecorderStats struct {
 	Resets     int
 	Resyncs    int
 	LinesRead  int
+	Lines      int
+	Texts      int
 	ToolCalls  int64
 	ToolResult int64
 	Errors     int64
@@ -61,8 +79,8 @@ type RecorderStats struct {
 
 // Summary is one flat key=value line.
 func (s RecorderStats) Summary() string {
-	return fmt.Sprintf("ingest complete: entries=%d resets=%d resyncs=%d lines_read=%d tool_calls=%d tool_results=%d errors=%d elapsed=%s",
-		s.Entries, s.Resets, s.Resyncs, s.LinesRead, s.ToolCalls, s.ToolResult, s.Errors, s.Elapsed.Round(time.Millisecond))
+	return fmt.Sprintf("ingest complete: entries=%d resets=%d resyncs=%d lines=%d texts=%d lines_read=%d tool_calls=%d tool_results=%d errors=%d elapsed=%s",
+		s.Entries, s.Resets, s.Resyncs, s.Lines, s.Texts, s.LinesRead, s.ToolCalls, s.ToolResult, s.Errors, s.Elapsed.Round(time.Millisecond))
 }
 
 type subscription struct {
@@ -73,15 +91,32 @@ type subscription struct {
 
 func rawJSON(v string) json.RawMessage { return json.RawMessage(v) }
 
-func subscriptions() []subscription {
-	toolTypes := &client.Filter{Field: "type", In: []any{"tool_use", "tool_result"}}
-	errResults := &client.Filter{All: []client.Filter{
+func transcript() client.Filter {
+	return client.Filter{Field: "source", Eq: rawJSON(`"claude-transcript"`)}
+}
+
+func subscriptions(thinking bool) []subscription {
+	lines := &client.Filter{All: []client.Filter{transcript(), {Field: "item", Eq: rawJSON(`-1`)}}}
+	tools := &client.Filter{All: []client.Filter{transcript(), {Field: "type", In: []any{"tool_use", "tool_result"}}}}
+	errs := &client.Filter{All: []client.Filter{
+		transcript(),
 		{Field: "type", Eq: rawJSON(`"tool_result"`)},
 		{Field: "is_error", Eq: rawJSON(`true`)},
 	}}
+	types := []any{"text"}
+	if thinking {
+		types = append(types, "thinking")
+	}
+	text := &client.Filter{All: []client.Filter{transcript(), {Field: "type", In: types}}}
 	return []subscription{
-		{SubAllTools, toolTypes, []string{"type", "session", "time", "tool_use_id", "is_error", "body_length"}},
-		{SubErrorBodies, errResults, []string{"type", "session", "time", "tool_use_id", "is_error", "body_length"}},
+		{SubLines, lines, []string{
+			"type", "session", "time", "uuid", "parent_uuid", "is_sidechain", "cwd",
+			"git_branch", "permission_mode", "duration_ms", "user_type", "source_tool_assistant_uuid",
+			"prompt_id", "entrypoint",
+		}},
+		{SubTools, tools, []string{"type", "session", "time", "tool_use_id", "is_error", "body_length"}},
+		{SubErrors, errs, []string{"type", "session", "time", "tool_use_id", "is_error", "body_length"}},
+		{SubText, text, []string{"type", "session", "time"}},
 	}
 }
 
@@ -94,9 +129,18 @@ func RunRecorder(ctx context.Context, db *sql.DB, opt RecorderOptions) (Recorder
 	if opt.Client == nil {
 		return st, ErrRecorderDown
 	}
-	for _, s := range subscriptions() {
+	for _, s := range subscriptions(opt.Thinking) {
+		resets := st.Resets
 		if err := runSub(ctx, db, opt, s, &st); err != nil {
 			return st, err
+		}
+		if s.name == SubLines && st.Resets > resets {
+			// A reset wiped the rows of a re-parsed file for every table. The other
+			// subscriptions' cursors may already be past the records that rewrite
+			// them, so they start over from a snapshot (idempotent upserts).
+			if _, err := db.ExecContext(ctx, `DELETE FROM feed_cursors WHERE name <> ?`, SubLines); err != nil {
+				return st, fmt.Errorf("rewind cursors after a reset: %w", err)
+			}
 		}
 	}
 	st.Elapsed = time.Since(start)
@@ -216,6 +260,22 @@ func readLine(ctx context.Context, c *client.Client, en client.Entry) (string, e
 	return ans.Data, nil
 }
 
+// wantsLine reports whether a record of this subscription needs its whole
+// transcript line read (the fields the feed cannot project: a tool_use input,
+// an error body, text, and a system line's hook keys).
+func wantsLine(sub string, en client.Entry) bool {
+	typ := fieldStr(en.Fields, "type")
+	switch sub {
+	case SubLines:
+		return typ == "system"
+	case SubTools:
+		return typ == "tool_use"
+	case SubErrors, SubText:
+		return true
+	}
+	return false
+}
+
 // applyEntries writes one page in one transaction together with the new cursor
 // (cur, when non-empty), so a crash never leaves the cursor ahead of the data.
 // A reset is applied before the records after it, and a record already held is
@@ -227,19 +287,19 @@ func applyEntries(ctx context.Context, db *sql.DB, opt RecorderOptions, sub stri
 	}
 	lines := map[lineKey]string{}
 	for _, en := range entries {
-		if en.Kind != "record" || en.Record == nil {
+		if en.Kind != "record" || en.Record == nil || !wantsLine(sub, en) {
 			continue
 		}
-		wantLine := fieldStr(en.Fields, "type") == "tool_use" || fieldBool(en.Fields, "is_error")
 		k := lineKey{en.Record.File, en.Record.Gen, en.Record.Offset}
-		if _, ok := lines[k]; wantLine && !ok {
-			raw, err := readLine(ctx, opt.Client, en)
-			if err != nil {
-				return fmt.Errorf("read line %s@%d: %w", pathOf(k.file, k.gen), k.offset, err)
-			}
-			lines[k] = raw
-			st.LinesRead++
+		if _, ok := lines[k]; ok {
+			continue
 		}
+		raw, err := readLine(ctx, opt.Client, en)
+		if err != nil {
+			return fmt.Errorf("read line %s@%d: %w", pathOf(k.file, k.gen), k.offset, err)
+		}
+		lines[k] = raw
+		st.LinesRead++
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -260,26 +320,28 @@ func applyEntries(ctx context.Context, db *sql.DB, opt RecorderOptions, sub stri
 		st.Entries++
 		switch en.Kind {
 		case "reset":
-			// Only the all-tools subscription applies a reset: it covers every file the
-			// error-bodies one does, and the two write the same tables, so a second
-			// delete would wipe the rows the first just rewrote.
-			if sub != SubAllTools {
+			// Only the lines subscription applies a reset: it covers every file the
+			// others do, and they write the same tables, so a second delete would
+			// wipe rows the first just rewrote. RunRecorder rewinds the others.
+			if sub != SubLines {
 				continue
 			}
 			st.Resets++
 			p := pathOf(en.File, en.Gen)
-			for _, stmt := range []string{
+			stmts := []string{
 				`DELETE FROM user_text WHERE path = ?`, `DELETE FROM assistant_text WHERE path = ?`,
 				`DELETE FROM tool_results WHERE path = ?`, `DELETE FROM tool_calls WHERE path = ?`,
 				`DELETE FROM events WHERE path = ?`,
-			} {
+			}
+			if opt.Thinking {
+				stmts = append(stmts, `DELETE FROM thinking WHERE path = ?`)
+			}
+			for _, stmt := range stmts {
 				if _, err := tx.ExecContext(ctx, stmt, p); err != nil {
 					return fmt.Errorf("apply reset %s: %w", p, err)
 				}
 			}
 			delete(ensured, p)
-			// The lines read for this page already come from the re-parsed copy, so
-			// they are kept: the records after the reset need them.
 		case "record":
 			if en.Record == nil {
 				continue
@@ -301,15 +363,50 @@ func applyEntries(ctx context.Context, db *sql.DB, opt RecorderOptions, sub stri
 	return tx.Commit()
 }
 
+// isoMillis renders the recorder's time the way Claude writes it, so ordering by
+// the ts text stays chronological within one second.
+func isoMillis(s string) any {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return s
+	}
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func nullStr(m map[string]any, k string) any {
+	if s := fieldStr(m, k); s != "" {
+		return s
+	}
+	return nil
+}
+
+func nullBool(m map[string]any, k string) any {
+	if b, ok := m[k].(bool); ok {
+		return boolInt(b)
+	}
+	return nil
+}
+
+func nullInt(m map[string]any, k string) any {
+	switch v := m[k].(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	}
+	return nil
+}
+
 func applyRecord(ctx context.Context, tx *sql.Tx, opt RecorderOptions, sub, path string, en client.Entry, lines map[lineKey]string, st *RecorderStats) error {
 	typ := fieldStr(en.Fields, "type")
-	id := fieldStr(en.Fields, "tool_use_id")
 	seq := en.Record.Offset
 	k := lineKey{en.Record.File, en.Record.Gen, seq}
 	if raw, ok := lines[k]; ok {
 		// The whole line is parsed with the same code the file reader used, so
-		// events, calls, results and narration keep their shape; the length of
-		// every body comes from the recorder's own fact.
+		// events, calls, results, narration and user text keep their shape.
 		var p parsedFile
 		p.appendLine(seq, []byte(raw), opt.Thinking)
 		if err := writeParsed(ctx, tx, path, p, opt.Thinking); err != nil {
@@ -318,36 +415,56 @@ func applyRecord(ctx context.Context, tx *sql.Tx, opt RecorderOptions, sub, path
 		tally(sub, typ, en, st)
 		return nil
 	}
-	if typ != "tool_result" || id == "" {
-		return nil
+	switch {
+	case sub == SubLines:
+		// Indexed scalar fields only. The raw-derived columns (prompt_source,
+		// hook_count, hook_errors) are left as they are on a conflict.
+		f := en.Fields
+		_, err := tx.ExecContext(ctx, `INSERT INTO events (path, seq, uuid, parent_uuid, session_id, ts, type, is_sidechain,
+				cwd, git_branch, permission_mode, duration_ms, user_type, source_tool_assistant_uuid, prompt_id, entrypoint)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(path, seq) DO UPDATE SET
+				uuid=excluded.uuid, parent_uuid=excluded.parent_uuid, session_id=excluded.session_id,
+				ts=excluded.ts, type=excluded.type, is_sidechain=excluded.is_sidechain, cwd=excluded.cwd,
+				git_branch=excluded.git_branch, permission_mode=excluded.permission_mode,
+				duration_ms=excluded.duration_ms, user_type=excluded.user_type,
+				source_tool_assistant_uuid=excluded.source_tool_assistant_uuid,
+				prompt_id=excluded.prompt_id, entrypoint=excluded.entrypoint`,
+			path, seq, nullStr(f, "uuid"), nullStr(f, "parent_uuid"), nullStr(f, "session"), isoMillis(fieldStr(f, "time")),
+			typ, nullBool(f, "is_sidechain"), nullStr(f, "cwd"), nullStr(f, "git_branch"), nullStr(f, "permission_mode"),
+			nullInt(f, "duration_ms"), nullStr(f, "user_type"), nullStr(f, "source_tool_assistant_uuid"),
+			nullStr(f, "prompt_id"), nullStr(f, "entrypoint"))
+		if err != nil {
+			return fmt.Errorf("insert event %s#%d: %w", path, seq, err)
+		}
+		tally(sub, typ, en, st)
+	case sub == SubTools && typ == "tool_result" && fieldStr(en.Fields, "tool_use_id") != "":
+		// A tool result without its body: length only. It never replaces a row
+		// that already carries an error body.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO tool_results (tool_use_id, path, seq, is_error, content_len)
+			VALUES (?, ?, ?, ?, ?) ON CONFLICT(tool_use_id) DO UPDATE SET
+				path=excluded.path, seq=excluded.seq, content_len=excluded.content_len`,
+			fieldStr(en.Fields, "tool_use_id"), path, seq, boolInt(fieldBool(en.Fields, "is_error")), fieldInt(en.Fields, "body_length")); err != nil {
+			return fmt.Errorf("insert tool_result %s: %w", fieldStr(en.Fields, "tool_use_id"), err)
+		}
+		tally(sub, typ, en, st)
 	}
-	// A success result: length only, no body. The event row is minimal and never
-	// replaces a full one already written from the line.
-	sess := fieldStr(en.Fields, "session")
-	ts := fieldStr(en.Fields, "time")
-	if _, err := tx.ExecContext(ctx, `INSERT INTO events (path, seq, session_id, ts, type) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), 'user')
-		ON CONFLICT(path, seq) DO NOTHING`, path, seq, sess, ts); err != nil {
-		return fmt.Errorf("insert event %s#%d: %w", path, seq, err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tool_results (tool_use_id, path, seq, is_error, content_len)
-		VALUES (?, ?, ?, ?, ?) ON CONFLICT(tool_use_id) DO NOTHING`,
-		id, path, seq, boolInt(fieldBool(en.Fields, "is_error")), fieldInt(en.Fields, "body_length")); err != nil {
-		return fmt.Errorf("insert tool_result %s: %w", id, err)
-	}
-	tally(sub, typ, en, st)
 	return nil
 }
 
-// tally attributes an entry once: calls and results by the all-tools
-// subscription, errors by the error-bodies one.
+// tally attributes an entry once, by the subscription that owns the count.
 func tally(sub, typ string, en client.Entry, st *RecorderStats) {
 	switch {
-	case sub == SubAllTools && typ == "tool_use":
+	case sub == SubLines:
+		st.Lines++
+	case sub == SubTools && typ == "tool_use":
 		st.ToolCalls++
-	case sub == SubAllTools && typ == "tool_result":
+	case sub == SubTools && typ == "tool_result":
 		st.ToolResult++
-	case sub == SubErrorBodies && typ == "tool_result" && fieldBool(en.Fields, "is_error"):
+	case sub == SubErrors && typ == "tool_result" && fieldBool(en.Fields, "is_error"):
 		st.Errors++
+	case sub == SubText:
+		st.Texts++
 	}
 }
 

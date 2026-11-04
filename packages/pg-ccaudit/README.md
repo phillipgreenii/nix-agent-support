@@ -455,16 +455,28 @@ rejection.
 ## Ingest source: the recorder feed
 
 `pg-ccaudit ingest` no longer reads Claude's `*.jsonl` files. It polls the
-recorder daemon's change feed through two subscriptions, each with its own
-cursor kept in the `feed_cursors` table: one takes every tool call and tool
-result with its id, `is_error` and body length (no body), the other takes only
-the results where `is_error` is true, whose bodies and surrounding line are read
-from the recorder's copy. A new subscriber starts from a snapshot, an expired
-cursor resyncs from a snapshot, and a reset entry is applied before the records
-that follow it. With the recorder down, ingest says "recorder offline", exits 0
-and polls again at the next tick; it never falls back to the files.
+recorder daemon's change feed through four subscriptions, each naming source
+`claude-transcript` (so a status file is never ingested) and each with its own
+cursor kept in the `feed_cursors` table:
 
-Known limit: only lines holding a tool call or an errored result are fed, so the
-`user_text` and `assistant_text` tables (human turns, narration of lines without
-tool calls) are no longer filled; the queries over them see only what the feed
-carried. `status` and `query` no longer compare the index with the disk.
+1. lines: every transcript line with its indexed scalar fields and no bodies (the
+   `events` rows); a `system` line is also read once through `raw` for
+   `hookCount` and `hookErrors`, which the recorder does not index;
+2. tool calls and results without bodies (id, `is_error`, body length); a tool
+   call's line is read once for its input, which the feed cannot project;
+3. error bodies: only the results where `is_error` is true, read from the
+   recorder's copy;
+4. text: the human and assistant text records (thinking blocks only while the
+   thinking capture flag is on), read from the recorder's copy.
+
+`seq` is the record's offset within one file id and generation (`path` is
+`<file>/g<gen>`), so the adjacency joins keep their meaning. A new subscriber
+starts from a snapshot, an expired cursor resyncs from a snapshot, and a reset
+entry is applied (by the lines subscription, which rewinds the other three to a
+snapshot) before the records that follow it. With the recorder down, ingest says
+"recorder offline", exits 0 and polls again at the next tick; it never falls back
+to the files.
+
+Known gap: the recorder does not index `promptSource`, so it is filled only on
+lines the ingest reads whole (user text, tool calls, error results).
+`status` and `query` no longer compare the index with the disk.
