@@ -2,9 +2,11 @@ package serve
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
 // loopTracker holds the start times of the passes now running, per loop, so the
@@ -13,6 +15,20 @@ type loopTracker struct {
 	mu     sync.Mutex
 	seq    uint64
 	starts map[string]map[uint64]time.Time
+	last   map[string]loopLast
+
+	// The per-event copier_ingest loop records through atomics, so its path takes
+	// no lock: the last duration (ns), the end time (UnixNano, 0 before the first
+	// event) and whether it failed.
+	ingestDur, ingestEnd atomic.Int64
+	ingestFailed         atomic.Bool
+}
+
+// loopLast is what a loop's last finished pass left behind.
+type loopLast struct {
+	dur     time.Duration
+	outcome string
+	end     time.Time
 }
 
 // begin records a pass of loop starting at t and returns its id.
@@ -30,11 +46,44 @@ func (lt *loopTracker) begin(loop string, t time.Time) uint64 {
 	return lt.seq
 }
 
-// end forgets the pass id of loop.
-func (lt *loopTracker) end(loop string, id uint64) {
+// end forgets the pass id of loop; with a non-nil last it also records it as the
+// loop's last finished pass.
+func (lt *loopTracker) end(loop string, id uint64, last *loopLast) {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 	delete(lt.starts[loop], id)
+	if last != nil {
+		if lt.last == nil {
+			lt.last = map[string]loopLast{}
+		}
+		lt.last[loop] = *last
+	}
+}
+
+// noteIngest records one copier_ingest event.
+func (lt *loopTracker) noteIngest(dur time.Duration, end time.Time, failed bool) {
+	lt.ingestDur.Store(int64(dur))
+	lt.ingestFailed.Store(failed)
+	lt.ingestEnd.Store(end.UnixNano())
+}
+
+// lastOf is loop's last finished pass; ok is false when it has none yet.
+func (lt *loopTracker) lastOf(loop string) (loopLast, bool) {
+	if loop == obs.LoopCopierIngest {
+		end := lt.ingestEnd.Load()
+		if end == 0 {
+			return loopLast{}, false
+		}
+		out := obs.OutcomeOK
+		if lt.ingestFailed.Load() {
+			out = obs.OutcomeError
+		}
+		return loopLast{dur: time.Duration(lt.ingestDur.Load()), outcome: out, end: time.Unix(0, end)}, true
+	}
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	l, ok := lt.last[loop]
+	return l, ok
 }
 
 // oldest is the start of the oldest pass of loop still running.
@@ -69,7 +118,7 @@ func (d *Daemon) runLoop(name string, step func() error) error {
 	d.setLoopInFlight(name)
 	var err error
 	defer func() {
-		d.loops.end(name, id)
+		d.loops.end(name, id, nil) // a no-op after the normal path below
 		d.setLoopInFlight(name)
 	}()
 	err = step()
@@ -78,6 +127,7 @@ func (d *Daemon) runLoop(name string, step func() error) error {
 	if err != nil {
 		outcome = obs.OutcomeError
 	}
+	d.loops.end(name, id, &loopLast{dur: end.Sub(start), outcome: outcome, end: end})
 	reg := d.obs.Reg
 	reg.ObserveL(obs.MLoopDuration, loopLabels(name), end.Sub(start).Seconds())
 	reg.Add(obs.MLoopRuns, map[string]string{"loop": name, "outcome": outcome}, 1)
@@ -125,4 +175,30 @@ func (d *Daemon) timer(loop string, wait time.Duration) (<-chan time.Time, func(
 	}
 	t := time.NewTimer(wait)
 	return t.C, func() { t.Stop() }
+}
+
+// loopStatuses is status's per-loop table: every loop's last duration, outcome,
+// age, in-flight seconds and stalled marker. It reads process-local state only.
+func (d *Daemon) loopStatuses() map[string]wire.LoopStatus {
+	now := d.clock.Now()
+	out := make(map[string]wire.LoopStatus, len(obs.Loops))
+	for _, l := range obs.Loops {
+		var ls wire.LoopStatus
+		var inFlight time.Duration
+		if t, ok := d.loops.oldest(l); ok {
+			inFlight = now.Sub(t)
+			ls.InFlightS = int64(inFlight / time.Second)
+		}
+		last, has := d.loops.lastOf(l)
+		var age time.Duration
+		if has {
+			ms := last.dur.Milliseconds()
+			age = now.Sub(last.end)
+			s := int64(age / time.Second)
+			ls.LastDurationMS, ls.LastOutcome, ls.AgeS = &ms, last.outcome, &s
+		}
+		ls.Stalled = obs.LoopStalled(l, has && l != obs.LoopParserDrain, age, inFlight, d.cfg.SweepInterval)
+		out[l] = ls
+	}
+	return out
 }

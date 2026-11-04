@@ -190,6 +190,11 @@ type Settler struct {
 	checkedAt map[string]time.Time
 	low       bool
 
+	// pubCounts and pubAt are the stage counts the last refresh derived and when
+	// (see LastCounts); guarded by mu.
+	pubCounts map[string]int
+	pubAt     time.Time
+
 	// The quarantine directory list the gauge refresh reuses between ticks.
 	qmu            sync.Mutex
 	qdirs          []string
@@ -1657,6 +1662,26 @@ func (s *Settler) Recover() error {
 	return s.recoverRemoval()
 }
 
+// gaugeStages are the stages the conversations_by_stage gauge and the published
+// counts carry, in order.
+var gaugeStages = []string{StageLive, StageQuiet, StageHeld, StageSettled, "removal_pending", "removed"}
+
+// LastCounts returns a copy of the stage counts the most recent refresh derived
+// (the same figures it set on the conversations_by_stage gauge) and the time of
+// that refresh. ok is false before the first refresh.
+func (s *Settler) LastCounts() (counts map[string]int, at time.Time, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pubCounts == nil {
+		return nil, time.Time{}, false
+	}
+	counts = make(map[string]int, len(s.pubCounts))
+	for k, v := range s.pubCounts {
+		counts[k] = v
+	}
+	return counts, s.pubAt, true
+}
+
 // refresh derives every Conversation's stage, emits the stage changes and sets
 // the gauges.
 func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now time.Time) {
@@ -1731,9 +1756,14 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 		}
 	}
 	s.refreshRemovalGauges(groups, live, now)
-	for _, st := range []string{StageLive, StageQuiet, StageHeld, StageSettled, "removal_pending", "removed"} {
+	pub := make(map[string]int, len(gaugeStages))
+	for _, st := range gaugeStages {
 		reg.Set(obs.MConversationsByStage, map[string]string{"stage": st}, float64(counts[st]))
+		pub[st] = counts[st]
 	}
+	s.mu.Lock()
+	s.pubCounts, s.pubAt = pub, now
+	s.mu.Unlock()
 	for _, r := range Reasons {
 		reg.Set(obs.MHeldConversations, map[string]string{"reason": r}, float64(held[r]))
 	}

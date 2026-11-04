@@ -94,6 +94,9 @@ type Daemon struct {
 	su        *startupTimer
 	// tickPhases returns the phase breakdown of the settle tick that just ran.
 	tickPhases func() settle.TickPhases
+	// lastTick is the last completed settle tick (nil before the first), for status.
+	lastTickMu sync.Mutex
+	lastTick   *lastTickInfo
 	// tickStartNS is when the running settle tick began (clock UnixNano), 0 when
 	// none runs; the in-flight gauge and the stuck-tick log read it.
 	tickStartNS atomic.Int64
@@ -268,7 +271,9 @@ func (d *Daemon) ingest(p string) copier.Result {
 	start := d.clock.Now()
 	res, err := d.cp.Ingest(p)
 	out := d.afterIngest(p, res, err)
-	d.obs.Reg.ObserveL(obs.MLoopDuration, ingestLabels, d.clock.Now().Sub(start).Seconds())
+	end := d.clock.Now()
+	d.obs.Reg.ObserveL(obs.MLoopDuration, ingestLabels, end.Sub(start).Seconds())
+	d.loops.noteIngest(end.Sub(start), end, err != nil)
 	return out
 }
 
@@ -515,6 +520,9 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 	d.setTickInFlight()
 	end := d.clock.Now()
 	dur := end.Sub(start)
+	d.lastTickMu.Lock()
+	d.lastTick = &lastTickInfo{dur: dur, examined: stats.Examined, end: end}
+	d.lastTickMu.Unlock()
 	outcome := obs.OutcomeOK
 	if err != nil {
 		outcome = obs.OutcomeError
@@ -708,4 +716,11 @@ func readMmapBytes(mib int) int64 {
 		return -1
 	}
 	return int64(mib) << 20
+}
+
+// lastTickInfo is what status reports of the last completed settle tick.
+type lastTickInfo struct {
+	dur      time.Duration
+	examined int
+	end      time.Time
 }

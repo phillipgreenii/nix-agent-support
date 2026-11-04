@@ -1,0 +1,21 @@
+ok: example
+  caught up:    true
+  copy lag:     0s
+  parse lag:    0s
+  held:         0
+  free bytes:   1000
+  schema:       3, protocol 1
+  stages:       live 2, quiet 1, held 0, settled 5, removal_pending 0, removed 0
+  last tick:    412ms, 8 examined, ended 3s ago
+  loops:
+    settle_tick     last 412ms ok, ended 3s ago, in flight 0s
+    refresh_gauges  never run, in flight 0s
+    wal_checkpoint  never run, in flight 0s
+    watcher_sweep   last 9000ms error, ended 4000s ago, in flight 0s  STALLED
+    copier_ingest   never run, in flight 0s
+    parser_drain    never run, in flight 0s
+    tracker_tick    never run, in flight 0s
+    tracker_poll    never run, in flight 0s
+    status_refresh  never run, in flight 0s
+    doctor          never run, in flight 700s  STALLED
+    removal_pass    never run, in flight 0s

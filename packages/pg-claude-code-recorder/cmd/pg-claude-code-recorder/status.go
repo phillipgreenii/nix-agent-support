@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/serve"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -140,5 +141,45 @@ func (a *app) printStatus(st wire.Status, jsonOut, short bool) {
 		if b := st.Backfill; b != nil && b.Running {
 			_, _ = fmt.Fprintf(a.out, "  backfill:     %d of %d files copied, %d parsed, about %.0fs left\n", b.Copied, b.Total, b.Parsed, b.EtaS)
 		}
+		a.printStages(st)
+	}
+}
+
+// stageOrder is the order status lists the stages in.
+var stageOrder = []string{"live", "quiet", "held", "settled", "removal_pending", "removed"}
+
+// printStages prints the stage counts, the last settle tick and one line per
+// loop. The tick and loop lines are absent from an answer that lacks them.
+func (a *app) printStages(st wire.Status) {
+	if len(st.StageCounts) > 0 {
+		parts := make([]string, 0, len(stageOrder))
+		for _, k := range stageOrder {
+			if n, ok := st.StageCounts[k]; ok {
+				parts = append(parts, fmt.Sprintf("%s %d", k, n))
+			}
+		}
+		_, _ = fmt.Fprintf(a.out, "  stages:       %s\n", strings.Join(parts, ", "))
+	}
+	if t := st.LastTick; t != nil {
+		_, _ = fmt.Fprintf(a.out, "  last tick:    %dms, %d examined, ended %ds ago\n", t.DurationMS, t.Examined, t.AgeS)
+	}
+	if len(st.Loops) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(a.out, "  loops:")
+	for _, name := range obs.Loops {
+		l, ok := st.Loops[name]
+		if !ok {
+			continue
+		}
+		line := "never run"
+		if l.LastDurationMS != nil && l.AgeS != nil {
+			line = fmt.Sprintf("last %dms %s, ended %ds ago", *l.LastDurationMS, l.LastOutcome, *l.AgeS)
+		}
+		line += fmt.Sprintf(", in flight %ds", l.InFlightS)
+		if l.Stalled {
+			line += "  STALLED"
+		}
+		_, _ = fmt.Fprintf(a.out, "    %-15s %s\n", name, line)
 	}
 }

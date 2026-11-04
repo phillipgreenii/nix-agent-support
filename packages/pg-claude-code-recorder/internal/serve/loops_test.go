@@ -83,7 +83,7 @@ func TestLoopInFlightIsNonZeroWhileAStepRunsAndZeroAfter(t *testing.T) {
 	if v := loopInFlight(d, obs.LoopStatusRefresh); v != 40 {
 		t.Fatalf("with two passes = %v, want 40 (the oldest)", v)
 	}
-	d.loops.end(obs.LoopStatusRefresh, id)
+	d.loops.end(obs.LoopStatusRefresh, id, nil)
 	if v := loopInFlight(d, obs.LoopRefreshGauges); v != 0 {
 		t.Fatalf("an idle loop reports %v", v)
 	}

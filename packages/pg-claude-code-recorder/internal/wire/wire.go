@@ -139,6 +139,32 @@ type Status struct {
 	LaunchAgent string `json:"launch_agent,omitempty"`
 	LogPath     string `json:"log_path,omitempty"`
 	StateBytes  int64  `json:"state_bytes,omitempty"`
+
+	// LastTick describes the last completed settle tick; it is absent (never
+	// zero) before the first one completes.
+	LastTick *LastTick `json:"last_tick,omitempty"`
+	// Loops maps each loop name to its last pass. A loop that has not completed a
+	// pass has no last_duration_ms, last_outcome or age_s.
+	Loops map[string]LoopStatus `json:"loops,omitempty"`
+}
+
+// LastTick is the last completed settle tick: how long it took, how many
+// Conversations it examined and the seconds since it ended.
+type LastTick struct {
+	DurationMS int64 `json:"duration_ms"`
+	Examined   int   `json:"examined"`
+	AgeS       int64 `json:"age_s"`
+}
+
+// LoopStatus is one loop's last pass and its now-running pass, all whole numbers
+// (milliseconds or seconds). Stalled is set when the loop is past its stall
+// bound (internal/obs StallAgeBound and InFlightStallBound).
+type LoopStatus struct {
+	LastDurationMS *int64 `json:"last_duration_ms,omitempty"`
+	LastOutcome    string `json:"last_outcome,omitempty"`
+	AgeS           *int64 `json:"age_s,omitempty"`
+	InFlightS      int64  `json:"in_flight_s"`
+	Stalled        bool   `json:"stalled,omitempty"`
 }
 
 // Backfill is the first-run progress: files copied of files seen, and an

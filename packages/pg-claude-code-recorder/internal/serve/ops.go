@@ -206,9 +206,14 @@ func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
 			heldLong++
 		}
 	}
-	counts := make(map[string]int, len(snap.stageCounts))
-	for k, v := range snap.stageCounts {
-		counts[k] = v
+	// The settler publishes the counts it derived at its last refresh (live and
+	// quiet included); before its first refresh the persisted stage rows stand in.
+	counts, _, published := d.sett.LastCounts()
+	if !published {
+		counts = make(map[string]int, len(snap.stageCounts))
+		for k, v := range snap.stageCounts {
+			counts[k] = v
+		}
 	}
 	caughtUp := d.backfillDone.Load()
 	st := wire.Status{
@@ -223,6 +228,13 @@ func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
 		CaughtUp:       caughtUp,
 		Backfill:       d.backfillProgress(),
 		Socket:         d.cfg.Socket,
+	}
+	st.Loops = d.loopStatuses()
+	d.lastTickMu.Lock()
+	lt := d.lastTick
+	d.lastTickMu.Unlock()
+	if lt != nil {
+		st.LastTick = &wire.LastTick{DurationMS: lt.dur.Milliseconds(), Examined: lt.examined, AgeS: int64(now.Sub(lt.end) / time.Second)}
 	}
 	if !snap.at.IsZero() {
 		st.StatusAgeS = now.Sub(snap.at).Seconds()

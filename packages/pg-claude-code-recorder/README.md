@@ -114,8 +114,13 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   (`reads_ms`, `prefilter_ms`, `evaluate_ms`, `removal_ms`, `refresh_ms`). A tick still running after a minute logs `settle_tick_stuck` (`in_flight_ms`) while it is stuck, and the gauge `settle_tick_in_flight_seconds` is the age of the running tick (0 when none; the last-timestamp gauge only moves when a tick ends). A start logs one `startup_phase`
   (`phase`, `duration_ms`) per phase, a `startup_phase_begin` first for the phases that can run long, and one
   `startup_complete` (`duration_ms`, `phases`) when it serves.
-- Known limitation: `status` `stage_counts` omits `live` and `quiet`, while the dashboard and the metrics include
-  them (phase 1). `status --watch` runs an O(files) loop on the daemon every 2 s, so do not leave it open while
+- `status` shows `stage_counts` with `live` and `quiet` included (the figures the last settle refresh set on the
+  `conversations_by_stage` gauge), `last_tick` (`duration_ms`, `examined`, `age_s`; absent until a tick completes)
+  and a `loops` table for all 11 loops (`last_duration_ms`, `last_outcome`, `age_s`, `in_flight_s`, `stalled`; a loop
+  that has not run has no duration, outcome or age). A loop is `stalled` when a pass has run over 600 s, or when its
+  last pass ended longer ago than its bound: `watcher_sweep` 3 times `sweep.interval`, `tracker_tick` and
+  `tracker_poll` 120 s, `status_refresh` 60 s; other loops, and `parser_drain`, have no age bound. The bounds live in
+  `internal/obs/stall.go`. `status --watch` runs an O(files) loop on the daemon every 2 s, so do not leave it open while
   profiling.
 
 ### pprof and the profiling harness

@@ -1,0 +1,53 @@
+{
+  "healthy": true,
+  "verdict": "ok",
+  "copy_lag_s": 1,
+  "parse_lag_s": 2,
+  "held": 0,
+  "free_bytes": 1000,
+  "stage_counts": {
+    "held": 0,
+    "live": 2,
+    "quiet": 1,
+    "settled": 5
+  },
+  "parser_versions": {
+    "1": 8
+  },
+  "schema_version": 3,
+  "protocol_version": 1,
+  "short": "ok",
+  "caught_up": true,
+  "degraded": true,
+  "backfill": {
+    "copied": 5,
+    "total": 10,
+    "parsed": 4,
+    "eta_s": 30,
+    "running": true
+  },
+  "socket": "/example/r.sock",
+  "status_age_s": 4,
+  "crashed_recent": 1,
+  "suspected_recent": 2,
+  "launch_agent": "loaded",
+  "log_path": "/example/log",
+  "state_bytes": 77,
+  "last_tick": {
+    "duration_ms": 412,
+    "examined": 8,
+    "age_s": 3
+  },
+  "loops": {
+    "settle_tick": {
+      "last_duration_ms": 412,
+      "last_outcome": "ok",
+      "age_s": 3,
+      "in_flight_s": 0
+    },
+    "watcher_sweep": {
+      "in_flight_s": 700,
+      "stalled": true
+    }
+  }
+}

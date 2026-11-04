@@ -564,3 +564,46 @@ func TestTickRecordsPhaseDurations(t *testing.T) {
 		t.Fatalf("phases = %+v, want %+v", got, want)
 	}
 }
+
+// fiveStageFixture seeds 2 live, 1 quiet, 1 held and 1 settled Conversation.
+func (e *env) fiveStageFixture() {
+	e.t.Helper()
+	id := func(n int) string { return fmt.Sprintf("0a1b2c3d-0000-4000-8000-00000000020%d", n) }
+	for i := 1; i <= 2; i++ {
+		e.seedSession(id(i), 3, 48*time.Hour)
+		e.live[id(i)] = true
+	}
+	e.seedSession(id(3), 3, time.Minute) // written a minute ago: not quiet long enough to settle
+	e.seedSession(id(4), 3, 48*time.Hour)
+	// A write the copier has not caught up with holds the Conversation.
+	e.write("projects/example-project/"+id(4)+".jsonl", line(9), e.clk.Now().Add(-48*time.Hour), true)
+	e.seedSession(id(5), 3, 48*time.Hour)
+}
+
+// The counts a refresh publishes are the figures it sets on the
+// conversations_by_stage gauge, live and quiet included, from the one tick.
+func TestLastCountsAreThePublishedGaugeFigures(t *testing.T) {
+	e := newEnv(t, false)
+	if _, _, ok := e.sett.LastCounts(); ok {
+		t.Fatal("counts published before any refresh")
+	}
+	e.fiveStageFixture()
+	e.tick()
+	got, at, ok := e.sett.LastCounts()
+	if !ok || at.IsZero() {
+		t.Fatalf("no counts after a tick: %v %v", ok, at)
+	}
+	want := map[string]int{"live": 2, "quiet": 1, "held": 1, "settled": 1, "removal_pending": 0, "removed": 0}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("published %s = %d, want %d (all: %v)", k, got[k], w, got)
+		}
+		if g, _ := e.obs.Reg.Gauge(obs.MConversationsByStage, map[string]string{"stage": k}); int(g) != got[k] {
+			t.Errorf("gauge %s = %v, published %d", k, g, got[k])
+		}
+	}
+	got["live"] = 99 // the returned map is a copy
+	if again, _, _ := e.sett.LastCounts(); again["live"] != 2 {
+		t.Fatalf("LastCounts shares its map: %v", again)
+	}
+}
