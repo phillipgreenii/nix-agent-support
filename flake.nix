@@ -372,6 +372,10 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-heartbeat: Pattern A, stdlib-only out-of-stack dead-man's switch.
+          pg-router-heartbeat = final.callPackage ./packages/pg-router-heartbeat {
+            inherit (goBuilders) mkGoApp;
+          };
           # beads-exporter: Pattern A (ADR 0008), a self-contained module (no
           # local `replace`) that execs a pinned, read-only bd (by the absolute
           # path its config file names) and serves hand-rolled Prometheus text.
@@ -1901,6 +1905,7 @@
                 "pg-decider"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
+                "pg-router-heartbeat"
                 "ccpool-probe"
                 "pg-rescue"
                 "pg-task-focus"
@@ -7042,6 +7047,14 @@
                 pname = "pg-router-disk-watchdog-go-tests";
                 src = lib.cleanSource ./packages/pg-router-disk-watchdog; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
+              };
+
+              # pg-router-heartbeat: unit suite over the pure sleep-aware decision, the
+              # run loop with fake clock/probe/notifier, and the probe against httptest.
+              pg-router-heartbeat-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-heartbeat-go-tests";
+                src = lib.cleanSource ./packages/pg-router-heartbeat; # matches default.nix
+                gomod2nixToml = ./packages/pg-router-heartbeat/gomod2nix.toml;
               };
 
               # beads-exporter - whole-module unit suite (adapter, categoriser, queues,
@@ -18358,6 +18371,7 @@
               pg-decider
               pg-router-probe
               pg-router-disk-watchdog
+              pg-router-heartbeat
               beads-exporter
               beads-exporter-contract
               ccpool-probe
