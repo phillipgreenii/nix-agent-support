@@ -154,6 +154,23 @@ assert_all_ran() {
   assert_none_ran
 }
 
+@test "--apply --yes with no controlling terminal runs every item and exits 0, never prompting" {
+  run bash -c 'python3 -I -c "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" "$@"' \
+    _ "${RUN[@]}" reclaim --aggressiveness 5 --apply --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"[y/N]"* ]]
+  [[ "$output" != *"no terminal"* ]]
+  assert_all_ran
+}
+
+@test "--apply --no with no controlling terminal runs nothing and exits 2 (a decline, not exit 3)" {
+  run bash -c 'python3 -I -c "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" "$@"' \
+    _ "${RUN[@]}" reclaim --aggressiveness 5 --apply --no
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not confirmed; nothing was run"* ]]
+  assert_none_ran
+}
+
 # --- the prompt goes to the terminal and the answer comes from it (item 8) ---
 
 @test "the prompt is still visible and answerable when stderr is discarded (mutant: prompt to stderr)" {

@@ -24,8 +24,9 @@ Commands:
       List reclaimable registry items
   validate [PATH]
       Validate a registry file
-  reclaim --aggressiveness N [ID...] [--apply] [-v|--verbose]
-      Reclaim disk space (dry-run unless --apply)
+  reclaim --aggressiveness N [ID...] [--apply [--yes|--no]] [-v|--verbose]
+      Reclaim disk space (dry-run unless --apply); --yes or --no answers
+      the level 4+ confirmation without asking (needs --apply)
   auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N] [--below3-gb N]
       Scheduled mode: pick level 1, 2 or 3 from the free space on the Data
       volume (below N1 GiB level 1, below N2 level 2, below N3 level 3 and
@@ -117,10 +118,12 @@ Aggressiveness scale:
                                or live shared state
     5  hardest to recover      slow, manual rebuild of user-visible state
   Under --apply, a selection that includes a variant at level >= 4 asks
-  for ONE interactive confirmation (at most once per run, on the terminal;
-  there is no bypass) after printing the plan and before anything runs. The
-  prompt names each such item and its size. Declining runs nothing
-  (exit 2); no terminal runs nothing (exit 3). A dry run never prompts, and
+  for ONE interactive confirmation (at most once per run, on the terminal)
+  after printing the plan and before anything runs. The prompt names each
+  such item and its size. Declining runs nothing (exit 2); no terminal runs
+  nothing (exit 3). --apply --yes answers it with yes without asking and
+  --apply --no answers it with no (exit 2, nothing run); they are mutually
+  exclusive and need --apply. A dry run never prompts, and
   no command prompts mid-run. The authoritative definition is
   packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md
   in the phillipgreenii-nix-agent-support repository.

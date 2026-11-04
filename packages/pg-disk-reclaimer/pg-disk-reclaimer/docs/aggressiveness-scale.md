@@ -43,8 +43,17 @@ document are to be interpreted as described in RFC 2119.
     it neither triggers the prompt nor counts toward it.
   - A dry run MUST NOT prompt at any level, and neither MUST an `--apply` run
     whose selection has no variant at level `>= 4`.
-  - There MUST NOT be any flag, environment variable, or non-interactive path
-    that bypasses the gate.
+  - `reclaim --apply --yes` MUST answer the confirmation with yes and
+    `reclaim --apply --no` MUST answer it with no, in both cases without
+    reading the terminal; the plan MUST still print first. `--no` MUST behave
+    as a declined confirmation (run nothing, exit 2). `--yes` and `--no` MUST
+    be mutually exclusive and MUST require `--apply`; either violation MUST
+    exit 1. They change nothing for a run with no variant at level `>= 4`.
+    These flags are the ONLY way to answer without the terminal: there MUST
+    NOT be an environment variable, and piped standard input MUST NOT be read
+    as an answer. (Operator ruling, Phillip, 2026-11-04, superseding the
+    earlier rule that no flag may bypass the gate: "implement it as --yes or
+    --no would be accepted. no guards for agents".)
 - Commands never prompt. A registry `displayCommand`, `sizeCommand`,
   `heldSizeCommand`, `dryRunCommand` and `removeCommand` MUST NOT ask for
   input. `reclaim` and `list` run each with standard input from `/dev/null`, so

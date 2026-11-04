@@ -39,6 +39,10 @@
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} --apply`
 
+- Actually remove without the level 4+ confirmation prompt (`--no` declines it instead, exit 2):
+
+`pg-disk-reclaimer reclaim --aggressiveness {{5}} --apply --yes`
+
 - Reclaim only specific registry items (by id) instead of every qualifying item:
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} {{item-id}}`

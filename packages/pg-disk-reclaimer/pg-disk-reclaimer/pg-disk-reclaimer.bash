@@ -1150,7 +1150,7 @@ pgdr_reclaim_size_item() {
 # captured output goes through pgdr_print_dry_run_output (long-line
 # collapse, raw under -v).
 #
-# Grammar: reclaim --aggressiveness N [id...] [--apply] [-v|--verbose]
+# Grammar: reclaim --aggressiveness N [id...] [--apply [--yes|--no]] [-v|--verbose]
 #   --aggressiveness N (REQUIRED): the selection ceiling. Passed straight
 #     through to pgdr_select_variants, which does the actual selection --
 #     see its doc comment above for the no-ids/explicit-ids semantics.
@@ -1168,6 +1168,8 @@ pgdr_reclaim_size_item() {
 #   --apply: switches from the default dry run (each selected variant's
 #     dryRunCommand) to the real reclaim (each selected variant's
 #     removeCommand).
+#   --yes|--no (optional, need --apply, mutually exclusive): answer the
+#     confirmation gate below without asking.
 #   -v|--verbose (optional): show a note when a selected item's path does
 #     not currently exist on disk. Without this flag such an item is
 #     skipped entirely (no output at all) -- see the path-existence guard
@@ -1193,8 +1195,13 @@ pgdr_reclaim_size_item() {
 # (return 3) runs NOTHING. A dry run never prompts, at any aggressiveness.
 # After the prompt nothing in the run reads input, and every command (display,
 # size, dry-run, remove) gets stdin from /dev/null so one that tries to fails
-# fast instead of hanging behind a prompt nobody can see. There is NO bypass of
-# any kind (no flag, no env var, no non-interactive path) -- do not add one.
+# fast instead of hanging behind a prompt nobody can see. The only way to answer
+# without the terminal is the explicit --yes (confirm) or --no (decline) flag on
+# the command line (operator ruling, Phillip, 2026-11-04, superseding the
+# earlier "no bypass of any kind" rule); there is still no env var and piped
+# stdin is never read. Both require --apply and are mutually exclusive (exit 1).
+# --yes runs the whole selection; --no exits 2 with nothing run, exactly like a
+# typed decline. Neither changes a run whose selection has no gated item.
 #
 # The run is two passes: pass 1 resolves every selected item (and, under
 # --apply only, sizes it), the --apply plan and the single confirmation follow,
@@ -1224,6 +1231,7 @@ pgdr_reclaim_size_item() {
 cmd_reclaim() {
   local max_aggressiveness=""
   local apply=0
+  local answer_yes=0 answer_no=0
   local verbose=0
   local ids=()
 
@@ -1239,6 +1247,14 @@ cmd_reclaim() {
       ;;
     --apply)
       apply=1
+      shift
+      ;;
+    --yes)
+      answer_yes=1
+      shift
+      ;;
+    --no)
+      answer_no=1
       shift
       ;;
     -v | --verbose)
@@ -1263,6 +1279,15 @@ cmd_reclaim() {
 
   if [[ -z $max_aggressiveness ]]; then
     echo "pg-disk-reclaimer: 'reclaim' requires --aggressiveness N" >&2
+    return 1
+  fi
+
+  if [[ $answer_yes -eq 1 && $answer_no -eq 1 ]]; then
+    echo "pg-disk-reclaimer: --yes and --no are mutually exclusive" >&2
+    return 1
+  fi
+  if [[ $apply -eq 0 && ($answer_yes -eq 1 || $answer_no -eq 1) ]]; then
+    echo "pg-disk-reclaimer: --yes and --no answer the --apply confirmation; add --apply" >&2
     return 1
   fi
 
@@ -1363,7 +1388,16 @@ cmd_reclaim() {
       # The prompt names each gated item and its size itself: it goes to the
       # terminal while the plan above goes to stdout, which may be redirected
       # to a file or a pager, and the operator must see what they confirm.
-      pgdr_confirm "pg-disk-reclaimer: run --apply for $n_items item(s), including level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_plan)? This is the only confirmation. [y/N] " || confirm_status=$?
+      # --yes and --no answer the one confirmation without asking, so the
+      # terminal is never read (operator ruling, Phillip, 2026-11-04). The plan
+      # above still printed, so the output records what was answered.
+      if [[ $answer_yes -eq 1 ]]; then
+        confirm_status=0
+      elif [[ $answer_no -eq 1 ]]; then
+        confirm_status=1
+      else
+        pgdr_confirm "pg-disk-reclaimer: run --apply for $n_items item(s), including level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_plan)? This is the only confirmation. [y/N] " || confirm_status=$?
+      fi
       if [[ $confirm_status -eq 2 ]]; then
         echo "pg-disk-reclaimer: no terminal to confirm level $PGDR_CONFIRM_GATE_LEVEL+ item(s) ($gated_list); nothing was run" >&2
         return 3

@@ -302,6 +302,63 @@ strict_reclaim() {
   [[ $output == *"rm-hi4"* ]]
 }
 
+# --- --yes and --no answer the one confirmation without asking --------------
+
+gated_registry() {
+  install_registry \
+    "$(item lo 1 'echo 1024' 'echo dry' 'echo rm-lo')" \
+    "$(item hi4 4 'echo 2048' 'echo dry' 'echo rm-hi4')"
+  pgdr_confirm() {
+    echo "PROMPT-ASKED"
+    return 2
+  }
+}
+
+@test "--apply --yes runs every item without asking, even with no terminal (mutant: --yes ignored)" {
+  gated_registry
+  run cmd_reclaim --aggressiveness 5 --apply --yes
+  [ "$status" -eq 0 ]
+  [[ $output != *"PROMPT-ASKED"* ]]
+  [[ $output == *"rm-lo"* ]]
+  [[ $output == *"rm-hi4"* ]]
+  [ -n "$(line_no 'hi4: size: 2.0M')" ]
+}
+
+@test "--apply --no runs nothing, exits 2 and never asks (mutant: --no treated as yes)" {
+  gated_registry
+  run cmd_reclaim --aggressiveness 5 --apply --no
+  [ "$status" -eq 2 ]
+  [[ $output != *"PROMPT-ASKED"* ]]
+  [[ $output == *"not confirmed; nothing was run"* ]]
+  [[ $output != *"rm-"* ]]
+  [ -n "$(line_no 'hi4: size: 2.0M')" ]
+}
+
+@test "--no still runs a selection with no gated item (no prompt was due)" {
+  install_registry "$(item lo 1 'echo 1024' 'echo dry' 'echo rm-lo')"
+  run cmd_reclaim --aggressiveness 5 --apply --no
+  [ "$status" -eq 0 ]
+  [[ $output == *"rm-lo"* ]]
+}
+
+@test "--yes and --no together exit 1 and run nothing" {
+  gated_registry
+  run cmd_reclaim --aggressiveness 5 --apply --yes --no
+  [ "$status" -eq 1 ]
+  [[ $output == *"mutually exclusive"* ]]
+  [[ $output != *"rm-"* ]]
+}
+
+@test "--yes or --no without --apply exits 1 and runs nothing" {
+  gated_registry
+  run cmd_reclaim --aggressiveness 5 --yes
+  [ "$status" -eq 1 ]
+  [[ $output == *"add --apply"* ]]
+  run cmd_reclaim --aggressiveness 5 --no
+  [ "$status" -eq 1 ]
+  [[ $output != *"dry"* ]]
+}
+
 # --- answer parsing (item 10) ---------------------------------------------
 
 @test "pgdr_reply_is_yes accepts exactly y, Y, yes in any case" {
