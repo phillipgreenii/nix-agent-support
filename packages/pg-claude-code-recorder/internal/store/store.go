@@ -316,6 +316,23 @@ func (s *Store) openDB(path string, bulk bool) error {
 		// A bulk rebuild creates the secondary indexes after the load.
 		ddl = schemaSQL + derivedTablesSQL
 	}
+	// An index.db from before unknown_keys_total existed gets the aggregate
+	// backfilled in the transaction that creates the table.
+	var hasTotal int
+	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='unknown_keys_total'`).Scan(&hasTotal); err != nil {
+		_ = w.Close()
+		return err
+	}
+	if hasTotal == 0 {
+		var hasKeys int
+		if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='unknown_keys'`).Scan(&hasKeys); err != nil {
+			_ = w.Close()
+			return err
+		}
+		if hasKeys > 0 {
+			ddl += unknownTotalBackfillSQL
+		}
+	}
 	if err := execInTx(w, ddl); err != nil {
 		_ = w.Close()
 		return err

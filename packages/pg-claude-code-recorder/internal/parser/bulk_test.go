@@ -52,6 +52,8 @@ FROM records r ORDER BY r.file_id, r.gen, r.off, r.item`)
 		`SELECT COUNT(*) FROM fts_tri WHERE fts_tri MATCH 'done'`,
 		`SELECT COUNT(*) FROM bad_lines`,
 		`SELECT COUNT(*) FROM unknown_keys`,
+		`SELECT COUNT(*) FROM unknown_keys_total`,
+		`SELECT SUM(count) FROM unknown_keys_total`,
 	} {
 		fmt.Fprintf(&b, "%s -> %d\n", q, k.Count(q))
 	}
@@ -182,5 +184,19 @@ func TestDeferredIndexRebuildHasTheSchemaAndPlansOfAnInlineBuild(t *testing.T) {
 	}
 	if got := schemaAndPlans(t, bulk); got != want {
 		t.Fatalf("a deferred-index rebuild differs from an inline build\n--- deferred\n%s\n--- inline\n%s", got, want)
+	}
+}
+
+// A bulk rebuild fills the per-key aggregate, equal to the GROUP BY over its rows.
+func TestBulkRebuildFillsUnknownKeysTotal(t *testing.T) {
+	bulk := bulkCorpus(t, 5)
+	bulk.StoreOptions = store.Options{Rebuild: true, BulkRebuild: true, BulkRecords: 100}
+	bulk.Reopen()
+	bulk.Parse()
+	if err := bulk.Store.FinishRebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if got := requireSummaryMatchesGroupBy(t, bulk); len(got) == 0 {
+		t.Fatal("the fixture has no unknown keys, so the aggregate is untested")
 	}
 }

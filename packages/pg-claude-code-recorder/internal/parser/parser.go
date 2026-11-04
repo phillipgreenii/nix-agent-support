@@ -458,6 +458,11 @@ func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {
 		`DELETE FROM fields WHERE rec_id IN (SELECT id FROM records WHERE file_id=?1 AND gen=?2)`,
 		`DELETE FROM records WHERE file_id=?1 AND gen=?2`,
 		`DELETE FROM bad_lines WHERE file_id=?1 AND gen=?2`,
+		// The aggregate gives back this file's counts before its rows go.
+		`UPDATE unknown_keys_total SET count=count-(SELECT u.count FROM unknown_keys u
+WHERE u.file_id=?1 AND u.gen=?2 AND u.source=unknown_keys_total.source AND u.rtype=unknown_keys_total.rtype AND u.path=unknown_keys_total.path)
+WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.source=unknown_keys_total.source AND u.rtype=unknown_keys_total.rtype AND u.path=unknown_keys_total.path)`,
+		`DELETE FROM unknown_keys_total WHERE count<=0`,
 		`DELETE FROM unknown_keys WHERE file_id=?1 AND gen=?2`,
 	}
 	for _, s := range stmts {
@@ -668,6 +673,10 @@ ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded
 ON CONFLICT(file_id,gen,source,rtype,path) DO UPDATE SET count=count+excluded.count`, f.ID, g.Gen, src.Name(), k[0], k[1], c); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`INSERT INTO unknown_keys_total(source,rtype,path,count) VALUES(?,?,?,?)
+ON CONFLICT(source,rtype,path) DO UPDATE SET count=count+excluded.count`, src.Name(), k[0], k[1], c); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -747,7 +756,8 @@ type UnknownKey struct {
 }
 
 // Summarize reads the bad-line count and the unknown keys (once per distinct
-// key per source and record type, summed over files).
+// key per source and record type, summed over files; read from the
+// unknown_keys_total aggregate the writers maintain, never the per-file rows).
 func Summarize(st *store.Store) (Summary, error) { return SummarizeFrom(&st.Reader) }
 
 // SummarizeFrom is Summarize over a Reader, so a caller holding one read
@@ -757,7 +767,7 @@ func SummarizeFrom(rd *store.Reader) (Summary, error) {
 	if err := rd.Q().QueryRow(`SELECT COUNT(*) FROM bad_lines`).Scan(&s.BadLines); err != nil {
 		return s, err
 	}
-	rows, err := rd.Q().Query(`SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path ORDER BY source,rtype,path`)
+	rows, err := rd.Q().Query(`SELECT source,rtype,path,count FROM unknown_keys_total ORDER BY source,rtype,path`)
 	if err != nil {
 		return s, err
 	}

@@ -99,6 +99,22 @@ CREATE TABLE IF NOT EXISTS unknown_keys(
   count INTEGER NOT NULL,
   PRIMARY KEY(file_id, gen, source, rtype, path)
 );
+CREATE TABLE IF NOT EXISTS unknown_keys_total(
+  source TEXT NOT NULL,
+  rtype TEXT NOT NULL,
+  path TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  PRIMARY KEY(source, rtype, path)
+) WITHOUT ROWID;
+`
+
+// unknownTotalBackfillSQL fills unknown_keys_total from the per-file rows. An
+// open runs it in the same transaction that creates the table, only when the
+// table did not exist, so an index.db written before the aggregate existed is
+// backfilled exactly once and atomically with the table's creation.
+const unknownTotalBackfillSQL = `
+INSERT INTO unknown_keys_total(source,rtype,path,count)
+SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path;
 `
 
 // WithWrite runs fn in one write transaction under the store's write lock. The

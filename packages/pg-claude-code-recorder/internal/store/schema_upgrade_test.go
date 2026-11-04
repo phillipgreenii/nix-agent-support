@@ -129,3 +129,44 @@ func TestOlderSchemaIsRefusedUntouchedAndRebuildKeepsTheOldFile(t *testing.T) {
 		t.Fatal("the old index was not kept intact as index.db.pre-rebuild")
 	}
 }
+
+// An index.db written before unknown_keys_total existed has the aggregate
+// backfilled once, correctly, at the next open; later opens leave it alone.
+func TestOpenBackfillsUnknownKeysTotalOnceForAnExistingStore(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	for _, q := range []string{
+		`INSERT INTO unknown_keys(file_id,gen,source,rtype,path,count) VALUES(1,1,'example','user','a',2),(2,1,'example','user','a',3),(2,1,'example','tool','b',1)`,
+		`DROP TABLE unknown_keys_total`,
+	} {
+		if _, err := s.wdb.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		s = open(t, dir)
+		rows, err := s.Read().Query(`SELECT source,rtype,path,count FROM unknown_keys_total ORDER BY rtype,path`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for rows.Next() {
+			var a, b, c string
+			var n int
+			if err := rows.Scan(&a, &b, &c, &n); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, strings.Join([]string{a, b, c}, "|")+"="+string(rune('0'+n)))
+		}
+		_ = rows.Close()
+		if strings.Join(got, ",") != "example|tool|b=1,example|user|a=5" {
+			t.Fatalf("open %d: aggregate %v", i, got)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
