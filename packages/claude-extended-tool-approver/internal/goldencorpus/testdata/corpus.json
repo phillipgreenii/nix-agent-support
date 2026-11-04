@@ -16030,5 +16030,81 @@
     "rules_config": {},
     "expected_verdict": "reject",
     "notes": "tc-54be4: file flags stay path reads; secret path is refused."
+  },
+  {
+    "case": "git_rev_parse_is_shallow_approve",
+    "tags": ["ceta-spec", "tc-cw7sf"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git rev-parse --is-shallow-repository"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-cw7sf: read-only boolean (git rev-parse --help)."
+  },
+  {
+    "case": "git_rev_parse_verify_quiet_approve",
+    "tags": ["ceta-spec", "tc-cw7sf"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git rev-parse --verify -q main"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-cw7sf: -q is only meaningful with --verify; silent exit status."
+  },
+  {
+    "case": "git_rev_parse_credential_store_reject",
+    "tags": ["ceta-spec", "tc-cw7sf"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C ~/.ssh rev-parse HEAD"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "tc-cw7sf: guardrail, -C into a credential store still rejects."
+  },
+  {
+    "case": "git_rev_parse_parseopt_not_approved",
+    "tags": ["ceta-spec", "tc-cw7sf"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git rev-parse --parseopt -- a"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-cw7sf: --parseopt stays unmodeled."
   }
 ]

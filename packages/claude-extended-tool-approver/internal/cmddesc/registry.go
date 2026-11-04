@@ -749,6 +749,12 @@ var gitRevParseSchema = CommandSchema{
 		"--symbolic-full-name": inert, "--symbolic": inert,
 		"--is-inside-work-tree": inert, "--is-bare-repository": inert,
 		"--show-prefix": inert, "--show-cdup": inert,
+		// tc-cw7sf: read-only booleans/paths seen in the decision DB or
+		// documented beside the ones above. --parseopt, --sq-quote,
+		// --resolve-git-dir and --local-env-vars stay unmodeled (abstain).
+		"--is-shallow-repository": inert, "--is-inside-git-dir": inert,
+		"--show-superproject-working-tree": inert,
+		"-q":                               inert, "--quiet": inert,
 	},
 	Positionals: PositionalSpec{Rest: Literal},
 	ImplicitEffects: []ImplicitEffect{

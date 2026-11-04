@@ -4649,6 +4649,18 @@
               "source": "git rev-parse --help: \"--is-bare-repository\""
             }
           },
+          "--is-inside-git-dir": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--is-inside-git-dir  When the current working directory is below the repository directory print \\\"true\\\", otherwise \\\"false\\\".\""
+            }
+          },
           "--is-inside-work-tree": {
             "arity": "none",
             "operand": {
@@ -4661,6 +4673,18 @@
               "source": "git rev-parse --help: \"--is-inside-work-tree\""
             }
           },
+          "--is-shallow-repository": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--is-shallow-repository  When the repository is shallow print \\\"true\\\", otherwise \\\"false\\\".\""
+            }
+          },
           "--path-format": {
             "arity": "one",
             "operand": {
@@ -4671,6 +4695,18 @@
             },
             "citation": {
               "source": "git rev-parse --help: \"--path-format=(absolute|relative)\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"-q, --quiet  Only meaningful in --verify mode. Do not output an error message if the first argument is not a valid object name; instead exit with non-zero status silently.\""
             }
           },
           "--short": {
@@ -4707,6 +4743,18 @@
             },
             "citation": {
               "source": "git rev-parse --help: \"prefix=$(git rev-parse --show-prefix)\""
+            }
+          },
+          "--show-superproject-working-tree": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--show-superproject-working-tree  Show the absolute path of the root of the superproject's working tree (if exists) that uses the current repository as its submodule.\""
             }
           },
           "--show-toplevel": {
@@ -4755,6 +4803,18 @@
             },
             "citation": {
               "source": "git rev-parse -h (full): \"--verify Verify that exactly one parameter is provided, and that it can be\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"-q, --quiet  Only meaningful in --verify mode. Do not output an error message if the first argument is not a valid object name; instead exit with non-zero status silently.\""
             }
           }
         },
