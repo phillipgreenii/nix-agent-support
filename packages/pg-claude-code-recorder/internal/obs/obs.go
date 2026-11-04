@@ -335,6 +335,9 @@ func (o *Obs) RegisterStandard() {
 	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}
+	for name, text := range helpTexts {
+		o.Reg.Help(name, text)
+	}
 }
 
 // ClientLabel maps a caller-supplied client name to the bounded label value:
@@ -384,10 +387,25 @@ func (o *Obs) EventsNamed(name string) []Event {
 
 // Registry holds counters, gauges and histograms keyed by name and labels.
 type Registry struct {
+	// OnLock, when non-nil, is called once per registry lock acquisition. It is a
+	// test seam (nil in production) so a test can count acquisitions; set it
+	// before the registry is shared.
+	OnLock func()
+
 	mu       sync.Mutex
 	counters map[string]float64
 	gauges   map[string]float64
 	hist     map[string]*Histogram
+	bounds   map[string][]float64 // bucket bounds per histogram name, for label sets not registered up front
+	help     map[string]string
+}
+
+// lock takes the registry mutex and reports the acquisition to OnLock.
+func (r *Registry) lock() {
+	r.mu.Lock()
+	if r.OnLock != nil {
+		r.OnLock()
+	}
 }
 
 // Histogram is a cumulative-bucket histogram.
@@ -400,7 +418,7 @@ type Histogram struct {
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, hist: map[string]*Histogram{}}
+	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, hist: map[string]*Histogram{}, bounds: map[string][]float64{}, help: map[string]string{}}
 }
 
 func key(name string, labels map[string]string) string {
@@ -427,7 +445,7 @@ func key(name string, labels map[string]string) string {
 
 // Add increments a counter (registering it at zero when v is 0).
 func (r *Registry) Add(name string, labels map[string]string, v float64) {
-	r.mu.Lock()
+	r.lock()
 	r.counters[key(name, labels)] += v
 	r.mu.Unlock()
 }
@@ -437,7 +455,7 @@ func (r *Registry) Add(name string, labels map[string]string, v float64) {
 // ignored so the counter never moves backwards.
 func (r *Registry) SetCounter(name string, labels map[string]string, v float64) {
 	k := key(name, labels)
-	r.mu.Lock()
+	r.lock()
 	if cur, ok := r.counters[k]; !ok || v > cur {
 		r.counters[k] = v
 	}
@@ -446,7 +464,7 @@ func (r *Registry) SetCounter(name string, labels map[string]string, v float64) 
 
 // Counter returns a counter value and whether the series exists.
 func (r *Registry) Counter(name string, labels map[string]string) (float64, bool) {
-	r.mu.Lock()
+	r.lock()
 	defer r.mu.Unlock()
 	v, ok := r.counters[key(name, labels)]
 	return v, ok
@@ -454,32 +472,65 @@ func (r *Registry) Counter(name string, labels map[string]string) (float64, bool
 
 // Set sets a gauge.
 func (r *Registry) Set(name string, labels map[string]string, v float64) {
-	r.mu.Lock()
+	r.lock()
 	r.gauges[key(name, labels)] = v
 	r.mu.Unlock()
 }
 
 // Gauge returns a gauge value and whether it was set.
 func (r *Registry) Gauge(name string, labels map[string]string) (float64, bool) {
-	r.mu.Lock()
+	r.lock()
 	defer r.mu.Unlock()
 	v, ok := r.gauges[key(name, labels)]
 	return v, ok
 }
 
-// RegisterHist registers a histogram with no samples (a no-op when it exists).
+// RegisterHist registers an unlabelled histogram with no samples (a no-op when
+// it exists).
 func (r *Registry) RegisterHist(name string, bounds []float64) {
-	r.mu.Lock()
+	r.RegisterHistL(name, bounds, []map[string]string{nil})
+}
+
+// RegisterHistL registers the histogram name with the given bucket bounds and
+// one empty series per label set (a nil or empty set is the unlabelled series).
+// An existing series is kept. Later ObserveL calls with a label set not listed
+// here use the same bounds.
+func (r *Registry) RegisterHistL(name string, bounds []float64, labelSets []map[string]string) {
+	r.lock()
 	defer r.mu.Unlock()
-	if r.hist[name] == nil {
-		r.hist[name] = &Histogram{Bounds: bounds, Counts: make([]uint64, len(bounds)+1)}
+	if _, ok := r.bounds[name]; !ok {
+		r.bounds[name] = bounds
 	}
+	for _, ls := range labelSets {
+		k := key(name, ls)
+		if r.hist[k] == nil {
+			r.hist[k] = &Histogram{Bounds: r.bounds[name], Counts: make([]uint64, len(r.bounds[name])+1)}
+		}
+	}
+}
+
+// Help sets the one-line help text exported for the metric name.
+func (r *Registry) Help(name, text string) {
+	r.lock()
+	r.help[name] = text
+	r.mu.Unlock()
+}
+
+// HelpTexts returns a copy of the help texts keyed by metric name.
+func (r *Registry) HelpTexts() map[string]string {
+	r.lock()
+	defer r.mu.Unlock()
+	out := make(map[string]string, len(r.help))
+	for k, v := range r.help {
+		out[k] = v
+	}
+	return out
 }
 
 // Snapshot returns copies of every counter, gauge and histogram, keyed by
 // "name" or "name{k=v,...}".
 func (r *Registry) Snapshot() (counters, gauges map[string]float64, hists map[string]*Histogram) {
-	r.mu.Lock()
+	r.lock()
 	defer r.mu.Unlock()
 	counters = make(map[string]float64, len(r.counters))
 	for k, v := range r.counters {
@@ -498,15 +549,26 @@ func (r *Registry) Snapshot() (counters, gauges map[string]float64, hists map[st
 	return counters, gauges, hists
 }
 
-// Observe records v in the named histogram using LagBuckets unless the
-// histogram was registered with other bounds.
+// Observe records v in the unlabelled histogram name; it is ObserveL(name, nil, v).
 func (r *Registry) Observe(name string, v float64) {
-	r.mu.Lock()
+	r.ObserveL(name, nil, v)
+}
+
+// ObserveL records v in the histogram series name{labels}, using the bounds the
+// name was registered with and LagBuckets when it never was. It takes the
+// registry lock once.
+func (r *Registry) ObserveL(name string, labels map[string]string, v float64) {
+	k := key(name, labels)
+	r.lock()
 	defer r.mu.Unlock()
-	h := r.hist[name]
+	h := r.hist[k]
 	if h == nil {
-		h = &Histogram{Bounds: LagBuckets, Counts: make([]uint64, len(LagBuckets)+1)}
-		r.hist[name] = h
+		b, ok := r.bounds[name]
+		if !ok {
+			b = LagBuckets
+		}
+		h = &Histogram{Bounds: b, Counts: make([]uint64, len(b)+1)}
+		r.hist[k] = h
 	}
 	i := sort.SearchFloat64s(h.Bounds, v)
 	h.Counts[i]++
@@ -514,11 +576,15 @@ func (r *Registry) Observe(name string, v float64) {
 	h.Samples++
 }
 
-// Hist returns a copy of the named histogram, or nil.
-func (r *Registry) Hist(name string) *Histogram {
-	r.mu.Lock()
+// Hist returns a copy of the unlabelled histogram name, or nil.
+func (r *Registry) Hist(name string) *Histogram { return r.HistL(name, nil) }
+
+// HistL returns a copy of the histogram series name{labels}, or nil.
+func (r *Registry) HistL(name string, labels map[string]string) *Histogram {
+	k := key(name, labels)
+	r.lock()
 	defer r.mu.Unlock()
-	h := r.hist[name]
+	h := r.hist[k]
 	if h == nil {
 		return nil
 	}

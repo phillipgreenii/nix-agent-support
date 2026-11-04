@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -121,5 +122,78 @@ func TestRenderedExpositionPassesGrammarCheck(t *testing.T) {
 	checkExposition(t, b.String())
 	if !strings.Contains(b.String(), "# TYPE "+Prefix+obs.MProcessCPUSeconds+" counter") {
 		t.Fatal("process cpu counter missing")
+	}
+}
+
+func TestRenderLabelledHistogramPutsLeLastAndKeepsLabelsOnSumAndCount(t *testing.T) {
+	r := obs.NewRegistry()
+	r.RegisterHistL("lat", []float64{1, 10}, []map[string]string{{"op": "x"}, {"op": "y"}})
+	r.ObserveL("lat", map[string]string{"op": "x"}, 0.5)
+	r.ObserveL("lat", map[string]string{"op": "x"}, 5)
+	r.Help("lat", "Latency.")
+	var b bytes.Buffer
+	Render(&b, r)
+	out := b.String()
+	for _, want := range []string{
+		"# HELP " + Prefix + "lat Latency.\n# TYPE " + Prefix + "lat histogram\n",
+		Prefix + `lat_bucket{op="x",le="1"} 1`,
+		Prefix + `lat_bucket{op="x",le="10"} 2`,
+		Prefix + `lat_bucket{op="x",le="+Inf"} 2`,
+		Prefix + `lat_sum{op="x"} 5.5`,
+		Prefix + `lat_count{op="x"} 2`,
+		Prefix + `lat_bucket{op="y",le="1"} 0`,
+		Prefix + `lat_count{op="y"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, "# TYPE "+Prefix+"lat "); n != 1 {
+		t.Errorf("family typed %d times", n)
+	}
+	checkExposition(t, out)
+}
+
+func TestRenderEveryStandardMetricHasHelpBeforeType(t *testing.T) {
+	o := obs.New(nil)
+	o.Reg.ObserveL(obs.MQueryDuration, map[string]string{"op": "status"}, 0.01)
+	var b bytes.Buffer
+	Render(&b, o.Reg)
+	lines := strings.Split(b.String(), "\n")
+	types := 0
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "# TYPE ") {
+			continue
+		}
+		types++
+		name := strings.Fields(l)[2]
+		if i == 0 || !strings.HasPrefix(lines[i-1], "# HELP "+name+" ") {
+			t.Errorf("no HELP line directly before %q", l)
+		}
+	}
+	if types == 0 {
+		t.Fatal("no TYPE lines")
+	}
+	checkExposition(t, b.String())
+}
+
+// TestRenderUnlabelledHistogramsGolden pins the phase 0 histogram series names
+// and layout: the unlabelled histograms render exactly as before labelled ones
+// existed.
+func TestRenderUnlabelledHistogramsGolden(t *testing.T) {
+	r := obs.NewRegistry()
+	r.RegisterHist(obs.MCopyLagHistogram, obs.LagBuckets)
+	r.RegisterHist(obs.MQueryDuration, obs.RequestBuckets)
+	r.Observe(obs.MCopyLagHistogram, 0.3)
+	r.Observe(obs.MQueryDuration, 0.003)
+	r.Observe(obs.MQueryDuration, 3)
+	var b bytes.Buffer
+	Render(&b, r)
+	want, err := os.ReadFile("testdata/unlabelled_histograms.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.String() != string(want) {
+		t.Fatalf("golden mismatch, got:\n%s\nwant:\n%s", b.String(), want)
 	}
 }
