@@ -51,7 +51,7 @@ State, all in memory, rebuilt by the start-up reconciliation (no schema change):
   seam the parser already uses), mapped from file id to session through a `fileSession` map the settler maintains
   from `groups()` (the same `SessionOf` rule). A file not yet in the map causes a one-off `groups()` refresh.
 - `due`: a min-heap of `(deadline, session)`. A conversation that is not settled gets a deadline of
-  `newest write + settle.after`; a held conversation gets `held.since + held.recheck`; a settled conversation has
+  `newest write + settle.after`; a held conversation gets its in-memory `checkedAt + held.recheck` (the code keys the recheck on `checkedAt`, set on every evaluation and lost on restart, where a zero value means evaluate immediately; the start-up reconcile reproduces that); a settled conversation has
   none until it is dirtied; a live-process conversation is re-queued when its process exits (the tracker already
   tells the engine; `Live()` is polled once per wake, not per session).
 - `Wake`: the loop sleeps until the earliest of: a dirty-set notification, the head of `due`, the reconcile timer.
@@ -65,6 +65,57 @@ The one-minute `time.NewTicker` in `settleLoop` is replaced by this loop; `runTi
 `examined` counter now means sessions processed in the wake, so the existing `settle_tick_duration_seconds` is
 renamed in meaning only (its help text changes); the dashboards' threshold line at 60 s is replaced by one at the
 `settle.min_wake`-relative value in T6.
+
+## State inputs the event-driven version MUST cover (review findings, folded in)
+
+The settle decision is NOT a pure function of persisted state and the clock; the full scan reads these inputs
+implicitly, so each needs an explicit source in the event-driven loop, a test, and a negative control:
+
+1. Quiet deadline source: `newest` is the original file's mtime (through `cfg.Mtime`) falling back to the recorded
+   last-seen times. An mtime change with no copier commit moves the deadline and sends no `Dirty`. The loop MUST
+   re-derive `newest` when a heap entry pops and re-push if the deadline moved, never trust the stored deadline.
+2. Low-space mode: `checkLow()` flips the gate that bypasses `settle.after` for quiet and held conversations. A
+   flip into low space MUST enqueue every quiet and held session at once; a flip out MUST re-derive deadlines.
+   `checkLow` runs once per wake and on a timer (see 4).
+3. Live-process entry and exit: a session becoming live (a registry file appears) clears its stage with reason
+   `process` and sets the gauge, with no write event; an exit makes it evaluable. The loop MUST subscribe to the
+   tracker's engine change (add a `Settler.LiveChanged()` callback from the lifecycle engine, an explicit task in
+   T1, not assumed) and, as a fallback, poll `Live()` every `settle.min_wake`.
+4. Timer sources besides `due`: the `checkLow` poll, the `Live()` fallback poll, removal due times and the
+   reconcile timer. The loop sleeps until the earliest of them all.
+5. Removal pass: `Tick` runs `removeLocked` every tick when removal is enabled. Removal eligibility is `newest +
+remove.after` (`blockers` returns the next deadline). The wake MUST run `removeLocked` when a removal deadline is
+   due (deadlines pushed into `due` with kind `removal`) and on every reconcile, and MUST re-run `groups()` and
+   `Live()` after it as `Tick` does. The oracle fixture includes conversations at each removal state.
+6. Events: `stage_changed` events today come from `refresh` diffing `s.last` over all groups (not from
+   `evaluate`). T4 replaces that loop, so `transition()` MUST emit the event, carry the `s.reasons` hand-off, and
+   apply the same first-seen defaults (quiet, or live when live). Sessions with persisted `removal_pending` or
+   `removed` stages and no files are counted from the stage rows, as `refresh` does; T4 maintains those counts too.
+7. Dirty callers: besides `afterIngest` (skipped when `res.File == 0`), `Dirty` MUST be called from the backfill
+   batch path, tombstones, snapshot-generation changes and the settler's and doctor's own `NewGenerationLocked` and
+   archive writes (`flushArchive`, `reclaim`). The task lists each call site found with `rg -n 'Commit\(|
+NewGenerationLocked' internal/copier internal/settle` and tests each. `Dirty(file, copyOffset)` carries the
+   offset so pending bytes can be maintained.
+8. Start sequencing: the first wake runs after the first parse completes, as `settleLoop` does today.
+
+The reconcile holds `s.run` like `Tick`, so a wake waits for a running reconcile (hourly, up to a tick's duration);
+the README says so. Reconcile healing is metered: `settle_reconcile_rescued_total` (sessions whose stage or
+counts changed during a reconcile that no event caused) and `settle_counts_drift_total` (counter, as well as the
+WARN). New gauges: `settle_dirty_sessions`, `settle_due_queue_depth`, and a counter `settle_wakes_total{reason}`
+with `reason` in `dirty due reconcile poll`. T6 lists the existing `runtick_test.go` assertions on `examined` that
+change meaning.
+
+Oracle tie-break: events within one simulated minute are applied in session-name order on both sides; compare
+final persisted stages and the multiset of `stage_changed` events. `checkedAt` is part of the comparison fixture
+(cleared on a simulated restart). Added negative controls: ignore the low-space flip, ignore an mtime-only change,
+drop a `Dirty` feed, clear `checkedAt` without reconcile. Also added oracle cases: removal firing, `path_reappeared`
+(removed to quiet), settled-then-mode-change. The count test's bound of 20 queries is derived, not arbitrary: it is
+the measured wake cost (one dirty session) plus a margin written in the test with the measured value, and the test
+also asserts the scan path exceeds the bound by 100x so the assertion stays meaningful.
+
+Dashboard note: the `settle tick duration` panel line stays at 60 s while the scan reconcile exists; T6 adds a
+second line for the wake budget (`settle.min_wake`), replacing the inconsistent wording above. `settle.mode` can be
+switched only by restart (stated in the README).
 
 ## Task list and order
 

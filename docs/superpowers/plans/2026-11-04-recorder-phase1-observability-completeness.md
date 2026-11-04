@@ -289,6 +289,57 @@ exists, as phase 0 did). Record as a bead comment: CPU cores averaged over the h
 `slow_request` count, WAL bytes, in-flight maximum. Re-set T8's thresholds from it if they disagree by more than
 a factor of 2.
 
+## Review findings folded in (corrections to the tasks above; where they disagree, this section wins)
+
+1. Existing loops. `loop_runs_total{loop}` already has `settle_tick`, `refresh_gauges` and `wal_checkpoint`. The
+   final loop set is those three plus the eight in T2's table (11 values). T2 moves the durations of the three
+   existing loops into `loop_duration_seconds{loop}` and KEEPS the old unlabelled histograms
+   (`settle_tick_duration_seconds`, `refresh_gauges_duration_seconds`, `wal_checkpoint_duration_seconds`) as
+   written, so dashboards and the existing alert keep working; end state: three old histograms plus one labelled
+   family that includes all 11 loops. T6 (`status` loops table) and T8 (`loop-stalled`) cover all 11; the stalled
+   rule carries the `loop` label into its summary and description so the alert names the loop.
+2. `watcher_sweep` is wrapped around the WALK, not just the `onSweep` callback: add an `OnSweepDone`-style timing
+   hook in `watcher.sweep` (the walk happens before `OnSweep`). `removal_pass` is timed inside `Settler.Tick`
+   through an injected `Timer` callback in `settle.Config` (a daemon-side wrapper cannot see inside), and its
+   duration is documented as nested inside `settle_tick` (not additive). The operator `remove` operation is NOT
+   counted as the loop. The tracker's grace-window goroutines are out of scope and listed as such.
+3. T3 `ingest_results_total{result}`: values are the real `copier.Result.Action` strings, not invented ones.
+   The task first lists them with `rg -n 'Action:' internal/copier` (they include hyphenated `new-generation`,
+   plus `snapshot`, `link`, `tombstone`, `missing`, `raced`, `skipped`, `unchanged`, `copied`) and the catalogue
+   enumerates exactly them, with hyphens mapped to underscores in the label value by one function under test. An
+   ingest that returns an error is `result="error"` (error is not an Action, the wrapper adds it).
+4. T4 double observation is dropped: mixed label sets under one family make `sum(...)` double count. Instead the
+   histogram becomes labelled with `op` ONLY, the unlabelled series is removed, and every expression that read it
+   (`rg -n 'query_duration_seconds|feed_latency_seconds' grafana README.md`, the phase 0 alerts and panels) is
+   rewritten with `sum without (op)` in the same task. The `request-slow` rule uses `sum` over all `op`. The golden
+   render test is updated and its diff reviewed.
+5. T5: the old series persists once written (it is set at one site and is not registered at zero); say that, and
+   list the tests to rewrite (`clone_test.go`, `copier_test.go` assertions on the labelled series). Names:
+   `clone_private_size_max_bytes` and `clone_private_size_total_bytes` (unit last, no `_sum` on a gauge). The
+   release note goes in the commit message and the dashboard panel description, not a README release-notes section.
+6. Test seams. `settleLoop`, `trackLoop`, `refreshLoop` use real `time.NewTicker`; `statusLoop` uses `time.After`;
+   `doctorLoop` uses `time.NewTimer`. T2 starts with a step that introduces a `Daemon.ticker(d)` seam (an injected
+   function returning a channel and a stop), defaulting to the real ticker, so each production loop body is driven
+   by the fake clock. Where a loop body is a small function (`parseLoop`'s drain), the test calls the step directly
+   and a separate test covers the wiring through the seam. The counting driver is the phase 0 task's
+   `internal/store/countdriver` package (named explicitly in T2, T3 and T6).
+7. Per-event cost rule, corrected: `copier_ingest` is the one per-event loop and gets a LIGHT path: one histogram
+   observe and one counter add for `ingest_results_total` (two lock acquisitions); no per-ingest last-timestamp, no
+   in-flight set, no `loop_runs_total` add (the results counter is the run count). The rule "at most two registry
+   lock acquisitions per call" is tested by a counting `Registry` wrapper hook (`Registry.OnLock` test seam added in
+   T1, nil in production).
+8. `loop_in_flight_seconds` is computed per loop from a start-time map held by the wrapper (concurrent passes keep
+   the oldest start), and is refreshed on EVERY scrape through `scrapeRefresh` as well as by the refresh loop, so a
+   stalled refresh loop still reports (it is process-local, no store read).
+9. Alerts: `request-slow` becomes a ratio, requests over 10 s divided by all requests over 1 h, above 2% with a
+   floor of 50 requests (phase 0 saw 109 of a few thousand, so it fires now and stops after phases 2, 3 and 5;
+   the description says so). `cpu-high` and every expression use the prefixed names. T8 depends on T2 (needs
+   `loop_last_timestamp_seconds`). Promtool tests add a stale-data and `noDataState` case. `settle-tick-slow`
+   stays the only settle-specific stall alert; `refresh_gauges` stalls are covered by `loop-stalled`.
+10. UX: T6's `status` prints a `stalled` marker beside any loop whose age exceeds its bound (the same bounds as the
+    alert, defined once in code and read by both the CLI and a test that compares them with the alert literals).
+11. Negative controls added: T1 (drop a HELP line), T2 (skip the in-flight clear), T6 (derive `live` as `quiet`).
+
 ## Risks and rollback
 
 - Registry mutex contention from per-request double observation: bounded by the T2/T4 rule and measured by the
