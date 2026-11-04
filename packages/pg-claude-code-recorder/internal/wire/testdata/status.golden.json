@@ -49,5 +49,7 @@
       "in_flight_s": 700,
       "stalled": true
     }
-  }
+  },
+  "stat_exceptions": 5,
+  "last_full_stat_age_s": 90
 }

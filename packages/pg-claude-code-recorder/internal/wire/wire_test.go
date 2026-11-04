@@ -46,6 +46,7 @@ var updateWireGolden = flag.Bool("update", false, "rewrite testdata/status.golde
 func TestStatusJSONGolden(t *testing.T) {
 	crashed, suspected := 1, 2
 	dur, age := int64(412), int64(3)
+	exc, fullAge := 5, 90.0
 	st := Status{
 		Healthy: true, Verdict: "ok", CopyLagS: 1, ParseLagS: 2, Held: 0, FreeBytes: 1000,
 		StageCounts:    map[string]int{"live": 2, "quiet": 1, "held": 0, "settled": 5},
@@ -53,7 +54,8 @@ func TestStatusJSONGolden(t *testing.T) {
 		Short: "ok", CaughtUp: true, Degraded: true, Backfill: &Backfill{Running: true, Total: 10, Copied: 5, Parsed: 4, EtaS: 30},
 		Socket: "/example/r.sock", StatusAgeS: 4, CrashedRecent: &crashed, SuspectedRecent: &suspected,
 		LaunchAgent: "loaded", LogPath: "/example/log", StateBytes: 77,
-		LastTick: &LastTick{DurationMS: 412, Examined: 8, AgeS: 3},
+		LastTick:       &LastTick{DurationMS: 412, Examined: 8, AgeS: 3},
+		StatExceptions: &exc, LastFullStatAgeS: &fullAge,
 		Loops: map[string]LoopStatus{
 			"settle_tick":   {LastDurationMS: &dur, LastOutcome: "ok", AgeS: &age, InFlightS: 0},
 			"watcher_sweep": {InFlightS: 700, Stalled: true},

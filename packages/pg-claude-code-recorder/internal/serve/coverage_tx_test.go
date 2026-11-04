@@ -29,7 +29,7 @@ func TestCoverageReadsInOneTransactionAndAnswersAsBefore(t *testing.T) {
 
 	// The per-statement version: the same body over the read pool.
 	c.Reset()
-	want, err := d.computeCoverageFrom(&d.st.Reader, "files", true)
+	want, err := d.computeCoverageFrom(&d.st.Reader, "files", true, statAll, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

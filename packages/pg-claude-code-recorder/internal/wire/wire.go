@@ -146,6 +146,14 @@ type Status struct {
 	// Loops maps each loop name to its last pass. A loop that has not completed a
 	// pass has no last_duration_ms, last_outcome or age_s.
 	Loops map[string]LoopStatus `json:"loops,omitempty"`
+
+	// StatExceptions is how many files the last status refresh had to Lstat (a
+	// file that lags or was touched recently); every other file's size is the one
+	// the copier last recorded, so a change the watcher missed shows only after
+	// the next sweep or a coverage run. LastFullStatAgeS is the age of the last
+	// coverage run or watcher sweep.
+	StatExceptions   *int     `json:"stat_exceptions,omitempty"`
+	LastFullStatAgeS *float64 `json:"last_full_stat_age_s,omitempty"`
 }
 
 // LastTick is the last completed settle tick: how long it took, how many
@@ -196,6 +204,10 @@ type FileCoverage struct {
 	CopyLagBytes  int64   `json:"copy_lag_bytes"`
 	ParseLagBytes int64   `json:"parse_lag_bytes"`
 	CopyLagS      float64 `json:"copy_lag_s"`
+	// SizeSource says where Size came from in the status snapshot: "recorded"
+	// (the copier's last seen size) or "stat" (a Lstat). The coverage command
+	// always stats and leaves it empty.
+	SizeSource string `json:"size_source,omitempty"`
 }
 
 // Worst names the file with the largest copy lag.

@@ -39,6 +39,9 @@ type Config struct {
 	Clients         []string // client names accepted as a metric label
 
 	SweepInterval time.Duration
+	// StatusFresh is how long after a file's last offset change the status loop
+	// still takes its size with a Lstat (status.fresh).
+	StatusFresh   time.Duration
 	MinFreeBytes  int64
 	WaitMax       time.Duration
 	WaitMaxWaiter int
@@ -100,6 +103,9 @@ type file struct {
 	Sweep           struct {
 		Interval string `toml:"interval"`
 	} `toml:"sweep"`
+	Status struct {
+		Fresh string `toml:"fresh"`
+	} `toml:"status"`
 	Wait struct {
 		Max        string `toml:"max"`
 		MaxWaiters *int   `toml:"maxWaiters"`
@@ -208,6 +214,7 @@ func Defaults(getenv func(string) string) Config {
 		ClaudeDir:         claude,
 		StateDir:          state,
 		SweepInterval:     15 * time.Minute,
+		StatusFresh:       2 * time.Minute,
 		MinFreeBytes:      20 << 30,
 		WaitMax:           60 * time.Second,
 		WaitMaxWaiter:     256,
@@ -326,6 +333,7 @@ func apply(c *Config, f file) error {
 		dst *time.Duration
 	}{
 		{"sweep.interval", f.Sweep.Interval, &c.SweepInterval},
+		{"status.fresh", f.Status.Fresh, &c.StatusFresh},
 		{"wait.max", f.Wait.Max, &c.WaitMax},
 		{"query.timeout", f.Query.Timeout, &c.QueryTimeout},
 		{"feed.retention", f.Feed.Retention, &c.FeedRetention},

@@ -193,6 +193,7 @@ type Store struct {
 	waitNow     func() time.Time
 	onContended func()
 	rbEpoch     atomic.Uint64
+	commitSeq   atomic.Uint64 // journal applies committed (see CommitSeq)
 	jf          fsx.File
 	nextSeq     int64
 	nextFile    int64
@@ -617,6 +618,11 @@ func (s *Store) FS() fsx.FS { return s.fs }
 // Epoch returns the current state epoch; a rebuild bumps it so clients resync.
 func (s *Store) Epoch() int { return int(s.metaInt("epoch")) }
 
+// CommitSeq counts the journal applies committed by this process. The file,
+// path and generation rows change only inside one, so a reader that cached them
+// rebuilds only when it moved. It issues no query.
+func (s *Store) CommitSeq() uint64 { return s.commitSeq.Load() }
+
 // LastSeq returns the last journal sequence applied to the database.
 func (s *Store) LastSeq() int64 { return s.metaInt("last_seq") }
 
@@ -891,6 +897,7 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 		return err
 	}
 	s.lastSeq = last
+	s.commitSeq.Add(1)
 	s.noteFiles(recs)
 	s.fireOffsets(notes)
 	return nil

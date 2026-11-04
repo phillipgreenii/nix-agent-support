@@ -30,39 +30,95 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 	return d.computeCoverage(view, true)
 }
 
+// statMode says how a coverage pass learns each file's size. statAll Lstats
+// every file (the coverage command: ground truth, it finds what the watcher
+// missed) and reads the rows and offsets from the store. statLazy (the status
+// loop) takes the size the copier last recorded and the maintained offsets, and
+// Lstats only the exceptions: a file whose recorded size differs from its copy
+// offset, or whose offsets changed within status.fresh.
+type statMode int
+
+const (
+	statAll statMode = iota
+	statLazy
+)
+
 // computeCoverage is coverage; withSummary false skips the bad-line and
 // unknown-key aggregates, which the status figures do not read.
 func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, error) {
+	return d.computeCoverageMode(view, withSummary, statAll)
+}
+
+func (d *Daemon) computeCoverageMode(view string, withSummary bool, mode statMode) (wire.Coverage, error) {
+	// The commit counter is read before the snapshot opens: a commit in between
+	// leaves the cache one step behind, never ahead.
+	seq := d.st.CommitSeq()
 	// One read transaction for every statement: one lock round trip instead of
 	// one per statement, and the figures come from one snapshot.
 	var cov wire.Coverage
 	err := d.st.ReadTx(func(rd *store.Reader) error {
 		var e error
-		cov, e = d.computeCoverageFrom(rd, view, withSummary)
+		cov, e = d.computeCoverageFrom(rd, view, withSummary, mode, seq)
 		return e
 	})
+	if err == nil && mode == statAll {
+		d.lastFullStatNS.Store(d.clock.Now().UnixNano())
+	}
 	return cov, err
 }
 
-func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary bool) (wire.Coverage, error) {
+// statusRows returns the file rows and current paths, rebuilt only when the
+// store's commit counter moved.
+func (d *Daemon) statusRows(rd *store.Reader, seq uint64) ([]store.File, map[int64][]string, error) {
+	d.rowsMu.Lock()
+	defer d.rowsMu.Unlock()
+	if d.rowsOK && d.rowsSeq == seq {
+		return d.rowsFiles, d.rowsPaths, nil
+	}
 	files, err := rd.AllFiles()
 	if err != nil {
-		return wire.Coverage{}, err
+		return nil, nil, err
 	}
-	gens, err := rd.AllGenerations()
+	paths, err := rd.AllCurrentPaths()
 	if err != nil {
-		return wire.Coverage{}, err
+		return nil, nil, err
 	}
-	curPaths, err := rd.AllCurrentPaths() // one query for every file, not one per file
-	if err != nil {
-		return wire.Coverage{}, err
+	d.rowsFiles, d.rowsPaths, d.rowsSeq, d.rowsOK = files, paths, seq, true
+	return files, paths, nil
+}
+
+func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary bool, mode statMode, seq uint64) (wire.Coverage, error) {
+	var files []store.File
+	var curPaths map[int64][]string
+	var byGen, parse map[genKey]int64 // statAll: copy and parse offsets
+	var lagGens map[int64][]parser.GenLag
+	var fresh map[int64]bool
+	var err error
+	if mode == statLazy {
+		if files, curPaths, err = d.statusRows(rd, seq); err != nil {
+			return wire.Coverage{}, err
+		}
+		lagGens = d.lag.Generations()
+		fresh = d.freshTouched(d.clock.Now())
+	} else {
+		if files, err = rd.AllFiles(); err != nil {
+			return wire.Coverage{}, err
+		}
+		gens, err := rd.AllGenerations()
+		if err != nil {
+			return wire.Coverage{}, err
+		}
+		if curPaths, err = rd.AllCurrentPaths(); err != nil { // one query for every file, not one per file
+			return wire.Coverage{}, err
+		}
+		byGen = make(map[genKey]int64, len(gens))
+		parse = make(map[genKey]int64, len(gens))
+		for _, g := range gens {
+			byGen[genKey{g.File, g.Gen}] = g.CopyOffset
+			parse[genKey{g.File, g.Gen}] = g.ParseOffset
+		}
 	}
-	byGen := make(map[genKey]int64, len(gens)) // copy offset
-	parse := make(map[genKey]int64, len(gens))
-	for _, g := range gens {
-		byGen[genKey{g.File, g.Gen}] = g.CopyOffset
-		parse[genKey{g.File, g.Gen}] = g.ParseOffset
-	}
+	exceptions := 0
 	now := d.clock.Now()
 	var cov wire.Coverage
 	kinds := map[string]int{}
@@ -88,13 +144,35 @@ func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary 
 				break
 			}
 		}
-		fc := d.fileCoverage(f, p, byGen[genKey{f.ID, f.CurGen}], parse[genKey{f.ID, f.CurGen}], now)
+		var fc wire.FileCoverage
+		var parseS float64
+		if mode == statLazy {
+			var gl parser.GenLag
+			for _, g := range lagGens[f.ID] {
+				if g.Gen == f.CurGen {
+					gl = g
+				}
+			}
+			var stat bool
+			fc, stat = d.lazyFileCoverage(f, p, gl, fresh[f.ID], now)
+			if stat {
+				exceptions++
+			}
+			if fc.ParseLagBytes > 0 && !gl.FrontSeen.IsZero() {
+				parseS = now.Sub(gl.FrontSeen).Seconds()
+			}
+		} else {
+			fc = d.fileCoverage(f, p, byGen[genKey{f.ID, f.CurGen}], parse[genKey{f.ID, f.CurGen}], now)
+			if fc.ParseLagBytes > 0 {
+				parseS = parseLagSeconds(rd, f.ID, f.CurGen, fc.ParseOffset, now)
+			}
+		}
 		if fc.ParseLagBytes > 0 {
 			if fc.ParseLagBytes > cov.ParseLagBytesMax {
 				cov.ParseLagBytesMax = fc.ParseLagBytes
 			}
-			if s := parseLagSeconds(rd, f.ID, f.CurGen, fc.ParseOffset, now); s > cov.ParseLagSecondsMax {
-				cov.ParseLagSecondsMax = s
+			if parseS > cov.ParseLagSecondsMax {
+				cov.ParseLagSecondsMax = parseS
 			}
 		}
 		if fc.CopyLagBytes > cov.CopyLagBytesMax {
@@ -141,6 +219,9 @@ func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary 
 	cov.CaughtUp = d.backfillDone.Load()
 	cov.Degraded = !cov.CaughtUp
 	cov.Backfill = d.backfillProgress()
+	if mode == statLazy {
+		d.statExceptions.Store(int64(exceptions))
+	}
 	return cov, nil
 }
 
@@ -148,7 +229,7 @@ func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary 
 // disk. copyOff and parseOff are the offsets of the file's current generation.
 func (d *Daemon) fileCoverage(f store.File, p string, copyOff, parseOff int64, now time.Time) wire.FileCoverage {
 	fc := wire.FileCoverage{FileID: f.ID, Source: f.Source, Path: p, State: f.State}
-	if fi, err := os.Lstat(p); err == nil {
+	if fi, err := d.statFunc(p); err == nil {
 		fc.Size = fi.Size()
 		if f.Mode == "append" && f.CurGen > 0 {
 			fc.CopyOffset = copyOff
@@ -167,6 +248,64 @@ func (d *Daemon) fileCoverage(f store.File, p string, copyOff, parseOff int64, n
 		fc.ParseLagBytes = fc.CopyOffset - fc.ParseOffset
 	}
 	return fc
+}
+
+// lazyFileCoverage is fileCoverage for the status loop: from the recorded size
+// and the maintained offsets, with a Lstat (stat true) only when the recorded
+// size differs from the copy offset or the file's offsets changed within
+// status.fresh. Without one, the copy lag seconds come from the commit time the
+// maintained state holds, not from the file's mtime.
+func (d *Daemon) lazyFileCoverage(f store.File, p string, gl parser.GenLag, fresh bool, now time.Time) (fc wire.FileCoverage, stat bool) {
+	appendMode := f.Mode == "append" && f.CurGen > 0
+	if fresh || (appendMode && f.LastSize != gl.CopyOffset) {
+		fc = d.fileCoverage(f, p, gl.CopyOffset, gl.ParseOffset, now)
+		fc.SizeSource = "stat"
+		return fc, true
+	}
+	fc = wire.FileCoverage{FileID: f.ID, Source: f.Source, Path: p, State: f.State, Size: f.LastSize, SizeSource: "recorded"}
+	if appendMode {
+		fc.CopyOffset, fc.ParseOffset = gl.CopyOffset, gl.ParseOffset
+		if lag := fc.Size - fc.CopyOffset; lag > 0 {
+			fc.CopyLagBytes = lag
+			if !gl.FrontSeen.IsZero() {
+				fc.CopyLagS = max(0, now.Sub(gl.FrontSeen).Seconds())
+			}
+		}
+	} else {
+		fc.CopyOffset = fc.Size
+	}
+	if f.Mode == "append" && d.prs.HasSource(f.Source) && fc.CopyOffset > fc.ParseOffset {
+		fc.ParseLagBytes = fc.CopyOffset - fc.ParseOffset
+	}
+	return fc, false
+}
+
+// noteTouched is the store's OnOffsets subscriber for the status loop: it
+// records when a file's offsets last changed. It runs under the store's write
+// lock and only takes touchedMu.
+func (d *Daemon) noteTouched(file int64, _ int, _, _ int64, at time.Time) {
+	d.touchedMu.Lock()
+	if d.touched == nil {
+		d.touched = map[int64]int64{}
+	}
+	d.touched[file] = at.UnixNano()
+	d.touchedMu.Unlock()
+}
+
+// freshTouched returns the files whose offsets changed within status.fresh of
+// now and forgets the older entries.
+func (d *Daemon) freshTouched(now time.Time) map[int64]bool {
+	d.touchedMu.Lock()
+	defer d.touchedMu.Unlock()
+	out := make(map[int64]bool, len(d.touched))
+	for id, at := range d.touched {
+		if now.Sub(time.Unix(0, at)) < d.cfg.StatusFresh {
+			out[id] = true
+		} else {
+			delete(d.touched, id)
+		}
+	}
+	return out
 }
 
 func (d *Daemon) backfillProgress() *wire.Backfill {
@@ -246,6 +385,14 @@ func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
 	}
 	if !snap.at.IsZero() {
 		st.StatusAgeS = now.Sub(snap.at).Seconds()
+	}
+	if !snap.warming {
+		n := snap.statExceptions
+		st.StatExceptions = &n
+	}
+	if at := d.lastFullStatNS.Load(); at > 0 {
+		age := max(0, now.Sub(time.Unix(0, at)).Seconds())
+		st.LastFullStatAgeS = &age
 	}
 	st.Healthy, st.Verdict, st.Short = Verdict(st, d.cfg.MinFreeBytes)
 	st.Degraded = !st.CaughtUp || st.CopyLagS >= behindAfter || st.ParseLagS >= behindAfter

@@ -122,6 +122,13 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `tracker_poll` 120 s, `status_refresh` 60 s; other loops, and `parser_drain`, have no age bound. The bounds live in
   `internal/obs/stall.go`. `status --watch` runs an O(files) loop on the daemon every 2 s, so do not leave it open while
   profiling.
+- The `status` copy and parse lag figures are as last recorded: the status loop (every 5 s) takes each file's size from
+  the copier's last recorded size and its offsets from the maintained lag state, and makes a `Lstat` only for the
+  exceptions: a file whose recorded size differs from its copy offset, or whose offsets changed within `status.fresh`
+  (default 2 minutes). A file that changed on disk without a watcher event shows in `status` only after the next sweep
+  (up to `sweep.interval`); the `coverage` command still stats every file and shows it at once. `status` carries
+  `stat_exceptions` (files stat-ed by the last pass) and `last_full_stat_age_s` (age of the last coverage run or
+  watcher sweep), and a file entry's `size_source` is `recorded` or `stat`.
 
 ### pprof and the profiling harness
 

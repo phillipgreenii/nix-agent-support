@@ -129,8 +129,25 @@ type Daemon struct {
 	statusFirst  sync.Once
 	// statusRefreshMu guards the refresh bookkeeping below.
 	statusRefreshMu sync.Mutex
-	statusSweepAt   time.Time // last full pass over every file
-	statusHot       []int64   // files that were lagging at the last pass
+
+	// statFunc is the Lstat of the status and coverage passes (os.Lstat; tests
+	// inject a counting one).
+	statFunc func(string) (os.FileInfo, error)
+	// touched is when each file's offsets last changed (fed by the store's
+	// OnOffsets hook); the status loop Lstats the ones inside status.fresh.
+	touchedMu sync.Mutex
+	touched   map[int64]int64
+	// rows is the status loop's cached copy of the file rows and current paths,
+	// valid for the store commit count rowsSeq.
+	rowsMu    sync.Mutex
+	rowsOK    bool
+	rowsSeq   uint64
+	rowsFiles []store.File
+	rowsPaths map[int64][]string
+	// statExceptions is how many files the last status pass Lstat'ed;
+	// lastFullStatNS is when the last coverage run or watcher sweep finished.
+	statExceptions atomic.Int64
+	lastFullStatNS atomic.Int64
 }
 
 // Open builds the daemon: it opens the store, probes the copy method, recovers
@@ -158,7 +175,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, stop: make(chan struct{}), statusReady: make(chan struct{})}
+	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, stop: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
 	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
 	if err != nil {
@@ -178,6 +195,7 @@ func Open(opt Options) (*Daemon, error) {
 		_ = st.Close()
 		return nil, fmt.Errorf("seed parse-lag state: %w", err)
 	}
+	st.OnOffsets(d.noteTouched)
 	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), ClaudeDir: cfg.ClaudeDir, Res: d.prs, SessionRef: st.SessionRefReady, Storage: sources.Storage(srcs), TypedStorage: st.HasExt, Behind: func() bool { return !d.backfillDone.Load() }}
 	d.fe = &feed.Engine{
 		Q: d.qe, Store: st, Clock: opt.Clock, Obs: o, Retention: cfg.FeedRetention, WaitMax: cfg.WaitMax,
@@ -329,6 +347,7 @@ func (d *Daemon) sink(e watcher.Event) {
 // on the first sweep copies newest first with a throttle, so the most recent
 // Conversations are safe first and the laptop stays usable.
 func (d *Daemon) onSweep(files []watcher.FileInfo) {
+	d.lastFullStatNS.Store(d.clock.Now().UnixNano())
 	found := make(map[copier.Identity]bool, len(files))
 	for _, f := range files {
 		var birth int64
