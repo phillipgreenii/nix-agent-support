@@ -234,7 +234,12 @@ func BusyDeclineFor(err error) (BusyDecline, bool) {
 	case errors.Is(err, executor.ErrPoolAtCapacity):
 		return BusyDecline{Reason: BusyReasonAtCapacity, Kind: DeclineKindBusy}, true
 	case errors.Is(err, executor.ErrLowDisk):
-		return BusyDecline{Reason: BusyReasonLowDisk, Kind: DeclineKindFault}, true
+		d := BusyDecline{Reason: BusyReasonLowDisk, Kind: DeclineKindFault}
+		var lf *executor.LowFreeSpaceError
+		if errors.As(err, &lf) {
+			d.Detail = BoundedDetail(lf.Error())
+		}
+		return d, true
 	case errors.Is(err, executor.ErrBusy):
 		return BusyDecline{Reason: BusyReasonCommandBusy, Kind: DeclineKindBusy}, true
 	case errors.Is(err, executor.ErrSessionInFlight):

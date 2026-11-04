@@ -113,6 +113,10 @@ type Deps struct {
 	// read (before the prior-session plan), when that unit found no orphan and so
 	// changed nothing: the plan then reuses it instead of listing again. The plan
 	// consumes it once (INV-CCH-41).
+	// FreeBytes reports the bytes available to unprivileged writers at a path
+	// (nil => statfs). The free-space floor before a worktree is created reads
+	// it (INV-CCH-8); tests substitute a fake.
+	FreeBytes   func(path string) (uint64, error)
 	PoolListing []ccpool.Session
 	PoolListed  bool
 }

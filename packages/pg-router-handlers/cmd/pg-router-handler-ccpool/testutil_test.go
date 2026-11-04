@@ -87,7 +87,7 @@ func launchConfig(t *testing.T, extra string) (cfgPath, stateDir string) {
 	dir := t.TempDir()
 	stateDir = filepath.Join(dir, "state")
 	cfgPath = filepath.Join(dir, "launch.json")
-	body := `{"originProbe":{"stateDir":"` + stateDir + `"}` + extra + `}`
+	body := `{"minFreeBytes":0,"originProbe":{"stateDir":"` + stateDir + `"}` + extra + `}`
 	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

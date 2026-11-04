@@ -48,6 +48,7 @@ func fastCfg() config.Config {
 	c := config.Default()
 	c.MaxWait = 50 * time.Millisecond
 	c.PollInterval = time.Millisecond
+	c.MinFreeBytes = 0 // the floor has its own tests; keep the rest independent of the host disk
 	return c
 }
 

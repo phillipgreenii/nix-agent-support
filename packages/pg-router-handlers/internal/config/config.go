@@ -98,6 +98,12 @@ type Config struct {
 	// SweepDeadline bounds the whole worktree-keyed sweep (INV-CCH-19); on expiry
 	// the pass returns what it had done. <= 0 means no deadline. Default 60s.
 	SweepDeadline time.Duration
+	// MinFreeBytes is the free-space floor, in bytes, on the volume holding
+	// WorktreeDir that a dispatch needs before it may CREATE a per-bead
+	// worktree (INV-CCH-8). Below it the dispatch declines with reason low-disk
+	// and creates nothing. 0 disables the check. Default
+	// DefaultMinFreeBytes. JSON key minFreeBytes.
+	MinFreeBytes int64
 	// Effort/Model/PermissionMode/AllowedTools/Autonomous are forwarded
 	// verbatim to `ccpool new` (NewCLIRunner).
 	Effort         string
@@ -324,6 +330,9 @@ func (c Config) Validate() error {
 	if err := c.ValidateNeedsInputStall(c.NeedsInputStall); err != nil {
 		return fmt.Errorf("needsInputStall: %w", err)
 	}
+	if c.MinFreeBytes < 0 {
+		return fmt.Errorf("minFreeBytes %d: must be >= 0 (0 disables the check)", c.MinFreeBytes)
+	}
 	return c.OriginProbe.Validate()
 }
 
@@ -455,6 +464,7 @@ func Default() Config {
 		WorktreeQuietMax:            10 * time.Minute,
 		WorktreeKeepRecheck:         5 * time.Minute,
 		SweepDeadline:               60 * time.Second,
+		MinFreeBytes:                DefaultMinFreeBytes,
 		Effort:                      "medium",
 		Model:                       "claude-sonnet-5-5",
 		Autonomous:                  true,
@@ -475,6 +485,15 @@ func Default() Config {
 		DeclineReconcileMinInterval: DefaultDeclineReconcileMinInterval,
 	}
 }
+
+// DefaultMinFreeBytes is the default worktree-creation floor: 40 GiB. The
+// other disk consumers on the machine act at 20 GiB (the disk watchdog sets its
+// gate below 20 GiB, the recorder holds work below 20 GiB), and a fresh
+// checkout of a large repository measured about 12 GiB each, so a floor of 20
+// GiB plus room for two concurrent checkouts (2 x 12 GiB = 24 GiB, rounded up
+// to 20 GiB of margin) is 40 GiB: a dispatch that would push free space under
+// the other tools' floors is declined before it starts.
+const DefaultMinFreeBytes int64 = 40 << 30
 
 // DefaultDeclineReconcileMinInterval is the default TTL of the decline-time
 // reconcile's negative cache (plan pg2-fx5x0l rev 3, Phase 4).

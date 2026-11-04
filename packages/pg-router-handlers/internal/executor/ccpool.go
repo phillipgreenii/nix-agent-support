@@ -323,6 +323,16 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		defer r.holdWorktreeLock(ctx, d.Item.ID)()
 	}
 	preexisting := usesWorktreeIsolation(cc.Isolation) && r.worktreePathExists(d.Item.ID)
+	// Free-space floor (INV-CCH-8): creating a worktree writes gigabytes, so a
+	// NEW worktree is only started while the volume keeps at least
+	// Cfg.MinFreeBytes free, above the floors other tools on the machine act on.
+	// A worktree that already exists is reused and adds nothing.
+	if usesWorktreeIsolation(cc.Isolation) && !preexisting {
+		if _, fErr := r.deps.checkFreeSpace(); fErr != nil {
+			slog.Warn("dispatch declined: free space below the worktree floor", "role", d.Role.Name, "bead", d.Item.ID, "err", fErr)
+			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, fErr)
+		}
+	}
 	wt, wtErr := newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
 	if wtErr != nil {
 		if errors.Is(wtErr, ErrLowDisk) {

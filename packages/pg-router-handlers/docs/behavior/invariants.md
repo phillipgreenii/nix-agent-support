@@ -81,6 +81,17 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   `INV-CCH-37`), mutating no bead, so the core simply re-offers the event later with backoff. This
   is consistent with `INV-CCH-3`/`INV-CCH-6`: a system-wide resource shortage is a pre-accept
   signal, not a post-accept or per-bead outcome.
+  - **Free-space floor before creation.** Before creating a NEW per-bead worktree the handler MUST
+    compare the free bytes of the volume holding the worktree directory against the configured
+    floor (`minFreeBytes`, default 40 GiB: the disk watchdog and the recorder both act at 20 GiB, and
+    one fresh checkout of a large repository measured about 12 GiB, so the floor leaves the other
+    tools' margin plus room for two concurrent checkouts). Below the floor it MUST create no worktree
+    and launch no session, and MUST decline exactly as above (reason `low-disk`, kind `fault`, the
+    measured free bytes and the floor in the reply detail), so the core's declined metric counts it
+    and the event log records it. A floor of `0` disables the check; a worktree that already exists
+    is reused without it; a free-space reading that cannot be taken passes (the guard never stops
+    dispatching by itself failing). The pool's total worktree bytes is the janitor census gauge
+    `ccpool_worktree_bytes`.
   - **Any other isolation failure.** A non-low-disk failure to prepare per-bead isolation (a
     per-bead worktree defect, before any session exists) is NOT a decline. It is an accepted failure
     (exit `1`) that adds no label to the bead and sets no `human`, and it counts as unsuccessful in
