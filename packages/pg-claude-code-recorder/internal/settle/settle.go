@@ -384,11 +384,24 @@ func (s *Settler) settledPrefilter(groups map[string]*conv, live map[string]bool
 		for _, r := range rows {
 			before[r.Session] = r.Stage
 		}
+		// Two bulk reads replace a settled-row read per Conversation and a
+		// generation read per file (thousands of statements, each taking the
+		// shared-memory lock, which kept the tick near the read deadline).
+		settled, err := rd.AllSettled()
+		if err != nil {
+			return err
+		}
+		offsets, err := rd.CopyOffsets()
+		if err != nil {
+			return err
+		}
+		byGen := func(f store.File) (int64, bool) { return offsets[[2]int64{f.ID, int64(f.CurGen)}], true }
 		for session, c := range groups {
 			if live[session] || before[session] != StageSettled {
 				continue
 			}
-			if !changedSinceSettleFrom(rd, c) {
+			st, ok := settled[session]
+			if !ok || !changedAgainst(st, c, byGen) {
 				unchanged[session] = true
 			}
 		}
@@ -642,6 +655,24 @@ func changedSinceSettleFrom(rd *store.Reader, c *conv) bool {
 	if err != nil || !ok {
 		return false
 	}
+	// One primary-key read per file: the work is bounded by this
+	// Conversation, not by the size of the generations table.
+	return changedAgainst(st, c, func(f store.File) (int64, bool) {
+		g, err := rd.Generation(f.ID, f.CurGen)
+		switch {
+		case err == nil:
+			return g.CopyOffset, true
+		case errors.Is(err, store.ErrNotFound):
+			return 0, true
+		}
+		return 0, false
+	})
+}
+
+// changedAgainst decides whether c changed since the settle record st. offset
+// returns the copy offset of the file's current generation (0 when it has
+// none) and false when it cannot be read, which answers "unchanged".
+func changedAgainst(st store.Settled, c *conv, offset func(store.File) (int64, bool)) bool {
 	var m store.Manifest
 	if json.Unmarshal(st.Manifest, &m) != nil {
 		return true
@@ -664,15 +695,8 @@ func changedSinceSettleFrom(rd *store.Reader, c *conv) bool {
 		if f.CurGen != mf.Gen {
 			return true
 		}
-		// One primary-key read per file: the work is bounded by this
-		// Conversation, not by the size of the generations table.
-		var off int64
-		g, err := rd.Generation(f.ID, f.CurGen)
-		switch {
-		case err == nil:
-			off = g.CopyOffset
-		case errors.Is(err, store.ErrNotFound):
-		default:
+		off, ok := offset(f)
+		if !ok {
 			return false
 		}
 		if off != mf.Size {

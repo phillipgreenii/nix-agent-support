@@ -210,6 +210,25 @@ func (s *Reader) AllGenerations() ([]Generation, error) {
 	return out, rows.Err()
 }
 
+// CopyOffsets returns the copy offset of every generation in one query, keyed
+// by {file, gen}. It reads three narrow columns, not whole generation rows.
+func (s *Reader) CopyOffsets() (map[[2]int64]int64, error) {
+	rows, err := s.q.Query(`SELECT file_id,gen,copy_offset FROM generations`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[[2]int64]int64{}
+	for rows.Next() {
+		var f, g, off int64
+		if err := rows.Scan(&f, &g, &off); err != nil {
+			return nil, err
+		}
+		out[[2]int64{f, g}] = off
+	}
+	return out, rows.Err()
+}
+
 // SetParseOffset records how far the parser has parsed a generation. It is a
 // derived column, not an observation, and MUST NOT exceed the copy offset.
 func (s *Store) SetParseOffset(file int64, gen int, off int64) error {

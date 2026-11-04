@@ -138,6 +138,27 @@ func (s *Reader) SettledOf(session string) (Settled, bool, error) {
 	return x, err == nil, err
 }
 
+// AllSettled returns the settle record of every session in one query, keyed by
+// session.
+func (s *Reader) AllSettled() (map[string]Settled, error) {
+	rows, err := s.q.Query(`SELECT session,seq,at_ns,method,manifest FROM settled`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]Settled{}
+	for rows.Next() {
+		var x Settled
+		var m string
+		if err := rows.Scan(&x.Session, &x.Seq, &x.AtNS, &x.Method, &m); err != nil {
+			return nil, err
+		}
+		x.Manifest = []byte(m)
+		out[x.Session] = x
+	}
+	return out, rows.Err()
+}
+
 // Range is a row of the ranges table.
 type Range struct {
 	File     int64

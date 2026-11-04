@@ -161,3 +161,36 @@ func TestPoolStatsReportBothPools(t *testing.T) {
 		t.Fatalf("pool stats %+v", ps)
 	}
 }
+
+func TestBulkReadsMatchTheirPointReads(t *testing.T) {
+	s, _ := openCounting(t, Options{})
+	for i := 0; i < 4; i++ {
+		seed(t, s)
+	}
+	gens, err := s.AllGenerations()
+	if err != nil || len(gens) == 0 {
+		t.Fatalf("fixture has %d generations, err %v", len(gens), err)
+	}
+	offs, err := s.CopyOffsets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offs) != len(gens) {
+		t.Fatalf("CopyOffsets has %d entries, generations %d", len(offs), len(gens))
+	}
+	for _, g := range gens {
+		if got := offs[[2]int64{g.File, int64(g.Gen)}]; got != g.CopyOffset {
+			t.Errorf("file %d gen %d: bulk %d, row %d", g.File, g.Gen, got, g.CopyOffset)
+		}
+	}
+	all, err := s.AllSettled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for session, got := range all {
+		want, ok, err := s.SettledOf(session)
+		if err != nil || !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: bulk %+v, point %+v (ok %v, err %v)", session, got, want, ok, err)
+		}
+	}
+}

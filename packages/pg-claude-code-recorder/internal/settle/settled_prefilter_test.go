@@ -75,3 +75,21 @@ func TestSettledPrefilterUsesOneReadTransaction(t *testing.T) {
 		t.Fatalf("per-statement %d tx/%d q, batched %d q", perStatementTx, perStatementQ, batchedQ)
 	}
 }
+
+// The prefilter's statement count does not grow with the number of
+// Conversations or files: Stages, the settled rows and the copy offsets are
+// each one statement.
+func TestSettledPrefilterStatementCountIsConstant(t *testing.T) {
+	count := func(n int) int64 {
+		e := newCSEnv(t)
+		groups, live := settledFixture(e, n)
+		e.cnt.Reset()
+		e.s.settledPrefilter(groups, live)
+		return e.cnt.Queries()
+	}
+	small, large := count(10), count(60)
+	t.Logf("prefilter statements: %d conversations %d, %d conversations %d", 10, small, 60, large)
+	if small != large || large > 4 {
+		t.Fatalf("statements grow with the data: %d for 10 conversations, %d for 60", small, large)
+	}
+}
