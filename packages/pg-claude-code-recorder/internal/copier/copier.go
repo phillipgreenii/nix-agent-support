@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -82,6 +83,10 @@ type Copier struct {
 	// before it queues (a test seam that lets a test move the injected clock
 	// while the caller is queued).
 	onContended func()
+
+	// onChange, when set, is told of every file whose persisted state a commit
+	// changed (see SetOnFileChange).
+	onChange atomic.Pointer[func(file, copyOffset int64)]
 }
 
 // lock takes the copier lock. A contended acquisition observes the seconds the
@@ -284,7 +289,7 @@ func (c *Copier) addPath(f store.File, path string) error {
 			recs = append(recs, &store.Rec{T: store.TPathClose, At: now, File: f.ID, Path: p})
 		}
 	}
-	return c.st.Commit(recs...)
+	return c.commit(recs...)
 }
 
 func sameInode(fi fs.FileInfo, f store.File) bool {
@@ -317,7 +322,7 @@ func (c *Copier) createFile(path string, id Identity, source, mode, link string,
 	recs = append(recs,
 		&store.Rec{T: store.TFile, At: now, File: fid, Source: source, Mode: mode, Dev: id.Dev, Ino: id.Ino, Birth: id.Birth, FirstHash: fh, Link: link},
 		&store.Rec{T: store.TPath, At: now, File: fid, Path: path})
-	if err := c.st.Commit(recs...); err != nil {
+	if err := c.commit(recs...); err != nil {
 		return store.File{}, err
 	}
 	return c.st.File(fid)
@@ -375,7 +380,7 @@ func (c *Copier) handleMissing(path string) (Result, error) {
 
 func (c *Copier) tombstone(f store.File, path string) error {
 	now := c.now()
-	if err := c.st.Commit(&store.Rec{T: store.TTomb, At: now, File: f.ID, Path: path}); err != nil {
+	if err := c.commit(&store.Rec{T: store.TTomb, At: now, File: f.ID, Path: path}); err != nil {
 		return err
 	}
 	var lost int64
@@ -434,7 +439,7 @@ func (c *Copier) SweepMissing(found map[Identity]bool) error {
 		for _, p := range gone {
 			recs = append(recs, &store.Rec{T: store.TPathClose, At: now, File: f.ID, Path: p})
 		}
-		if err := c.st.Commit(recs...); err != nil {
+		if err := c.commit(recs...); err != nil {
 			return err
 		}
 	}
@@ -538,7 +543,7 @@ func (c *Copier) ingestSnapshot(path string, fi fs.FileInfo, source string) (Res
 	if revived {
 		recs = append(recs, &store.Rec{T: store.TPath, At: now, File: f.ID, Path: path})
 	}
-	if err := c.st.Commit(recs...); err != nil {
+	if err := c.commit(recs...); err != nil {
 		return Result{}, err
 	}
 	if perr == nil && c.cfg.InferMissed != nil {
@@ -605,14 +610,14 @@ func (c *Copier) ingestAppend(path string, fi fs.FileInfo, source string) (Resul
 		return Result{}, err
 	}
 	if f.FirstHash == 0 && size >= FirstBytes && f.CurGen > 0 {
-		if err := c.st.Commit(&store.Rec{T: store.TIdent, At: c.now(), File: f.ID, Dev: f.Dev, Ino: f.Ino, Birth: f.Birth, FirstHash: firstHash(src, size)}); err != nil {
+		if err := c.commit(&store.Rec{T: store.TIdent, At: c.now(), File: f.ID, Dev: f.Dev, Ino: f.Ino, Birth: f.Birth, FirstHash: firstHash(src, size)}); err != nil {
 			return Result{}, err
 		}
 	}
 	res := Result{File: f.ID, Action: "unchanged"}
 	if f.State == "deleted" {
 		// The deleted file's inode reappeared at a path.
-		if err := c.st.Commit(&store.Rec{T: store.TState, At: c.now(), File: f.ID, State: "ok"}); err != nil {
+		if err := c.commit(&store.Rec{T: store.TState, At: c.now(), File: f.ID, State: "ok"}); err != nil {
 			return Result{}, err
 		}
 	}
@@ -688,7 +693,7 @@ func (c *Copier) appendStep(f store.File, src *os.File, size int64, path string)
 	case clen < g.CopyOffset || (!exists && g.CopyOffset > 0):
 		// After a power loss a copy can be shorter than its committed offset.
 		c.cfg.Obs.Event(obs.EvCopyMismatch, "file", fmt.Sprint(f.ID), "gen", fmt.Sprint(g.Gen))
-		if err := c.st.Commit(&store.Rec{T: store.TState, At: c.now(), File: f.ID, State: "copy_mismatch"}); err != nil {
+		if err := c.commit(&store.Rec{T: store.TState, At: c.now(), File: f.ID, State: "copy_mismatch"}); err != nil {
 			return step{}, err
 		}
 		f.State = "copy_mismatch"
@@ -907,7 +912,7 @@ func (c *Copier) appendBytes(f store.File, g store.Generation, src *os.File, siz
 	if newOff > obsSize {
 		obsSize = newOff
 	}
-	if err := c.st.Commit(&store.Rec{
+	if err := c.commit(&store.Rec{
 		T: store.TCommit, At: c.now(), File: f.ID, Gen: g.Gen, From: off, To: newOff,
 		Size: obsSize, Tail: xxhash.Sum64(tail), TailLen: len(tail),
 	}); err != nil {
@@ -989,7 +994,7 @@ func (c *Copier) startGeneration(f store.File, src *os.File, reason string, rese
 	if f.State == "copy_mismatch" {
 		recs = append(recs, &store.Rec{T: store.TState, At: now, File: f.ID, State: "ok"})
 	}
-	if err := c.st.Commit(recs...); err != nil {
+	if err := c.commit(recs...); err != nil {
 		return err
 	}
 	c.cfg.Obs.Event(obs.EvGenerationStart, "file", fmt.Sprint(f.ID), "gen", fmt.Sprint(gen), "reason", reason, "method", method)
@@ -1193,12 +1198,13 @@ func (c *Copier) recoverLocked(retry *[]string) error {
 				continue
 			}
 			c.cfg.Obs.Event(obs.EvCopyMismatch, "file", fmt.Sprint(f.ID), "gen", fmt.Sprint(g.Gen))
-			if err := c.st.Commit(&store.Rec{T: store.TState, At: c.now(), File: f.ID, State: "copy_mismatch"}); err != nil {
+			if err := c.commit(&store.Rec{T: store.TState, At: c.now(), File: f.ID, State: "copy_mismatch"}); err != nil {
 				return err
 			}
 			if _, err := c.st.StartGeneration(f.ID, "copy_mismatch", "bytes", c.now()); err != nil {
 				return err
 			}
+			c.noteFiles(f.ID)
 		}
 	}
 	return nil

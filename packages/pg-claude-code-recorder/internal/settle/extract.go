@@ -178,6 +178,7 @@ func (s *Settler) Extract(session, to string) (ExtractResult, error) {
 					_ = os.Remove(tmp)
 					return err
 				}
+				s.dirtyRecorded(mf.File)
 				if i == 0 {
 					faults.At("extract.after-path")
 				}

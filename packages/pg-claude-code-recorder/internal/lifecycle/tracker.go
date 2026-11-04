@@ -45,6 +45,10 @@ type TrackerConfig struct {
 	// file is still present at a Process's exit, it is read again after the window.
 	GraceEnable bool
 	GraceWindow time.Duration
+	// OnChange, when set, runs after a commit that can change which
+	// Conversations are live (a Process discovered or exited); a commit of only
+	// liveness refreshes does not run it. It MUST NOT block.
+	OnChange func()
 }
 
 type tracked struct {
@@ -111,6 +115,16 @@ func (t *Tracker) now() int64 { return t.cfg.Clock.Now().UnixNano() }
 func (t *Tracker) commit(recs ...*store.Rec) {
 	if err := t.cfg.Store.Commit(recs...); err != nil {
 		t.cfg.Obs.Log.Warn("process_observation_failed", "err", err.Error())
+		return
+	}
+	if t.cfg.OnChange == nil {
+		return
+	}
+	for _, r := range recs {
+		if r.Kind != "seen" {
+			t.cfg.OnChange()
+			return
+		}
 	}
 }
 

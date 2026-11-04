@@ -177,6 +177,10 @@ type Settler struct {
 	gcache map[string]*conv
 	owner  map[int64]string // file id to the session it is placed in
 
+	// df is the dirty-set feed (see dirty.go); it has its own lock.
+	df       *dirtyFeed
+	feedOnce sync.Once
+
 	// seen holds, during Tick's evaluate phase, the newest recorded change
 	// time of every file about to be evaluated (see prefetchLastSeen); nil
 	// otherwise. Guarded by run.
@@ -245,6 +249,12 @@ func New(cfg Config) *Settler {
 		cfg.Holders = LsofHolders
 	}
 	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}}
+	if cfg.Copier != nil {
+		// Every file-state change the copier commits (a backfill batch, a
+		// tombstone, a new generation, the settler's and doctor's own) feeds the
+		// dirty set.
+		cfg.Copier.SetOnFileChange(s.Dirty)
+	}
 	if rows, err := s.st.Stages(); err == nil {
 		for _, r := range rows {
 			s.last[r.Session] = r.Stage
@@ -364,14 +374,18 @@ func (s *Settler) groups() (map[string]*conv, error) {
 		c, owner, err := s.groupsFull()
 		if err != nil {
 			s.gcache, s.owner = nil, nil
+			s.syncFileSession(nil, true)
 			return nil, err
 		}
 		s.gcache, s.owner = c, owner
+		s.syncFileSession(nil, true)
 	} else if len(ids) > 0 {
 		if err := s.applyChanged(ids); err != nil {
 			s.gcache, s.owner = nil, nil
+			s.syncFileSession(nil, true)
 			return nil, err
 		}
+		s.syncFileSession(ids, false)
 	}
 	out := make(map[string]*conv, len(s.gcache))
 	for k, v := range s.gcache {
@@ -1112,6 +1126,7 @@ func (s *Settler) checkAppend(f store.File, rel string, quiet bool, now time.Tim
 			if err := s.st.Commit(&store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, Reset: true}); err != nil {
 				return nil, false, err
 			}
+			s.Dirty(f.ID, g.CopyOffset)
 		}
 		tornLen := g.CopyOffset - nl
 		if tornLen > 0 && g.ParseOffset < g.CopyOffset {
@@ -1132,6 +1147,7 @@ func (s *Settler) checkAppend(f store.File, rel string, quiet bool, now time.Tim
 					if err := s.st.Commit(&store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, From: nl, To: g.CopyOffset}); err != nil {
 						return nil, false, err
 					}
+					s.Dirty(f.ID, g.CopyOffset)
 				}
 			}
 		}

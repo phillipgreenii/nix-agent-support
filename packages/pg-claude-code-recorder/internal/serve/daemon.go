@@ -192,6 +192,7 @@ func Open(opt Options) (*Daemon, error) {
 	d.tr = lifecycle.NewTracker(lifecycle.TrackerConfig{
 		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
 		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow,
+		OnChange: func() { d.sett.LiveChanged() },
 	})
 	d.sett = settle.New(settle.Config{
 		Store: st, Copier: d.cp, Parser: d.prs, Live: d.eng.LiveSessions, Clock: opt.Clock, Obs: o,
@@ -306,6 +307,7 @@ func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Resu
 	d.obs.Reg.Add(obs.MIngestResults, map[string]string{"result": result}, 1)
 	if res.File != 0 {
 		d.prs.Notify(res.File)
+		d.sett.Dirty(res.File, d.cp.RecordedOffset(res.File))
 	}
 	if src, _ := d.scope.Classify(p); src == scope.SrcRegistry {
 		d.tr.Observe(p)

@@ -825,6 +825,9 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 	if err := s.st.CommitFull(recs...); err != nil {
 		return "", err
 	}
+	for _, pf := range pl.Files {
+		s.dirtyRecorded(pf.File)
+	}
 	faults.At("remove.after-removed")
 	s.cfg.Obs.Reg.Add(obs.MRemovedTotal, nil, 1)
 	s.cfg.Obs.Event(obs.EvRemoved, "session", pl.Session, "files", strconv.Itoa(len(pl.Files)))

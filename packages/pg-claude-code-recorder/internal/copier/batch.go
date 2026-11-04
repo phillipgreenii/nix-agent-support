@@ -132,7 +132,7 @@ func (c *Copier) flushStaged(batch []*staged) error {
 	for _, s := range batch {
 		recs = append(recs, s.recs...)
 	}
-	if err := c.st.Commit(recs...); err != nil {
+	if err := c.commit(recs...); err != nil {
 		return err
 	}
 	for _, s := range batch {
