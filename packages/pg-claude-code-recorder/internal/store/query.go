@@ -113,6 +113,26 @@ func (s *Store) CurrentPaths(file int64) ([]string, error) {
 	return s.strings(`SELECT path FROM paths WHERE file_id=? AND closed_ns IS NULL ORDER BY path`, file)
 }
 
+// AllCurrentPaths returns the current paths of every file in one query, each
+// file's paths ordered by path.
+func (s *Store) AllCurrentPaths() (map[int64][]string, error) {
+	rows, err := s.rdb.Query(`SELECT file_id,path FROM paths WHERE closed_ns IS NULL ORDER BY file_id,path`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64][]string{}
+	for rows.Next() {
+		var id int64
+		var p string
+		if err := rows.Scan(&id, &p); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], p)
+	}
+	return out, rows.Err()
+}
+
 // PathHistory returns every path the file ever had, in first-seen order.
 func (s *Store) PathHistory(file int64) ([]string, error) {
 	return s.strings(`SELECT path FROM paths WHERE file_id=? ORDER BY first_seen_ns, path`, file)

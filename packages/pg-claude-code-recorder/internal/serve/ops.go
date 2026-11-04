@@ -27,11 +27,21 @@ type genKey struct {
 // coverage reads every file's copy and parse state against the original on
 // disk. A file that has no current path (every path closed) is not listed.
 func (d *Daemon) coverage(view string) (wire.Coverage, error) {
+	return d.computeCoverage(view, true)
+}
+
+// computeCoverage is coverage; withSummary false skips the bad-line and
+// unknown-key aggregates, which the status figures do not read.
+func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, error) {
 	files, err := d.st.AllFiles()
 	if err != nil {
 		return wire.Coverage{}, err
 	}
 	gens, err := d.st.AllGenerations()
+	if err != nil {
+		return wire.Coverage{}, err
+	}
+	curPaths, err := d.st.AllCurrentPaths() // one query for every file, not one per file
 	if err != nil {
 		return wire.Coverage{}, err
 	}
@@ -51,7 +61,7 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 			cov.Removed++ // a deleted original (the archive path comes in phase 6)
 			continue
 		}
-		paths, _ := d.st.CurrentPaths(f.ID)
+		paths := curPaths[f.ID]
 		if len(paths) == 0 {
 			continue
 		}
@@ -107,7 +117,9 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 		_, err := os.Stat(root)
 		cov.Roots = append(cov.Roots, wire.RootCoverage{Path: root, Present: err == nil, Files: counts[root]})
 	}
-	if sum, err := parser.Summarize(d.st); err == nil {
+	if !withSummary {
+		// the caller does not read the aggregates
+	} else if sum, err := parser.Summarize(d.st); err == nil {
 		cov.BadLines = sum.BadLines
 		cov.UnknownKeys = []wire.UnknownKey{}
 		for _, u := range sum.UnknownKeys {
@@ -167,36 +179,48 @@ func (d *Daemon) opCoverage(_ context.Context, body []byte) (any, *wire.Error) {
 	return cov, nil
 }
 
+// opStatus answers from the snapshot the status loop keeps: it issues no
+// query and touches no file, so its cost does not grow with the file count.
 func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
-	cov, err := d.coverage("summary")
+	snap, err := d.statusSnapshot()
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}
 	free, _ := FreeBytes(d.cfg.StateDir)
-	heldLong, counts := 0, map[string]int{}
-	if rows, err := d.st.Stages(); err == nil {
-		for _, r := range rows {
-			counts[r.Stage]++
-			if r.Stage == store.StageHeld && d.clock.Now().Sub(time.Unix(0, r.SinceNS)) > d.cfg.HeldMaxAge {
-				heldLong++
-			}
+	now := d.clock.Now()
+	heldLong := 0
+	for _, since := range snap.heldSince {
+		if now.Sub(time.Unix(0, since)) > d.cfg.HeldMaxAge {
+			heldLong++
 		}
 	}
+	counts := make(map[string]int, len(snap.stageCounts))
+	for k, v := range snap.stageCounts {
+		counts[k] = v
+	}
+	caughtUp := d.backfillDone.Load()
 	st := wire.Status{
-		CopyLagS:       cov.CopyLagSecondsMax,
-		ParseLagS:      cov.ParseLagSecondsMax,
+		CopyLagS:       snap.cov.CopyLagSecondsMax,
+		ParseLagS:      snap.cov.ParseLagSecondsMax,
 		Held:           heldLong,
 		FreeBytes:      free,
 		StageCounts:    counts,
 		ParserVersions: map[string]int{},
 		SchemaVersion:  d.st.SchemaVersion(),
 		ProtocolVer:    wire.ProtocolVersion,
-		CaughtUp:       cov.CaughtUp,
-		Backfill:       cov.Backfill,
+		CaughtUp:       caughtUp,
+		Backfill:       d.backfillProgress(),
 		Socket:         d.cfg.Socket,
+	}
+	if !snap.at.IsZero() {
+		st.StatusAgeS = now.Sub(snap.at).Seconds()
 	}
 	st.Healthy, st.Verdict, st.Short = Verdict(st, d.cfg.MinFreeBytes)
 	st.Degraded = !st.CaughtUp || st.CopyLagS >= behindAfter || st.ParseLagS >= behindAfter
+	if snap.warming {
+		st.Healthy, st.Short, st.Degraded = false, "behind", true
+		st.Verdict = "behind: the status figures are still being computed"
+	}
 	return st, nil
 }
 

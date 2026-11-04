@@ -92,6 +92,13 @@ type Daemon struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	refreshing   sync.WaitGroup
+
+	// statusMu guards statusSnap, the cached figures opStatus serves.
+	statusMu     sync.Mutex
+	statusSnap   *statusSnap
+	statusLoopOn atomic.Bool
+	statusReady  chan struct{} // closed once the loop has stored its first snapshot
+	statusFirst  sync.Once
 }
 
 // Open builds the daemon: it opens the store, probes the copy method, recovers
@@ -116,7 +123,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), stop: make(chan struct{})}
+	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), stop: make(chan struct{}), statusReady: make(chan struct{})}
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
 	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
 	if err != nil {
@@ -366,7 +373,9 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("start watcher: %w", err)
 	}
 	d.tr.Startup()
-	d.refreshing.Add(6)
+	d.refreshing.Add(7)
+	d.statusLoopOn.Store(true)
+	go d.statusLoop()
 	go d.walCheckpointLoop()
 	go d.settleLoop()
 	go d.doctorLoop()

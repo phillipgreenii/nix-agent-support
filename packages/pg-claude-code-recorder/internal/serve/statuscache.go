@@ -1,0 +1,94 @@
+package serve
+
+import (
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+)
+
+// statusRefreshEvery is the pause between two recomputations of the status
+// figures (measured from the end of one run to the start of the next).
+const statusRefreshEvery = 5 * time.Second
+
+// statusFirstWait is how long a status call waits for the first snapshot
+// before it answers "still being computed".
+const statusFirstWait = 500 * time.Millisecond
+
+// statusSnap is what status serves: the copy and parse lag figures and the
+// stage rows, computed off the request path.
+type statusSnap struct {
+	cov         wire.Coverage
+	stageCounts map[string]int
+	heldSince   []int64 // since_ns of every held Conversation
+	at          time.Time
+	warming     bool // no real figures yet
+}
+
+// refreshStatus recomputes the snapshot. It reads every file once (Lstat per
+// file), which is why status never does it.
+func (d *Daemon) refreshStatus() error {
+	cov, err := d.computeCoverage("summary", false)
+	if err != nil {
+		return err
+	}
+	snap := &statusSnap{cov: cov, stageCounts: map[string]int{}, at: d.clock.Now()}
+	rows, err := d.st.Stages()
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		snap.stageCounts[r.Stage]++
+		if r.Stage == store.StageHeld {
+			snap.heldSince = append(snap.heldSince, r.SinceNS)
+		}
+	}
+	d.statusMu.Lock()
+	d.statusSnap = snap
+	d.statusMu.Unlock()
+	d.statusFirst.Do(func() { close(d.statusReady) })
+	return nil
+}
+
+func (d *Daemon) loadStatusSnap() *statusSnap {
+	d.statusMu.Lock()
+	defer d.statusMu.Unlock()
+	return d.statusSnap
+}
+
+// statusSnapshot returns the cached figures. With the loop running and no
+// snapshot yet it waits briefly, then answers a warming snapshot; without the
+// loop (a daemon that was opened but not started) it computes once inline.
+func (d *Daemon) statusSnapshot() (*statusSnap, error) {
+	if s := d.loadStatusSnap(); s != nil {
+		return s, nil
+	}
+	if !d.statusLoopOn.Load() {
+		if err := d.refreshStatus(); err != nil {
+			return nil, err
+		}
+		return d.loadStatusSnap(), nil
+	}
+	select {
+	case <-d.statusReady:
+	case <-time.After(statusFirstWait):
+	}
+	if s := d.loadStatusSnap(); s != nil {
+		return s, nil
+	}
+	return &statusSnap{stageCounts: map[string]int{}, warming: true}, nil
+}
+
+func (d *Daemon) statusLoop() {
+	defer d.refreshing.Done()
+	for {
+		if err := d.refreshStatus(); err != nil {
+			d.obs.Event("status_refresh_failed", "error", err.Error())
+		}
+		select {
+		case <-d.stop:
+			return
+		case <-time.After(statusRefreshEvery):
+		}
+	}
+}
