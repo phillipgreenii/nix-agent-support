@@ -51,6 +51,7 @@ var knownSubcommands = map[string]bool{
 	"evaluate":             true,
 	"lint":                 true,
 	"mark-excluded":        true,
+	"replay":               true,
 	"report":               true,
 	"set-correct-decision": true,
 	"shapes":               true,
@@ -88,6 +89,7 @@ and analyzing the decision log.`,
 	root.AddCommand(newEvaluateCmd())
 	root.AddCommand(newLintCmd())
 	root.AddCommand(newMarkExcludedCmd())
+	root.AddCommand(newReplayCmd())
 	root.AddCommand(newReportCmd())
 	root.AddCommand(newSetCorrectDecisionCmd())
 	root.AddCommand(newShapesCmd())
