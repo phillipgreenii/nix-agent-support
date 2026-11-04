@@ -72,6 +72,12 @@ type Copier struct {
 	cloneOK     bool
 	cloneReason string
 
+	// privMu guards the lifetime private-clone figures below (its own lock, so
+	// the figures never depend on the copier lock being held).
+	privMu    sync.Mutex
+	privMax   int64
+	privTotal int64
+
 	// onContended, when set, runs once a lock attempt found the copier busy and
 	// before it queues (a test seam that lets a test move the injected clock
 	// while the caller is queued).
@@ -1060,9 +1066,26 @@ func (c *Copier) tryClone(src *os.File, dst string, syncDir bool) (off int64, ta
 		}
 	}
 	if ps, err := c.cfg.Clone.PrivateSize(dst); err == nil {
-		c.cfg.Obs.Reg.Set(obs.MClonePrivateSize, map[string]string{"file": fmt.Sprint(filepath.Base(dst))}, float64(ps))
+		c.recordPrivateClone(filepath.Base(dst), ps)
 	}
 	return off, tail, nil
+}
+
+// recordPrivateClone exports the bounded private-clone series (largest and
+// total private size, count of private clones created) and logs the per-file
+// size as a clone_private event, so no metric carries a per-file label.
+func (c *Copier) recordPrivateClone(file string, size int64) {
+	c.privMu.Lock()
+	if size > c.privMax {
+		c.privMax = size
+	}
+	c.privTotal += size
+	mx, total := c.privMax, c.privTotal
+	c.privMu.Unlock()
+	c.cfg.Obs.Reg.Set(obs.MClonePrivateMax, nil, float64(mx))
+	c.cfg.Obs.Reg.Set(obs.MClonePrivateTotal, nil, float64(total))
+	c.cfg.Obs.Reg.Add(obs.MClonePrivateFiles, nil, 1)
+	c.cfg.Obs.Event(obs.EvClonePrivate, "file", file, "bytes", fmt.Sprint(size))
 }
 
 // recordLag exports the copy-lag gauges (bytes behind after the copy, and how

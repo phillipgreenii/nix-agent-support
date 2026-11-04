@@ -75,8 +75,43 @@ func TestCloneModeSeedsThenAppendsBytes(t *testing.T) {
 	if got := e.eventAttr(obs.EvCopyMethod, "method"); !contains(got, "clone") {
 		t.Fatalf("copy_method events %v", got)
 	}
-	if v, ok := e.obs.Reg.Gauge(obs.MClonePrivateSize, map[string]string{"file": fmt.Sprintf("%d.1", r.File)}); !ok || v != 1234 {
-		t.Fatalf("private size gauge = %v %v", v, ok)
+	if v, ok := e.obs.Reg.Gauge(obs.MClonePrivateMax, nil); !ok || v != 1234 {
+		t.Fatalf("private size max gauge = %v %v", v, ok)
+	}
+	if got := e.eventAttr(obs.EvClonePrivate, "bytes"); len(got) != 1 || got[0] != "1234" {
+		t.Fatalf("clone_private bytes = %v", got)
+	}
+}
+
+func TestPrivateCloneSeriesAreBounded(t *testing.T) {
+	e := newEnv(t, func(e *env) { e.clone.ok = true; e.clone.reason = "same volume, clone capable" })
+	sizes := []int64{300, 900, 500}
+	for i, sz := range sizes {
+		e.clone.private = sz
+		e.ingest(e.write(fmt.Sprintf("projects/example-project/s%d.jsonl", i), "line\n"))
+	}
+	if v, ok := e.obs.Reg.Gauge(obs.MClonePrivateMax, nil); !ok || v != 900 {
+		t.Fatalf("max = %v %v, want 900", v, ok)
+	}
+	if v, ok := e.obs.Reg.Gauge(obs.MClonePrivateTotal, nil); !ok || v != 1700 {
+		t.Fatalf("total = %v %v, want 1700", v, ok)
+	}
+	if v, ok := e.obs.Reg.Counter(obs.MClonePrivateFiles, nil); !ok || v != 3 {
+		t.Fatalf("files = %v %v, want 3", v, ok)
+	}
+	if got := e.eventAttr(obs.EvClonePrivate, "file"); len(got) != 3 || got[0] == "" {
+		t.Fatalf("clone_private files = %v", got)
+	}
+	counters, gauges, _ := e.obs.Reg.Snapshot()
+	for _, m := range []map[string]float64{counters, gauges} {
+		for k := range m {
+			if strings.Contains(k, "file=") {
+				t.Errorf("series %q carries a file label", k)
+			}
+			if k == "clone_private_size_bytes" {
+				t.Errorf("retired series %q is still written", k)
+			}
+		}
 	}
 }
 

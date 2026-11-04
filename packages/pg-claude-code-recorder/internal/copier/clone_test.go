@@ -70,7 +70,7 @@ func TestRealCloneOnAPFS(t *testing.T) {
 	if err := cp.SweepMissing(map[Identity]bool{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := o.Reg.Gauge(obs.MClonePrivateSize, map[string]string{"file": "1.1"}); !ok && runtime.GOOS == "darwin" {
+	if _, ok := o.Reg.Gauge(obs.MClonePrivateMax, nil); !ok && runtime.GOOS == "darwin" {
 		t.Fatal("private size not exported")
 	}
 }

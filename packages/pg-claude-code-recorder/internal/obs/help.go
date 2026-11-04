@@ -6,7 +6,9 @@ package obs
 // here fails TestEveryStandardMetricHasHelp.
 var helpTexts = map[string]string{
 	MDroppedBytes:             "Bytes the copier could not preserve, by reason.",
-	MClonePrivateSize:         "Size in bytes of a private clone file.",
+	MClonePrivateMax:          "Largest private size in bytes of any clone file created since the daemon started.",
+	MClonePrivateTotal:        "Sum of the private sizes in bytes of the clone files created since the daemon started.",
+	MClonePrivateFiles:        "Private clone files created.",
 	MCopyLagBytes:             "Bytes of source files not yet copied.",
 	MCopyLagSeconds:           "Age in seconds of the oldest uncopied source data.",
 	MCopyLagHistogram:         "Distribution of the copy lag in seconds.",

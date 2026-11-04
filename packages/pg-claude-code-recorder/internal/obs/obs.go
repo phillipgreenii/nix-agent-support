@@ -13,7 +13,10 @@ import (
 // Metric names exported by the store and copier.
 const (
 	MDroppedBytes      = "dropped_bytes_total"
-	MClonePrivateSize  = "clone_private_size_bytes"
+	MClonePrivateMax   = "clone_private_size_max_bytes"
+	MClonePrivateTotal = "clone_private_size_total_bytes"
+	MClonePrivateFiles = "clone_private_files_total"
+	EvClonePrivate     = "clone_private"
 	MCopyLagBytes      = "copy_lag_bytes"
 	MCopyLagSeconds    = "copy_lag_seconds"
 	MCopyLagHistogram  = "copy_lag_seconds_histogram"
