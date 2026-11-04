@@ -584,6 +584,16 @@ apply.
    per interval, so a burst shows as the first line plus the counter.
 3. Compare with `lock waits` (a request waiting on the store write lock or the copier lock) and `wal size`.
 
+### Registry lock cost per ingest
+
+The metrics registry is one mutex, and every counter add, gauge set and histogram observation takes it once. A copying
+ingest takes five acquisitions: three from the copier's own lag gauges and lag histogram, one from the loop duration
+histogram and one from the ingest result counter. The last two are the instrumentation the observability work added,
+and a test holds that share to at most two. The total is left as it is until the mutex shows as contended: a high
+`lock waits` figure for the copier alongside a busy ingest rate, or a scrape that stalls ingest. The fix then is one
+batched registry write per ingest (a single acquisition for all of an ingest's writes); per-series atomics are the
+larger change to consider only if batching is not enough. The decision is recorded in the phase 1 plan's ground rules.
+
 ### Turning on `remove.enable`
 
 **There is no undo other than `extract`.** Once `remove.enable` is true, the recorder removes the Claude files of Conversations settled

@@ -64,8 +64,14 @@ Additional rules for this phase:
 
 - Instrumentation MUST be cheap: a loop wrapper adds one clock read pair, one histogram observation and one counter
   add per pass. It MUST NOT add a store query. A test with the phase 0 counting driver asserts zero added queries.
-- A per-event path (the copier's `Ingest`, the server's request path) MUST NOT take a registry lock more than twice
-  per call; the registry is one mutex, so measure it (T2 test).
+- A per-event path (the copier's `Ingest`, the server's request path) MUST NOT add more than two registry lock
+  acquisitions per call through the instrumentation this phase adds; the registry is one mutex, so measure it
+  (T2 test). The bound covers only what this phase adds. The copier's own gauge and histogram writes already take
+  three acquisitions per copying ingest, so a whole copying ingest takes five (measured after T1 to T3). Operator
+  ruling (Phillip, 2026-11-04), verbatim: "if we haven't seen any issues with the locks, then leave it until we do
+  and update the docs." The total is therefore left as it is until contention is observed. If it is, the preferred
+  fix is one batched registry write per ingest (a single acquisition for all of an ingest's writes), before any
+  move to per-series atomics.
 
 ## Task list and order
 
@@ -327,7 +333,9 @@ a factor of 2.
    observe and one counter add for `ingest_results_total` (two lock acquisitions); no per-ingest last-timestamp, no
    in-flight set, no `loop_runs_total` add (the results counter is the run count). The rule "at most two registry
    lock acquisitions per call" is tested by a counting `Registry` wrapper hook (`Registry.OnLock` test seam added in
-   T1, nil in production).
+   T1, nil in production). As built, the test asserts the two acquisitions this phase adds (the histogram observe
+   and the counter add) and logs the whole-ingest total, which is five because the copier's own gauge and histogram
+   writes take three (see the ground rule above for the ruling that leaves it so).
 8. `loop_in_flight_seconds` is computed per loop from a start-time map held by the wrapper (concurrent passes keep
    the oldest start), and is refreshed on EVERY scrape through `scrapeRefresh` as well as by the refresh loop, so a
    stalled refresh loop still reports (it is process-local, no store read).
