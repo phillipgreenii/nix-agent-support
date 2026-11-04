@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,16 +23,44 @@ func checkpoint(t *testing.T, s *Store, mode string) (busy, log, done int) {
 }
 
 // A held-open slow read is cut at the deadline, and the WAL then resets.
+// firingCtx is a context whose deadline fires when the test says so, not when
+// a clock does: it reports context.DeadlineExceeded after fire.
+type firingCtx struct {
+	context.Context
+	cancel context.CancelFunc
+	fired  atomic.Bool
+}
+
+func (c *firingCtx) Err() error {
+	if c.fired.Load() {
+		return context.DeadlineExceeded
+	}
+	return c.Context.Err()
+}
+
+func (c *firingCtx) fire() {
+	c.fired.Store(true)
+	c.cancel()
+}
+
+// The test fires the deadline itself, after the reader is shown to pin the
+// WAL, so no wall-clock margin decides the outcome however loaded the host is.
 func TestSlowReadIsCutAtTheDeadlineAndTheWALResets(t *testing.T) {
-	s, err := Open(t.TempDir(), Options{ReadTimeout: 300 * time.Millisecond})
+	fires := make(chan *firingCtx, 4)
+	s, err := Open(t.TempDir(), Options{stmtCtx: func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		inner, cancel := context.WithCancel(ctx)
+		fc := &firingCtx{Context: inner, cancel: cancel}
+		fires <- fc
+		return fc, cancel
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
 
-	// The test's own context only guards against a missing deadline, so a
-	// failing run ends instead of hanging.
-	guard, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	// The guard is never cancelled by a timer: a missing deadline would hang
+	// the run until the package timeout, never pass it.
+	guard, stop := context.WithCancel(context.Background())
 	defer stop()
 	res := make(chan error, 1)
 	go func() {
@@ -42,27 +71,23 @@ func TestSlowReadIsCutAtTheDeadlineAndTheWALResets(t *testing.T) {
 	// Write after the reader began until a checkpoint shows the reader pins
 	// the log: frames written after its snapshot cannot be backfilled.
 	pinned := false
-	for i := 0; i < 200 && !pinned; i++ {
+	for i := 0; i < 100000 && !pinned; i++ {
 		if _, err := s.wdb.Exec(`INSERT OR REPLACE INTO meta(key,value) VALUES('probe', ?)`, i); err != nil {
 			t.Fatal(err)
 		}
 		_, log, done := checkpoint(t, s, "PASSIVE")
 		pinned = done < log
 		if !pinned {
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(time.Millisecond)
 		}
 	}
 	if !pinned {
 		t.Fatal("the slow reader never pinned the WAL; the fixture proves nothing")
 	}
 
-	select {
-	case err := <-res:
-		if !errors.Is(err, context.DeadlineExceeded) || guard.Err() != nil {
-			t.Fatalf("the read ended with %v (guard %v), want the store deadline", err, guard.Err())
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the slow read was not cut by the store deadline")
+	(<-fires).fire()
+	if err := <-res; !errors.Is(err, context.DeadlineExceeded) || guard.Err() != nil {
+		t.Fatalf("the read ended with %v (guard %v), want the store deadline", err, guard.Err())
 	}
 
 	busy, log, done := checkpoint(t, s, "TRUNCATE")

@@ -63,32 +63,39 @@ type deadlineConnector struct {
 	under   driver.Driver
 	dsn     string
 	timeout time.Duration
+	// stmtCtx, when set, replaces the wall-clock deadline of a statement that
+	// runs outside a transaction (a test injects its own trigger).
+	stmtCtx stmtCtxFunc
 }
+
+// stmtCtxFunc derives the context a standalone statement runs under.
+type stmtCtxFunc func(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc)
 
 func (c *deadlineConnector) Connect(context.Context) (driver.Conn, error) {
 	cn, err := c.under.Open(c.dsn)
 	if err != nil {
 		return nil, err
 	}
-	return &dconn{Conn: cn, timeout: c.timeout}, nil
+	return &dconn{Conn: cn, timeout: c.timeout, stmtCtx: c.stmtCtx}, nil
 }
 
 func (c *deadlineConnector) Driver() driver.Driver { return c.under }
 
 // openDeadlineDB opens dsn on the named driver with the deadline wrapper.
-func openDeadlineDB(driverName, dsn string, timeout time.Duration) (*sql.DB, error) {
+func openDeadlineDB(driverName, dsn string, timeout time.Duration, stmtCtx stmtCtxFunc) (*sql.DB, error) {
 	probe, err := sql.Open(driverName, "")
 	if err != nil {
 		return nil, err
 	}
 	under := probe.Driver()
 	_ = probe.Close()
-	return sql.OpenDB(&deadlineConnector{under: under, dsn: dsn, timeout: timeout}), nil
+	return sql.OpenDB(&deadlineConnector{under: under, dsn: dsn, timeout: timeout, stmtCtx: stmtCtx}), nil
 }
 
 type dconn struct {
 	driver.Conn
 	timeout time.Duration
+	stmtCtx stmtCtxFunc
 
 	mu    sync.Mutex
 	txEnd time.Time // end of the open transaction's deadline; zero outside one
@@ -132,6 +139,9 @@ func (cn *dconn) bound(ctx context.Context) (context.Context, context.CancelFunc
 	cn.mu.Lock()
 	end := cn.txEnd
 	cn.mu.Unlock()
+	if end.IsZero() && cn.stmtCtx != nil {
+		return cn.stmtCtx(ctx, cn.timeout)
+	}
 	if end.IsZero() {
 		end = time.Now().Add(cn.timeout)
 	}

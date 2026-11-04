@@ -82,6 +82,8 @@ type Options struct {
 	// transaction (DefaultReadTimeout when zero): no reader pins a WAL
 	// snapshot for longer.
 	ReadTimeout time.Duration
+	// stmtCtx is a test seam: see deadlineConnector.stmtCtx.
+	stmtCtx stmtCtxFunc
 	// Phase, when set, is called as a startup phase begins (name is a stable
 	// phase name) and its result is called when the phase ends; nil is a no-op.
 	Phase func(name string) (done func())
@@ -126,6 +128,7 @@ type Store struct {
 	driverName   string // database/sql driver name (Options.DriverName)
 	journalLimit int    // journal_size_limit in bytes
 	readTO       time.Duration
+	stmtCtx      stmtCtxFunc
 	readCacheKiB int   // cache_size of each read connection, KiB
 	readMmap     int64 // mmap_size ceiling of each read connection, bytes
 	dir          string
@@ -201,7 +204,7 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.BulkBytes <= 0 {
 		opt.BulkBytes = DefaultBulkBytes
 	}
-	s := &Store{noTrigram: opt.NoTrigramIndex, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
+	s := &Store{noTrigram: opt.NoTrigramIndex, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -420,7 +423,7 @@ func (s *Store) openDB(path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
-	r, err := openDeadlineDB(s.driverName, dsn+s.readPragmas(), s.readTO)
+	r, err := openDeadlineDB(s.driverName, dsn+s.readPragmas(), s.readTO, s.stmtCtx)
 	if err != nil {
 		_ = w.Close()
 		return err
