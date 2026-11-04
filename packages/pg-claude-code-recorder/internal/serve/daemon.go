@@ -80,6 +80,16 @@ type Daemon struct {
 	sett  *settle.Settler
 	clock clock.Clock
 
+	// loops tracks the passes now running (loop_in_flight_seconds). tickerFn and
+	// timerFn, when set (tests), replace the real tickers and timers behind
+	// ticker and timer.
+	loops    loopTracker
+	tickerFn func(loop string, every time.Duration) (<-chan time.Time, func())
+	timerFn  func(loop string, wait time.Duration) (<-chan time.Time, func())
+	// loopDone, when set (tests), is called after each pass of a loop has been
+	// recorded.
+	loopDone func(loop string)
+
 	startedAt time.Time
 	su        *startupTimer
 	// tickPhases returns the phase breakdown of the settle tick that just ran.
@@ -172,6 +182,7 @@ func Open(opt Options) (*Daemon, error) {
 		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
 		HoldRate: cfg.FormatHoldRate,
+		Timer:    func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
 	})
 	d.tickPhases = d.sett.LastPhases
 	endPhase = su.begin("doctor_gauges", false)
@@ -191,6 +202,7 @@ func Open(opt Options) (*Daemon, error) {
 		Filter:        d.filter,
 		Sink:          d.sink,
 		OnSweep:       d.onSweep,
+		SweepTimer:    func(step func() error) error { return d.runLoop(obs.LoopWatcherSweep, step) },
 		Checkpoint:    d.ckpt,
 		SweepInterval: cfg.SweepInterval,
 		Now:           opt.Clock.Now,
@@ -246,9 +258,15 @@ func (d *Daemon) filter(p string) bool {
 	return true
 }
 
+// ingest copies one path. It is the per-event path (copier_ingest), so it takes
+// the light route: one histogram observation, no run count, last-timestamp or
+// in-flight write.
 func (d *Daemon) ingest(p string) copier.Result {
+	start := d.clock.Now()
 	res, err := d.cp.Ingest(p)
-	return d.afterIngest(p, res, err)
+	out := d.afterIngest(p, res, err)
+	d.obs.Reg.ObserveL(obs.MLoopDuration, ingestLabels, d.clock.Now().Sub(start).Seconds())
+	return out
 }
 
 // afterIngest logs a failed ingest and tells the parser and the lifecycle
@@ -436,23 +454,28 @@ func (d *Daemon) parseLoop() {
 			if !d.prs.Coalesce(d.stop) {
 				return
 			}
-			if err := d.prs.Drain(); err != nil {
-				d.obs.Log.Warn("parse_failed", "err", err.Error())
-			}
+			d.drainParsed()
 		}
+	}
+}
+
+// drainParsed is one parser_drain pass: it parses every dirty file.
+func (d *Daemon) drainParsed() {
+	if err := d.runLoop(obs.LoopParserDrain, d.prs.Drain); err != nil {
+		d.obs.Log.Warn("parse_failed", "err", err.Error())
 	}
 }
 
 // settleLoop runs the settle pass once a minute, after the first parse.
 func (d *Daemon) settleLoop() {
 	defer d.refreshing.Done()
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
+	tick, stopTicker := d.ticker(obs.LoopSettleTick, time.Minute)
+	defer stopTicker()
 	for {
 		select {
 		case <-d.stop:
 			return
-		case <-t.C:
+		case <-tick:
 			d.runTick(d.sett.Tick)
 		}
 	}
@@ -470,7 +493,12 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 	start := d.clock.Now()
 	d.tickStartNS.Store(start.UnixNano())
 	watchdog := time.AfterFunc(settleTickSlow, d.logStuckTick)
-	stats, err := step()
+	var stats settle.TickStats
+	var err error
+	_ = d.runLoop(obs.LoopSettleTick, func() error {
+		stats, err = step()
+		return err
+	})
 	watchdog.Stop()
 	d.tickStartNS.Store(0)
 	d.setTickInFlight()
@@ -483,7 +511,6 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 	}
 	reg := d.obs.Reg
 	reg.Observe(obs.MSettleTickDuration, dur.Seconds())
-	reg.Add(obs.MLoopRuns, map[string]string{"loop": obs.LoopSettleTick, "outcome": outcome}, 1)
 	reg.Add(obs.MSettleTickExamined, nil, float64(stats.Examined))
 	reg.Add(obs.MSettleTickTransitions, nil, float64(stats.Transitions))
 	reg.Set(obs.MSettleTickLastDuration, nil, dur.Seconds())
@@ -541,28 +568,28 @@ func (d *Daemon) trackLoop() {
 	if every <= 0 {
 		every = 5 * time.Second
 	}
-	t := time.NewTicker(every)
-	defer t.Stop()
+	tick, stopTicker := d.ticker(obs.LoopTrackerTick, every)
+	defer stopTicker()
 	for {
 		select {
 		case <-d.stop:
 			return
-		case <-t.C:
-			d.tr.Tick()
-			d.tr.Poll()
+		case <-tick:
+			_ = d.runLoop(obs.LoopTrackerTick, func() error { d.tr.Tick(); return nil })
+			_ = d.runLoop(obs.LoopTrackerPoll, func() error { d.tr.Poll(); return nil })
 		}
 	}
 }
 
 func (d *Daemon) refreshLoop() {
 	defer d.refreshing.Done()
-	t := time.NewTicker(5 * time.Second)
-	defer t.Stop()
+	tick, stopTicker := d.ticker(obs.LoopRefreshGauges, 5*time.Second)
+	defer stopTicker()
 	for {
 		select {
 		case <-d.stop:
 			return
-		case <-t.C:
+		case <-tick:
 			d.refreshGauges()
 		}
 	}
@@ -575,6 +602,7 @@ func (d *Daemon) refreshLoop() {
 // come from refreshGauges, which the refresh loop runs every 5 seconds.
 func (d *Daemon) scrapeRefresh() {
 	d.setTickInFlight()
+	d.refreshLoopsInFlight()
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
 	if d.st != nil {
 		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
@@ -586,11 +614,14 @@ func (d *Daemon) scrapeRefresh() {
 // are recomputed at most once a minute.
 func (d *Daemon) refreshGauges() {
 	d.setTickInFlight()
-	start := time.Now()
-	defer func() {
-		d.obs.Reg.Observe(obs.MRefreshGaugesDuration, time.Since(start).Seconds())
-		d.obs.Reg.Add(obs.MLoopRuns, map[string]string{"loop": obs.LoopRefreshGauges, "outcome": obs.OutcomeOK}, 1)
-	}()
+	d.refreshLoopsInFlight()
+	start := d.clock.Now()
+	_ = d.runLoop(obs.LoopRefreshGauges, func() error { d.refreshGaugesPass(); return nil })
+	d.obs.Reg.Observe(obs.MRefreshGaugesDuration, d.clock.Now().Sub(start).Seconds())
+}
+
+// refreshGaugesPass is the body of one refresh_gauges pass.
+func (d *Daemon) refreshGaugesPass() {
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
 	if d.st != nil {
 		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
@@ -603,9 +634,9 @@ func (d *Daemon) refreshGauges() {
 		d.obs.Reg.Set(obs.MStateFreeBytes, nil, float64(free))
 	}
 	d.usedMu.Lock()
-	if d.usedAt.IsZero() || time.Since(d.usedAt) > time.Minute {
+	if now := d.clock.Now(); d.usedAt.IsZero() || now.Sub(d.usedAt) > time.Minute {
 		d.usedBytes = DirBytes(d.cfg.StateDir)
-		d.usedAt = time.Now()
+		d.usedAt = now
 	}
 	used := d.usedBytes
 	d.usedMu.Unlock()

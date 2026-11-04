@@ -3,6 +3,7 @@ package serve
 import (
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -82,13 +83,15 @@ func (d *Daemon) statusSnapshot() (*statusSnap, error) {
 func (d *Daemon) statusLoop() {
 	defer d.refreshing.Done()
 	for {
-		if err := d.refreshStatus(); err != nil {
+		if err := d.runLoop(obs.LoopStatusRefresh, d.refreshStatus); err != nil {
 			d.obs.Event("status_refresh_failed", "error", err.Error())
 		}
+		wait, stopTimer := d.timer(obs.LoopStatusRefresh, statusRefreshEvery)
 		select {
 		case <-d.stop:
+			stopTimer()
 			return
-		case <-time.After(statusRefreshEvery):
+		case <-wait:
 		}
 	}
 }

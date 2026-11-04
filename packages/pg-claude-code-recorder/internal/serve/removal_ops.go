@@ -150,17 +150,21 @@ func (d *Daemon) doctorLoop() {
 			wait = time.Minute
 		}
 	}
-	t := time.NewTimer(wait)
-	defer t.Stop()
 	for {
+		fire, stopTimer := d.timer(obs.LoopDoctor, wait)
 		select {
 		case <-d.stop:
+			stopTimer()
 			return
-		case <-t.C:
-			if _, err := d.sett.Doctor(); err != nil {
+		case <-fire:
+			err := d.runLoop(obs.LoopDoctor, func() error {
+				_, err := d.sett.Doctor()
+				return err
+			})
+			if err != nil {
 				d.obs.Log.Warn("doctor_failed", "err", err.Error())
 			}
-			t.Reset(every)
+			wait = every
 		}
 	}
 }

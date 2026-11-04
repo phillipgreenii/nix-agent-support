@@ -106,6 +106,9 @@ const (
 	MSettleTickDuration      = "settle_tick_duration_seconds"
 	MRefreshGaugesDuration   = "refresh_gauges_duration_seconds"
 	MLoopRuns                = "loop_runs_total"
+	MLoopDuration            = "loop_duration_seconds"
+	MLoopLastTimestamp       = "loop_last_timestamp_seconds"
+	MLoopInFlight            = "loop_in_flight_seconds"
 	MSettleTickExamined      = "settle_tick_examined_total"
 	MSettleTickTransitions   = "settle_tick_transitions_total"
 	MSettleTickLastDuration  = "settle_tick_last_duration_seconds"
@@ -154,14 +157,43 @@ const (
 	MWALCheckpointDuration = "wal_checkpoint_duration_seconds"
 )
 
-// Loop and outcome label values of loop_runs_total.
+// Loop and outcome label values of the loop metrics. removal_pass is nested
+// inside settle_tick (its time is part of the tick's, not additive to it).
+// copier_ingest is the one per-event loop: it has a duration observation only,
+// no run count, last-timestamp or in-flight series.
 const (
 	LoopSettleTick    = "settle_tick"
 	LoopRefreshGauges = "refresh_gauges"
 	LoopWALCheckpoint = "wal_checkpoint"
+	LoopWatcherSweep  = "watcher_sweep"
+	LoopCopierIngest  = "copier_ingest"
+	LoopParserDrain   = "parser_drain"
+	LoopTrackerTick   = "tracker_tick"
+	LoopTrackerPoll   = "tracker_poll"
+	LoopStatusRefresh = "status_refresh"
+	LoopDoctor        = "doctor"
+	LoopRemovalPass   = "removal_pass"
 	OutcomeOK         = "ok"
 	OutcomeError      = "error"
 )
+
+// Loops are the 11 values of the loop label.
+var Loops = []string{
+	LoopSettleTick, LoopRefreshGauges, LoopWALCheckpoint, LoopWatcherSweep, LoopCopierIngest,
+	LoopParserDrain, LoopTrackerTick, LoopTrackerPoll, LoopStatusRefresh, LoopDoctor, LoopRemovalPass,
+}
+
+// PassLoops are the loops that count runs and carry a last-timestamp and an
+// in-flight series: every loop except the per-event copier_ingest.
+func PassLoops() []string {
+	out := make([]string, 0, len(Loops))
+	for _, l := range Loops {
+		if l != LoopCopierIngest {
+			out = append(out, l)
+		}
+	}
+	return out
+}
 
 // Metric and event names of removal, quarantine, extract and doctor.
 const (
@@ -308,11 +340,18 @@ func (o *Obs) RegisterStandard() {
 			o.Reg.Set(g, nil, 0)
 		}
 	}
-	for _, l := range []string{LoopSettleTick, LoopRefreshGauges, LoopWALCheckpoint} {
+	for _, l := range PassLoops() {
 		for _, out := range []string{OutcomeOK, OutcomeError} {
 			o.Reg.Add(MLoopRuns, map[string]string{"loop": l, "outcome": out}, 0)
 		}
+		o.Reg.Set(MLoopLastTimestamp, map[string]string{"loop": l}, 0)
+		o.Reg.Set(MLoopInFlight, map[string]string{"loop": l}, 0)
 	}
+	loopSets := make([]map[string]string, 0, len(Loops))
+	for _, l := range Loops {
+		loopSets = append(loopSets, map[string]string{"loop": l})
+	}
+	o.Reg.RegisterHistL(MLoopDuration, LoopBuckets, loopSets)
 	o.Reg.Add(MSettleTickExamined, nil, 0)
 	o.Reg.Add(MSettleTickTransitions, nil, 0)
 	o.Reg.Set(MSettleTickLastDuration, nil, 0)

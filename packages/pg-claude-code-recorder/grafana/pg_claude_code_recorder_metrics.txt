@@ -15,7 +15,11 @@
 #                                  restore_conflict live_process registry_names_session no_archive unlink_failed
 #   stage                          live quiet held settled removal_pending removed
 #                                  (conversations_by_stage is as of the last settle tick, up to 60 s old)
-#   loop (loop_runs_total)         settle_tick refresh_gauges wal_checkpoint
+#   loop (loop_runs_total, loop_duration_seconds, loop_last_timestamp_seconds, loop_in_flight_seconds)
+#                                  settle_tick refresh_gauges wal_checkpoint watcher_sweep copier_ingest parser_drain
+#                                  tracker_tick tracker_poll status_refresh doctor removal_pass (11 values; removal_pass is
+#                                  nested inside settle_tick, not additive; copier_ingest is per-event and has only the
+#                                  duration histogram)
 #   outcome (loop_runs_total)      ok error
 #   state (control_inbox_state)    present gone never_loaded
 #   outcome (end_reason_source_files_total)  ingested removed invalid
@@ -81,6 +85,9 @@ pg_claude_code_recorder_unknown_kinds gauge -
 pg_claude_code_recorder_settle_tick_duration_seconds histogram -
 pg_claude_code_recorder_refresh_gauges_duration_seconds histogram -
 pg_claude_code_recorder_loop_runs_total counter loop,outcome
+pg_claude_code_recorder_loop_duration_seconds histogram loop
+pg_claude_code_recorder_loop_last_timestamp_seconds gauge loop
+pg_claude_code_recorder_loop_in_flight_seconds gauge loop
 pg_claude_code_recorder_settle_tick_examined_total counter -
 pg_claude_code_recorder_settle_tick_transitions_total counter -
 pg_claude_code_recorder_settle_tick_last_duration_seconds gauge -

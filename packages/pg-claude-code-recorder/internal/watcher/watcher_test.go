@@ -292,3 +292,29 @@ func TestNewValidates(t *testing.T) {
 		t.Fatal("expected error without roots")
 	}
 }
+
+// SweepTimer wraps the whole sweep: the walk, OnSweep and the per-file events
+// all happen inside the timed step, and its error is the sweep's.
+func TestSweepTimerWrapsTheWalkAndTheCallback(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "example-project", "example-session.jsonl"), "{}\n")
+	inStep, timed := false, 0
+	var onSweepIn, filterIn bool
+	w, _ := newTestWatcher(t, Config{
+		Roots: []string{root}, backend: &fakeBackend{}, SweepInterval: time.Hour, DisableEvents: true,
+		Filter:  func(string) bool { filterIn = filterIn || inStep; return true },
+		OnSweep: func([]FileInfo) { onSweepIn = inStep },
+		SweepTimer: func(step func() error) error {
+			timed++
+			inStep = true
+			defer func() { inStep = false }()
+			return step()
+		},
+	})
+	if err := w.Rescan(); err != nil {
+		t.Fatal(err)
+	}
+	if timed != 1 || !filterIn || !onSweepIn {
+		t.Fatalf("timed=%d walk inside=%v OnSweep inside=%v", timed, filterIn, onSweepIn)
+	}
+}

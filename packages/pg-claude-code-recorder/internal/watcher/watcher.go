@@ -41,6 +41,10 @@ type Config struct {
 	// OnSweep, when set, receives the full filtered file list of every
 	// successful sweep (identity for the copier's deletion decision).
 	OnSweep func([]FileInfo)
+	// SweepTimer, when set, runs every sweep pass through it: step is the whole
+	// pass (the directory walk, OnSweep and the per-file events), so the caller
+	// can time the walk as well as the callback. It returns step's error.
+	SweepTimer func(step func() error) error
 	// Checkpoint is optional; nil disables persistence (always sweeps at start).
 	Checkpoint    Checkpoint
 	SweepInterval time.Duration // default 15m
@@ -264,6 +268,14 @@ func (w *Watcher) handle(path string) {
 func (w *Watcher) sweep() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.cfg.SweepTimer != nil {
+		return w.cfg.SweepTimer(w.sweepLocked)
+	}
+	return w.sweepLocked()
+}
+
+// sweepLocked is one sweep pass; the caller holds w.mu.
+func (w *Watcher) sweepLocked() error {
 	var files []FileInfo
 	for _, root := range w.cfg.Roots {
 		infos, err := platformSweep(root)

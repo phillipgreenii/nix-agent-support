@@ -158,6 +158,10 @@ type Config struct {
 	// FS is the file system removal and extract act on in the Claude directory
 	// (the store's when nil), so the recording wrapper sees the order.
 	FS fsx.FS
+	// Timer, when set, runs the removal pass of every Tick through it (the
+	// removal_pass loop; its time is nested inside the tick's). It returns
+	// step's error. The operator remove operation does not use it.
+	Timer func(step func() error) error
 }
 
 // Settler runs the settle stage.
@@ -545,7 +549,16 @@ func (s *Settler) Tick() (TickStats, error) {
 	s.seen = nil
 	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable {
-		if _, err := s.removeLocked(RemoveOptions{}, now, nil); err != nil && first == nil {
+		removal := func() error {
+			_, err := s.removeLocked(RemoveOptions{}, now, nil)
+			return err
+		}
+		if s.cfg.Timer != nil {
+			err = s.cfg.Timer(removal)
+		} else {
+			err = removal()
+		}
+		if err != nil && first == nil {
 			first = fmt.Errorf("removal pass: %w", err)
 		}
 		if groups, err = s.groups(); err == nil {
