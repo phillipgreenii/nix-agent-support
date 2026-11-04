@@ -168,6 +168,11 @@ type Settler struct {
 
 	run sync.Mutex // one pass at a time
 
+	// The incrementally kept file-to-Conversation map (see groups); guarded by run.
+	trk    *store.FileTracker
+	gcache map[string]*conv
+	owner  map[int64]string // file id to the session it is placed in
+
 	mu        sync.Mutex
 	phases    TickPhases // the last Tick's phase durations
 	removedAt []time.Time
@@ -275,41 +280,156 @@ type conv struct {
 	rel     map[int64]string
 }
 
-func (s *Settler) groups() (map[string]*conv, error) {
+// place returns the Conversation a file belongs to and its path relative to the
+// Claude directory: the first of the file's paths that lies under root and
+// names a Conversation. ok is false for a file that belongs to none.
+func (s *Settler) place(root string, f store.File, paths []string) (session, rel string, ok bool) {
+	if f.Mode != "append" && f.Mode != "snapshot" {
+		return "", "", false
+	}
+	for _, p := range paths {
+		if !strings.HasPrefix(p, root) {
+			continue
+		}
+		rel := p[len(root):]
+		if session, ok := SessionOf(rel); ok {
+			return session, rel, true
+		}
+	}
+	return "", "", false
+}
+
+func (s *Settler) claudeRoot() string { return strings.TrimRight(s.cfg.ClaudeDir, "/") + "/" }
+
+// groupsFull builds the file-to-Conversation map from every file and path. It
+// is the definition of the map; groups keeps a copy of it up to date.
+func (s *Settler) groupsFull() (map[string]*conv, map[int64]string, error) {
 	files, err := s.st.AllFiles()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	paths, err := s.st.AllPaths()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	root := strings.TrimRight(s.cfg.ClaudeDir, "/") + "/"
+	root := s.claudeRoot()
 	out := map[string]*conv{}
+	owner := map[int64]string{}
 	for _, f := range files {
-		if f.Mode != "append" && f.Mode != "snapshot" {
+		session, rel, ok := s.place(root, f, paths[f.ID])
+		if !ok {
 			continue
 		}
-		for _, p := range paths[f.ID] {
-			if !strings.HasPrefix(p, root) {
-				continue
-			}
-			rel := p[len(root):]
-			session, ok := SessionOf(rel)
-			if !ok {
-				continue
-			}
-			c := out[session]
-			if c == nil {
-				c = &conv{session: session, rel: map[int64]string{}}
-				out[session] = c
-			}
-			c.files = append(c.files, f)
-			c.rel[f.ID] = rel
-			break
+		c := out[session]
+		if c == nil {
+			c = &conv{session: session, rel: map[int64]string{}}
+			out[session] = c
+		}
+		c.files = append(c.files, f)
+		c.rel[f.ID] = rel
+		owner[f.ID] = session
+	}
+	return out, owner, nil
+}
+
+// groups returns the file-to-Conversation map. The caller holds the run lock.
+//
+// The map is kept between calls and only the files the store's FileTracker
+// reports as changed (a journal record named them since the last call) are
+// reread and re-placed. The first call, and any call after the tracker reports
+// full (a write was rolled back, so a reported change may have been undone), or
+// after a failed incremental read, rebuilds it whole with groupsFull. Each
+// touched Conversation gets a fresh conv, so one returned earlier is never
+// mutated; the returned map is a copy the caller may keep.
+func (s *Settler) groups() (map[string]*conv, error) {
+	if s.trk == nil {
+		s.trk = s.st.TrackFiles()
+	}
+	ids, full := s.trk.Take()
+	if full || s.gcache == nil {
+		c, owner, err := s.groupsFull()
+		if err != nil {
+			s.gcache, s.owner = nil, nil
+			return nil, err
+		}
+		s.gcache, s.owner = c, owner
+	} else if len(ids) > 0 {
+		if err := s.applyChanged(ids); err != nil {
+			s.gcache, s.owner = nil, nil
+			return nil, err
 		}
 	}
+	out := make(map[string]*conv, len(s.gcache))
+	for k, v := range s.gcache {
+		out[k] = v
+	}
 	return out, nil
+}
+
+// applyChanged rereads the given files and their paths and moves each to the
+// Conversation it now belongs to (or out of the map).
+func (s *Settler) applyChanged(ids []int64) error {
+	var files []store.File
+	var paths map[int64][]string
+	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+		if files, err = rd.FilesByIDs(ids); err != nil {
+			return err
+		}
+		paths, err = rd.PathsByFiles(ids)
+		return err
+	}); err != nil {
+		return err
+	}
+	root := s.claudeRoot()
+	dirty := make(map[int64]bool, len(ids))
+	touched := map[string]bool{}
+	for _, id := range ids {
+		dirty[id] = true
+		if old, ok := s.owner[id]; ok {
+			touched[old] = true
+			delete(s.owner, id)
+		}
+	}
+	type placed struct {
+		f   store.File
+		rel string
+	}
+	arrivals := map[string][]placed{}
+	for _, f := range files {
+		session, rel, ok := s.place(root, f, paths[f.ID])
+		if !ok {
+			continue
+		}
+		touched[session] = true
+		s.owner[f.ID] = session
+		arrivals[session] = append(arrivals[session], placed{f, rel})
+	}
+	for session := range touched {
+		var nc *conv
+		if old := s.gcache[session]; old != nil {
+			nc = &conv{session: session, rel: map[int64]string{}}
+			for _, f := range old.files {
+				if !dirty[f.ID] {
+					nc.files = append(nc.files, f)
+					nc.rel[f.ID] = old.rel[f.ID]
+				}
+			}
+		}
+		for _, a := range arrivals[session] {
+			if nc == nil {
+				nc = &conv{session: session, rel: map[int64]string{}}
+			}
+			nc.files = append(nc.files, a.f)
+			nc.rel[a.f.ID] = a.rel
+		}
+		if nc == nil || len(nc.files) == 0 {
+			delete(s.gcache, session)
+			continue
+		}
+		sort.Slice(nc.files, func(i, j int) bool { return nc.files[i].ID < nc.files[j].ID })
+		s.gcache[session] = nc
+	}
+	return nil
 }
 
 // slowRunLockWait is the wait for the run lock above which a warning is logged.
@@ -1563,7 +1683,14 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 	reg.Set(obs.MBytesPendingSettle, nil, float64(pending))
 	if facts, err := s.st.TornTails(); err == nil {
 		bySource := map[string]float64{}
-		files, _ := s.st.AllFiles()
+		ids := make([]int64, 0, len(facts))
+		for _, t := range facts {
+			ids = append(ids, t.File)
+		}
+		var files []store.File
+		if len(ids) > 0 {
+			files, _ = s.st.FilesByIDs(ids)
+		}
 		src := map[int64]string{}
 		for _, f := range files {
 			src[f.ID] = f.Source

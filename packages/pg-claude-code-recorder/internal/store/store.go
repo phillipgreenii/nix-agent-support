@@ -153,6 +153,9 @@ type Store struct {
 	hooks    []func()
 	wrHooks  []func()
 
+	trkMu    sync.Mutex // guards trackers
+	trackers []*FileTracker
+
 	// TornBytes is the size of the torn journal tail dropped on open.
 	TornBytes int64
 	// Rebuilt is true when index.db was rebuilt from the journal on open.
@@ -618,6 +621,7 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 		return err
 	}
 	s.lastSeq = last
+	s.noteFiles(recs)
 	return nil
 }
 

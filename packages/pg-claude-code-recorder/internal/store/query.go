@@ -497,12 +497,19 @@ func (s *Reader) SnapshotFileByPathHistory(path string) (File, error) {
 // every path it ever had, in one query pair; the settle stage groups files into
 // Conversations with it.
 func (s *Reader) AllPaths() (map[int64][]string, error) {
-	out := map[int64][]string{}
 	rows, err := s.q.Query(`SELECT file_id, path, closed_ns IS NULL FROM paths ORDER BY file_id, first_seen_ns, path`)
 	if err != nil {
 		return nil, err
 	}
+	return foldPaths(rows)
+}
+
+// foldPaths reads (file_id, path, open) rows ordered by file then first sight
+// and keeps, per file, its open paths, or every path it ever had when none is
+// open. It closes rows.
+func foldPaths(rows *sql.Rows) (map[int64][]string, error) {
 	defer func() { _ = rows.Close() }()
+	out := map[int64][]string{}
 	cur := map[int64][]string{}
 	hist := map[int64][]string{}
 	for rows.Next() {
@@ -525,4 +532,56 @@ func (s *Reader) AllPaths() (map[int64][]string, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// idChunk bounds the ids bound into one statement (SQLite's variable limit is
+// far above it).
+const idChunk = 400
+
+func idArgs(ids []int64) (string, []any) {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", len(ids)), ","), args
+}
+
+// FilesByIDs returns the files with the given ids, ordered by id; an id with no
+// file is absent. It is AllFiles restricted to ids.
+func (s *Reader) FilesByIDs(ids []int64) ([]File, error) {
+	var out []File
+	for len(ids) > 0 {
+		n := min(len(ids), idChunk)
+		ph, args := idArgs(ids[:n])
+		ids = ids[n:]
+		fs, err := s.files(`SELECT `+fileCols+` FROM files WHERE id IN (`+ph+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fs...)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// PathsByFiles is AllPaths restricted to the given file ids.
+func (s *Reader) PathsByFiles(ids []int64) (map[int64][]string, error) {
+	out := map[int64][]string{}
+	for len(ids) > 0 {
+		n := min(len(ids), idChunk)
+		ph, args := idArgs(ids[:n])
+		ids = ids[n:]
+		rows, err := s.q.Query(`SELECT file_id, path, closed_ns IS NULL FROM paths WHERE file_id IN (`+ph+`) ORDER BY file_id, first_seen_ns, path`, args...)
+		if err != nil {
+			return nil, err
+		}
+		m, err := foldPaths(rows)
+		if err != nil {
+			return nil, err
+		}
+		for id, p := range m {
+			out[id] = p
+		}
+	}
+	return out, nil
 }
