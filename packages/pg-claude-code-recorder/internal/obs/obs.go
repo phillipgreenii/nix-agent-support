@@ -110,7 +110,7 @@ const (
 	MSettleRunLockWaits       = "settle_run_lock_wait_total"
 	MSettleRunLockWaitSeconds = "settle_run_lock_wait_seconds_total"
 	EvSettleTick              = "settle_tick"
-	EvSettleTickSlow         = "settle_tick_slow"
+	EvSettleTickSlow          = "settle_tick_slow"
 	EvWALTruncateStart        = "wal_truncate_start"
 	EvWALTruncateDone         = "wal_truncate_done"
 )
