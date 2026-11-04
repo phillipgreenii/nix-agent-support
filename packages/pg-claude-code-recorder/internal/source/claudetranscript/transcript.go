@@ -112,14 +112,14 @@ type Message struct {
 
 // Usage is the token usage of a message.
 type Usage struct {
-	InputTokens              *int64         `json:"input_tokens"                ingest:"int"`
-	OutputTokens             *int64         `json:"output_tokens"               ingest:"int"`
-	CacheCreationInputTokens *int64         `json:"cache_creation_input_tokens" ingest:"int"`
-	CacheReadInputTokens     *int64         `json:"cache_read_input_tokens"     ingest:"int"`
+	InputTokens              *int64         `json:"input_tokens"                ingest:"int" store:"ext:assistant_usage.input_tokens"`
+	OutputTokens             *int64         `json:"output_tokens"               ingest:"int" store:"ext:assistant_usage.output_tokens"`
+	CacheCreationInputTokens *int64         `json:"cache_creation_input_tokens" ingest:"int" store:"ext:assistant_usage.cache_creation_input_tokens"`
+	CacheReadInputTokens     *int64         `json:"cache_read_input_tokens"     ingest:"int" store:"ext:assistant_usage.cache_read_input_tokens"`
 	CacheCreation            *CacheCreation `json:"cache_creation"`
-	ServiceTier              string         `json:"service_tier"                ingest:"keyword"`
-	InferenceGeo             string         `json:"inference_geo"               ingest:"keyword"`
-	Speed                    string         `json:"speed"                       ingest:"keyword"`
+	ServiceTier              string         `json:"service_tier"                ingest:"keyword" store:"ext:assistant_usage.service_tier"`
+	InferenceGeo             string         `json:"inference_geo"               ingest:"keyword" store:"ext:assistant_usage.inference_geo"`
+	Speed                    string         `json:"speed"                       ingest:"keyword" store:"ext:assistant_usage.speed"`
 
 	ServerToolUse json.RawMessage `json:"server_tool_use"`
 	Iterations    json.RawMessage `json:"iterations"`
@@ -127,8 +127,8 @@ type Usage struct {
 
 // CacheCreation is the per-TTL breakdown of cache writes.
 type CacheCreation struct {
-	Ephemeral1h *int64 `json:"ephemeral_1h_input_tokens" ingest:"int"`
-	Ephemeral5m *int64 `json:"ephemeral_5m_input_tokens" ingest:"int"`
+	Ephemeral1h *int64 `json:"ephemeral_1h_input_tokens" ingest:"int" store:"ext:assistant_usage.cache_1h_input_tokens"`
+	Ephemeral5m *int64 `json:"ephemeral_5m_input_tokens" ingest:"int" store:"ext:assistant_usage.cache_5m_input_tokens"`
 }
 
 // Block is one message.content item (a union of the block types).
@@ -199,6 +199,9 @@ func (*Source) Catalog() map[string]source.Kind {
 	delete(c, "text")
 	return c
 }
+
+// Storage lists where each field is stored (implements source.Stored).
+func (*Source) Storage() map[string]source.Storage { return source.MustCatalogStorage(Line{}, Block{}) }
 
 var (
 	lineType  = reflect.TypeOf(Line{})
@@ -333,6 +336,3 @@ func flatten(raw json.RawMessage) string {
 	}
 	return string(t)
 }
-
-// Storage lists where each field is stored (implements source.Stored).
-func (*Source) Storage() map[string]source.Storage { return source.MustCatalogStorage(Line{}, Block{}) }

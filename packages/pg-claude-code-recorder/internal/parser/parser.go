@@ -57,6 +57,9 @@ type Config struct {
 type Parser struct {
 	cfg   Config
 	bySrc map[string]source.Source
+	// ext routes declared fields into the extension tables (see ext.go); it is
+	// used only when the store has them.
+	ext map[string]map[string]extRoute
 
 	run sync.Mutex // one parse at a time
 
@@ -126,6 +129,7 @@ func New(cfg Config) *Parser {
 		p.bySrc[s.Name()] = s
 	}
 	p.routes = lookupRoutes(cfg.Sources)
+	p.ext, _ = extRoutes(cfg.Sources)
 	return p
 }
 
@@ -683,6 +687,9 @@ WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.
 	if triStmt != "" {
 		stmts = append([]string{triStmt}, stmts...)
 	}
+	if err := p.clearExt(tx, file, gen); err != nil {
+		return err
+	}
 	for _, s := range stmts {
 		if _, err := tx.Exec(s, file, gen); err != nil {
 			return err
@@ -829,6 +836,11 @@ func derivable(fl source.Field, caps source.Captures) bool {
 func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
 	unk := map[[2]string]int{}
 	nameID := func(name string) (int64, error) { return p.fieldNameID(tx, name) }
+	// Fields a source declares into an extension table, only where the table exists.
+	var routes map[string]extRoute
+	if p.cfg.Store.HasExt() {
+		routes = p.ext[src.Name()]
+	}
 	for _, r := range recs {
 		tns := seen
 		if !r.Time.IsZero() {
@@ -850,6 +862,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		}
 		tx.noteSession(ref, tns, f.ID, lk)
 		id, _ := res.LastInsertId()
+		var extRows map[int]*extRow
 		for _, fl := range r.Fields {
 			if fl.Kind.Searchable() {
 				if fl.S == "" {
@@ -875,6 +888,25 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 			var s any
 			var n any
 			var fv any
+			if rt, ok := routes[fl.Name]; ok {
+				if extRows == nil {
+					extRows = map[int]*extRow{}
+				}
+				row := extRows[rt.table]
+				if row == nil {
+					row = &extRow{vals: map[string]any{}}
+					extRows[rt.table] = row
+				}
+				switch fl.Kind {
+				case source.KindID, source.KindKeyword, source.KindPath, source.KindSession:
+					row.vals[rt.col] = fl.S
+				case source.KindFloat:
+					row.vals[rt.col] = fl.F
+				default:
+					row.vals[rt.col] = fl.N
+				}
+				continue
+			}
 			switch fl.Kind {
 			case source.KindID, source.KindKeyword, source.KindPath, source.KindSession:
 				s = fl.S
@@ -893,6 +925,9 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded.f`, id, nid, s, n, fv); err != nil {
 				return err
 			}
+		}
+		if err := insertExt(tx, id, extRows); err != nil {
+			return err
 		}
 		for _, u := range r.Unknown {
 			unk[[2]string{r.Type, u}]++

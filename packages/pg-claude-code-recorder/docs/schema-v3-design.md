@@ -404,6 +404,20 @@ until the query-layer slice moves it to the ids (removing the rows is that slice
 `lk_` rows are never deleted. The optional partial indexes on `cwd_id` and `branch_id` wait for the
 version-bump slice. Rows parsed before the slice keep NULL ids until a rebuild.
 
+Slice 5 as built: the extension-table convention lives in `internal/store/ext.go` (registry `extTables`, DDL
+generated from it: `ext_<name>`, `STRICT`, `rec_id INTEGER PRIMARY KEY`, every other column nullable). A source
+declares a field into a column with `store:"ext:<name>.<column>"`; the claude transcript source declares the nine
+usage values of `ext_assistant_usage`, and `parser.CheckExtDeclarations` (tested over every compiled-in source)
+rejects a declaration naming an unregistered table or column or a column type that cannot hold the field's kind.
+The tables exist only in a file built with `store.Options.ExtensionTables` (the new-file layout, picked the way
+`NoTrigramIndex` picks the layout without `fts_tri`, and kept on reopen); only then does the parser write the
+declared fields as one `INSERT OR REPLACE` into the ext table per record instead of `fields` rows. The running v2
+file has no ext tables and keeps writing `fields` rows, so its behavior is unchanged and `SchemaVersion` stays 2.
+The reparse path (`clearGen`) deletes a generation's ext rows by `rec_id` before its records; a rebuild writes them
+again by parsing the copies, so nothing else holds them. Left to later slices: the query layer reading `ext:` fields
+(a file with the ext layout does not answer `usage.*` filters until then), the type-mismatch fallback row (nothing
+yet produces a mismatch for a typed Go struct field), and interning the three strings.
+
 ## 12. Decision for the operator
 
 Fold S1 to S6, S8 and S9 (and S7 if wanted) into one schema v3 rebuild, or defer v3?

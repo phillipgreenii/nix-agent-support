@@ -101,6 +101,12 @@ type Options struct {
 	// routing, so the running schema is unchanged; the option only picks the
 	// layout of a file that has none.
 	NoTrigramIndex bool
+	// ExtensionTables builds a NEW index.db with the extension tables (ext_*,
+	// see ext.go), into which the parser routes the fields a source declares
+	// with an ext: storage. An existing index.db that already has them keeps
+	// them for good (a reopen without the option keeps them); one that has none
+	// keeps the running layout unless the option is set.
+	ExtensionTables bool
 }
 
 // SchemaNewerError is returned by Open when index.db carries a newer
@@ -138,6 +144,9 @@ type Store struct {
 	// openDB); without it opaque fields are indexed in fts_word.
 	trigram   bool
 	noTrigram bool // Options.NoTrigramIndex
+	// ext is whether this index.db has the extension tables (set by openDB).
+	ext     bool
+	wantExt bool // Options.ExtensionTables
 
 	Reader // the read methods over the read pool (ReadTx hands out one over a transaction)
 
@@ -204,7 +213,7 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.BulkBytes <= 0 {
 		opt.BulkBytes = DefaultBulkBytes
 	}
-	s := &Store{noTrigram: opt.NoTrigramIndex, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
+	s := &Store{noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -378,7 +387,13 @@ func (s *Store) openDB(path string, bulk bool) error {
 		return err
 	}
 	s.trigram = hasTri > 0 || !s.noTrigram
-	tables := derivedTables(s.trigram)
+	var hasExt int
+	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, extTables[0].Table()).Scan(&hasExt); err != nil {
+		_ = w.Close()
+		return err
+	}
+	s.ext = hasExt > 0 || s.wantExt
+	tables := derivedTables(s.trigram, s.ext)
 	ddl := schemaSQL + tables + derivedIndexesSQL()
 	if bulk {
 		// A bulk rebuild creates the secondary indexes after the load.
