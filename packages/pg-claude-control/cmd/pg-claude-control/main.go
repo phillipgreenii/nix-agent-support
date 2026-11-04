@@ -55,7 +55,9 @@ const usageText = `usage: pg-claude-control <command> [flags]
   stop      <target> [--signal] [--escalate <duration>]
                                          abort the turn, then run exit; --signal sends SIGTERM at
                                          once (works without the mod); --escalate follows with
-                                         SIGTERM if the Claude is still alive after the duration
+                                         SIGTERM if the Claude is still alive after the duration;
+                                         without --escalate, a Claude still alive after --timeout
+                                         (it may be asking to stop its tasks or stay) exits 9
   read      <target> --json              read the prompt draft
   list      [--json]                     every running Claude: pid, session, name, inbox present
 
@@ -64,7 +66,8 @@ Flags: --json  --wait <duration> (inbox wait, default 3s)  --timeout <duration> 
        --reply (ask the mod to confirm; exit 6 on refusal, 8 on no reply)
 Flags go before run's <command>; everything after it is passed to the command.
 Exit codes: 0 written, 1 unexpected, 2 usage, 3 no such Claude process, 4 no control mod,
-5 mod not accepting, 6 refused by the mod, 7 ambiguous target, 8 no reply within --timeout.
+5 mod not accepting, 6 refused by the mod, 7 ambiguous target, 8 no reply within --timeout,
+9 session stayed (stop: still running after exit; use --escalate or --signal).
 Environment: PG_CLAUDE_CONTROL_STATE_DIR, PG_CLAUDE_CONTROL_RUN_ALLOW, CLAUDE_CONFIG_DIR.
 `
 

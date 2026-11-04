@@ -40,6 +40,7 @@ every write and every signal, so a reused pid never receives a request or a SIGT
 | 6    | `refused_by_mod`    | The mod refused a request that carried a reply path                   |
 | 7    | `ambiguous_target`  | A name or session id matches several Claudes (candidates listed)      |
 | 8    | `no_reply`          | No reply within `--timeout`                                           |
+| 9    | `session_stayed`    | `stop` without `--escalate`: still running `--timeout` after `exit`   |
 
 Without `--json` an error prints `error: <name>` then the message on standard error; with `--json` one
 object `{"error","exit","message"}` goes there instead.
@@ -52,6 +53,9 @@ object `{"error","exit","message"}` goes there instead.
   `<state>/inbox/payloads/` and the request carries `payload=<path>`.
 - `stop` sends `interrupt`, then `run exit`; `--escalate <d>` follows with SIGTERM if the Claude is still
   alive after `d`; `--signal` sends SIGTERM at once and works without the mod. SIGKILL is never sent.
+  A session with scheduled or background tasks makes Claude ask whether to exit and stop the tasks or
+  stay; the mod does not answer that prompt, so plain `stop` then exits 9 (`session_stayed`) once
+  `--timeout` passes with the Claude alive, and the caller escalates with `--escalate` or `--signal`.
 - Settings are shared with the mod: `PG_CLAUDE_CONTROL_STATE_DIR` (default
   `$XDG_STATE_HOME/pg-claude-control`, else `~/.local/state/pg-claude-control`) and
   `PG_CLAUDE_CONTROL_RUN_ALLOW` (default `exit,clear,compact`; `exit` is always kept).

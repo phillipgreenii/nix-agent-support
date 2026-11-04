@@ -16,6 +16,7 @@ const (
 	exitRefused      = 6
 	exitAmbiguous    = 7
 	exitNoReply      = 8
+	exitStayed       = 9
 )
 
 // Stable error names (the --json "error" field; scripts match on these).
@@ -27,6 +28,7 @@ const (
 	errRefused      = "refused_by_mod"
 	errAmbiguous    = "ambiguous_target"
 	errNoReply      = "no_reply"
+	errStayed       = "session_stayed"
 	errInternal     = "internal"
 )
 
@@ -38,6 +40,7 @@ var exitFor = map[string]int{
 	errRefused:      exitRefused,
 	errAmbiguous:    exitAmbiguous,
 	errNoReply:      exitNoReply,
+	errStayed:       exitStayed,
 	errInternal:     exitInternal,
 }
 

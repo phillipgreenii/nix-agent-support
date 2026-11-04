@@ -361,13 +361,16 @@ func (a *app) stop(e entry, state string, o opts) int {
 	if o.escalate > 0 {
 		return a.stopSignal(e, o, id)
 	}
-	if _, ok := readReply(rp); ok {
-		return a.report(o, e, id, true, nil, "sent; confirmed by the mod")
-	}
-	if o.reply {
+	// The Claude is still alive after the wait. A session with scheduled or background tasks asks
+	// "exit and stop the tasks, or stay" and waits for an answer, so this is a distinct outcome
+	// the caller can escalate (--escalate or --signal), never a success.
+	if _, ok := readReply(rp); !ok && o.reply {
 		return a.emitError(o.json, fail(errNoReply, "pid %d did not answer within %s", e.PID, o.timeout))
 	}
-	return a.report(o, e, id, false, nil, sentUnconfirmed)
+	return a.emitError(o.json, fail(errStayed,
+		"pid %d is still running %s after exit was sent; it may be asking whether to stop its "+
+			"scheduled tasks and exit, or stay; end it with: pg-claude-control stop pid:%d --signal",
+		e.PID, limit, e.PID))
 }
 
 func (a *app) stopHint(ce *cmdError, e entry) *cmdError {

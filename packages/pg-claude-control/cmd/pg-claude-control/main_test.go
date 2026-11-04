@@ -591,6 +591,23 @@ func TestStopEscalatesToSIGTERMNeverSIGKILL(t *testing.T) {
 	}
 }
 
+func TestStopReportsSessionStayedWhenTheClaudeStaysAlive(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	w.inbox(4242, func(string) string { return `{"ok":true}` + "\n" }) // exit asked, Claude stays
+	if rc := w.run("stop", "4242", "--timeout", "150ms"); rc != 9 {
+		t.Fatalf("rc=%d err=%s", rc, w.errb.String())
+	}
+	for _, want := range []string{"error: session_stayed", "stop pid:4242 --signal"} {
+		if !strings.Contains(w.errb.String(), want) {
+			t.Fatalf("stderr %q lacks %q", w.errb.String(), want)
+		}
+	}
+	if s := w.signals(); len(s) != 0 {
+		t.Fatalf("signalled %v", s)
+	}
+}
+
 func TestStopPrintsTheModsRefusal(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
