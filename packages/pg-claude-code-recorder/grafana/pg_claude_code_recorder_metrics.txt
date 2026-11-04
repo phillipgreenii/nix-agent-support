@@ -13,6 +13,7 @@
 #   reason (held_conversations)    copy_offset_mismatch copy_tail_mismatch parse_behind file_unparsed torn_tail_too_long restore_conflict
 #   reason (skipped_files_total)   quarantine_unavailable holder_found write_after_rename file_replaced
 #                                  restore_conflict live_process registry_names_session no_archive unlink_failed
+#   reason (settle_wakes_total)    dirty due reconcile poll
 #   stage                          live quiet held settled removal_pending removed
 #                                  (conversations_by_stage is as of the last settle tick, up to 60 s old)
 #   loop (loop_runs_total, loop_duration_seconds, loop_last_timestamp_seconds, loop_in_flight_seconds)
@@ -106,6 +107,9 @@ pg_claude_code_recorder_settle_tick_transitions_total counter -
 pg_claude_code_recorder_settle_tick_last_duration_seconds gauge -
 pg_claude_code_recorder_settle_tick_last_timestamp_seconds gauge -
 pg_claude_code_recorder_settle_tick_in_flight_seconds gauge -
+pg_claude_code_recorder_settle_dirty_sessions gauge -
+pg_claude_code_recorder_settle_due_queue_depth gauge -
+pg_claude_code_recorder_settle_wakes_total counter reason
 pg_claude_code_recorder_settle_run_lock_wait_total counter op
 pg_claude_code_recorder_settle_run_lock_wait_seconds_total counter op
 pg_claude_code_recorder_process_cpu_seconds_total counter -

@@ -162,6 +162,16 @@ type Config struct {
 	// removal_pass loop; its time is nested inside the tick's). It returns
 	// step's error. The operator remove operation does not use it.
 	Timer func(step func() error) error
+
+	// Mode selects the settle loop: ModeScan (the default; the whole-store Tick
+	// every minute) or ModeEvent (Wake on dirty and due Conversations, Tick as the
+	// reconcile). Reconcile is how often the event loop runs a full Tick (default
+	// 1 h); MinWake is the shortest time between two wakes (default 5 s). The
+	// daemon reads all three; the settler uses Mode to decide whether a Tick
+	// rebuilds the due-time state.
+	Mode      string
+	Reconcile time.Duration
+	MinWake   time.Duration
 }
 
 // Settler runs the settle stage.
@@ -186,7 +196,15 @@ type Settler struct {
 	// otherwise. Guarded by run.
 	seen map[int64]int64
 
+	// The event loop's state (see wake.go); guarded by run.
+	due      *DueHeap
+	liveSeen map[string]bool
+	lowSeen  bool
+	seeded   bool
+
 	mu        sync.Mutex
+	nextAt    time.Time // earliest due deadline after the last pass; guarded by mu
+	nextOK    bool
 	phases    TickPhases // the last Tick's phase durations
 	removedAt []time.Time
 	last      map[string]string
@@ -232,6 +250,15 @@ func New(cfg Config) *Settler {
 			}
 			return fi.ModTime(), nil
 		}
+	}
+	if cfg.Mode == "" {
+		cfg.Mode = ModeScan
+	}
+	if cfg.Reconcile <= 0 {
+		cfg.Reconcile = time.Hour
+	}
+	if cfg.MinWake <= 0 {
+		cfg.MinWake = 5 * time.Second
 	}
 	if cfg.RemoveAfter <= 0 {
 		cfg.RemoveAfter = 30 * 24 * time.Hour
@@ -366,6 +393,19 @@ func (s *Settler) groupsFull() (map[string]*conv, map[int64]string, error) {
 // touched Conversation gets a fresh conv, so one returned earlier is never
 // mutated; the returned map is a copy the caller may keep.
 func (s *Settler) groups() (map[string]*conv, error) {
+	if err := s.syncGroups(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]*conv, len(s.gcache))
+	for k, v := range s.gcache {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// syncGroups brings the kept map up to date without copying it; the event loop
+// reads s.gcache directly so a wake costs nothing per Conversation it skips.
+func (s *Settler) syncGroups() error {
 	if s.trk == nil {
 		s.trk = s.st.TrackFiles()
 	}
@@ -375,7 +415,7 @@ func (s *Settler) groups() (map[string]*conv, error) {
 		if err != nil {
 			s.gcache, s.owner = nil, nil
 			s.syncFileSession(nil, true)
-			return nil, err
+			return err
 		}
 		s.gcache, s.owner = c, owner
 		s.syncFileSession(nil, true)
@@ -383,15 +423,11 @@ func (s *Settler) groups() (map[string]*conv, error) {
 		if err := s.applyChanged(ids); err != nil {
 			s.gcache, s.owner = nil, nil
 			s.syncFileSession(nil, true)
-			return nil, err
+			return err
 		}
 		s.syncFileSession(ids, false)
 	}
-	out := make(map[string]*conv, len(s.gcache))
-	for k, v := range s.gcache {
-		out[k] = v
-	}
-	return out, nil
+	return nil
 }
 
 // applyChanged rereads the given files and their paths and moves each to the
@@ -518,6 +554,11 @@ func (s *Settler) LastPhases() TickPhases {
 // the ones whose Process came back to Live, and refreshes the gauges.
 func (s *Settler) Tick() (TickStats, error) {
 	defer s.lockRun("tick")()
+	return s.tickLocked()
+}
+
+// tickLocked is the Tick body, run with the run lock held.
+func (s *Settler) tickLocked() (TickStats, error) {
 	var stats TickStats
 	var ph TickPhases
 	defer func() {
@@ -587,6 +628,10 @@ func (s *Settler) Tick() (TickStats, error) {
 	// A persisted stage whose Conversation has no files any more is dropped from view.
 	lap(&ph.Removal)
 	s.refresh(groups, live, now)
+	if s.cfg.Mode == ModeEvent {
+		s.seedLocked(groups, live, now)
+		s.cfg.Obs.Reg.Add(obs.MSettleWakes, map[string]string{"reason": "reconcile"}, 1)
+	}
 	lap(&ph.Refresh)
 	return stats, first
 }
@@ -1747,21 +1792,7 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 				pending += pendingByFile[f.ID]
 			}
 		}
-		s.mu.Lock()
-		prev, seen := s.last[session]
-		if !seen {
-			prev = StageQuiet
-			if stage == StageLive {
-				prev = StageLive
-			}
-		}
-		s.last[session] = stage
-		reason := s.reasons[session]
-		delete(s.reasons, session)
-		s.mu.Unlock()
-		if prev != stage {
-			s.cfg.Obs.Event(obs.EvStageChanged, "session", session, "from", prev, "to", stage, "reason", reason)
-		}
+		s.transition(session, s.priorStage(session, stage), stage)
 	}
 	for session, r := range persisted {
 		if _, ok := groups[session]; ok {

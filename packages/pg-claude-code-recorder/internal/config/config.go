@@ -69,6 +69,14 @@ type Config struct {
 	// SettleAfter is settle.after: how long every file of a Conversation must
 	// have been quiet before it settles (default 24 h).
 	SettleAfter time.Duration
+	// SettleMode is the settle loop: "scan" (the whole-store pass every minute,
+	// the default) or "event" (wakes on dirty and due Conversations with an hourly
+	// reconciliation). SettleReconcile is the reconciliation interval (default 1 h)
+	// and SettleMinWake the shortest time between two event wakes (default 5 s).
+	// Go-level settings for now; the config file keys arrive with the config packet.
+	SettleMode      string
+	SettleReconcile time.Duration
+	SettleMinWake   time.Duration
 	// HeldRecheck is held.recheck: how often a held Conversation is checked
 	// again (default 1 h).
 	HeldRecheck time.Duration
@@ -229,6 +237,9 @@ func Defaults(getenv func(string) string) Config {
 		DoctorInterval:    24 * time.Hour,
 		CopyThrottle:      2 * time.Millisecond,
 		SettleAfter:       24 * time.Hour,
+		SettleMode:        "scan",
+		SettleReconcile:   time.Hour,
+		SettleMinWake:     5 * time.Second,
 		HeldRecheck:       time.Hour,
 		HeldMaxAge:        3 * 24 * time.Hour,
 		ParseMaxLineBytes: 64 << 20,

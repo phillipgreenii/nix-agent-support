@@ -110,6 +110,11 @@ type Daemon struct {
 	// seen is the last observation of each path (sweep_files_total).
 	seen sweepSeen
 
+	// firstParse is closed once the start-up parse finished; the event settle
+	// loop makes its first pass after it.
+	firstParse     chan struct{}
+	firstParseOnce sync.Once
+
 	backfillDone atomic.Bool
 	filesTotal   atomic.Int64
 	filesCopied  atomic.Int64
@@ -178,7 +183,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, stop: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
+	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, stop: make(chan struct{}), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
 	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
 	if err != nil {
@@ -225,7 +230,8 @@ func Open(opt Options) (*Daemon, error) {
 		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
 		HoldRate: cfg.FormatHoldRate,
-		Timer:    func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
+		Mode:     cfg.SettleMode, Reconcile: cfg.SettleReconcile, MinWake: cfg.SettleMinWake,
+		Timer: func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
 	})
 	d.tickPhases = d.sett.LastPhases
 	endPhase = su.begin("doctor_gauges", false)
@@ -519,6 +525,7 @@ func (d *Daemon) parseLoop() {
 	if err := d.prs.ParseAll(); err != nil {
 		d.obs.Log.Warn("parse_all_failed", "err", err.Error())
 	}
+	d.firstParseOnce.Do(func() { close(d.firstParse) })
 	for {
 		select {
 		case <-d.stop:
@@ -541,8 +548,13 @@ func (d *Daemon) drainParsed() {
 	}
 }
 
-// settleLoop runs the settle pass once a minute, after the first parse.
+// settleLoop runs the settle pass: once a minute in scan mode, or the event
+// loop in event mode.
 func (d *Daemon) settleLoop() {
+	if d.sett.EventMode() {
+		d.settleLoopEvent()
+		return
+	}
 	defer d.refreshing.Done()
 	tick, stopTicker := d.ticker(obs.LoopSettleTick, time.Minute)
 	defer stopTicker()
@@ -553,6 +565,87 @@ func (d *Daemon) settleLoop() {
 		case <-tick:
 			d.runTick(d.sett.Tick)
 		}
+	}
+}
+
+// Seam names of the event loop's timers (tests drive each apart).
+const (
+	settleReconcileSeam = "settle_reconcile"
+	settlePollSeam      = "settle_poll"
+	settleDueSeam       = "settle_due"
+	settleCoalesceSeam  = "settle_coalesce"
+)
+
+// settleLoopEvent is the event-driven settle loop. After the first parse it runs
+// the reconciliation (Tick), then sleeps until the earliest of: the dirty set
+// signalling, the head of the due-time queue, the poll timer (the low-space and
+// live-process fallback, every settle.min_wake) and the reconcile timer. A wake
+// never starts sooner than settle.min_wake after the previous one, so a burst of
+// writes coalesces into one pass.
+func (d *Daemon) settleLoopEvent() {
+	defer d.refreshing.Done()
+	select {
+	case <-d.stop:
+		return
+	case <-d.firstParse:
+	}
+	minWake := d.sett.MinWake()
+	reconcile, stopReconcile := d.ticker(settleReconcileSeam, d.sett.ReconcileEvery())
+	defer stopReconcile()
+	poll, stopPoll := d.ticker(settlePollSeam, minWake)
+	defer stopPoll()
+	last := d.clock.Now()
+	d.runTick(d.sett.Tick) // the start-up reconciliation
+	wake := func() {
+		d.runTick(func() (settle.TickStats, error) { return d.sett.Wake(d.clock.Now()) })
+		last = d.clock.Now()
+	}
+	// holdOff waits out what is left of the min-wake interval; false when stopped.
+	holdOff := func() bool {
+		wait := minWake - d.clock.Now().Sub(last)
+		if wait <= 0 {
+			return true
+		}
+		c, stop := d.timer(settleCoalesceSeam, wait)
+		defer stop()
+		select {
+		case <-d.stop:
+			return false
+		case <-c:
+			return true
+		}
+	}
+	for {
+		var dueC <-chan time.Time
+		stopDue := func() {}
+		if at, ok := d.sett.NextDue(); ok {
+			wait := at.Sub(d.clock.Now())
+			if wait < 0 {
+				wait = 0
+			}
+			dueC, stopDue = d.timer(settleDueSeam, wait)
+		}
+		select {
+		case <-d.stop:
+			stopDue()
+			return
+		case <-reconcile:
+			d.runTick(d.sett.Tick)
+			last = d.clock.Now()
+		case <-poll:
+			if holdOff() {
+				wake()
+			}
+		case <-d.sett.DirtyWake():
+			if holdOff() {
+				wake()
+			}
+		case <-dueC:
+			if holdOff() {
+				wake()
+			}
+		}
+		stopDue()
 	}
 }
 

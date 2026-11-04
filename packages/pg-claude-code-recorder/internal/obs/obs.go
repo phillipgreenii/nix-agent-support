@@ -129,10 +129,16 @@ const (
 	MSettleRunLockWaitSeconds = "settle_run_lock_wait_seconds_total"
 	EvSettleTick              = "settle_tick"
 	MSettleTickInFlight       = "settle_tick_in_flight_seconds"
-	EvSettleTickStuck         = "settle_tick_stuck"
-	EvSettleTickSlow          = "settle_tick_slow"
-	EvWALTruncateStart        = "wal_truncate_start"
-	EvWALTruncateDone         = "wal_truncate_done"
+	// The event-driven settle loop: sessions waiting in the dirty set, entries in
+	// the due-time queue, and wakes by trigger (label reason: dirty, due,
+	// reconcile, poll).
+	MSettleDirtySessions = "settle_dirty_sessions"
+	MSettleDueQueueDepth = "settle_due_queue_depth"
+	MSettleWakes         = "settle_wakes_total"
+	EvSettleTickStuck    = "settle_tick_stuck"
+	EvSettleTickSlow     = "settle_tick_slow"
+	EvWALTruncateStart   = "wal_truncate_start"
+	EvWALTruncateDone    = "wal_truncate_done"
 )
 
 // Metric names of the process, Go runtime and WAL-size collectors.
@@ -414,6 +420,11 @@ func (o *Obs) RegisterStandard() {
 	o.Reg.Set(MSettleTickLastDuration, nil, 0)
 	o.Reg.Set(MSettleTickLastTimestamp, nil, 0)
 	o.Reg.Set(MSettleTickInFlight, nil, 0)
+	o.Reg.Set(MSettleDirtySessions, nil, 0)
+	o.Reg.Set(MSettleDueQueueDepth, nil, 0)
+	for _, r := range []string{"dirty", "due", "reconcile", "poll"} {
+		o.Reg.Add(MSettleWakes, map[string]string{"reason": r}, 0)
+	}
 	o.Reg.Set(MWALFrames, nil, 0)
 	o.Reg.Set(MWALCheckpointedFrames, nil, 0)
 	o.Reg.Set(MWALCheckpointLastTime, nil, 0)

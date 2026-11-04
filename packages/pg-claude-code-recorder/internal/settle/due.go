@@ -120,3 +120,22 @@ func (h *DueHeap) Next() (time.Time, bool) {
 
 // Len reports the number of scheduled entries.
 func (h *DueHeap) Len() int { return len(h.q) }
+
+// DueItem is one popped entry.
+type DueItem struct {
+	Session string
+	Kind    DueKind
+}
+
+// PopDue removes every entry whose deadline is at or before now and returns
+// them in deadline order with their kinds (a session due under both kinds
+// appears twice).
+func (h *DueHeap) PopDue(now time.Time) []DueItem {
+	var out []DueItem
+	for len(h.q) > 0 && !h.q[0].at.After(now) {
+		e := heap.Pop(&h.q).(*dueEntry)
+		delete(h.index, e.key)
+		out = append(out, DueItem{Session: e.key.session, Kind: e.key.kind})
+	}
+	return out
+}
