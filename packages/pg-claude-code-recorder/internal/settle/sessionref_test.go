@@ -68,7 +68,7 @@ func readSessionFacts(t *testing.T, st *store.Store) sessionReads {
 		out.Versions[id] = v
 		out.Names[id] = s.registryNames(id)
 		var info WhereInfo
-		s.fillVersions(&info, id)
+		s.fillVersions(&st.Reader, &info, id)
 		out.Info[id] = info
 	}
 	for _, f := range []int64{1, 2, 3, 99} {

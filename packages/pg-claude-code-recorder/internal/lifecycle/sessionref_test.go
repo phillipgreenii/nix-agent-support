@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -48,12 +49,12 @@ func TestLifecycleAnswersThroughSessionRefEqualTheTextSessionPath(t *testing.T) 
 	}
 	read := func(st *store.Store) (list []Conversation, shows []Conversation) {
 		e := &Engine{St: st, Exists: func(string) bool { return true }}
-		list, err := e.List(ConversationFilter{})
+		list, err := e.List(context.Background(), ConversationFilter{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, s := range []string{"s1", "s2", "absent"} {
-			c, err := e.Show(s)
+			c, err := e.Show(context.Background(), s)
 			if err != nil && err != ErrNotFound {
 				t.Fatal(err)
 			}

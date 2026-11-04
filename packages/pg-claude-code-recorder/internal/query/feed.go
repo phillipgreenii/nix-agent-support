@@ -1,12 +1,12 @@
 package query
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -38,7 +38,7 @@ func ParseCursor(s string) (epoch, seq int64, ok bool) {
 
 // Head reads, in one transaction, the epoch, the head sequence (the greatest
 // sequence committed) and the greatest record id.
-func Head(tx *sql.Tx) (epoch, head, maxRec int64) {
+func Head(tx store.Querier) (epoch, head, maxRec int64) {
 	var s string
 	if tx.QueryRow(`SELECT value FROM meta WHERE key='epoch'`).Scan(&s) == nil {
 		epoch, _ = strconv.ParseInt(s, 10, 64)
@@ -77,7 +77,7 @@ func LimitOf(n int) int { return limitOf(n) }
 
 // Select reads up to Limit+1 records in id order (the caller trims and sets
 // more).
-func (e *Engine) Select(tx *sql.Tx, sel Selection) ([]Selected, *wire.Error) {
+func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
 	b := e.builder()
 	names := sel.Project
 	if len(names) == 0 {

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -119,11 +120,15 @@ func viaSessionRef(q string) string { return strings.ReplaceAll(q, "r.session,",
 const endReasonQuery = `SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='reason')
 WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`
 
-func (e *Engine) load() (*model, error) {
+func (e *Engine) load() (*model, error) { return e.loadCtx(context.Background()) }
+
+// loadCtx is load with every statement under ctx, so a cancelled request ends
+// the read in flight.
+func (e *Engine) loadCtx(ctx context.Context) (*model, error) {
 	// One read transaction: the registry, history, end reasons, stages and
 	// processes are read under one lock round trip and from one snapshot.
 	var m *model
-	err := e.St.ReadTx(func(rd *store.Reader) error {
+	err := e.St.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e2 error
 		m, e2 = e.loadFrom(rd)
 		return e2
@@ -405,7 +410,7 @@ const maxTranscriptFiles = 50
 
 // sessionFileFacts returns the newest transcript write time in nanoseconds (0
 // when there is none) and up to maxTranscriptFiles file ids of the session.
-func sessionFileFacts(db *sql.DB, session string, byRef bool) (last int64, ids []int64, err error) {
+func sessionFileFacts(db store.Querier, session string, byRef bool) (last int64, ids []int64, err error) {
 	q := fileFactsQuery
 	if byRef {
 		q = fileFactsQueryRef
@@ -434,8 +439,9 @@ func sessionFileFacts(db *sql.DB, session string, byRef bool) (last int64, ids [
 // transcriptFacts fills what a transcript says: the newest cwd (when its files
 // disagree, the newest file's value), the last write, whether the originals
 // still exist, and the end time when nothing better is known.
-func (e *Engine) transcriptFacts(c *Conversation) error {
-	db := e.St.Read()
+func (e *Engine) transcriptFacts(ctx context.Context, c *Conversation) error {
+	db := store.BindCtx(ctx, e.St.Read())
+	rd := e.St.Reader.WithContext(ctx)
 	var cwd sql.NullString
 	byRef := e.St.SessionRefReady()
 	cq := cwdQuery
@@ -465,7 +471,7 @@ func (e *Engine) transcriptFacts(c *Conversation) error {
 		}
 	}
 	for _, id := range ids {
-		paths, _ := e.St.CurrentPaths(id)
+		paths, _ := rd.CurrentPaths(id)
 		for _, p := range paths {
 			if e.exists(p) {
 				c.OriginalsExist = true
@@ -503,7 +509,7 @@ const (
 )
 
 // List returns the Conversations that match the filter, newest first.
-func (e *Engine) List(f ConversationFilter) ([]Conversation, error) {
+func (e *Engine) List(ctx context.Context, f ConversationFilter) ([]Conversation, error) {
 	var since int64
 	if f.Since != "" {
 		t, err := time.Parse(time.RFC3339Nano, f.Since)
@@ -512,7 +518,7 @@ func (e *Engine) List(f ConversationFilter) ([]Conversation, error) {
 		}
 		since = t.UnixNano()
 	}
-	m, err := e.load()
+	m, err := e.loadCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +528,7 @@ func (e *Engine) List(f ConversationFilter) ([]Conversation, error) {
 		if !ok || !f.evidenceMatch(&c) {
 			continue
 		}
-		if err := e.transcriptFacts(&c); err != nil {
+		if err := e.transcriptFacts(ctx, &c); err != nil {
 			return nil, err
 		}
 		if since > 0 && c.sortTime() < since {
@@ -574,8 +580,8 @@ func holdings(m *model, k pkey) []Holding {
 }
 
 // Show returns one Conversation with its Process history.
-func (e *Engine) Show(session string) (Conversation, error) {
-	m, err := e.load()
+func (e *Engine) Show(ctx context.Context, session string) (Conversation, error) {
+	m, err := e.loadCtx(ctx)
 	if err != nil {
 		return Conversation{}, err
 	}
@@ -583,7 +589,7 @@ func (e *Engine) Show(session string) (Conversation, error) {
 	if !ok {
 		return Conversation{}, ErrNotFound
 	}
-	if err := e.transcriptFacts(&c); err != nil {
+	if err := e.transcriptFacts(ctx, &c); err != nil {
 		return Conversation{}, err
 	}
 	for _, s := range m.segs[session] {
@@ -661,8 +667,8 @@ func (m *model) processKeys() []pkey {
 }
 
 // Processes returns the Processes that match the filter, newest first.
-func (e *Engine) Processes(f ProcessFilter) ([]Process, error) {
-	m, err := e.load()
+func (e *Engine) Processes(ctx context.Context, f ProcessFilter) ([]Process, error) {
+	m, err := e.loadCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -691,8 +697,8 @@ func (e *Engine) Processes(f ProcessFilter) ([]Process, error) {
 
 // Process returns one Process with its registry versions and the Conversations
 // it held. An empty procStart selects the newest Process with that pid.
-func (e *Engine) Process(pid int64, procStart string) (Process, error) {
-	m, err := e.load()
+func (e *Engine) Process(ctx context.Context, pid int64, procStart string) (Process, error) {
+	m, err := e.loadCtx(ctx)
 	if err != nil {
 		return Process{}, err
 	}

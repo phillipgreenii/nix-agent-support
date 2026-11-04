@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -299,7 +300,7 @@ func (t *Tracker) countEnd(session string, present bool) {
 	}
 	ev := Evidence{ExitObserved: true, RegistryPresentAtExit: present}
 	if t.cfg.Engine != nil && session != "" {
-		if c, err := t.cfg.Engine.Show(session); err == nil {
+		if c, err := t.cfg.Engine.Show(context.Background(), session); err == nil {
 			ev = c.Evidence
 		}
 	}
@@ -326,7 +327,7 @@ func (t *Tracker) countEndAsync(old string) {
 		if t.cfg.Engine == nil {
 			return
 		}
-		if c, err := t.cfg.Engine.Show(old); err == nil && c.Ended {
+		if c, err := t.cfg.Engine.Show(context.Background(), old); err == nil && c.Ended {
 			t.addEnd(c.Evidence)
 		}
 	}()

@@ -133,7 +133,10 @@ func (cn *dconn) endTx() {
 }
 
 // bound derives the context a statement runs under: the open transaction's
-// end, else now plus the timeout. The returned cancel MUST run once the
+// end, else now plus the timeout, and always the earlier of that and ctx's own
+// deadline (a request deadline reaches a statement inside a transaction only
+// through the context the transaction began with, because the end is fixed at
+// BeginTx). The returned cancel MUST run once the
 // statement (or its rows) is done.
 func (cn *dconn) bound(ctx context.Context) (context.Context, context.CancelFunc) {
 	cn.mu.Lock()

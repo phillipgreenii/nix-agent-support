@@ -2,13 +2,13 @@ package query
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -73,11 +73,12 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 	if mode != "word" && mode != "substring" {
 		return nil, badf("mode %q: use word or substring", mode)
 	}
-	tx, err := e.DB.BeginTx(ctx, nil)
+	dbtx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = dbtx.Rollback() }()
+	tx := store.BindCtx(ctx, dbtx) // every statement runs under the request ctx
 	ans := &SearchAnswer{AsOf: e.asOf(tx), Hits: []Hit{}}
 	if e.Behind != nil && e.Behind() {
 		ans.Degraded = true
@@ -181,7 +182,7 @@ func (e *Engine) opaqueFields() []string {
 // filter and fields, newest first; no full-text table is read, so it works with
 // the trigram index absent. The scan stops at the byte budget or the query
 // deadline and answers partial with how far it got.
-func (e *Engine) substring(ctx context.Context, tx *sql.Tx, req SearchRequest, ans *SearchAnswer) (*SearchAnswer, *wire.Error) {
+func (e *Engine) substring(ctx context.Context, tx store.Querier, req SearchRequest, ans *SearchAnswer) (*SearchAnswer, *wire.Error) {
 	if e.Res == nil {
 		return nil, wire.Errf(wire.ErrUnavailable, "substring search reads the recorder's copies and none are attached")
 	}
@@ -224,7 +225,7 @@ func (e *Engine) substring(ctx context.Context, tx *sql.Tx, req SearchRequest, a
 		args = append(args, f)
 	}
 	args = append(args, wargs...)
-	rs, qerr := tx.QueryContext(ctx, q, args...)
+	rs, qerr := tx.Query(q, args...)
 	if qerr != nil {
 		return nil, wire.FromErr(qerr)
 	}

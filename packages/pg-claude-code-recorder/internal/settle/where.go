@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -34,8 +35,11 @@ type HeldRow struct {
 }
 
 // Held lists the held Conversations, oldest first.
-func (s *Settler) Held() ([]HeldRow, error) {
-	rows, err := s.st.Stages()
+func (s *Settler) Held() ([]HeldRow, error) { return s.HeldCtx(context.Background()) }
+
+// HeldCtx is Held with the read under ctx.
+func (s *Settler) HeldCtx(ctx context.Context) ([]HeldRow, error) {
+	rows, err := s.st.Reader.WithContext(ctx).Stages()
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +101,14 @@ var clearBy = map[string]string{
 // Where reports a Conversation's stage, what blocks its removal and the command
 // that clears the first blocker.
 func (s *Settler) Where(session string) (WhereInfo, error) {
+	return s.WhereCtx(context.Background(), session)
+}
+
+// WhereCtx is Where with its own statements under ctx. The shared file-group
+// cache (groups) is built for every caller and is not cancelled by one
+// request, so a disconnect cannot discard it.
+func (s *Settler) WhereCtx(ctx context.Context, session string) (WhereInfo, error) {
+	rd := s.st.Reader.WithContext(ctx)
 	defer s.lockRun("where")()
 	now := s.cfg.Clock.Now()
 	info := WhereInfo{Session: session, BlockedBy: []string{}, RemovalEnabled: s.cfg.RemoveEnable}
@@ -108,12 +120,12 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 	if err != nil {
 		return info, err
 	}
-	row, hasRow, err := s.st.Stage(session)
+	row, hasRow, err := rd.Stage(session)
 	if err != nil {
 		return info, err
 	}
 	c := groups[session]
-	settled, hasSettled, err := s.st.SettledOf(session)
+	settled, hasSettled, err := rd.SettledOf(session)
 	if err != nil {
 		return info, err
 	}
@@ -141,10 +153,10 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 		if !next.IsZero() {
 			info.NextEligible = &next
 		}
-		s.fillVersions(&info, session)
+		s.fillVersions(rd, &info, session)
 	} else if hasRow && row.Stage == store.StageRemoved {
 		info.BlockedBy = []string{BlockRemoved}
-		s.fillVersions(&info, session)
+		s.fillVersions(rd, &info, session)
 	}
 	if !s.cfg.RemoveEnable {
 		info.BlockedBy = append([]string{BlockRemovalDisabled}, info.BlockedBy...)
@@ -161,10 +173,10 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 
 // fillVersions sets the parser version of the Conversation's records and the
 // Claude Code version that wrote them (the registry's version field).
-func (s *Settler) fillVersions(info *WhereInfo, session string) {
+func (s *Settler) fillVersions(rd *store.Reader, info *WhereInfo, session string) {
 	byRef := s.st.SessionRefReady()
-	_ = s.st.Read().QueryRow(pick(byRef, parserVersionQuery, parserVersionQueryRef), session).Scan(&info.ParserVersion)
-	_ = s.st.Read().QueryRow(pick(byRef, claudeVersionQuery, claudeVersionQueryRef), session).Scan(&info.ClaudeCodeVersion)
+	_ = rd.Q().QueryRow(pick(byRef, parserVersionQuery, parserVersionQueryRef), session).Scan(&info.ParserVersion)
+	_ = rd.Q().QueryRow(pick(byRef, claudeVersionQuery, claudeVersionQueryRef), session).Scan(&info.ClaudeCodeVersion)
 }
 
 // pick returns the session_ref form of a query on a store marked ready for it

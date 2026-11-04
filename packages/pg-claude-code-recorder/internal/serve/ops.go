@@ -27,7 +27,13 @@ type genKey struct {
 // coverage reads every file's copy and parse state against the original on
 // disk. A file that has no current path (every path closed) is not listed.
 func (d *Daemon) coverage(view string) (wire.Coverage, error) {
-	return d.computeCoverage(view, true)
+	return d.coverageCtx(context.Background(), view)
+}
+
+// coverageCtx is coverage under ctx: a cancelled request ends the reads and
+// the per-file stat loop.
+func (d *Daemon) coverageCtx(ctx context.Context, view string) (wire.Coverage, error) {
+	return d.computeCoverageModeCtx(ctx, view, true, statAll)
 }
 
 // statMode says how a coverage pass learns each file's size. statAll Lstats
@@ -50,15 +56,21 @@ func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, 
 }
 
 func (d *Daemon) computeCoverageMode(view string, withSummary bool, mode statMode) (wire.Coverage, error) {
+	return d.computeCoverageModeCtx(context.Background(), view, withSummary, mode)
+}
+
+// computeCoverageModeCtx is computeCoverageMode with the read transaction and
+// every statement in it under ctx.
+func (d *Daemon) computeCoverageModeCtx(ctx context.Context, view string, withSummary bool, mode statMode) (wire.Coverage, error) {
 	// The commit counter is read before the snapshot opens: a commit in between
 	// leaves the cache one step behind, never ahead.
 	seq := d.st.CommitSeq()
 	// One read transaction for every statement: one lock round trip instead of
 	// one per statement, and the figures come from one snapshot.
 	var cov wire.Coverage
-	err := d.st.ReadTx(func(rd *store.Reader) error {
+	err := d.st.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e error
-		cov, e = d.computeCoverageFrom(rd, view, withSummary, mode, seq)
+		cov, e = d.computeCoverageFrom(ctx, rd, view, withSummary, mode, seq)
 		return e
 	})
 	if err == nil && mode == statAll {
@@ -87,7 +99,10 @@ func (d *Daemon) statusRows(rd *store.Reader, seq uint64) ([]store.File, map[int
 	return files, paths, nil
 }
 
-func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary bool, mode statMode, seq uint64) (wire.Coverage, error) {
+// computeCoverageFrom computes the figures over rd. rd's statements run under
+// the context rd was made with; ctx also bounds the per-file loop (Lstat per
+// file), which no statement would stop.
+func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view string, withSummary bool, mode statMode, seq uint64) (wire.Coverage, error) {
 	var files []store.File
 	var curPaths map[int64][]string
 	var byGen, parse map[genKey]int64 // statAll: copy and parse offsets
@@ -125,6 +140,9 @@ func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary 
 	cov.Roots = make([]wire.RootCoverage, 0, len(d.cfg.Roots()))
 	counts := map[string]int{}
 	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return wire.Coverage{}, err
+		}
 		if f.State == "deleted" {
 			cov.Removed++ // a deleted original (the archive path comes in phase 6)
 			continue
@@ -319,7 +337,7 @@ func (d *Daemon) backfillProgress() *wire.Backfill {
 	return b
 }
 
-func (d *Daemon) opCoverage(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opCoverage(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req wire.CoverageRequest
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -331,7 +349,7 @@ func (d *Daemon) opCoverage(_ context.Context, body []byte) (any, *wire.Error) {
 	default:
 		return nil, wire.Errf(wire.ErrBadRequest, fmt.Sprintf("unknown coverage view %q (summary or files)", req.View))
 	}
-	cov, err := d.coverage(req.View)
+	cov, err := d.coverageCtx(ctx, req.View)
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}

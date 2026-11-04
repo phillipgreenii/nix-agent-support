@@ -28,7 +28,7 @@ func lifeErr(err error, what string) *wire.Error {
 
 // opConversationShow answers one Conversation: its state and stage, its end
 // evidence (never a label) and its Process history.
-func (d *Daemon) opConversationShow(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opConversationShow(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req lifecycle.ConversationShow
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
@@ -36,7 +36,7 @@ func (d *Daemon) opConversationShow(_ context.Context, body []byte) (any, *wire.
 	if req.SessionID == "" {
 		return nil, wire.Errf(wire.ErrBadRequest, "conversation.show needs a session_id")
 	}
-	c, err := d.eng.Show(req.SessionID)
+	c, err := d.eng.Show(ctx, req.SessionID)
 	if err != nil {
 		return nil, lifeErr(err, "no Conversation "+req.SessionID)
 	}
@@ -45,12 +45,12 @@ func (d *Daemon) opConversationShow(_ context.Context, body []byte) (any, *wire.
 
 // opConversationList answers the Conversations whose evidence matches the
 // filters (a superset of the rows a label can come from), newest first.
-func (d *Daemon) opConversationList(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opConversationList(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req lifecycle.ConversationFilter
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
 	}
-	cs, err := d.eng.List(req)
+	cs, err := d.eng.List(ctx, req)
 	if err != nil {
 		return nil, wire.Errf(wire.ErrBadRequest, err.Error())
 	}
@@ -60,7 +60,7 @@ func (d *Daemon) opConversationList(_ context.Context, body []byte) (any, *wire.
 	return lifecycle.ConversationList{Conversations: cs, Degraded: !d.backfillDone.Load()}, nil
 }
 
-func (d *Daemon) opProcessShow(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opProcessShow(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req lifecycle.ProcessShow
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
@@ -68,19 +68,19 @@ func (d *Daemon) opProcessShow(_ context.Context, body []byte) (any, *wire.Error
 	if req.Pid <= 0 {
 		return nil, wire.Errf(wire.ErrBadRequest, "process.show needs a pid")
 	}
-	p, err := d.eng.Process(req.Pid, req.ProcStart)
+	p, err := d.eng.Process(ctx, req.Pid, req.ProcStart)
 	if err != nil {
 		return nil, lifeErr(err, "no Process with that pid")
 	}
 	return p, nil
 }
 
-func (d *Daemon) opProcessList(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opProcessList(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req lifecycle.ProcessFilter
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
 	}
-	ps, err := d.eng.Processes(req)
+	ps, err := d.eng.Processes(ctx, req)
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}

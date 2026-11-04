@@ -41,7 +41,7 @@ type (
 	}
 )
 
-func (d *Daemon) opHeld(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opHeld(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req HeldRequest
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
@@ -60,7 +60,7 @@ func (d *Daemon) opHeld(_ context.Context, body []byte) (any, *wire.Error) {
 			ans.Cleared = 0
 		}
 	}
-	held, err := d.sett.Held()
+	held, err := d.sett.HeldCtx(ctx)
 	if err != nil {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
@@ -68,7 +68,7 @@ func (d *Daemon) opHeld(_ context.Context, body []byte) (any, *wire.Error) {
 	return ans, nil
 }
 
-func (d *Daemon) opWhere(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opWhere(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req WhereRequest
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
@@ -76,7 +76,7 @@ func (d *Daemon) opWhere(_ context.Context, body []byte) (any, *wire.Error) {
 	if req.Session == "" {
 		return nil, wire.Errf(wire.ErrBadRequest, "where needs a session")
 	}
-	w, err := d.sett.Where(req.Session)
+	w, err := d.sett.WhereCtx(ctx, req.Session)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, wire.Errf(wire.ErrNotFound, "no Conversation "+req.Session)
 	}

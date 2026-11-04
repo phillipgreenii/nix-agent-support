@@ -440,9 +440,9 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	d.obs.Event("backfill_done", "files", fmt.Sprint(len(files)))
 }
 
-// Start opens the listener and the exporter and starts the watcher.
-func (d *Daemon) Start() error {
-	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
+// registerOps registers every operation on d.srv (the audit of which operations
+// read through the request context is cancel_ops_test.go).
+func (d *Daemon) registerOps() {
 	d.srv.Register("status", server.KindQuery, d.opStatus)
 	d.srv.Register("coverage", server.KindQuery, d.opCoverage)
 	d.srv.Register("query", server.KindQuery, d.opQuery)
@@ -459,6 +459,12 @@ func (d *Daemon) Start() error {
 	d.srv.Register("remove", server.KindQuery, d.opRemove)
 	d.srv.Register("extract", server.KindQuery, d.opExtract)
 	d.srv.Register("doctor", server.KindQuery, d.opDoctor)
+}
+
+// Start opens the listener and the exporter and starts the watcher.
+func (d *Daemon) Start() error {
+	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
+	d.registerOps()
 	endPhase := d.su.begin("listener_bind", false)
 	if err := d.srv.Listen(d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)

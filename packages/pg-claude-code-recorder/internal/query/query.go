@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudetranscript"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -140,7 +141,7 @@ func limitOf(n int) int {
 	return n
 }
 
-func (e *Engine) asOf(tx *sql.Tx) string {
+func (e *Engine) asOf(tx store.Querier) string {
 	epoch, head, _ := Head(tx)
 	return Cursor(epoch, head)
 }
@@ -173,11 +174,12 @@ func (e *Engine) Query(ctx context.Context, req Request) (*Answer, *wire.Error) 
 	if req.From != "" && req.From != "records" {
 		return nil, badf("from %q: only records is available", req.From)
 	}
-	tx, err := e.DB.BeginTx(ctx, nil)
+	dbtx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = dbtx.Rollback() }()
+	tx := store.BindCtx(ctx, dbtx) // every statement runs under the request ctx
 	ans := &Answer{AsOf: e.asOf(tx), Rows: [][]any{}}
 	if e.Behind != nil && e.Behind() {
 		ans.Degraded = true
@@ -194,7 +196,7 @@ func (e *Engine) Query(ctx context.Context, req Request) (*Answer, *wire.Error) 
 	return ans, nil
 }
 
-func (e *Engine) rows(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
+func (e *Engine) rows(tx store.Querier, req Request, ans *Answer) *wire.Error {
 	b := e.builder()
 	names := req.Select
 	if len(names) == 0 {
@@ -369,7 +371,7 @@ type tgt struct {
 	ref  RecordRef
 }
 
-func (e *Engine) scanTargets(tx *sql.Tx, q string, args []any) ([]tgt, *wire.Error) {
+func (e *Engine) scanTargets(tx store.Querier, q string, args []any) ([]tgt, *wire.Error) {
 	rs, err := tx.Query(q, args...)
 	if err != nil {
 		return nil, wire.FromErr(err)
@@ -393,7 +395,7 @@ const targetHead = `SELECT r.id,r.file_id,r.gen,r.off,r.item FROM records r JOIN
 
 // linkTargets returns the records record id links to under ls (before the
 // same-file preference).
-func (e *Engine) linkTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Error) {
+func (e *Engine) linkTargets(tx store.Querier, ls linkSpec, id int64) ([]tgt, *wire.Error) {
 	if ls.bySession {
 		var session string
 		var ref int64
@@ -444,7 +446,7 @@ func (e *Engine) linkTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Er
 
 // pathTargets links a tool_result to the tool-results body its text names, and a
 // body without a tool_use_id back to the tool_result that names its path.
-func (e *Engine) pathTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Error) {
+func (e *Engine) pathTargets(tx store.Querier, ls linkSpec, id int64) ([]tgt, *wire.Error) {
 	var typ, src string
 	var file, off, item, ln int64
 	var gen int
@@ -473,7 +475,7 @@ func (e *Engine) pathTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Er
 	return nil, nil
 }
 
-func (e *Engine) follow(tx *sql.Tx, req Request, ids, files []int64, cols []colSpec) ([][]Link, *wire.Error) {
+func (e *Engine) follow(tx store.Querier, req Request, ids, files []int64, cols []colSpec) ([][]Link, *wire.Error) {
 	ls, ok := linkOf(req.Follow)
 	if !ok {
 		return nil, badf("follow %q: use parent, result, call, body, subagents, status, mode, registry or compaction", req.Follow)
@@ -506,7 +508,7 @@ func (e *Engine) follow(tx *sql.Tx, req Request, ids, files []int64, cols []colS
 	return out, nil
 }
 
-func (e *Engine) fetch(tx *sql.Tx, rec int64, c colSpec) any {
+func (e *Engine) fetch(tx store.Querier, rec int64, c colSpec) any {
 	b := e.builder()
 	cs, err := b.col(c.name)
 	if err != nil {
@@ -531,7 +533,7 @@ type groupAcc struct {
 	seen   []map[string]bool
 }
 
-func (e *Engine) aggregate(tx *sql.Tx, req Request, ans *Answer) *wire.Error {
+func (e *Engine) aggregate(tx store.Querier, req Request, ans *Answer) *wire.Error {
 	b := e.builder()
 	var sel []string
 	idx := func(name string) (int, colSpec, *wire.Error) {

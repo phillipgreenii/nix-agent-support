@@ -195,7 +195,7 @@ func (e *Engine) behind() bool { return e.Behind != nil && e.Behind() }
 
 // floor returns the retention floor as a sequence: the greatest record id
 // committed before now minus the retention, doubled.
-func (e *Engine) floor(tx *sql.Tx) int64 {
+func (e *Engine) floor(tx store.Querier) int64 {
 	e.init()
 	cutoff := e.Clock.Now().Add(-e.Retention).UnixNano()
 	var rec int64
@@ -264,11 +264,12 @@ func (e *Engine) Feed(ctx context.Context, body []byte) (any, *wire.Error) {
 }
 
 func (e *Engine) once(ctx context.Context, req Request) (*Answer, *wire.Error) {
-	tx, err := e.Q.DB.BeginTx(ctx, nil)
+	dbtx, err := e.Q.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = dbtx.Rollback() }()
+	tx := store.BindCtx(ctx, dbtx) // every statement runs under the request ctx
 	epoch, head, maxRec := query.Head(tx)
 	floor := e.floor(tx)
 	afterSeq := floor
@@ -333,7 +334,7 @@ func seqOf(en Entry) int64 {
 
 // resets lists the reset entries in (after, bound] whose file could hold a
 // record matching the filter.
-func (e *Engine) resets(tx *sql.Tx, where *query.Filter, after, bound, epoch int64) ([]Entry, *wire.Error) {
+func (e *Engine) resets(tx store.Querier, where *query.Filter, after, bound, epoch int64) ([]Entry, *wire.Error) {
 	rs, err := tx.Query(`SELECT p.file_id,p.gen,p.parser,p.next_rec,COALESCE(f.source,'') FROM parse_resets p LEFT JOIN files f ON f.id=p.file_id
 WHERE 2*p.next_rec-1 > ? AND 2*p.next_rec-1 <= ? ORDER BY p.next_rec,p.id`, after, bound)
 	if err != nil {
@@ -383,11 +384,12 @@ func (e *Engine) Snapshot(ctx context.Context, body []byte) (any, *wire.Error) {
 	if err := query.Decode(body, &req); err != nil {
 		return nil, err
 	}
-	tx, err := e.Q.DB.BeginTx(ctx, nil)
+	dbtx, err := e.Q.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = dbtx.Rollback() }()
+	tx := store.BindCtx(ctx, dbtx) // every statement runs under the request ctx
 	epoch, head, maxRec := query.Head(tx)
 	bound := maxRec
 	if req.At != "" {
