@@ -252,7 +252,7 @@ _Includes:_ `INTF-CCH-CCPOOL`, `INTF-CCH-BEADS`.
 1. The session reads the bead and its stop history (the stopped sessions recorded on it,
    `INV-CCH-11`) and decides whether it can be split.
 2. The session records exactly one outcome through this module's own `split` subcommand, as its
-   role's prompt template directs, never by hand-built `bd` calls. All bead text reaches `bd` as
+   role's prompt template directs, never by hand-built `bd` calls. A JSON plan reaches it as a file (`--file`), never a heredoc. All bead text reaches `bd` as
    discrete arguments taken from the session's input, never through a shell (`INV-CCH-13`).
 3. Splittable (`split apply`): the session supplies a plan of at least two children, each with a
    title, a description and acceptance criteria. This module creates each child with the parent's

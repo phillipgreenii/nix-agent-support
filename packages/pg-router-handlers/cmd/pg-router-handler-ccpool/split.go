@@ -15,7 +15,7 @@ const splitHelp = `pg-router-handler-ccpool split — record a split-triage deci
 needs-split-review bead. Run by the split-triage role's session; bd resolves
 its tracker from the session's inherited environment (BEADS_DIR / cwd).
 
-  split apply <bead-id>         SPLITTABLE: reads a JSON plan on stdin
+  split apply <bead-id>         SPLITTABLE: reads a JSON plan (stdin or --file)
                                  {"rationale": "...", "children": [{"title",
                                  "description", "acceptance", "priority"?,
                                  "type"?}, ...]}; creates the children
@@ -30,8 +30,14 @@ its tracker from the session's inherited environment (BEADS_DIR / cwd).
                                  stop history, releases a held claim, removes
                                  needs-split-review last.
 
-All bead text arrives on stdin and goes to bd as discrete argv elements, never
-through a shell.
+Each verb reads its input from stdin, or from a file with a trailing
+"--file <path>" (split apply <bead-id> --file <path>). Use the file form when
+the input holds JSON: Claude Code's dontAsk permission matcher refuses a Bash
+command whose heredoc body contains a brace followed by a double quote, so a
+JSON plan on a heredoc never runs; a file written with the Write tool does.
+
+All bead text arrives on stdin or in that file and goes to bd as discrete argv
+elements, never through a shell.
 `
 
 func runSplit(args []string) int {
@@ -43,18 +49,32 @@ func runSplitWith(args []string, stdin io.Reader, stdout, stderr io.Writer, br b
 		fmt.Fprint(stdout, splitHelp)
 		return conformance.ExitOK
 	}
+	if len(args) == 4 && args[2] == "--file" {
+		return runSplitInput(args[0], args[1], args[3], stdin, stdout, stderr, br)
+	}
 	if len(args) != 2 {
-		fmt.Fprintln(stderr, "split: usage: split <apply|unsplittable> <bead-id> (input on stdin)")
+		fmt.Fprintln(stderr, "split: usage: split <apply|unsplittable> <bead-id> [--file <path>] (input on stdin by default)")
 		return conformance.ExitUsage
 	}
-	verb, id := args[0], args[1]
+	return runSplitInput(args[0], args[1], "", stdin, stdout, stderr, br)
+}
+
+// runSplitInput runs one split verb, reading its input from path when it is
+// set and from stdin otherwise.
+func runSplitInput(verb, id, path string, stdin io.Reader, stdout, stderr io.Writer, br beads.Runner) int {
 	if !beads.IsID(id) {
 		fmt.Fprintf(stderr, "split: invalid bead id %q\n", id)
 		return conformance.ExitUsage
 	}
-	raw, err := io.ReadAll(stdin)
+	var raw []byte
+	var err error
+	if path != "" {
+		raw, err = os.ReadFile(path)
+	} else {
+		raw, err = io.ReadAll(stdin)
+	}
 	if err != nil {
-		fmt.Fprintln(stderr, "split: read stdin:", err)
+		fmt.Fprintln(stderr, "split: read input:", err)
 		return conformance.ExitError
 	}
 	ctx := context.Background()

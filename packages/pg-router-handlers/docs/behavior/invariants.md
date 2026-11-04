@@ -241,7 +241,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   `needs-split-review` (`INV-CCH-12`) and MUST record exactly one outcome through the handler's own
   `split` subcommand, never by hand-built `bd` calls. Its completion is `close-or-split-triage`: the
   dispatch is done when the bead is closed or the `needs-split-review` label is gone (a hand-back
-  and a new comment are NOT outcomes). (a) `split apply <id>` (JSON plan on stdin; at least 2
+  and a new comment are NOT outcomes). (a) `split apply <id>` (JSON plan on stdin, or in a file named by a trailing `--file <path>`; at least 2
   children, each with title, description and acceptance criteria) creates each child labelled with
   the parent's labels MINUS every `budget-stop:*`, `needs-split-review`, `was-split`, `human`,
   `escalated` and `split-from:*` label PLUS `split-from:<id>` (so a child inherits no stop count),
@@ -249,7 +249,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   `blocks` type) and verifies the edges with `bd dep list <parent>`, adds `was-split`, comments the
   decomposition, releases a held claim (status open + assignee cleared in one update), and removes
   `needs-split-review` LAST. It refuses a closed, `was-split` or `split-from:*` parent, writing
-  nothing. (b) `split unsplittable <id>` (reason on stdin) hands the bead to the operator (one update adds `human`
+  nothing. (b) `split unsplittable <id>` (reason on stdin or `--file`) hands the bead to the operator (one update adds `human`
   and `attention` and removes `escalated`, bead `pg2-ikkpk`), comments the reason plus
   the stop history, releases a held claim, and removes `needs-split-review` last. If a split fails
   after children exist, the parent fails safe to `human` + `attention` (label removed, claim released) rather than
@@ -261,7 +261,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   escalated packets and block them on it, then either split as above or just remove
   `needs-split-review`; no new label, role or `plan-decompose` access exists for it. No part
   of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin
-  JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the
+  or that file, never via a shell. The reference prompt MUST pass a JSON plan as a file (the session
+  writes it with its file-write tool): a Bash command whose heredoc body holds a brace followed by a
+  double quote is refused by the permission mode a pool session runs in, so a JSON heredoc never runs
+  and the bead stays parked (recorded as `session-idle`). The reference prompt is `docs/roles/split-triager-prompt.txt`; the
   role, its discovery query (`ready --label needs-split-review --exclude-label human`) and the
   `allowedTools` grant for the `split` subcommand are wired in the deployment config. The role
   opts in to the `split-triage` dispatch precheck of `INV-CCH-22`, so a moot or

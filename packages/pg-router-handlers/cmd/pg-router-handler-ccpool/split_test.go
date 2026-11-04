@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -64,5 +66,53 @@ func TestRunSplit_usageErrors(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runSplitWith([]string{"apply", "pg2-p"}, strings.NewReader("{}"), &out, &errb, &splitFake{}); rc == 0 {
 		t.Error("an invalid plan must fail")
+	}
+}
+
+// A session cannot pass a JSON plan on a heredoc: Claude Code's dontAsk
+// permission matcher refuses a Bash command whose heredoc body holds a brace
+// followed by a double quote, so the outcome command never ran and the bead
+// stayed parked (recorded as session-idle). The plan therefore also arrives as
+// a file the session writes with the Write tool.
+func TestRunSplit_fileInput(t *testing.T) {
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "plan.json")
+	body := `{"rationale":"r","children":[{"title":"a","description":"d","acceptance":"x"},{"title":"b","description":"d","acceptance":"x"}]}`
+	if err := os.WriteFile(plan, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := &splitFake{}
+	var out, errb bytes.Buffer
+	if rc := runSplitWith([]string{"apply", "pg2-p", "--file", plan}, strings.NewReader(""), &out, &errb, f); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	if len(strings.Fields(out.String())) != 2 {
+		t.Errorf("want 2 child ids on stdout, got %q", out.String())
+	}
+	why := filepath.Join(dir, "why.txt")
+	if err := os.WriteFile(why, []byte(`not {"splittable"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g := &splitFake{}
+	if rc := runSplitWith([]string{"unsplittable", "pg2-p", "--file", why}, strings.NewReader(""), &out, &errb, g); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(strings.Join(g.calls, "\n"), `not {"splittable"}`) {
+		t.Errorf("the reason from the file must reach the comment: %v", g.calls)
+	}
+}
+
+func TestRunSplit_fileInputErrors(t *testing.T) {
+	f := &splitFake{}
+	var out, errb bytes.Buffer
+	missing := filepath.Join(t.TempDir(), "absent.json")
+	if rc := runSplitWith([]string{"apply", "pg2-p", "--file", missing}, strings.NewReader(""), &out, &errb, f); rc != 1 {
+		t.Errorf("an unreadable file: rc=%d, want 1", rc)
+	}
+	if rc := runSplitWith([]string{"apply", "pg2-p", "--plan", "x"}, strings.NewReader(""), &out, &errb, f); rc != 2 {
+		t.Errorf("an unknown flag: rc=%d, want 2 (usage)", rc)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("a file error must not call bd: %v", f.calls)
 	}
 }
