@@ -180,7 +180,7 @@ func TestCwdQueryPlanStartsFromTheSessionIndex(t *testing.T) {
 	}
 
 	newPlan := plan(cwdQuery)
-	search := regexp.MustCompile(`SEARCH.*USING INDEX records_session`)
+	search := regexp.MustCompile(`SEARCH.*USING (COVERING )?INDEX records_session`)
 	scan := regexp.MustCompile(`SCAN`)
 	var sawSearch bool
 	for _, d := range newPlan {

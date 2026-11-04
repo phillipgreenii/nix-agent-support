@@ -177,6 +177,9 @@ var derivedIndexes = []struct{ name, sql string }{
 	{"fields_name_n", `CREATE INDEX IF NOT EXISTS fields_name_n ON fields(name_id, n) WHERE n IS NOT NULL`},
 	{"records_ident", `CREATE UNIQUE INDEX IF NOT EXISTS records_ident ON records(file_id, gen, off, item)`},
 	{"records_session", `CREATE INDEX IF NOT EXISTS records_session ON records(session)`},
+	// Serves the per-session transcript facts (newest write per file, newest cwd)
+	// without walking and sorting every record of the session.
+	{"records_session_source_time", `CREATE INDEX IF NOT EXISTS records_session_source_time ON records(session, source, time_ns)`},
 	{"records_time", `CREATE INDEX IF NOT EXISTS records_time ON records(time_ns)`},
 	{"records_type", `CREATE INDEX IF NOT EXISTS records_type ON records(type)`},
 	// Serves every "WHERE source=? [AND type=?]" lookup (the lifecycle engine's

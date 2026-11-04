@@ -35,3 +35,24 @@ After the next apply, take `scripts/profile-cpu.sh --seconds 30`, the tick histo
 `query_duration_seconds` from the loopback metrics, once in a quiet window (no `conversation.list` client
 running), and compare `Settler.Tick`'s share against the 39 percent recorded here. Cause 1 will dominate the
 over-10 s requests until the index exists, so judge the tick and the requests separately.
+
+## Cause 1 fix: index and grouped read (deploy note)
+
+`conversation.list` and `conversation.show` now read a session's newest write and its files in one grouped
+statement (`SELECT file_id, MAX(time_ns) ... GROUP BY file_id`) instead of a `MAX` and a `DISTINCT` statement,
+and the newest-cwd lookup runs on the same new index. The index is `records_session_source_time` on
+`records(session, source, time_ns)`.
+
+- Migration: no `SchemaVersion` bump and no migration step. The index is one more entry in `derivedIndexes`,
+  and a normal open runs `CREATE INDEX IF NOT EXISTS` for every entry, so the first start of the new binary
+  builds it. A bulk rebuild builds it with the others after the load. An older binary ignores the extra index,
+  so a rollback is safe. If the schema v3 rebuild lands, carry this index into v3 (or replace it with the
+  equivalent on the interned session reference).
+- Operator step at deploy: the first start on the live file (about 30 GB) builds this index in one write
+  transaction before the daemon serves requests. The file and the WAL grow by the size of the index (not yet
+  measured on the live file) until the next checkpoint. Do it in a maintenance window: check free space first
+  (`pg-claude-code-recorder status` shows it), stop the old daemon, start the new one, wait for it to report
+  `caught_up`, then confirm with
+  `sqlite3 index.db "SELECT name FROM sqlite_master WHERE name='records_session_source_time'"`.
+- Verify afterwards: `query_duration_seconds` observations over 10 s for `conversation.list` and
+  `conversation.show` should stop, and `query_timeouts_total` should stop growing on them.

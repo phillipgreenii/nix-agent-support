@@ -366,6 +366,40 @@ func (m *model) conversation(session string) (Conversation, bool) {
 const cwdQuery = `SELECT f.s FROM records r CROSS JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
 WHERE r.session=? AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
 
+// fileFactsQuery reads, for one session's transcript records, the newest
+// write per file in one grouped statement. The newest write overall is the
+// largest of them and the files are the distinct file ids, so one pass over the
+// records_session_source_time index replaces a MAX query and a DISTINCT query.
+const fileFactsQuery = `SELECT file_id, MAX(time_ns) FROM records WHERE session=? AND source='claude-transcript' GROUP BY file_id ORDER BY file_id`
+
+// maxTranscriptFiles bounds how many of a session's files are checked for
+// surviving originals.
+const maxTranscriptFiles = 50
+
+// sessionFileFacts returns the newest transcript write time in nanoseconds (0
+// when there is none) and up to maxTranscriptFiles file ids of the session.
+func sessionFileFacts(db *sql.DB, session string) (last int64, ids []int64, err error) {
+	rows, err := db.Query(fileFactsQuery, session)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var t sql.NullInt64
+		if err := rows.Scan(&id, &t); err != nil {
+			return 0, nil, err
+		}
+		if t.Valid && t.Int64 > last {
+			last = t.Int64
+		}
+		if len(ids) < maxTranscriptFiles {
+			ids = append(ids, id)
+		}
+	}
+	return last, ids, rows.Err()
+}
+
 // transcriptFacts fills what a transcript says: the newest cwd (when its files
 // disagree, the newest file's value), the last write, whether the originals
 // still exist, and the end time when nothing better is known.
@@ -379,12 +413,12 @@ func (e *Engine) transcriptFacts(c *Conversation) error {
 	if cwd.Valid && cwd.String != "" {
 		c.Cwd = cwd.String
 	}
-	var last sql.NullInt64
-	if err := db.QueryRow(`SELECT MAX(time_ns) FROM records WHERE session=? AND source='claude-transcript'`, c.SessionID).Scan(&last); err != nil {
+	last, ids, err := sessionFileFacts(db, c.SessionID)
+	if err != nil {
 		return err
 	}
-	if last.Valid && last.Int64 > 0 {
-		c.LastWrite = tp(last.Int64)
+	if last > 0 {
+		c.LastWrite = tp(last)
 	}
 	if c.Ended && c.EndTime == nil {
 		switch {
@@ -393,22 +427,6 @@ func (e *Engine) transcriptFacts(c *Conversation) error {
 		case c.regTime > 0:
 			c.EndTime, c.EndTimeApprox = tp(c.regTime), true
 		}
-	}
-	frows, err := db.Query(`SELECT DISTINCT file_id FROM records WHERE session=? AND source='claude-transcript' LIMIT 50`, c.SessionID)
-	if err != nil {
-		return err
-	}
-	var ids []int64
-	for frows.Next() {
-		var id int64
-		if err := frows.Scan(&id); err != nil {
-			_ = frows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	if err := frows.Close(); err != nil {
-		return err
 	}
 	for _, id := range ids {
 		paths, _ := e.St.CurrentPaths(id)
