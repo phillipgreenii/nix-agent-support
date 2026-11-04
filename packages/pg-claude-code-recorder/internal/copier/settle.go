@@ -12,7 +12,7 @@ import (
 // WithLock runs fn while no Ingest runs (the settle stage holds a Conversation's
 // bytes still while it checks, archives and deletes). fn MUST NOT call Ingest.
 func (c *Copier) WithLock(fn func() error) error {
-	c.mu.Lock()
+	c.lock()
 	defer c.mu.Unlock()
 	return fn()
 }

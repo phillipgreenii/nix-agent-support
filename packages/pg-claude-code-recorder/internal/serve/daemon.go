@@ -98,6 +98,9 @@ type Daemon struct {
 	// none runs; the in-flight gauge and the stuck-tick log read it.
 	tickStartNS atomic.Int64
 
+	// seen is the last observation of each path (sweep_files_total).
+	seen sweepSeen
+
 	backfillDone atomic.Bool
 	filesTotal   atomic.Int64
 	filesCopied  atomic.Int64
@@ -272,9 +275,13 @@ func (d *Daemon) ingest(p string) copier.Result {
 // afterIngest logs a failed ingest and tells the parser and the lifecycle
 // tracker about a copied path.
 func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Result {
+	result := obs.ResultError
 	if err != nil {
 		d.obs.Log.Warn("ingest_failed", "path", p, "err", err.Error())
+	} else {
+		result = obs.IngestResultLabel(res.Action)
 	}
+	d.obs.Reg.Add(obs.MIngestResults, map[string]string{"result": result}, 1)
 	if res.File != 0 {
 		d.prs.Notify(res.File)
 	}
@@ -284,7 +291,10 @@ func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Resu
 	return res
 }
 
-func (d *Daemon) sink(e watcher.Event) { d.ingest(e.Path) }
+func (d *Daemon) sink(e watcher.Event) {
+	d.noteSeen(e)
+	d.ingest(e.Path)
+}
 
 // onSweep runs under the watcher's lock before the sweep's events. It records
 // deletions (a missing path with no file of the same identity elsewhere), and
@@ -299,6 +309,7 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 		}
 		found[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}] = true
 	}
+	d.countSweepFiles(files)
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}

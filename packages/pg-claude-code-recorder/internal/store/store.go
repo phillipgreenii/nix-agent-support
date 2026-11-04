@@ -186,14 +186,19 @@ type Store struct {
 	bulkRecords int
 	bulkBytes   int64
 
-	mu       sync.Mutex // serializes every write
-	rbEpoch  atomic.Uint64
-	jf       fsx.File
-	nextSeq  int64
-	nextFile int64
-	lastSeq  int64
-	hooks    []func()
-	wrHooks  []func()
+	mu sync.Mutex // serializes every write
+	// waitNow is the clock of the write-lock wait (time.Now when nil) and
+	// onContended a test seam that runs after a lock attempt found the lock busy
+	// and before it queues.
+	waitNow     func() time.Time
+	onContended func()
+	rbEpoch     atomic.Uint64
+	jf          fsx.File
+	nextSeq     int64
+	nextFile    int64
+	lastSeq     int64
+	hooks       []func()
+	wrHooks     []func()
 
 	trkMu    sync.Mutex // guards trackers
 	trackers []*FileTracker
@@ -670,8 +675,27 @@ func (s *Store) Commit(recs ...*Rec) error { return s.commit(false, recs) }
 // flush the drive's cache.
 func (s *Store) CommitFull(recs ...*Rec) error { return s.commit(true, recs) }
 
-func (s *Store) commit(full bool, recs []*Rec) error {
+// lockWrite takes the single write lock. A contended acquisition observes the
+// seconds the caller queued (store_write_lock_wait_seconds); an uncontended one
+// reads no clock and touches no registry lock.
+func (s *Store) lockWrite() {
+	if s.mu.TryLock() {
+		return
+	}
+	now := s.waitNow
+	if now == nil {
+		now = time.Now
+	}
+	start := now()
+	if s.onContended != nil {
+		s.onContended()
+	}
 	s.mu.Lock()
+	s.obs.Reg.Observe(obs.MStoreWriteLockWait, now().Sub(start).Seconds())
+}
+
+func (s *Store) commit(full bool, recs []*Rec) error {
+	s.lockWrite()
 	defer s.mu.Unlock()
 	var buf []byte
 	for _, r := range recs {

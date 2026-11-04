@@ -174,7 +174,7 @@ SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path
 // before the commit, so a test can crash exactly there; a panic or an error
 // rolls the transaction back.
 func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
-	s.mu.Lock()
+	s.lockWrite()
 	defer s.mu.Unlock()
 	if s.batching {
 		return s.bulkWriteLocked(point, fn)

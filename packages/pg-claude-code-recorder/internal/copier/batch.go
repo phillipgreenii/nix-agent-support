@@ -161,7 +161,7 @@ type BatchResult struct {
 // flushes what is staged and takes the ordinary Ingest path, so ordering
 // between paths is preserved. It holds the copier for the whole batch.
 func (c *Copier) IngestBatch(paths []string) []BatchResult {
-	c.mu.Lock()
+	c.lock()
 	defer c.mu.Unlock()
 	out := make([]BatchResult, len(paths))
 	var pend []*staged

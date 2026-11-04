@@ -21,6 +21,10 @@
 #                                  nested inside settle_tick, not additive; copier_ingest is per-event and has only the
 #                                  duration histogram)
 #   outcome (loop_runs_total)      ok error
+#   result (ingest_results_total)  copied new_generation unchanged skipped snapshot link missing tombstone raced error
+#                                  (the copier.Result.Action strings, hyphens mapped to underscores, plus error for an
+#                                  ingest that returned an error)
+#   outcome (sweep_files_total)    walked unchanged_candidate (observation only: nothing is skipped)
 #   state (control_inbox_state)    present gone never_loaded
 #   outcome (end_reason_source_files_total)  ingested removed invalid
 #   verb (control_requests_total)  submit interrupt run read ping other
@@ -88,6 +92,10 @@ pg_claude_code_recorder_loop_runs_total counter loop,outcome
 pg_claude_code_recorder_loop_duration_seconds histogram loop
 pg_claude_code_recorder_loop_last_timestamp_seconds gauge loop
 pg_claude_code_recorder_loop_in_flight_seconds gauge loop
+pg_claude_code_recorder_ingest_results_total counter result
+pg_claude_code_recorder_sweep_files_total counter outcome
+pg_claude_code_recorder_copier_lock_wait_seconds histogram -
+pg_claude_code_recorder_store_write_lock_wait_seconds histogram -
 pg_claude_code_recorder_settle_tick_examined_total counter -
 pg_claude_code_recorder_settle_tick_transitions_total counter -
 pg_claude_code_recorder_settle_tick_last_duration_seconds gauge -

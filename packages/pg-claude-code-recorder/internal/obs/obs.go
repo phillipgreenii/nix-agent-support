@@ -157,6 +157,40 @@ const (
 	MWALCheckpointDuration = "wal_checkpoint_duration_seconds"
 )
 
+// Metric names of the per-pass work counters and the lock waits. The lock-wait
+// histograms observe CONTENDED acquisitions only (an uncontended lock costs no
+// registry lock), so their sample count is the number of times a caller had to
+// queue, and the rate of ingest_results_total is the denominator for the
+// fraction of ingests that queued.
+const (
+	MIngestResults          = "ingest_results_total"
+	MSweepFiles             = "sweep_files_total"
+	MCopierLockWait         = "copier_lock_wait_seconds"
+	MStoreWriteLockWait     = "store_write_lock_wait_seconds"
+	SweepWalked             = "walked"
+	SweepUnchangedCandidate = "unchanged_candidate"
+)
+
+// IngestResults are the values of the result label of ingest_results_total:
+// the copier.Result.Action strings with hyphens mapped to underscores, plus
+// error (an ingest that returned an error).
+var IngestResults = []string{
+	"copied", "new_generation", "unchanged", "skipped", "snapshot", "link",
+	"missing", "tombstone", "raced", ResultError,
+}
+
+// ResultError is the result value of an ingest that returned an error.
+const ResultError = "error"
+
+// SweepOutcomes are the values of the outcome label of sweep_files_total.
+var SweepOutcomes = []string{SweepWalked, SweepUnchangedCandidate}
+
+// IngestResultLabel maps a copier.Result.Action string to its result label
+// value: hyphens become underscores (new-generation is new_generation).
+func IngestResultLabel(action string) string {
+	return strings.ReplaceAll(action, "-", "_")
+}
+
 // Loop and outcome label values of the loop metrics. removal_pass is nested
 // inside settle_tick (its time is part of the tick's, not additive to it).
 // copier_ingest is the one per-event loop: it has a duration observation only,
@@ -340,6 +374,12 @@ func (o *Obs) RegisterStandard() {
 			o.Reg.Set(g, nil, 0)
 		}
 	}
+	for _, r := range IngestResults {
+		o.Reg.Add(MIngestResults, map[string]string{"result": r}, 0)
+	}
+	for _, oc := range SweepOutcomes {
+		o.Reg.Add(MSweepFiles, map[string]string{"outcome": oc}, 0)
+	}
 	for _, l := range PassLoops() {
 		for _, out := range []string{OutcomeOK, OutcomeError} {
 			o.Reg.Add(MLoopRuns, map[string]string{"loop": l, "outcome": out}, 0)
@@ -371,6 +411,8 @@ func (o *Obs) RegisterStandard() {
 		{MSettleTickDuration, LoopBuckets},
 		{MRefreshGaugesDuration, LoopBuckets},
 		{MWALCheckpointDuration, LoopBuckets},
+		{MCopierLockWait, LoopBuckets},
+		{MStoreWriteLockWait, LoopBuckets},
 	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}

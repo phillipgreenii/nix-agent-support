@@ -71,6 +71,27 @@ type Copier struct {
 	mu          sync.Mutex
 	cloneOK     bool
 	cloneReason string
+
+	// onContended, when set, runs once a lock attempt found the copier busy and
+	// before it queues (a test seam that lets a test move the injected clock
+	// while the caller is queued).
+	onContended func()
+}
+
+// lock takes the copier lock. A contended acquisition observes the seconds the
+// caller queued (copier_lock_wait_seconds) from the injected clock; an
+// uncontended one reads no clock and touches no registry lock, so the
+// per-event path pays nothing while the lock is free.
+func (c *Copier) lock() {
+	if c.mu.TryLock() {
+		return
+	}
+	start := c.cfg.Clock.Now()
+	if c.onContended != nil {
+		c.onContended()
+	}
+	c.mu.Lock()
+	c.cfg.Obs.Reg.Observe(obs.MCopierLockWait, c.cfg.Clock.Now().Sub(start).Seconds())
 }
 
 // ErrNotYetValid is returned when a snapshot's JSON stays invalid after the
@@ -133,7 +154,7 @@ func (c *Copier) now() int64 { return c.cfg.Clock.Now().UnixNano() }
 
 // Ingest processes one changed path (a hint only).
 func (c *Copier) Ingest(path string) (Result, error) {
-	c.mu.Lock()
+	c.lock()
 	defer c.mu.Unlock()
 	return c.ingestLocked(path)
 }
@@ -369,7 +390,7 @@ func (c *Copier) tombstone(f store.File, path string) error {
 // path that no longer names its file is closed; a file left with no path whose
 // identity is not in found is deleted (a Tombstone).
 func (c *Copier) SweepMissing(found map[Identity]bool) error {
-	c.mu.Lock()
+	c.lock()
 	defer c.mu.Unlock()
 	files, err := c.st.AllFiles()
 	if err != nil {
