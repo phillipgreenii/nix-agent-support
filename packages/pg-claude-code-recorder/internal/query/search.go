@@ -2,14 +2,24 @@ package query
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
-// MinSubstringChars is the shortest substring query the trigram index serves.
+// MinSubstringChars is the shortest substring query served.
 const MinSubstringChars = 3
+
+// DefaultSubstringBudget is the number of bytes of copy text one substring
+// request reads before it stops and answers partial. A request that names a
+// session, a time range or a cwd rarely reaches it; an unscoped one stops here,
+// newest records first.
+const DefaultSubstringBudget int64 = 256 << 20
 
 // SearchRequest is the search operation's body.
 type SearchRequest struct {
@@ -40,10 +50,18 @@ type SearchAnswer struct {
 	Hits     []Hit  `json:"hits"`
 	More     bool   `json:"more"`
 	Degraded bool   `json:"degraded,omitempty"`
-	// TooShort is true when a substring query was under three characters: the
-	// trigram index cannot answer it, so no hits are returned.
+	// TooShort is true when a substring query was under three characters: it is
+	// refused, so no hits are returned.
 	TooShort bool   `json:"too_short,omitempty"`
 	Note     string `json:"note,omitempty"`
+	// Partial is true when a substring scan stopped at its byte budget or at the
+	// query deadline before it had read every candidate copy. The hits are
+	// correct but may be incomplete: ScannedBytes says how much text was read and
+	// ScannedTo is the time of the oldest record read (the scan runs newest
+	// first), so a retry narrowed to that side of ScannedTo covers the rest.
+	Partial      bool   `json:"partial,omitempty"`
+	ScannedBytes int64  `json:"scanned_bytes,omitempty"`
+	ScannedTo    string `json:"scanned_to,omitempty"`
 }
 
 // Search runs a word or substring search.
@@ -64,23 +82,20 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 	if e.Behind != nil && e.Behind() {
 		ans.Degraded = true
 	}
-	var match, table string
-	var terms []string
-	if mode == "word" {
-		q, ok := wordQuery(req.Q)
-		if !ok {
-			ans.Note = "the query has no words"
-			return ans, nil
-		}
-		match, table, terms = q, "fts_word", tokens(req.Q)
-	} else {
+	if mode == "substring" {
 		if utf8.RuneCountInString(req.Q) < MinSubstringChars {
 			ans.TooShort = true
 			ans.Note = "a substring query needs at least 3 characters; nothing was searched"
 			return ans, nil
 		}
-		match, table = `"`+strings.ReplaceAll(req.Q, `"`, `""`)+`"`, "fts_tri"
+		return e.substring(ctx, tx, req, ans)
 	}
+	match, ok := wordQuery(req.Q)
+	if !ok {
+		ans.Note = "the query has no words"
+		return ans, nil
+	}
+	terms := tokens(req.Q)
 	b := e.builder()
 	wsql, wargs, werr := b.where(req.Where)
 	if werr != nil {
@@ -104,19 +119,14 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 		}
 		fieldSQL = " AND t.field IN (" + strings.Join(ph, ",") + ")"
 	}
-	order := "t.id"
-	score := "0"
-	if mode == "word" {
-		order, score = "bm25(fts_word)", "bm25(fts_word)"
-	}
 	gen := ""
 	if !req.OldGenerations {
 		gen = " AND r.gen=fl.cur_gen"
 	}
-	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, r.session, r.time_ns, " + score +
-		" FROM " + table + " JOIN texts t ON t.id=" + table + ".rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id" +
+	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, r.session, r.time_ns, bm25(fts_word)" +
+		" FROM fts_word JOIN texts t ON t.id=fts_word.rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id" +
 		gen + " " + strings.Join(b.joins, " ") +
-		" WHERE " + table + " MATCH ?" + fieldSQL + " AND (" + wsql + ") ORDER BY " + order
+		" WHERE fts_word MATCH ?" + fieldSQL + " AND (" + wsql + ") ORDER BY bm25(fts_word)"
 	args := append(append([]any{}, b.joinArgs...), match)
 	args = append(append(args, fieldArgs...), wargs...)
 	rs, qerr := tx.Query(q, args...)
@@ -137,27 +147,138 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, 
 		if e.Res != nil {
 			if v, err := e.Res.Value(fid, gen, off, ln, src, item, field); err == nil {
 				value = v
-			} else if mode == "substring" {
-				continue // cannot verify against the copy
 			}
 		}
-		h := Hit{Record: RecordRef{File: FileRef(fid), Gen: gen, Offset: off, Item: item}, SessionID: session, Time: rfc(tns), Field: field}
-		if mode == "substring" {
-			at := strings.Index(value, req.Q)
-			if at < 0 {
-				continue // the index matched trigrams but the bytes do not hold the text
-			}
-			h.MatchAt = &at
-			h.Snippet = window(value, at, at+len(req.Q))
-		} else {
-			h.Score = -sc
-			h.Snippet = wordSnippet(value, terms)
+		h := Hit{
+			Record: RecordRef{File: FileRef(fid), Gen: gen, Offset: off, Item: item}, SessionID: session, Time: rfc(tns), Field: field,
+			Score: -sc, Snippet: wordSnippet(value, terms),
 		}
 		if len(ans.Hits) == limit {
 			ans.More = true
 			break
 		}
 		ans.Hits = append(ans.Hits, h)
+	}
+	return ans, nil
+}
+
+// opaqueFields is the sorted names of the catalogued opaque fields, the ones a
+// substring search reads when the request names no fields.
+func (e *Engine) opaqueFields() []string {
+	var out []string
+	for name, k := range e.Catalog {
+		if k == source.KindOpaque {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// substring answers a literal, case-sensitive search by scanning the recorder's
+// copies, read through the Resolver (never the original Claude files). The
+// candidates come from the records and texts tables, narrowed by the request's
+// filter and fields, newest first; no full-text table is read, so it works with
+// the trigram index absent. The scan stops at the byte budget or the query
+// deadline and answers partial with how far it got.
+func (e *Engine) substring(ctx context.Context, tx *sql.Tx, req SearchRequest, ans *SearchAnswer) (*SearchAnswer, *wire.Error) {
+	if e.Res == nil {
+		return nil, wire.Errf(wire.ErrUnavailable, "substring search reads the recorder's copies and none are attached")
+	}
+	b := e.builder()
+	wsql, wargs, werr := b.where(req.Where)
+	if werr != nil {
+		return nil, werr
+	}
+	e.noteFilter("search", b)
+	fields := e.opaqueFields()
+	if len(req.Fields) > 0 {
+		fields = fields[:0:0]
+		for _, f := range req.Fields {
+			stored, kind, err := b.resolve(f)
+			if err != nil {
+				return nil, err
+			}
+			if !kind.Searchable() {
+				return nil, badf("field %q is not a text or opaque field", f)
+			}
+			if kind == source.KindOpaque {
+				fields = append(fields, stored)
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return ans, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(fields)), ",")
+	gen := ""
+	if !req.OldGenerations {
+		gen = " AND r.gen=fl.cur_gen"
+	}
+	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, r.session, r.time_ns" +
+		" FROM texts t JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id" +
+		gen + " " + strings.Join(b.joins, " ") +
+		" WHERE t.field IN (" + ph + ") AND (" + wsql + ") ORDER BY r.time_ns DESC, t.id DESC"
+	args := append([]any{}, b.joinArgs...)
+	for _, f := range fields {
+		args = append(args, f)
+	}
+	args = append(args, wargs...)
+	rs, qerr := tx.QueryContext(ctx, q, args...)
+	if qerr != nil {
+		return nil, wire.FromErr(qerr)
+	}
+	defer func() { _ = rs.Close() }()
+	budget := e.SubstringBudget
+	if budget <= 0 {
+		budget = DefaultSubstringBudget
+	}
+	limit := limitOf(req.Limit)
+	var scanned, lastNS int64
+	stop := func() {
+		ans.Partial = true
+		ans.ScannedBytes = scanned
+		if lastNS != 0 {
+			ans.ScannedTo = rfc(lastNS)
+		}
+		ans.Note = "the scan stopped before every candidate copy was read; add a session, time range or cwd filter, or search below scanned_to"
+	}
+	for rs.Next() {
+		if scanned >= budget || ctx.Err() != nil {
+			stop()
+			return ans, nil
+		}
+		var field, src, session string
+		var recID, fid, off, tns int64
+		var gen, item, ln int
+		if err := rs.Scan(&field, &recID, &fid, &gen, &off, &item, &ln, &src, &session, &tns); err != nil {
+			return nil, wire.FromErr(err)
+		}
+		value, err := e.Res.Value(fid, gen, off, ln, src, item, field)
+		if err != nil {
+			continue // the copy cannot be read: nothing to verify against
+		}
+		scanned += int64(len(value))
+		lastNS = tns
+		at := strings.Index(value, req.Q)
+		if at < 0 {
+			continue
+		}
+		if len(ans.Hits) == limit {
+			ans.More = true
+			break
+		}
+		ans.Hits = append(ans.Hits, Hit{
+			Record: RecordRef{File: FileRef(fid), Gen: gen, Offset: off, Item: item}, SessionID: session, Time: rfc(tns),
+			Field: field, MatchAt: &at, Snippet: window(value, at, at+len(req.Q)),
+		})
+	}
+	if err := rs.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			stop()
+			return ans, nil
+		}
+		return nil, wire.FromErr(err)
 	}
 	return ans, nil
 }

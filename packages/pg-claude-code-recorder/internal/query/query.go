@@ -26,6 +26,9 @@ type Engine struct {
 	DB      *sql.DB
 	Catalog map[string]source.Kind
 	Res     Resolver
+	// SubstringBudget is the bytes of copy text one substring search reads
+	// before it answers partial; zero means DefaultSubstringBudget.
+	SubstringBudget int64
 	// Behind reports whether the recorder is catching up (answers are marked
 	// degraded then).
 	Behind func() bool

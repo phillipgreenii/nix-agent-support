@@ -43,6 +43,11 @@ Examples:
   pg-claude-code-recorder coverage --view files     per-file copy and parse offsets and lag
   echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"count"}]}' | pg-claude-code-recorder query
   echo '{"mode":"word","q":"registry file"}' | pg-claude-code-recorder search --limit 5
+  echo '{"mode":"substring","q":"--no-verify","where":{"field":"session_id","eq":"<session>"}}' | pg-claude-code-recorder search
+                                                     substring scans the copies (tool input and bodies), literal and case sensitive,
+                                                     3 characters minimum, newest first, at most 256 MiB read per request; a request
+                                                     that stops early answers partial: true with scanned_bytes and scanned_to, so add a
+                                                     session_id, time or cwd filter (or search below scanned_to) to cover the rest
   pg-claude-code-recorder find pg2-abc               a bead id is a text search
   pg-claude-code-recorder status --client swiftbar  count this call under client "swiftbar"
   pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'   the state, then tail it:

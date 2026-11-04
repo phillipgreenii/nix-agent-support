@@ -159,8 +159,9 @@ Sources are compiled in (`internal/source`): `claude-transcript` (session and su
 and `claude-history`. The parser (`internal/parser`) reads each copy from its parse offset to the
 last newline within the copy offset and commits records, typed fields, text indexes and the new
 parse offset in one transaction; a re-parse replaces a file generation atomically behind a
-`parse_resets` marker. Only `text` fields (FTS5 word index) and `opaque` fields (FTS5 trigram index,
-case sensitive, every hit verified against the copy) are search-indexed; no file contents are stored.
+`parse_resets` marker. `text` fields are search-indexed in the FTS5 word index; `opaque` fields are
+searched by `mode=substring`, which scans the copies (see "Substring search" below); no file contents are
+stored in `index.db`.
 
 Typed scalars live in `fields(rec_id, name_id, s, n, f)`, `WITHOUT ROWID`, keyed `(rec_id, name_id)`;
 the field name is stored once in `field_names(id, name UNIQUE)` and the query layer resolves a name to
@@ -177,6 +178,25 @@ echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[
 echo '{"mode":"substring","q":"--no-verify","fields":["tool_use.input"]}' | pg-claude-code-recorder search
 pg-claude-code-recorder find <session-id|text>
 ```
+
+### Substring search
+
+`mode=substring` finds a literal, case-sensitive string (a path, a flag such as `--no-verify`, a partial token)
+in the opaque fields (`tool_use.input`, `tool_result.body`, saved tool-result bodies, pasted contents; `fields`
+narrows it to some of them). It does not use a full-text index: the candidates are the records of those fields
+that match the request's `where` filter (session, time range, cwd, project and the rest), newest first, and each
+candidate's text is read from the recorder's own copy and searched for the literal. It never reads the original
+Claude tree. `match_at` is the byte offset of the match in the field text, and `snippet` the text around it.
+
+Cost is bounded by a byte budget, not by refusing unscoped requests. One request reads at most
+`DefaultSubstringBudget` (256 MiB) of copy text, and stops earlier at the daemon's query deadline
+(`query.timeout`). When it stops with candidates left it answers normally (never an error) with
+`partial: true`, `scanned_bytes` (how much text it read), `scanned_to` (the time of the oldest record it
+reached) and a `note`; the hits it returns are correct but may be incomplete, so a miss with `partial: true`
+is not a proof of absence. Narrow the request (a `session_id` or `time` or `cwd` filter) or search below
+`scanned_to` to cover the rest. Why a budget and not a rejection: an agent with only a string and no session
+still gets the most recent matches, the wire shape needs no new error, and a scoped request that fits the
+budget is exact and not partial. `limit` and `more` behave as for word search.
 
 A substring query under three characters returns no hits and `too_short: true`. Config key
 `parse.maxLineBytes` bounds a line (longer lines are bad lines). The soak check

@@ -87,3 +87,14 @@ flowchart TD
 - Mid-word search over prose is not provided by `fts_word` and is not decided here; a phase that needs it
   decides it separately.
 - This decision is carried out by the schema v3 rebuild; until that rebuild runs, the trigram index exists.
+
+## Implementation note: the substring bound
+
+The substring path is implemented as a scan of the copies with a byte budget, the second of the two bounds
+policy item 2 allows. Candidates are the records and `texts` rows of the opaque fields matching the request's
+filter, newest first; each is read through the recorder's copy store and checked for the literal. A scan stops at
+256 MiB of copy text or at the query deadline and answers `partial: true` with `scanned_bytes` and `scanned_to`
+(not an error), so an unscoped request still returns the most recent hits and a scoped one is exact. Rejecting
+unscoped requests was not chosen: it would need a new retryable error and would turn away the common case of an
+agent that has only the string. The word index does not narrow a substring request, because the wire carries one
+`q`. The path does not read `fts_tri`, so the table can be dropped by the schema rebuild without touching it.
