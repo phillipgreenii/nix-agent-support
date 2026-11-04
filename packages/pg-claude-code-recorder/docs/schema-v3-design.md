@@ -362,6 +362,14 @@ Sizes are t-shirt sizes. "Blocked by" names other slices of this list.
 | S8  | Version bump to 3, free-space preflight, v2 versus v3 parity test, README and ADR update                         | L    | S3, S6 (and S7 if taken) |
 | S9  | Grafana panel and alert for the mismatch metric and unknown-key growth                                           | S    | S1                       |
 
+Slice 2 as built: a fresh or existing store gets `sessions`, `session_stats`, `session_files` and a
+`records.session_ref` column (added with `ALTER TABLE` at open when missing, a constant default so no row is
+rewritten) while `SchemaVersion` stays 2 and `records.session` stays the column every query reads. The parser
+writes both. A store created before the slice keeps `session_ref` 0 on its older rows and has no session rows
+for them until it is rebuilt. Left to later slices: the `records_session` index on `session_ref` (an index
+build over the live table is the version-bump slice's job), the swap of `session` for `session_ref`, and the
+lookup ids on `sessions`, which stay NULL until the lookup tables exist.
+
 ## 12. Decision for the operator
 
 Fold S1 to S6, S8 and S9 (and S7 if wanted) into one schema v3 rebuild, or defer v3?

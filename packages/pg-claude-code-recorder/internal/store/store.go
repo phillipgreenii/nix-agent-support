@@ -348,6 +348,10 @@ func (s *Store) openDB(path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
+	if err := addSessionRefColumn(w); err != nil {
+		_ = w.Close()
+		return err
+	}
 	// One transaction: one commit for the whole script instead of one per
 	// statement (the FTS5 tables add many).
 	ddl := schemaSQL + derivedSQL()
@@ -829,4 +833,19 @@ func execInTx(db *sql.DB, q string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// addSessionRefColumn gives a records table created before session_ref existed
+// the column. The default is a constant, so SQLite adds it without rewriting a
+// row; older rows keep 0 (no session row) until the database is rebuilt.
+func addSessionRefColumn(db *sql.DB) error {
+	var tbl, has int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil || tbl == 0 {
+		return err
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session_ref'`).Scan(&has); err != nil || has > 0 {
+		return err
+	}
+	_, err := db.Exec(`ALTER TABLE records ADD COLUMN session_ref INTEGER NOT NULL DEFAULT 0`)
+	return err
 }

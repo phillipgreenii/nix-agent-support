@@ -25,6 +25,20 @@ import (
 // those rows answers the same (a stored row wins), it is just larger until it
 // is rebuilt.
 //
+// Session tables (schema v3 slice 2). records.session_ref is the integer
+// reference of the record's session in sessions (first-seen order; the empty
+// session has a sentinel row with session_id ”). sessions is append-only,
+// session_stats is its mutable sibling (written once per parse batch, an
+// upsert), and session_files fans a session out to the files that hold it. They
+// are derived from records and rebuildable from it. For now records.session
+// stays the column every query reads and records.session_ref is written beside
+// it: the swap, the index on session_ref and the version bump belong to later
+// slices. A database created before these tables existed gets them (and the
+// session_ref column, see addSessionRefColumn) at open, but its older rows keep
+// session_ref 0 and are absent from the session tables until it is rebuilt.
+// first_version_id, entrypoint_id and user_type_id stay NULL until the lookup
+// tables of a later slice exist.
+//
 // fields_name_n is partial: only rows with a number are indexed. A filter or
 // sort on a numeric field compares n with = < > IN and the like, which the
 // planner can prove implies n IS NOT NULL, so it can use the index; a query
@@ -42,8 +56,28 @@ CREATE TABLE IF NOT EXISTS records(
   type TEXT NOT NULL,
   parser_version INTEGER NOT NULL,
   session TEXT NOT NULL DEFAULT '',
-  time_ns INTEGER NOT NULL DEFAULT 0
+  time_ns INTEGER NOT NULL DEFAULT 0,
+  session_ref INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS sessions(
+  session_ref INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL UNIQUE,
+  project TEXT,
+  first_time_ns INTEGER NOT NULL,
+  first_version_id INTEGER,
+  entrypoint_id INTEGER,
+  user_type_id INTEGER
+) STRICT;
+CREATE TABLE IF NOT EXISTS session_stats(
+  session_ref INTEGER PRIMARY KEY REFERENCES sessions(session_ref),
+  last_time_ns INTEGER NOT NULL,
+  record_count INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS session_files(
+  session_ref INTEGER NOT NULL REFERENCES sessions(session_ref),
+  file_id INTEGER NOT NULL,
+  PRIMARY KEY(session_ref, file_id)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS field_names(
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
@@ -185,6 +219,7 @@ var derivedIndexes = []struct{ name, sql string }{
 	// Serves every "WHERE source=? [AND type=?]" lookup (the lifecycle engine's
 	// registry, history and control-end reads); without it the planner scans every row.
 	{"records_source_type", `CREATE INDEX IF NOT EXISTS records_source_type ON records(source, type)`},
+	{"session_files_file", `CREATE INDEX IF NOT EXISTS session_files_file ON session_files(file_id)`},
 	{"texts_rec", `CREATE INDEX IF NOT EXISTS texts_rec ON texts(rec_id)`},
 }
 

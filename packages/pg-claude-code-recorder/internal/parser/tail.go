@@ -75,6 +75,9 @@ func (p *Parser) ParseTail(file int64, gen int) (bool, error) {
 		if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
 			return err
 		}
+		if err := p.flushSessions(tx); err != nil {
+			return err
+		}
 		return p.mark(tx)
 	})
 	if err != nil {

@@ -152,6 +152,9 @@ func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captu
 		if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
 			return err
 		}
+		if err := p.flushSessions(tx); err != nil {
+			return err
+		}
 		return p.mark(tx)
 	})
 	return count, err
@@ -197,6 +200,9 @@ func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tomb
 				return err
 			}
 			if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
+				return err
+			}
+			if err := p.flushSessions(tx); err != nil {
 				return err
 			}
 			return p.mark(tx)

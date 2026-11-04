@@ -78,6 +78,11 @@ type Parser struct {
 	// field_names ids are reused after a rollback.
 	names      map[string]int64
 	namesEpoch uint64
+
+	// sessRefs maps a session id to its sessions.session_ref, under the same
+	// validity rule as names (see sessionRef).
+	sessRefs  map[string]int64
+	sessEpoch uint64
 }
 
 // New returns a Parser.
@@ -481,6 +486,9 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 			if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
 				return err
 			}
+			if err := p.flushSessions(tx); err != nil {
+				return err
+			}
 			return p.mark(tx)
 		}
 		if err := p.cfg.Store.WithWrite("parse.before-commit", fn); err != nil {
@@ -626,6 +634,9 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('parse_seq','1') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)`); err != nil {
 			return err
 		}
+		if err := p.flushSessions(tx); err != nil {
+			return err
+		}
 		return p.mark(tx)
 	}
 	// A re-parse is one transaction so the new records appear together.
@@ -636,6 +647,11 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 }
 
 func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {
+	// The sessions that lose rows get their stats recomputed once the rows are gone.
+	affected, err := p.sessionsOfGen(tx, file, gen)
+	if err != nil {
+		return err
+	}
 	stmts := []string{
 		`DELETE FROM fts_word WHERE rowid IN (SELECT t.id FROM texts t JOIN records r ON r.id=t.rec_id WHERE r.file_id=?1 AND r.gen=?2 AND t.kind='text')`,
 		`DELETE FROM fts_tri WHERE rowid IN (SELECT t.id FROM texts t JOIN records r ON r.id=t.rec_id WHERE r.file_id=?1 AND r.gen=?2 AND t.kind='opaque')`,
@@ -655,7 +671,7 @@ WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.
 			return err
 		}
 	}
-	return nil
+	return p.recomputeSessionStats(tx, affected)
 }
 
 // chunk parses lines from off, at most ChunkBytes of them, never past the last
@@ -801,11 +817,16 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if !r.Time.IsZero() {
 			tns = r.Time.UnixNano()
 		}
-		res, err := tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns)
+		ref, err := p.sessionRef(tx, r.Session, caps["project"], tns)
 		if err != nil {
 			return err
 		}
+		res, err := tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref)
+		if err != nil {
+			return err
+		}
+		tx.noteSession(ref, tns, f.ID)
 		id, _ := res.LastInsertId()
 		for _, fl := range r.Fields {
 			if fl.Kind.Searchable() {
@@ -1118,7 +1139,8 @@ func (p *pstx) QueryRow(q string, args ...any) *sql.Row {
 // (a parse inserts tens of thousands of rows per transaction).
 type pstx struct {
 	*sql.Tx
-	st map[string]*sql.Stmt
+	st   map[string]*sql.Stmt
+	sess *sessionBatch // session activity of this transaction, see flushSessions
 }
 
 func newPS(tx *sql.Tx) *pstx { return &pstx{Tx: tx, st: map[string]*sql.Stmt{}} }

@@ -170,3 +170,39 @@ func TestOpenBackfillsUnknownKeysTotalOnceForAnExistingStore(t *testing.T) {
 		}
 	}
 }
+
+// A v2 store written before the session tables existed gets them, and the
+// session_ref column on records, at the next open; its older rows keep
+// session_ref 0 and a second open changes nothing.
+func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	for _, q := range []string{
+		`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(1,1,1,0,-1,1,'claude-transcript','user',1,'example-session-1',5)`,
+		`ALTER TABLE records DROP COLUMN session_ref`,
+		`DROP TABLE session_files`, `DROP TABLE session_stats`, `DROP TABLE sessions`,
+	} {
+		if _, err := s.wdb.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		s = open(t, dir)
+		var ref, tables int
+		if err := s.Read().QueryRow(`SELECT session_ref FROM records WHERE id=1`).Scan(&ref); err != nil || ref != 0 {
+			t.Fatalf("open %d: old row session_ref %d, %v", i, ref, err)
+		}
+		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions','session_stats','session_files')`).Scan(&tables); err != nil || tables != 3 {
+			t.Fatalf("open %d: %d session tables, %v", i, tables, err)
+		}
+		if s.SchemaVersion() != 2 {
+			t.Fatalf("schema_version %d, the session tables must not change it", s.SchemaVersion())
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
