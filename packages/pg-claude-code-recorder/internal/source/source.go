@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -168,21 +169,17 @@ func extract(rv reflect.Value, prefix string, out *[]Field) {
 	if rv.Kind() != reflect.Struct {
 		return
 	}
-	rt := rv.Type()
-	for i := 0; i < rt.NumField(); i++ {
-		sf := rt.Field(i)
-		if !sf.IsExported() || jsonName(sf) == "" {
-			continue
-		}
-		fv := rv.Field(i)
-		kind := Kind(sf.Tag.Get("ingest"))
-		if kind == "" {
-			if _, ok := structOf(sf.Type); ok {
-				extract(fv, queryName(sf, prefix), out)
+	plan := planOf(rv.Type())
+	for i := range plan.fields {
+		fp := &plan.fields[i]
+		fv := rv.Field(fp.index)
+		if fp.kind == "" {
+			if fp.nested {
+				extract(fv, fp.name(prefix), out)
 			}
 			continue
 		}
-		if f, ok := scalar(queryName(sf, prefix), kind, fv); ok {
+		if f, ok := scalar(fp.name(prefix), fp.kind, fv); ok {
 			*out = append(*out, f)
 		}
 	}
@@ -325,39 +322,54 @@ func catalog(rt reflect.Type, prefix string, out map[string]Kind) {
 	}
 }
 
-// UnknownKeys decodes raw (one JSON object) and returns the dotted path of
+// UnknownKeys scans raw (one JSON object) and returns the dotted path of
 // every object key that the struct type t does not declare, once per
 // occurrence. Arrays of objects add "[]" to the path. Go's JSON decoder drops
 // unknown keys silently; this is how a new Claude Code field is noticed.
+//
+// Only the levels the struct type declares as objects are opened; the value
+// of a key typed as raw JSON or a scalar is never decoded.
 func UnknownKeys(raw []byte, t reflect.Type, prefix string) []string {
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
+	if !json.Valid(raw) {
 		return nil
 	}
 	var out []string
-	unknown(v, t, prefix, &out)
+	unknown(raw, t, prefix, &out)
 	sort.Strings(out)
 	return out
 }
 
-func unknown(v any, t reflect.Type, path string, out *[]string) {
+func unknown(raw json.RawMessage, t reflect.Type, path string, out *[]string) {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
-	switch tv := v.(type) {
-	case map[string]any:
+	switch {
+	case t.Kind() == reflect.Slice:
+		et := t.Elem()
+		for et.Kind() == reflect.Ptr {
+			et = et.Elem()
+		}
+		if _, ok := structOf(et); !ok && et.Kind() != reflect.Slice {
+			return
+		}
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil {
+			return
+		}
+		for _, e := range items {
+			unknown(e, t.Elem(), path+"[]", out)
+		}
+	default:
 		st, ok := structOf(t)
 		if !ok {
 			return
 		}
-		known := map[string]reflect.Type{}
-		for i := 0; i < st.NumField(); i++ {
-			sf := st.Field(i)
-			if n := jsonName(sf); n != "" && sf.IsExported() {
-				known[n] = sf.Type
-			}
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil {
+			return
 		}
-		for k, child := range tv {
+		known := planOf(st).known
+		for k, child := range obj {
 			p := k
 			if path != "" {
 				p = path + "." + k
@@ -369,14 +381,57 @@ func unknown(v any, t reflect.Type, path string, out *[]string) {
 			}
 			unknown(child, ft, p, out)
 		}
-	case []any:
-		if t.Kind() != reflect.Slice {
-			return
-		}
-		for _, e := range tv {
-			unknown(e, t.Elem(), path+"[]", out)
-		}
 	}
+}
+
+// fieldPlan is what Extract needs to know about one exported, JSON-named
+// struct field, worked out once per type instead of once per record.
+type fieldPlan struct {
+	index  int
+	kind   Kind   // the ingest tag; empty when the field is not indexed
+	nested bool   // an untagged field whose type is a struct (or pointer to one)
+	field  string // the field tag override, which ignores any prefix
+	snake  string // snake_case JSON key
+}
+
+func (fp *fieldPlan) name(prefix string) string {
+	if fp.field != "" {
+		return fp.field
+	}
+	if prefix != "" {
+		return prefix + "." + fp.snake
+	}
+	return fp.snake
+}
+
+// typePlan is the cached reflection result for one struct type.
+type typePlan struct {
+	fields []fieldPlan
+	known  map[string]reflect.Type // JSON key to field type, for UnknownKeys
+}
+
+var plans sync.Map // reflect.Type to *typePlan
+
+func planOf(rt reflect.Type) *typePlan {
+	if p, ok := plans.Load(rt); ok {
+		return p.(*typePlan)
+	}
+	p := &typePlan{known: map[string]reflect.Type{}}
+	for i := 0; i < rt.NumField(); i++ {
+		sf := rt.Field(i)
+		n := jsonName(sf)
+		if !sf.IsExported() || n == "" {
+			continue
+		}
+		fp := fieldPlan{index: i, kind: Kind(sf.Tag.Get("ingest")), field: sf.Tag.Get("field"), snake: Snake(n)}
+		if fp.kind == "" {
+			_, fp.nested = structOf(sf.Type)
+		}
+		p.fields = append(p.fields, fp)
+		p.known[n] = sf.Type
+	}
+	actual, _ := plans.LoadOrStore(rt, p)
+	return actual.(*typePlan)
 }
 
 // Itoa is strconv.Itoa for callers that name captures.

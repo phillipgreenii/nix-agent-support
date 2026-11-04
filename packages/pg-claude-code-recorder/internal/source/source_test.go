@@ -58,3 +58,26 @@ func TestCatalogListsTaggedFields(t *testing.T) {
 		t.Fatalf("catalog %v", c)
 	}
 }
+
+func TestUnknownKeysToleratesNullAndShapeMismatch(t *testing.T) {
+	typ := reflect.TypeOf(outer{})
+	for _, raw := range []string{
+		`{"usage":null,"items":null}`,
+		`{"usage":"text","items":{"a":1}}`,
+		`{"items":[1,"x",null,{"zzz":1}]}`,
+	} {
+		got := UnknownKeys([]byte(raw), typ, "")
+		if raw == `{"items":[1,"x",null,{"zzz":1}]}` {
+			if !reflect.DeepEqual(got, []string{"items[].zzz"}) {
+				t.Fatalf("%s: got %v", raw, got)
+			}
+			continue
+		}
+		if len(got) != 0 {
+			t.Fatalf("%s: got %v", raw, got)
+		}
+	}
+	if UnknownKeys([]byte(`{"extra":`), typ, "") != nil {
+		t.Fatal("invalid JSON must report nothing")
+	}
+}

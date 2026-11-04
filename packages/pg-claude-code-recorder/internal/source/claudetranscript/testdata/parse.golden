@@ -1,0 +1,567 @@
+[
+ {
+  "Type": "user",
+  "Item": -1,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:00.123Z",
+  "Fields": [
+   {
+    "Name": "type",
+    "Kind": "keyword",
+    "S": "user",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "uuid",
+    "Kind": "id",
+    "S": "u1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "session_id",
+    "Kind": "session",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "timestamp",
+    "Kind": "time",
+    "S": "",
+    "N": 1793700000123000000,
+    "F": 0
+   },
+   {
+    "Name": "cwd",
+    "Kind": "path",
+    "S": "/work/p",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "is_sidechain",
+    "Kind": "bool",
+    "S": "",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.role",
+    "Kind": "keyword",
+    "S": "user",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "git_branch",
+    "Kind": "keyword",
+    "S": "main",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "version",
+    "Kind": "keyword",
+    "S": "2.1.0",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "user_type",
+    "Kind": "keyword",
+    "S": "external",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "file_session",
+    "Kind": "id",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "project",
+    "Kind": "keyword",
+    "S": "-work-p",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ },
+ {
+  "Type": "text",
+  "Item": 0,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:00.123Z",
+  "Fields": [
+   {
+    "Name": "user_text",
+    "Kind": "text",
+    "S": "please list the files",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ }
+]
+[
+ {
+  "Type": "assistant",
+  "Item": -1,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:02Z",
+  "Fields": [
+   {
+    "Name": "type",
+    "Kind": "keyword",
+    "S": "assistant",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "uuid",
+    "Kind": "id",
+    "S": "a1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "parent_uuid",
+    "Kind": "id",
+    "S": "u1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "session_id",
+    "Kind": "session",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "timestamp",
+    "Kind": "time",
+    "S": "",
+    "N": 1793700002000000000,
+    "F": 0
+   },
+   {
+    "Name": "cwd",
+    "Kind": "path",
+    "S": "/work/p",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.id",
+    "Kind": "id",
+    "S": "msg_1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.type",
+    "Kind": "keyword",
+    "S": "message",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.role",
+    "Kind": "keyword",
+    "S": "assistant",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.model",
+    "Kind": "keyword",
+    "S": "claude-x",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.stop_reason",
+    "Kind": "keyword",
+    "S": "tool_use",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.input_tokens",
+    "Kind": "int",
+    "S": "",
+    "N": 10,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.output_tokens",
+    "Kind": "int",
+    "S": "",
+    "N": 42,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.cache_creation_input_tokens",
+    "Kind": "int",
+    "S": "",
+    "N": 5,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.cache_read_input_tokens",
+    "Kind": "int",
+    "S": "",
+    "N": 900,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.cache_creation.ephemeral_1h_input_tokens",
+    "Kind": "int",
+    "S": "",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.cache_creation.ephemeral_5m_input_tokens",
+    "Kind": "int",
+    "S": "",
+    "N": 5,
+    "F": 0
+   },
+   {
+    "Name": "message.usage.service_tier",
+    "Kind": "keyword",
+    "S": "standard",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "request_id",
+    "Kind": "id",
+    "S": "req_1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "file_session",
+    "Kind": "id",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "project",
+    "Kind": "keyword",
+    "S": "-work-p",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": [
+   "futureKey",
+   "message.usage.newUsageKey"
+  ]
+ },
+ {
+  "Type": "thinking",
+  "Item": 0,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:02Z",
+  "Fields": [
+   {
+    "Name": "thinking",
+    "Kind": "text",
+    "S": "plan",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ },
+ {
+  "Type": "text",
+  "Item": 1,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:02Z",
+  "Fields": [
+   {
+    "Name": "assistant_text",
+    "Kind": "text",
+    "S": "Listing now.",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ },
+ {
+  "Type": "tool_use",
+  "Item": 2,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:02Z",
+  "Fields": [
+   {
+    "Name": "tool_use_id",
+    "Kind": "id",
+    "S": "toolu_1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "name",
+    "Kind": "keyword",
+    "S": "Bash",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "tool_use.input",
+    "Kind": "opaque",
+    "S": "{\"command\":\"ls\"}",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": [
+   "message.content[].surprise"
+  ]
+ }
+]
+[
+ {
+  "Type": "user",
+  "Item": -1,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:03Z",
+  "Fields": [
+   {
+    "Name": "type",
+    "Kind": "keyword",
+    "S": "user",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "uuid",
+    "Kind": "id",
+    "S": "u2",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "parent_uuid",
+    "Kind": "id",
+    "S": "a1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "session_id",
+    "Kind": "session",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "timestamp",
+    "Kind": "time",
+    "S": "",
+    "N": 1793700003000000000,
+    "F": 0
+   },
+   {
+    "Name": "message.role",
+    "Kind": "keyword",
+    "S": "user",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "is_meta",
+    "Kind": "bool",
+    "S": "",
+    "N": 1,
+    "F": 0
+   },
+   {
+    "Name": "duration_ms",
+    "Kind": "float",
+    "S": "",
+    "N": 0,
+    "F": 12.5
+   },
+   {
+    "Name": "file_session",
+    "Kind": "id",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "project",
+    "Kind": "keyword",
+    "S": "-work-p",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ },
+ {
+  "Type": "tool_result",
+  "Item": 0,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:03Z",
+  "Fields": [
+   {
+    "Name": "tool_use_id",
+    "Kind": "id",
+    "S": "toolu_1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "is_error",
+    "Kind": "bool",
+    "S": "",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "tool_result.body",
+    "Kind": "opaque",
+    "S": "a.txt b.txt",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "body_length",
+    "Kind": "int",
+    "S": "",
+    "N": 11,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ }
+]
+[
+ {
+  "Type": "summary",
+  "Item": -1,
+  "Session": "s1",
+  "Time": "0001-01-01T00:00:00Z",
+  "Fields": [
+   {
+    "Name": "type",
+    "Kind": "keyword",
+    "S": "summary",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "leaf_uuid",
+    "Kind": "id",
+    "S": "a1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "summary",
+    "Kind": "text",
+    "S": "Listing files",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "file_session",
+    "Kind": "id",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "project",
+    "Kind": "keyword",
+    "S": "-work-p",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ }
+]
+[
+ {
+  "Type": "system",
+  "Item": -1,
+  "Session": "s1",
+  "Time": "2026-11-03T10:00:04Z",
+  "Fields": [
+   {
+    "Name": "type",
+    "Kind": "keyword",
+    "S": "system",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "uuid",
+    "Kind": "id",
+    "S": "s9",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "session_id",
+    "Kind": "session",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "timestamp",
+    "Kind": "time",
+    "S": "",
+    "N": 1793700004000000000,
+    "F": 0
+   },
+   {
+    "Name": "subtype",
+    "Kind": "keyword",
+    "S": "info",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "level",
+    "Kind": "keyword",
+    "S": "info",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "file_session",
+    "Kind": "id",
+    "S": "s1",
+    "N": 0,
+    "F": 0
+   },
+   {
+    "Name": "project",
+    "Kind": "keyword",
+    "S": "-work-p",
+    "N": 0,
+    "F": 0
+   }
+  ],
+  "Unknown": null
+ }
+]

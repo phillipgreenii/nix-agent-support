@@ -396,6 +396,14 @@ failure. The table-by-table reasoning, the macOS `fullfsync` answer and the benc
 `docs/investigations/2026-11-04-index-durability-and-group-commit.md`. The benchmark is
 `go test -tags soak -run '^$' -bench BenchmarkLiveCommit ./internal/parser/`.
 
+The transcript parse benchmark is `go test -run '^$' -bench Parse -benchmem
+./internal/source/claudetranscript/` (ns/op and allocs/op are per line, over the five fixture lines in
+`testdata/lines.jsonl`; `TestParseMatchesGolden` pins the records those lines yield). Field extraction
+reads a per-type plan cached on first use, and unknown-key detection opens only the levels the struct
+declares as objects instead of decoding the whole line into a generic tree. Measured on an Apple M3 Pro
+(arm64, `-count 5`): before, 43.8 to 51.2 us and 14366 B and 195 allocs per line; after, 26.8 to 33.1 us
+and 8500 B and 121 allocs per line.
+
 ## Signals, alerts and the dashboard (phase 7c)
 
 Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
