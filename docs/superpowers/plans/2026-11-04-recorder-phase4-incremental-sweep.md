@@ -159,6 +159,57 @@ sweep's duration and skipped ratio (target above 99% and a duration an order of 
 CPU in a 15-minute window containing a sweep versus one without, and a deliberately appended test file picked up by
 the next sweep within `sweep.interval`.
 
+## Review findings folded in (corrections to the sections above; where they disagree, this section wins)
+
+1. Cache write condition. The `seen` entry is written only when the ingest is fully caught up: result action
+   `unchanged` or `copied` with the committed copy offset equal to the `Stat` size used, and not after hitting the 64
+   round limit. A partial copy writes nothing. First-copy paths through `IngestBatch`/`flushStaged` write the entry
+   after the flush with the staged `Stat` values; the task lists each writer.
+2. The skip bypasses `afterIngest` (parser `Notify`, tracker `Observe`). Today the sweep re-notifies the parser
+   for every file, a retry net for parse failures, and re-observes registry files. Decision: a skipped file is still
+   passed to a cheap `afterSkip(path, fileID)` that calls `Notify` only when the file's parse offset is behind its
+   copy offset (the maintained state of phase 3, else one in-memory check) and `tr.Observe` for registry paths
+   (which are snapshot files and so are small and rarely skipped anyway). Tests: a file with a failed parse is
+   re-notified by a sweep that skips its copy; a registry file's `Observe` still fires.
+3. The cache is keyed by path as well as identity: `seenState` holds `{path, size, mtimeNS, dev, ino, birthNS}` keyed
+   by file id, with a second map `path -> fileID`, so a hard link (two paths, one identity) skips only the path that
+   was ingested and a new path to a known inode is ingested (as `resolveAppend`'s `set[path]` requires). No store
+   read per file.
+4. `SweepMissing` from the walk compares a `path -> identity` map built from the walk (not two independent sets): a
+   stored path is present only when the walk has that path with the stored identity; anything else gets the
+   `Lstat` fallback for that file, which keeps the `!sameInode` close-path behaviour. Per-batch locking re-reads
+   each batch's file rows (`FileByID`) under the lock, so a file ingested between batches is not tombstoned from a
+   stale snapshot of `AllFiles`. `notifyDeletedSnapshots`'s `AllFiles` per sweep becomes a query for only deleted
+   snapshot files (`WHERE mode='snapshot' AND state='deleted'`), added as T3b (S).
+5. Locks. The watcher holds `w.mu` for the whole sweep including every `Sink`; FSEvents handling waits for it. T3
+   also changes `watcher.sweep` to build the file list under the lock, release it, then call `OnSweep` and the
+   sinks unlocked (the checkpoint state and `lastSweep` stay under the lock), and tests that a `Wake` during a
+   blocked sink returns promptly. The "waits at most one batch" claim holds only with this change.
+6. Snapshot sources are exempt from the skip unless their size is above 64 KiB; small registry and session-mode
+   JSON files are re-read on every sweep as today (cheap, and same-size same-second rewrites are plausible for
+   them). The README states it.
+7. `verifiedOnce` is set only when a full sweep completes without error; a failed first sweep keeps skipping off.
+   `sweep.verify_every` runs on the watcher's injected clock (`Now`). `sweep.verify_every = "0"` disables skipping
+   entirely and is the documented rollback switch (validated: `0` or at least `sweep.interval`). Config validation
+   for `sweep.interval` (1 minute to 24 h) is a behaviour change: a smaller existing value is clamped to 1 minute
+   with a startup WARN for one release instead of failing startup.
+8. Birth time may be zero on Linux, so identity weakens to (Dev, Ino); the skip also requires a non-zero
+   `Birth` on darwin; on Linux it additionally requires `ctime` equality when the walk provides it, else skipping
+   is off for that file. Inode reuse with identical size and mtime is bounded by `verify_every`.
+9. Test seams. The source-side `Lstat` and `open` bypass `fsx` (which wraps only the copy side), so T3 and T4 add a
+   `srcFS` seam in the copier (`Lstat`, `Open`) with a counting implementation for tests. The watcher's ticker is
+   real; T5 uses `Rescan` for determinism plus a `ticker` seam in `watcher.Config` for the interval test. The query
+   counting driver is the phase 0 task's `internal/store/countdriver` package. The "fewer than 20 queries" bound is
+   replaced by a relative bound (the unchanged sweep issues under 1% of the verification sweep's queries) and an
+   absolute zero-per-file assertion on `Generation` and `CurrentPaths`.
+10. Negative controls added for T2 (drop the path-set check, so the rename test fails), T4 (drop the size gate),
+    and the invalid-JSON case. New tests: a hard link, a file under a symlinked directory (not walked, handled by
+    `handleLink`), a failed first sweep, a sweep during backfill (`Skip` stays false).
+11. Observability: add `sweep_duration` through phase 1's `loop_duration_seconds{loop="watcher_sweep"}` (T6 states a
+    dependency on phase 1's T2 and creates the minimal timing locally if phase 1 has not landed; one definition,
+    whichever lands first), `sweep_lstat_fallbacks_total`, `sweep_verify_forced_total`, and one log line per sweep
+    `sweep_done` with `walked`, `skipped`, `ingested`, `missing`, `duration_ms`, `verify` (bool).
+
 ## Risks and rollback
 
 - A stale cache entry hides a change: the skip rule needs size, mtime, identity and path to all match; `verify_every`

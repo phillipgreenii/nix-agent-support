@@ -142,6 +142,54 @@ unmeasured but profile-implied seconds; if phase 1 is applied, compare with its 
 p99, CPU cores (phase 0 figure 0.63), and a fresh `alloc_space` profile (`AllGenerations` below 2% of allocation).
 Misses are reported with the profile; a miss is not a reason to revert unless a gauge is wrong.
 
+## Review findings folded in (corrections to the sections above; where they disagree, this section wins)
+
+1. Scope and target. The phase removes `UpdateGauges` and the status loop's reads; `Settler.refresh` (11.7% of
+   `AllGenerations` allocation) is phase 2's T4. T6's target is therefore stated per caller: after phases 2 and 3
+   both land, `AllGenerations` is below 2% of allocation; after this phase alone, the `parser.UpdateGauges` share
+   (87.5% of the 9.3%) is gone. The status loop's `computeCoverageFrom` also reads `AllFiles`, `AllGenerations` and
+   `AllCurrentPaths` every 5 s (`ops.go`); T2 also moves those onto the maintained state: the status snapshot takes
+   per-file copy and parse offsets from the maintained `lagState` map and file rows from a cached, change-versioned
+   copy of `AllFiles` and `AllCurrentPaths` (rebuilt when the store's commit counter moved, checked with one cheap
+   `SELECT` of the counter), not by re-reading the tables every 5 s.
+2. Hook anchor. `copy_offset` changes inside the store's commit (`store.go`, the applying of a copy record) and parse
+   offsets change in FOUR places (`parser.go` twice, `tail.go`, and the store's parse-offset setter used by
+   `ReparseGen`), by `UPDATE` not `Commit(`. So the hooks live in the STORE, not in `afterIngest`: the store gets
+   `OnOffsets(file, gen, copyOffset, parseOffset, at)` called inside the same locked apply that changes either
+   offset (the store already has a hook list that runs under the write lock and MUST NOT block; reuse that
+   mechanism, which the store comments describe at the commit-hook doc). This covers copier commits, startup
+   recovery, settler paths, `ReparseGen` and tail mode with one subscription, and removes `Result.CopyOffset`. The
+   task enumerates every offset-changing statement with `rg -n 'copy_offset|parse_offset' internal` and tests each.
+3. Exact semantics of `UpdateGauges` (the oracle) must be preserved, not what the draft assumed: old generations
+   STAY in the sums and in max lag (it iterates `AllGenerations`); a deleted file is excluded only from
+   `unknown_kinds`, not from lag; the lag-seconds origin is the `seen_ns` of the commit that CONTAINS `parse_offset`
+   (`seenAt`), so after a partial parse it moves to the next commit's time. The maintained state therefore keeps a
+   per-generation ordered list of `(to_off, seen)` spans (bounded: one entry per unparsed commit, dropped as parse
+   advances) rather than one `firstUnparsedSeen`. The oldest-unparsed value is the minimum over generations of the
+   front span, kept in a lazily-pruned heap with a stated rule: an entry is valid only if its generation's front
+   span still equals it.
+4. T1 equivalence cases added: partial parses; `ReparseGen`; tail-mode parse; startup recovery; a failed offset
+   update (the guard `parse_offset <= copy_offset` rejects it; state must not change); a generation restart with the
+   old generation still counted; a deleted file with unparsed bytes. Negative controls become "skip one hook site"
+   (the equivalence test must go red), one per site.
+5. `lag_drift`: compare with a tolerance of one second on lag seconds (copier `now()` versus the maintained clock)
+   and exactly on bytes; counter `lag_rebuild_total{result}` with `result` in `match drift`; the first reconcile
+   runs 5 minutes after start, then hourly, so a missed hook is bounded to 5 minutes at first.
+6. `fsx` has no `Lstat` and records only mutating copy-side calls. T2 introduces a `statFunc` seam on the daemon
+   (default `os.Lstat`, injected in tests) and counts through it; the copier's source-side calls are untouched.
+7. `files.last_seen` does not exist. The `status.fresh` window is replaced by an in-memory `touched` map fed by the
+   same store hook (file id to last offset change time), config key `status.fresh` (default 2 minutes). Copy lag
+   seconds for a non-stat file is computed from the maintained commit time (the `seen` of the front span), not from
+   mtime. Snapshot files keep `copy_offset = size` as today (`last_size`).
+8. UX: the `status` summary carries an aggregate `stat_exceptions` and `last_full_stat_age_s` (the age of the last
+   `coverage` run or sweep), so the disclosure reaches `status` users, who never see per-file entries; the README
+   says the figures are as last recorded.
+9. T3 depends on T4 (`rebuildLag` also computes `unknown_kinds`); the order is T1, T4, T3. T4's file-creation hook is
+   the store's file-record apply (a `TFile` record), not a copier function; a deleted file leaves `unknown_kinds` on
+   the state-change apply. The counting test isolates `rebuildLag` (it runs once at start, outside the measured call).
+10. T6 states that `status_refresh` and `refresh_gauges` timings are phase 1 dependencies (a SHOULD becomes a
+    precondition of the gated bead: it is gated on phase 1's T2 apply as well).
+
 ## Risks and rollback
 
 - A hook missed in the copier or parser makes a gauge drift. Mitigation: `rebuildLag` runs at start and every
