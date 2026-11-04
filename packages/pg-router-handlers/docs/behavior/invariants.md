@@ -480,9 +480,24 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   inside it, as its working directory, and an unreadable process listing keeps it. Reclaiming MUST
   first move the directory aside into a trash directory under the worktree directory and only then
   delete it, so a delete killed part-way leaves a trash entry and never a half-deleted tree at the
-  bead's path; the scan purges trash entries older than the grace window. The interrupted removal
-  itself is not changed: it is healed by this reclaim on the next dispatch or scan. Each reclaim
+  bead's path; the scan purges trash entries older than the grace window. Each reclaim
   is logged and recorded as a reclaimed-worktree event marked as a leftover.
+
+  Every worktree removal this handler runs (the dispatch cleanup, the closed-bead teardown, the
+  orphan reconcile and this scan) MUST run under its own deadline, the removal timeout
+  (`worktreeRemoveTimeout`, default ten minutes, zero uses the default, a negative value is
+  rejected at load). That deadline MUST be independent of, and longer than, the deadline of the
+  pass around the removal (the scan's own deadline, default one minute, and a purge-close's two
+  minutes): a surrounding deadline MUST NOT kill a removal that still has time left under its own,
+  while the surrounding pass being cancelled (the handler told to stop) still stops it. A removal
+  that is nevertheless killed at its deadline MUST NOT strand the bead's path: git drops a
+  worktree's registration only after it has deleted the files, so a kill can leave the
+  registration naming a path whose `.git` entry is already gone, which is neither a linked worktree
+  nor an unregistered leftover. After such a kill the handler MUST prune the stale registration
+  (from the repository root, on a fresh short deadline), so the half-deleted directory becomes the
+  unregistered leftover above and is reclaimed on the next dispatch of the bead or the next scan. A
+  worktree that still has its `.git` entry after a kill stays registered and is retried by the
+  guarded removals.
 
   The scan MUST stay cheap when worktrees are kept, because the handler is one short-lived process
   per request and would otherwise re-run `git status` and a commit count on every kept worktree

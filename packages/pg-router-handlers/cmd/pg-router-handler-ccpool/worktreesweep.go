@@ -430,7 +430,7 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 		return false, didGit, false
 	}
 
-	if err := wm.RemoveWorktree(ctx, c.path, interrupted); err != nil {
+	if err := worktree.RemoveWithin(ctx, wm, c.path, interrupted, deps.Cfg.WorktreeRemoveTimeout, worktree.PruneVia(env.open, deps.Cfg.RepoRoot)); err != nil {
 		slog.Warn("worktree sweep: removal refused; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
 		return false, didGit, false
 	}

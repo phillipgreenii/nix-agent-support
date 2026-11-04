@@ -427,7 +427,7 @@ func removeOrphanWorktree(ctx context.Context, role roles.Role, deps executor.De
 		slog.Warn("orphan reconcile: worktree kept -- open failed", "session", s.ExternalID, "worktree", s.CWD, "err", err)
 		return
 	}
-	if err := wm.RemoveWorktree(ctx, s.CWD, false); err != nil {
+	if err := worktree.RemoveWithin(ctx, wm, s.CWD, false, deps.Cfg.WorktreeRemoveTimeout, worktree.PruneVia(env.open, deps.Cfg.RepoRoot)); err != nil {
 		slog.Warn("orphan reconcile: worktree kept -- removal refused (uncommitted changes, or not a linked worktree)",
 			"session", s.ExternalID, "worktree", s.CWD, "err", err)
 		return

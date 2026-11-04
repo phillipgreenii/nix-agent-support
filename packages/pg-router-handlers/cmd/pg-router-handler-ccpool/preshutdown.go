@@ -50,6 +50,7 @@ func runPreShutdown(args []string) int {
 		if err != nil {
 			return nil, nil, "", "", "", err
 		}
+		useRemoveTimeout(cfg)
 		return ccpool.NewCLIRunner(cfg), beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, nil
 	}, worktree.GitOpener)
 }
@@ -429,7 +430,7 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 	} else if err != nil {
 		slog.Warn("teardown: worktree remove failed (cannot open the cwd's git repository)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
-	} else if err := wm.RemoveWorktree(ctx, s.CWD, true); err != nil {
+	} else if err := worktree.RemoveWithin(ctx, wm, s.CWD, true, teardownRemoveTimeout, worktree.PruneVia(open, repoRoot)); err != nil {
 		slog.Warn("teardown: worktree remove failed (cwd may not be a linked worktree)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 	} else {

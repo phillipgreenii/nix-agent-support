@@ -303,6 +303,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		fmt.Fprintln(os.Stderr, "janitor:", err)
 		return conformance.ExitUsage
 	}
+	useRemoveTimeout(cfg)
 	jroles, err := loadJanitorRoles(opts, mkDeps)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "janitor:", err)

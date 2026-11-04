@@ -144,6 +144,7 @@ func (p poolReconciler) ReconcileClosedBeads(ctx context.Context) (executor.Reco
 		return executor.ReconcileOutcome{Skipped: true}, nil
 	}
 	t0 := time.Now()
+	useRemoveTimeout(p.cfg)
 	closed := reconcileClosedBeadSessions(ctx, p.deps.CC, worktree.GitOpener, p.deps.BD, p.cfg.SessionPrefix, p.cfg.RepoRoot, p.cfg.WorktreeDir, newTranscriptQuietCheck(p.cfg.WorktreeQuietWindow, nil, nil))
 	recordSweepPass("dispatch", p.role.Name, "closed_bead_reconcile", closed, time.Since(t0), p.deps)
 	if closed > 0 {

@@ -98,6 +98,14 @@ type Config struct {
 	// SweepDeadline bounds the whole worktree-keyed sweep (INV-CCH-19); on expiry
 	// the pass returns what it had done. <= 0 means no deadline. Default 60s.
 	SweepDeadline time.Duration
+	// WorktreeRemoveTimeout is the deadline of one `git worktree remove` in every
+	// removal path (the dispatch cleanup, the closed-bead teardown, the orphan
+	// reconcile, the worktree sweep). It is independent of, and much longer than,
+	// the deadlines of the passes around it (SweepDeadline, a purge-close): a very
+	// large checkout needs minutes to delete, and a removal killed half-way is the
+	// expensive failure. The parent's cancellation still stops it; its deadline does
+	// not. 0 means the default; negative is rejected. Default 10 minutes.
+	WorktreeRemoveTimeout time.Duration
 	// MinFreeBytes is the free-space floor, in bytes, on the volume holding
 	// WorktreeDir that a dispatch needs before it may CREATE a per-bead
 	// worktree (INV-CCH-8). Below it the dispatch declines with reason low-disk
@@ -330,6 +338,9 @@ func (c Config) Validate() error {
 	if err := c.ValidateNeedsInputStall(c.NeedsInputStall); err != nil {
 		return fmt.Errorf("needsInputStall: %w", err)
 	}
+	if c.WorktreeRemoveTimeout < 0 {
+		return fmt.Errorf("worktreeRemoveTimeout %v: must be >= 0 (0 uses the default)", c.WorktreeRemoveTimeout)
+	}
 	if c.MinFreeBytes < 0 {
 		return fmt.Errorf("minFreeBytes %d: must be >= 0 (0 disables the check)", c.MinFreeBytes)
 	}
@@ -464,6 +475,7 @@ func Default() Config {
 		WorktreeQuietMax:            10 * time.Minute,
 		WorktreeKeepRecheck:         5 * time.Minute,
 		SweepDeadline:               60 * time.Second,
+		WorktreeRemoveTimeout:       10 * time.Minute,
 		MinFreeBytes:                DefaultMinFreeBytes,
 		Effort:                      "medium",
 		Model:                       "claude-sonnet-5-5",

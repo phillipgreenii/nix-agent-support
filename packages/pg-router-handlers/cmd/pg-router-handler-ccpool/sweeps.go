@@ -44,6 +44,7 @@ func runSweeps(ctx context.Context, who string, role roles.Role, cfg config.Conf
 	// Opportunistic reconciliation (pg2-hrppg): reuses deps.CC/deps.BD (the role's
 	// own pool runner) rather than constructing a second pair.
 	t0 := time.Now()
+	useRemoveTimeout(cfg)
 	closed := reconcileClosedBeadSessions(ctx, deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
 	timed("closed_bead_reconcile", closed, t0)
 	if closed > 0 {

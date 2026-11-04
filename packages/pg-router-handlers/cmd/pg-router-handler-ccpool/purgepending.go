@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 )
 
@@ -133,7 +134,7 @@ func removeWorktreeForPurge(ctx context.Context, open worktree.Opener, repoRoot,
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 		return false
 	}
-	rmErr := root.RemoveWorktree(ctx, s.CWD, true)
+	rmErr := worktree.RemoveWithin(ctx, root, s.CWD, true, teardownRemoveTimeout, worktree.PruneVia(open, repoRoot))
 	if rmErr == nil {
 		slog.Info("teardown: worktree removed", "session", s.ExternalID, "cwd", s.CWD)
 		deleteAnchorBranch(ctx, open, repoRoot, s.ExternalID, s.Meta[ccpool.MetaKeyBead])
@@ -288,3 +289,13 @@ func worktreeHeldByStranger(ctx context.Context, s ccpool.Session) bool {
 	}
 	return keep
 }
+
+// teardownRemoveTimeout is the deadline of one worktree removal in the
+// closed-bead teardown (preshutdown and the purge_pending retry). The teardown
+// entry points have no config in hand, so the process-wide value is set once,
+// where each loads its launch config (useRemoveTimeout). Zero means
+// worktree.DefaultRemoveTimeout.
+var teardownRemoveTimeout time.Duration
+
+// useRemoveTimeout adopts cfg's worktree removal deadline for the teardown.
+func useRemoveTimeout(cfg config.Config) { teardownRemoveTimeout = cfg.WorktreeRemoveTimeout }

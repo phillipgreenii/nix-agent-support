@@ -429,3 +429,21 @@ func TestDefault_modelAndEffort(t *testing.T) {
 		t.Errorf("Default().Effort = %q, want medium", d.Effort)
 	}
 }
+
+func TestWorktreeRemoveTimeout_defaultOutlastsTheSurroundingPassesAndRejectsNegative(t *testing.T) {
+	c := Default()
+	if c.WorktreeRemoveTimeout <= c.SweepDeadline {
+		t.Errorf("WorktreeRemoveTimeout %v must exceed SweepDeadline %v", c.WorktreeRemoveTimeout, c.SweepDeadline)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("default config: %v", err)
+	}
+	c.WorktreeRemoveTimeout = 0
+	if err := c.Validate(); err != nil {
+		t.Errorf("zero means the default and must be accepted: %v", err)
+	}
+	c.WorktreeRemoveTimeout = -time.Second
+	if err := c.Validate(); err == nil {
+		t.Error("a negative removal timeout must be rejected")
+	}
+}

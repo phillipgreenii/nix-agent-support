@@ -872,7 +872,7 @@ func (r *ccpoolRun) removeWorktree(ctx context.Context, name, beadID, wt string)
 			"session", name, "worktree", wt, "err", err)
 		return
 	}
-	if err := wm.RemoveWorktree(ctx, wt, false); err != nil {
+	if err := worktree.RemoveWithin(ctx, wm, wt, false, r.deps.Cfg.WorktreeRemoveTimeout, worktree.PruneVia(r.deps.gitOpener(), r.deps.Cfg.RepoRoot)); err != nil {
 		slog.Warn("dispatch: worktree cleanup: remove failed (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)
 		return

@@ -1241,6 +1241,7 @@ let
       # worktree sweep bounds (bead pg2-fx5x0l.2, INV-CCH-19): nanoseconds, as above.
       worktreeKeepRecheck = cfg.launchConfig.worktreeKeepRecheckSeconds * 1000000000;
       sweepDeadline = cfg.launchConfig.sweepDeadlineSeconds * 1000000000;
+      worktreeRemoveTimeout = cfg.launchConfig.worktreeRemoveTimeoutSeconds * 1000000000;
       declineReconcileMinInterval = cfg.launchConfig.declineReconcileMinIntervalSeconds * 1000000000;
       budgetTokens = cfg.launchConfig.budget.tokens;
       budgetCost = cfg.launchConfig.budget.cost;
@@ -2309,6 +2310,16 @@ in
           Deadline (SECONDS) for the whole worktree-keyed sweep (INV-CCH-19); on
           expiry the pass returns what it had done. 0 means no deadline.
           Rendered as nanoseconds. Default 60 matches `internal/config.Default()`.
+        '';
+      };
+      worktreeRemoveTimeoutSeconds = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 600;
+        description = ''
+          Deadline (SECONDS) of one `git worktree remove` in every removal path
+          (INV-CCH-19): independent of, and longer than, the sweep deadline, so a
+          very large checkout is not killed half-way. 0 uses the handler default.
+          Rendered as nanoseconds. Default 600 matches `internal/config.Default()`.
         '';
       };
       originProbe = {
