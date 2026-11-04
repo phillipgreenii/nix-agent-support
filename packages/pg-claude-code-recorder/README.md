@@ -161,16 +161,15 @@ Sources are compiled in (`internal/source`): `claude-transcript` (session and su
 and `claude-history`. The parser (`internal/parser`) reads each copy from its parse offset to the
 last newline within the copy offset and commits records, typed fields, text indexes and the new
 parse offset in one transaction; a re-parse replaces a file generation atomically behind a
-`parse_resets` marker. `text` fields are search-indexed in the FTS5 word index, and so are `opaque` fields in an `index.db` built
-without the trigram table (the layout of the next schema; the running `schema_version` 2 still keeps a trigram
-index for them and its word search does not reach tool bodies). Exact-punctuation and partial-token lookups over
+`parse_resets` marker. `text` fields are search-indexed in the FTS5 word index, and so are `opaque` fields (the `schema_version` 3
+layout has no trigram table; a `schema_version` 2 file kept one and its word search did not reach tool bodies). Exact-punctuation and partial-token lookups over
 opaque fields use `mode=substring`, which scans the copies (see "Substring search" below); no file contents are
 stored in `index.db`.
 
-In an `index.db` of the next schema layout (built with extension tables), a field a source declares with `record:`
-or `ext:` storage (`cwd`, `git_branch`, `version`, `entrypoint`, `user_type`, and the `usage.*` counters) is
-filtered, grouped, ordered and selected through its typed column, with the same field names and answers as the
-running layout, which keeps reading `fields`. A raw value that did not convert to the column's type is kept in a
+In a `schema_version` 3 `index.db`, a field a source declares with `record:` or `ext:` storage (`cwd`,
+`git_branch`, `version`, `entrypoint`, `user_type`, and the `usage.*` counters) is filtered, grouped, ordered
+and selected through its typed column, with the same field names and answers as the version 2 layout, which
+read `fields`. A raw value that did not convert to the column's type is kept in a
 `fields` row; it counts as present for `exists`, select, group and order, and never matches a typed comparison.
 
 Typed scalars live in `fields(rec_id, name_id, s, n, f)`, `WITHOUT ROWID`, keyed `(rec_id, name_id)`;
@@ -180,8 +179,17 @@ row per field name; when a record yields the same name twice, the LAST value win
 whole row (`s`, `n` and `f` together, never a mix of two values); `fields_name_n` indexes
 `(name_id, n)` for numeric filters. A field whose value another table already holds gets no row: `type` and
 `session_id` are the record's own columns, and `project` and `file_session` (the path captures) are read back from
-the file's path under the Claude directory; an older database that still stores them answers the same. This is
-`schema_version` 2.
+the file's path under the Claude directory; an older database that still stores them answers the same.
+
+**Schema version 3** (the design is `docs/schema-v3-design.md`): `records` carries `session_ref`, an integer
+into `sessions` (`session_id`, `project`, first time, first version, entrypoint and user type), instead of the
+36-character session text and its two indexes; `session_stats` and `session_files` hold the per-session last
+time, record count and files; `cwd`, `git_branch`, `version`, `entrypoint` and `user_type` are interned ids
+(`lk_*` tables) on the record; the usage counters of an assistant line are one `ext_assistant_usage` row;
+there is no trigram index; `records_cwd` and `records_branch` are partial indexes on the lookup ids. The
+wire protocol, field names and answers are unchanged (a parity test rebuilds one corpus into both layouts and
+compares them). Interning `source` and `type` was not taken. The daemon always builds this layout, and a
+`schema_version` 2 `index.db` is refused by a version 3 binary until it is rebuilt (see "Rebuild").
 
 ```sh
 echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}' | pg-claude-code-recorder query
@@ -197,7 +205,7 @@ with the prose fields. A query is a word or phrase match over case-insensitive t
 a double-quoted string is a phrase. Punctuation splits tokens, so `--no-verify` matches the phrase `no verify`
 (and `git commit --no-verify` and `no-verify` alike) but not the exact characters, and a partial token such as
 `verif` matches nothing. Use `mode=substring` for exact punctuation and partial tokens. With the trigram table
-present (`schema_version` 2) a word search over an opaque field returns no hits.
+present (a `schema_version` 2 file) a word search over an opaque field returns no hits.
 
 ### Substring search
 
@@ -285,7 +293,17 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   refused the same way, untouched and not migrated in place: stop the daemon and run `rebuild` (or
   `serve --rebuild`), which re-derives records, fields and text indexes from the journal and the
   copies into a new file and keeps the old one as `index.db.pre-rebuild`; nothing is deleted before
-  the operator has checked the new file. The `rebuild` command (not `serve --rebuild`) runs in bulk
+  the operator has checked the new file. **Deploying `schema_version` 3**: the first start of a version 3
+  binary over a version 2 `index.db` fails with that message and the daemon stays down until the operator
+  stops it and runs `pg-claude-code-recorder rebuild` (bulk mode, the daemon stopped). Before it moves
+  anything the rebuild checks the free space of the state directory: it needs 85 percent of the size of
+  `index.db` plus its WAL (the estimated new file) plus 1 GiB for the bulk WAL, and the old file stays on
+  disk beside the new one as `index.db.pre-rebuild`. Below that it refuses with an error naming the free
+  and the needed bytes, logs `rebuild_refused_low_space`, counts `rebuild_refused_total`, and leaves the
+  old `index.db` where it was; free the space and run it again. The rebuild takes hours (the parse ran at
+  2 to 3 MB/s on the measured fixture): leave the machine running and plan for the daemon to be down for
+  that window; the `pre-rebuild` file can be deleted once the new index has been checked, and rolling back is
+  restoring it with the version 2 binary. The `rebuild` command (not `serve --rebuild`) runs in bulk
   mode: one write transaction spans many files and commits at 100,000 records or 64 MiB of parsed
   copy bytes, with `synchronous=OFF`, a 256 MiB page cache, a 1 GiB WAL autocheckpoint and FTS5
   automerge off; at the end it restores `synchronous=FULL` and the default automerge, merges the FTS5
@@ -295,8 +313,11 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   the operator to run `rebuild` again. The `rebuild` command logs a `rebuild_progress` line every 30
   seconds (`--progress-interval` changes it) with `records_parsed`, `records_per_sec` and
   `commits_per_sec` over the interval, `files_done` of `files_total`, and the byte sizes of `index.db`
-  and its WAL, then a `rebuild_summary` with the totals and `wall_sec`; these are log fields only (the
-  command opens no metrics endpoint). `feed_waiters` is the gauge of waiters in progress.
+  and its WAL, then a `rebuild_summary` with the totals and `wall_sec`, and after the finish a
+  `rebuild_profile` line with the wall time, `parse_sec`, `records_per_sec`, the time spent committing
+  batches, building the deferred indexes, optimizing FTS5 and checkpointing, and the byte sizes of the new
+  and the `pre-rebuild` file; the same numbers are stored as JSON in `meta.last_rebuild_profile` of the new
+  `index.db`. These are log fields and a meta row only (the command opens no metrics endpoint). `feed_waiters` is the gauge of waiters in progress.
 
 ```sh
 pg-claude-code-recorder snapshot --all --where '{"field":"type","eq":"assistant"}'

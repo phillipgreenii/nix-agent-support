@@ -33,23 +33,28 @@ const (
 
 // Metric names exported by the serve composition and the listener.
 const (
-	MHeartbeat       = "last_sweep_timestamp_seconds"
-	MStateFreeBytes  = "state_free_bytes"
-	MStateUsedBytes  = "state_used_bytes"
-	MRequestsTotal   = "requests_total"
-	MQueryDuration   = "query_duration_seconds"
-	MQueryTimeouts   = "query_timeouts_total"
-	MFilterFields    = "query_filter_fields_total"
-	MFeedDuration    = "feed_latency_seconds"
-	MWaitDuration    = "wait_duration_seconds"
-	MCopiedFiles     = "backfill_files_copied"
-	MBackfillFiles   = "backfill_files_total"
-	MCaughtUp        = "caught_up"
-	MFeedWaiters     = "feed_waiters"
-	MIndexRebuilds   = "index_rebuilds_total"
-	EvIndexRebuilt   = "index_rebuilt"
-	ClientOther      = "other"
-	UnknownClientLbl = "client"
+	MHeartbeat      = "last_sweep_timestamp_seconds"
+	MStateFreeBytes = "state_free_bytes"
+	MStateUsedBytes = "state_used_bytes"
+	MRequestsTotal  = "requests_total"
+	MQueryDuration  = "query_duration_seconds"
+	MQueryTimeouts  = "query_timeouts_total"
+	MFilterFields   = "query_filter_fields_total"
+	MFeedDuration   = "feed_latency_seconds"
+	MWaitDuration   = "wait_duration_seconds"
+	MCopiedFiles    = "backfill_files_copied"
+	MBackfillFiles  = "backfill_files_total"
+	MCaughtUp       = "caught_up"
+	MFeedWaiters    = "feed_waiters"
+	MIndexRebuilds  = "index_rebuilds_total"
+	EvIndexRebuilt  = "index_rebuilt"
+	// EvRebuildRefused and MRebuildRefused: a rebuild stopped by the free-space
+	// preflight before it moved anything. EvRebuildPreflight is a passed check.
+	EvRebuildRefused   = "rebuild_refused_low_space"
+	EvRebuildPreflight = "rebuild_preflight"
+	MRebuildRefused    = "rebuild_refused_total"
+	ClientOther        = "other"
+	UnknownClientLbl   = "client"
 )
 
 // Metric and event names of the Process and Conversation facts.
@@ -255,6 +260,7 @@ func (o *Obs) RegisterStandard() {
 		o.Reg.Add(MDroppedBytes, map[string]string{"reason": r}, 0)
 	}
 	o.Reg.Add(MIndexRebuilds, nil, 0)
+	o.Reg.Add(MRebuildRefused, nil, 0)
 	o.Reg.Add(MQueryTimeouts, map[string]string{"op": "unknown"}, 0)
 	o.Reg.Add(MStaleDiscovery, nil, 0)
 	o.Reg.Add(MStaleFifosRemoved, nil, 0)

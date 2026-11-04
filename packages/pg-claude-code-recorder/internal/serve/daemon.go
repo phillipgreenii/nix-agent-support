@@ -131,7 +131,7 @@ func Open(opt Options) (*Daemon, error) {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
 	endPhase()
-	st, err := store.Open(cfg.StateDir, store.Options{Phase: su.storeHook, Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB)})
+	st, err := store.Open(cfg.StateDir, store.Options{V3Layout: true, Phase: su.storeHook, Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB)})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}

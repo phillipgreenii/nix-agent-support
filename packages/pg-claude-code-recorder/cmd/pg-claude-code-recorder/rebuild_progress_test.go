@@ -52,7 +52,7 @@ func TestRebuildLogsProgressAndASummaryWithConsistentNumbers(t *testing.T) {
 	if code := a.run([]string{"rebuild", "--progress-interval", "1ms"}); code != wire.ExitOK {
 		t.Fatalf("exit %d: %s", code, errw.String())
 	}
-	var sum map[string]any
+	var sum, prof map[string]any
 	prog := 0
 	for _, m := range jsonLogLines(t, errw.String()) {
 		switch m["event"] {
@@ -69,7 +69,20 @@ func TestRebuildLogsProgressAndASummaryWithConsistentNumbers(t *testing.T) {
 			}
 		case "rebuild_summary":
 			sum = m
+		case "rebuild_profile":
+			prof = m
 		}
+	}
+	if prof == nil {
+		t.Fatalf("no rebuild_profile line in %s", errw.String())
+	}
+	for _, f := range []string{"wall_sec", "parse_sec", "finish_sec", "records", "records_per_sec", "batch_commits", "batch_commit_sec", "index_build_sec", "fts_optimize_sec", "checkpoint_sec", "index_db_bytes"} {
+		if _, ok := prof[f]; !ok {
+			t.Fatalf("profile lacks %s: %v", f, prof)
+		}
+	}
+	if prof["wall_sec"].(float64) <= 0 || prof["records_per_sec"].(float64) <= 0 || prof["records"].(float64) <= 0 {
+		t.Fatalf("profile %v", prof)
 	}
 	if prog == 0 {
 		t.Fatalf("no progress line in %s", errw.String())
@@ -84,6 +97,10 @@ func TestRebuildLogsProgressAndASummaryWithConsistentNumbers(t *testing.T) {
 		t.Fatalf("summary %v", sum)
 	}
 	k.Reopen()
+	var stored string
+	if err := k.Store.Read().QueryRow(`SELECT value FROM meta WHERE key='last_rebuild_profile'`).Scan(&stored); err != nil || !strings.Contains(stored, `"records_per_sec"`) {
+		t.Fatalf("the stored profile: %q, %v", stored, err)
+	}
 	if want := k.Count(`SELECT COUNT(*) FROM records`); want == 0 || sum["records_parsed"].(float64) != float64(want) {
 		t.Fatalf("summary records %v, index has %d", sum["records_parsed"], want)
 	}

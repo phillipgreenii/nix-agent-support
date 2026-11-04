@@ -8,7 +8,16 @@ package store
 // refuses it with a SchemaOlderError and the derived part is rebuilt from the
 // journal and the copies (the rebuild command or serve --rebuild), which sets
 // the old file aside as index.db.pre-rebuild and deletes nothing.
-const SchemaVersion = 2
+//
+// Version 3 is the layout described in docs/schema-v3-design.md: records carry
+// session_ref (an integer into sessions) instead of the session text, the
+// per-session constants are interned in the lk_ tables, the usage counters of an
+// assistant line live in ext_assistant_usage, and there is no trigram index
+// (opaque fields are indexed in the word index). A version 2 database is not
+// migrated: Open refuses it with a SchemaOlderError and the rebuild builds the
+// version 3 layout (Options.V3Layout, which the daemon always sets), after the
+// free-space preflight (see rebuildpreflight.go).
+const SchemaVersion = 3
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);

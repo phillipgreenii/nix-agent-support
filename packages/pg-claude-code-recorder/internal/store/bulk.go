@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 )
@@ -144,7 +145,7 @@ func (s *Store) buildIndexesLocked() error {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	for _, ix := range derivedIndexes {
+	for _, ix := range layoutIndexes(s.sessText) {
 		if _, err := conn.ExecContext(ctx, ix.sql); err != nil {
 			if ix.name == "records_ident" {
 				if dup := duplicateRecords(ctx, conn); dup != nil {
@@ -202,10 +203,13 @@ func (s *Store) FinishRebuild() error {
 	ctx := context.Background()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	finishStart := time.Now()
 	if s.deferIdx {
+		t0 := time.Now()
 		if err := s.buildIndexesLocked(); err != nil {
 			return err
 		}
+		s.prof.IndexBuildSec += time.Since(t0).Seconds()
 	}
 	conn, err := s.wdb.Conn(ctx)
 	if err != nil {
@@ -213,6 +217,7 @@ func (s *Store) FinishRebuild() error {
 	}
 	defer func() { _ = conn.Close() }()
 	exec := func(q string) error { _, err := conn.ExecContext(ctx, q); return err }
+	ftsStart := time.Now()
 	for _, q := range s.withoutTrigram([]string{
 		`PRAGMA synchronous=FULL`,
 		`PRAGMA wal_autocheckpoint=1000`,
@@ -227,6 +232,8 @@ func (s *Store) FinishRebuild() error {
 	}
 	// The data is durable (a TRUNCATE checkpoint syncs the database file)
 	// before the marker is cleared; the marker clear is itself a FULL commit.
+	s.prof.FTSOptimize += time.Since(ftsStart).Seconds()
+	ckptStart := time.Now()
 	var busy, log, ckpt int
 	if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &log, &ckpt); err != nil {
 		return err
@@ -244,6 +251,8 @@ func (s *Store) FinishRebuild() error {
 	if err := exec(`PRAGMA synchronous=NORMAL`); err != nil {
 		return err
 	}
+	s.prof.CheckpointSec += time.Since(ckptStart).Seconds()
+	s.prof.FinishSec += time.Since(finishStart).Seconds()
 	s.bulk = false
 	return nil
 }
@@ -322,9 +331,11 @@ func (s *Store) commitBatchLocked() error {
 		}
 	}()
 	faults.At("rebuild.before-batch-commit")
+	t0 := time.Now()
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.prof.CommitSec += time.Since(t0).Seconds()
 	committed = true
 	s.bCommits++
 	for _, h := range s.wrHooks {

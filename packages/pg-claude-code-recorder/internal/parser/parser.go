@@ -854,9 +854,16 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref,
-			lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType])
+		var res sql.Result
+		if p.cfg.Store.HasSessionText() {
+			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref,
+				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType])
+		} else {
+			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), tns, ref,
+				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType])
+		}
 		if err != nil {
 			return err
 		}

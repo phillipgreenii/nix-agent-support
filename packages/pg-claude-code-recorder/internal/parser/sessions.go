@@ -134,11 +134,19 @@ ON CONFLICT(session_ref) DO UPDATE SET last_time_ns=MAX(last_time_ns,excluded.la
 // records, after rows were deleted. sessions and session_files rows are shared
 // and stay.
 func (p *Parser) recomputeSessionStats(tx *pstx, ids []string) error {
-	for _, id := range ids {
-		if _, err := tx.Exec(`UPDATE session_stats SET
+	q := `UPDATE session_stats SET
   last_time_ns=COALESCE((SELECT MAX(time_ns) FROM records WHERE session=?1),0),
   record_count=(SELECT COUNT(*) FROM records WHERE session=?1)
-WHERE session_ref=(SELECT session_ref FROM sessions WHERE session_id=?1)`, id); err != nil {
+WHERE session_ref=(SELECT session_ref FROM sessions WHERE session_id=?1)`
+	if !p.cfg.Store.HasSessionText() {
+		// The version 3 layout has no session text: the id names its sessions row.
+		q = `UPDATE session_stats SET
+  last_time_ns=COALESCE((SELECT MAX(time_ns) FROM records WHERE session_ref=session_stats.session_ref),0),
+  record_count=(SELECT COUNT(*) FROM records WHERE session_ref=session_stats.session_ref)
+WHERE session_ref=(SELECT session_ref FROM sessions WHERE session_id=?1)`
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(q, id); err != nil {
 			return err
 		}
 	}
@@ -147,7 +155,11 @@ WHERE session_ref=(SELECT session_ref FROM sessions WHERE session_id=?1)`, id); 
 
 // sessionsOfGen lists the sessions that have records in one file generation.
 func (p *Parser) sessionsOfGen(tx *pstx, file int64, gen int) ([]string, error) {
-	rows, err := tx.Query(`SELECT DISTINCT session FROM records WHERE file_id=? AND gen=?`, file, gen)
+	q := `SELECT DISTINCT session FROM records WHERE file_id=? AND gen=?`
+	if !p.cfg.Store.HasSessionText() {
+		q = `SELECT DISTINCT s.session_id FROM records r JOIN sessions s ON s.session_ref=r.session_ref WHERE r.file_id=? AND r.gen=?`
+	}
+	rows, err := tx.Query(q, file, gen)
 	if err != nil {
 		return nil, err
 	}

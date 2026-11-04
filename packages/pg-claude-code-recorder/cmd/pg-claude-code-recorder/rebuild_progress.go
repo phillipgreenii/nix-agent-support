@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
 // defaultRebuildProgressEvery is how often the rebuild command logs a
@@ -91,4 +93,29 @@ func fileSize(p string) int64 {
 		return fi.Size()
 	}
 	return 0
+}
+
+// logRebuildProfile logs the finished rebuild's wall time, rate and short
+// profile as one rebuild_profile line and stores the same numbers in index.db
+// (meta key last_rebuild_profile), so the operator can read them after the
+// live rebuild. wall covers the parse and the finish; parseWall is the parse.
+func logRebuildProfile(log *slog.Logger, st *store.Store, dir string, wall, parseWall time.Duration) {
+	recs, _ := st.BulkTotals()
+	p, err := st.RecordRebuildSummary(wall, recs)
+	if err != nil {
+		log.Warn("rebuild_profile_not_stored", "err", err.Error())
+	}
+	log.Info("rebuild_profile",
+		"wall_sec", wall.Seconds(),
+		"parse_sec", parseWall.Seconds(),
+		"finish_sec", p.FinishSec,
+		"records", recs,
+		"records_per_sec", rate(recs, wall.Seconds()),
+		"batch_commits", p.Commits,
+		"batch_commit_sec", p.CommitSec,
+		"index_build_sec", p.IndexBuildSec,
+		"fts_optimize_sec", p.FTSOptimize,
+		"checkpoint_sec", p.CheckpointSec,
+		"index_db_bytes", fileSize(filepath.Join(dir, "index.db")),
+		"pre_rebuild_bytes", fileSize(filepath.Join(dir, "index.db.pre-rebuild")))
 }

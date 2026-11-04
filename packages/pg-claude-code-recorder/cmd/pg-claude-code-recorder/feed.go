@@ -251,12 +251,17 @@ func (a *app) rebuild(args []string) int {
 		done, total := d.Parser().FileProgress()
 		return rebuildSample{records: recs, commits: commits, filesDone: done, filesTotal: total}
 	})
+	started := time.Now()
 	perr := d.Parser().ParseAll()
+	parseWall := time.Since(started)
 	rep.finish()
 	if perr == nil {
 		// Clears the unfinished-rebuild marker; on any failure it stays and
 		// the next start refuses this index until the rebuild is rerun.
 		perr = d.Store().FinishRebuild()
+	}
+	if perr == nil {
+		logRebuildProfile(log, d.Store(), cfg.StateDir, time.Since(started), parseWall)
 	}
 	epoch := d.Store().Epoch()
 	if err := d.Close(); err != nil && perr == nil {

@@ -203,7 +203,7 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 		if s.SessionRefReady() {
 			t.Fatalf("open %d: a store with unreferenced older rows is marked ready", i)
 		}
-		if s.SchemaVersion() != 2 {
+		if s.SchemaVersion() != SchemaVersion {
 			t.Fatalf("schema_version %d, the session tables must not change it", s.SchemaVersion())
 		}
 		if err := s.Close(); err != nil {
@@ -335,7 +335,7 @@ func TestOpenAddsTheLookupColumnsAndTablesToAnExistingStore(t *testing.T) {
 		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('lk_cwd','lk_branch','lk_version','lk_entrypoint','lk_user_type')`).Scan(&tables); err != nil || tables != 5 {
 			t.Fatalf("open %d: %d lookup tables, %v", i, tables, err)
 		}
-		if s.SchemaVersion() != 2 {
+		if s.SchemaVersion() != SchemaVersion {
 			t.Fatalf("schema_version %d, the lookup tables must not change it", s.SchemaVersion())
 		}
 		if err := s.Close(); err != nil {

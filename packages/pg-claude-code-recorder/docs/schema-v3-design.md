@@ -1,9 +1,19 @@
-# Design: recorder `index.db` schema v3 (proposal, not decided)
+# Design: recorder `index.db` schema v3 (implemented)
 
-Status: PROPOSAL. Nothing in this document is implemented and `store.SchemaVersion` stays 2. It ends with
-one decision for the operator (fold into one v3 rebuild, or defer). This repo is public: every figure below
-comes from a synthetic fixture or from aggregate counts of a local database, with no transcript content,
-session ids or real paths.
+Status: IMPLEMENTED as `store.SchemaVersion` 3. The operator ruled to fold slices S1 to S6, S8 and S9 into
+one rebuild; slice S7 (interning `source` and `type`) was deferred and is not part of v3. What v3 is: the
+layout of sections 5 to 8 below, built by the daemon for every new `index.db` (`store.Options.V3Layout`), with
+no `records.session` column (every reader goes through `session_ref`), no `fts_tri`, and the extension and
+lookup tables. How it is triggered: a version 2 `index.db` is refused by the version 3 binary with a
+`SchemaOlderError`; the operator stops the daemon and runs `pg-claude-code-recorder rebuild`, which sets the
+old file aside as `index.db.pre-rebuild` and re-parses the journal and the copies. At deploy the operator MUST
+have free space in the state directory of about 85 percent of the old `index.db` plus its WAL, plus 1 GiB (the
+rebuild refuses below that, before moving anything) and MUST plan for a rebuild window of hours with the
+daemon down; the rebuild logs a `rebuild_profile` line (wall time, rate, phase times) and stores it in
+`meta.last_rebuild_profile`. The rest of this document is the original proposal text, kept as the design
+record, and its statements in the present or future tense about "the running v2 file" describe the file before
+the rebuild. This repo is public: every figure below comes from a synthetic fixture or from aggregate counts of
+a local database, with no transcript content, session ids or real paths.
 
 Related: `docs/investigations/2026-11-03-index-db-size.md` (where the bytes go; its "Live scan" section is the
 baseline this design builds on).
@@ -434,6 +444,22 @@ version-bump slice. Answer parity between the two layouts is tested on real stor
 select. Left to later slices: the parser still writes the `fields` rows of `record:` fields in the new layout,
 because the lifecycle and settle readers (`cwdQuery`, the registry queries) still read them; dropping those rows
 belongs with moving those readers to the ids.
+
+Slice 8 as built: `SchemaVersion` is 3 and the daemon opens with `Options.V3Layout`, which builds a new file
+with the extension tables, without `fts_tri` and without `records.session` (and with its two indexes), and adds
+the partial indexes `records_cwd` and `records_branch`. A file keeps the layout it was built with, so a store
+opened without the option (the unit tests) builds the version 2 layout, which the parity test uses as the
+reference: `TestV3RebuildHoldsTheSameRecordsFactsAndAnswersAsV2` (internal/query) rebuilds one corpus into both
+layouts and asserts equal record counts (total, by source and type, per session), equal `session_stats` and
+`session_files`, equal lookup values, identical answers for the session, typed-field, group and order requests
+and for word and substring search, and lists the intentional differences in a second test (the dropped column,
+indexes and `fts_tri`, the added extension table and partial indexes, and the bm25 score of a word search, which
+differs because the word index now also holds tool bodies; hits, order and snippets are equal). The preflight
+(`internal/store/rebuildpreflight.go`) runs before the old file is moved: free space below 85 percent of
+`index.db` plus WAL, plus 1 GiB, is refused with `InsufficientSpaceError`, the event `rebuild_refused_low_space`
+and the counter `rebuild_refused_total`. The two parser reads that still used the text column (the reparse
+path's session list and stats recompute) read `session_ref` in the new layout. Reading the text column
+remains only for a file built in the version 2 layout.
 
 ## 12. Decision for the operator
 

@@ -107,6 +107,18 @@ type Options struct {
 	// them for good (a reopen without the option keeps them); one that has none
 	// keeps the running layout unless the option is set.
 	ExtensionTables bool
+	// V3Layout builds a NEW index.db in the schema version 3 layout: the
+	// extension tables, no trigram table and no records.session column (the
+	// session is read through records.session_ref). The daemon always sets it.
+	// An existing index.db keeps the layout it was built with, so the option
+	// only picks the layout of a file that has none; a store opened without it
+	// builds the previous (version 2) layout, which only the tests and the
+	// parity check use.
+	V3Layout bool
+	// FreeBytes reports the free bytes of the file system holding a directory
+	// (the file system's own figure when nil); the rebuild preflight reads it,
+	// and a test supplies a fixed answer.
+	FreeBytes func(dir string) (int64, error)
 }
 
 // SchemaNewerError is returned by Open when index.db carries a newer
@@ -147,6 +159,13 @@ type Store struct {
 	// ext is whether this index.db has the extension tables (set by openDB).
 	ext     bool
 	wantExt bool // Options.ExtensionTables
+	// v3 is Options.V3Layout; sessText is whether records has the legacy session
+	// column (set by openDB).
+	v3       bool
+	sessText bool
+	freeFn   func(string) (int64, error)
+	// prof holds the phase timings of a bulk rebuild's finish (see rebuildprofile.go).
+	prof RebuildProfile
 
 	Reader // the read methods over the read pool (ReadTx hands out one over a transaction)
 
@@ -213,7 +232,10 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.BulkBytes <= 0 {
 		opt.BulkBytes = DefaultBulkBytes
 	}
-	s := &Store{noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
+	if opt.V3Layout {
+		opt.NoTrigramIndex, opt.ExtensionTables = true, true
+	}
+	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -253,6 +275,9 @@ func Open(dir string, opt Options) (*Store, error) {
 	_, statErr := os.Stat(dbPath)
 	dbExisted := statErr == nil
 	if opt.Rebuild && dbExisted {
+		if err := s.rebuildPreflight(dbPath); err != nil {
+			return nil, err
+		}
 		for _, suf := range []string{"-wal", "-shm"} {
 			_ = os.Remove(dbPath + suf)
 		}
@@ -386,15 +411,29 @@ func (s *Store) openDB(path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
-	s.trigram = hasTri > 0 || !s.noTrigram
+	var hasRecords int
+	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&hasRecords); err != nil {
+		_ = w.Close()
+		return err
+	}
+	// An existing file keeps the layout it was built with (a reopen without the
+	// layout option must not add back a table the file was built without); the
+	// options only pick the layout of a file that has none.
+	s.trigram = hasTri > 0 || (hasRecords == 0 && !s.noTrigram)
 	var hasExt int
 	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, extTables[0].Table()).Scan(&hasExt); err != nil {
 		_ = w.Close()
 		return err
 	}
 	s.ext = hasExt > 0 || s.wantExt
-	tables := derivedTables(s.trigram, s.ext)
-	ddl := schemaSQL + tables + derivedIndexesSQL()
+	sessText, err := recordsHasSessionText(w, s.v3)
+	if err != nil {
+		_ = w.Close()
+		return err
+	}
+	s.sessText = sessText
+	tables := derivedTables(s.trigram, s.ext, sessText)
+	ddl := schemaSQL + tables + layoutIndexesSQL(sessText)
 	if bulk {
 		// A bulk rebuild creates the secondary indexes after the load.
 		ddl = schemaSQL + tables
@@ -461,6 +500,25 @@ func (s *Store) openDB(path string, bulk bool) error {
 	s.sessionRef = marked
 	return nil
 }
+
+// recordsHasSessionText reports whether records carries the legacy session
+// column: an existing table by its columns, a new one by the layout wanted.
+func recordsHasSessionText(db *sql.DB, v3 bool) (bool, error) {
+	var tbl int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil {
+		return false, err
+	}
+	if tbl == 0 {
+		return !v3, nil
+	}
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&n)
+	return n > 0, err
+}
+
+// HasSessionText reports whether records has the legacy session TEXT column. The
+// version 3 layout has none: every reader goes through session_ref.
+func (s *Store) HasSessionText() bool { return s.sessText }
 
 // sessionRefMarked reports whether the database being opened is marked, or is
 // new (no records table yet) and so is marked by this open.

@@ -279,21 +279,65 @@ func derivedIndexesSQL() string {
 // derivedTables is derivedTablesSQL, without the trigram table when tri is false
 // (the layout of a new index.db built with Options.NoTrigramIndex) and with the
 // extension tables when ext is true (Options.ExtensionTables).
-func derivedTables(tri, ext bool) string {
+//
+// sessText is whether records has the legacy session TEXT column; the version 3
+// layout (Options.V3Layout) has none and reads the session through session_ref.
+func derivedTables(tri, ext, sessText bool) string {
 	base := derivedTablesSQL
 	if ext {
 		base += extDDL()
 	}
-	if tri {
+	if tri && sessText {
 		return base
 	}
 	var b strings.Builder
 	for _, l := range strings.SplitAfter(base, "\n") {
-		if !strings.Contains(l, "VIRTUAL TABLE IF NOT EXISTS fts_tri ") {
-			b.WriteString(l)
+		if !tri && strings.Contains(l, "VIRTUAL TABLE IF NOT EXISTS fts_tri ") {
+			continue
 		}
+		if !sessText && l == recordsSessionColumnLine {
+			continue
+		}
+		b.WriteString(l)
 	}
 	return b.String()
 }
 
-func derivedSQL() string { return derivedTablesSQL + derivedIndexesSQL() }
+// recordsSessionColumnLine is the legacy session column inside derivedTablesSQL.
+const recordsSessionColumnLine = "  session TEXT NOT NULL DEFAULT '',\n"
+
+// legacySessionIndexes are the derivedIndexes names that exist only with the
+// legacy records.session column.
+var legacySessionIndexes = map[string]bool{"records_session": true, "records_session_source_time": true}
+
+// v3OnlyIndexes are the optional partial indexes of the version 3 layout: the
+// lookup ids of a record, indexed only where present.
+var v3OnlyIndexes = []struct{ name, sql string }{
+	{"records_cwd", `CREATE INDEX IF NOT EXISTS records_cwd ON records(cwd_id) WHERE cwd_id IS NOT NULL`},
+	{"records_branch", `CREATE INDEX IF NOT EXISTS records_branch ON records(branch_id) WHERE branch_id IS NOT NULL`},
+}
+
+// layoutIndexes is the secondary indexes of one layout, largest first: the
+// legacy session indexes only with the session column, the lookup-id indexes
+// only without it.
+func layoutIndexes(sessText bool) []struct{ name, sql string } {
+	out := make([]struct{ name, sql string }, 0, len(derivedIndexes)+len(v3OnlyIndexes))
+	for _, ix := range derivedIndexes {
+		if !sessText && legacySessionIndexes[ix.name] {
+			continue
+		}
+		out = append(out, ix)
+	}
+	if !sessText {
+		out = append(out, v3OnlyIndexes...)
+	}
+	return out
+}
+
+func layoutIndexesSQL(sessText bool) string {
+	var b strings.Builder
+	for _, ix := range layoutIndexes(sessText) {
+		b.WriteString(ix.sql + ";\n")
+	}
+	return b.String()
+}
