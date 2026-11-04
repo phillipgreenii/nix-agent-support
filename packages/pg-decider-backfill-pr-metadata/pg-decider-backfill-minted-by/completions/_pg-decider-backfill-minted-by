@@ -6,4 +6,5 @@ _arguments \
   '--bd-dir[Tracker root to run bd against]:directory:_files -/' \
   '--actor[Actor id recorded on every write]:actor:' \
   '--expect[Fail unless exactly N beads are planned]:count:' \
+  '--limit-per-kind[Write only the first N planned beads of each kind]:count:' \
   '--apply[Perform the writes (default is a dry run)]'

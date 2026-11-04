@@ -71,7 +71,9 @@ lacks_label() { ! has_label "$1"; }
 backfill() { "$RUN" --bd-dir "$TDIR" --actor test-actor "$@"; }
 
 # install_shim: a bd shim first on PATH that logs argv to $SHIM_DIR/calls.log,
-# then execs the real bd. With FAIL_ID set, an `update` of that id fails.
+# then execs the real bd. For an `update`: FAIL_ID=<id> fails an update of that
+# id, FAIL_ID='*' fails every update, SHIM_NOOP_UPDATE=1 reports success without
+# changing anything (a lost write), SHIM_HANG_UPDATE=1 never returns.
 install_shim() {
   local real_bd
   real_bd="$(command -v bd)"
@@ -81,8 +83,13 @@ install_shim() {
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"$SHIM_DIR/calls.log"
 for a in "\$@"; do
-  if [ "\$a" = update ] && [ -n "\${FAIL_ID:-}" ]; then
-    for b in "\$@"; do [ "\$b" = "\$FAIL_ID" ] && { echo "forced failure" >&2; exit 1; }; done
+  if [ "\$a" = update ]; then
+    [ -n "\${SHIM_NOOP_UPDATE:-}" ] && exit 0
+    [ -n "\${SHIM_HANG_UPDATE:-}" ] && exec sleep 30
+    if [ -n "\${FAIL_ID:-}" ]; then
+      [ "\$FAIL_ID" = '*' ] && { echo "forced failure" >&2; exit 1; }
+      for b in "\$@"; do [ "\$b" = "\$FAIL_ID" ] && { echo "forced failure" >&2; exit 1; }; done
+    fi
   fi
 done
 exec "$real_bd" "\$@"
@@ -256,6 +263,71 @@ SHIM
   [ "$status" -eq 0 ]
   [[ $output == *"skipped=$n planned=$((3 - n))"* ]]
   for id in "${ids[@]}"; do has_label "$id"; done
+}
+
+@test "--apply attempts exactly one write when the first write fails (no write after a failure)" {
+  for i in 1 2 3; do mk "bead $i" "$(key "pr:N:review-pr:$i")" >/dev/null; done
+  install_shim
+  FAIL_ID='*' run --separate-stderr backfill --apply
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"FAIL "* ]]
+  [[ $output == *"updated=0 failed=1"* ]]
+  [ "$(grep -c -E ' update ' "$SHIM_DIR/calls.log")" -eq 1 ]
+}
+
+@test "--apply fails when a write is reported successful but the label is missing on read-back" {
+  a="$(mk "one" "$(key pr:N:anchor)")"
+  b="$(mk "two" "$(key pr:N:review-pr:b)")"
+  install_shim
+  SHIM_NOOP_UPDATE=1 run --separate-stderr backfill --apply
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"read-back mismatch"* ]]
+  [[ $output == *"updated=0 failed=1"* ]]
+  [ "$(grep -c -E ' update ' "$SHIM_DIR/calls.log")" -eq 1 ]
+  lacks_label "$a"
+  lacks_label "$b"
+}
+
+@test "a bd call that hangs is cut off by PB_BD_TIMEOUT and fails the write, not the run's exit path" {
+  a="$(mk "one" "$(key pr:N:anchor)")"
+  install_shim
+  # 5 s: long enough that the real `bd where`/`bd show` calls finish, far
+  # shorter than the shim's 30 s hang
+  SHIM_HANG_UPDATE=1 PB_BD_TIMEOUT=5 run --separate-stderr backfill --apply
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"bd update failed for $a"* ]]
+  [[ $output == *"updated=0 failed=1"* ]]
+  lacks_label "$a"
+}
+
+@test "--limit-per-kind writes only the first N beads of each kind, ordered by id, and --expect still checks the full plan" {
+  ids=()
+  for i in 1 2 3; do ids+=("$(mk "review $i" "$(key "pr:N:review-pr:$i")")"); done
+  for i in 1 2; do ids+=("$(mk "anchor $i" "$(key "pr:N$i:anchor")")"); done
+  sorted_review="$(printf '%s\n' "${ids[@]:0:3}" | sort)"
+  first_review="$(head -n 1 <<<"$sorted_review")"
+  run --separate-stderr backfill --apply --expect 5 --limit-per-kind 1
+  [ "$status" -eq 0 ]
+  [[ $output == *"planned=5"* ]]
+  [[ $output == *"updated=2 "* ]]
+  [[ $output == *$'SELECT\t'"$first_review"$'\treview-pr'* ]]
+  [ "$(grep -c '^SELECT' <<<"$output")" -eq 2 ]
+  n=0
+  for id in "${ids[@]}"; do has_label "$id" && n=$((n + 1)); done
+  [ "$n" -eq 2 ]
+  has_label "$first_review"
+  # a full run afterwards labels the rest, and only the rest
+  run --separate-stderr backfill --apply --expect 3
+  [ "$status" -eq 0 ]
+  [[ $output == *"skipped=2 planned=3"* ]]
+  for id in "${ids[@]}"; do has_label "$id"; done
+}
+
+@test "--limit-per-kind needs a positive integer" {
+  run --separate-stderr "$RUN" --bd-dir "$TDIR" --actor a --limit-per-kind 0
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$RUN" --bd-dir "$TDIR" --actor a --limit-per-kind x
+  [ "$status" -eq 2 ]
 }
 
 @test "refuses a --bd-dir that is not a directory" {

@@ -62,14 +62,23 @@ per kind, the RESIDUAL lines and a SUMMARY, and writes nothing. With --apply eac
 bead is updated and read back, stopping at the first failure.
 
 Each bd listing may take over a minute on a large tracker: run it with a long
-timeout or in the background, and never repeat a timed-out run unchanged.
+timeout or in the background, and never repeat a timed-out run unchanged. Every
+bd call is bounded by `timeout`: 60 seconds (PB_BD_TIMEOUT) for a single bead and
+300 seconds (PB_BD_LIST_TIMEOUT) for the listing. A call that hits its bound
+fails that step; a re-run is safe because the run is idempotent.
 
 Options:
   --bd-dir DIR   Tracker root to run bd against (bd -C DIR). Required.
   --actor ID     Actor id passed on every write (--actor). Required; falls back
                  to $PG_BACKFILL_ACTOR. Never defaults to a person's name.
   --expect N     Fail (exit 1, nothing written) unless exactly N beads are
-                 planned. Matching nothing at all always fails.
+                 planned. Matching nothing at all always fails. It checks the
+                 full plan, also when --limit-per-kind narrows the writes.
+  --limit-per-kind N
+                 Write only the first N planned beads of each kind (ordered by
+                 id), for a small trial. The plan, COUNT and RESIDUAL lines still
+                 cover everything; a SELECT<TAB>id<TAB>kind line names each bead
+                 that would be written. A later run without it labels the rest.
   --apply        Perform the writes. Without it nothing is written.
   -h, --help     Show this help message
   -v, --version  Show version information
@@ -80,6 +89,7 @@ PB_BD_DIR=""
 PB_ACTOR="${PG_BACKFILL_ACTOR:-}"
 PB_APPLY=0
 PB_EXPECT=""
+PB_LIMIT_PER_KIND=""
 
 # need_value <option> <value...>: the option's value must exist and not look
 # like another option.
@@ -108,6 +118,12 @@ while [[ $# -gt 0 ]]; do
     need_value "$@"
     [[ $2 =~ ^[0-9]+$ ]] || die "--expect needs a non-negative integer, got '$2'"
     PB_EXPECT="$2"
+    shift
+    ;;
+  --limit-per-kind)
+    need_value "$@"
+    [[ $2 =~ ^[1-9][0-9]*$ ]] || die "--limit-per-kind needs a positive integer, got '$2'"
+    PB_LIMIT_PER_KIND="$2"
     shift
     ;;
   --apply) PB_APPLY=1 ;;
@@ -143,7 +159,7 @@ snapshot="$(pb_snapshot)" || fail_run "listing failed"
 rows="$(pb_classify "$snapshot")" || fail_run "classification failed"
 
 # ---- Phase 1: plan (no writes) ----
-plan_ids=()
+plan_rows=()
 while IFS= read -r row; do
   [[ -n $row ]] || continue
   decision="$(jq -r '.decision' <<<"$row")"
@@ -152,7 +168,7 @@ while IFS= read -r row; do
   plan)
     id="$(jq -r '.id' <<<"$row")"
     printf 'PLAN\t%s\t%s\t%s\t%s\n' "$id" "$(jq -r '.kind' <<<"$row")" "$(jq -r '.status' <<<"$row")" "$(jq -r '.title' <<<"$row")"
-    plan_ids+=("$id")
+    plan_rows+=("$(jq -r '.kind' <<<"$row")"$'\t'"$id")
     planned=$((planned + 1))
     ;;
   residual) residual=$((residual + 1)) ;;
@@ -172,6 +188,17 @@ jq -r 'select(.decision == "residual" and .status != "closed") | ["RESIDUAL-OPEN
 
 if [[ -n $PB_EXPECT && $planned -ne $PB_EXPECT ]]; then
   fail_run "planned $planned beads but --expect is $PB_EXPECT; nothing written"
+fi
+
+# The beads to write: the whole plan, or the first N of each kind (by id).
+plan_ids=()
+if ((planned > 0)); then
+  # rows are "kind<TAB>id"; n=0 means no limit
+  while IFS=$'\t' read -r id kind; do
+    plan_ids+=("$id")
+    [[ -z $PB_LIMIT_PER_KIND ]] || printf 'SELECT\t%s\t%s\n' "$id" "$kind"
+  done < <(printf '%s\n' "${plan_rows[@]}" | sort -t $'\t' -k1,1 -k2,2 |
+    awk -F'\t' -v n="${PB_LIMIT_PER_KIND:-0}" 'n == 0 || ++seen[$1] <= n { print $2 "\t" $1 }')
 fi
 
 # ---- Phase 2: writes (--apply only), stop at the first failure ----

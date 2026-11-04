@@ -15,7 +15,10 @@ PB_ENVELOPE_ARRAY='(if type=="object" and has("data") then .data else . end) | (
 # pb_bd: run bd against the requested tracker root, and ONLY that root: every
 # inherited BEADS_*/BD_* variable (BEADS_DIR, BEADS_DB, server host/port, actor)
 # is dropped so a stray one cannot redirect the run, backups are off, and bd is
-# never allowed to spawn its own dolt server.
+# never allowed to spawn its own dolt server. Every call is bounded by
+# `timeout` (PB_BD_TIMEOUT seconds, default 60; the listing raises it), so a hung
+# bd fails that step instead of stalling the run; a re-run is safe because the
+# run is idempotent.
 pb_bd() {
   local -a drop=()
   local v
@@ -24,7 +27,7 @@ pb_bd() {
     BEADS_* | BD_*) drop+=(-u "$v") ;;
     esac
   done
-  env ${drop[@]+"${drop[@]}"} BEADS_DOLT_AUTO_START=0 BD_BACKUP_ENABLED=0 bd -C "$PB_BD_DIR" "$@"
+  timeout "${PB_BD_TIMEOUT:-60}" env ${drop[@]+"${drop[@]}"} BEADS_DOLT_AUTO_START=0 BD_BACKUP_ENABLED=0 bd -C "$PB_BD_DIR" "$@"
 }
 
 # pb_verify_target: print the tracker bd actually resolves (`bd where`) and
@@ -47,9 +50,11 @@ pb_verify_target() {
 
 # pb_snapshot: read-only. ONE listing of every bead, any status, so planning
 # works from a single consistent snapshot (a per-kind query would let the
-# decider mint between two reads). Printed as the raw bd JSON.
+# decider mint between two reads). Printed as the raw bd JSON. The listing of a
+# large tracker takes about two minutes, so it gets its own, longer bound
+# (PB_BD_LIST_TIMEOUT seconds, default 300).
 pb_snapshot() {
-  pb_bd list --all -n 0 --json --brief
+  PB_BD_TIMEOUT="${PB_BD_LIST_TIMEOUT:-300}" pb_bd list --all -n 0 --json --brief
 }
 
 # PB_CLASSIFY is a jq program over the snapshot array. It prints one compact

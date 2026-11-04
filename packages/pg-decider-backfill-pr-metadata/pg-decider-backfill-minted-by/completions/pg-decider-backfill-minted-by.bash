@@ -9,13 +9,13 @@ _pg_decider_backfill_minted_by() {
     _filedir -d
     return
     ;;
-  --actor | --expect)
+  --actor | --expect | --limit-per-kind)
     return
     ;;
   esac
 
   if [[ $cur == -* ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "--bd-dir --actor --expect --apply --help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--bd-dir --actor --expect --limit-per-kind --apply --help -h --version -v" -- "$cur")
   fi
 }
 

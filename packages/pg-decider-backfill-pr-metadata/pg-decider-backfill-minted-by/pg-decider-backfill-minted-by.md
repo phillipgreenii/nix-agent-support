@@ -11,6 +11,10 @@
 
 `pg-decider-backfill-minted-by --bd-dir {{/path/to/tracker/root}} --actor {{session-id}} --apply`
 
+- Trial run: write only the first bead of each kind, still checking the full plan size:
+
+`pg-decider-backfill-minted-by --bd-dir {{/path/to/tracker/root}} --actor {{session-id}} --expect {{539}} --limit-per-kind {{1}} --apply`
+
 - Refuse to continue unless exactly N beads are planned:
 
 `pg-decider-backfill-minted-by --bd-dir {{/path/to/tracker/root}} --actor {{session-id}} --expect {{539}}`
