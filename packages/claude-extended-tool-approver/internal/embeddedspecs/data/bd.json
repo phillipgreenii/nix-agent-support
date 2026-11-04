@@ -1707,6 +1707,18 @@
               "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
+          "--assignee": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--body-file": {
             "arity": "one",
             "operand": {
@@ -1735,6 +1747,30 @@
             "arity": "one",
             "operand": {
               "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--defer": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--deps": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
             },
             "transform": {
               "kind": "none"
@@ -1779,6 +1815,42 @@
               "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
+          "--due": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--estimate": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--external-ref": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--file": {
             "arity": "one",
             "operand": {
@@ -1803,6 +1875,30 @@
               "source": "bd create --help: \"--graph string Create a graph of issues with dependencies from JSON plan file\""
             }
           },
+          "--id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--labels": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "--metadata": {
             "arity": "one",
             "operand": {
@@ -1813,6 +1909,126 @@
             },
             "citation": {
               "source": "bd create --help: \"--metadata string Set custom metadata (JSON string or @file.json to read from file)\""
+            }
+          },
+          "--mol-type": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--parent": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--priority": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--spec-id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--status": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--storage-class": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--type": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--waits-for": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--waits-for-gate": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "--wisp-type": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           },
           "-C": {
@@ -1827,6 +2043,30 @@
               "source": "bd create --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
+          "-a": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-e": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
           "-f": {
             "arity": "one",
             "operand": {
@@ -1837,6 +2077,54 @@
             },
             "citation": {
               "source": "bd create --help: \"-f, --file string Create multiple issues from markdown file\""
+            }
+          },
+          "-l": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-p": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-s": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            }
+          },
+          "-t": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
             }
           }
         },

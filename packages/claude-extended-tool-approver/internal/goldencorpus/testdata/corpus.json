@@ -15916,5 +15916,119 @@
     "rules_config": {},
     "expected_verdict": "reject",
     "notes": "tc-k0r5o guardrail: credential store path."
+  },
+  {
+    "case": "bd_create_runtime_flag_values_approve",
+    "tags": ["ceta-spec", "tc-54be4"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"T\" -t \"$2\" -p \"$3\" -l \"$4\" --actor \"$SID\" --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-54be4: quoted runtime values for create value flags are flag values."
+  },
+  {
+    "case": "bd_create_parent_deps_var_approve",
+    "tags": ["ceta-spec", "tc-54be4"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"T\" --parent \"$P\" --deps \"discovered-from:$X\" --assignee \"$A\" --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-54be4: parent/deps/assignee are plain data values."
+  },
+  {
+    "case": "bd_create_freetext_subst_not_approve",
+    "tags": ["ceta-spec", "tc-54be4"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"T\" --description \"$(date +%F) d\" --type task"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-54be4: free-text value opening with a runtime expansion stays held (pg2-i4lbg)."
+  },
+  {
+    "case": "bd_create_unmodeled_flag_not_approve",
+    "tags": ["ceta-spec", "tc-54be4"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"T\" --bogus \"$X\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-54be4: unmodeled flag still abstains."
+  },
+  {
+    "case": "bd_reopen_unruled_not_approve",
+    "tags": ["ceta-spec", "tc-54be4"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd reopen tc-abc --type \"$A\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-54be4: unruled verb still needs consent."
+  },
+  {
+    "case": "bd_create_body_file_secret_reject",
+    "tags": ["ceta-spec", "tc-54be4"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"T\" --body-file ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "tc-54be4: file flags stay path reads; secret path is refused."
   }
 ]

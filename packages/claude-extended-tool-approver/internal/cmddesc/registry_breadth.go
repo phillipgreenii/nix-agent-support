@@ -176,6 +176,16 @@ var bdFileFlags = map[string][]string{
 // makes a runtime-expanded value a flag value rather than a live positional.
 // Positional ids are unaffected: `bd update $ID` still abstains.
 var bdValueFlags = map[string][]string{
+	// tc-54be4: `bd create --help` identity/classification/scheduling flags.
+	// Free-text (--title, --description, --design, --notes, --acceptance,
+	// --context, --skills, --event-*), --repo (routes the issue to another
+	// repository) and the file flags (bdFileFlags) are NOT plain values.
+	"create": {
+		"-a", "--assignee", "--defer", "--deps", "--due", "-e", "--estimate",
+		"--external-ref", "--id", "-l", "--labels", "--mol-type", "--parent",
+		"-p", "--priority", "--spec-id", "-s", "--status", "--storage-class",
+		"-t", "--type", "--waits-for", "--waits-for-gate", "--wisp-type",
+	},
 	"update": {
 		"--add-label", "-a", "--assignee",
 		"--await-id", "--defer", "--due",
