@@ -164,10 +164,10 @@ import (
 // the call deadline, the signals that would justify a beads daemon. Registered
 // the same way, with no escalation label.
 //
-// The nineteen pg-ccrec-* rules of the recorder's alert file (packages/
+// The eighteen pg-ccrec-* rules of the recorder's alert file (packages/
 // pg-claude-code-recorder/grafana/alerting/alerts.yaml, docket pg2-v77tsx phase 7c;
 // registered by darwin/modules/pg-claude-code-recorder while the daemon is deployed):
-// daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old, free-space,
+// daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old,
 // unknown-key-burst, data-loss, removal-backlog, doctor-mismatch, control-inbox-gone,
 // crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled and request-slow. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
@@ -216,7 +216,6 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-copy-lag",
 	"pg-ccrec-parse-stuck",
 	"pg-ccrec-held-old",
-	"pg-ccrec-free-space",
 	"pg-ccrec-unknown-key-burst",
 	"pg-ccrec-data-loss",
 	"pg-ccrec-removal-backlog",

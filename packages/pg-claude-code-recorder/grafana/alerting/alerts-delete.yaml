@@ -12,7 +12,12 @@
 # deleteRules entry for a uid alongside the rule that defines it is never emitted). The two files
 # are therefore never loaded together.
 #
-# The uids MUST equal the rule uids of alerts.yaml: rule S8 of check-alert-structure.sh (flake check
+# The uids MUST equal the rule uids of alerts.yaml plus the retired uid pg-ccrec-free-space: the
+# free-space rule (a recorder-specific filesystem alert) was removed from alerts.yaml on the operator
+# ruling of Phillip, 2026-11-04: "there shouldn't be a pg-claud-code-recorder specific file system
+# alert." and "B.  it's ok to measure specifics about the app, but host level alerts belong elsewhere".
+# Its uid stays here for as long as any Grafana database may still hold the provisioned rule. Rule S8
+# of check-alert-structure.sh (flake check
 # test-pg-claude-code-recorder-alert-structure) pins that. Keep the entries for as long as any
 # Grafana database may still hold the rules; they are harmless once the rules are gone.
 apiVersion: 1

@@ -679,7 +679,7 @@ func (d *Daemon) scrapeRefresh() {
 }
 
 // refreshGauges sets the heartbeat (the watcher's last successful sweep) and the
-// state directory's free and used bytes. Used bytes walk the directory, so they
+// state directory's used bytes. Used bytes walk the directory, so they
 // are recomputed at most once a minute.
 func (d *Daemon) refreshGauges() {
 	d.setTickInFlight()
@@ -698,9 +698,6 @@ func (d *Daemon) refreshGaugesPass() {
 	d.prs.UpdateGauges()
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)
-	}
-	if free, err := FreeBytes(d.cfg.StateDir); err == nil {
-		d.obs.Reg.Set(obs.MStateFreeBytes, nil, float64(free))
 	}
 	d.usedMu.Lock()
 	if now := d.clock.Now(); d.usedAt.IsZero() || now.Sub(d.usedAt) > time.Minute {

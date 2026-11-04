@@ -10,25 +10,26 @@
 # Needs yq (mikefarah), jq, grep. Every failure line starts with RULE-Sn so a mutant can assert the
 # exact rule that fired.
 #
-#   S1  exactly the nineteen expected uids, each once, each of the form pg-ccrec-<name> and at most
+#   S1  exactly the eighteen expected uids, each once, each of the form pg-ccrec-<name> and at most
 #       40 characters (Grafana's cap)
 #   S2  one group pg-claude-code-recorder in folder Claude Agents, no folderUid anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description (the
 #       description names the first command to run), labels with exactly the one key severity
 #       (warning or critical), and a non-empty for
 #   S4  every rule uses datasourceUid prometheus with instant: true
-#   S5  noDataState is Alerting for daemon-down, heartbeat-stale, free-space and doctor-mismatch,
+#   S5  noDataState is Alerting for daemon-down, heartbeat-stale and doctor-mismatch,
 #       OK for every other rule
 #   S6  every pg_claude_code_recorder_* token of an expression is a catalogued name (a histogram's
 #       _bucket/_sum/_count stripped first)
 #   S7  the guards: daemon-down adds the SYSTEM_PAUSE gate to an `or vector(0)` value (never empty, so a
 #       pause cannot read as NoData-as-Alerting; no `unless`) and its description states the
 #       30s scrape interval; heartbeat-stale and doctor-mismatch carry `and on() (max(up{...}) == 1)`
-#       and `or vector(0)`; free-space carries neither an `up` selector nor SYSTEM_PAUSE
-#       (deliberately unguarded); control-inbox-gone selects only state="gone"; crash-share carries
+#       and `or vector(0)`; control-inbox-gone selects only state="gone"; crash-share carries
 #       a volume floor and the stale-at-discovery counter
 #   S8  the deleteRules file is apiVersion 1, has no groups, and its deleteRules entries are exactly
-#       the uids of S1 (so, with S1, exactly the rule file's uids), each once, each with orgId 1
+#       the uids of S1 plus the retired uids (RETIRED_UIDS: rules removed from the rules file whose
+#       already-provisioned copies Grafana keeps live until a deleteRules entry names them), each once,
+#       each with orgId 1
 #
 # Exit codes: 0 clean (self-test: the real inputs pass and every mutant fails with exactly its own
 # rule), 2 usage error or unreadable input or a missing tool, 3 a rule failed (1 is reserved for
@@ -64,13 +65,17 @@ done
 
 EXPECTED_UIDS=(
   pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-copy-lag pg-ccrec-parse-stuck
-  pg-ccrec-held-old pg-ccrec-free-space pg-ccrec-unknown-key-burst pg-ccrec-data-loss
+  pg-ccrec-held-old pg-ccrec-unknown-key-burst pg-ccrec-data-loss
   pg-ccrec-removal-backlog pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
   pg-ccrec-crash-share pg-ccrec-removal-stuck pg-ccrec-settle-tick-slow
   pg-ccrec-field-type-mismatch pg-ccrec-cpu-high pg-ccrec-wal-large pg-ccrec-loop-stalled
   pg-ccrec-request-slow
 )
-NODATA_ALERTING=(pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-free-space pg-ccrec-doctor-mismatch)
+# Rules removed from alerts.yaml that alerts-delete.yaml MUST still delete (Grafana keeps a
+# file-provisioned rule live after its file entry is dropped): free-space (removed 2026-11-04 on
+# the operator ruling "there shouldn't be a pg-claud-code-recorder specific file system alert").
+RETIRED_UIDS=(pg-ccrec-free-space)
+NODATA_ALERTING=(pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-doctor-mismatch)
 
 # check <alerts> <deletes>: print RULE-Sn lines for each failing rule (at most one line per rule).
 check() {
@@ -89,7 +94,7 @@ check() {
       ([.groups[].rules[].uid] | sort) as $u
       | ($u == $exp)
         and ($u | all(. | test("^pg-ccrec-[a-z0-9-]+$") and (length <= 40)))' >/dev/null; then
-    rule_fail "RULE-S1: the rule uids are not exactly the nineteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
+    rule_fail "RULE-S1: the rule uids are not exactly the eighteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
   fi
   # S2
   if ! printf '%s' "$j" | jq -e '
@@ -121,7 +126,7 @@ check() {
   if ! printf '%s' "$j" | jq -e --argjson na "$nodata" '
       .groups[].rules | all(
         if (.uid as $u | $na | index($u)) then .noDataState == "Alerting" else .noDataState == "OK" end)' >/dev/null; then
-    rule_fail "RULE-S5: noDataState must be Alerting for daemon-down, heartbeat-stale, free-space and doctor-mismatch, and OK for every other rule"
+    rule_fail "RULE-S5: noDataState must be Alerting for daemon-down, heartbeat-stale and doctor-mismatch, and OK for every other rule"
   fi
   # S6
   local bad="" tok base
@@ -150,22 +155,21 @@ check() {
       and ([rule("daemon-down") | .annotations.description | test("scrape interval is 30s")] | first)
       and (expr("heartbeat-stale") | contains($up) and contains("or vector(0)"))
       and (expr("doctor-mismatch") | contains($up) and contains("or vector(0)"))
-      and (expr("free-space") | (contains("up{") | not) and (contains("SYSTEM_PAUSE") | not))
       and (expr("control-inbox-gone") | contains("state=\"gone\"") and (contains("never_loaded") | not))
       and (expr("crash-share") | contains("> 20") and contains("registry_stale_at_discovery_total"))
       and (expr("loop-stalled") | contains("{loop=\"watcher_sweep\"} > 0)) > 2700 or") and contains("loop=~\"tracker_tick|tracker_poll\"} > 0)) > 120 or") and contains("{loop=\"status_refresh\"} > 0)) > 60 or") and contains("loop_in_flight_seconds > 600)") and (contains("parser_drain") | not))
       and (expr("request-slow") | contains("> 50)") and contains("{le=\"10\"}"))' >/dev/null; then
-    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; free-space unguarded; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket)"
+    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket)"
   fi
   # S8
   local ruids
-  ruids="$(printf '%s' "$j" | jq -c '[.groups[].rules[].uid] | sort')"
+  ruids="$(printf '%s\n' "${RETIRED_UIDS[@]}" | jq -R . | jq -sc --argjson r "$(printf '%s' "$j" | jq -c '[.groups[].rules[].uid]')" '$r + . | sort')"
   if ! printf '%s' "$dj" | jq -e --argjson exp "$ruids" '
       (.apiVersion == 1)
       and (has("groups") | not)
       and ((.deleteRules | map(.uid) | sort) == $exp)
       and (.deleteRules | all(.orgId == 1))' >/dev/null; then
-    rule_fail "RULE-S8: the deleteRules twin must be apiVersion 1, have no groups, and list exactly the rule uids, each once with orgId 1"
+    rule_fail "RULE-S8: the deleteRules twin must be apiVersion 1, have no groups, and list exactly the rule uids plus the retired uids, each once with orgId 1"
   fi
   printf '%s' "$fails"
 }
@@ -221,8 +225,6 @@ mutant RULE-S6 "an uncatalogued metric" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-copy-lag") | .data[0].model.expr) = "max(pg_claude_code_recorder_not_a_metric)"'
 mutant RULE-S7 "daemon-down without the SYSTEM_PAUSE guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"})"'
-mutant RULE-S7 "free-space with an up guard" \
-  '(.groups[0].rules[] | select(.uid == "pg-ccrec-free-space") | .data[0].model.expr) += " and on() (max(up{job=\"pg-claude-code-recorder\"}) == 1)"'
 mutant RULE-S7 "heartbeat-stale without the up guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-heartbeat-stale") | .data[0].model.expr) = "(time() - max(pg_claude_code_recorder_last_sweep_timestamp_seconds))"'
 mutant RULE-S7 "daemon-down back on the empty-under-pause unless form" \
@@ -236,4 +238,6 @@ mutant RULE-S7 "request-slow without the request floor" \
 mutant RULE-S8 "a twin uid that differs" \
   '.' '(.deleteRules[0].uid) = "pg-ccrec-other"'
 mutant RULE-S8 "a twin with a group" '.' '.groups = []'
+mutant RULE-S8 "a twin that no longer deletes the retired free-space uid" \
+  '.' 'del(.deleteRules[] | select(.uid == "pg-ccrec-free-space"))'
 echo "OK: $n mutants each fail with exactly their own rule"

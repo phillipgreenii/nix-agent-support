@@ -26,7 +26,7 @@ func TestRenderPrefixesSeriesAndRegistersReasonsAtZero(t *testing.T) {
 		`pg_claude_code_recorder_requests_total{client="other",op="status",outcome="ok"} 2`,
 		`pg_claude_code_recorder_query_duration_seconds_bucket{op="status",le="0.005"} 1`,
 		`pg_claude_code_recorder_query_duration_seconds_count{op="status"} 1`,
-		`pg_claude_code_recorder_state_free_bytes 0`,
+		`pg_claude_code_recorder_state_used_bytes 0`,
 		`# TYPE pg_claude_code_recorder_last_sweep_timestamp_seconds gauge`,
 	} {
 		if !strings.Contains(out, want) {

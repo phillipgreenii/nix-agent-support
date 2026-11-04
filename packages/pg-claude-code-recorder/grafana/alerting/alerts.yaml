@@ -4,9 +4,9 @@
 # packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
-# Nineteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
-# parse-stuck, held-old, free-space, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
-# control-inbox-gone) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow). Each uid is
+# Eighteen rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# parse-stuck, held-old, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
+# control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow). Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
 # packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
@@ -22,7 +22,7 @@
 # Grafana has no inhibition, so each guard is in the expression: daemon-down ends with the
 # SYSTEM_PAUSE guard of the pg-connector rules; heartbeat-stale and doctor-mismatch carry
 # `and on() (max(up) == 1)` and read 0 while the daemon is not scraped, so they never page with
-# daemon-down; free-space is deliberately unguarded.
+# daemon-down.
 #
 # Shape notes (copied from packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml):
 # condition C over refIds A (the query), B (reduce, last), C (threshold); a Prometheus rule is
@@ -251,51 +251,6 @@ groups:
                 - evaluator:
                     type: gt
                     params: [259200]
-
-      # Free space, deliberately UNGUARDED (design: Signals added by the second review): it reads the
-      # free-bytes figure the node reports for the state directory and carries neither the up guard nor
-      # the SYSTEM_PAUSE guard, so a full disk pages whether or not the daemon is scraped. Value: 1 for the
-      # floor, 1 for the 24h slope, so any value above 0 fires. 21474836480 STANDS FOR the minFreeBytes
-      # default (20 GiB). noDataState Alerting: no free-space figure at all is itself alarming.
-      - uid: pg-ccrec-free-space
-        title: pg-claude-code-recorder state directory is low on space
-        condition: C
-        for: 5m
-        noDataState: Alerting
-        execErrState: Error
-        labels:
-          severity: critical
-        annotations:
-          summary: "pg-claude-code-recorder state directory is under its free-space floor or full within a day"
-          description: "The state directory free bytes (state_free_bytes, read from the filesystem of the node the recorder runs on) are under 20 GiB (the minFreeBytes default), or the 6-hour slope predicts it to be full within 24 hours. The recorder is in low-space mode and logs state_dir_low; if it cannot copy it pauses copying. Follow the runbook under Disk full in the recorder design (Operating it): free space or raise minFreeBytes, run pg-claude-code-recorder status, let it catch up. The literal 21474836480 stands for the minFreeBytes default of 20 GiB. This rule is deliberately unguarded (no up and no SYSTEM_PAUSE guard)."
-        data:
-          - refId: A
-            relativeTimeRange:
-              from: 600
-              to: 0
-            datasourceUid: prometheus
-            model:
-              refId: A
-              editorMode: code
-              instant: true
-              expr: "(min(pg_claude_code_recorder_state_free_bytes) < bool 21474836480) + (min(predict_linear(pg_claude_code_recorder_state_free_bytes[6h], 86400)) < bool 0)"
-          - refId: B
-            datasourceUid: __expr__
-            model:
-              refId: B
-              type: reduce
-              expression: A
-              reducer: last
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: B
-              conditions:
-                - evaluator:
-                    type: gt
-                    params: [0]
 
       # Unknown-key burst, design threshold: more than 100 new keys in an hour.
       - uid: pg-ccrec-unknown-key-burst

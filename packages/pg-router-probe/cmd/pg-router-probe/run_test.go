@@ -376,7 +376,6 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-ccrec-copy-lag",
 		"pg-ccrec-parse-stuck",
 		"pg-ccrec-held-old",
-		"pg-ccrec-free-space",
 		"pg-ccrec-unknown-key-burst",
 		"pg-ccrec-data-loss",
 		"pg-ccrec-removal-backlog",
@@ -1042,7 +1041,7 @@ const recorderRuleFile = "../../../pg-claude-code-recorder/grafana/alerting/aler
 // The recorder's rule uids (docket pg2-v77tsx, phase 7c) are registered exactly: the pg-ccrec-*
 // entries of registeredRuleUIDs equal the uids of the rule file, in the file's order. The file lives
 // in a sibling module, so a build that carries only this module (the nix go-tests sandbox) cannot see
-// it; the test then checks the list against its own pinned nineteen, and the flake check
+// it; the test then checks the list against its own pinned eighteen, and the flake check
 // test-pg-claude-code-recorder-signals-registration compares the real file with run.go.
 func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
 	var registered []string
@@ -1051,8 +1050,8 @@ func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
 			registered = append(registered, uid)
 		}
 	}
-	if len(registered) != 19 {
-		t.Fatalf("registered pg-ccrec uids = %d, want 19: %v", len(registered), registered)
+	if len(registered) != 18 {
+		t.Fatalf("registered pg-ccrec uids = %d, want 18: %v", len(registered), registered)
 	}
 	for _, uid := range registered {
 		if len(uid) > 40 {

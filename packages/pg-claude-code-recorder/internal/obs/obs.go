@@ -37,7 +37,6 @@ const (
 // Metric names exported by the serve composition and the listener.
 const (
 	MHeartbeat      = "last_sweep_timestamp_seconds"
-	MStateFreeBytes = "state_free_bytes"
 	MStateUsedBytes = "state_used_bytes"
 	MRequestsTotal  = "requests_total"
 	MQueryDuration  = "query_duration_seconds"
@@ -374,7 +373,7 @@ func (o *Obs) RegisterStandard() {
 		o.Reg.Add(MSkippedFiles, map[string]string{"reason": r}, 0)
 	}
 	for _, g := range []string{
-		MHeartbeat, MStateFreeBytes, MStateUsedBytes, MCopyLagBytes, MCopyLagSeconds,
+		MHeartbeat, MStateUsedBytes, MCopyLagBytes, MCopyLagSeconds,
 		MCopiedFiles, MBackfillFiles, MCaughtUp, MFeedWaiters,
 	} {
 		if _, ok := o.Reg.Gauge(g, nil); !ok {

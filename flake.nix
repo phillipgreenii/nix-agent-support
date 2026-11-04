@@ -7570,7 +7570,7 @@
               # pg-claude-code-recorder alert rules (docket pg2-v77tsx, phase 7c): the promtool
               # behaviour of each Prometheus rule through the pg-connector wrapping script (one
               # <uid>.test.yaml per rule, guards tested both ways: heartbeat-stale with up == 1 and
-              # with up == 0, free-space unguarded), then the crash-share PromQL against the shared
+              # with up == 0), then the crash-share PromQL against the shared
               # label table (client/testdata/labels.json) with a negative control (a mutated rule
               # must be rejected). Grafana-only fields are pinned by the structure check below.
               test-pg-claude-code-recorder-alert-rules =

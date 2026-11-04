@@ -394,9 +394,6 @@ func TestMetricsExporterAndGauges(t *testing.T) {
 	if v, ok := reg.Gauge(obs.MHeartbeat, nil); !ok || v <= 0 {
 		t.Fatalf("heartbeat %v", v)
 	}
-	if v, _ := reg.Gauge(obs.MStateFreeBytes, nil); v <= 0 {
-		t.Fatalf("free bytes %v", v)
-	}
 	if v, _ := reg.Gauge(obs.MStateUsedBytes, nil); v <= 0 {
 		t.Fatalf("used bytes %v", v)
 	}

@@ -13,11 +13,11 @@
 #       M* string constants of obs.go and parser.go, each once
 #   R2  the pg-ccrec-* entries of registeredRuleUIDs in run.go are exactly the rule uids of the
 #       rules file, in its order
-#   R3  the deleteRules twin lists exactly the rule uids
+#   R3  the deleteRules twin lists exactly the rule uids plus the retired uid pg-ccrec-free-space
 #   R4  every pg_claude_code_recorder_* token of a dashboard expression is catalogued, every
-#       expression parses under promtool, and the eight panels the design names plus the two schema v3 panels are present
-#   R5  the README documents remove.enable's readiness checklist only with the daemon-down and
-#       free-space alerts named, doctor staleness, a state directory backup, remove --dry-run and
+#       expression parses under promtool, and the seven panels the design names plus the two schema v3 panels are present
+#   R5  the README documents remove.enable's readiness checklist only with the daemon-down
+#       alert named, doctor staleness, a state directory backup, remove --dry-run and
 #       the "no undo other than extract" statement
 #
 # Exit codes: 0 clean, 2 usage error or unreadable input or missing tool, 3 a rule failed (1 is
@@ -66,8 +66,8 @@ check() {
     rule_fail "RULE-R2: the rule file uids and the pg-ccrec-* entries of registeredRuleUIDs differ"
   fi
   # R3
-  if [ "$(yq -o=json '.' "$deletes" | jq -r '.deleteRules[].uid' | sort)" != "$(printf '%s\n' "$fromFile" | sort)" ]; then
-    rule_fail "RULE-R3: the deleteRules twin does not list exactly the rule uids"
+  if [ "$(yq -o=json '.' "$deletes" | jq -r '.deleteRules[].uid' | sort)" != "$(printf '%s\n%s\n' "$fromFile" "pg-ccrec-free-space" | sort)" ]; then
+    rule_fail "RULE-R3: the deleteRules twin does not list exactly the rule uids plus the retired pg-ccrec-free-space"
   fi
   # R4
   local bad="" tok base exprs
@@ -92,13 +92,13 @@ check() {
   fi
   rm -rf "$tmp"
   local topic
-  for topic in "copy and parse lag" "conversations by stage" "held age" "dropped bytes by reason" "free space and its slope" "removal backlog" "processes without an inbox" "request rate by client" "field type mismatches" "unknown key growth"; do
+  for topic in "copy and parse lag" "conversations by stage" "held age" "dropped bytes by reason" "removal backlog" "processes without an inbox" "request rate by client" "field type mismatches" "unknown key growth"; do
     jq -e --arg t "$topic" '[.panels[].title | ascii_downcase | select(. == $t)] | length == 1' "$dash" >/dev/null ||
       rule_fail "RULE-R4: no panel titled '$topic'"
   done
   # R5
   local missing=""
-  for needle in "remove.enable" "daemon-down" "free-space" "no undo other than" "remove --dry-run" "doctor" "backed up"; do
+  for needle in "remove.enable" "daemon-down" "no undo other than" "remove --dry-run" "doctor" "backed up"; do
     grep -qi -- "$needle" "$readme" || missing="$missing [$needle]"
   done
   if [ -n "$missing" ]; then
