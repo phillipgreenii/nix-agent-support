@@ -400,7 +400,9 @@ keys `source_fetch.*` (see [`freshness.md`](freshness.md)). The liveness stamp i
 and never depends on the connector: when `pg-connector ledger show` is missing, slow or
 undecodable, `heartbeat` says so on stderr, keeps the previously recorded times, and still exits
 `0`. `pg-desk heartbeat-item` prints the single pr-pool item the `desk-heartbeat` query emits,
-carrying a timestamp id.
+carrying a timestamp id. The deployed `desk-heartbeat` query is a 60-second period trigger, so about one
+dispatch per minute (roughly 50 an hour while the daemon is up) is the intended cadence, not a fault; the
+period lives in the deployment module, not in `pg-desk`.
 
 Exit codes: `0` on success; `1` when the store cannot be written (`heartbeat`) or read
 (`heartbeat-item`).
