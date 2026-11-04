@@ -218,6 +218,8 @@ let
           "claude-projects"
           "pg2-scratch-caches"
           "library-caches"
+          "pg-ccaudit-index"
+          "ceta-asks-db"
         ]
         && ids noGrowersC == [ ];
     }
@@ -236,7 +238,21 @@ let
         levels defaultC "claude-projects" == [ 4 ]
         && levels defaultC "pg2-scratch-caches" == [ 2 ]
         && levels defaultC "library-caches" == [ 2 ]
-        && levels defaultC "pg-claude-code-recorder-store" == [ 3 ];
+        && levels defaultC "pg-claude-code-recorder-store" == [ 3 ]
+        && levels defaultC "pg-ccaudit-index" == [ 4 ]
+        && levels defaultC "ceta-asks-db" == [ 4 ];
+    }
+    {
+      name = "the pg-ccaudit and CETA items prune to 90 days and only delete on their own commands";
+      ok =
+        let
+          ccaudit = lib.head (item defaultC "pg-ccaudit-index").variants;
+          ceta = lib.head (item defaultC "ceta-asks-db").variants;
+        in
+        ccaudit.dryRunCommand == "pg-ccaudit prune --days 90"
+        && ccaudit.removeCommand == "pg-ccaudit prune --days 90 --yes"
+        && has "archive --days 90 --dry-run" ceta.dryRunCommand
+        && has "archive --days 90 --yes --fixtures-out" ceta.removeCommand;
     }
     {
       name = "every grower removal has an age cutoff";

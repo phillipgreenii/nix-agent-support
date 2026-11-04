@@ -33,6 +33,7 @@ COMMANDS
   query       run a named, versioned canned query (read-only)
   queries     list the canned queries
   schema      print the database DDL
+  prune       drop indexed history older than a retention window (dry run unless --yes)
   version     print the version
 
 MISTAKE CENSUS (read-only; the three tiers, in order)
@@ -131,6 +132,8 @@ func run(ctx context.Context, args []string, stdout, stderr *os.File) error {
 		return cmdReport(ctx, args[1:], stdout, stderr)
 	case "gold":
 		return cmdGold(ctx, args[1:], stdout, stderr)
+	case "prune":
+		return cmdPrune(ctx, args[1:], stdout, stderr)
 	case "cost":
 		return cmdCost(ctx, args[1:], stdout, stderr)
 	case "version", "--version", "-V":

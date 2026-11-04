@@ -69,6 +69,62 @@ let
       ];
     }
     {
+      id = "pg-ccaudit-index";
+      description = "pg-ccaudit index: files whose newest event is older than 90 days";
+      path = "~/.local/share/pg-ccaudit";
+      displayCommand = "du -sh ~/.local/share/pg-ccaudit";
+      displayTimeoutSeconds = 300;
+      sizeCommand = "du -sk ~/.local/share/pg-ccaudit/transcripts.db* 2>/dev/null | awk '{s+=$1} END {print s+0}'";
+      sizeKind = "upper_bound";
+      sizeMethod = "du-whole-db";
+      sizeBasis = "du -sk over transcripts.db and its WAL/SHM files (the gold set and lock file are excluded); the prune keeps every file whose newest event is within 90 days, so it frees at most this much.";
+      variants = [
+        {
+          # Level 4 (costly or irreversible): pruned rows are gone from the index.
+          # The index is fed by the recorder's change feed with a cursor kept in the
+          # index, so removed history is not re-read, and a recorder resync could only
+          # restore what the recorder itself still holds. Retention window: 90 days,
+          # the widest look-back of the analysis skills (improvement-retro,
+          # tool-error-waste-review) plus about a quarter of margin; see
+          # docs/retention.md in packages/pg-ccaudit. VACUUM needs free space about the
+          # size of the database, so this is not a low-disk-space emergency tool and
+          # is never part of the scheduled run (levels 1 to 3 only).
+          aggressiveness = 4;
+          variantDescription = "pg-ccaudit prune: drop indexed files whose newest event is older than 90 days, then VACUUM (no undo)";
+          dryRunCommand = "pg-ccaudit prune --days 90";
+          removeCommand = "pg-ccaudit prune --days 90 --yes";
+        }
+      ];
+    }
+    {
+      id = "ceta-asks-db";
+      description = "claude-extended-tool-approver decision log: rows older than 90 days, sampled into fixtures first";
+      path = "~/.local/share/claude-extended-tool-approver";
+      displayCommand = "du -sh ~/.local/share/claude-extended-tool-approver";
+      displayTimeoutSeconds = 300;
+      sizeCommand = "du -sk ~/.local/share/claude-extended-tool-approver/asks.db* 2>/dev/null | awk '{s+=$1} END {print s+0}'";
+      sizeKind = "upper_bound";
+      sizeMethod = "du-whole-db";
+      sizeBasis = "du -sk over asks.db and its WAL/SHM files (the backups directory is excluded); archive keeps every decision row newer than 90 days, so it frees at most this much.";
+      variants = [
+        {
+          # Level 4 (costly or irreversible): the archive command deletes the old
+          # decision rows for good; only a representative sample (every annotated
+          # miss and match, plus a spread per tool and outcome) survives in the
+          # fixtures file it writes first. Retention window: 90 days, enough
+          # history for identify-hook-misses and engine A/B replays, which work on
+          # recent behaviour, and annotated ground truth survives in the fixtures.
+          # VACUUM needs free space about the size of the database. Never part of
+          # the scheduled run (levels 1 to 3 only). See
+          # packages/claude-extended-tool-approver/docs/retention.md.
+          aggressiveness = 4;
+          variantDescription = "CETA archive: sample fixtures, delete decision rows older than 90 days, then VACUUM (no undo beyond the fixtures)";
+          dryRunCommand = "claude-extended-tool-approver archive --days 90 --dry-run";
+          removeCommand = "mkdir -p ~/.local/share/claude-extended-tool-approver/archive-fixtures && claude-extended-tool-approver archive --days 90 --yes --fixtures-out ~/.local/share/claude-extended-tool-approver/archive-fixtures/archive-$(date +%Y-%m-%d).json";
+        }
+      ];
+    }
+    {
       id = "pg2-scratch-caches";
       description = "~/.cache/pg2-*-scratch: per-bead scratch directories untouched for 7 days";
       path = "~/.cache";
@@ -133,8 +189,9 @@ in
       description = ''
         Contribute the registry items for the largest growers on the Data
         volume: the pg-claude-code-recorder store (through the recorder's own
-        retention command only), `~/.claude/projects`, `~/.cache/pg2-*-scratch`
-        and `~/Library/Caches`. Each has a size, a dry-run command and an age
+        retention command only), `~/.claude/projects`, the pg-ccaudit index and
+        the claude-extended-tool-approver decision log (each pruned to 90 days,
+        level 4), `~/.cache/pg2-*-scratch` and `~/Library/Caches`. Each has a size, a dry-run command and an age
         cutoff.
       '';
     };
