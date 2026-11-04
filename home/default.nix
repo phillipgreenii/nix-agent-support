@@ -57,6 +57,7 @@
     ./programs/build-tmp
     ./programs/claude-code-tmp
     ./programs/tmp-sweep
+    ./programs/host-forensics
     ./programs/wtnew
     ./programs/wtdone
     ./programs/wtaudit

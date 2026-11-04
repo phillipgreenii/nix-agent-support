@@ -11988,6 +11988,23 @@
                     touch $out
                   '';
 
+              # test-host-forensics-eval: home/default.nix imports the host-forensics module
+              # and, enabled, the module evaluates and registers its launchd agent
+              # (tests/host-forensics-eval.nix). Fails when the import is missing.
+              test-host-forensics-eval =
+                let
+                  r = import ./tests/host-forensics-eval.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "test-host-forensics-eval" { } (
+                  if r.failures == [ ] then
+                    "touch $out"
+                  else
+                    ''
+                      echo "host-forensics eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''
+                );
+
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
               # paths.defaults wiring actually evaluates and renders the
