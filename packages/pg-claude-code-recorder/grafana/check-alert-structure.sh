@@ -21,7 +21,8 @@
 #       OK for every other rule
 #   S6  every pg_claude_code_recorder_* token of an expression is a catalogued name (a histogram's
 #       _bucket/_sum/_count stripped first)
-#   S7  the guards: daemon-down ends with the SYSTEM_PAUSE guard and its description states the
+#   S7  the guards: daemon-down adds the SYSTEM_PAUSE gate to an `or vector(0)` value (never empty, so a
+#       pause cannot read as NoData-as-Alerting; no `unless`) and its description states the
 #       30s scrape interval; heartbeat-stale and doctor-mismatch carry `and on() (max(up{...}) == 1)`
 #       and `or vector(0)`; free-space carries neither an `up` selector nor SYSTEM_PAUSE
 #       (deliberately unguarded); control-inbox-gone selects only state="gone"; crash-share carries
@@ -143,7 +144,7 @@ check() {
   if ! printf '%s' "$j" | jq -e --arg up "$up" '
       def rule($n): .groups[].rules[] | select(.uid == "pg-ccrec-" + $n);
       def expr($n): [rule($n) | .data[] | select(.refId == "A") | .model.expr] | first;
-      (expr("daemon-down") | endswith("unless on() (pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1)"))
+      (expr("daemon-down") | endswith("+ on() (max(pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1) or vector(0))") and contains("or vector(0)) + on()") and (contains("unless") | not))
       and ([rule("daemon-down") | .annotations.description | test("scrape interval is 30s")] | first)
       and (expr("heartbeat-stale") | contains($up) and contains("or vector(0)"))
       and (expr("doctor-mismatch") | contains($up) and contains("or vector(0)"))
@@ -220,6 +221,8 @@ mutant RULE-S7 "free-space with an up guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-free-space") | .data[0].model.expr) += " and on() (max(up{job=\"pg-claude-code-recorder\"}) == 1)"'
 mutant RULE-S7 "heartbeat-stale without the up guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-heartbeat-stale") | .data[0].model.expr) = "(time() - max(pg_claude_code_recorder_last_sweep_timestamp_seconds))"'
+mutant RULE-S7 "daemon-down back on the empty-under-pause unless form" \
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"}) unless on() (pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1)"'
 mutant RULE-S8 "a twin uid that differs" \
   '.' '(.deleteRules[0].uid) = "pg-ccrec-other"'
 mutant RULE-S8 "a twin with a group" '.' '.groups = []'

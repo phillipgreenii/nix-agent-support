@@ -443,7 +443,7 @@ Alerts and their thresholds (the thresholds are the builder's calls; a literal t
 | `removal-stuck`      | the oldest quarantined file is over an hour old                                                         | warning  | OK       | `remove --dry-run`; the log       |
 | `settle-tick-slow`   | the last settle tick took over 60 s (the tick interval) for 15 minutes                                  | warning  | OK       | `status`; the log; pprof CPU      |
 
-Grafana has no inhibition, so each guard is in the expression: `daemon-down` carries the `SYSTEM_PAUSE` guard; `heartbeat-stale` and
+Grafana has no inhibition, so each guard is in the expression: `daemon-down` adds the `SYSTEM_PAUSE` gate to a value that is never empty (a pause cannot read as NoData); `heartbeat-stale` and
 `doctor-mismatch` read 0 while the daemon is not scraped (so `daemon-down` alone pages); `free-space` is deliberately unguarded and
 reads the free-bytes figure the node reports, so a full disk pages whether or not the daemon is scraped. A `doctor_last_run_timestamp`
 of 0 means doctor has not run yet (the daemon first runs it one `doctor.interval` after start): that is not stale, and the removal

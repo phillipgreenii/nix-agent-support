@@ -38,7 +38,11 @@ groups:
       # Daemon scraped. noDataState is Alerting (the pg-conn-github-daemon-down polarity): once the
       # daemon is deployed an absent up series means the scrape target is gone. The scrape interval is
       # 30s (darwin/modules/pg-claude-code-recorder metricsTargets), so for: 2m is four missed scrapes.
-      # Ends with the SYSTEM_PAUSE guard the pg-connector rules use.
+      # SYSTEM_PAUSE guard: the expression is never empty. A missing up series reads 0 (`or vector(0)`),
+      # and an active SYSTEM_PAUSE gate adds 1 (`+ on() (max(gate == 1) or vector(0))`), lifting the
+      # value to 1 or more so the threshold (below 1) does not fire. The earlier `unless on()` form
+      # returned an EMPTY result under a pause, which Grafana mapped to Alerting through
+      # noDataState, paging a live daemon. Cases: rule-tests/pg-ccrec-daemon-down.test.yaml.
       - uid: pg-ccrec-daemon-down
         title: pg-claude-code-recorder daemon is down
         condition: C
@@ -60,7 +64,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'min(up{job="pg-claude-code-recorder"}) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '(min(up{job="pg-claude-code-recorder"}) or vector(0)) + on() (max(pg_router_gates_active{type="SYSTEM_PAUSE"} == 1) or vector(0))'
           - refId: B
             datasourceUid: __expr__
             model:

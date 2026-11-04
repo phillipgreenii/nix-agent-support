@@ -80,7 +80,52 @@ tests:
           - exp_labels:
               severity: critical
 
-  - name: an absent up series gives no sample and no Prometheus alert (Grafana pages via noDataState Alerting)
+  # The pause case of the expression: a live daemon under a SYSTEM_PAUSE gate must not read as
+  # NoData (Grafana maps an empty result to Alerting through noDataState).
+  - name: daemon up and a SYSTEM_PAUSE gate active gives a sample (not empty) and does not fire
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "1x30"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE"}
+        values: "1x30"
+    promql_expr_test:
+      - expr: count(wrapped:pg_ccrec_daemon_down)
+        eval_time: 10m
+        exp_samples: []
+      - expr: (min(up{job="pg-claude-code-recorder"}) or vector(0)) + on() (max(pg_router_gates_active{type="SYSTEM_PAUSE"} == 1) or vector(0))
+        eval_time: 10m
+        exp_samples:
+          - labels: "{}"
+            value: 2
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []
+
+  - name: daemon up and no gate series does not fire
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts: []
+
+  - name: daemon down (up of 0) and no gate series still fires
+    interval: 1m
+    input_series:
+      - series: up{job="pg-claude-code-recorder",instance="127.0.0.1:49320"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: up series gone (another series present) and no gate fires (the expression reads 0, not empty)
     interval: 1m
     input_series:
       - series: pg_claude_code_recorder_caught_up{job="x"}
@@ -88,7 +133,23 @@ tests:
     promql_expr_test:
       - expr: count(wrapped:pg_ccrec_daemon_down)
         eval_time: 10m
-        exp_samples: []
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-ccrec-daemon-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: up series gone under an active SYSTEM_PAUSE gate does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="x"}
+        values: "1x30"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE"}
+        values: "1x30"
     alert_rule_test:
       - eval_time: 10m
         alertname: pg-ccrec-daemon-down
