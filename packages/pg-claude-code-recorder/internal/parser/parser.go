@@ -748,12 +748,16 @@ type UnknownKey struct {
 
 // Summarize reads the bad-line count and the unknown keys (once per distinct
 // key per source and record type, summed over files).
-func Summarize(st *store.Store) (Summary, error) {
+func Summarize(st *store.Store) (Summary, error) { return SummarizeFrom(&st.Reader) }
+
+// SummarizeFrom is Summarize over a Reader, so a caller holding one read
+// transaction takes both queries from its snapshot.
+func SummarizeFrom(rd *store.Reader) (Summary, error) {
 	var s Summary
-	if err := st.Read().QueryRow(`SELECT COUNT(*) FROM bad_lines`).Scan(&s.BadLines); err != nil {
+	if err := rd.Q().QueryRow(`SELECT COUNT(*) FROM bad_lines`).Scan(&s.BadLines); err != nil {
 		return s, err
 	}
-	rows, err := st.Read().Query(`SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path ORDER BY source,rtype,path`)
+	rows, err := rd.Q().Query(`SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path ORDER BY source,rtype,path`)
 	if err != nil {
 		return s, err
 	}

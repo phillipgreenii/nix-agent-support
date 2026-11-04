@@ -109,6 +109,18 @@ const (
 	MWALBytes          = "wal_bytes"
 )
 
+// Metric names of the database/sql connection pools (label pool: read or
+// write). The wait figures say how long callers queued for a connection.
+const (
+	MDBOpenConns         = "db_open_connections"
+	MDBInUseConns        = "db_in_use_connections"
+	MDBIdleConns         = "db_idle_connections"
+	MDBWaitCount         = "db_wait_total"
+	MDBWaitSeconds       = "db_wait_seconds_total"
+	MDBMaxLifetimeClosed = "db_max_lifetime_closed_total"
+	MDBMaxIdleClosed     = "db_max_idle_closed_total"
+)
+
 // Metric names of the passive WAL checkpoint loop. wal_frames and
 // wal_checkpointed_frames are in WAL pages (not bytes), as of the last passive
 // checkpoint, and are cumulative until the WAL restarts.

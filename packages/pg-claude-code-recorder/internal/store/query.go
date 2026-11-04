@@ -67,8 +67,8 @@ func scanFile(sc interface{ Scan(...any) error }) (File, error) {
 }
 
 // File returns the file with the given id.
-func (s *Store) File(id int64) (File, error) {
-	f, err := scanFile(s.rdb.QueryRow(`SELECT `+fileCols+` FROM files WHERE id=?`, id))
+func (s *Reader) File(id int64) (File, error) {
+	f, err := scanFile(s.q.QueryRow(`SELECT `+fileCols+` FROM files WHERE id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return File{}, ErrNotFound
 	}
@@ -77,22 +77,22 @@ func (s *Store) File(id int64) (File, error) {
 
 // FilesByIdentity returns the files with the given device and inode, newest
 // first. The caller applies the birth-time and first-bytes rules.
-func (s *Store) FilesByIdentity(dev, ino uint64) ([]File, error) {
+func (s *Reader) FilesByIdentity(dev, ino uint64) ([]File, error) {
 	return s.files(`SELECT `+fileCols+` FROM files WHERE dev=? AND ino=? ORDER BY id DESC`, int64(dev), int64(ino))
 }
 
 // FilesByCurrentPath returns the files whose current path is path.
-func (s *Store) FilesByCurrentPath(path string) ([]File, error) {
+func (s *Reader) FilesByCurrentPath(path string) ([]File, error) {
 	return s.files(`SELECT `+fileCols+` FROM files WHERE id IN (SELECT file_id FROM paths WHERE path=? AND closed_ns IS NULL) ORDER BY id DESC`, path)
 }
 
 // AllFiles returns every file ordered by id.
-func (s *Store) AllFiles() ([]File, error) {
+func (s *Reader) AllFiles() ([]File, error) {
 	return s.files(`SELECT ` + fileCols + ` FROM files ORDER BY id`)
 }
 
-func (s *Store) files(q string, args ...any) ([]File, error) {
-	rows, err := s.rdb.Query(q, args...)
+func (s *Reader) files(q string, args ...any) ([]File, error) {
+	rows, err := s.q.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -109,14 +109,14 @@ func (s *Store) files(q string, args ...any) ([]File, error) {
 }
 
 // CurrentPaths returns the paths that currently name the file.
-func (s *Store) CurrentPaths(file int64) ([]string, error) {
+func (s *Reader) CurrentPaths(file int64) ([]string, error) {
 	return s.strings(`SELECT path FROM paths WHERE file_id=? AND closed_ns IS NULL ORDER BY path`, file)
 }
 
 // AllCurrentPaths returns the current paths of every file in one query, each
 // file's paths ordered by path.
-func (s *Store) AllCurrentPaths() (map[int64][]string, error) {
-	rows, err := s.rdb.Query(`SELECT file_id,path FROM paths WHERE closed_ns IS NULL ORDER BY file_id,path`)
+func (s *Reader) AllCurrentPaths() (map[int64][]string, error) {
+	rows, err := s.q.Query(`SELECT file_id,path FROM paths WHERE closed_ns IS NULL ORDER BY file_id,path`)
 	if err != nil {
 		return nil, err
 	}
@@ -134,12 +134,12 @@ func (s *Store) AllCurrentPaths() (map[int64][]string, error) {
 }
 
 // PathHistory returns every path the file ever had, in first-seen order.
-func (s *Store) PathHistory(file int64) ([]string, error) {
+func (s *Reader) PathHistory(file int64) ([]string, error) {
 	return s.strings(`SELECT path FROM paths WHERE file_id=? ORDER BY first_seen_ns, path`, file)
 }
 
-func (s *Store) strings(q string, args ...any) ([]string, error) {
-	rows, err := s.rdb.Query(q, args...)
+func (s *Reader) strings(q string, args ...any) ([]string, error) {
+	rows, err := s.q.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -166,8 +166,8 @@ func scanGen(sc interface{ Scan(...any) error }) (Generation, error) {
 }
 
 // Generation returns one generation.
-func (s *Store) Generation(file int64, gen int) (Generation, error) {
-	g, err := scanGen(s.rdb.QueryRow(`SELECT `+genCols+` FROM generations WHERE file_id=? AND gen=?`, file, gen))
+func (s *Reader) Generation(file int64, gen int) (Generation, error) {
+	g, err := scanGen(s.q.QueryRow(`SELECT `+genCols+` FROM generations WHERE file_id=? AND gen=?`, file, gen))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Generation{}, ErrNotFound
 	}
@@ -175,8 +175,8 @@ func (s *Store) Generation(file int64, gen int) (Generation, error) {
 }
 
 // Generations returns every generation of a file in order.
-func (s *Store) Generations(file int64) ([]Generation, error) {
-	rows, err := s.rdb.Query(`SELECT `+genCols+` FROM generations WHERE file_id=? ORDER BY gen`, file)
+func (s *Reader) Generations(file int64) ([]Generation, error) {
+	rows, err := s.q.Query(`SELECT `+genCols+` FROM generations WHERE file_id=? ORDER BY gen`, file)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +193,8 @@ func (s *Store) Generations(file int64) ([]Generation, error) {
 }
 
 // AllGenerations returns every generation of every file.
-func (s *Store) AllGenerations() ([]Generation, error) {
-	rows, err := s.rdb.Query(`SELECT ` + genCols + ` FROM generations ORDER BY file_id, gen`)
+func (s *Reader) AllGenerations() ([]Generation, error) {
+	rows, err := s.q.Query(`SELECT ` + genCols + ` FROM generations ORDER BY file_id, gen`)
 	if err != nil {
 		return nil, err
 	}
@@ -226,10 +226,10 @@ func (s *Store) SetParseOffset(file int64, gen int, off int64) error {
 }
 
 // LatestSnapshot returns the newest stored snapshot version of a file.
-func (s *Store) LatestSnapshot(file int64) (Snapshot, error) {
+func (s *Reader) LatestSnapshot(file int64) (Snapshot, error) {
 	var sn Snapshot
 	var h int64
-	err := s.rdb.QueryRow(`SELECT version,hash,size,seen_ns FROM snapshots WHERE file_id=? ORDER BY version DESC LIMIT 1`, file).Scan(&sn.Version, &h, &sn.Size, &sn.SeenNS)
+	err := s.q.QueryRow(`SELECT version,hash,size,seen_ns FROM snapshots WHERE file_id=? ORDER BY version DESC LIMIT 1`, file).Scan(&sn.Version, &h, &sn.Size, &sn.SeenNS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Snapshot{}, ErrNotFound
 	}
@@ -238,8 +238,8 @@ func (s *Store) LatestSnapshot(file int64) (Snapshot, error) {
 }
 
 // Snapshots returns every stored version of a file.
-func (s *Store) Snapshots(file int64) ([]Snapshot, error) {
-	rows, err := s.rdb.Query(`SELECT version,hash,size,seen_ns FROM snapshots WHERE file_id=? ORDER BY version`, file)
+func (s *Reader) Snapshots(file int64) ([]Snapshot, error) {
+	rows, err := s.q.Query(`SELECT version,hash,size,seen_ns FROM snapshots WHERE file_id=? ORDER BY version`, file)
 	if err != nil {
 		return nil, err
 	}
@@ -258,8 +258,8 @@ func (s *Store) Snapshots(file int64) ([]Snapshot, error) {
 }
 
 // Tombstones returns the deletion times of a file.
-func (s *Store) Tombstones(file int64) ([]int64, error) {
-	rows, err := s.rdb.Query(`SELECT at_ns FROM tombstones WHERE file_id=? ORDER BY at_ns`, file)
+func (s *Reader) Tombstones(file int64) ([]int64, error) {
+	rows, err := s.q.Query(`SELECT at_ns FROM tombstones WHERE file_id=? ORDER BY at_ns`, file)
 	if err != nil {
 		return nil, err
 	}
@@ -284,8 +284,8 @@ type CopyCommit struct {
 }
 
 // CopyCommits returns the per-commit seen-times of a file.
-func (s *Store) CopyCommits(file int64) ([]CopyCommit, error) {
-	rows, err := s.rdb.Query(`SELECT gen,seq,from_off,to_off,seen_ns FROM commits WHERE file_id=? ORDER BY seq`, file)
+func (s *Reader) CopyCommits(file int64) ([]CopyCommit, error) {
+	rows, err := s.q.Query(`SELECT gen,seq,from_off,to_off,seen_ns FROM commits WHERE file_id=? ORDER BY seq`, file)
 	if err != nil {
 		return nil, err
 	}
@@ -303,12 +303,12 @@ func (s *Store) CopyCommits(file int64) ([]CopyCommit, error) {
 
 // Resets returns the reset entries; pinnedOnly keeps those clients behind have
 // not advanced past. The retention floor MUST NOT prune a pinned reset.
-func (s *Store) Resets(pinnedOnly bool) ([]Reset, error) {
+func (s *Reader) Resets(pinnedOnly bool) ([]Reset, error) {
 	q := `SELECT id,file_id,from_gen,to_gen,reason,at_ns,pinned FROM resets`
 	if pinnedOnly {
 		q += ` WHERE pinned=1`
 	}
-	rows, err := s.rdb.Query(q + ` ORDER BY id`)
+	rows, err := s.q.Query(q + ` ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -351,11 +351,11 @@ func (s *Store) StartGeneration(file int64, reason, method string, atNS int64) (
 }
 
 // CountObservations returns row counts used by tests and status.
-func (s *Store) CountObservations() (map[string]int, error) {
+func (s *Reader) CountObservations() (map[string]int, error) {
 	out := map[string]int{}
 	for _, t := range []string{"files", "paths", "generations", "commits", "snapshots", "tombstones", "resets"} {
 		var n int
-		if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM ` + t).Scan(&n); err != nil {
+		if err := s.q.QueryRow(`SELECT COUNT(*) FROM ` + t).Scan(&n); err != nil {
 			return nil, err
 		}
 		out[t] = n
@@ -365,7 +365,7 @@ func (s *Store) CountObservations() (map[string]int, error) {
 
 // Dump renders every observation deterministically (parse offsets, a derived
 // column, are excluded). The invariants helper compares it with ReplayDump.
-func (s *Store) Dump() (string, error) {
+func (s *Reader) Dump() (string, error) {
 	var b strings.Builder
 	tables := []struct{ name, q string }{
 		{"meta", `SELECT key||'='||value FROM meta WHERE key IN ('epoch','schema_version') ORDER BY key`},
@@ -378,7 +378,7 @@ func (s *Store) Dump() (string, error) {
 		{"resets", `SELECT id||'|'||file_id||'|'||from_gen||'|'||to_gen||'|'||reason||'|'||at_ns||'|'||pinned FROM resets ORDER BY id`},
 	}
 	for _, t := range tables {
-		rows, err := s.rdb.Query(t.q)
+		rows, err := s.q.Query(t.q)
 		if err != nil {
 			return "", err
 		}
@@ -424,8 +424,8 @@ func ReplayDump(journalPath string) (string, error) {
 // SnapshotFileByPathHistory returns the newest snapshot file that ever had
 // path (a snapshot source is keyed by path, so a deleted path that comes back
 // continues the same file).
-func (s *Store) SnapshotFileByPathHistory(path string) (File, error) {
-	f, err := scanFile(s.rdb.QueryRow(`SELECT `+fileCols+` FROM files WHERE mode='snapshot' AND id IN (SELECT file_id FROM paths WHERE path=?) ORDER BY id DESC LIMIT 1`, path))
+func (s *Reader) SnapshotFileByPathHistory(path string) (File, error) {
+	f, err := scanFile(s.q.QueryRow(`SELECT `+fileCols+` FROM files WHERE mode='snapshot' AND id IN (SELECT file_id FROM paths WHERE path=?) ORDER BY id DESC LIMIT 1`, path))
 	if errors.Is(err, sql.ErrNoRows) {
 		return File{}, ErrNotFound
 	}
@@ -435,9 +435,9 @@ func (s *Store) SnapshotFileByPathHistory(path string) (File, error) {
 // AllPaths returns, for every file, its current paths and (when it has none)
 // every path it ever had, in one query pair; the settle stage groups files into
 // Conversations with it.
-func (s *Store) AllPaths() (map[int64][]string, error) {
+func (s *Reader) AllPaths() (map[int64][]string, error) {
 	out := map[int64][]string{}
-	rows, err := s.rdb.Query(`SELECT file_id, path, closed_ns IS NULL FROM paths ORDER BY file_id, first_seen_ns, path`)
+	rows, err := s.q.Query(`SELECT file_id, path, closed_ns IS NULL FROM paths ORDER BY file_id, first_seen_ns, path`)
 	if err != nil {
 		return nil, err
 	}

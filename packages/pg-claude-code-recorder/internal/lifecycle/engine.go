@@ -113,11 +113,23 @@ const endReasonQuery = `SELECT r.session, f.s FROM records r JOIN fields f ON f.
 WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`
 
 func (e *Engine) load() (*model, error) {
+	// One read transaction: the registry, history, end reasons, stages and
+	// processes are read under one lock round trip and from one snapshot.
+	var m *model
+	err := e.St.ReadTx(func(rd *store.Reader) error {
+		var e2 error
+		m, e2 = e.loadFrom(rd)
+		return e2
+	})
+	return m, err
+}
+
+func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
 	m := &model{
 		vers: map[pkey][]regRow{}, segs: map[string][]seg{}, deleted: map[pkey]int64{}, procs: map[pkey]store.Proc{},
 		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
 	}
-	db := e.St.Read()
+	db := rd.Q()
 	rows, err := db.Query(registryQuery)
 	if err != nil {
 		return nil, err
@@ -218,14 +230,14 @@ func (e *Engine) load() (*model, error) {
 	if err := erows.Close(); err != nil {
 		return nil, err
 	}
-	srows, err := e.St.Stages()
+	srows, err := rd.Stages()
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range srows {
 		m.stages[r.Session] = r.Stage
 	}
-	ps, err := e.St.Procs()
+	ps, err := rd.Procs()
 	if err != nil {
 		return nil, err
 	}

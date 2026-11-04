@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -15,11 +16,43 @@ const DefaultReadTimeout = 30 * time.Second
 
 // Read-pool connection recycling. A pool lifetime alone cannot unpin a WAL
 // (database/sql never closes a connection in use); the deadline does that.
-// These only retire idle connections so none lives forever.
+// These only retire idle connections so none lives forever. A connection that
+// is closed throws its page cache away, and against a file of tens of
+// gigabytes every fresh connection starts cold, so the bounds are long: a
+// connection is replaced rarely (and only when idle), and the pool keeps a few
+// idle ones so a burst of concurrent readers does not close and re-open them.
 const (
-	readConnMaxLifetime = 10 * time.Minute
-	readConnMaxIdleTime = time.Minute
+	readConnMaxLifetime = 6 * time.Hour
+	readConnMaxIdleTime = 30 * time.Minute
+	readMaxIdleConns    = 4
 )
+
+// Read connection memory. Both are ceilings per connection: SQLite fills the
+// page cache lazily, and mapped pages are shared file cache the kernel evicts.
+const (
+	// DefaultReadCacheKiB is the default cache_size of a read connection: 64 MiB
+	// (the driver default is about 2 MiB).
+	DefaultReadCacheKiB = 64 * 1024
+	// DefaultReadMmapBytes is the default mmap_size ceiling of a read connection.
+	DefaultReadMmapBytes = int64(512) << 20
+)
+
+// readPragmas is the DSN tail of a read connection: read only, a larger page
+// cache and a bounded memory map.
+func (s *Store) readPragmas() string {
+	kib := s.readCacheKiB
+	if kib <= 0 {
+		kib = DefaultReadCacheKiB
+	}
+	mm := s.readMmap
+	if mm == 0 {
+		mm = DefaultReadMmapBytes
+	}
+	if mm < 0 {
+		mm = 0
+	}
+	return "&_pragma=query_only(1)&_pragma=cache_size(-" + strconv.Itoa(kib) + ")&_pragma=mmap_size(" + strconv.FormatInt(mm, 10) + ")"
+}
 
 // deadlineConnector opens read-pool connections whose every statement, and
 // every transaction as a whole, ends at a deadline: a reader cannot pin the

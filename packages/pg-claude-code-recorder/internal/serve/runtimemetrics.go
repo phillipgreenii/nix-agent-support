@@ -1,12 +1,14 @@
 package serve
 
 import (
+	"database/sql"
 	"os"
 	"runtime/debug"
 	"runtime/metrics"
 	"syscall"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
 // Runtime samples are read through one pre-built slice: metrics.Read does not
@@ -49,4 +51,19 @@ func collectRuntimeMetrics(reg *obs.Registry, walPath string) {
 		wal = float64(fi.Size())
 	}
 	reg.Set(obs.MWALBytes, nil, wal)
+}
+
+// collectPoolMetrics records the database/sql statistics of the read and write
+// pools. The figures are in-memory counters: it issues no query.
+func collectPoolMetrics(reg *obs.Registry, ps store.PoolStats) {
+	for pool, st := range map[string]sql.DBStats{"read": ps.Read, "write": ps.Write} {
+		l := map[string]string{"pool": pool}
+		reg.Set(obs.MDBOpenConns, l, float64(st.OpenConnections))
+		reg.Set(obs.MDBInUseConns, l, float64(st.InUse))
+		reg.Set(obs.MDBIdleConns, l, float64(st.Idle))
+		reg.SetCounter(obs.MDBWaitCount, l, float64(st.WaitCount))
+		reg.SetCounter(obs.MDBWaitSeconds, l, st.WaitDuration.Seconds())
+		reg.SetCounter(obs.MDBMaxLifetimeClosed, l, float64(st.MaxLifetimeClosed))
+		reg.SetCounter(obs.MDBMaxIdleClosed, l, float64(st.MaxIdleClosed+st.MaxIdleTimeClosed))
+	}
 }

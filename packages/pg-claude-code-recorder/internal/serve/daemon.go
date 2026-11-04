@@ -55,6 +55,9 @@ type Options struct {
 	BulkRebuild bool
 	// Procs is the process table (the ProcessTable seam; the real one when nil).
 	Procs proc.System
+	// StoreDriver is the database/sql driver name of the store (tests register a
+	// counting wrapper); empty means the SQLite driver.
+	StoreDriver string
 }
 
 // Daemon is the composed recorder.
@@ -119,7 +122,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, ReadTimeout: cfg.QueryTimeout})
+	st, err := store.Open(cfg.StateDir, store.Options{Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB)})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -500,6 +503,9 @@ func (d *Daemon) refreshLoop() {
 // come from refreshGauges, which the refresh loop runs every 5 seconds.
 func (d *Daemon) scrapeRefresh() {
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
+	if d.st != nil {
+		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
+	}
 }
 
 // refreshGauges sets the heartbeat (the watcher's last successful sweep) and the
@@ -512,6 +518,9 @@ func (d *Daemon) refreshGauges() {
 		d.obs.Reg.Add(obs.MLoopRuns, map[string]string{"loop": obs.LoopRefreshGauges, "outcome": obs.OutcomeOK}, 1)
 	}()
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
+	if d.st != nil {
+		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
+	}
 	d.prs.UpdateGauges()
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)
@@ -574,4 +583,13 @@ func realPath(p string) string {
 		return r
 	}
 	return p
+}
+
+// readMmapBytes converts the configured memory-map ceiling (MiB) to the store
+// option: 0 MiB disables mapping, which the store spells as a negative size.
+func readMmapBytes(mib int) int64 {
+	if mib <= 0 {
+		return -1
+	}
+	return int64(mib) << 20
 }

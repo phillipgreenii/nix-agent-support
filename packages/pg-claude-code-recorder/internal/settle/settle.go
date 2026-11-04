@@ -333,12 +333,7 @@ func (s *Settler) Tick() (TickStats, error) {
 		return stats, err
 	}
 	stats.Examined = len(groups)
-	before := map[string]string{}
-	if rows, err := s.st.Stages(); err == nil {
-		for _, r := range rows {
-			before[r.Session] = r.Stage
-		}
-	}
+	before, unchanged := s.settledPrefilter(groups, live)
 	sessions := make([]string, 0, len(groups))
 	for k := range groups {
 		sessions = append(sessions, k)
@@ -346,6 +341,12 @@ func (s *Settler) Tick() (TickStats, error) {
 	sort.Strings(sessions)
 	var first error
 	for _, session := range sessions {
+		if unchanged[session] {
+			// Already settled, no live process, nothing written since: what
+			// evaluate would answer, without its per-Conversation reads.
+			stats.add(Outcome{Session: session, Stage: StageSettled, Skipped: "settled"}, before[session])
+			continue
+		}
 		out, err := s.evaluate(groups[session], live[session], now, false)
 		if err != nil && first == nil {
 			first = fmt.Errorf("settle %s: %w", session, err)
@@ -363,6 +364,46 @@ func (s *Settler) Tick() (TickStats, error) {
 	// A persisted stage whose Conversation has no files any more is dropped from view.
 	s.refresh(groups, live, now)
 	return stats, first
+}
+
+// settledPrefilter reads the persisted stages and, for every settled
+// Conversation without a live process, whether it changed since its settle, all
+// inside ONE read transaction (one lock round trip and one snapshot, instead of
+// a transaction per statement for each of thousands of Conversations). The
+// unchanged set is exactly the Conversations evaluate would skip as "settled";
+// every other Conversation still goes through evaluate, so the stage machine is
+// untouched. When the transaction cannot complete the unchanged set is empty
+// and the pass falls back to evaluating every Conversation.
+func (s *Settler) settledPrefilter(groups map[string]*conv, live map[string]bool) (before map[string]string, unchanged map[string]bool) {
+	before, unchanged = map[string]string{}, map[string]bool{}
+	err := s.st.ReadTx(func(rd *store.Reader) error {
+		rows, err := rd.Stages()
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			before[r.Session] = r.Stage
+		}
+		for session, c := range groups {
+			if live[session] || before[session] != StageSettled {
+				continue
+			}
+			if !changedSinceSettleFrom(rd, c) {
+				unchanged[session] = true
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		unchanged = map[string]bool{}
+		before = map[string]string{}
+		if rows, err := s.st.Stages(); err == nil {
+			for _, r := range rows {
+				before[r.Session] = r.Stage
+			}
+		}
+	}
+	return before, unchanged
 }
 
 // add folds one evaluation Outcome into the stats. prior is the persisted
@@ -591,7 +632,13 @@ func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outco
 // changedSinceSettle reports whether any file of the Conversation has bytes the
 // settled manifest does not describe (a write after the settle, or a new file).
 func (s *Settler) changedSinceSettle(c *conv) bool {
-	st, ok, err := s.st.SettledOf(c.session)
+	return changedSinceSettleFrom(&s.st.Reader, c)
+}
+
+// changedSinceSettleFrom is changedSinceSettle over a Reader, so a pass can
+// ask for every Conversation inside one read transaction.
+func changedSinceSettleFrom(rd *store.Reader, c *conv) bool {
+	st, ok, err := rd.SettledOf(c.session)
 	if err != nil || !ok {
 		return false
 	}
@@ -620,7 +667,7 @@ func (s *Settler) changedSinceSettle(c *conv) bool {
 		// One primary-key read per file: the work is bounded by this
 		// Conversation, not by the size of the generations table.
 		var off int64
-		g, err := s.st.Generation(f.ID, f.CurGen)
+		g, err := rd.Generation(f.ID, f.CurGen)
 		switch {
 		case err == nil:
 			off = g.CopyOffset

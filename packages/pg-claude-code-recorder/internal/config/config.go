@@ -43,6 +43,10 @@ type Config struct {
 	WaitMax       time.Duration
 	WaitMaxWaiter int
 	QueryTimeout  time.Duration // deadline of every read (query.timeout)
+	// ReadCacheMiB and ReadMmapMiB bound the memory of each read connection:
+	// the SQLite page cache and the memory map (0 maps nothing).
+	ReadCacheMiB  int
+	ReadMmapMiB   int
 	FeedRetention time.Duration
 	RemoveAfter   time.Duration
 	RemoveEnable  bool
@@ -101,7 +105,9 @@ type file struct {
 		MaxWaiters *int   `toml:"maxWaiters"`
 	} `toml:"wait"`
 	Query struct {
-		Timeout string `toml:"timeout"`
+		Timeout      string `toml:"timeout"`
+		ReadCacheMiB *int   `toml:"readCacheMiB"`
+		ReadMmapMiB  *int   `toml:"readMmapMiB"`
 	} `toml:"query"`
 	Feed struct {
 		Retention string `toml:"retention"`
@@ -206,6 +212,8 @@ func Defaults(getenv func(string) string) Config {
 		WaitMax:           60 * time.Second,
 		WaitMaxWaiter:     256,
 		QueryTimeout:      30 * time.Second,
+		ReadCacheMiB:      64,
+		ReadMmapMiB:       512,
 		FeedRetention:     14 * 24 * time.Hour,
 		RemoveAfter:       30 * 24 * time.Hour,
 		RemoveMaxPerRun:   50,
@@ -298,6 +306,18 @@ func apply(c *Config, f file) error {
 			return fmt.Errorf("format.holdRate must be between 0 and 1")
 		}
 		c.FormatHoldRate = *f.Format.HoldRate
+	}
+	if f.Query.ReadCacheMiB != nil {
+		if *f.Query.ReadCacheMiB < 1 {
+			return fmt.Errorf("query.readCacheMiB must be at least 1")
+		}
+		c.ReadCacheMiB = *f.Query.ReadCacheMiB
+	}
+	if f.Query.ReadMmapMiB != nil {
+		if *f.Query.ReadMmapMiB < 0 {
+			return fmt.Errorf("query.readMmapMiB must not be negative")
+		}
+		c.ReadMmapMiB = *f.Query.ReadMmapMiB
 	}
 	c.MetricsAddr = f.Metrics.Addr
 	for _, d := range []struct {

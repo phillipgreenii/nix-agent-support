@@ -69,6 +69,14 @@ type Options struct {
 	// transaction (DefaultReadTimeout when zero): no reader pins a WAL
 	// snapshot for longer.
 	ReadTimeout time.Duration
+	// ReadCacheKiB is the page cache of each read connection in KiB
+	// (DefaultReadCacheKiB when zero). SQLite allocates it lazily, so it is a
+	// ceiling per connection, not a reservation.
+	ReadCacheKiB int
+	// ReadMmapBytes is the memory-map ceiling of each read connection in bytes
+	// (DefaultReadMmapBytes when zero, negative disables mapping). Mapped pages
+	// are shared, evictable file cache, not private memory.
+	ReadMmapBytes int64
 }
 
 // SchemaNewerError is returned by Open when index.db carries a newer
@@ -96,9 +104,13 @@ type Store struct {
 	driverName   string // database/sql driver name (Options.DriverName)
 	journalLimit int    // journal_size_limit in bytes
 	readTO       time.Duration
+	readCacheKiB int   // cache_size of each read connection, KiB
+	readMmap     int64 // mmap_size ceiling of each read connection, bytes
 	dir          string
 	fs           fsx.FS
 	obs          *obs.Obs
+
+	Reader // the read methods over the read pool (ReadTx hands out one over a transaction)
 
 	wdb *sql.DB // the one serialized write connection
 	rdb *sql.DB
@@ -159,7 +171,7 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.BulkBytes <= 0 {
 		opt.BulkBytes = DefaultBulkBytes
 	}
-	s := &Store{bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, journalLimit: opt.JournalSizeLimit}
+	s := &Store{bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -312,13 +324,15 @@ func (s *Store) openDB(path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
-	r, err := openDeadlineDB(s.driverName, dsn+"&_pragma=query_only(1)", s.readTO)
+	r, err := openDeadlineDB(s.driverName, dsn+s.readPragmas(), s.readTO)
 	if err != nil {
 		_ = w.Close()
 		return err
 	}
 	r.SetConnMaxLifetime(readConnMaxLifetime)
 	r.SetConnMaxIdleTime(readConnMaxIdleTime)
+	r.SetMaxIdleConns(readMaxIdleConns)
+	s.Reader = Reader{q: r}
 	// A passive checkpoint can run for minutes on a large backlog: it gets its
 	// own connection so it never holds the one write connection.
 	c, err := sql.Open(s.driverName, cdsn)

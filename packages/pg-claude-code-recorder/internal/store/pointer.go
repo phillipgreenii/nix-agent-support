@@ -38,7 +38,7 @@ type Pointer struct {
 // through.
 func (s *Store) OpenPointer(file int64, gen int) (*Pointer, error) {
 	mode := ""
-	_ = s.rdb.QueryRow(`SELECT mode FROM files WHERE id=?`, file).Scan(&mode)
+	_ = s.q.QueryRow(`SELECT mode FROM files WHERE id=?`, file).Scan(&mode)
 	primary := s.CopyPath(file, gen)
 	if mode == "snapshot" {
 		primary = s.SnapshotPath(file, gen)

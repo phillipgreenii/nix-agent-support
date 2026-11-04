@@ -20,13 +20,18 @@ import (
 type Counter struct {
 	queries atomic.Int64
 	rows    atomic.Int64
+	begins  atomic.Int64 // explicit transactions begun
+	txQ     atomic.Int64 // statements that ran inside an explicit transaction
 
 	mu    sync.Mutex
 	texts []string // the text of every counted statement, in order
 }
 
-func (c *Counter) note(query string) {
+func (c *Counter) note(query string, inTx bool) {
 	c.queries.Add(1)
+	if inTx {
+		c.txQ.Add(1)
+	}
 	c.mu.Lock()
 	c.texts = append(c.texts, query)
 	c.mu.Unlock()
@@ -52,10 +57,23 @@ func (c *Counter) Queries() int64 { return c.queries.Load() }
 // RowsRead is the number of rows returned through Rows.Next.
 func (c *Counter) RowsRead() int64 { return c.rows.Load() }
 
-// Reset zeroes both counters.
+// Begins is the number of explicit transactions begun.
+func (c *Counter) Begins() int64 { return c.begins.Load() }
+
+// Transactions is the number of read or write transactions SQLite took: each
+// explicit transaction counts once, and each statement outside one counts as
+// its own implicit transaction. It is the figure that falls when statements are
+// batched into one transaction.
+func (c *Counter) Transactions() int64 {
+	return c.begins.Load() + c.queries.Load() - c.txQ.Load()
+}
+
+// Reset zeroes every counter.
 func (c *Counter) Reset() {
 	c.queries.Store(0)
 	c.rows.Store(0)
+	c.begins.Store(0)
+	c.txQ.Store(0)
 	c.mu.Lock()
 	c.texts = nil
 	c.mu.Unlock()
@@ -102,11 +120,20 @@ func (d *drv) Open(name string) (driver.Conn, error) {
 
 type conn struct {
 	driver.Conn
-	c *Counter
+	c    *Counter
+	inTx atomic.Bool
 }
 
+type tx struct {
+	driver.Tx
+	cn *conn
+}
+
+func (t *tx) Commit() error   { t.cn.inTx.Store(false); return t.Tx.Commit() }
+func (t *tx) Rollback() error { t.cn.inTx.Store(false); return t.Tx.Rollback() }
+
 func (cn *conn) Prepare(query string) (driver.Stmt, error) {
-	cn.c.note(query)
+	cn.c.note(query, cn.inTx.Load())
 	st, err := cn.Conn.Prepare(query)
 	if err != nil {
 		return nil, err
@@ -115,7 +142,7 @@ func (cn *conn) Prepare(query string) (driver.Stmt, error) {
 }
 
 func (cn *conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	cn.c.note(query)
+	cn.c.note(query, cn.inTx.Load())
 	var st driver.Stmt
 	var err error
 	if p, ok := cn.Conn.(driver.ConnPrepareContext); ok {
@@ -130,10 +157,19 @@ func (cn *conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, 
 }
 
 func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	var t driver.Tx
+	var err error
 	if b, ok := cn.Conn.(driver.ConnBeginTx); ok {
-		return b.BeginTx(ctx, opts)
+		t, err = b.BeginTx(ctx, opts)
+	} else {
+		t, err = cn.Conn.Begin() //nolint:staticcheck // fallback for drivers without BeginTx
 	}
-	return cn.Conn.Begin() //nolint:staticcheck // fallback for drivers without BeginTx
+	if err != nil {
+		return nil, err
+	}
+	cn.c.begins.Add(1)
+	cn.inTx.Store(true)
+	return &tx{Tx: t, cn: cn}, nil
 }
 
 func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -141,7 +177,7 @@ func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.Na
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	cn.c.note(query)
+	cn.c.note(query, cn.inTx.Load())
 	rs, err := q.QueryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
@@ -154,7 +190,7 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	cn.c.note(query)
+	cn.c.note(query, cn.inTx.Load())
 	return e.ExecContext(ctx, query, args)
 }
 

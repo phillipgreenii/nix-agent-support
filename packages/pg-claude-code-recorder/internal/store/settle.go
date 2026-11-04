@@ -88,8 +88,8 @@ type StageRow struct {
 }
 
 // Stages returns every persisted stage (settled and held Conversations).
-func (s *Store) Stages() ([]StageRow, error) {
-	rows, err := s.rdb.Query(`SELECT session,stage,reason,since_ns,detail FROM conv_stage ORDER BY session`)
+func (s *Reader) Stages() ([]StageRow, error) {
+	rows, err := s.q.Query(`SELECT session,stage,reason,since_ns,detail FROM conv_stage ORDER BY session`)
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +106,9 @@ func (s *Store) Stages() ([]StageRow, error) {
 }
 
 // Stage returns the persisted stage of a session ("" when none).
-func (s *Store) Stage(session string) (StageRow, bool, error) {
+func (s *Reader) Stage(session string) (StageRow, bool, error) {
 	var x StageRow
-	err := s.rdb.QueryRow(`SELECT session,stage,reason,since_ns,detail FROM conv_stage WHERE session=?`, session).
+	err := s.q.QueryRow(`SELECT session,stage,reason,since_ns,detail FROM conv_stage WHERE session=?`, session).
 		Scan(&x.Session, &x.Stage, &x.Reason, &x.SinceNS, &x.Detail)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StageRow{}, false, nil
@@ -126,10 +126,10 @@ type Settled struct {
 }
 
 // SettledOf returns the settle record of a session.
-func (s *Store) SettledOf(session string) (Settled, bool, error) {
+func (s *Reader) SettledOf(session string) (Settled, bool, error) {
 	var x Settled
 	var m string
-	err := s.rdb.QueryRow(`SELECT session,seq,at_ns,method,manifest FROM settled WHERE session=?`, session).
+	err := s.q.QueryRow(`SELECT session,seq,at_ns,method,manifest FROM settled WHERE session=?`, session).
 		Scan(&x.Session, &x.Seq, &x.AtNS, &x.Method, &m)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Settled{}, false, nil
@@ -148,17 +148,17 @@ type Range struct {
 }
 
 // Ranges returns the archived ranges of one generation, ordered by offset.
-func (s *Store) Ranges(file int64, gen int) ([]Range, error) {
+func (s *Reader) Ranges(file int64, gen int) ([]Range, error) {
 	return s.ranges(`SELECT file_id,gen,from_off,to_off,session,seg FROM ranges WHERE file_id=? AND gen=? ORDER BY from_off`, file, gen)
 }
 
 // AllRanges returns every archived range.
-func (s *Store) AllRanges() ([]Range, error) {
+func (s *Reader) AllRanges() ([]Range, error) {
 	return s.ranges(`SELECT file_id,gen,from_off,to_off,session,seg FROM ranges ORDER BY file_id,gen,from_off`)
 }
 
-func (s *Store) ranges(q string, args ...any) ([]Range, error) {
-	rows, err := s.rdb.Query(q, args...)
+func (s *Reader) ranges(q string, args ...any) ([]Range, error) {
+	rows, err := s.q.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (s *Store) ranges(q string, args ...any) ([]Range, error) {
 // ArchivedTo returns the end of the archived prefix [0, n) of a generation
 // (0 when nothing is archived): the bytes before it are in an archive, not in
 // the copy file.
-func (s *Store) ArchivedTo(file int64, gen int) int64 {
+func (s *Reader) ArchivedTo(file int64, gen int) int64 {
 	rs, err := s.Ranges(file, gen)
 	if err != nil {
 		return 0
@@ -205,8 +205,8 @@ type TornTail struct {
 }
 
 // TornTails returns every recorded torn-tail fact.
-func (s *Store) TornTails() ([]TornTail, error) {
-	rows, err := s.rdb.Query(`SELECT file_id,gen,off,len,at_ns FROM torn_tails ORDER BY file_id,gen`)
+func (s *Reader) TornTails() ([]TornTail, error) {
+	rows, err := s.q.Query(`SELECT file_id,gen,off,len,at_ns FROM torn_tails ORDER BY file_id,gen`)
 	if err != nil {
 		return nil, err
 	}
@@ -223,16 +223,16 @@ func (s *Store) TornTails() ([]TornTail, error) {
 }
 
 // TornTailOf returns the torn-tail fact of a generation.
-func (s *Store) TornTailOf(file int64, gen int) (TornTail, bool) {
+func (s *Reader) TornTailOf(file int64, gen int) (TornTail, bool) {
 	var x TornTail
-	err := s.rdb.QueryRow(`SELECT file_id,gen,off,len,at_ns FROM torn_tails WHERE file_id=? AND gen=?`, file, gen).
+	err := s.q.QueryRow(`SELECT file_id,gen,off,len,at_ns FROM torn_tails WHERE file_id=? AND gen=?`, file, gen).
 		Scan(&x.File, &x.Gen, &x.Off, &x.Len, &x.AtNS)
 	return x, err == nil
 }
 
 // SessionOfFile is the sorted distinct session ids the records of a file carry.
-func (s *Store) SessionsOfFile(file int64) ([]string, error) {
-	rows, err := s.rdb.Query(`SELECT DISTINCT session FROM records WHERE file_id=? AND session<>''`, file)
+func (s *Reader) SessionsOfFile(file int64) ([]string, error) {
+	rows, err := s.q.Query(`SELECT DISTINCT session FROM records WHERE file_id=? AND session<>''`, file)
 	if err != nil {
 		return nil, err
 	}

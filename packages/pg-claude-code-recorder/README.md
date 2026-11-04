@@ -95,7 +95,10 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `settle_tick_examined_total`, `settle_tick_transitions_total`, `settle_tick_last_duration_seconds`,
   `settle_tick_last_timestamp_seconds`, `refresh_gauges_duration_seconds`, `loop_runs_total{loop,outcome}`,
   `process_cpu_seconds_total`, `go_goroutines`, `go_memstats_heap_alloc_bytes`,
-  `go_memstats_alloc_bytes_total`, `go_gc_pause_seconds_total` and `wal_bytes`. The `client` label is whitelisted (`clients` in the config adds names); any other
+  `go_memstats_alloc_bytes_total`, `go_gc_pause_seconds_total`, `wal_bytes` and the database/sql pool figures `db_open_connections`,
+  `db_in_use_connections`, `db_idle_connections`, `db_wait_total`, `db_wait_seconds_total`,
+  `db_max_lifetime_closed_total` and `db_max_idle_closed_total` (label `pool`: `read` or `write`; a rising
+  `db_wait_seconds_total` means callers queue for a connection). The `client` label is whitelisted (`clients` in the config adds names); any other
   name is `other`. The exporter is a small text renderer over the in-process registry, so the
   package takes no Prometheus client dependency.
 - Log: JSONL on standard error (or `logFile`), service `pg-claude-code-recorder`, fields `ts`,
@@ -210,6 +213,12 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   held while a waiter waits (it reads, releases, waits, then reads again). A read that hits the
   deadline answers `query_timeout` (504, exit 6, `client.ErrQueryTimeout`, retryable) and counts in
   `query_timeouts_total{op}`.
+- **Read connection memory and batching**: read connections use a larger SQLite page cache and a bounded memory map, because every fresh connection
+  to a file of tens of gigabytes starts cold: `query.readCacheMiB` (default 64) is the per-connection
+  `cache_size` ceiling and `query.readMmapMiB` (default 512, 0 disables) the per-connection `mmap_size`
+  ceiling. Read connections are recycled rarely (6 hours, 30 minutes idle) so the cache survives. A
+  multi-statement read (coverage, the settle pass over settled Conversations, the lifecycle load) runs in one
+  read transaction: one WAL read-lock round trip and one snapshot instead of one transaction per statement.
 - **Filter field census**: each query, search or feed request whose filter compiled counts the catalogued
   field names its filter leaves named in `query_filter_fields_total{op,field}` (op is query, search or
   feed) and logs one `query_filter_fields` info line (`op`, `fields` as `name=count,...`). Names and

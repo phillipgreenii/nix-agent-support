@@ -33,15 +33,27 @@ func (d *Daemon) coverage(view string) (wire.Coverage, error) {
 // computeCoverage is coverage; withSummary false skips the bad-line and
 // unknown-key aggregates, which the status figures do not read.
 func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, error) {
-	files, err := d.st.AllFiles()
+	// One read transaction for every statement: one lock round trip instead of
+	// one per statement, and the figures come from one snapshot.
+	var cov wire.Coverage
+	err := d.st.ReadTx(func(rd *store.Reader) error {
+		var e error
+		cov, e = d.computeCoverageFrom(rd, view, withSummary)
+		return e
+	})
+	return cov, err
+}
+
+func (d *Daemon) computeCoverageFrom(rd *store.Reader, view string, withSummary bool) (wire.Coverage, error) {
+	files, err := rd.AllFiles()
 	if err != nil {
 		return wire.Coverage{}, err
 	}
-	gens, err := d.st.AllGenerations()
+	gens, err := rd.AllGenerations()
 	if err != nil {
 		return wire.Coverage{}, err
 	}
-	curPaths, err := d.st.AllCurrentPaths() // one query for every file, not one per file
+	curPaths, err := rd.AllCurrentPaths() // one query for every file, not one per file
 	if err != nil {
 		return wire.Coverage{}, err
 	}
@@ -98,7 +110,7 @@ func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, 
 			if fc.ParseLagBytes > cov.ParseLagBytesMax {
 				cov.ParseLagBytesMax = fc.ParseLagBytes
 			}
-			if s := d.parseLagSeconds(f.ID, f.CurGen, fc.ParseOffset, now); s > cov.ParseLagSecondsMax {
+			if s := parseLagSeconds(rd, f.ID, f.CurGen, fc.ParseOffset, now); s > cov.ParseLagSecondsMax {
 				cov.ParseLagSecondsMax = s
 			}
 		}
@@ -119,7 +131,7 @@ func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, 
 	}
 	if !withSummary {
 		// the caller does not read the aggregates
-	} else if sum, err := parser.Summarize(d.st); err == nil {
+	} else if sum, err := parser.SummarizeFrom(rd); err == nil {
 		cov.BadLines = sum.BadLines
 		cov.UnknownKeys = []wire.UnknownKey{}
 		for _, u := range sum.UnknownKeys {
@@ -131,7 +143,7 @@ func (d *Daemon) computeCoverage(view string, withSummary bool) (wire.Coverage, 
 		cov.UnparsedKinds = append(cov.UnparsedKinds, wire.UnparsedKind{Kind: k, Files: n})
 	}
 	sort.Slice(cov.UnparsedKinds, func(i, j int) bool { return cov.UnparsedKinds[i].Kind < cov.UnparsedKinds[j].Kind })
-	if rows, err := d.st.Stages(); err == nil {
+	if rows, err := rd.Stages(); err == nil {
 		for _, r := range rows {
 			switch r.Stage {
 			case store.StageHeld:
@@ -247,8 +259,8 @@ func Verdict(st wire.Status, minFree int64) (healthy bool, verdict, short string
 
 // parseLagSeconds is how long the byte at the parse offset has waited: the time
 // since the recorder saw it.
-func (d *Daemon) parseLagSeconds(file int64, gen int, off int64, now time.Time) float64 {
-	cc, err := d.st.CopyCommits(file)
+func parseLagSeconds(rd *store.Reader, file int64, gen int, off int64, now time.Time) float64 {
+	cc, err := rd.CopyCommits(file)
 	if err != nil {
 		return 0
 	}

@@ -63,8 +63,8 @@ func scanProc(sc interface{ Scan(...any) error }) (Proc, error) {
 }
 
 // Procs returns every observed Process, oldest first.
-func (s *Store) Procs() ([]Proc, error) {
-	rows, err := s.rdb.Query(`SELECT ` + procCols + ` FROM procs ORDER BY first_seen_ns, pid`)
+func (s *Reader) Procs() ([]Proc, error) {
+	rows, err := s.q.Query(`SELECT ` + procCols + ` FROM procs ORDER BY first_seen_ns, pid`)
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +81,8 @@ func (s *Store) Procs() ([]Proc, error) {
 }
 
 // Proc returns the Process with the given pid and start time.
-func (s *Store) Proc(pid int64, procStart string) (Proc, error) {
-	p, err := scanProc(s.rdb.QueryRow(`SELECT `+procCols+` FROM procs WHERE pid=? AND proc_start=?`, pid, procStart))
+func (s *Reader) Proc(pid int64, procStart string) (Proc, error) {
+	p, err := scanProc(s.q.QueryRow(`SELECT `+procCols+` FROM procs WHERE pid=? AND proc_start=?`, pid, procStart))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Proc{}, ErrNotFound
 	}
