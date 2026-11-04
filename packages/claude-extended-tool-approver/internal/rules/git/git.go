@@ -526,6 +526,14 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 		}
 		return r.updateRefVerdict(rest)
 	}
+	// read-tree: ONLY the exact two-tree merge `read-tree -m -u <id> <id>` is
+	// approved — see readTreeVerdict. Every other shape gets a NoOpinion.
+	if subcmd == "read-tree" {
+		if hasRedirectEnvVar(envs, cwd) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
+		}
+		return r.readTreeVerdict(rest)
+	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
 		if hasRedirectEnvVar(envs, cwd) {
@@ -932,6 +940,28 @@ func (r *Rule) updateRefVerdict(rest []string) (hookio.RuleResult, error) {
 			"full non-zero object ids) is approved; deferring to the prompt")
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "git update-ref: primary-branch compare-and-swap", Module: r.Name()}, nil
+}
+
+// readTreeVerdict returns the verdict for `git read-tree` (rest = args after the
+// subcommand). Operator ruling 2026-11-03 (Phillip, "2b should be agents do all of
+// it. (there should be a caveat that if problems are detected that they are
+// esclated)"): after the primary-branch compare-and-swap the reconcile moves the
+// canonical working tree with the two-tree merge. Once update-ref has moved the
+// branch, HEAD already equals the new tip, so `reset --keep <new>` is a no-op;
+// `read-tree -m -u <old> <new>` carries the tree from old to new and keeps local
+// edits (it refuses when they conflict). The only approved shape is
+//
+//	git read-tree -m -u <old-sha> <new-sha>
+//
+// with exactly those two flags in that order, then exactly two literal, non-zero,
+// full-length object ids. Everything else is a NoOpinion: any other flag
+// (--reset, --prefix, --index-output, --empty, ...), the one-tree and three-tree
+// forms, a ref name or abbreviated id.
+func (r *Rule) readTreeVerdict(rest []string) (hookio.RuleResult, error) {
+	if len(rest) != 4 || rest[0] != "-m" || rest[1] != "-u" || !isCASObjectID(rest[2]) || !isCASObjectID(rest[3]) {
+		return r.refuse("git: only `git read-tree -m -u <old-sha> <new-sha>` (two full non-zero object ids) is approved; deferring to the prompt")
+	}
+	return hookio.RuleResult{Decision: hookio.Approve, Reason: "git read-tree: two-tree merge update of the working tree", Module: r.Name()}, nil
 }
 
 // configGateClass is the MECHANISM by which a gated `git config` key is

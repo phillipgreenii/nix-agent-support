@@ -305,6 +305,7 @@ func TestGit_Chdir_ReconcileCommands_CanonicalClone(t *testing.T) {
 		"git -C " + canon + " update-ref refs/heads/main " + casNew + " " + casOld,
 		"git -C " + canon + " update-ref refs/heads/master " + casNew + " " + casOld,
 		"git -C " + canon + " reset --keep " + casNew,
+		"git -C " + canon + " read-tree -m -u " + casOld + " " + casNew,
 	} {
 		if got := hookio.Verdict(r.Evaluate(chdirInput(cmd, wtCWD))); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
@@ -328,6 +329,19 @@ func TestGit_Chdir_ReconcileCommands_CanonicalClone(t *testing.T) {
 		"git -C " + canon + " update-ref refs/heads/main " + casNew + " " + casOld + " x",     // four operands
 		"git -C " + canon + " reset --hard " + casNew,
 		"git -C " + canon + " reset --hard",
+		"git -C " + canon + " read-tree -m " + casOld + " " + casNew,                   // no -u
+		"git -C " + canon + " read-tree -u -m " + casOld + " " + casNew,                // flag order
+		"git -C " + canon + " read-tree -mu " + casOld + " " + casNew,                  // combined flags
+		"git -C " + canon + " read-tree --reset -u " + casNew,                          // reset form
+		"git -C " + canon + " read-tree -m -u " + casNew,                               // one tree
+		"git -C " + canon + " read-tree -m -u " + casOld + " " + casNew + " " + casOld, // three trees
+		"git -C " + canon + " read-tree -m -u HEAD " + casNew,                          // ref name
+		"git -C " + canon + " read-tree -m -u abc123 " + casNew,                        // abbreviated id
+		"git -C " + canon + " read-tree -m -u " + casZero + " " + casNew,               // zero id
+		"git -C " + canon + " read-tree -m -u --prefix=x/ " + casOld + " " + casNew,    // extra flag
+		"git -C " + canon + " read-tree -m -u " + casOld + " " + casNew + " --empty",   // trailing flag
+		"git -C /etc read-tree -m -u " + casOld + " " + casNew,                         // unsafe -C zone
+		"GIT_DIR=/other git read-tree -m -u " + casOld + " " + casNew,
 		"git -C /etc update-ref refs/heads/main " + casNew + " " + casOld, // unsafe -C zone
 		"git -C /etc reset --keep " + casNew,
 		"GIT_DIR=/other git update-ref refs/heads/main " + casNew + " " + casOld,
