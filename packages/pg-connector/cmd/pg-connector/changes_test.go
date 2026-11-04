@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -713,4 +714,59 @@ func TestChangesRemovedFallsBackToIDOnlyWhenNoCacheEntry(t *testing.T) {
 	if len(extra) != 1 {
 		t.Fatalf("Changes[0].Entity = %s, want the id-only envelope unchanged (exactly one key)", c.Entity)
 	}
+}
+
+// TestRun_PrChanges_ReEntryAfterRemovalIsReportedAddedOnce drives the whole
+// changes verb across: poll, entity leaves, poll (removed), entity returns,
+// poll (added), repeat poll (nothing).
+func TestRun_PrChanges_ReEntryAfterRemovalIsReportedAddedOnce(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	const name = "backend-changes-reentry"
+	entity := func(n int) string {
+		return `{"id":"o/r#` + strconv.Itoa(n) + `","repo":"o/r","number":` + strconv.Itoa(n) + `,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false}`
+	}
+	listResp := func(nums ...int) string {
+		var ents, ids []string
+		for _, n := range nums {
+			ents = append(ents, entity(n))
+			ids = append(ids, `"o/r#`+strconv.Itoa(n)+`"`)
+		}
+		return `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[` + strings.Join(ents, ",") + `],"present_ids":[` + strings.Join(ids, ",") + `],"cursor":null,"truncated":false}}`
+	}
+	writeConfigFor(t, name)
+	poll := func(nums ...int) changesWire {
+		t.Helper()
+		writeOpAwareFakeBackend(t, name, map[string]string{"list": listResp(nums...)}, `{}`)
+		stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
+		if code != 0 {
+			t.Fatalf("exit code = %d; stdout=%s", code, stdout)
+		}
+		return decodeChangesWire(t, stdout)
+	}
+	only := func(w changesWire, id, kind string) {
+		t.Helper()
+		if len(w.Changes) != 1 || string(w.Changes[0].Change) != kind {
+			t.Fatalf("Changes = %+v, want exactly one %s for %s", w.Changes, kind, id)
+		}
+		if got, err := entityID(w.Changes[0].Entity); err != nil || got != id {
+			t.Fatalf("Changes[0] id = %q (%v), want %q", got, err, id)
+		}
+	}
+
+	if w := poll(1, 2); changeKindsFor(w.Changes)["added"] != 2 {
+		t.Fatalf("poll 1: %+v, want 2 added", w.Changes)
+	}
+	only(poll(2), "o/r#1", "removed")
+	w := poll(1, 2)
+	only(w, "o/r#1", "added")
+	var full struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(w.Changes[0].Entity, &full); err != nil || full.Title != "t" {
+		t.Fatalf("added row must carry the full entity, got %s", w.Changes[0].Entity)
+	}
+	if w := poll(1, 2); len(w.Changes) != 0 {
+		t.Fatalf("repeat poll: %+v, want no duplicates", w.Changes)
+	}
+	only(poll(2), "o/r#1", "removed")
 }

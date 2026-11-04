@@ -433,6 +433,11 @@ daemon-backed backend" below describes. `ci changes` is the same verb built for 
   call one duplicate delivery, never a lost one. `--cached` skips the backend call entirely,
   answering only from what the ledger already has on disk. `--reset` replays every live entity to
   that consumer as freshly added, with no tombstone for anything already removed before the reset.
+  An entity that leaves a query and later re-enters it MUST be reported `added` (with its full
+  entity) on the first poll that sees it present again, whether or not its content differs from
+  before it left; the earlier removal does not suppress it. A later real removal of that entity
+  MUST be reported `removed` again, so each leave and each re-entry is reported exactly once per
+  consumer.
   The response shape is `{sources: [{backend, status, version, truncated, reason}], changes:
 [{change, source, entity}]}` — `change` is one of `added`/`changed`/`removed`. `reason` (bead
   `pg2-unqcn`) is `omitempty`: present with the real degraded/failed cause (e.g. a backend's own

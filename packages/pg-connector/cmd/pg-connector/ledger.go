@@ -674,14 +674,22 @@ func (l *Ledger) Refresh(listFn func(cursor json.RawMessage) (entities []json.Ra
 			changed = true
 			l.Entries[h.id] = LedgerEntry{Hash: h.hash, VersionLastChanged: nextVersion}
 			changes = append(changes, LedgerChange{Change: ChangeAdded, Entity: h.entity})
+		case existing.RemovedAtVersion != nil:
+			// A tombstoned entry that is present again has re-entered the
+			// query: clear the tombstone and report it as added with the
+			// full entity, whether or not its hash differs from before it
+			// left. Otherwise the re-entry is never reported and a later
+			// real removal is never reported either.
+			changed = true
+			existing.RemovedAtVersion = nil
+			existing.Hash = h.hash
+			existing.VersionLastChanged = nextVersion
+			l.Entries[h.id] = existing
+			changes = append(changes, LedgerChange{Change: ChangeAdded, Entity: h.entity})
 		case existing.Hash != h.hash:
 			changed = true
 			existing.Hash = h.hash
 			existing.VersionLastChanged = nextVersion
-			// A re-added-looking hash change on a previously-tombstoned
-			// entry is not a case this docket's design addresses (design:
-			// out of scope); left untouched here (RemovedAtVersion is not
-			// cleared) rather than guessed at.
 			l.Entries[h.id] = existing
 			changes = append(changes, LedgerChange{Change: ChangeChanged, Entity: h.entity})
 		default:

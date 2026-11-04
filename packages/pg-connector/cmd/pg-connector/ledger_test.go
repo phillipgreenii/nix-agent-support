@@ -602,3 +602,68 @@ func TestCanonicalHash_MergeableUnknownDoesNotFlap(t *testing.T) {
 		t.Error("CONFLICTING must hash differently from UNKNOWN")
 	}
 }
+
+// TestLedgerRefresh_ReEntryAfterRemovalIsAddedEveryTime proves an entity
+// that leaves the query and comes back is classified added again (same hash
+// or different hash), the tombstone is cleared, and a later real removal is
+// reported removed again.
+func TestLedgerRefresh_ReEntryAfterRemovalIsAddedEveryTime(t *testing.T) {
+	l := newEmptyLedger()
+	cur := json.RawMessage(`"c"`)
+	refresh := func(entities []json.RawMessage, present []string) []LedgerChange {
+		t.Helper()
+		changes, err := l.Refresh(listFnReturning(entities, present, cur, false, nil))
+		if err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+		return changes
+	}
+	keep := fakeEntity("2", "k", "2026-01-01T00:00:00Z", false)
+
+	if c := refresh([]json.RawMessage{fakeEntity("1", "a", "2026-01-01T00:00:00Z", false), keep}, []string{"1", "2"}); changeKinds(c)["added"] != 2 {
+		t.Fatalf("seed: got %+v, want 2 added", c)
+	}
+
+	// Leave.
+	c := refresh([]json.RawMessage{keep}, []string{"2"})
+	if !hasChangeForID(t, c, "1", ChangeRemoved) || len(c) != 1 {
+		t.Fatalf("leave: got %+v, want exactly id 1 removed", c)
+	}
+	if l.Entries["1"].RemovedAtVersion == nil {
+		t.Fatal("leave: id 1 not tombstoned")
+	}
+
+	// Return with the same hash.
+	c = refresh([]json.RawMessage{fakeEntity("1", "a", "2026-02-01T00:00:00Z", false), keep}, []string{"1", "2"})
+	if !hasChangeForID(t, c, "1", ChangeAdded) || len(c) != 1 {
+		t.Fatalf("return same hash: got %+v, want exactly id 1 added", c)
+	}
+	if e := l.Entries["1"]; e.RemovedAtVersion != nil || e.VersionLastChanged != l.Version {
+		t.Fatalf("return same hash: entry %+v, want tombstone cleared and VersionLastChanged = %d", e, l.Version)
+	}
+	var body struct {
+		Field string `json:"field"`
+	}
+	if err := json.Unmarshal(c[0].Entity, &body); err != nil || body.Field != "a" {
+		t.Fatalf("return same hash: added row must carry the full entity, got %s", c[0].Entity)
+	}
+
+	// Leave again, then return with a different hash.
+	if c = refresh([]json.RawMessage{keep}, []string{"2"}); !hasChangeForID(t, c, "1", ChangeRemoved) {
+		t.Fatalf("second leave: got %+v, want id 1 removed again", c)
+	}
+	c = refresh([]json.RawMessage{fakeEntity("1", "a2", "2026-03-01T00:00:00Z", false), keep}, []string{"1", "2"})
+	if !hasChangeForID(t, c, "1", ChangeAdded) || len(c) != 1 {
+		t.Fatalf("return new hash: got %+v, want exactly id 1 added", c)
+	}
+
+	// A steady poll afterwards reports nothing.
+	if c = refresh([]json.RawMessage{fakeEntity("1", "a2", "2026-03-02T00:00:00Z", false), keep}, []string{"1", "2"}); len(c) != 0 {
+		t.Fatalf("steady poll: got %+v, want none", c)
+	}
+
+	// A later real removal is reported.
+	if c = refresh([]json.RawMessage{keep}, []string{"2"}); !hasChangeForID(t, c, "1", ChangeRemoved) || len(c) != 1 {
+		t.Fatalf("final leave: got %+v, want id 1 removed", c)
+	}
+}
