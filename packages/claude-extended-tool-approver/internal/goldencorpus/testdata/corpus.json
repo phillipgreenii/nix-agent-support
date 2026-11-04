@@ -16258,5 +16258,100 @@
     "rules_config": {},
     "expected_verdict": "reject",
     "notes": "tc-iqhja: -F is a path read; a credential store is refused."
+  },
+  {
+    "case": "ping_bounded_ip_approve",
+    "tags": ["ceta-spec", "tc-jlgi9"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ping -c 2 -W 2 192.168.40.28 2>&1; echo \"---exit:$?\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-jlgi9 (absorbs Bash(ping:*)): count-bounded ping of a literal IP approves."
+  },
+  {
+    "case": "ping_bounded_host_approve",
+    "tags": ["ceta-spec", "tc-jlgi9"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ping -c 3 -W 2 pve3 2>&1; echo \"---\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-jlgi9: count-bounded ping of a literal hostname approves."
+  },
+  {
+    "case": "ping_unbounded_not_approve",
+    "tags": ["ceta-spec", "tc-jlgi9"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ping pve3"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-jlgi9 guardrail: a bare ping runs until interrupted, so it abstains."
+  },
+  {
+    "case": "ping_flood_not_approve",
+    "tags": ["ceta-spec", "tc-jlgi9"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ping -f -c 5 pve3"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-jlgi9 guardrail: flood (-f) stays unmodeled."
+  },
+  {
+    "case": "ping_expansion_dest_not_approve",
+    "tags": ["ceta-spec", "tc-jlgi9"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ping -c 1 \"$H\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-jlgi9 guardrail: a runtime-expanded destination could carry data in the DNS name."
   }
 ]

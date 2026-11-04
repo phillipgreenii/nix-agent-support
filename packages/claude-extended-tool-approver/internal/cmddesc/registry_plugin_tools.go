@@ -1112,6 +1112,35 @@ var astGrepSchema = CommandSchema{
 	},
 }
 
+// pingSchema (tc-jlgi9, absorbing the settings rule Bash(ping:*)): ICMP echo
+// to one host. Pinging contacts the network, so only a BOUNDED probe is
+// modeled: the destination is a closed-set plain host/IP literal (no
+// expansion, so no caller content rides in the name) and is accepted ONLY
+// when -c <count> or -w <deadline> bounds the run; those and the other
+// numeric flags take a small closed integer set. A bare `ping host` runs
+// until interrupted, and -f (flood), -l (preload), -i (interval), -I (source
+// interface), -p/-Q/-m/-M, -b and the rest stay unmodeled so they abstain.
+var pingSchema = CommandSchema{
+	Name:       "ping",
+	Provenance: "ping from iputils 20250605, ping -h / ping(8)",
+	Flags: map[string]FlagSpec{
+		"-c": {Arity: ArityOne, Operand: AllowedLiteral("ping-bound")},
+		"-w": {Arity: ArityOne, Operand: AllowedLiteral("ping-bound")},
+		"-W": {Arity: ArityOne, Operand: AllowedLiteral("ping-bound")},
+		"-s": {Arity: ArityOne, Operand: AllowedLiteral("ping-bound")},
+		"-t": {Arity: ArityOne, Operand: AllowedLiteral("ping-bound")},
+		"-n": inert, "-q": inert, "-v": inert, "-D": inert, "-O": inert,
+		"-4": inert, "-6": inert, "-a": inert, "-U": inert,
+	},
+	Positionals: PositionalSpec{
+		Rest:         Unmodeled,
+		RestOverride: RestOverride{Flags: []string{"-c", "-w"}, Role: AllowedLiteral("ping-destination")},
+	},
+	Stdin:       StdinNever,
+	Stdout:      StdoutMetadata,
+	UnknownFlag: UnknownFlagInsufficient,
+}
+
 // duSchema: `du [-s] [-h] [-a] [-c] [-k|-m|-b] [-x] [-d N] [PATH...]` —
 // disk usage; a metadata read of each PATH ("." when none).
 var duSchema = CommandSchema{
@@ -1286,7 +1315,7 @@ func pluginToolSchemas() []CommandSchema {
 		bgcheckSchema, bgwaitSchema, integrateBranchSupportSchema, wtdoneSchema,
 		handoffCreateSchema, sessionModeSchema, pgGoMutateSchema, pgCcauditSchema,
 		pgWiFlowSchema, pgHooksSchema, prekSchema, batsSchema, ghSchema,
-		cetaSchema, rgSchema, fdSchema, sdSchema, astGrepSchema, duSchema, lsofSchema, launchctlSchema, manSchema,
+		cetaSchema, rgSchema, fdSchema, sdSchema, astGrepSchema, duSchema, pingSchema, lsofSchema, launchctlSchema, manSchema,
 		uuidgenSchema, trSchema,
 	}
 	out = append(out, pluginSupportToolSchemas()...)

@@ -598,6 +598,39 @@ var allowedLiteralSets = map[string]func(string) bool{
 	"git-plain-refspec": func(tok string) bool {
 		return tok != "" && !strings.HasPrefix(tok, "+") && !strings.HasPrefix(tok, ":") && !strings.Contains(tok, "*") && !strings.HasPrefix(tok, "-")
 	},
+	// "ping-bound": a small plain decimal integer 1..120 -- the count/deadline/
+	// timeout/size/ttl operand of a bounded `ping` probe (tc-jlgi9). 0 is
+	// excluded (-c 0 / -w 0 mean no limit in iputils), as is any non-decimal
+	// spelling.
+	"ping-bound": func(tok string) bool {
+		if tok == "" || len(tok) > 3 || tok[0] == '0' {
+			return false
+		}
+		n := 0
+		for _, c := range tok {
+			if c < '0' || c > '9' {
+				return false
+			}
+			n = n*10 + int(c-'0')
+		}
+		return n >= 1 && n <= 120
+	},
+	// "ping-destination": a plain DNS name, IPv4 or IPv6 literal -- letters,
+	// digits, '.', '-', '_' and ':' only, never starting with '-' (an
+	// option) (tc-jlgi9). No expansion, URL, path or glob spelling passes.
+	"ping-destination": func(tok string) bool {
+		if tok == "" || len(tok) > 253 || tok[0] == '-' {
+			return false
+		}
+		for _, c := range tok {
+			switch {
+			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-', c == '_', c == ':':
+			default:
+				return false
+			}
+		}
+		return true
+	},
 	// "local-flake-installable": a nix installable that names THIS directory's
 	// own flake — "." or ".#<attr>" — the same two spellings the policy layer's
 	// installable-reference class recognises (effectpolicy.isLocalFlakeInstallable).

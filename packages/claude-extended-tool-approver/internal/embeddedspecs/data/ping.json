@@ -1,0 +1,222 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "ping",
+  "command": {
+    "name": "ping",
+    "provenance": "ping from iputils 20250605, ping -h / ping(8)",
+    "citations": {
+      "provenance": {
+        "source": "ping from iputils 20250605, ping -V: \"ping from iputils 20250605\""
+      },
+      "stdin": {
+        "source": "ping from iputils 20250605, ping -h: usage lists only <destination> and options; no stdin input is documented, classified never"
+      },
+      "stdout": {
+        "source": "ping from iputils 20250605, ping -h: replies and statistics are printed about the network peer, not local file content; classified metadata"
+      },
+      "unknownFlag": {
+        "source": "ping from iputils 20250605, ping -h: full option listing reviewed (-f flood, -l preload, -i interval, -I interface, -p/-Q/-m/-M, -b are deliberately not modeled); an unmodeled flag keeps the fail-closed default (insufficient)"
+      },
+      "dangerFlagInert:-c": {
+        "source": "ping from iputils 20250605, ping -h: \"-c <count>         stop after <count> replies\" -- a bounding count (value restricted to the closed set ping-bound 1..120), not a config/command flag despite the spelling"
+      },
+      "dangerFlagInert:-v": {
+        "source": "ping from iputils 20250605, ping -h: \"-v                 verbose output\" -- verbosity only"
+      }
+    },
+    "flags": {
+      "-4": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-4                 use IPv4\""
+        }
+      },
+      "-6": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-6                 use IPv6\""
+        }
+      },
+      "-D": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-D                 print timestamps\""
+        }
+      },
+      "-O": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-O                 report outstanding replies\""
+        }
+      },
+      "-U": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-U                 print user-to-user latency\""
+        }
+      },
+      "-W": {
+        "arity": "one",
+        "operand": {
+          "kind": "allowed-literal",
+          "set": "ping-bound"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-W <timeout>       time to wait for response\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-a                 use audible ping\""
+        }
+      },
+      "-c": {
+        "arity": "one",
+        "operand": {
+          "kind": "allowed-literal",
+          "set": "ping-bound"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-c <count>         stop after <count> replies\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-n                 no reverse DNS name resolution, override -H\""
+        }
+      },
+      "-q": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-q                 quiet output\""
+        }
+      },
+      "-s": {
+        "arity": "one",
+        "operand": {
+          "kind": "allowed-literal",
+          "set": "ping-bound"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-s <size>          use <size> as number of data bytes to be sent\""
+        }
+      },
+      "-t": {
+        "arity": "one",
+        "operand": {
+          "kind": "allowed-literal",
+          "set": "ping-bound"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-t <ttl>           define time to live\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-v                 verbose output\""
+        }
+      },
+      "-w": {
+        "arity": "one",
+        "operand": {
+          "kind": "allowed-literal",
+          "set": "ping-bound"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "ping from iputils 20250605, ping -h: \"-w <deadline>      reply wait <deadline> in seconds\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "flags": ["-c", "-w"],
+        "role": {
+          "kind": "allowed-literal",
+          "set": "ping-destination"
+        }
+      },
+      "citation": {
+        "source": "ping from iputils 20250605, ping -h: \"Usage\\n  ping [options] <destination>\\n  <destination>      DNS name or IP address\". Destination is accepted only when -c or -w bounds the run (RestOverride); a bare run is unbounded and stays unmodeled"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient"
+  }
+}

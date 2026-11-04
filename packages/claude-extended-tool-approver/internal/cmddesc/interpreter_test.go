@@ -271,7 +271,7 @@ func TestRegistryNames(t *testing.T) {
 		want,
 		"assemble-packet.sh", "audit-docket-label-leak.sh", "bats", "bgcheck", "bgwait", "capture-prefix-snapshots.sh", "chunk-for-bd-field.sh",
 		"claude-extended-tool-approver", "create-packet.sh", "du", "fd", "gh", "handoff-create", "impl-traces.sh",
-		"integrate-branch-support", "launchctl", "lsof", "man", "name-collisions.sh", "pg-ccaudit", "pg-go-mutate",
+		"integrate-branch-support", "launchctl", "lsof", "man", "name-collisions.sh", "pg-ccaudit", "ping", "pg-go-mutate",
 		"pg-hooks", "pg-wi-flow", "prek", "relocation-check.sh", "resolve-imports.sh", "rg", "self-checks.sh",
 		"session-mode", "trace-extract.sh", "update-packet.sh", "wtdone",
 	)
