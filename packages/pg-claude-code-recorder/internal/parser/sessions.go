@@ -14,6 +14,9 @@ type sessionDelta struct {
 	last  int64
 	count int64
 	files map[int64]struct{}
+	// first is the first lookup id seen in this transaction for the version,
+	// entrypoint and user type slots (nil: none seen).
+	first [3]any
 }
 
 // sessionRef returns the integer reference of a session, creating its sessions
@@ -65,7 +68,7 @@ func (p *Parser) sessionRef(tx *pstx, id, project string, firstNS int64) (int64,
 }
 
 // noteSession records one record of session ref at time tns in file.
-func (tx *pstx) noteSession(ref, tns, file int64) {
+func (tx *pstx) noteSession(ref, tns, file int64, lk [lkCount]any) {
 	if tx.sess == nil {
 		tx.sess = &sessionBatch{by: map[int64]*sessionDelta{}}
 	}
@@ -79,6 +82,11 @@ func (tx *pstx) noteSession(ref, tns, file int64) {
 	}
 	d.count++
 	d.files[file] = struct{}{}
+	for i, slot := range [3]int{lkVersion, lkEntrypoint, lkUserType} {
+		if d.first[i] == nil {
+			d.first[i] = lk[slot]
+		}
+	}
 }
 
 // flushSessions upserts session_stats and inserts session_files for what the
@@ -98,6 +106,14 @@ func (p *Parser) flushSessions(tx *pstx) error {
 ON CONFLICT(session_ref) DO UPDATE SET last_time_ns=MAX(last_time_ns,excluded.last_time_ns), record_count=record_count+excluded.record_count`,
 			ref, d.last, d.count); err != nil {
 			return err
+		}
+		// The session's first version, entrypoint and user type: the first record
+		// that carries one fills it; a later one never changes it.
+		if d.first[0] != nil || d.first[1] != nil || d.first[2] != nil {
+			if _, err := tx.Exec(`UPDATE sessions SET first_version_id=COALESCE(first_version_id,?1), entrypoint_id=COALESCE(entrypoint_id,?2), user_type_id=COALESCE(user_type_id,?3) WHERE session_ref=?4`,
+				d.first[0], d.first[1], d.first[2], ref); err != nil {
+				return err
+			}
 		}
 		files := make([]int64, 0, len(d.files))
 		for f := range d.files {

@@ -239,3 +239,21 @@ func Convert(kind Kind, raw json.RawMessage) (Converted, bool) {
 	}
 	return Converted{}, false
 }
+
+// Stored is implemented by a source whose catalogued fields declare a storage
+// other than `fields`; the parser routes by it. A source without it stores
+// every field in the generic fields table.
+type Stored interface {
+	Storage() map[string]Storage
+}
+
+// MustCatalogStorage is CatalogStorage for a source's own tags, which are
+// fixed at build time: a bad declaration is a programming error that a test
+// of the source catches, so it panics.
+func MustCatalogStorage(types ...any) map[string]Storage {
+	st, err := CatalogStorage(types...)
+	if err != nil {
+		panic(err)
+	}
+	return st
+}

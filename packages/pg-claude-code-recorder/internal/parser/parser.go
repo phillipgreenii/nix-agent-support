@@ -83,6 +83,13 @@ type Parser struct {
 	// validity rule as names (see sessionRef).
 	sessRefs  map[string]int64
 	sessEpoch uint64
+
+	// routes maps source name and field name to a lookup slot (see
+	// lookupRoutes); lk interns each slot's values to ids, valid while lkEpoch
+	// equals Store.RollbackEpoch (see lookupID).
+	routes  map[string]map[string]int
+	lk      [lkCount]map[string]int64
+	lkEpoch uint64
 }
 
 // New returns a Parser.
@@ -118,6 +125,7 @@ func New(cfg Config) *Parser {
 	for _, s := range cfg.Sources {
 		p.bySrc[s.Name()] = s
 	}
+	p.routes = lookupRoutes(cfg.Sources)
 	return p
 }
 
@@ -830,12 +838,17 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref)
+		lk, err := p.recordLookups(tx, src.Name(), r)
 		if err != nil {
 			return err
 		}
-		tx.noteSession(ref, tns, f.ID)
+		res, err := tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref,
+			lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType])
+		if err != nil {
+			return err
+		}
+		tx.noteSession(ref, tns, f.ID, lk)
 		id, _ := res.LastInsertId()
 		for _, fl := range r.Fields {
 			if fl.Kind.Searchable() {

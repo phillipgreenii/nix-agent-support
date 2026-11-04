@@ -303,3 +303,43 @@ func TestBulkRebuildIsMarkedAndBuildsTheSessionRefIndexAfterTheLoad(t *testing.T
 		t.Fatal("the mark did not survive the rebuild")
 	}
 }
+
+// A v2 store written before the lookup ids existed gets the five records
+// columns and the lookup tables at the next open; older rows keep NULL, a
+// second open changes nothing and the schema version stays 2.
+func TestOpenAddsTheLookupColumnsAndTablesToAnExistingStore(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	for _, q := range []string{
+		`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(1,1,1,0,-1,1,'claude-transcript','user',1,'example-session-1',5)`,
+		`ALTER TABLE records DROP COLUMN cwd_id`, `ALTER TABLE records DROP COLUMN branch_id`, `ALTER TABLE records DROP COLUMN version_id`,
+		`ALTER TABLE records DROP COLUMN entrypoint_id`, `ALTER TABLE records DROP COLUMN user_type_id`,
+		`DROP TABLE lk_cwd`, `DROP TABLE lk_branch`, `DROP TABLE lk_version`, `DROP TABLE lk_entrypoint`, `DROP TABLE lk_user_type`,
+	} {
+		if _, err := s.wdb.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		s = open(t, dir)
+		var nulls, cols, tables int
+		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM records WHERE id=1 AND cwd_id IS NULL AND branch_id IS NULL AND version_id IS NULL AND entrypoint_id IS NULL AND user_type_id IS NULL`).Scan(&nulls); err != nil || nulls != 1 {
+			t.Fatalf("open %d: old row lookup ids not NULL: %d, %v", i, nulls, err)
+		}
+		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name IN ('cwd_id','branch_id','version_id','entrypoint_id','user_type_id')`).Scan(&cols); err != nil || cols != 5 {
+			t.Fatalf("open %d: %d lookup columns, %v", i, cols, err)
+		}
+		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('lk_cwd','lk_branch','lk_version','lk_entrypoint','lk_user_type')`).Scan(&tables); err != nil || tables != 5 {
+			t.Fatalf("open %d: %d lookup tables, %v", i, tables, err)
+		}
+		if s.SchemaVersion() != 2 {
+			t.Fatalf("schema_version %d, the lookup tables must not change it", s.SchemaVersion())
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

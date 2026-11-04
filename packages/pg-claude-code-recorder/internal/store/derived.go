@@ -36,8 +36,16 @@ import (
 // is read through session_ref, the version bump belongs to a later slice. A database created before these tables existed gets them (and the
 // session_ref column, see addSessionRefColumn) at open, but its older rows keep
 // session_ref 0 and are absent from the session tables until it is rebuilt.
-// first_version_id, entrypoint_id and user_type_id stay NULL until the lookup
-// tables of a later slice exist.
+//
+// Lookup tables (schema v3 slice 4). lk_cwd, lk_branch, lk_version,
+// lk_entrypoint and lk_user_type intern a string once as (id, v); a record
+// carries cwd_id, branch_id, version_id, entrypoint_id and user_type_id (NULL
+// when its line has no such value), and sessions carries the first version,
+// entrypoint and user type seen. They are append-only and shared, so a reparse
+// never deletes a lookup row. The values are still ALSO written as fields rows,
+// because the query layer reads those until a later slice moves it to the ids;
+// the optional partial indexes on cwd_id and branch_id wait for the
+// version-bump slice like the session_ref index.
 //
 // fields_name_n is partial: only rows with a number are indexed. A filter or
 // sort on a numeric field compares n with = < > IN and the like, which the
@@ -57,16 +65,26 @@ CREATE TABLE IF NOT EXISTS records(
   parser_version INTEGER NOT NULL,
   session TEXT NOT NULL DEFAULT '',
   time_ns INTEGER NOT NULL DEFAULT 0,
-  session_ref INTEGER NOT NULL DEFAULT 0
+  session_ref INTEGER NOT NULL DEFAULT 0,
+  cwd_id INTEGER REFERENCES lk_cwd(id),
+  branch_id INTEGER REFERENCES lk_branch(id),
+  version_id INTEGER REFERENCES lk_version(id),
+  entrypoint_id INTEGER REFERENCES lk_entrypoint(id),
+  user_type_id INTEGER REFERENCES lk_user_type(id)
 );
+CREATE TABLE IF NOT EXISTS lk_cwd(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;
+CREATE TABLE IF NOT EXISTS lk_branch(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;
+CREATE TABLE IF NOT EXISTS lk_version(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;
+CREATE TABLE IF NOT EXISTS lk_entrypoint(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;
+CREATE TABLE IF NOT EXISTS lk_user_type(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;
 CREATE TABLE IF NOT EXISTS sessions(
   session_ref INTEGER PRIMARY KEY,
   session_id TEXT NOT NULL UNIQUE,
   project TEXT,
   first_time_ns INTEGER NOT NULL,
-  first_version_id INTEGER,
-  entrypoint_id INTEGER,
-  user_type_id INTEGER
+  first_version_id INTEGER REFERENCES lk_version(id),
+  entrypoint_id INTEGER REFERENCES lk_entrypoint(id),
+  user_type_id INTEGER REFERENCES lk_user_type(id)
 ) STRICT;
 CREATE TABLE IF NOT EXISTS session_stats(
   session_ref INTEGER PRIMARY KEY REFERENCES sessions(session_ref),

@@ -363,6 +363,10 @@ func (s *Store) openDB(path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
+	if err := addLookupColumns(w); err != nil {
+		_ = w.Close()
+		return err
+	}
 	// One transaction: one commit for the whole script instead of one per
 	// statement (the FTS5 tables add many).
 	var hasTri int
@@ -914,4 +918,36 @@ func addSessionRefColumn(db *sql.DB) error {
 	}
 	_, err := db.Exec(`ALTER TABLE records ADD COLUMN session_ref INTEGER NOT NULL DEFAULT 0`)
 	return err
+}
+
+// lookupColumns are the records columns that hold an interned lookup id.
+var lookupColumns = []struct{ col, table string }{
+	{"cwd_id", "lk_cwd"},
+	{"branch_id", "lk_branch"},
+	{"version_id", "lk_version"},
+	{"entrypoint_id", "lk_entrypoint"},
+	{"user_type_id", "lk_user_type"},
+}
+
+// addLookupColumns gives a records table created before the lookup ids existed
+// the five columns (NULL default, so no row is rewritten; older rows keep NULL
+// until the database is rebuilt).
+func addLookupColumns(db *sql.DB) error {
+	var tbl int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil || tbl == 0 {
+		return err
+	}
+	for _, c := range lookupColumns {
+		var has int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name=?`, c.col).Scan(&has); err != nil {
+			return err
+		}
+		if has > 0 {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE records ADD COLUMN ` + c.col + ` INTEGER REFERENCES ` + c.table + `(id)`); err != nil {
+			return err
+		}
+	}
+	return nil
 }

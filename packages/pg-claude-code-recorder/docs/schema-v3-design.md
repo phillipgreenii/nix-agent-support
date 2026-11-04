@@ -393,6 +393,17 @@ control-end records too), so using them would change the answer. Second, `cwdQue
 (the lookup tables do not exist yet); it gets the `lk_cwd` join with slice 4, and its plan guard already
 names the index each form must search.
 
+Slice 4 as built: a fresh or existing store gets the five `lk_` tables and the five lookup columns on
+`records` (`ALTER TABLE` at open when missing, NULL default, so no row is rewritten) while `SchemaVersion`
+stays 2. The transcript and session-registry sources declare `store:"record:<column>"` on `cwd`, `git_branch`,
+`version`, `entrypoint` and `user_type` (the registry has the first, third and fourth); the parser routes by
+that declaration through a lookup cache keyed to `Store.RollbackEpoch`, writes the ids on the record, and
+fills `sessions.first_version_id`, `entrypoint_id` and `user_type_id` from the first record of the session
+that carries each. The values are still ALSO written as `fields` rows, because the query layer reads them
+until the query-layer slice moves it to the ids (removing the rows is that slice's job, with the savings);
+`lk_` rows are never deleted. The optional partial indexes on `cwd_id` and `branch_id` wait for the
+version-bump slice. Rows parsed before the slice keep NULL ids until a rebuild.
+
 ## 12. Decision for the operator
 
 Fold S1 to S6, S8 and S9 (and S7 if wanted) into one schema v3 rebuild, or defer v3?

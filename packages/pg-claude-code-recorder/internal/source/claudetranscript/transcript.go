@@ -46,14 +46,14 @@ type Line struct {
 	ParentUUID  string   `json:"parentUuid"  ingest:"id"`
 	SessionID   string   `json:"sessionId"   ingest:"session"`
 	Timestamp   string   `json:"timestamp"   ingest:"time"`
-	Cwd         string   `json:"cwd"         ingest:"path"`
+	Cwd         string   `json:"cwd"         ingest:"path" store:"record:cwd_id"`
 	IsSidechain *bool    `json:"isSidechain" ingest:"bool"`
 	Message     *Message `json:"message"`
 
-	GitBranch      string   `json:"gitBranch"      ingest:"keyword"`
-	Version        string   `json:"version"        ingest:"keyword"`
-	Entrypoint     string   `json:"entrypoint"     ingest:"keyword"`
-	UserType       string   `json:"userType"       ingest:"keyword"`
+	GitBranch      string   `json:"gitBranch"      ingest:"keyword" store:"record:branch_id"`
+	Version        string   `json:"version"        ingest:"keyword" store:"record:version_id"`
+	Entrypoint     string   `json:"entrypoint"     ingest:"keyword" store:"record:entrypoint_id"`
+	UserType       string   `json:"userType"       ingest:"keyword" store:"record:user_type_id"`
 	PermissionMode string   `json:"permissionMode" ingest:"keyword"`
 	Subtype        string   `json:"subtype"        ingest:"keyword"`
 	Level          string   `json:"level"          ingest:"keyword"`
@@ -333,3 +333,6 @@ func flatten(raw json.RawMessage) string {
 	}
 	return string(t)
 }
+
+// Storage lists where each field is stored (implements source.Stored).
+func (*Source) Storage() map[string]source.Storage { return source.MustCatalogStorage(Line{}, Block{}) }

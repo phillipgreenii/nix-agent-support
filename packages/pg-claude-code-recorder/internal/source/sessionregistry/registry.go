@@ -24,12 +24,12 @@ const ParserVersion = 1
 type Entry struct {
 	PID             *int64          `json:"pid"             ingest:"int"`
 	SessionID       string          `json:"sessionId"       ingest:"session"`
-	Cwd             string          `json:"cwd"             ingest:"path"`
+	Cwd             string          `json:"cwd"             ingest:"path" store:"record:cwd_id"`
 	StartedAt       *float64        `json:"startedAt"       ingest:"time"`
 	ProcStart       string          `json:"procStart"       ingest:"keyword"`
-	Version         string          `json:"version"         ingest:"keyword"`
+	Version         string          `json:"version"         ingest:"keyword" store:"record:version_id"`
 	Kind            string          `json:"kind"            ingest:"keyword"`
-	Entrypoint      string          `json:"entrypoint"      ingest:"keyword"`
+	Entrypoint      string          `json:"entrypoint"      ingest:"keyword" store:"record:entrypoint_id"`
 	PidDomain       string          `json:"pidDomain"       ingest:"keyword"`
 	Name            string          `json:"name"            ingest:"keyword"`
 	NameSource      string          `json:"nameSource"      ingest:"keyword"`
@@ -129,3 +129,6 @@ func (s *Source) Tombstone(c source.Captures, last []byte, at time.Time) (source
 	}
 	return rec, true
 }
+
+// Storage lists where each field is stored (implements source.Stored).
+func (*Source) Storage() map[string]source.Storage { return source.MustCatalogStorage(Entry{}) }
