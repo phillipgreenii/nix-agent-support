@@ -45,3 +45,5 @@ deleteRules:
     uid: pg-ccrec-settle-tick-slow
   - orgId: 1
     uid: pg-ccrec-unknown-key-burst
+  - orgId: 1
+    uid: pg-ccrec-field-type-mismatch

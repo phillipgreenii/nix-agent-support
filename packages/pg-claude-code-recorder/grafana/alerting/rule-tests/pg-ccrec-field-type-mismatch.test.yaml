@@ -1,0 +1,69 @@
+# promtool unit tests for the pg-ccrec-field-type-mismatch alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+# The series is registered when first incremented, so every case starts from the first mismatch.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an increase fires with the source, type and field labels and severity warning
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_field_type_mismatch_total{source="s1",type="t1",field="f1"}
+        values: "0x10 3x100"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-ccrec-field-type-mismatch
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-ccrec-field-type-mismatch
+        exp_alerts:
+          - exp_labels:
+              source: s1
+              type: t1
+              field: f1
+              severity: warning
+
+  - name: a flat counter (no new mismatch) does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_field_type_mismatch_total{source="s1",type="t1",field="f1"}
+        values: "7x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-ccrec-field-type-mismatch
+        exp_alerts: []
+
+  - name: the alert clears once the increase is more than an hour old
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_field_type_mismatch_total{source="s1",type="t1",field="f1"}
+        values: "0x10 3x200"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-ccrec-field-type-mismatch
+        exp_alerts:
+          - exp_labels:
+              source: s1
+              type: t1
+              field: f1
+              severity: warning
+      - eval_time: 120m
+        alertname: pg-ccrec-field-type-mismatch
+        exp_alerts: []
+
+  - name: an absent counter gives no alert
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_caught_up{job="pg-claude-code-recorder"}
+        values: "1x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-ccrec-field-type-mismatch
+        exp_alerts: []

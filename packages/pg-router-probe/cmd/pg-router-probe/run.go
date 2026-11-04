@@ -164,12 +164,12 @@ import (
 // the call deadline, the signals that would justify a beads daemon. Registered
 // the same way, with no escalation label.
 //
-// The fourteen pg-ccrec-* rules of the recorder's alert file (packages/
+// The fifteen pg-ccrec-* rules of the recorder's alert file (packages/
 // pg-claude-code-recorder/grafana/alerting/alerts.yaml, docket pg2-v77tsx phase 7c;
 // registered by darwin/modules/pg-claude-code-recorder while the daemon is deployed):
 // daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old, free-space,
 // unknown-key-burst, data-loss, removal-backlog, doctor-mismatch, control-inbox-gone,
-// crash-share, removal-stuck and settle-tick-slow. Registered the same way, with no escalation label.
+// crash-share, removal-stuck, settle-tick-slow and field-type-mismatch. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
 // pg-router-pr-dispatch-failed (pg2-87pjb1: three or more pr.changed dispatches
@@ -225,6 +225,7 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-crash-share",
 	"pg-ccrec-removal-stuck",
 	"pg-ccrec-settle-tick-slow",
+	"pg-ccrec-field-type-mismatch",
 }
 
 func defaultSnapshotPath() string {

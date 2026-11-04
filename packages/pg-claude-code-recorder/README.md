@@ -442,7 +442,7 @@ Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 
 | File                                  | What it is                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alerting/alerts.yaml`                | fourteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                         |
+| `alerting/alerts.yaml`                | fifteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                          |
 | `alerting/alerts-delete.yaml`         | the `deleteRules`-only twin (same uids), registered instead while no daemon is deployed; the two are never loaded together                                                                                                                                                                                                               |
 | `alerting/rule-tests/`                | one promtool test file per rule, run through `packages/pg-connector/grafana/check-alert-rules.sh`                                                                                                                                                                                                                                        |
 | `pg_claude_code_recorder_metrics.txt` | the metric catalogue (the Signals table): name, type, labels, with the enumerated label values                                                                                                                                                                                                                                           |
@@ -454,26 +454,27 @@ Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 Flake checks (build one with `nix build .#checks.<system>.<name>`): `test-pg-claude-code-recorder-alert-rules`,
 `test-pg-claude-code-recorder-alert-structure` and `test-pg-claude-code-recorder-signals-registration`. Every rule uid is also in
 `registeredRuleUIDs` of `packages/pg-router-probe/cmd/pg-router-probe/run.go` (a deployment that passes its own `--rule-uid` list replaces
-that list and must carry the fourteen too).
+that list and must carry the fifteen too).
 
 Alerts and their thresholds (the thresholds are the builder's calls; a literal that stands for a config default is named in the rule):
 
-| Alert                | Fires when                                                                                              | Severity | No data  | First action                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------- | -------- | -------- | --------------------------------- |
-| `daemon-down`        | `up` of the scrape target is 0 for 2 minutes (scrape interval 30s); `SYSTEM_PAUSE` guard                | critical | Alerting | `status`; the launch agent log    |
-| `heartbeat-stale`    | scraped (`and on() up == 1`) and the last sweep is older than 2700 s (3 times `sweep.interval`)         | warning  | Alerting | `status`; pprof goroutine dump    |
-| `copy-lag`           | copy lag over 120 s for 10 minutes                                                                      | warning  | OK       | `coverage`                        |
-| `parse-stuck`        | parse lag bytes above 0 and the parse progress ratio unchanged for 10 minutes                           | warning  | OK       | `coverage`; the log               |
-| `held-old`           | oldest held Conversation over 259200 s (the `held.alertAfter` default, 3 days)                          | warning  | OK       | `held`                            |
-| `free-space`         | free bytes under 20 GiB (the `minFreeBytes` default), or the 6-hour slope predicts full within 24 hours | critical | Alerting | the Disk full runbook             |
-| `unknown-key-burst`  | more than 100 new unknown keys in an hour                                                               | warning  | OK       | `coverage`; update the parser     |
-| `data-loss`          | any increase of `dropped_bytes_total` in an hour (the firing alert carries the `reason`)                | warning  | OK       | `coverage`; the log               |
-| `removal-backlog`    | the removal queue is over 4800 Conversations (24 hours of the default `remove.maxPerHour` of 200)       | warning  | OK       | `remove --dry-run`                |
-| `doctor-mismatch`    | `doctor_mismatch_files` above 0, or a non-zero `doctor_last_run_timestamp` older than 2 days            | critical | Alerting | `doctor`                          |
-| `control-inbox-gone` | a live Process in `control_inbox_state{state="gone"}` for 10 minutes (never `never_loaded`)             | warning  | OK       | `pg-claude-control list`          |
-| `crash-share`        | crashed plus suspected over 20 percent of a day's ends, with at least 20 ends                           | warning  | OK       | `conversations --crashed --since` |
-| `removal-stuck`      | the oldest quarantined file is over an hour old                                                         | warning  | OK       | `remove --dry-run`; the log       |
-| `settle-tick-slow`   | the last settle tick took over 60 s (the tick interval) for 15 minutes                                  | warning  | OK       | `status`; the log; pprof CPU      |
+| Alert                 | Fires when                                                                                                     | Severity | No data  | First action                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- | -------- | -------- | --------------------------------- |
+| `daemon-down`         | `up` of the scrape target is 0 for 2 minutes (scrape interval 30s); `SYSTEM_PAUSE` guard                       | critical | Alerting | `status`; the launch agent log    |
+| `heartbeat-stale`     | scraped (`and on() up == 1`) and the last sweep is older than 2700 s (3 times `sweep.interval`)                | warning  | Alerting | `status`; pprof goroutine dump    |
+| `copy-lag`            | copy lag over 120 s for 10 minutes                                                                             | warning  | OK       | `coverage`                        |
+| `parse-stuck`         | parse lag bytes above 0 and the parse progress ratio unchanged for 10 minutes                                  | warning  | OK       | `coverage`; the log               |
+| `held-old`            | oldest held Conversation over 259200 s (the `held.alertAfter` default, 3 days)                                 | warning  | OK       | `held`                            |
+| `free-space`          | free bytes under 20 GiB (the `minFreeBytes` default), or the 6-hour slope predicts full within 24 hours        | critical | Alerting | the Disk full runbook             |
+| `unknown-key-burst`   | more than 100 new unknown keys in an hour                                                                      | warning  | OK       | `coverage`; update the parser     |
+| `data-loss`           | any increase of `dropped_bytes_total` in an hour (the firing alert carries the `reason`)                       | warning  | OK       | `coverage`; the log               |
+| `removal-backlog`     | the removal queue is over 4800 Conversations (24 hours of the default `remove.maxPerHour` of 200)              | warning  | OK       | `remove --dry-run`                |
+| `doctor-mismatch`     | `doctor_mismatch_files` above 0, or a non-zero `doctor_last_run_timestamp` older than 2 days                   | critical | Alerting | `doctor`                          |
+| `control-inbox-gone`  | a live Process in `control_inbox_state{state="gone"}` for 10 minutes (never `never_loaded`)                    | warning  | OK       | `pg-claude-control list`          |
+| `crash-share`         | crashed plus suspected over 20 percent of a day's ends, with at least 20 ends                                  | warning  | OK       | `conversations --crashed --since` |
+| `removal-stuck`       | the oldest quarantined file is over an hour old                                                                | warning  | OK       | `remove --dry-run`; the log       |
+| `settle-tick-slow`    | the last settle tick took over 60 s (the tick interval) for 15 minutes                                         | warning  | OK       | `status`; the log; pprof CPU      |
+| `field-type-mismatch` | any increase of `field_type_mismatch_total` in an hour (the firing alert carries `source`, `type` and `field`) | warning  | OK       | `coverage`; update the catalogue  |
 
 Grafana has no inhibition, so each guard is in the expression: `daemon-down` adds the `SYSTEM_PAUSE` gate to a value that is never empty (a pause cannot read as NoData); `heartbeat-stale` and
 `doctor-mismatch` read 0 while the daemon is not scraped (so `daemon-down` alone pages); `free-space` is deliberately unguarded and

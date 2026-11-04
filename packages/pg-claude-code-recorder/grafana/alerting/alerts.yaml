@@ -4,9 +4,9 @@
 # packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
-# Fourteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# Fifteen rules: the eleven of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
 # parse-stuck, held-old, free-space, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
-# control-inbox-gone) plus crash-share and removal-stuck of the second review, plus settle-tick-slow. Each uid is
+# control-inbox-gone) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch. Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
 # packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
@@ -635,3 +635,47 @@ groups:
                 - evaluator:
                     type: gt
                     params: [60]
+
+      # Field-type mismatch, schema v3 design: any increase in an hour. A catalogued field carried a
+      # value that did not convert losslessly to its declared storage type; the typed column stays
+      # NULL and only the generic fields row holds the value. The series appears when first
+      # incremented (not at zero), so a first mismatch reads as no increase until the second scrape.
+      - uid: pg-ccrec-field-type-mismatch
+        title: pg-claude-code-recorder field value of the wrong type
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder saw a catalogued field with a value of the wrong type"
+          description: "field_type_mismatch_total increased in the last hour for the source, type and field labels shown: Claude Code probably changed the type of a field the catalogue declares, so its typed column is left NULL. Run pg-claude-code-recorder coverage to see the field, then update the catalogue and re-parse."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum by (source, type, field) (increase(pg_claude_code_recorder_field_type_mismatch_total[1h]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
