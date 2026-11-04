@@ -327,6 +327,7 @@ func (s *Store) commitBatchLocked() error {
 	defer func() {
 		if !committed {
 			s.rbEpoch.Add(1)
+			s.dropPend()
 			_ = tx.Rollback()
 		}
 	}()
@@ -341,6 +342,7 @@ func (s *Store) commitBatchLocked() error {
 	for _, h := range s.wrHooks {
 		h()
 	}
+	s.fireOffsets(s.takePend())
 	return nil
 }
 
@@ -358,8 +360,10 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 	if _, err := tx.Exec(`SAVEPOINT bulk_write`); err != nil {
 		return err
 	}
+	mark := s.pendLen()
 	if err := fn(tx); err != nil {
 		s.rbEpoch.Add(1)
+		s.pendTrunc(mark)
 		_, _ = tx.Exec(`ROLLBACK TO bulk_write`)
 		_, _ = tx.Exec(`RELEASE bulk_write`)
 		return err

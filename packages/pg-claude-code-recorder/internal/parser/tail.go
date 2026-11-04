@@ -65,9 +65,11 @@ func (p *Parser) ParseTail(file int64, gen int) (bool, error) {
 		if err := p.insert(tx, f, src, caps, g, g.ParseOffset, len(buf), recs, seen); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, g.CopyOffset, f.ID, g.Gen, g.CopyOffset); err != nil {
+		res, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, g.CopyOffset, f.ID, g.Gen, g.CopyOffset)
+		if err != nil {
 			return err
 		}
+		p.noteParseOffset(res, f.ID, g.Gen)
 		if _, err := tx.Exec(`INSERT INTO parse_state(file_id,gen,version) VALUES(?,?,?) ON CONFLICT(file_id,gen) DO UPDATE SET version=excluded.version`,
 			f.ID, g.Gen, src.Version()); err != nil {
 			return err

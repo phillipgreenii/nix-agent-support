@@ -192,6 +192,7 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 	}()
 	if err := fn(tx); err != nil {
 		s.rbEpoch.Add(1)
+		s.dropPend()
 		return err
 	}
 	if point != "" {
@@ -199,12 +200,14 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 	}
 	if err := tx.Commit(); err != nil {
 		s.rbEpoch.Add(1)
+		s.dropPend()
 		return err
 	}
 	done = true
 	for _, h := range s.wrHooks {
 		h()
 	}
+	s.fireOffsets(s.takePend())
 	return nil
 }
 

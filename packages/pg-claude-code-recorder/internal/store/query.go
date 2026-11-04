@@ -284,6 +284,7 @@ func (s *Store) SetParseOffset(file int64, gen int, off int64) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("store: parse offset %d beyond copy offset or unknown generation %d.%d", off, file, gen)
 	}
+	s.fireOffsets([]offNote{{file: file, gen: gen, read: true}})
 	return nil
 }
 
@@ -618,4 +619,35 @@ func (s *Reader) PathsByFiles(ids []int64) (map[int64][]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// UnparsedCommit is one copy commit that still holds bytes the parser has not
+// parsed (its end is past its generation's parse offset).
+type UnparsedCommit struct {
+	File     int64
+	Gen      int
+	From, To int64
+	SeenNS   int64
+}
+
+// UnparsedCommits returns, in one statement, every copy commit that ends past
+// its generation's parse offset, ordered by file, generation and commit
+// sequence. It seeds the parser's maintained lag state.
+func (s *Reader) UnparsedCommits() ([]UnparsedCommit, error) {
+	rows, err := s.q.Query(`SELECT c.file_id,c.gen,c.from_off,c.to_off,c.seen_ns FROM commits c
+JOIN generations g ON g.file_id=c.file_id AND g.gen=c.gen
+WHERE c.to_off>g.parse_offset ORDER BY c.file_id,c.gen,c.seq`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []UnparsedCommit
+	for rows.Next() {
+		var c UnparsedCommit
+		if err := rows.Scan(&c.File, &c.Gen, &c.From, &c.To, &c.SeenNS); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

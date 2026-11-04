@@ -71,6 +71,9 @@ type Daemon struct {
 	w     *watcher.Watcher
 	ckpt  *fileCheckpoint
 	prs   *parser.Parser
+	// lag is the maintained parse-lag state, fed by the store's OnOffsets hook and
+	// seeded once at start; the gauge and status refreshes read it.
+	lag   *parser.Lag
 	qe    *query.Engine
 	fe    *feed.Engine
 	srv   *server.Server
@@ -171,6 +174,10 @@ func Open(opt Options) (*Daemon, error) {
 	}
 	srcs := sources.All()
 	d.prs = parser.New(parser.Config{Store: st, Sources: srcs, ClaudeDir: cfg.ClaudeDir, EndsDir: cfg.EndsDir(), Obs: o, Clock: opt.Clock, MaxLineBytes: cfg.ParseMaxLineBytes, FeedRetention: cfg.FeedRetention})
+	if d.lag, err = d.prs.StartLag(); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("seed parse-lag state: %w", err)
+	}
 	d.qe = &query.Engine{DB: st.Read(), Catalog: sources.Catalog(srcs), ClaudeDir: cfg.ClaudeDir, Res: d.prs, SessionRef: st.SessionRefReady, Storage: sources.Storage(srcs), TypedStorage: st.HasExt, Behind: func() bool { return !d.backfillDone.Load() }}
 	d.fe = &feed.Engine{
 		Q: d.qe, Store: st, Clock: opt.Clock, Obs: o, Retention: cfg.FeedRetention, WaitMax: cfg.WaitMax,

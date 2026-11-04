@@ -199,6 +199,9 @@ type Store struct {
 	lastSeq     int64
 	hooks       []func()
 	wrHooks     []func()
+	offHooks    []OffsetsHook
+	pendMu      sync.Mutex // guards pendOff (a parse transaction may note from workers)
+	pendOff     []offNote  // offset changes of an open write, fired after its commit
 
 	trkMu    sync.Mutex // guards trackers
 	trackers []*FileTracker
@@ -640,6 +643,98 @@ func (s *Store) OnWrite(fn func()) {
 	s.mu.Unlock()
 }
 
+// OffsetsHook is called when a generation's copy offset or parse offset has
+// changed: after the commit that changed it, still under the write lock, with
+// the generation's committed offsets. at is the commit's seen time for a copy
+// change (the commits.seen_ns of the new span) and the store clock for a parse
+// change. A hook MUST NOT block, MUST be idempotent (the same offsets may be
+// delivered twice) and MAY assume neither offset ever decreases.
+type OffsetsHook func(file int64, gen int, copyOffset, parseOffset int64, at time.Time)
+
+// offNote is one offset change waiting to be delivered. A copy note carries
+// both offsets (read inside the applying transaction); a parse note is resolved
+// after the commit (read false).
+type offNote struct {
+	file        int64
+	gen         int
+	copy, parse int64
+	at          time.Time
+	read        bool // copy and parse still to be read from the database
+}
+
+// OnOffsets registers a hook called inside the locked apply that changes a
+// generation's copy offset (a copy commit, journal replay after open excepted:
+// a subscriber seeds itself) or parse offset (the parser's transactions, tail
+// mode, ReparseGen, SetParseOffset). A hook runs under the write lock and MUST
+// NOT block.
+func (s *Store) OnOffsets(fn OffsetsHook) {
+	s.mu.Lock()
+	s.offHooks = append(s.offHooks, fn)
+	s.mu.Unlock()
+}
+
+// NoteParseOffset records, from inside a WithWrite callback, that the callback
+// advanced the parse offset of a generation; the OnOffsets hooks run after the
+// transaction commits, with the committed offsets. A callback whose UPDATE
+// matched no row (the parse_offset <= copy_offset guard) MUST NOT call it.
+func (s *Store) NoteParseOffset(file int64, gen int) {
+	s.pendMu.Lock()
+	s.pendOff = append(s.pendOff, offNote{file: file, gen: gen, read: true})
+	s.pendMu.Unlock()
+}
+
+// pendLen and pendTrunc let a savepoint rollback drop the notes of the failed
+// callback.
+func (s *Store) pendLen() int {
+	s.pendMu.Lock()
+	defer s.pendMu.Unlock()
+	return len(s.pendOff)
+}
+
+func (s *Store) pendTrunc(n int) {
+	s.pendMu.Lock()
+	if n < len(s.pendOff) {
+		s.pendOff = s.pendOff[:n]
+	}
+	s.pendMu.Unlock()
+}
+
+// fireOffsets delivers the notes to the OnOffsets hooks. The caller holds the
+// write lock, no transaction of its own is open on the write handle that would
+// block a read, and the notes' writes are committed.
+func (s *Store) fireOffsets(notes []offNote) {
+	if len(s.offHooks) == 0 {
+		return
+	}
+	for _, n := range notes {
+		if n.read {
+			if s.wdb == nil {
+				continue
+			}
+			if err := s.wdb.QueryRow(`SELECT copy_offset,parse_offset FROM generations WHERE file_id=? AND gen=?`, n.file, n.gen).Scan(&n.copy, &n.parse); err != nil {
+				continue
+			}
+			if n.at.IsZero() {
+				n.at = time.Now()
+			}
+		}
+		for _, h := range s.offHooks {
+			h(n.file, n.gen, n.copy, n.parse, n.at)
+		}
+	}
+}
+
+// takePend returns and clears the notes of the write that just committed.
+func (s *Store) takePend() []offNote {
+	s.pendMu.Lock()
+	defer s.pendMu.Unlock()
+	n := s.pendOff
+	s.pendOff = nil
+	return n
+}
+
+func (s *Store) dropPend() { s.pendMu.Lock(); s.pendOff = nil; s.pendMu.Unlock() }
+
 // NewFileID reserves a file id. Ids name copies, not Claude paths.
 func (s *Store) NewFileID() int64 {
 	s.mu.Lock()
@@ -780,8 +875,9 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 	if err != nil {
 		return err
 	}
+	var notes []offNote
 	for _, r := range recs {
-		if err := apply(tx, r); err != nil {
+		if err := apply(tx, r, &notes); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("store: apply seq %d (%s): %w", r.Seq, r.T, err)
 		}
@@ -796,6 +892,7 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 	}
 	s.lastSeq = last
 	s.noteFiles(recs)
+	s.fireOffsets(notes)
 	return nil
 }
 
@@ -903,7 +1000,14 @@ func nz(b bool) int {
 	return 0
 }
 
-func apply(tx *sql.Tx, r *Rec) error {
+func resRows(res sql.Result, err error) (int64, error) {
+	if err != nil || res == nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func apply(tx *sql.Tx, r *Rec, notes *[]offNote) error {
 	var err error
 	switch r.T {
 	case TEpoch:
@@ -932,8 +1036,14 @@ func apply(tx *sql.Tx, r *Rec) error {
 	case TCommit:
 		_, err = tx.Exec(`INSERT OR IGNORE INTO commits(file_id,gen,seq,from_off,to_off,seen_ns) VALUES(?,?,?,?,?,?)`, r.File, r.Gen, r.Seq, r.From, r.To, r.At)
 		if err == nil {
-			_, err = tx.Exec(`UPDATE generations SET copy_offset=?, tail_hash=?, tail_len=? WHERE file_id=? AND gen=? AND copy_offset<=?`,
+			var res sql.Result
+			res, err = tx.Exec(`UPDATE generations SET copy_offset=?, tail_hash=?, tail_len=? WHERE file_id=? AND gen=? AND copy_offset<=?`,
 				r.To, int64(r.Tail), r.TailLen, r.File, r.Gen, r.To)
+			if n, _ := resRows(res, err); n > 0 {
+				note := offNote{file: r.File, gen: r.Gen, copy: r.To, at: time.Unix(0, r.At)}
+				err = tx.QueryRow(`SELECT parse_offset FROM generations WHERE file_id=? AND gen=?`, r.File, r.Gen).Scan(&note.parse)
+				*notes = append(*notes, note)
+			}
 		}
 		if err == nil {
 			_, err = tx.Exec(`UPDATE files SET last_size=? WHERE id=?`, r.Size, r.File)

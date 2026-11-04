@@ -484,9 +484,11 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 				if cur == w.start {
 					continue
 				}
-				if _, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, cur, w.f.ID, w.g.Gen, cur); err != nil {
+				res, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, cur, w.f.ID, w.g.Gen, cur)
+				if err != nil {
 					return err
 				}
+				p.noteParseOffset(res, w.f.ID, w.g.Gen)
 				if _, err := tx.Exec(`INSERT INTO parse_state(file_id,gen,version) VALUES(?,?,?) ON CONFLICT(file_id,gen) DO UPDATE SET version=excluded.version`,
 					w.f.ID, w.g.Gen, w.src.Version()); err != nil {
 					return err
@@ -636,9 +638,11 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 			}
 			off += n
 		}
-		if _, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, off, f.ID, g.Gen, off); err != nil {
+		res, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, off, f.ID, g.Gen, off)
+		if err != nil {
 			return err
 		}
+		p.noteParseOffset(res, f.ID, g.Gen)
 		if _, err := tx.Exec(`INSERT INTO parse_state(file_id,gen,version) VALUES(?,?,?) ON CONFLICT(file_id,gen) DO UPDATE SET version=excluded.version`,
 			f.ID, g.Gen, src.Version()); err != nil {
 			return err
@@ -1010,6 +1014,16 @@ func (p *Parser) UpdateGauges() {
 	r.Set(MParseLagSecs, nil, lagSecs)
 	r.Set(MParseProgress, nil, prog)
 	r.Set(MUnknownKinds, nil, float64(len(kinds)))
+}
+
+// noteParseOffset tells the store's OnOffsets subscribers that the UPDATE just
+// run in the open write transaction moved a generation's parse offset. An
+// UPDATE the parse_offset <= copy_offset guard rejected matched no row and is
+// not noted.
+func (p *Parser) noteParseOffset(res sql.Result, file int64, gen int) {
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		p.cfg.Store.NoteParseOffset(file, gen)
+	}
 }
 
 func fileByID(files []store.File, id int64) (store.File, bool) {
