@@ -10,30 +10,31 @@ import (
 	"github.com/phillipgreenii/pg-ccaudit/internal/ingest"
 	"github.com/phillipgreenii/pg-ccaudit/internal/lock"
 	"github.com/phillipgreenii/pg-ccaudit/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
 func cmdIngest(ctx context.Context, args []string, stdout, stderr *os.File) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dbPath := fs.String("db", "", "database path")
-	root := fs.String("root", "", "transcript root")
+	socket := fs.String("socket", "", "recorder socket (default: $PG_CLAUDE_CODE_RECORDER_SOCKET, else the recorder's default path)")
 	thinking := fs.Bool("thinking", false,
-		"also index thinking blocks (T-16; DEFAULT OFF — ~94 MB corpus-wide and no shipped query reads them)")
-	progressEvery := fs.Int("progress-every", ingest.DefaultProgressEvery,
-		"emit a progress line every N scanned files")
-	finalAfter := fs.Duration("final-after", ingest.DefaultFinalAfter,
-		"how long a fully consumed file must be quiescent before it is recorded complete (0 = immediately)")
-	quiet := fs.Bool("quiet", false, "suppress progress lines (the final summary is still printed)")
+		"also index thinking blocks (DEFAULT OFF; no shipped query reads them)")
+	pageLimit := fs.Int("page-limit", 0, "feed page size (0 = the recorder's default)")
+	quiet := fs.Bool("quiet", false, "suppress the summary line when nothing was read")
 	lockPath := fs.String("lock", "", "advisory lock path (default: alongside the database)")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, `pg-ccaudit ingest — index new and appended transcripts
+		fmt.Fprintf(stderr, `pg-ccaudit ingest — index new tool calls and results from the recorder
 
-Incremental and resumable: change is detected on (path, size, mtime) and only the
-appended byte range is parsed. A file whose size shrank or whose mtime moved
-backward was rewritten (compaction does this) and is re-indexed from zero.
+Reads the recorder daemon's change feed through two subscriptions (every tool
+call and result without bodies; bodies only for errored results), each with its
+own cursor kept in the database. A new subscriber starts from a snapshot; an
+expired cursor resyncs from a snapshot. Claude's own files are never read: with
+the recorder down this prints "recorder offline" and exits 0, and the next tick
+polls again.
 
 Single-instance: a second concurrent ingest detects the advisory lock, does
-nothing, and exits 0 — an overlapping tick is expected, not an error.
+nothing, and exits 0.
 
 FLAGS
 `)
@@ -47,14 +48,6 @@ FLAGS
 	if err != nil {
 		return err
 	}
-	resolvedRoot, err := resolveRoot(*root)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(resolvedRoot); err != nil {
-		return fmt.Errorf("transcript root %s: %w", resolvedRoot, err)
-	}
-
 	lp := *lockPath
 	if lp == "" {
 		lp = lock.DefaultPath(resolvedDB)
@@ -63,9 +56,6 @@ FLAGS
 	if err != nil {
 		var held *lock.ErrHeld
 		if errors.As(err, &held) {
-			// T-12: detect and NO-OP. Exit zero — a skipped overlapping tick is
-			// correct behaviour, and reporting it as failure would make the
-			// scheduled sweep log an alarm every time two ticks overlapped.
 			fmt.Fprintf(stdout, "ingest skipped: another ingest holds %s (single-instance writer)\n", lp)
 			return nil
 		}
@@ -77,45 +67,40 @@ FLAGS
 		}
 	}()
 
+	c, err := client.Dial(ctx, client.Options{Socket: *socket, Name: "pg-ccaudit"})
+	if err != nil {
+		if errors.Is(err, client.ErrDown) {
+			fmt.Fprintf(stdout, "ingest skipped: recorder offline (%v); will poll again later\n", err)
+			return nil
+		}
+		return err
+	}
+
 	db, err := store.Open(resolvedDB, *thinking)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
-	progress := (*os.File)(nil)
+	fmt.Fprintf(stdout, "pg-ccaudit ingest: recorder feed db=%s thinking=%t\n", resolvedDB, *thinking)
+	var progress *os.File
 	if !*quiet {
 		progress = stdout
 	}
-	fmt.Fprintf(stdout, "pg-ccaudit ingest: root=%s db=%s thinking=%t\n", resolvedRoot, resolvedDB, *thinking)
-	// A user-typed 0 means "final as soon as fully consumed"; the library reads a
-	// zero Options field as "caller said nothing", so translate here.
-	resolvedFinalAfter := *finalAfter
-	if resolvedFinalAfter == 0 {
-		resolvedFinalAfter = ingest.FinalAfterImmediate
-	}
-	opt := ingest.Options{
-		Root:          resolvedRoot,
-		Thinking:      *thinking,
-		ProgressEvery: *progressEvery,
-		FinalAfter:    resolvedFinalAfter,
-	}
+	opt := ingest.RecorderOptions{Client: c, Thinking: *thinking, PageLimit: *pageLimit}
 	if progress != nil {
 		opt.Progress = progress
-	} else {
-		// Even quiet mode prints the final summary: it is the only observable
-		// proof that the sweep did zero work rather than silently failing.
-		opt.Progress = nil
 	}
-	stats, err := ingest.Run(ctx, db, opt)
+	stats, err := ingest.RunRecorder(ctx, db, opt)
 	if err != nil {
+		if errors.Is(err, client.ErrDown) || client.Retryable(err) || errors.Is(err, client.ErrBehind) {
+			fmt.Fprintf(stdout, "ingest cycle skipped: recorder not ready (%v); will poll again later\n", err)
+			return nil
+		}
 		return err
 	}
 	if progress == nil {
 		fmt.Fprintln(stdout, stats.Summary())
-	}
-	if stats.Failed > 0 {
-		fmt.Fprintf(stderr, "pg-ccaudit: %d file(s) could not be indexed; see warnings above\n", stats.Failed)
 	}
 	return nil
 }
@@ -125,11 +110,4 @@ func resolveDB(flagVal string) (string, error) {
 		return flagVal, nil
 	}
 	return store.DefaultDBPath()
-}
-
-func resolveRoot(flagVal string) (string, error) {
-	if flagVal != "" {
-		return flagVal, nil
-	}
-	return store.DefaultTranscriptRoot()
 }

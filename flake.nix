@@ -321,8 +321,9 @@
           claude-hook-router = final.callPackage ./packages/claude-hook-router {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-ccaudit: Pattern A (ADR 0008) — a self-contained Go module with no
-          # local `replace`, so no sibling needs to be in the same store tree.
+          # pg-ccaudit: Pattern B (ADR 0008) — its only local `replace` is the
+          # recorder client (../pg-claude-code-recorder), so the source is rooted
+          # at packages/; see packages/pg-ccaudit/default.nix.
           # It deliberately does NOT reuse claude-transcript; see the rationale in
           # packages/pg-ccaudit/default.nix.
           pg-ccaudit = final.callPackage ./packages/pg-ccaudit {
@@ -1898,7 +1899,6 @@
                 "claude-extended-tool-approver"
                 "pa-monitor-decorator-scope"
                 "claude-transcript"
-                "pg-ccaudit"
                 "pg-connector"
                 "pg-router-source-pg-connector"
                 "pg-router-source-pg-desk"
@@ -1936,6 +1936,17 @@
               # packages/ so every replaced sibling lives in one store tree, and
               # pass modRoot. Filesets mirror each module's own default.nix.
               patternBGoLints = [
+                (goLint {
+                  module = "pg-ccaudit";
+                  modRoot = "pg-ccaudit";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-ccaudit
+                      ./packages/pg-claude-code-recorder
+                    ];
+                  };
+                })
                 (goLint {
                   module = "ccpool";
                   modRoot = "ccpool";
@@ -6384,7 +6395,14 @@
               # No testDeps: the suite shells out to nothing.
               pg-ccaudit-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-ccaudit-go-tests";
-                src = lib.cleanSource ./packages/pg-ccaudit; # matches default.nix
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-ccaudit
+                    ./packages/pg-claude-code-recorder
+                  ];
+                };
+                modRoot = "pg-ccaudit";
                 gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
               };
 

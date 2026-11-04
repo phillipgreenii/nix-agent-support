@@ -451,3 +451,20 @@ The refusal fixture is **half negative cases**, and that half is the point. It c
 discusses blocking, a successful `cat` whose output is full of refusal verbs, and the
 permission layer's own denials — every one of which a naive text match counts as a hook
 rejection.
+
+## Ingest source: the recorder feed
+
+`pg-ccaudit ingest` no longer reads Claude's `*.jsonl` files. It polls the
+recorder daemon's change feed through two subscriptions, each with its own
+cursor kept in the `feed_cursors` table: one takes every tool call and tool
+result with its id, `is_error` and body length (no body), the other takes only
+the results where `is_error` is true, whose bodies and surrounding line are read
+from the recorder's copy. A new subscriber starts from a snapshot, an expired
+cursor resyncs from a snapshot, and a reset entry is applied before the records
+that follow it. With the recorder down, ingest says "recorder offline", exits 0
+and polls again at the next tick; it never falls back to the files.
+
+Known limit: only lines holding a tool call or an errored result are fed, so the
+`user_text` and `assistant_text` tables (human turns, narration of lines without
+tool calls) are no longer filled; the queries over them see only what the feed
+carried. `status` and `query` no longer compare the index with the disk.

@@ -16,7 +16,8 @@ func cmdStatus(ctx context.Context, args []string, stdout, stderr *os.File) erro
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dbPath := fs.String("db", "", "database path")
-	root := fs.String("root", "", "transcript root")
+	root := fs.String("root", "", "ignored: kept so existing schedules keep working (ccaudit no longer reads Claude files)")
+	_ = root
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `pg-ccaudit status — report index coverage and staleness
@@ -37,17 +38,13 @@ FLAGS
 	if err != nil {
 		return err
 	}
-	resolvedRoot, err := resolveRoot(*root)
-	if err != nil {
-		return err
-	}
 	db, err := store.OpenReadOnly(resolvedDB)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
-	s := query.Measure(ctx, db, resolvedRoot)
+	s := query.Measure(ctx, db, "")
 	hasThinking, err := store.HasThinkingTable(db)
 	if err != nil {
 		return err
@@ -56,7 +53,6 @@ FLAGS
 	if *asJSON {
 		payload := map[string]any{
 			"db":             resolvedDB,
-			"root":           resolvedRoot,
 			"files_on_disk":  s.FilesOnDisk,
 			"files_indexed":  s.FilesIndexed,
 			"files_missing":  s.FilesMissing,
@@ -79,7 +75,6 @@ FLAGS
 	}
 
 	fmt.Fprintf(stdout, "db:   %s\n", resolvedDB)
-	fmt.Fprintf(stdout, "root: %s\n", resolvedRoot)
 	fmt.Fprintln(stdout, s.Note())
 	fmt.Fprintf(stdout, "thinking table (T-16): %t\n", hasThinking)
 

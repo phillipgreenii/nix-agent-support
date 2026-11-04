@@ -62,7 +62,10 @@ const DriverName = "sqlite"
 // 2 — pg2-oisvb adds user_text.
 // 3 — pg2-pqsvsl: no DDL change. Ingest stopped treating <session>.status.jsonl
 // as a transcript; the bump purges the rows those files already produced.
-const SchemaVersion = 3
+// 4 — recorder feed: adds feed_cursors (one cursor per subscription). Ingest no
+// longer reads Claude files; rows written by the file reader are cleared and
+// re-filled from the recorder.
+const SchemaVersion = 4
 
 // Schema is the CORRECTED DDL from bead pg2-xnnab, plus pg2-oisvb's user_text.
 // `IF NOT EXISTS` is the only addition to the specified columns: it makes Open
@@ -136,6 +139,11 @@ CREATE TABLE IF NOT EXISTS user_text (       -- pg2-oisvb: the HUMAN side
   PRIMARY KEY (path, seq)
 );
 
+CREATE TABLE IF NOT EXISTS feed_cursors (  -- one recorder feed cursor per subscription
+  name   TEXT PRIMARY KEY,
+  cursor TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_calls_name  ON tool_calls(tool_name);
 -- (path, seq) is tool_calls' ORDER, not its identity, so it needs an index of its
 -- own: pg2-oisvb's Tier 1 queries ask "the nearest tool call BEFORE line N of this
@@ -174,6 +182,7 @@ CREATE TABLE IF NOT EXISTS thinking (
 var CanonicalTables = []string{
 	"assistant_text",
 	"events",
+	"feed_cursors",
 	"files",
 	"tool_calls",
 	"tool_results",
@@ -305,6 +314,7 @@ func migrate(db *sql.DB, prior int, withThinking bool) error {
 		`DELETE FROM tool_calls`,
 		`DELETE FROM events`,
 		`DELETE FROM files`,
+		`DELETE FROM feed_cursors`,
 	}
 	if withThinking {
 		stmts = append([]string{`DELETE FROM thinking`}, stmts...)

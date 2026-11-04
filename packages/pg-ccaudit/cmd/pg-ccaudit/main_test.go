@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-ccaudit/internal/lock"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest"
 )
 
 // captureRun drives the CLI end to end. run takes *os.File, so real temp files
@@ -43,28 +44,24 @@ func captureRun(t *testing.T, args ...string) (string, string, error) {
 	return string(ob), string(eb), runErr
 }
 
-// corpus builds a minimal transcript tree in a temp dir. The CLI tests must never
-// reach the real corpus or the real database, so every invocation below passes
-// explicit --root and --db.
-func corpus(t *testing.T) (root, dbPath string) {
+// corpus starts an in-process recorder over a throwaway Claude directory holding
+// one transcript and returns its socket (named root for the existing call sites)
+// and a database path. The CLI tests must never reach the real corpus, the real
+// recorder or the real database.
+func corpus(t *testing.T) (sock, dbPath string) {
 	t.Helper()
-	base := t.TempDir()
-	root = filepath.Join(base, "projects", "projA")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+	env := clienttest.Start(t)
 	content := `{"type":"assistant","uuid":"x-0","sessionId":"S-CLI","timestamp":"2026-07-22T10:00:00.000Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_X1","name":"Bash","input":{"command":"sleep 60"}}]}}` + "\n" +
 		`{"type":"user","uuid":"x-1","sessionId":"S-CLI","timestamp":"2026-07-22T10:00:01.000Z","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_X1","is_error":true,"content":"Blocked: sleep 60"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(root, "s.jsonl"), []byte(content), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	return filepath.Join(base, "projects"), filepath.Join(base, "transcripts.db")
+	env.Write("projects/example-proj/s.jsonl", content)
+	env.Settle()
+	return env.Socket, filepath.Join(t.TempDir(), "transcripts.db")
 }
 
 func TestIngestThenQueryEndToEnd(t *testing.T) {
 	root, dbPath := corpus(t)
 
-	out, _, err := captureRun(t, "ingest", "--root", root, "--db", dbPath, "--final-after", "0")
+	out, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath)
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
@@ -94,14 +91,14 @@ func TestIngestThenQueryEndToEnd(t *testing.T) {
 // T-1: the second sweep with nothing new reports zero work.
 func TestSecondIngestReportsZeroWork(t *testing.T) {
 	root, dbPath := corpus(t)
-	if _, _, err := captureRun(t, "ingest", "--root", root, "--db", dbPath, "--final-after", "0"); err != nil {
+	if _, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath); err != nil {
 		t.Fatalf("first ingest: %v", err)
 	}
-	out, _, err := captureRun(t, "ingest", "--root", root, "--db", dbPath, "--final-after", "0")
+	out, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath)
 	if err != nil {
 		t.Fatalf("second ingest: %v", err)
 	}
-	if !strings.Contains(out, "changed=0") || !strings.Contains(out, "bytes=0") {
+	if !strings.Contains(out, "entries=0") {
 		t.Errorf("second ingest did not report zero work:\n%s", out)
 	}
 }
@@ -110,15 +107,15 @@ func TestSecondIngestReportsZeroWork(t *testing.T) {
 // no per-batch "progress:" lines, but the final summary is still printed.
 func TestIngestQuietSuppressesProgressKeepsSummary(t *testing.T) {
 	root, dbPath := corpus(t)
-	out, _, err := captureRun(t, "ingest", "--quiet", "--progress-every", "1",
-		"--root", root, "--db", dbPath, "--final-after", "0")
+	out, _, err := captureRun(t, "ingest", "--quiet",
+		"--socket", root, "--db", dbPath)
 	if err != nil {
 		t.Fatalf("ingest --quiet: %v", err)
 	}
 	if strings.Contains(out, "progress:") {
 		t.Errorf("--quiet still emitted progress lines:\n%s", out)
 	}
-	if !strings.Contains(out, "bytes=") {
+	if !strings.Contains(out, "entries=") {
 		t.Errorf("--quiet dropped the final summary:\n%s", out)
 	}
 }
@@ -135,7 +132,7 @@ func TestConcurrentIngestNoOpsWithoutError(t *testing.T) {
 	}
 	defer func() { _ = held.Release() }()
 
-	out, _, err := captureRun(t, "ingest", "--root", root, "--db", dbPath, "--final-after", "0")
+	out, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath)
 	if err != nil {
 		t.Fatalf("concurrent ingest returned an error; an overlapping tick must be a clean no-op: %v", err)
 	}
@@ -151,21 +148,13 @@ func TestConcurrentIngestNoOpsWithoutError(t *testing.T) {
 // T-13 at the CLI boundary: the query path leaves the index byte-identical.
 func TestQueryDoesNotModifyTheIndex(t *testing.T) {
 	root, dbPath := corpus(t)
-	if _, _, err := captureRun(t, "ingest", "--root", root, "--db", dbPath, "--final-after", "0"); err != nil {
+	if _, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
 	before, err := os.Stat(dbPath)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	// Add an unindexed transcript so the index is genuinely stale.
-	if err := os.WriteFile(filepath.Join(root, "projA", "later.jsonl"), []byte(
-		`{"type":"assistant","uuid":"y-0","sessionId":"S-LATE","timestamp":"2026-07-29T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"later"}]}}`+"\n",
-	),
-		0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
 	out, errOut, err := captureRun(t, "query", "--root", root, "--db", dbPath, "error-rate-by-tool")
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -173,8 +162,8 @@ func TestQueryDoesNotModifyTheIndex(t *testing.T) {
 	if !strings.Contains(out, "Bash") {
 		t.Errorf("query returned no results against a stale index:\n%s", out)
 	}
-	if !strings.Contains(errOut, "BEHIND") {
-		t.Errorf("staleness note does not report the index is behind:\n%s", errOut)
+	if !strings.Contains(errOut, "staleness:") {
+		t.Errorf("no staleness note:\n%s", errOut)
 	}
 	after, err := os.Stat(dbPath)
 	if err != nil {
@@ -188,7 +177,7 @@ func TestQueryDoesNotModifyTheIndex(t *testing.T) {
 
 func TestStatusCommand(t *testing.T) {
 	root, dbPath := corpus(t)
-	if _, _, err := captureRun(t, "ingest", "--root", root, "--db", dbPath, "--final-after", "0"); err != nil {
+	if _, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
 	out, _, err := captureRun(t, "status", "--root", root, "--db", dbPath)
@@ -326,10 +315,18 @@ func TestQueryAgainstMissingIndexIsAClearError(t *testing.T) {
 	}
 }
 
-func TestIngestAgainstMissingRootIsAClearError(t *testing.T) {
+// With the recorder down ingest says so, exits clean, writes nothing and never
+// falls back to Claude's files.
+func TestIngestWithRecorderDownSkipsCleanly(t *testing.T) {
 	_, dbPath := corpus(t)
-	_, _, err := captureRun(t, "ingest", "--root", filepath.Join(t.TempDir(), "nope"), "--db", dbPath)
-	if err == nil {
-		t.Fatal("expected an error for a missing transcript root")
+	out, _, err := captureRun(t, "ingest", "--socket", filepath.Join(t.TempDir(), "nope.sock"), "--db", dbPath)
+	if err != nil {
+		t.Fatalf("recorder-down ingest returned an error: %v", err)
+	}
+	if !strings.Contains(out, "recorder offline") {
+		t.Errorf("output does not say the recorder is offline:\n%s", out)
+	}
+	if _, statErr := os.Stat(dbPath); statErr == nil {
+		t.Error("a skipped cycle created a database")
 	}
 }

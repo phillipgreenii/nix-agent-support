@@ -110,7 +110,11 @@ func Measure(ctx context.Context, db *sql.DB, root string) Staleness {
 
 	_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(lines_bad), 0) FROM files`).Scan(&s.LinesBad)
 
-	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	var walkErr error
+	if root == "" {
+		return s
+	}
+	walkErr = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
 				return fs.SkipDir

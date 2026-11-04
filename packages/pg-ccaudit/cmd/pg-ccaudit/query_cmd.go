@@ -15,7 +15,8 @@ func cmdQuery(ctx context.Context, args []string, stdout, stderr *os.File) error
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dbPath := fs.String("db", "", "database path")
-	root := fs.String("root", "", "transcript root (for the staleness comparison only)")
+	root := fs.String("root", "", "ignored: kept so existing schedules keep working (ccaudit no longer reads Claude files)")
+	_ = root
 	since := fs.String("since", "", "include events with ts >= this ISO-8601 prefix (e.g. 2026-07-22)")
 	until := fs.String("until", "", "include events with ts < this ISO-8601 prefix (exclusive)")
 	format := fs.String("format", "table", "output format: table, tsv or json")
@@ -62,12 +63,7 @@ QUERIES
 	defer func() { _ = db.Close() }()
 
 	if !*noStaleness {
-		resolvedRoot, rerr := resolveRoot(*root)
-		if rerr != nil {
-			fmt.Fprintf(stderr, "staleness: UNKNOWN — %v\n", rerr)
-		} else {
-			fmt.Fprintln(stderr, query.Measure(ctx, db, resolvedRoot).Note())
-		}
+		fmt.Fprintln(stderr, query.Measure(ctx, db, "").Note())
 	}
 
 	req := query.Request{
