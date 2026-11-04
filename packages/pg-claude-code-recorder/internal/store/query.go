@@ -229,6 +229,48 @@ func (s *Reader) CopyOffsets() (map[[2]int64]int64, error) {
 	return out, rows.Err()
 }
 
+// OffsetTotals is the sum of copy and parse offsets over a file's generations.
+type OffsetTotals struct{ Copy, Parse int64 }
+
+// OffsetTotalsByFile returns, in one aggregate statement, the summed copy and
+// parse offsets of every file's generations, keyed by file id.
+func (s *Reader) OffsetTotalsByFile() (map[int64]OffsetTotals, error) {
+	rows, err := s.q.Query(`SELECT file_id,SUM(copy_offset),SUM(parse_offset) FROM generations GROUP BY file_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]OffsetTotals{}
+	for rows.Next() {
+		var f int64
+		var t OffsetTotals
+		if err := rows.Scan(&f, &t.Copy, &t.Parse); err != nil {
+			return nil, err
+		}
+		out[f] = t
+	}
+	return out, rows.Err()
+}
+
+// LaggingGenerations returns only the generations whose parse offset is behind
+// the copy offset, ordered by file and gen.
+func (s *Reader) LaggingGenerations() ([]Generation, error) {
+	rows, err := s.q.Query(`SELECT ` + genCols + ` FROM generations WHERE copy_offset>parse_offset ORDER BY file_id, gen`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Generation
+	for rows.Next() {
+		g, err := scanGen(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // SetParseOffset records how far the parser has parsed a generation. It is a
 // derived column, not an observation, and MUST NOT exceed the copy offset.
 func (s *Store) SetParseOffset(file int64, gen int, off int64) error {

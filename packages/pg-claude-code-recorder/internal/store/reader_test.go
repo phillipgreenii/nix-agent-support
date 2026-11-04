@@ -194,3 +194,40 @@ func TestBulkReadsMatchTheirPointReads(t *testing.T) {
 		}
 	}
 }
+
+func TestOffsetAggregatesMatchTheGenerationRows(t *testing.T) {
+	s, _ := openCounting(t, Options{})
+	var ids []int64
+	for i := 0; i < 4; i++ {
+		ids = append(ids, seed(t, s))
+	}
+	if err := s.SetParseOffset(ids[0], 1, 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetParseOffset(ids[1], 1, 10); err != nil {
+		t.Fatal(err)
+	}
+	gens, err := s.AllGenerations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]OffsetTotals{}
+	var wantLag []Generation
+	for _, g := range gens {
+		t := want[g.File]
+		t.Copy += g.CopyOffset
+		t.Parse += g.ParseOffset
+		want[g.File] = t
+		if g.CopyOffset > g.ParseOffset {
+			wantLag = append(wantLag, g)
+		}
+	}
+	got, err := s.OffsetTotalsByFile()
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("totals %+v, want %+v (err %v)", got, want, err)
+	}
+	lag, err := s.LaggingGenerations()
+	if err != nil || len(lag) != 3 || !reflect.DeepEqual(lag, wantLag) {
+		t.Fatalf("lagging %+v, want %+v (err %v)", lag, wantLag, err)
+	}
+}

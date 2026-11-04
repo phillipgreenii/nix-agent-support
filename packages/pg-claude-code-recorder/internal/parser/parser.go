@@ -873,37 +873,42 @@ func (p *Parser) UpdateGauges() {
 	if err != nil {
 		return
 	}
-	gens, err := p.cfg.Store.AllGenerations()
+	totals, err := p.cfg.Store.OffsetTotalsByFile()
 	if err != nil {
 		return
 	}
-	cur := map[int64]int{}
-	kinds := map[string]bool{}
-	for _, f := range files {
-		cur[f.ID] = f.CurGen
-		if !p.HasSource(f.Source) && f.State != "deleted" {
-			kinds[f.Source] = true
-		}
+	lagging, err := p.cfg.Store.LaggingGenerations()
+	if err != nil {
+		return
 	}
-	var lagBytes, copied, parsed int64
+	kinds := map[string]bool{}
+	var copied, parsed int64
+	for _, f := range files {
+		if !p.HasSource(f.Source) {
+			if f.State != "deleted" {
+				kinds[f.Source] = true
+			}
+			continue
+		}
+		t := totals[f.ID]
+		copied += t.Copy
+		parsed += t.Parse
+	}
+	var lagBytes int64
 	var lagSecs float64
 	now := p.cfg.Clock.Now().UnixNano()
-	for _, g := range gens {
+	for _, g := range lagging {
 		f, ok := fileByID(files, g.File)
 		if !ok || !p.HasSource(f.Source) {
 			continue
 		}
-		copied += g.CopyOffset
-		parsed += g.ParseOffset
-		if lag := g.CopyOffset - g.ParseOffset; lag > 0 {
-			if lag > lagBytes {
-				lagBytes = lag
-			}
-			cc, _ := p.cfg.Store.CopyCommits(g.File)
-			if s := seenAt(cc, g.Gen, g.ParseOffset); s > 0 {
-				if d := float64(now-s) / 1e9; d > lagSecs {
-					lagSecs = d
-				}
+		if lag := g.CopyOffset - g.ParseOffset; lag > lagBytes {
+			lagBytes = lag
+		}
+		cc, _ := p.cfg.Store.CopyCommits(g.File)
+		if s := seenAt(cc, g.Gen, g.ParseOffset); s > 0 {
+			if d := float64(now-s) / 1e9; d > lagSecs {
+				lagSecs = d
 			}
 		}
 	}

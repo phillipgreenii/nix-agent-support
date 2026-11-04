@@ -312,7 +312,7 @@ func TestChangedSinceSettleWorkIsBoundedByTheConversation(t *testing.T) {
 
 // changedSinceSettle and the removal path MUST NOT read the whole generations
 // table (AllGenerations stays in the store for its other callers).
-func TestChangedSinceSettleAndRemoveNeverCallAllGenerations(t *testing.T) {
+func TestChangedSinceSettleRefreshAndRemoveNeverCallAllGenerations(t *testing.T) {
 	calls := func(fn *ast.FuncDecl) bool {
 		found := false
 		ast.Inspect(fn, func(n ast.Node) bool {
@@ -337,7 +337,7 @@ func TestChangedSinceSettleAndRemoveNeverCallAllGenerations(t *testing.T) {
 			if !ok {
 				continue
 			}
-			if name == "settle.go" && fn.Name.Name == "changedSinceSettle" {
+			if name == "settle.go" && fn.Name.Name == "changedSinceSettle" || fn.Name.Name == "refresh" {
 				seen = true
 			} else if name == "settle.go" {
 				continue

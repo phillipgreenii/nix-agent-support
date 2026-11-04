@@ -1484,7 +1484,7 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 	counts := map[string]int{}
 	held := map[string]int{}
 	var oldest float64
-	gens, _ := s.st.AllGenerations()
+	offsets, _ := s.st.CopyOffsets()
 	arch, _ := s.st.AllRanges()
 	archived := map[[2]int64]int64{}
 	for _, r := range arch {
@@ -1494,9 +1494,9 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 		}
 	}
 	pendingByFile := map[int64]int64{}
-	for _, g := range gens {
-		if p := g.CopyOffset - archived[[2]int64{g.File, int64(g.Gen)}]; p > 0 {
-			pendingByFile[g.File] += p
+	for k, off := range offsets {
+		if p := off - archived[k]; p > 0 {
+			pendingByFile[k[0]] += p
 		}
 	}
 	var pending int64
