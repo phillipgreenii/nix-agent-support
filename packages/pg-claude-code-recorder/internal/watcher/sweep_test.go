@@ -27,7 +27,7 @@ func TestSweepMatchesLstatIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := platformSweep(root)
+	got, err := platformSweep(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestSweepMatchesLstatIdentity(t *testing.T) {
 }
 
 func TestWalkSweepSkipsMissingRootError(t *testing.T) {
-	if _, err := platformSweep(filepath.Join(t.TempDir(), "example-nope")); err == nil {
+	if _, err := platformSweep(filepath.Join(t.TempDir(), "example-nope"), nil); err == nil {
 		t.Fatal("expected an error for a missing root")
 	}
 }

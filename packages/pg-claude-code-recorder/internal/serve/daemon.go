@@ -254,6 +254,9 @@ func Open(opt Options) (*Daemon, error) {
 	d.w, err = watcher.New(watcher.Config{
 		Roots:         cfg.Roots(),
 		Filter:        d.filter,
+		DirFilter:     d.scope.DescendDir,
+		SweepDirs:     d.scope.SweepDirs(),
+		SweepFiles:    d.scope.SweepFiles(),
 		Sink:          d.sink,
 		OnSweep:       d.onSweep,
 		SweepTimer:    func(step func() error) error { return d.runLoop(obs.LoopWatcherSweep, step) },

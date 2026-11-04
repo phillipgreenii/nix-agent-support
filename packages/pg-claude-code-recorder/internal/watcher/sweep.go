@@ -21,10 +21,16 @@ type FileInfo struct {
 	ModTime time.Time
 }
 
+// dirReadHook, when set (tests only), is told every directory a sweep reads, so
+// a test can prove the walker never opened a directory outside the allowlist.
+var dirReadHook func(dir string)
+
 // walkSweep lists every regular file under root with a plain directory walk.
+// descend, when non-nil, runs on every subdirectory before it is read; false
+// skips the whole subtree (the root itself is always read).
 // It is the Linux sweep and the fallback where getattrlistbulk is unavailable.
 // Entries that vanish mid-walk are skipped; symlinks are not followed.
-func walkSweep(root string) ([]FileInfo, error) {
+func walkSweep(root string, descend func(dir string) bool) ([]FileInfo, error) {
 	var out []FileInfo
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -32,6 +38,15 @@ func walkSweep(root string) ([]FileInfo, error) {
 				return nil
 			}
 			return err
+		}
+		if d.IsDir() {
+			if path != root && descend != nil && !descend(path) {
+				return filepath.SkipDir
+			}
+			if dirReadHook != nil {
+				dirReadHook(path)
+			}
+			return nil
 		}
 		if !d.Type().IsRegular() {
 			return nil

@@ -118,16 +118,62 @@ func (s *Scope) Match(path string) Decision {
 	if !ok {
 		return Decision{Reason: "outside_roots"}
 	}
+	// One string check rejects every path outside the three top-level names
+	// (most event hints), before the block list or the shape check run.
+	top := r
+	if i := strings.IndexByte(r, '/'); i >= 0 {
+		top = r[:i]
+	}
+	if top != "history.jsonl" && top != "projects" && top != "sessions" {
+		return Decision{Reason: "outside_roots"}
+	}
 	if b, why := Blocked(r); b {
 		return Decision{Reason: why}
 	}
-	switch {
-	case r == "history.jsonl":
-		return Decision{Ingest: true}
-	case strings.HasPrefix(r, "projects/"), strings.HasPrefix(r, "sessions/"):
-		return Decision{Ingest: true}
+	if !allowFile(strings.Split(r, "/")) {
+		return Decision{Reason: "outside_roots"}
 	}
-	return Decision{Reason: "outside_roots"}
+	return Decision{Ingest: true}
+}
+
+// DescendDir reports whether the sweep walker may read the directory at path
+// (absolute). It answers from the same allowlist as Match, so a directory the
+// walker skips cannot hold a file Match would accept. The control ends root is
+// walked whole; the Claude directory itself is never read.
+func (s *Scope) DescendDir(path string) bool {
+	path = filepath.Clean(path)
+	if s.endsDir != "" {
+		if path == s.endsDir {
+			return true
+		}
+		if r, ok := rel(s.endsDir, path); ok {
+			b, _ := Blocked(r)
+			return !b
+		}
+	}
+	r, ok := rel(s.claudeDir, path)
+	if !ok {
+		return false
+	}
+	if b, _ := Blocked(r); b {
+		return false
+	}
+	return allowDir(strings.Split(r, "/"))
+}
+
+// SweepDirs returns the directories a sweep walks: projects/ and sessions/ of
+// the Claude directory, and the ends root when configured.
+func (s *Scope) SweepDirs() []string {
+	dirs := []string{filepath.Join(s.claudeDir, "projects"), filepath.Join(s.claudeDir, "sessions")}
+	if s.endsDir != "" {
+		dirs = append(dirs, s.endsDir)
+	}
+	return dirs
+}
+
+// SweepFiles returns the single files a sweep reads with a direct lstat.
+func (s *Scope) SweepFiles() []string {
+	return []string{filepath.Join(s.claudeDir, "history.jsonl")}
 }
 
 // Classify returns the source and copy mode of an in-scope path.

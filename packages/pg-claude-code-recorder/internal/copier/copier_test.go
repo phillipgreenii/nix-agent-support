@@ -28,8 +28,8 @@ func TestByteModeCopiesFixtureTreeByteExact(t *testing.T) {
 	e := newEnv(t)
 	files := map[string]string{
 		tx: "{\"n\":1}\n{\"n\":2}\n",
-		"projects/example-project/example-session.status.jsonl":            "{\"s\":1}\n",
-		"projects/example-project/example-session/subagents/agent-1.jsonl": "{\"a\":1}\n",
+		"projects/example-project/example-session.status.jsonl":                                 "{\"s\":1}\n",
+		"projects/example-project/0f8fad5b-d9cb-469f-a165-70867728950e/subagents/agent-1.jsonl": "{\"a\":1}\n",
 		"history.jsonl": "{\"h\":1}\n",
 	}
 	ids := map[string]int64{}
@@ -598,7 +598,7 @@ func TestBlockListAndOutOfScopeAreNotIngested(t *testing.T) {
 	if files, _ := e.st.AllFiles(); len(files) != 0 {
 		t.Fatalf("%d files ingested", len(files))
 	}
-	r := e.ingest(e.write("projects/example-project/w/other.js", "ok\n"))
+	r := e.ingest(e.write("projects/example-project/other.jsonl", "ok\n"))
 	if r.Action == "skipped" {
 		t.Fatal("a non-blocked file in the same tree was skipped")
 	}

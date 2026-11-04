@@ -14,15 +14,15 @@ import (
 )
 
 const (
-	registryV1 = `{"pid":111,"sessionId":"example-session-1","cwd":"/example/work","startedAt":1793375456251,"procStart":"Fri Oct 30 15:50:54 2026","version":"2.1.0","kind":"interactive","entrypoint":"cli","name":"example-1","status":"busy","updatedAt":1793388636910,"futureKey":1}`
-	registryV2 = `{"pid":111,"sessionId":"example-session-1","cwd":"/example/work","startedAt":1793375456251,"procStart":"Fri Oct 30 15:50:54 2026","version":"2.1.0","kind":"interactive","entrypoint":"cli","name":"example-1","status":"idle","waitingFor":"input","updatedAt":1793388699999}`
+	registryV1 = `{"pid":111,"sessionId":"0f8fad5b-d9cb-469f-a165-70867728950e","cwd":"/example/work","startedAt":1793375456251,"procStart":"Fri Oct 30 15:50:54 2026","version":"2.1.0","kind":"interactive","entrypoint":"cli","name":"example-1","status":"busy","updatedAt":1793388636910,"futureKey":1}`
+	registryV2 = `{"pid":111,"sessionId":"0f8fad5b-d9cb-469f-a165-70867728950e","cwd":"/example/work","startedAt":1793375456251,"procStart":"Fri Oct 30 15:50:54 2026","version":"2.1.0","kind":"interactive","entrypoint":"cli","name":"example-1","status":"idle","waitingFor":"input","updatedAt":1793388699999}`
 	subMeta    = `{"agentType":"general-purpose","description":"find the example","requestNonInteractive":true,"requestShape":"shape-a","spawnDepth":1,"toolUseId":"toolu_example1"}`
 	modeJSON   = `{"kind":"drain-beads","detail":"P1 only","state":"running","started_at":"2026-10-29T14:32:00Z","updated_at":"2026-10-29T14:40:00Z"}`
 	compJSON   = `{"ts":1793388000,"trigger":"auto"}`
-	statusJSON = `{"ts":1793388100,"session_id":"example-session-1","hostname":"example-host","five_hour_pct":12.5,"five_hour_resets_at":1793400000}` + "\n" +
-		`{"ts":1793388200,"session_id":"example-session-1","hostname":"example-host","five_hour_pct":13.5,"seven_day_pct":4}` + "\n"
-	transcript = `{"type":"assistant","uuid":"u1","sessionId":"example-session-1","timestamp":"2026-10-29T20:00:00Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_example1","name":"Bash","input":{"command":"true"}},{"type":"tool_use","id":"toolu_example2","name":"Bash","input":{"command":"false"}}]}}` + "\n" +
-		`{"type":"user","uuid":"u2","parentUuid":"u1","sessionId":"example-session-1","timestamp":"2026-10-29T20:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_example1","content":"Output too large (3KB). Full output saved to: /example/claude/projects/example-proj/example-session-1/tool-results/toolu_example1.txt"},{"type":"tool_result","tool_use_id":"toolu_example2","content":"Output too large (9KB). Full output saved to: /example/claude/projects/example-proj/example-session-1/tool-results/hook-example.txt"}]}}` + "\n"
+	statusJSON = `{"ts":1793388100,"session_id":"0f8fad5b-d9cb-469f-a165-70867728950e","hostname":"example-host","five_hour_pct":12.5,"five_hour_resets_at":1793400000}` + "\n" +
+		`{"ts":1793388200,"session_id":"0f8fad5b-d9cb-469f-a165-70867728950e","hostname":"example-host","five_hour_pct":13.5,"seven_day_pct":4}` + "\n"
+	transcript = `{"type":"assistant","uuid":"u1","sessionId":"0f8fad5b-d9cb-469f-a165-70867728950e","timestamp":"2026-10-29T20:00:00Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_example1","name":"Bash","input":{"command":"true"}},{"type":"tool_use","id":"toolu_example2","name":"Bash","input":{"command":"false"}}]}}` + "\n" +
+		`{"type":"user","uuid":"u2","parentUuid":"u1","sessionId":"0f8fad5b-d9cb-469f-a165-70867728950e","timestamp":"2026-10-29T20:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_example1","content":"Output too large (3KB). Full output saved to: /example/claude/projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/tool-results/toolu_example1.txt"},{"type":"tool_result","tool_use_id":"toolu_example2","content":"Output too large (9KB). Full output saved to: /example/claude/projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/tool-results/hook-example.txt"}]}}` + "\n"
 )
 
 func (e *env) write(t *testing.T, rel, content string) {
@@ -59,13 +59,13 @@ func rowsJSON(a *query.Answer) string { b, _ := json.Marshal(a.Rows); return str
 
 func TestTheSixRemainingSourcesParseTheirFixturesAndLink(t *testing.T) {
 	e := newEnv(t, false)
-	e.write(t, "projects/example-proj/example-session-1.jsonl", transcript)
-	e.write(t, "projects/example-proj/example-session-1/subagents/agent-a1.meta.json", subMeta)
-	e.write(t, "projects/example-proj/example-session-1/tool-results/toolu_example1.txt", "the full output of the first call\n")
-	e.write(t, "projects/example-proj/example-session-1/tool-results/hook-example.txt", "the full output of the hook\n")
-	e.write(t, "projects/example-proj/example-session-1.status.jsonl", statusJSON)
-	e.write(t, "projects/example-proj/example-session-1.session-mode.json", modeJSON)
-	e.write(t, "projects/example-proj/example-session-1.compaction.json", compJSON)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.jsonl", transcript)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/subagents/agent-a1.meta.json", subMeta)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/tool-results/toolu_example1.txt", "the full output of the first call\n")
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/tool-results/hook-example.txt", "the full output of the hook\n")
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.status.jsonl", statusJSON)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.session-mode.json", modeJSON)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.compaction.json", compJSON)
 	e.write(t, "sessions/111.json", registryV1)
 	d := e.open(t)
 	defer func() { _ = d.Close() }()
@@ -90,13 +90,13 @@ func TestTheSixRemainingSourcesParseTheirFixturesAndLink(t *testing.T) {
 		return a.Rows[0]
 	}
 	reg := one(`{"where":{"field":"type","eq":"registry"},"select":["pid","proc_start","status","session","started_at"]}`)
-	if fmt.Sprint(reg[0]) != "111" || reg[1] != "Fri Oct 30 15:50:54 2026" || reg[2] != "busy" || reg[3] != "example-session-1" || !strings.HasPrefix(fmt.Sprint(reg[4]), "2026-10-") {
+	if fmt.Sprint(reg[0]) != "111" || reg[1] != "Fri Oct 30 15:50:54 2026" || reg[2] != "busy" || reg[3] != "0f8fad5b-d9cb-469f-a165-70867728950e" || !strings.HasPrefix(fmt.Sprint(reg[4]), "2026-10-") {
 		t.Errorf("registry row %v", reg)
 	}
-	if m := one(`{"where":{"field":"type","eq":"session_mode"},"select":["mode_kind","mode_state","session"]}`); m[0] != "drain-beads" || m[1] != "running" || m[2] != "example-session-1" {
+	if m := one(`{"where":{"field":"type","eq":"session_mode"},"select":["mode_kind","mode_state","session"]}`); m[0] != "drain-beads" || m[1] != "running" || m[2] != "0f8fad5b-d9cb-469f-a165-70867728950e" {
 		t.Errorf("session-mode row %v", m)
 	}
-	if c := one(`{"where":{"field":"type","eq":"compaction"},"select":["compaction_trigger","session"]}`); c[0] != "auto" || c[1] != "example-session-1" {
+	if c := one(`{"where":{"field":"type","eq":"compaction"},"select":["compaction_trigger","session"]}`); c[0] != "auto" || c[1] != "0f8fad5b-d9cb-469f-a165-70867728950e" {
 		t.Errorf("compaction row %v", c)
 	}
 	if s := e.query(t, `{"where":{"field":"type","eq":"status"},"select":["five_hour_pct","hostname"],"order":[{"by":"time"}]}`); len(s.Rows) != 2 || fmt.Sprint(s.Rows[1][0]) != "13.5" {
@@ -135,7 +135,7 @@ func TestRegistryVersionsAndADeletionRecord(t *testing.T) {
 	}
 	e.settle(t)
 	del := e.query(t, `{"where":{"field":"type","eq":"registry_deleted"},"select":["file_pid","proc_start","session","registry_key"]}`)
-	if len(del.Rows) != 1 || fmt.Sprint(del.Rows[0][1]) != "Fri Oct 30 15:50:54 2026" || del.Rows[0][2] != "example-session-1" || fmt.Sprint(del.Rows[0][3]) != k1 {
+	if len(del.Rows) != 1 || fmt.Sprint(del.Rows[0][1]) != "Fri Oct 30 15:50:54 2026" || del.Rows[0][2] != "0f8fad5b-d9cb-469f-a165-70867728950e" || fmt.Sprint(del.Rows[0][3]) != k1 {
 		t.Fatalf("deletion record: %s (want key %s)", rowsJSON(del), k1)
 	}
 	// A second sweep does not write it again.
@@ -156,13 +156,13 @@ func TestRegistryVersionsAndADeletionRecord(t *testing.T) {
 
 func TestLinksFollowAcrossSources(t *testing.T) {
 	e := newEnv(t, false)
-	e.write(t, "projects/example-proj/example-session-1.jsonl", transcript)
-	e.write(t, "projects/example-proj/example-session-1/subagents/agent-a1.meta.json", subMeta)
-	e.write(t, "projects/example-proj/example-session-1/tool-results/toolu_example1.txt", "the full output of the first call\n")
-	e.write(t, "projects/example-proj/example-session-1/tool-results/hook-example.txt", "the full output of the hook\n")
-	e.write(t, "projects/example-proj/example-session-1.status.jsonl", statusJSON)
-	e.write(t, "projects/example-proj/example-session-1.session-mode.json", modeJSON)
-	e.write(t, "projects/example-proj/example-session-1.compaction.json", compJSON)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.jsonl", transcript)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/subagents/agent-a1.meta.json", subMeta)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/tool-results/toolu_example1.txt", "the full output of the first call\n")
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e/tool-results/hook-example.txt", "the full output of the hook\n")
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.status.jsonl", statusJSON)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.session-mode.json", modeJSON)
+	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.compaction.json", compJSON)
 	e.write(t, "sessions/111.json", registryV1)
 	d := e.open(t)
 	defer func() { _ = d.Close() }()

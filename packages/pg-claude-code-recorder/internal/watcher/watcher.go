@@ -41,7 +41,16 @@ type Config struct {
 	// Filter decides, before any lstat, whether a path is interesting.
 	// nil accepts everything.
 	Filter func(path string) bool
-	Sink   func(Event)
+	// DirFilter, when set, runs on every subdirectory a sweep is about to read;
+	// false prunes the subtree before any directory read. It MUST accept
+	// every directory that can hold a path Filter accepts.
+	DirFilter func(dir string) bool
+	// SweepDirs are the directories a sweep walks and SweepFiles the single
+	// files it lstats directly. Both empty means a sweep walks Roots whole.
+	// Roots still names what the event stream watches.
+	SweepDirs  []string
+	SweepFiles []string
+	Sink       func(Event)
 	// OnSweep, when set, receives the full filtered file list of every
 	// successful sweep (identity for the copier's deletion decision).
 	OnSweep func([]FileInfo)
@@ -281,8 +290,12 @@ func (w *Watcher) sweep() error {
 // sweepLocked is one sweep pass; the caller holds w.mu.
 func (w *Watcher) sweepLocked() error {
 	var files []FileInfo
-	for _, root := range w.cfg.Roots {
-		infos, err := platformSweep(root)
+	dirs := w.cfg.SweepDirs
+	if len(dirs) == 0 && len(w.cfg.SweepFiles) == 0 {
+		dirs = w.cfg.Roots
+	}
+	for _, root := range dirs {
+		infos, err := platformSweep(root, w.cfg.DirFilter)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
 				continue
@@ -293,6 +306,18 @@ func (w *Watcher) sweepLocked() error {
 			if w.cfg.Filter == nil || w.cfg.Filter(fi.Path) {
 				files = append(files, fi)
 			}
+		}
+	}
+	for _, p := range w.cfg.SweepFiles {
+		fi, regular, err := lstatInfo(p)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if regular && (w.cfg.Filter == nil || w.cfg.Filter(p)) {
+			files = append(files, fi)
 		}
 	}
 	now := w.cfg.Now()

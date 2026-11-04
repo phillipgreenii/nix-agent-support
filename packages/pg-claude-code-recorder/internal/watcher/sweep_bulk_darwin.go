@@ -57,15 +57,18 @@ type bulkEntry struct {
 
 // platformSweep lists every regular file under root with getattrlistbulk, which
 // returns a whole directory's names and attributes in one call.
-func platformSweep(root string) ([]FileInfo, error) {
+func platformSweep(root string, descend func(dir string) bool) ([]FileInfo, error) {
 	var out []FileInfo
-	if err := bulkWalk(root, &out); err != nil {
+	if err := bulkWalk(root, descend, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func bulkWalk(dir string, out *[]FileInfo) error {
+func bulkWalk(dir string, descend func(dir string) bool, out *[]FileInfo) error {
+	if dirReadHook != nil {
+		dirReadHook(dir)
+	}
 	entries, err := bulkReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -80,7 +83,10 @@ func bulkWalk(dir string, out *[]FileInfo) error {
 			e.info.Path = path
 			*out = append(*out, e.info)
 		case vtDir:
-			if err := bulkWalk(path, out); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if descend != nil && !descend(path) {
+				continue
+			}
+			if err := bulkWalk(path, descend, out); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 		}

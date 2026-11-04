@@ -50,6 +50,37 @@ The darwin sweep uses `getattrlistbulk`; it reports device, inode, birth time, s
 modification time per file. `Wake(path)` and `Rescan()` are the test seams. `fsnotify` is not
 used (kqueue needs one file descriptor per watched file).
 
+### What is ingested and walked
+
+One path-shape allowlist (`internal/scope/shape.go`) decides what the recorder ingests, and both
+`scope.Match` (the per-event filter) and the sweep walker's directory predicate
+(`scope.DescendDir`) answer from it, so they cannot disagree. Paths are relative to the Claude
+directory:
+
+- `history.jsonl`;
+- `sessions/**`;
+- `projects/<project>/<name>` where the name ends in `.jsonl` (transcripts and `.status.jsonl`),
+  `.session-mode.json` or `.compaction.json`;
+- `projects/<project>/<uuid>/subagents/**`, `.../tool-results/**`, `.../scratchpad/**` and
+  `.../workflows/**`, where a session directory is recognized by its UUID shape, never by a list of
+  names to skip;
+- the control `ends` root, walked whole.
+
+Everything else (`file-history`, `plugins`, `security`, `paste-cache`, `usage-data`, `state`,
+`telemetry`, `shell-snapshots`, a non-UUID directory under a project such as `spikes-*`, `memory` or
+`artifacts`, project-level `sessions-index.json` and `.orphaned-*` / `.superseded-*` copies) is
+neither walked nor ingested. The sweep roots are `projects/`, `sessions/` and the ends root, plus a
+direct `lstat` of `history.jsonl`; the Claude directory itself is never read, and a directory the
+predicate rejects is skipped before it is opened (in both the darwin `getattrlistbulk` walk and the
+portable `WalkDir`). A hint for a rejected path costs one string comparison on its first path
+component. `scratchpad/` and `workflows/` stay because removal and extract carry them with their
+Conversation; the project-level files that no source reads were dropped. The FSEvents stream still
+covers the whole Claude directory (it cannot filter by subdirectory), so rejected events still
+arrive and are dropped by `Match`.
+
+The scale check `TestSoakPrunedSweep` (tag `soak`, over 100,000 synthetic files) runs in the
+`pg-claude-code-recorder-soak` check, never in the unit gate.
+
 ### Linux: the inotify watch limit
 
 On Linux the watcher uses inotify (`CGO_ENABLED=0`, standard library only) with one watch per

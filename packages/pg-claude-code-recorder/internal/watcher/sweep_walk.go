@@ -2,4 +2,6 @@
 
 package watcher
 
-func platformSweep(root string) ([]FileInfo, error) { return walkSweep(root) }
+func platformSweep(root string, descend func(dir string) bool) ([]FileInfo, error) {
+	return walkSweep(root, descend)
+}

@@ -19,7 +19,7 @@ func TestMatchAllowAndBlock(t *testing.T) {
 		{"/c/projects/p/x.tmp.1", false, "atomic_tmp"},
 		{"/c/projects/.DS_Store", false, "ds_store"},
 		{"/c/projects/p/w/node_modules/a/b.js", false, "node_modules"},
-		{"/c/projects/p/w/other.js", true, ""},
+		{"/c/projects/p/w/other.js", false, "outside_roots"},
 		{"/c/file-history/x", false, "outside_roots"},
 		{"/c/paste-cache/x", false, "outside_roots"},
 		{"/elsewhere/projects/x", false, "outside_roots"},
