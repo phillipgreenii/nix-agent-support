@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -21,7 +22,21 @@ import (
 const Name = "claude-transcript"
 
 // ParserVersion is stamped on every record; bump it to re-parse stored copies.
-const ParserVersion = 1
+// Version 2 added the saved_to field of a tool_result.
+const ParserVersion = 2
+
+// savedToRe finds the path a tool_result preview says the full output was saved
+// to: the part from "projects/" on, a suffix of the saved-to path and the
+// rel_path of the tool-results body it names.
+var savedToRe = regexp.MustCompile(`\S*/(projects/[^\s"']+/tool-results/[^\s"']+)`)
+
+// SavedTo returns the tool-results path a tool_result's text names, or "".
+func SavedTo(text string) string {
+	if m := savedToRe.FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // Line is one transcript line (the keys Claude Code writes that the recorder
 // knows; an unlisted key is reported as an unknown key).
@@ -177,6 +192,7 @@ func (*Source) Catalog() map[string]source.Kind {
 	c["agent_id"] = source.KindID
 	c["body_length"] = source.KindInt
 	c["tool_result.body"] = source.KindOpaque
+	c["saved_to"] = source.KindPath
 	c["assistant_text"] = source.KindText
 	c["user_text"] = source.KindText
 	c["other_text"] = source.KindText
@@ -266,6 +282,9 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 				source.Field{Name: "body_length", Kind: source.KindInt, N: int64(len(body))})
 			if !utf8.ValidString(body) {
 				fields[len(fields)-2].S = strings.ToValidUTF8(body, "�")
+			}
+			if to := SavedTo(body); to != "" {
+				fields = append(fields, source.Field{Name: "saved_to", Kind: source.KindPath, S: to})
 			}
 		}
 		unk := source.UnknownKeys(it, blockType, "message.content[]")

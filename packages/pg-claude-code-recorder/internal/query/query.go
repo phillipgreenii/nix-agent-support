@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudetranscript"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -346,10 +346,6 @@ func linkOf(follow string) (linkSpec, bool) {
 	return linkSpec{}, false
 }
 
-// savedToRe finds the path a transcript's tool_result preview says the full
-// output was saved to.
-var savedToRe = regexp.MustCompile(`\S*/(projects/[^\s"']+/tool-results/[^\s"']+)`)
-
 type tgt struct {
 	id   int64
 	file int64
@@ -431,35 +427,19 @@ func (e *Engine) pathTargets(tx *sql.Tx, ls linkSpec, id int64) ([]tgt, *wire.Er
 		if err != nil {
 			return nil, nil
 		}
-		m := savedToRe.FindStringSubmatch(text)
-		if m == nil {
+		to := claudetranscript.SavedTo(text)
+		if to == "" {
 			return nil, nil
 		}
-		return e.scanTargets(tx, targetHead+` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name_id=(SELECT id FROM field_names WHERE name='rel_path') AND fu.s=? AND r.type='tool_result_body' ORDER BY r.id`, []any{m[1]})
+		return e.scanTargets(tx, targetHead+` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name_id=(SELECT id FROM field_names WHERE name='rel_path') AND fu.s=? AND r.type='tool_result_body' ORDER BY r.id`, []any{to})
 	}
 	if typ == "tool_result_body" && ls.toType == "tool_result" {
 		var rel sql.NullString
 		_ = tx.QueryRow(`SELECT s FROM fields WHERE rec_id=? AND name_id=(SELECT id FROM field_names WHERE name='rel_path')`, id).Scan(&rel)
-		if !rel.Valid || len(rel.String) < MinSubstringChars {
+		if !rel.Valid || rel.String == "" {
 			return nil, nil
 		}
-		cands, err := e.scanTargets(tx, `SELECT r.id,r.file_id,r.gen,r.off,r.item FROM fts_tri JOIN texts t ON t.id=fts_tri.rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen WHERE fts_tri MATCH ? AND t.field='tool_result.body' AND r.type='tool_result' ORDER BY r.id`,
-			[]any{`"` + strings.ReplaceAll(rel.String, `"`, `""`) + `"`})
-		if err != nil || e.Res == nil {
-			return nil, err
-		}
-		var out []tgt
-		for _, c := range cands {
-			var csrc string
-			var cln int
-			if tx.QueryRow(`SELECT source,len FROM records WHERE id=?`, c.id).Scan(&csrc, &cln) != nil {
-				continue
-			}
-			if text, err := e.Res.Value(c.file, c.ref.Gen, c.ref.Offset, cln, csrc, c.ref.Item, "tool_result.body"); err == nil && strings.Contains(text, rel.String) {
-				out = append(out, c)
-			}
-		}
-		return out, nil
+		return e.scanTargets(tx, targetHead+` JOIN fields fu ON fu.rec_id=r.id WHERE fu.name_id=(SELECT id FROM field_names WHERE name='saved_to') AND fu.s=? AND r.type='tool_result' ORDER BY r.id`, []any{rel.String})
 	}
 	return nil, nil
 }

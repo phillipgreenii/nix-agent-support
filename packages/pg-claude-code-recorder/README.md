@@ -194,6 +194,9 @@ hash, plus a `registry_deleted` record when the file vanishes), `claude-status` 
 (generation = version); the default query shows the newest version, `old_generations` all of them.
 `query` follows `parent`, `result`, `call`, `body`, `subagents`, `status`, `mode`, `registry` and
 `compaction`.
+A tool-results body links back to the `tool_result` that names it through stored fields only: the
+transcript parser stores the saved-to path a `tool_result` preview names as `saved_to`, and the link
+matches it to the body's `rel_path`. No full-text index is read.
 
 Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_version`,
 `schema_version`, `epoch`, `capabilities`, `caught_up`, `degraded`), `feed`, `snapshot` and `raw`.

@@ -171,3 +171,28 @@ func (k *Kit) Count(q string, args ...any) int {
 	}
 	return n
 }
+
+// AddToolResultBody creates a tool-results body file of a session (a snapshot
+// source) holding content, at projects/<project>/<session>/tool-results/<name>.
+func (k *Kit) AddToolResultBody(project, session, name, content string) int64 {
+	k.T.Helper()
+	id := k.Store.NewFileID()
+	path := filepath.Join(ClaudeDir, "projects", project, session, "tool-results", name)
+	at := k.now()
+	if err := k.Store.Commit(
+		&store.Rec{T: store.TFile, At: at, File: id, Source: "claude-tool-result-body", Mode: "snapshot", Dev: 1, Ino: uint64(id)},
+		&store.Rec{T: store.TPath, At: at, File: id, Path: path},
+	); err != nil {
+		k.T.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(k.Store.SnapshotPath(id, 1)), 0o700); err != nil {
+		k.T.Fatal(err)
+	}
+	if err := os.WriteFile(k.Store.SnapshotPath(id, 1), []byte(content), 0o600); err != nil {
+		k.T.Fatal(err)
+	}
+	if err := k.Store.Commit(&store.Rec{T: store.TSnap, At: k.now(), File: id, Version: 1, Hash: 1, Size: int64(len(content))}); err != nil {
+		k.T.Fatal(err)
+	}
+	return id
+}
