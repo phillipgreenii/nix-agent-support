@@ -145,6 +145,9 @@ func (w *Watcher) Start() error {
 	w.mu.Unlock()
 
 	if w.b != nil {
+		if s, ok := w.b.(dirFilterSetter); ok {
+			s.SetDirFilter(w.cfg.DirFilter)
+		}
 		if err := w.b.Start(w.cfg.Roots, d.SinceID, d.Replay, w.hint); err != nil {
 			return err
 		}

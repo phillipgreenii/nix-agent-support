@@ -169,7 +169,10 @@ func Violations(st *store.Store, o Options) []string {
 	}
 
 	// The quarantine directory is covered: after a test, every removal has
-	// either unlinked its quarantined files or restored them.
+	// either unlinked its quarantined files or restored them. This walk is
+	// deliberately the whole Claude directory (test support, never run by the
+	// daemon): a quarantine directory stray in a tree the recorder does not
+	// ingest is still a defect the test must see.
 	if o.ClaudeDir != "" && !o.AllowQuarantine {
 		_ = filepath.WalkDir(o.ClaudeDir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || !d.IsDir() || d.Name() != quarantineDir {
@@ -227,7 +230,9 @@ func originalPrefix(st *store.Store, f store.File, cp string, off int64) string 
 // DirSnapshot records paths, sizes, modification times and inodes of a tree.
 type DirSnapshot struct{ entries map[string]string }
 
-// SnapshotDir snapshots dir without following links.
+// SnapshotDir snapshots dir without following links. It deliberately walks
+// every directory (test support, never run by the daemon): it proves nothing,
+// ingested or not, changed in the Claude directory.
 func SnapshotDir(dir string) (*DirSnapshot, error) {
 	s := &DirSnapshot{entries: map[string]string{}}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {

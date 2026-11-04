@@ -26,6 +26,9 @@ type inotifyBackend struct {
 	closed bool
 	onHint func(Hint)
 	done   chan struct{}
+	// descend is the directory predicate shared with the sweep; nil watches
+	// every directory.
+	descend func(dir string) bool
 }
 
 func newBackend() backend { return &inotifyBackend{} }
@@ -44,7 +47,7 @@ func (b *inotifyBackend) Start(roots []string, _ uint64, _ bool, onHint func(Hin
 	b.onHint = onHint
 	b.done = make(chan struct{})
 	for _, r := range roots {
-		if err := b.addTree(r, false); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := b.addTree(r, false, true); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			_ = b.file.Close()
 			return err
 		}
@@ -53,38 +56,37 @@ func (b *inotifyBackend) Start(roots []string, _ uint64, _ bool, onHint func(Hin
 	return nil
 }
 
-// addTree watches root and every directory below it. With emit, files already
-// present are hinted too (a new directory may have been filled before its
-// watch existed).
-func (b *inotifyBackend) addTree(root string, emit bool) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if d.IsDir() {
-			b.mu.Lock()
-			defer b.mu.Unlock()
-			if b.closed {
-				return nil
-			}
-			wd, err := syscall.InotifyAddWatch(b.fd, path, inotifyMask)
-			if err != nil {
-				if errors.Is(err, syscall.ENOENT) {
-					return nil
-				}
-				return err
-			}
-			b.wds[int32(wd)] = path
-			return nil
-		}
-		if emit && d.Type().IsRegular() {
-			b.onHint(Hint{Path: path})
-		}
+// SetDirFilter installs the directory predicate shared with the sweep.
+func (b *inotifyBackend) SetDirFilter(descend func(dir string) bool) { b.descend = descend }
+
+// addTree watches root and every allowed directory below it (the traversal is
+// walkWatchTree; this file keeps only the inotify syscalls). With emit, files
+// already present are hinted too (a new directory may have been filled before
+// its watch existed). A configured root is always watched; a directory a
+// create event reported is checked against the predicate first.
+func (b *inotifyBackend) addTree(root string, emit, isConfiguredRoot bool) error {
+	var emitFn func(string)
+	if emit {
+		emitFn = func(p string) { b.onHint(Hint{Path: p}) }
+	}
+	return walkWatchTree(root, b.descend, !isConfiguredRoot, b.addWatch, emitFn)
+}
+
+func (b *inotifyBackend) addWatch(path string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
 		return nil
-	})
+	}
+	wd, err := syscall.InotifyAddWatch(b.fd, path, inotifyMask)
+	if err != nil {
+		if errors.Is(err, syscall.ENOENT) {
+			return fs.ErrNotExist
+		}
+		return err
+	}
+	b.wds[int32(wd)] = path
+	return nil
 }
 
 func (b *inotifyBackend) readLoop() {
@@ -130,7 +132,7 @@ func (b *inotifyBackend) dispatch(ev *syscall.InotifyEvent, name string) {
 	}
 	path := filepath.Join(dir, name)
 	if ev.Mask&syscall.IN_ISDIR != 0 && ev.Mask&(syscall.IN_CREATE|syscall.IN_MOVED_TO) != 0 {
-		_ = b.addTree(path, true)
+		_ = b.addTree(path, true, false)
 		return
 	}
 	b.onHint(Hint{Path: path})

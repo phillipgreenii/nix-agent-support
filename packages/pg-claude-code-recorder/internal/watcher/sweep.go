@@ -74,3 +74,12 @@ func lstatInfo(path string) (FileInfo, bool, error) {
 	}
 	return infoFromStat(path, fi), true, nil
 }
+
+// SetDirReadHook installs fn to be told every directory a sweep or a watch walk
+// reads, and returns a function that removes it. It is a test seam (the serve
+// tests prove a whole daemon never opens a directory outside the allowlist);
+// production code never calls it.
+func SetDirReadHook(fn func(dir string)) (restore func()) {
+	dirReadHook = fn
+	return func() { dirReadHook = nil }
+}

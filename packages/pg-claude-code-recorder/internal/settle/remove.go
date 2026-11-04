@@ -1014,16 +1014,23 @@ func (s *Settler) invalidateQuarantineDirs() {
 	s.qmu.Unlock()
 }
 
-// quarantineDirs lists every quarantine directory under projects/.
+// quarantineDirs lists every quarantine directory under projects/. It walks
+// only the directories the scope allowlist descends into (a quarantine
+// directory sits beside an ingested file, so it is always inside one), never
+// the trees the recorder does not ingest, such as a project's spikes-* tree.
 func (s *Settler) quarantineDirs() []string {
 	var out []string
 	root := filepath.Join(s.cfg.ClaudeDir, "projects")
+	sc := scope.New(s.cfg.ClaudeDir, "")
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
 			return nil
 		}
 		if d.Name() == scope.QuarantineDir {
 			out = append(out, p)
+			return filepath.SkipDir
+		}
+		if p != root && !sc.DescendDir(p) {
 			return filepath.SkipDir
 		}
 		return nil
