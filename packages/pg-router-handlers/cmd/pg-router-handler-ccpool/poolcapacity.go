@@ -49,21 +49,22 @@ func (p *poolFlag) Set(v string) error {
 	return nil
 }
 
-// poolEmitFn asks ONE pool to emit its capacity gauge — the seam
-// runPoolCapacity's production wiring (ccpoolEmitFor) and this file's tests
-// (a fake, zero real processes) both satisfy. It receives only the pool
-// directory: the name half of --pool name=dir is a display label and is
+// poolEmitFn asks ccpool to emit the capacity gauge for every dir in ONE
+// call — the seam runPoolCapacity's production wiring (ccpoolEmitFor) and this
+// file's tests (a fake, zero real processes) both satisfy. It receives only the
+// pool directories: the name half of --pool name=dir is a display label and is
 // never passed to ccpool, so it cannot influence the metric's pool attribute.
-type poolEmitFn func(ctx context.Context, dir string) error
+type poolEmitFn func(ctx context.Context, dirs []string) error
 
-// ccpoolEmitFor is the production poolEmitFn: a real
-// ccpool.NewCLIRunnerForPool scoped to dir (CCPOOL_POOL override) running
-// `ccpool capacity --emit-metrics`. ccpool resolves the pool root through
-// symlinks and emits ccpool_pool_capacity{pool=basename(root),dim=...} over
-// OTLP using the OTEL_* env this process inherited (obs.mkEmitterEnv on the
-// LaunchAgent). config.Default() is safe: no launch-flag fields are read.
-func ccpoolEmitFor(ctx context.Context, dir string) error {
-	return ccpool.NewCLIRunnerForPool(config.Default(), dir).EmitCapacity(ctx)
+// ccpoolEmitFor is the production poolEmitFn: ONE ccpool process
+// (`ccpool capacity --emit-metrics --pool-dir D...`) covering every pool, so a
+// run costs a single recorder dial instead of one per pool. ccpool resolves
+// each pool root through symlinks and emits
+// ccpool_pool_capacity{pool=basename(root),dim=...} over OTLP using the OTEL_*
+// env this process inherited (obs.mkEmitterEnv on the LaunchAgent).
+// config.Default() is safe: no launch-flag fields are read.
+func ccpoolEmitFor(ctx context.Context, dirs []string) error {
+	return ccpool.NewCLIRunnerDefaultPool(config.Default()).EmitCapacityPools(ctx, dirs)
 }
 
 // runPoolCapacity implements the `pool-capacity` subcommand (bead pg2-mr0sl).
@@ -101,25 +102,24 @@ func runPoolCapacity(args []string) int {
 	return emitPoolCapacity(os.Stderr, pools.entries, ccpoolEmitFor)
 }
 
-// emitPoolCapacity triggers capacity emission for every entry, sorted by name
-// for deterministic ordering. A failing pool is reported on w as a
-// `pool-capacity:` line and does not stop the other pools; the result is
-// conformance.ExitError iff at least one pool failed. Nothing is written for
-// healthy pools: the data goes out over OTLP, not stdout (the former
+// emitPoolCapacity triggers capacity emission for every entry in one emit call,
+// with dirs sorted by role name for deterministic ordering. A failure is
+// reported on w as one `pool-capacity:` line naming the roles; ccpool itself
+// continues past a failing pool, so the healthy pools are still emitted. The
+// result is conformance.ExitError iff the emit failed. Nothing is written on
+// success: the data goes out over OTLP, not stdout (the former
 // pool-capacity.prom exposition text and its temp-file writer are retired).
 func emitPoolCapacity(w io.Writer, pools []poolEntry, emit poolEmitFn) int {
 	sorted := append([]poolEntry(nil), pools...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].name < sorted[j].name })
 
-	ctx := context.Background()
-	failed := 0
-	for _, p := range sorted {
-		if err := emit(ctx, p.dir); err != nil {
-			failed++
-			fmt.Fprintf(w, "pool-capacity: role=%q dir=%q: %v\n", p.name, p.dir, err)
-		}
+	dirs := make([]string, len(sorted))
+	roles := make([]string, len(sorted))
+	for i, p := range sorted {
+		dirs[i], roles[i] = p.dir, p.name
 	}
-	if failed > 0 {
+	if err := emit(context.Background(), dirs); err != nil {
+		fmt.Fprintf(w, "pool-capacity: roles=%q: %v\n", roles, err)
 		return conformance.ExitError
 	}
 	return conformance.ExitOK

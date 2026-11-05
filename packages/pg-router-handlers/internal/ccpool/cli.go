@@ -323,6 +323,20 @@ func (c *CLIRunner) EmitCapacity(ctx context.Context) error {
 	return err
 }
 
+// EmitCapacityPools runs ONE `ccpool capacity --emit-metrics --pool-dir D...`
+// covering every dir, so ccpool reaches the fact recorder once per run rather
+// than once per pool. The runner's own pool scope is irrelevant: each --pool-dir
+// names its pool explicitly. A pool that fails is reported by ccpool on stderr
+// and does not stop the others; the call errors iff any pool failed.
+func (c *CLIRunner) EmitCapacityPools(ctx context.Context, dirs []string) error {
+	args := []string{"capacity", "--emit-metrics"}
+	for _, d := range dirs {
+		args = append(args, "--pool-dir", d)
+	}
+	_, err := c.ccpool(ctx, quickCallTimeout, args...)
+	return err
+}
+
 // EmitGauge runs `ccpool emit-gauge --name N --value V [--label k=v]...`, the
 // generic gauge emitter (bead pg2-fx5x0l.8): ccpool exports the point over OTLP
 // from the OTEL_* env this process inherited, and exits 0 silently when none is

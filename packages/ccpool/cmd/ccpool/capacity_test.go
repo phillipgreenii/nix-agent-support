@@ -93,3 +93,40 @@ func TestRenderCapacityText_freeZero(t *testing.T) {
 		t.Fatalf("renderCapacityText(%+v) = %q, want %q", c, got, want)
 	}
 }
+
+func TestParseCapacityArgs_poolDirRepeatable(t *testing.T) {
+	got := parseCapacityArgs([]string{"--emit-metrics", "--pool-dir", "/a", "--pool-dir", "/b"})
+	if !got.emitMetrics || len(got.poolDirs) != 2 || got.poolDirs[0] != "/a" || got.poolDirs[1] != "/b" {
+		t.Fatalf("parseCapacityArgs = %+v", got)
+	}
+	if d := parseCapacityArgs([]string{"--json"}).poolDirs; len(d) != 0 {
+		t.Fatalf("poolDirs default = %v, want none", d)
+	}
+}
+
+func TestRunCapacity_poolDirNeedsEmitMetricsAndNoJSON(t *testing.T) {
+	for _, args := range [][]string{{"--pool-dir", "/a"}, {"--pool-dir", "/a", "--emit-metrics", "--json"}} {
+		if code := runCapacity(args); code != 2 {
+			t.Errorf("runCapacity(%v) = %d, want 2", args, code)
+		}
+	}
+}
+
+// TestEmitCapacityForPools_failureDoesNotStopOthers: every pool is attempted
+// in order, and one failing pool flips the result to 1 without skipping the rest.
+func TestEmitCapacityForPools_failureDoesNotStopOthers(t *testing.T) {
+	var seen []string
+	rc := emitCapacityForPools([]string{"/a", "/bad", "/c"}, func(d string) error {
+		seen = append(seen, d)
+		if d == "/bad" {
+			return errors.New("boom")
+		}
+		return nil
+	})
+	if rc != 1 || len(seen) != 3 || seen[2] != "/c" {
+		t.Fatalf("rc=%d seen=%v", rc, seen)
+	}
+	if rc := emitCapacityForPools([]string{"/a"}, func(string) error { return nil }); rc != 0 {
+		t.Fatalf("all-ok rc = %d", rc)
+	}
+}

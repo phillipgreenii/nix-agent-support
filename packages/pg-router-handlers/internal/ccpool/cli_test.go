@@ -895,3 +895,18 @@ func TestSend_usesReplyTimeout(t *testing.T) {
 		})
 	}
 }
+
+// EmitCapacityPools must cover every pool in ONE ccpool process: one argv with
+// a --pool-dir per pool, in order.
+func TestCLI_EmitCapacityPoolsIsOneProcess(t *testing.T) {
+	cli, argv, _ := newSpy()
+	if err := cli.EmitCapacityPools(context.Background(), []string{"/p/a", "/p/b"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*argv) != 1 {
+		t.Fatalf("ccpool processes = %d, want 1", len(*argv))
+	}
+	if got := strings.Join((*argv)[0], " "); got != "capacity --emit-metrics --pool-dir /p/a --pool-dir /p/b" {
+		t.Fatalf("argv = %q", got)
+	}
+}
