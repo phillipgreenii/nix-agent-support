@@ -604,15 +604,15 @@ func (d *Daemon) drainParsed() {
 	}
 }
 
-// settleLoop runs the settle pass: once a minute in scan mode, or the event
-// loop in event mode.
+// settleLoop runs the settle pass: every settle.tick (default 5 m) in scan mode,
+// or the event loop in event mode.
 func (d *Daemon) settleLoop() {
 	if d.sett.EventMode() {
 		d.settleLoopEvent()
 		return
 	}
 	defer d.refreshing.Done()
-	tick, stopTicker := d.ticker(obs.LoopSettleTick, time.Minute)
+	tick, stopTicker := d.ticker(obs.LoopSettleTick, d.settleTickEvery())
 	defer stopTicker()
 	for {
 		select {
@@ -622,6 +622,15 @@ func (d *Daemon) settleLoop() {
 			d.runTick(d.sett.Tick)
 		}
 	}
+}
+
+// settleTickEvery is the scan-mode tick interval: settle.tick, or its default
+// when the daemon was built without one.
+func (d *Daemon) settleTickEvery() time.Duration {
+	if d.cfg.SettleTick > 0 {
+		return d.cfg.SettleTick
+	}
+	return config.DefaultSettleTick
 }
 
 // Seam names of the event loop's timers (tests drive each apart).

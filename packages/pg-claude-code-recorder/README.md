@@ -712,7 +712,9 @@ counters agree with it.
 
 ### Settle cadence
 
-`settle.mode` picks the loop. `scan` (the default) runs the whole-store settle tick once a minute. `event` keeps a dirty
+`settle.mode` picks the loop. `scan` (the default) runs the whole-store settle tick every `settle.tick` (default 5 minutes, at least 1 second; the
+settle age is a day, so a stage change is late by at most one tick, and the default matches the 5 minute removal-gauge
+cadence below; it was a fixed minute before and nothing downstream needs minute resolution). `event` keeps a dirty
 set (sessions the copier or parser changed) and a due-time queue (the moment each quiet, held or removable session next
 needs a decision), and sleeps until the earliest of them, never waking twice within `settle.min_wake` (default 5 s).
 A full reconciliation scan, the same tick `scan` mode runs, runs at start and every `settle.reconcile` (default 1 h,
@@ -721,6 +723,16 @@ same decisions; an equivalence test holds that. `settle.mode` is read at start, 
 restart. A wake waits for a running reconcile (the settler's run lock), which is hourly and takes up to a tick's
 duration. In `event` mode `settle_tick_duration_seconds` is the duration of a wake or a reconcile and
 `settle_tick_examined_total` counts sessions processed per wake.
+
+### Removal gauges are approximate
+
+`removal_backlog_conversations` and `removal_backlog_bytes` are computed from what the event-driven flow already stored:
+the newest last-seen time of a Conversation's files (copy commits, snapshots, tombstones, first seen) and the bytes the
+database holds for them (copy offset or snapshot size), in two batched statements however many Conversations there are.
+They never stat an original file and refresh at most every 5 minutes (or right after a removal, a restore or a doctor
+run). The original's modification time can be newer than the last-seen time (a change not ingested yet), so a
+Conversation can count as ready slightly early or late. `remove` stays exact: it checks every Conversation's original
+at removal time and refuses one modified recently, whatever the gauge says.
 
 ### A conversation did not settle when expected
 

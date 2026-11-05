@@ -162,6 +162,7 @@ let
     daemon.enable = true;
     settle = {
       mode = "event";
+      tick = "10m";
       reconcile = "2h";
       min_wake = "10s";
     };
@@ -334,7 +335,10 @@ let
     removeDisabledByDefault = d.remove.enable == false && (opts on).remove.enable == false;
     settleAndRemoveDefaults = d.settle.after == "24h" && d.remove.after == "30d";
     settleLoopDefaults =
-      d.settle.mode == "scan" && d.settle.reconcile == "1h" && d.settle.min_wake == "5s";
+      d.settle.mode == "scan"
+      && d.settle.tick == "5m"
+      && d.settle.reconcile == "1h"
+      && d.settle.min_wake == "5s";
     doctorDefaults =
       d.doctor.bytes_per_slice == 268435456
       && d.doctor.slice_every == "1m"
@@ -350,7 +354,10 @@ let
       let
         r = data onEventSettle;
       in
-      r.settle.mode == "event" && r.settle.reconcile == "2h" && r.settle.min_wake == "10s";
+      r.settle.mode == "event"
+      && r.settle.tick == "10m"
+      && r.settle.reconcile == "2h"
+      && r.settle.min_wake == "10s";
     otherDefaults =
       d.minFreeBytes == 21474836480
       && d.sweep.interval == "15m"

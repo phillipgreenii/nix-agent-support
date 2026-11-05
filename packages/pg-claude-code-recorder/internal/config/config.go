@@ -90,12 +90,15 @@ type Config struct {
 	// SettleAfter is settle.after: how long every file of a Conversation must
 	// have been quiet before it settles (default 24 h).
 	SettleAfter time.Duration
-	// SettleMode is the settle loop: "scan" (the whole-store pass every minute,
+	// SettleMode is the settle loop: "scan" (the whole-store pass every SettleTick,
 	// the default) or "event" (wakes on dirty and due Conversations with an hourly
 	// reconciliation). SettleReconcile is the reconciliation interval (default 1 h)
 	// and SettleMinWake the shortest time between two event wakes (default 5 s).
 	// Go-level settings for now; the config file keys arrive with the config packet.
-	SettleMode      string
+	SettleMode string
+	// SettleTick is settle.tick: the interval of the scan-mode settle tick
+	// (default 5 m). settle.after is 24 h, so the tick needs no minute resolution.
+	SettleTick      time.Duration
 	SettleReconcile time.Duration
 	SettleMinWake   time.Duration
 	// HeldRecheck is held.recheck: how often a held Conversation is checked
@@ -182,6 +185,7 @@ type file struct {
 	Settle struct {
 		After     string `toml:"after"`
 		Mode      string `toml:"mode"`
+		Tick      string `toml:"tick"`
 		Reconcile string `toml:"reconcile"`
 		MinWake   string `toml:"min_wake"`
 	} `toml:"settle"`
@@ -194,6 +198,12 @@ type file struct {
 		LivenessInterval string `toml:"livenessInterval"`
 	} `toml:"process"`
 }
+
+// DefaultSettleTick is the default scan-mode settle tick (settle.tick). The
+// settle age is 24 h, so a stage change is late by at most one tick against a
+// day-scale threshold; the removal gauges refresh on a 5 minute cadence of their
+// own, so a shorter tick would only repeat the cheap evaluation.
+const DefaultSettleTick = 5 * time.Minute
 
 // ParseDuration parses a Go duration string with an optional d (days) unit.
 func ParseDuration(s string) (time.Duration, error) {
@@ -276,6 +286,7 @@ func Defaults(getenv func(string) string) Config {
 		CopyThrottle:        2 * time.Millisecond,
 		SettleAfter:         24 * time.Hour,
 		SettleMode:          "scan",
+		SettleTick:          DefaultSettleTick,
 		SettleReconcile:     time.Hour,
 		SettleMinWake:       5 * time.Second,
 		HeldRecheck:         time.Hour,
@@ -406,6 +417,7 @@ func apply(c *Config, f file) error {
 		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},
 		{"held.recheck", f.Held.Recheck, &c.HeldRecheck},
 		{"settle.after", f.Settle.After, &c.SettleAfter},
+		{"settle.tick", f.Settle.Tick, &c.SettleTick},
 		{"settle.reconcile", f.Settle.Reconcile, &c.SettleReconcile},
 		{"settle.min_wake", f.Settle.MinWake, &c.SettleMinWake},
 		{"process.graceWindow", f.Process.GraceWindow, &c.GraceWindow},
@@ -444,6 +456,9 @@ func apply(c *Config, f file) error {
 	}
 	if c.DoctorSliceEvery < time.Second {
 		return fmt.Errorf("doctor.slice_every: %s is under the 1s minimum", c.DoctorSliceEvery)
+	}
+	if c.SettleTick < time.Second {
+		return fmt.Errorf("settle.tick: %s is under the 1s minimum", c.SettleTick)
 	}
 	if c.SettleReconcile < time.Minute {
 		return fmt.Errorf("settle.reconcile: %s is under the 1m minimum", c.SettleReconcile)

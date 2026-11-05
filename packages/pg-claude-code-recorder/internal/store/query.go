@@ -422,6 +422,39 @@ UNION ALL SELECT file_id, at_ns FROM tombstones WHERE file_id IN (SELECT value F
 	return out, rows.Err()
 }
 
+// FileBytesByID returns, in one statement, the bytes the recorder holds for
+// each of the given files, the same figure the per-file readers give: a
+// snapshot-mode file's latest snapshot size, an append-mode file's copy offset
+// at its current generation (0 with none). The ids travel as one JSON array
+// parameter, so the statement count does not depend on how many files are asked
+// for.
+func (s *Reader) FileBytesByID(ids []int64) (map[int64]int64, error) {
+	out := map[int64]int64{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	arg, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.Query(`SELECT f.id, CASE WHEN f.mode='snapshot'
+THEN COALESCE((SELECT size FROM snapshots WHERE file_id=f.id ORDER BY version DESC LIMIT 1),0)
+ELSE COALESCE((SELECT copy_offset FROM generations WHERE file_id=f.id AND gen=f.cur_gen),0) END
+FROM files f WHERE f.id IN (SELECT value FROM json_each(?1))`, string(arg))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var f, n int64
+		if err := rows.Scan(&f, &n); err != nil {
+			return nil, err
+		}
+		out[f] = n
+	}
+	return out, rows.Err()
+}
+
 // Resets returns the reset entries; pinnedOnly keeps those clients behind have
 // not advanced past. The retention floor MUST NOT prune a pinned reset.
 func (s *Reader) Resets(pinnedOnly bool) ([]Reset, error) {

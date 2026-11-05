@@ -79,6 +79,7 @@ let
     settle = {
       after = cfg.settle.after;
       mode = cfg.settle.mode;
+      tick = cfg.settle.tick;
       reconcile = cfg.settle.reconcile;
       min_wake = cfg.settle.min_wake;
     };
@@ -230,12 +231,18 @@ in
         ];
         default = "scan";
         description = ''
-          The settle loop: `scan` runs the whole-store pass every minute;
+          The settle loop: `scan` runs the whole-store pass every `settle.tick`;
           `event` settles from a dirty set and a due-time queue and runs the
           scan only as the reconciliation. Changing it needs a daemon restart.
           Rendered as `settle.mode`.
         '';
       };
+      tick = durationOption "5m" ''
+        Interval of the settle tick in `scan` mode (at least 1s). The settle
+        age is a day, so the tick needs no minute resolution; the removal
+        gauges refresh on their own 5 minute cadence. Rendered as
+        `settle.tick`.
+      '';
       reconcile = durationOption "1h" ''
         Interval of the full reconciliation scan in `event` mode (at least
         1m); a missed event delays a settle by at most this long. Rendered as

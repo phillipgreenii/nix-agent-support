@@ -1079,40 +1079,49 @@ func (s *Settler) refreshRemovalGaugesIfDue(groups map[string]*conv, live map[st
 	s.rgAt = now
 }
 
-// backlogRecomputeAfter is how long the removal backlog gauges reuse a settled
-// Conversation's newest modification time and byte size. Finding them costs a
-// path lookup, an lstat and two store reads per file, and a settled Conversation
-// that changes leaves the Settled stage, so a stale entry only delays the gauge.
-const backlogRecomputeAfter = 15 * time.Minute
-
-// backlogEntry is what the backlog gauges last computed for one Conversation.
-type backlogEntry struct {
-	newest time.Time
-	bytes  int64
-	at     time.Time
-}
-
-// backlogFacts returns the Conversation's newest modification time and total
-// copied bytes, from the cache while the entry is younger than
-// backlogRecomputeAfter.
-func (s *Settler) backlogFacts(session string, c *conv, now time.Time) (time.Time, int64) {
-	s.qmu.Lock()
-	e, ok := s.backlog[session]
-	s.qmu.Unlock()
-	if d := now.Sub(e.at); ok && d >= 0 && d < backlogRecomputeAfter {
-		return e.newest, e.bytes
+// backlogFacts returns, for each of the given Conversations, the newest time
+// the recorder saw one of its files change and the bytes it holds for them. It
+// reads only the database, in two batched statements however many Conversations
+// there are, and never touches an original file. The removal backlog gauges are
+// approximate by design: the value stands in for newest(), which prefers the
+// original's modification time. The accepted difference is that the original's
+// mtime can be newer than the last-seen time (a change the recorder has not
+// ingested yet) or, rarely, older (the recorder saw the file after it was last
+// written), so a Conversation can count as ready slightly early or late. Remove
+// keeps the exact check (blockers and newest per Conversation) and refuses a
+// Conversation whose original changed recently, whatever this gauge says. On a
+// read error the maps are empty and the gauge reports zero until the next refresh.
+func (s *Settler) backlogFacts(cs []*conv) (newest map[string]time.Time, bytes map[string]int64) {
+	newest, bytes = map[string]time.Time{}, map[string]int64{}
+	var ids []int64
+	for _, c := range cs {
+		for _, f := range c.files {
+			ids = append(ids, f.ID)
+		}
 	}
-	e = backlogEntry{newest: s.newest(c), at: now}
-	for _, f := range c.files {
-		e.bytes += s.fileBytes(f)
+	if len(ids) == 0 {
+		return
 	}
-	s.qmu.Lock()
-	if s.backlog == nil {
-		s.backlog = map[string]backlogEntry{}
+	var seen, size map[int64]int64
+	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+		if seen, err = rd.LastSeenByFile(ids); err != nil {
+			return err
+		}
+		size, err = rd.FileBytesByID(ids)
+		return err
+	}); err != nil {
+		return
 	}
-	s.backlog[session] = e
-	s.qmu.Unlock()
-	return e.newest, e.bytes
+	for _, c := range cs {
+		var best, total int64
+		for _, f := range c.files {
+			best = max(best, f.FirstSeen, seen[f.ID])
+			total += size[f.ID]
+		}
+		newest[c.session] = time.Unix(0, best)
+		bytes[c.session] = total
+	}
+	return
 }
 
 // refreshRemovalGauges sets the quarantine gauges and the removal backlog.
@@ -1145,25 +1154,22 @@ func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]
 	var convs int
 	var back int64
 	rows, _ := s.st.Stages()
+	var settled []*conv
 	for _, r := range rows {
 		c := groups[r.Session]
 		if r.Stage != StageSettled || c == nil || live[r.Session] {
 			continue
 		}
-		newest, bytes := s.backlogFacts(r.Session, c, now)
-		if now.Sub(newest) < s.cfg.RemoveAfter {
+		settled = append(settled, c)
+	}
+	newest, size := s.backlogFacts(settled)
+	for _, c := range settled {
+		if t, ok := newest[c.session]; !ok || now.Sub(t) < s.cfg.RemoveAfter {
 			continue
 		}
 		convs++
-		back += bytes
+		back += size[c.session]
 	}
-	s.qmu.Lock()
-	for session, e := range s.backlog {
-		if d := now.Sub(e.at); d < 0 || d >= backlogRecomputeAfter {
-			delete(s.backlog, session)
-		}
-	}
-	s.qmu.Unlock()
 	reg.Set(obs.MRemovalBacklogConvs, nil, float64(convs))
 	reg.Set(obs.MRemovalBacklogBytes, nil, float64(back))
 }

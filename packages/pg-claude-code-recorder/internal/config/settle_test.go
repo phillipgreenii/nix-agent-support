@@ -67,7 +67,7 @@ func TestQueryTimeoutDefaultsTo30sAndIsConfigurable(t *testing.T) {
 func TestSettleLoopKeys(t *testing.T) {
 	e := env(map[string]string{"HOME": "/h"})
 	d := Defaults(e)
-	if d.SettleMode != "scan" || d.SettleReconcile != time.Hour || d.SettleMinWake != 5*time.Second {
+	if d.SettleMode != "scan" || d.SettleReconcile != time.Hour || d.SettleMinWake != 5*time.Second || d.SettleTick != 5*time.Minute {
 		t.Fatalf("defaults %q %v %v", d.SettleMode, d.SettleReconcile, d.SettleMinWake)
 	}
 	load := func(body string) (Config, error) {
@@ -82,13 +82,14 @@ func TestSettleLoopKeys(t *testing.T) {
 		t.Fatalf("%v %+v", err, c)
 	}
 	// the floors are inclusive
-	if _, err := load("[settle]\nreconcile = \"1m\"\nmin_wake = \"1s\"\n"); err != nil {
+	if _, err := load("[settle]\nreconcile = \"1m\"\nmin_wake = \"1s\"\ntick = \"1s\"\n"); err != nil {
 		t.Fatalf("floor values rejected: %v", err)
 	}
 	for _, bad := range []struct{ body, key string }{
 		{"[settle]\nmode = \"auto\"\n", "settle.mode"},
 		{"[settle]\nreconcile = \"59s\"\n", "settle.reconcile"},
 		{"[settle]\nmin_wake = \"999ms\"\n", "settle.min_wake"},
+		{"[settle]\ntick = \"999ms\"\n", "settle.tick"},
 		{"[settle]\nreconcile = \"soon\"\n", "settle.reconcile"},
 	} {
 		if _, err := load(bad.body); err == nil || !strings.Contains(err.Error(), bad.key) {

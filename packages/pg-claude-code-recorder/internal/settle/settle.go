@@ -247,17 +247,14 @@ type Settler struct {
 	qdirsAge       int
 	walkQuarantine func() []string // test seam; nil walks projects/
 
-	// The removal gauges (quarantine and removal backlog) are refreshed by the
-	// event-driven wake only on rgInterval or after rgDirty was set by a
+	// The removal gauges (quarantine and removal backlog) are refreshed by a
+	// settle pass (a scan tick, an event wake or a reconcile) only on rgInterval or after rgDirty was set by a
 	// removal, a quarantine restore or a doctor run. rgAt is guarded by the
 	// run lock.
 	rgDirty atomic.Bool
 	rgAt    time.Time
 	// removalGaugeRefreshes counts refreshRemovalGauges calls (test seam).
 	removalGaugeRefreshes atomic.Int64
-	// The per-Conversation facts the removal backlog gauges reuse between ticks
-	// (see backlogFacts); guarded by qmu.
-	backlog map[string]backlogEntry
 }
 
 // New returns a Settler.
@@ -1919,8 +1916,6 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 	s.mu.Lock()
 	s.gauges = ng
 	s.mu.Unlock()
-	s.refreshRemovalGauges(groups, live, now)
-	s.rgDirty.Store(false)
-	s.rgAt = now
+	s.refreshRemovalGaugesIfDue(groups, live, now)
 	s.publishGauges(now)
 }
