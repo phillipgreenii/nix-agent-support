@@ -1,0 +1,153 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-claude-code-recorder",
+  "command": {
+    "name": "pg-claude-code-recorder",
+    "provenance": "pg-claude-code-recorder --help, packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go, this repo 2026-11-04",
+    "citations": {
+      "provenance": {
+        "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (provenance); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+      },
+      "stdin": {
+        "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (stdin); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+      },
+      "stdout": {
+        "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (stdout); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+      },
+      "unknownFlag": {
+        "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (unknownFlag); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (flags/--help); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (flags/-h); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (positionals); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "status": {
+        "name": "status",
+        "provenance": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/status.go status, this repo 2026-11-04",
+        "citations": {
+          "provenance": {
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/provenance); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+          },
+          "stdin": {
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/stdin); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+          },
+          "stdout": {
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/stdout); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+          },
+          "unknownFlag": {
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/unknownFlag); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+          }
+        },
+        "flags": {
+          "--allow-partial": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/flags/--allow-partial); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/flags/--json); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+            }
+          },
+          "--short": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/flags/--short); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/positionals); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "pg-claude-code-recorder",
+            "citation": {
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:41 dispatch (subcommands/status/implicitEffects); reviewed this repo 2026-11-04: status subcommand only; every other verb is absent from the schema"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

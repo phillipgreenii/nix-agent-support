@@ -129,6 +129,217 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
+      "search": {
+        "name": "search",
+        "provenance": "packages/pa-monitor/cmd/pa-monitor/search.go parseSearchArgs, this repo 2026-11-04",
+        "citations": {
+          "provenance": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (provenance); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+          },
+          "stdin": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (stdin); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+          },
+          "stdout": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (stdout); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+          },
+          "unknownFlag": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (unknownFlag); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+          }
+        },
+        "flags": {
+          "--before": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (flags/--before); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (flags/--json); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+            }
+          },
+          "--session": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (flags/--session); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (flags/--since); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+            }
+          },
+          "--substring": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (flags/--substring); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (positionals); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "pa-monitor",
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/search.go:101 parseSearchArgs (implicitEffects); reviewed this repo 2026-11-04: flags and one query positional parsed from argv; runSearch reads the recorder's facts only"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "sessions": {
+        "name": "sessions",
+        "provenance": "packages/pa-monitor/cmd/pa-monitor/sessions.go parseSessionsArgs, this repo 2026-11-04",
+        "citations": {
+          "provenance": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (provenance); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+          },
+          "stdin": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (stdin); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+          },
+          "stdout": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (stdout); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+          },
+          "unknownFlag": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (unknownFlag); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+          }
+        },
+        "flags": {
+          "--before": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (flags/--before); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (flags/--json); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (flags/--since); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+            }
+          },
+          "--stats": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (flags/--stats); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (positionals); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "pa-monitor",
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/sessions.go:67 parseSessionsArgs (implicitEffects); reviewed this repo 2026-11-04: --json/--since/--before/--stats parsed from argv; runSessions reads the recorder's facts only"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "status": {
         "name": "status",
         "provenance": "packages/pa-monitor/cmd/pa-monitor/cli.go runStatus, this repo 2026-10-05",

@@ -373,10 +373,71 @@ var paMonitorSchema = CommandSchema{
 			UnknownFlag:     UnknownFlagInsufficient,
 			EndOfOptions:    true,
 		},
+		// sessions and search read the pg-claude-code-recorder store through the
+		// pa-monitor facts layer (sessions.go runSessions, search.go runSearch):
+		// no daemon or session state changes, and no transcript file is opened.
+		// The value flags carry a time bound or a session id, never a path.
+		"sessions": {
+			Name:       "sessions",
+			Provenance: "packages/pa-monitor/cmd/pa-monitor/sessions.go parseSessionsArgs, this repo 2026-11-04",
+			Flags: map[string]FlagSpec{
+				"--json": inert, "--stats": inert,
+				"--since": {Arity: ArityOne, Operand: Literal}, "--before": {Arity: ArityOne, Operand: Literal},
+			},
+			Positionals:     PositionalSpec{Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{readsPaMonitor},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
+		"search": {
+			Name:       "search",
+			Provenance: "packages/pa-monitor/cmd/pa-monitor/search.go parseSearchArgs, this repo 2026-11-04",
+			Flags: map[string]FlagSpec{
+				"--json": inert, "--substring": inert,
+				"--session": {Arity: ArityOne, Operand: Literal},
+				"--since":   {Arity: ArityOne, Operand: Literal}, "--before": {Arity: ArityOne, Operand: Literal},
+			},
+			Positionals:     PositionalSpec{Leading: []OperandRole{Literal}, Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{readsPaMonitor},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
+	},
+}
+
+// recorderSchema: ONLY the read-only `pg-claude-code-recorder status` query
+// (the recorder's post-apply verify beads run it). Source:
+// packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/status.go: it
+// asks the daemon over its socket, else reads the offline answer from disk, and
+// writes nothing. --watch (polls, may never return) and the --socket/--config/
+// --client path-or-name flags are NOT modeled, so they abstain. serve, remove,
+// coverage and every other subcommand are absent.
+var recorderSchema = CommandSchema{
+	Name:         "pg-claude-code-recorder",
+	Provenance:   "pg-claude-code-recorder --help, packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go, this repo 2026-11-04",
+	Flags:        map[string]FlagSpec{"-h": inert, "--help": inert},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"status": {
+			Name:            "status",
+			Provenance:      "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/status.go status, this repo 2026-11-04",
+			Flags:           map[string]FlagSpec{"--json": inert, "--short": inert, "--allow-partial": inert},
+			Positionals:     PositionalSpec{Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{{Role: Remote("read"), Target: "pg-claude-code-recorder"}},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
 	},
 }
 
 // repoBaseToolSchemas lists the schemas this file contributes to DefaultRegistry.
 func repoBaseToolSchemas() []CommandSchema {
-	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema}
+	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema, recorderSchema}
 }
