@@ -594,6 +594,44 @@ func (s *Store) Checkpoint() (log, checkpointed int, err error) {
 	return log, checkpointed, nil
 }
 
+// walBusyTimeoutMS is the busy_timeout the checkpoint connection runs with
+// (the DSN value); CheckpointTruncate restores it after its own, shorter one.
+const walBusyTimeoutMS = 5000
+
+// CheckpointTruncate runs one PRAGMA wal_checkpoint(TRUNCATE) on the checkpoint
+// connection, waiting at most busyTimeout for readers. A TRUNCATE takes the WAL
+// write lock while it waits, so a writer blocks for as long as it does: the
+// caller MUST bound how often it runs and run it only when a fresh passive
+// checkpoint reached every frame. busy is true when a reader pinned the WAL (or
+// a writer held it) and the attempt gave up; the WAL is then unchanged. It
+// returns an error after Close.
+func (s *Store) CheckpointTruncate(busyTimeout time.Duration) (busy bool, err error) {
+	s.mu.Lock()
+	c := s.cdb
+	s.mu.Unlock()
+	if c == nil {
+		return false, errors.New("store closed")
+	}
+	ctx := context.Background()
+	conn, err := c.Conn(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout=`+strconv.FormatInt(busyTimeout.Milliseconds(), 10)); err != nil {
+		return false, err
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA busy_timeout=`+strconv.Itoa(walBusyTimeoutMS)) }()
+	var b, log, done int
+	if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&b, &log, &done); err != nil {
+		if strings.Contains(err.Error(), "locked") || strings.Contains(err.Error(), "BUSY") {
+			return true, nil
+		}
+		return false, err
+	}
+	return b != 0, nil
+}
+
 func (s *Store) closeDBs() {
 	if s.btx != nil {
 		s.rbEpoch.Add(1)
@@ -1033,9 +1071,9 @@ func (s *Store) Close() error {
 	if s.wdb != nil {
 		// Checkpoint so a reopen starts from a small WAL.
 		start := time.Now()
-		s.obs.Event(obs.EvWALTruncateStart)
+		s.obs.Event(obs.EvWALTruncateStart, "source", "close")
 		_, _ = s.wdb.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
-		s.obs.Event(obs.EvWALTruncateDone, "duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
+		s.obs.Event(obs.EvWALTruncateDone, "source", "close", "duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 	}
 	s.closeDBs()
 	return first

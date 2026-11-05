@@ -680,10 +680,14 @@ groups:
                     type: gt
                     params: [1]
 
-      # WAL large. The write-ahead log above 256 MiB (268435456 bytes) for 15 minutes. Value: the
-      # baseline captured after the phase 1 apply was flat at 24.3 MiB (phase 0 left it at 88 MB; before
-      # the checkpoint loop it reached 13.9 GB), so this is a ceiling for runaway growth, not a typical
-      # value. Operator ruling (Phillip, 2026-11-04): 256 MiB, replacing the earlier 1 GiB.
+      # WAL large. The write-ahead log above 1 GiB (1073741824 bytes) for 15 minutes. Value: twice the
+      # default wal.truncate_above (512 MiB), so the rule fires only when the periodic TRUNCATE
+      # checkpoint is not working (it is attempted above 512 MiB, at most once an hour). The baseline
+      # after the phase 1 apply was flat at 24.3 MiB (before the checkpoint loop the WAL reached
+      # 13.9 GB), so this is a ceiling for runaway growth, not a typical value. It was 256 MiB (operator
+      # ruling, Phillip, 2026-11-04) until the TRUNCATE policy landed: with a 512 MiB truncate threshold
+      # a 256 MiB alert would fire before any truncation. Raise it with wal.truncate_above (twice it);
+      # the literal assumes the default.
       - uid: pg-ccrec-wal-large
         title: pg-claude-code-recorder write-ahead log is large
         condition: C
@@ -693,8 +697,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-claude-code-recorder write-ahead log is over 256 MiB"
-          description: "wal_bytes has been above 256 MiB (268435456 bytes) for 15 minutes: the WAL checkpoint loop is not keeping the log small. The baseline after the phase 1 apply was flat at 24.3 MiB, so 256 MiB is a ceiling for runaway growth (operator ruling, Phillip, 2026-11-04). Run pg-claude-code-recorder status, then read the recorder log for wal_checkpoint_failed lines (a long reader holds the checkpoint back)."
+          summary: "pg-claude-code-recorder write-ahead log is over 1 GiB"
+          description: "wal_bytes has been above 1 GiB (1073741824 bytes, twice the default wal.truncate_above) for 15 minutes: the periodic TRUNCATE checkpoint is not shrinking the log. The baseline after the phase 1 apply was flat at 24.3 MiB. Check wal_truncate_total{outcome} (busy means a long reader blocks it). Run pg-claude-code-recorder status, then read the recorder log for wal_checkpoint_failed lines (a long reader holds the checkpoint back)."
         data:
           - refId: A
             relativeTimeRange:
@@ -722,7 +726,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [268435456]
+                    params: [1073741824]
 
       # Loop stalled, per loop (the loop label stays on the result, so the alert names the loop). A loop
       # is stalled when a pass has run over 600 s (loop_in_flight_seconds, every loop) or, for the loops

@@ -125,12 +125,18 @@ type Daemon struct {
 
 	// lastCkptWarn is touched only by the WAL checkpoint loop.
 	lastCkptWarn time.Time
-	usedMu       sync.Mutex
-	usedBytes    int64
-	usedAt       time.Time
-	stop         chan struct{}
-	stopOnce     sync.Once
-	refreshing   sync.WaitGroup
+	// lastTruncate is when the last TRUNCATE attempt ran (loop-only).
+	lastTruncate time.Time
+	// checkpoint and truncate are test seams over the store's passive and
+	// TRUNCATE checkpoints; nil selects the store's.
+	checkpoint func() (int, int, error)
+	truncate   func(time.Duration) (bool, error)
+	usedMu     sync.Mutex
+	usedBytes  int64
+	usedAt     time.Time
+	stop       chan struct{}
+	stopOnce   sync.Once
+	refreshing sync.WaitGroup
 
 	// statusMu guards statusSnap, the cached figures opStatus serves.
 	statusMu     sync.Mutex

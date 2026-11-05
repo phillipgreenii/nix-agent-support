@@ -176,7 +176,16 @@ const (
 	MWALCheckpointedFrames = "wal_checkpointed_frames"
 	MWALCheckpointLastTime = "wal_checkpoint_last_timestamp_seconds"
 	MWALCheckpointDuration = "wal_checkpoint_duration_seconds"
+	// MWALTruncateTotal counts periodic TRUNCATE checkpoint attempts by outcome
+	// (WALTruncateOutcomes); MWALTruncateDuration times each attempt.
+	MWALTruncateTotal    = "wal_truncate_total"
+	MWALTruncateDuration = "wal_truncate_duration_seconds"
 )
+
+// WALTruncateOutcomes are the outcome label values of wal_truncate_total: ok
+// (the WAL was truncated), busy (a reader pinned it and the attempt gave up)
+// and error.
+var WALTruncateOutcomes = []string{"ok", "busy", "error"}
 
 // Metric names of the per-pass work counters and the lock waits. The lock-wait
 // histograms observe CONTENDED acquisitions only (an uncontended lock costs no
@@ -454,6 +463,9 @@ func (o *Obs) RegisterStandard() {
 	o.Reg.Set(MWALFrames, nil, 0)
 	o.Reg.Set(MWALCheckpointedFrames, nil, 0)
 	o.Reg.Set(MWALCheckpointLastTime, nil, 0)
+	for _, oc := range WALTruncateOutcomes {
+		o.Reg.Add(MWALTruncateTotal, map[string]string{"outcome": oc}, 0)
+	}
 	for _, h := range []struct {
 		name   string
 		bounds []float64
@@ -463,6 +475,7 @@ func (o *Obs) RegisterStandard() {
 		{MSettleTickDuration, LoopBuckets},
 		{MRefreshGaugesDuration, LoopBuckets},
 		{MWALCheckpointDuration, LoopBuckets},
+		{MWALTruncateDuration, LoopBuckets},
 		{MCopierLockWait, LoopBuckets},
 		{MStoreWriteLockWait, LoopBuckets},
 		{MDoctorSliceDuration, LoopBuckets},

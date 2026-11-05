@@ -73,7 +73,11 @@ type Config struct {
 	DoctorBytesPerSlice  int64
 	DoctorSliceEvery     time.Duration
 	DoctorAllowSlowCycle bool
-	MetricsAddr          string
+	// WALTruncateAbove is wal.truncate_above: the WAL size in bytes above which
+	// the checkpoint loop may attempt a TRUNCATE checkpoint, at most once an
+	// hour (default 512 MiB; 0 disables TRUNCATE).
+	WALTruncateAbove int64
+	MetricsAddr      string
 	// CopyThrottle is the pause after each backfill file copy that moved bytes,
 	// so first-run backfill leaves the laptop usable.
 	CopyThrottle time.Duration
@@ -153,6 +157,9 @@ type file struct {
 		SliceEvery     string `toml:"slice_every"`
 		AllowSlowCycle bool   `toml:"allow_slow_cycle"`
 	} `toml:"doctor"`
+	WAL struct {
+		TruncateAbove *int64 `toml:"truncate_above"`
+	} `toml:"wal"`
 	Metrics struct {
 		Addr string `toml:"addr"`
 	} `toml:"metrics"`
@@ -256,6 +263,7 @@ func Defaults(getenv func(string) string) Config {
 		DoctorBytesPerSlice: 256 << 20,
 		DoctorSliceEvery:    time.Minute,
 		MaxConnections:      8,
+		WALTruncateAbove:    512 << 20,
 		CopyThrottle:        2 * time.Millisecond,
 		SettleAfter:         24 * time.Hour,
 		SettleMode:          "scan",
@@ -410,6 +418,12 @@ func apply(c *Config, f file) error {
 		c.DoctorBytesPerSlice = *f.Doctor.BytesPerSlice
 	}
 	c.DoctorAllowSlowCycle = f.Doctor.AllowSlowCycle
+	if f.WAL.TruncateAbove != nil {
+		if *f.WAL.TruncateAbove < 0 {
+			return fmt.Errorf("wal.truncate_above must not be negative (0 disables TRUNCATE)")
+		}
+		c.WALTruncateAbove = *f.WAL.TruncateAbove
+	}
 	if c.DoctorSliceEvery < time.Second {
 		return fmt.Errorf("doctor.slice_every: %s is under the 1s minimum", c.DoctorSliceEvery)
 	}

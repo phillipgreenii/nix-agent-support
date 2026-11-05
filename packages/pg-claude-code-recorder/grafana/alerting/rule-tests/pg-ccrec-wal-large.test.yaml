@@ -4,8 +4,9 @@
 # with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
 # and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
 #
-# The write-ahead log above 256 MiB (268435456 bytes) for 15 minutes. 314572800 is 300 MiB,
-# 25480000 is the baseline of about 24.3 MiB.
+# The write-ahead log above 1 GiB (1073741824 bytes, twice the default wal.truncate_above of 512 MiB)
+# for 15 minutes. 1610612736 is 1.5 GiB, 314572800 is 300 MiB (above the old 256 MiB threshold, now
+# silent because the periodic TRUNCATE handles it), 25480000 is the baseline of about 24.3 MiB.
 # Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
 rule_files:
   - rules.yml
@@ -13,11 +14,11 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
-  - name: a 300 MiB WAL held past the for fires with severity warning only
+  - name: a 1.5 GiB WAL held past the for fires with severity warning only
     interval: 1m
     input_series:
       - series: pg_claude_code_recorder_wal_bytes{job="pg-claude-code-recorder"}
-        values: "314572800x80"
+        values: "1610612736x80"
     alert_rule_test:
       - eval_time: 10m
         alertname: pg-ccrec-wal-large
@@ -27,6 +28,16 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+
+  - name: a 300 MiB WAL (over the old 256 MiB threshold) no longer fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_wal_bytes{job="pg-claude-code-recorder"}
+        values: "314572800x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-wal-large
+        exp_alerts: []
 
   - name: the baseline 24.3 MiB WAL never fires
     interval: 1m
@@ -38,11 +49,11 @@ tests:
         alertname: pg-ccrec-wal-large
         exp_alerts: []
 
-  - name: exactly 256 MiB is not above the threshold
+  - name: exactly 1 GiB is not above the threshold
     interval: 1m
     input_series:
       - series: pg_claude_code_recorder_wal_bytes{job="pg-claude-code-recorder"}
-        values: "268435456x80"
+        values: "1073741824x80"
     alert_rule_test:
       - eval_time: 60m
         alertname: pg-ccrec-wal-large
@@ -52,7 +63,7 @@ tests:
     interval: 1m
     input_series:
       - series: pg_claude_code_recorder_wal_bytes{job="pg-claude-code-recorder"}
-        values: "25480000x10 314572800x9 25480000x60"
+        values: "25480000x10 1610612736x9 25480000x60"
     alert_rule_test:
       - eval_time: 25m
         alertname: pg-ccrec-wal-large
@@ -65,7 +76,7 @@ tests:
     interval: 1m
     input_series:
       - series: pg_claude_code_recorder_wal_bytes{job="pg-claude-code-recorder"}
-        values: "314572800x30 stale"
+        values: "1610612736x30 stale"
     alert_rule_test:
       - eval_time: 25m
         alertname: pg-ccrec-wal-large

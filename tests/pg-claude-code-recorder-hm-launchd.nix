@@ -169,6 +169,7 @@ let
       slice_every = "30s";
       allow_slow_cycle = true;
     };
+    wal.truncate_above = 0;
   } osWithObs;
   onSettings = case darwin {
     daemon.enable = true;
@@ -338,6 +339,8 @@ let
         r = data onRollingDoctor;
       in
       r.doctor.bytes_per_slice == 0 && r.doctor.slice_every == "30s" && r.doctor.allow_slow_cycle == true;
+    walDefaults = d.wal.truncate_above == 536870912;
+    walKeyRendered = (data onRollingDoctor).wal.truncate_above == 0;
     settleLoopKeysRendered =
       let
         r = data onEventSettle;

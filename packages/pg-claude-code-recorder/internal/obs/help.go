@@ -82,6 +82,8 @@ var helpTexts = map[string]string{
 	MWALCheckpointedFrames:    "Write-ahead log pages checkpointed at the last passive checkpoint.",
 	MWALCheckpointLastTime:    "Unix time of the last passive WAL checkpoint.",
 	MWALCheckpointDuration:    "Distribution of passive WAL checkpoint durations in seconds.",
+	MWALTruncateTotal:         "Periodic WAL TRUNCATE checkpoint attempts, by outcome.",
+	MWALTruncateDuration:      "Distribution of periodic WAL TRUNCATE checkpoint durations in seconds.",
 	MQuarantineFiles:          "Files in quarantine.",
 	MQuarantineBytes:          "Bytes in quarantine.",
 	MQuarantineOldestAge:      "Age in seconds of the oldest quarantined file.",

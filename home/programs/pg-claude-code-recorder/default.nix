@@ -87,6 +87,7 @@ let
       slice_every = cfg.doctor.slice_every;
       allow_slow_cycle = cfg.doctor.allow_slow_cycle;
     };
+    wal.truncate_above = cfg.wal.truncate_above;
     sweep.interval = cfg.sweep.interval;
     feed.retention = cfg.feed.retention;
     wait = {
@@ -268,6 +269,21 @@ in
           Start even when the projected cycle (copy bytes over
           `doctor.bytes_per_slice`, times `doctor.slice_every`) is longer than
           `doctor.interval`. Rendered as `doctor.allow_slow_cycle`.
+        '';
+      };
+    };
+
+    wal = {
+      truncate_above = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 536870912;
+        description = ''
+          WAL size in bytes above which the checkpoint loop may attempt a
+          TRUNCATE checkpoint (default 512 MiB), at most once an hour and only
+          after a fresh passive checkpoint reached every frame while the daemon is
+          caught up. A TRUNCATE blocks writers while it waits for readers. `0`
+          disables TRUNCATE. The `wal-large` alert fires at twice this value.
+          Rendered as `wal.truncate_above`.
         '';
       };
     };

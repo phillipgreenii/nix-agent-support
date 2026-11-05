@@ -605,7 +605,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "wal size",
-      "description": "Size of the SQLite write-ahead log file in bytes. The wal-large alert fires above 256 MiB for 15 minutes.",
+      "description": "Size of the SQLite write-ahead log file in bytes. The periodic TRUNCATE checkpoint runs above wal.truncate_above (512 MiB); the wal-large alert fires above 1 GiB for 15 minutes.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
