@@ -175,3 +175,60 @@ func TestDeferredUniqueIndexViolationFailsTheRebuildAndReportsTheRows(t *testing
 		t.Fatal("the unfinished marker must stay after a failed index build")
 	}
 }
+
+// tempStore reads PRAGMA temp_store (0 DEFAULT, 1 FILE, 2 MEMORY) on db.
+func tempStore(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	conn, err := db.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	var v int
+	if err := conn.QueryRowContext(t.Context(), `PRAGMA temp_store`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestBulkRebuildKeepsTheTempStoreInMemoryOnlyWhileWritingAndOnlyOnTheWriter(t *testing.T) {
+	const memory, dflt = 2, 0
+	dir := seededDir(t)
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if got := tempStore(t, s.wdb); got != memory {
+		t.Fatalf("writer temp_store during the bulk write phase is %d, want %d (MEMORY)", got, memory)
+	}
+	if got := tempStore(t, s.rdb); got != dflt {
+		t.Fatalf("read pool temp_store is %d, want %d (DEFAULT)", got, dflt)
+	}
+	if got := tempStore(t, s.cdb); got != dflt {
+		t.Fatalf("checkpoint connection temp_store is %d, want %d (DEFAULT)", got, dflt)
+	}
+	// The index builds sort millions of rows: the reset happens before them.
+	if err := s.EnsureIndexes(); err != nil {
+		t.Fatal(err)
+	}
+	if got := tempStore(t, s.wdb); got != dflt {
+		t.Fatalf("writer temp_store after the index builds is %d, want %d (DEFAULT)", got, dflt)
+	}
+	if err := s.FinishRebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if got := tempStore(t, s.wdb); got != dflt {
+		t.Fatalf("writer temp_store after FinishRebuild is %d, want %d", got, dflt)
+	}
+}
+
+func TestLiveStoreTempStoreIsDefault(t *testing.T) {
+	s := open(t, t.TempDir())
+	defer func() { _ = s.Close() }()
+	for name, db := range map[string]*sql.DB{"writer": s.wdb, "reader": s.rdb, "checkpoint": s.cdb} {
+		if got := tempStore(t, db); got != 0 {
+			t.Fatalf("%s temp_store on a live store is %d, want 0 (DEFAULT)", name, got)
+		}
+	}
+}

@@ -16,7 +16,8 @@ import (
 // so while it runs the index trades durability for speed: one write
 // transaction spans many files and commits on a record or byte budget,
 // synchronous is OFF, the page cache is large, the WAL autocheckpoint is
-// raised and FTS5 automerge is off. The normal serve path keeps its durability.
+// raised, FTS5 automerge is off and the temp store (the per-file savepoint's
+// sub-journal) is in memory until the index builds. The normal serve path keeps its durability.
 //
 // Failure semantics: a marker row (meta key metaRebuildUnfinished) is written
 // and made durable BEFORE any of that is relaxed, and cleared LAST by
@@ -81,6 +82,10 @@ func (s *Store) beginRebuild() error {
 		`INSERT INTO fts_word(fts_word,rank) VALUES('automerge',0)`,
 		`INSERT INTO fts_tri(fts_tri,rank) VALUES('automerge',0)`,
 		`PRAGMA synchronous=OFF`,
+		// The per-file SAVEPOINT keeps its sub-journal in the temp store; in
+		// memory it costs a fraction of a temp-file write and still rolls
+		// back. buildIndexesLocked resets it before the index sorts.
+		`PRAGMA temp_store=MEMORY`,
 	}
 	for _, q := range s.withoutTrigram(qs) {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
@@ -145,6 +150,11 @@ func (s *Store) buildIndexesLocked() error {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
+	// The index builds sort every records row, and cache_size does not bound
+	// that sort, so it MUST spill to the temp file, not to memory.
+	if _, err := conn.ExecContext(ctx, `PRAGMA temp_store=DEFAULT`); err != nil {
+		return err
+	}
 	for _, ix := range layoutIndexes(s.sessText) {
 		if _, err := conn.ExecContext(ctx, ix.sql); err != nil {
 			if ix.name == "records_ident" {
