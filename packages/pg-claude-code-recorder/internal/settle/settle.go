@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -245,6 +246,15 @@ type Settler struct {
 	qdirsValid     bool
 	qdirsAge       int
 	walkQuarantine func() []string // test seam; nil walks projects/
+
+	// The removal gauges (quarantine and removal backlog) are refreshed by the
+	// event-driven wake only on rgInterval or after rgDirty was set by a
+	// removal, a quarantine restore or a doctor run. rgAt is guarded by the
+	// run lock.
+	rgDirty atomic.Bool
+	rgAt    time.Time
+	// removalGaugeRefreshes counts refreshRemovalGauges calls (test seam).
+	removalGaugeRefreshes atomic.Int64
 }
 
 // New returns a Settler.
@@ -1888,5 +1898,7 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 	s.gauges = ng
 	s.mu.Unlock()
 	s.refreshRemovalGauges(groups, live, now)
+	s.rgDirty.Store(false)
+	s.rgAt = now
 	s.publishGauges(now)
 }

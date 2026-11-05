@@ -329,6 +329,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		s.transition(session, s.priorStage(session, to), to)
 		s.noteSession(c, to, row)
 	}
+	s.refreshRemovalGaugesIfDue(s.gcache, live, now)
 	s.publishGauges(now)
 	s.publishNext()
 	return stats, first

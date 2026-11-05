@@ -160,7 +160,16 @@ func (s *Settler) hourCount(now time.Time) int {
 // removeLocked runs the removal pass with the run lock held. early holds the
 // format verdicts computed before the lock (nil: the caller holds the lock for
 // the whole pass, as the tick does, and the verdicts are computed on first use).
-func (s *Settler) removeLocked(opt RemoveOptions, now time.Time, early *formatCache) (RemoveReport, error) {
+func (s *Settler) removeLocked(opt RemoveOptions, now time.Time, early *formatCache) (rep RemoveReport, err error) {
+	defer func() {
+		if !opt.DryRun && len(rep.Removed) > 0 {
+			s.markRemovalGauges()
+		}
+	}()
+	return s.removeLockedBody(opt, now, early)
+}
+
+func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time, early *formatCache) (RemoveReport, error) {
 	fc := early
 	if fc == nil {
 		fc = newFormatCache(false)
@@ -897,6 +906,7 @@ func (s *Settler) restoreOne(pf pendingFile, q string) (conflict bool, err error
 	if err := s.cfs().SyncDir(filepath.Dir(pf.Path)); err != nil {
 		return false, err
 	}
+	s.markRemovalGauges()
 	s.cfg.Obs.Event(obs.EvQuarantineRestored, "session", pf.Rel, "path", pf.Path)
 	return false, nil
 }
@@ -1051,8 +1061,27 @@ func (s *Settler) logOrphans() error {
 	return nil
 }
 
+// rgInterval is how often the event-driven wake refreshes the removal gauges
+// when nothing marked them stale.
+const rgInterval = 5 * time.Minute
+
+// markRemovalGauges notes that a removal, quarantine restore or doctor run
+// changed what the removal gauges report; the next wake refreshes them.
+func (s *Settler) markRemovalGauges() { s.rgDirty.Store(true) }
+
+// refreshRemovalGaugesIfDue is the wake path's refresh: it runs only after a
+// mark or when rgInterval has passed since the last refresh. Run lock held.
+func (s *Settler) refreshRemovalGaugesIfDue(groups map[string]*conv, live map[string]bool, now time.Time) {
+	if !s.rgDirty.Swap(false) && !s.rgAt.IsZero() && now.Sub(s.rgAt) < rgInterval {
+		return
+	}
+	s.refreshRemovalGauges(groups, live, now)
+	s.rgAt = now
+}
+
 // refreshRemovalGauges sets the quarantine gauges and the removal backlog.
 func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]bool, now time.Time) {
+	s.removalGaugeRefreshes.Add(1)
 	reg := s.cfg.Obs.Reg
 	var files int
 	var bytes int64

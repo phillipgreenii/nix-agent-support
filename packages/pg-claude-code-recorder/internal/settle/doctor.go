@@ -132,6 +132,7 @@ func (s *Settler) doctorFull() (DoctorResult, error) {
 	}
 	s.cfg.Obs.Reg.Set(obs.MDoctorLastRun, nil, float64(now.UnixNano())/1e9)
 	s.cfg.Obs.Reg.Set(obs.MDoctorMismatchFiles, nil, float64(res.MismatchFiles))
+	s.markRemovalGauges()
 	s.cfg.Obs.Event(obs.EvDoctorDone, "files", fmt.Sprint(res.FilesChecked), "mismatch_files", fmt.Sprint(res.MismatchFiles))
 	return res, nil
 }
