@@ -82,6 +82,11 @@ let
       reconcile = cfg.settle.reconcile;
       min_wake = cfg.settle.min_wake;
     };
+    doctor = {
+      bytes_per_slice = cfg.doctor.bytes_per_slice;
+      slice_every = cfg.doctor.slice_every;
+      allow_slow_cycle = cfg.doctor.allow_slow_cycle;
+    };
     sweep.interval = cfg.sweep.interval;
     feed.retention = cfg.feed.retention;
     wait = {
@@ -238,6 +243,32 @@ in
         Shortest time between two event wakes in `event` mode (at least 1s).
         Rendered as `settle.min_wake`.
       '';
+    };
+
+    doctor = {
+      bytes_per_slice = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 268435456;
+        description = ''
+          Bytes of the copy one rolling doctor slice hashes (default 256 MiB).
+          The budget counts one side, the copy. `0` selects the old synchronous
+          doctor, which holds the copier lock across every file. Rendered as
+          `doctor.bytes_per_slice`.
+        '';
+      };
+      slice_every = durationOption "1m" ''
+        How often the rolling doctor runs a slice while a cycle is open (at
+        least 1s). Rendered as `doctor.slice_every`.
+      '';
+      allow_slow_cycle = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Start even when the projected cycle (copy bytes over
+          `doctor.bytes_per_slice`, times `doctor.slice_every`) is longer than
+          `doctor.interval`. Rendered as `doctor.allow_slow_cycle`.
+        '';
+      };
     };
 
     remove = {

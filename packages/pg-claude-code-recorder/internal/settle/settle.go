@@ -172,6 +172,16 @@ type Config struct {
 	Mode      string
 	Reconcile time.Duration
 	MinWake   time.Duration
+
+	// The rolling doctor (see doctor_rolling.go): DoctorInterval is
+	// doctor.interval, DoctorBytesPerSlice doctor.bytes_per_slice (0 selects the
+	// old synchronous run), DoctorSliceEvery doctor.slice_every, and
+	// DoctorLagBound the copy_lag_bytes above which a slice is deferred (1 GiB
+	// when 0).
+	DoctorInterval      time.Duration
+	DoctorBytesPerSlice int64
+	DoctorSliceEvery    time.Duration
+	DoctorLagBound      int64
 }
 
 // Settler runs the settle stage.
@@ -181,6 +191,13 @@ type Settler struct {
 	fs  fsx.FS
 
 	run sync.Mutex // one pass at a time
+
+	// doctorMu is the single flight of the doctor cursor: a rolling slice and a
+	// CLI doctor run never overlap.
+	doctorMu     sync.Mutex
+	doctorIdle   func() error
+	doctorSeamMu sync.Mutex
+	doctorSeam   doctorSeam
 
 	// The incrementally kept file-to-Conversation map (see groups); guarded by run.
 	trk    *store.FileTracker

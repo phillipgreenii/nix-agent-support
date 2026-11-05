@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -126,11 +127,29 @@ func (d *Daemon) opExtract(_ context.Context, body []byte) (any, *wire.Error) {
 }
 
 func (d *Daemon) opDoctor(_ context.Context, _ []byte) (any, *wire.Error) {
-	res, err := d.sett.Doctor()
+	ans, err := d.sett.DoctorRun()
 	if err != nil {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
-	return res, nil
+	return ans, nil
+}
+
+// checkDoctorProjection is the rolling doctor's config validation, run at start
+// once the file set is known: a cycle that the budget and the slice interval
+// project past doctor.interval fails unless doctor.allow_slow_cycle is set.
+func (d *Daemon) checkDoctorProjection() error {
+	if d.cfg.DoctorBytesPerSlice <= 0 || d.cfg.DoctorInterval <= 0 {
+		return nil
+	}
+	total, projected, err := d.sett.DoctorProjection()
+	if err != nil {
+		return fmt.Errorf("doctor projection: %w", err)
+	}
+	if projected > d.cfg.DoctorInterval && !d.cfg.DoctorAllowSlowCycle {
+		return fmt.Errorf("doctor: %d copy bytes at doctor.bytes_per_slice = %d project a cycle of %s, longer than doctor.interval = %s; raise doctor.bytes_per_slice or doctor.interval, or set doctor.allow_slow_cycle = true",
+			total, d.cfg.DoctorBytesPerSlice, projected, d.cfg.DoctorInterval)
+	}
+	return nil
 }
 
 // doctorLoop runs doctor from a timer inside the daemon (doctor.interval), so no
@@ -140,6 +159,10 @@ func (d *Daemon) doctorLoop() {
 	defer d.refreshing.Done()
 	every := d.cfg.DoctorInterval
 	if every <= 0 {
+		return
+	}
+	if d.cfg.DoctorBytesPerSlice > 0 {
+		d.rollingDoctorLoop()
 		return
 	}
 	wait := every
@@ -175,5 +198,22 @@ func (d *Daemon) loadDoctorGauges() {
 	if last, ok := settle.LoadDoctor(d.cfg.StateDir); ok {
 		d.obs.Reg.Set(obs.MDoctorLastRun, nil, float64(last.AtNS)/1e9)
 		d.obs.Reg.Set(obs.MDoctorMismatchFiles, nil, float64(last.MismatchFiles))
+	}
+}
+
+// rollingDoctorLoop wakes every doctor.slice_every: the settler starts a cycle
+// when one is due, runs one slice of the open cycle, or runs its idle step.
+func (d *Daemon) rollingDoctorLoop() {
+	for {
+		fire, stopTimer := d.timer(obs.LoopDoctor, d.cfg.DoctorSliceEvery)
+		select {
+		case <-d.stop:
+			stopTimer()
+			return
+		case <-fire:
+			if err := d.runLoop(obs.LoopDoctor, d.sett.DoctorTick); err != nil {
+				d.obs.Log.Warn("doctor_failed", "err", err.Error())
+			}
+		}
 	}
 }

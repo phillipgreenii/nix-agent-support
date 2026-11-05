@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -45,4 +46,39 @@ func TestStandardSeriesAreRegisteredAtZero(t *testing.T) {
 			t.Errorf("dropped_bytes_total{reason=%s} not registered", r)
 		}
 	}
+}
+
+// The projection check runs at start, once the file set is known: a cycle the
+// budget and slice interval project past doctor.interval fails config
+// validation unless doctor.allow_slow_cycle is set.
+func TestStartFailsWhenTheProjectedDoctorCycleExceedsTheInterval(t *testing.T) {
+	e := newEnv(t, false)
+	e.transcript("a.jsonl", "{\"n\":1}\n{\"n\":2}\n", time.Now().Add(-time.Hour))
+	d := e.open(t)
+	if err := d.Watcher().Rescan(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// 16 copy bytes at 1 byte per slice: 16 slices of an hour against a 2 h interval
+	e.cfg.DoctorBytesPerSlice = 1
+	e.cfg.DoctorSliceEvery = time.Hour
+	e.cfg.DoctorInterval = 2 * time.Hour
+	_, err := Open(Options{Config: e.cfg, Logger: NewLogger(e.log), NoEvents: true, Version: "test", Procs: e.procs})
+	if err == nil || !strings.Contains(err.Error(), "doctor.allow_slow_cycle") {
+		t.Fatalf("Open = %v, want the projection failure", err)
+	}
+	e.cfg.DoctorAllowSlowCycle = true
+	d2 := e.open(t)
+	defer func() { _ = d2.Close() }()
+	if v, _ := d2.Obs().Reg.Gauge(obs.MDoctorProjectedCycle, nil); v != 16*3600 {
+		t.Fatalf("doctor_projected_cycle_seconds %v, want %d", v, 16*3600)
+	}
+	// bytes_per_slice = 0 is the old path: no projection, no failure
+	e.cfg.DoctorAllowSlowCycle = false
+	e.cfg.DoctorBytesPerSlice = 0
+	_ = d2.Close()
+	d3 := e.open(t)
+	_ = d3.Close()
 }

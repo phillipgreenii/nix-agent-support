@@ -162,6 +162,14 @@ let
       min_wake = "10s";
     };
   } osWithObs;
+  onRollingDoctor = case darwin {
+    daemon.enable = true;
+    doctor = {
+      bytes_per_slice = 0;
+      slice_every = "30s";
+      allow_slow_cycle = true;
+    };
+  } osWithObs;
   onSettings = case darwin {
     daemon.enable = true;
     settings.doctor.interval = "6h";
@@ -316,6 +324,15 @@ let
     settleAndRemoveDefaults = d.settle.after == "24h" && d.remove.after == "30d";
     settleLoopDefaults =
       d.settle.mode == "scan" && d.settle.reconcile == "1h" && d.settle.min_wake == "5s";
+    doctorDefaults =
+      d.doctor.bytes_per_slice == 268435456
+      && d.doctor.slice_every == "1m"
+      && d.doctor.allow_slow_cycle == false;
+    doctorKeysRendered =
+      let
+        r = data onRollingDoctor;
+      in
+      r.doctor.bytes_per_slice == 0 && r.doctor.slice_every == "30s" && r.doctor.allow_slow_cycle == true;
     settleLoopKeysRendered =
       let
         r = data onEventSettle;

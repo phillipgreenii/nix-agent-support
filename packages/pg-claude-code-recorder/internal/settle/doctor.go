@@ -53,8 +53,9 @@ type DoctorResult struct {
 	Mismatches    []DoctorMismatch `json:"mismatches"`
 }
 
-// Doctor runs the full comparison.
-func (s *Settler) Doctor() (DoctorResult, error) {
+// doctorFull is the old synchronous comparison (doctor.bytes_per_slice = 0): it
+// holds the copier lock across every file's full hash.
+func (s *Settler) doctorFull() (DoctorResult, error) {
 	now := s.cfg.Clock.Now()
 	res := DoctorResult{AtNS: now.UnixNano(), Mismatches: []DoctorMismatch{}}
 	bad := map[int64]bool{}
@@ -214,61 +215,80 @@ func (s *Settler) doctorJournal(add func(DoctorMismatch)) {
 // manifest: the manifest file on disk equals the committed one and every file's
 // bytes, read through the archive, hash to the manifest's hash.
 func (s *Settler) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) error {
-	rows, err := s.st.Read().Query(`SELECT session FROM settled ORDER BY session`)
+	sessions, err := s.settledSessions()
 	if err != nil {
 		return err
+	}
+	for _, session := range sessions {
+		checked, _ := s.doctorArchive(session, add)
+		if checked {
+			res.ArchivesCheck++
+		}
+	}
+	return nil
+}
+
+// settledSessions lists the settled Conversations in session order.
+func (s *Settler) settledSessions() ([]string, error) {
+	rows, err := s.st.Read().Query(`SELECT session FROM settled ORDER BY session`)
+	if err != nil {
+		return nil, err
 	}
 	var sessions []string
 	for rows.Next() {
 		var x string
 		if err := rows.Scan(&x); err != nil {
 			_ = rows.Close()
-			return err
+			return nil, err
 		}
 		sessions = append(sessions, x)
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	for _, session := range sessions {
-		st, ok, err := s.st.SettledOf(session)
-		if err != nil || !ok {
+	return sessions, nil
+}
+
+// doctorArchive checks one Conversation's archive; checked is false when the
+// Conversation is not settled, and hashed is the bytes hashed.
+func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (checked bool, hashed int64) {
+	st, ok, err := s.st.SettledOf(session)
+	if err != nil || !ok {
+		return false, 0
+	}
+	disk, err := os.ReadFile(filepath.Join(s.st.SegDir(session), "manifest.json"))
+	switch {
+	case err != nil:
+		add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "manifest.json: " + err.Error()})
+	case !bytes.Equal(bytes.TrimSpace(disk), bytes.TrimSpace(st.Manifest)):
+		add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "manifest.json differs from the committed manifest"})
+	}
+	var m store.Manifest
+	if json.Unmarshal(st.Manifest, &m) != nil {
+		add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "the committed manifest is not valid JSON"})
+		return true, 0
+	}
+	for _, mf := range m.Files {
+		if mf.Hash == "" {
 			continue
 		}
-		res.ArchivesCheck++
-		disk, err := os.ReadFile(filepath.Join(s.st.SegDir(session), "manifest.json"))
-		switch {
-		case err != nil:
-			add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "manifest.json: " + err.Error()})
-		case !bytes.Equal(bytes.TrimSpace(disk), bytes.TrimSpace(st.Manifest)):
-			add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "manifest.json differs from the committed manifest"})
-		}
-		var m store.Manifest
-		if json.Unmarshal(st.Manifest, &m) != nil {
-			add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "the committed manifest is not valid JSON"})
+		ptr, err := s.st.OpenPointer(mf.File, mf.Gen)
+		if err != nil {
+			add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "opening the stored bytes: " + err.Error()})
 			continue
 		}
-		for _, mf := range m.Files {
-			if mf.Hash == "" {
-				continue
-			}
-			ptr, err := s.st.OpenPointer(mf.File, mf.Gen)
-			if err != nil {
-				add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "opening the stored bytes: " + err.Error()})
-				continue
-			}
-			h, herr := hashReader(ptr, mf.Size)
-			_ = ptr.Close()
-			if herr != nil && !errors.Is(herr, io.EOF) {
-				add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "reading the stored bytes: " + herr.Error()})
-				continue
-			}
-			if hexHash(h) != mf.Hash {
-				add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "the stored bytes hash to " + hexHash(h) + ", the manifest says " + mf.Hash})
-			}
+		h, herr := hashReader(ptr, mf.Size)
+		_ = ptr.Close()
+		hashed += mf.Size
+		if herr != nil && !errors.Is(herr, io.EOF) {
+			add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "reading the stored bytes: " + herr.Error()})
+			continue
+		}
+		if hexHash(h) != mf.Hash {
+			add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "the stored bytes hash to " + hexHash(h) + ", the manifest says " + mf.Hash})
 		}
 	}
-	return nil
+	return true, hashed
 }
 
 // writeDoctor writes the result file atomically.

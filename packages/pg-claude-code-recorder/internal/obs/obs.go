@@ -256,16 +256,25 @@ func PassLoops() []string {
 
 // Metric and event names of removal, quarantine, extract and doctor.
 const (
-	MQuarantineFiles      = "quarantine_files"
-	MQuarantineBytes      = "quarantine_bytes"
-	MQuarantineOldestAge  = "quarantine_oldest_age_seconds"
-	MQuarantineMismatch   = "removal_quarantine_mismatch_total"
-	MRemovalBacklogConvs  = "removal_backlog_conversations"
-	MRemovalBacklogBytes  = "removal_backlog_bytes"
-	MRemovedTotal         = "conversations_removed_total"
-	MSkippedFiles         = "skipped_files_total"
-	MDoctorLastRun        = "doctor_last_run_timestamp"
-	MDoctorMismatchFiles  = "doctor_mismatch_files"
+	MQuarantineFiles     = "quarantine_files"
+	MQuarantineBytes     = "quarantine_bytes"
+	MQuarantineOldestAge = "quarantine_oldest_age_seconds"
+	MQuarantineMismatch  = "removal_quarantine_mismatch_total"
+	MRemovalBacklogConvs = "removal_backlog_conversations"
+	MRemovalBacklogBytes = "removal_backlog_bytes"
+	MRemovedTotal        = "conversations_removed_total"
+	MSkippedFiles        = "skipped_files_total"
+	MDoctorLastRun       = "doctor_last_run_timestamp"
+	MDoctorMismatchFiles = "doctor_mismatch_files"
+	// The rolling doctor: slice duration is a plain histogram, slices count by
+	// outcome (DoctorOutcomes), the rest are gauges and one counter.
+	MDoctorSliceDuration  = "doctor_slice_duration_seconds"
+	MDoctorCycleProgress  = "doctor_cycle_progress_ratio"
+	MDoctorCycleDuration  = "doctor_cycle_duration_seconds"
+	MDoctorSlices         = "doctor_slices_total"
+	MDoctorProjectedCycle = "doctor_projected_cycle_seconds"
+	MDoctorRaceSkips      = "doctor_race_skips_total"
+	MDoctorCursorAge      = "doctor_cursor_age_seconds"
 	EvQuarantined         = "quarantined"
 	EvQuarantineRestored  = "quarantine_restored"
 	EvQuarantineOrphan    = "quarantine_orphan_found_on_start"
@@ -275,6 +284,9 @@ const (
 	EvRemovalRecovered    = "removal_recovered_on_start"
 	ReasonQuarantineUnavl = "quarantine_unavailable"
 )
+
+// DoctorOutcomes are the outcome values of doctor_slices_total.
+var DoctorOutcomes = []string{"ok", "deferred", "error", "skipped_gone"}
 
 // SkipReasons are the removal reasons of skipped_files_total{reason}; each is
 // registered at zero at start, so the first increase fires.
@@ -386,6 +398,13 @@ func (o *Obs) RegisterStandard() {
 	for _, g := range []string{MQuarantineFiles, MQuarantineBytes, MQuarantineOldestAge, MRemovalBacklogConvs, MRemovalBacklogBytes, MDoctorLastRun, MDoctorMismatchFiles} {
 		o.Reg.Set(g, nil, 0)
 	}
+	for _, g := range []string{MDoctorCycleProgress, MDoctorCycleDuration, MDoctorProjectedCycle, MDoctorCursorAge} {
+		o.Reg.Set(g, nil, 0)
+	}
+	o.Reg.Add(MDoctorRaceSkips, nil, 0)
+	for _, oc := range DoctorOutcomes {
+		o.Reg.Add(MDoctorSlices, map[string]string{"outcome": oc}, 0)
+	}
 	o.Reg.Add(MQuarantineMismatch, nil, 0)
 	o.Reg.Add(MRemovedTotal, nil, 0)
 	for _, r := range SkipReasons {
@@ -446,6 +465,7 @@ func (o *Obs) RegisterStandard() {
 		{MWALCheckpointDuration, LoopBuckets},
 		{MCopierLockWait, LoopBuckets},
 		{MStoreWriteLockWait, LoopBuckets},
+		{MDoctorSliceDuration, LoopBuckets},
 	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}

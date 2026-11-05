@@ -91,5 +91,12 @@ var helpTexts = map[string]string{
 	MRemovedTotal:             "Conversations removed.",
 	MSkippedFiles:             "Files skipped by removal, by reason.",
 	MDoctorLastRun:            "Unix time of the last doctor run.",
-	MDoctorMismatchFiles:      "Files the last doctor run found mismatched.",
+	MDoctorMismatchFiles:      "Files the current or last doctor cycle found mismatched.",
+	MDoctorSliceDuration:      "Distribution of rolling doctor slice durations in seconds.",
+	MDoctorCycleProgress:      "Fraction of the open rolling doctor cycle's files checked (1 when idle).",
+	MDoctorCycleDuration:      "Seconds the last completed rolling doctor cycle took.",
+	MDoctorSlices:             "Rolling doctor slices, by outcome (a skipped_gone is a file whose copy was reclaimed under the slice).",
+	MDoctorProjectedCycle:     "Projected rolling doctor cycle length in seconds: copy bytes over the slice budget, times the slice interval.",
+	MDoctorRaceSkips:          "Doctor findings dropped because the file changed between the snapshot and the re-check.",
+	MDoctorCursorAge:          "Seconds since the rolling doctor cursor was last written (0 when no cycle is open).",
 }

@@ -62,7 +62,15 @@ type Config struct {
 	FormatHoldRate float64
 	// DoctorInterval is doctor.interval: how often the daemon runs doctor itself.
 	DoctorInterval time.Duration
-	MetricsAddr    string
+	// DoctorBytesPerSlice is doctor.bytes_per_slice: the bytes of the copy one
+	// rolling doctor slice hashes (default 256 MiB; 0 selects the old
+	// synchronous doctor). DoctorSliceEvery is doctor.slice_every (default 1 m).
+	// DoctorAllowSlowCycle is doctor.allow_slow_cycle: start even when the
+	// projected cycle is longer than doctor.interval.
+	DoctorBytesPerSlice  int64
+	DoctorSliceEvery     time.Duration
+	DoctorAllowSlowCycle bool
+	MetricsAddr          string
 	// CopyThrottle is the pause after each backfill file copy that moved bytes,
 	// so first-run backfill leaves the laptop usable.
 	CopyThrottle time.Duration
@@ -136,7 +144,10 @@ type file struct {
 		HoldRate *float64 `toml:"holdRate"`
 	} `toml:"format"`
 	Doctor struct {
-		Interval string `toml:"interval"`
+		Interval       string `toml:"interval"`
+		BytesPerSlice  *int64 `toml:"bytes_per_slice"`
+		SliceEvery     string `toml:"slice_every"`
+		AllowSlowCycle bool   `toml:"allow_slow_cycle"`
 	} `toml:"doctor"`
 	Metrics struct {
 		Addr string `toml:"addr"`
@@ -222,34 +233,36 @@ func Defaults(getenv func(string) string) Config {
 	}
 	state := StateHome(getenv)
 	c := Config{
-		ClaudeDir:         claude,
-		StateDir:          state,
-		SweepInterval:     15 * time.Minute,
-		StatusFresh:       2 * time.Minute,
-		MinFreeBytes:      20 << 30,
-		WaitMax:           60 * time.Second,
-		WaitMaxWaiter:     256,
-		QueryTimeout:      30 * time.Second,
-		ReadCacheMiB:      64,
-		ReadMmapMiB:       512,
-		FeedRetention:     14 * 24 * time.Hour,
-		RemoveAfter:       30 * 24 * time.Hour,
-		RemoveMaxPerRun:   50,
-		RemoveMaxPerHour:  200,
-		FormatHoldRate:    0.01,
-		DoctorInterval:    24 * time.Hour,
-		CopyThrottle:      2 * time.Millisecond,
-		SettleAfter:       24 * time.Hour,
-		SettleMode:        "scan",
-		SettleReconcile:   time.Hour,
-		SettleMinWake:     5 * time.Second,
-		HeldRecheck:       time.Hour,
-		HeldMaxAge:        3 * 24 * time.Hour,
-		ParseMaxLineBytes: 64 << 20,
-		Clients:           DefaultClients(),
-		GraceEnable:       false,
-		GraceWindow:       time.Second,
-		LivenessInterval:  5 * time.Second,
+		ClaudeDir:           claude,
+		StateDir:            state,
+		SweepInterval:       15 * time.Minute,
+		StatusFresh:         2 * time.Minute,
+		MinFreeBytes:        20 << 30,
+		WaitMax:             60 * time.Second,
+		WaitMaxWaiter:       256,
+		QueryTimeout:        30 * time.Second,
+		ReadCacheMiB:        64,
+		ReadMmapMiB:         512,
+		FeedRetention:       14 * 24 * time.Hour,
+		RemoveAfter:         30 * 24 * time.Hour,
+		RemoveMaxPerRun:     50,
+		RemoveMaxPerHour:    200,
+		FormatHoldRate:      0.01,
+		DoctorInterval:      24 * time.Hour,
+		DoctorBytesPerSlice: 256 << 20,
+		DoctorSliceEvery:    time.Minute,
+		CopyThrottle:        2 * time.Millisecond,
+		SettleAfter:         24 * time.Hour,
+		SettleMode:          "scan",
+		SettleReconcile:     time.Hour,
+		SettleMinWake:       5 * time.Second,
+		HeldRecheck:         time.Hour,
+		HeldMaxAge:          3 * 24 * time.Hour,
+		ParseMaxLineBytes:   64 << 20,
+		Clients:             DefaultClients(),
+		GraceEnable:         false,
+		GraceWindow:         time.Second,
+		LivenessInterval:    5 * time.Second,
 	}
 	c.Socket = filepath.Join(c.StateDir, SocketName)
 	return c
@@ -353,6 +366,7 @@ func apply(c *Config, f file) error {
 		{"feed.retention", f.Feed.Retention, &c.FeedRetention},
 		{"remove.after", f.Remove.After, &c.RemoveAfter},
 		{"doctor.interval", f.Doctor.Interval, &c.DoctorInterval},
+		{"doctor.slice_every", f.Doctor.SliceEvery, &c.DoctorSliceEvery},
 		{"copy.throttle", f.Copy.Throttle, &c.CopyThrottle},
 		{"held.maxAge", f.Held.MaxAge, &c.HeldMaxAge},
 		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},
@@ -377,6 +391,16 @@ func apply(c *Config, f file) error {
 			return fmt.Errorf("settle.mode: %q is not scan or event", m)
 		}
 		c.SettleMode = m
+	}
+	if f.Doctor.BytesPerSlice != nil {
+		if *f.Doctor.BytesPerSlice < 0 {
+			return fmt.Errorf("doctor.bytes_per_slice must not be negative (0 selects the synchronous doctor)")
+		}
+		c.DoctorBytesPerSlice = *f.Doctor.BytesPerSlice
+	}
+	c.DoctorAllowSlowCycle = f.Doctor.AllowSlowCycle
+	if c.DoctorSliceEvery < time.Second {
+		return fmt.Errorf("doctor.slice_every: %s is under the 1s minimum", c.DoctorSliceEvery)
 	}
 	if c.SettleReconcile < time.Minute {
 		return fmt.Errorf("settle.reconcile: %s is under the 1m minimum", c.SettleReconcile)

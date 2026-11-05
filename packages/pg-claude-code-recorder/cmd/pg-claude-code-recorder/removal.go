@@ -311,7 +311,7 @@ func (a *app) doctor(args []string) int {
 		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
 	}
 	longRequest(cl)
-	var res settle.DoctorResult
+	var res settle.DoctorAnswer
 	if err := cl.Post(a.ctx, "doctor", struct{}{}, &res); err != nil {
 		return a.emitWireError(c.jsonOut, err, cfg.Socket)
 	}
@@ -322,6 +322,10 @@ func (a *app) doctor(args []string) int {
 	if c.jsonOut {
 		a.printJSON(res)
 		return code
+	}
+	if t := res.TookOver; t != nil {
+		_, _ = fmt.Fprintf(a.out, "doctor: a rolling cycle was mid-way (started %s, %s phase, %d of %d file(s) passed, %d finding(s)); this run completed it\n",
+			time.Unix(0, t.StartedNS).UTC().Format(time.RFC3339), t.Phase, t.Processed, t.TotalFiles, t.Findings)
 	}
 	_, _ = fmt.Fprintf(a.out, "doctor: %d file(s) and %d archive(s) checked, %d file(s) with a mismatch\n", res.FilesChecked, res.ArchivesCheck, res.MismatchFiles)
 	for _, m := range res.Mismatches {

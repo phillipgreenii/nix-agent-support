@@ -231,6 +231,7 @@ func Open(opt Options) (*Daemon, error) {
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
 		HoldRate: cfg.FormatHoldRate,
 		Mode:     cfg.SettleMode, Reconcile: cfg.SettleReconcile, MinWake: cfg.SettleMinWake,
+		DoctorInterval: cfg.DoctorInterval, DoctorBytesPerSlice: cfg.DoctorBytesPerSlice, DoctorSliceEvery: cfg.DoctorSliceEvery,
 		Timer: func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
 	})
 	d.tickPhases = d.sett.LastPhases
@@ -243,6 +244,10 @@ func Open(opt Options) (*Daemon, error) {
 	if err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover settle: %w", err)
+	}
+	if err := d.checkDoctorProjection(); err != nil {
+		_ = st.Close()
+		return nil, err
 	}
 	d.ckpt = newFileCheckpoint(cfg.StateDir)
 	endPhase = su.begin("watcher_new", false)

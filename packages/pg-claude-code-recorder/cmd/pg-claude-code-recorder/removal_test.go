@@ -25,7 +25,7 @@ type opsDaemon struct {
 	enabled bool
 }
 
-func newOpsDaemon(t *testing.T, enabled bool, doctor settle.DoctorResult) *opsDaemon {
+func newOpsDaemon(t *testing.T, enabled bool, doctor any) *opsDaemon {
 	t.Helper()
 	d := &opsDaemon{sock: filepath.Join(shortDir(t), "r.sock"), enabled: enabled}
 	s := server.New(obs.New(nil), nil, func() any { return map[string]any{} })
@@ -256,5 +256,16 @@ func TestRemovalSubcommandsOfflineExit3(t *testing.T) {
 		if code := a.run(append(args, "--socket", sock)); code != 3 || !strings.HasPrefix(errw.String(), "error: daemon_offline") {
 			t.Errorf("%v: exit %d, stderr %q", args, code, errw.String())
 		}
+	}
+}
+
+func TestDoctorPrintsTheCycleStateWhenItTookOverARollingCycle(t *testing.T) {
+	d := newOpsDaemon(t, true, settle.DoctorAnswer{
+		DoctorResult: settle.DoctorResult{FilesChecked: 40},
+		TookOver:     &settle.DoctorCycleState{StartedNS: 0, Phase: "files", Processed: 12, TotalFiles: 40, Findings: 1},
+	})
+	a, out, _ := testApp(nil)
+	if code := runCLI(t, a, "doctor", "--socket", d.sock); code != 0 || !strings.Contains(out.String(), "rolling cycle was mid-way") || !strings.Contains(out.String(), "12 of 40") {
+		t.Fatalf("%d %s", code, out.String())
 	}
 }

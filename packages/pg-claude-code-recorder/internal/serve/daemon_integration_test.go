@@ -540,6 +540,7 @@ func TestDoctorRunsFromATimerInsideTheDaemon(t *testing.T) {
 	e := newEnv(t, false)
 	e.transcript("a.jsonl", "{\"n\":1}\n", time.Now())
 	e.cfg.DoctorInterval = 50 * time.Millisecond
+	e.cfg.DoctorSliceEvery = 10 * time.Millisecond
 	d := e.open(t)
 	if v, ok := d.Obs().Reg.Gauge(obs.MDoctorLastRun, nil); !ok || v != 0 {
 		t.Fatalf("doctor_last_run_timestamp not registered at zero: %v %v", v, ok)
