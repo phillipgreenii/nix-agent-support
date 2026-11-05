@@ -192,7 +192,7 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   declared type; see `internal/source/storage.go`; registered when first incremented, so a clean run has no series),
   `sweep_files_total{outcome}` (walked, unchanged_candidate, skipped) and `sweep_changed_total{reason}` (new, size, mtime, ino,
   not_cached: why a walked file is not known unchanged), `db_max_lifetime_closed_total` and `db_max_idle_closed_total` (label `pool`: `read` or `write`; a rising
-  `db_wait_seconds_total` means callers queue for a connection). The `client` label is whitelisted (`clients` in the config adds names); any other
+  `db_wait_seconds_total` means callers queue for a connection; the read pool is bounded by `query.max_connections`, default 8, at least 2, 0 means unbounded, and the read panel is "read pool wait"). The `client` label is whitelisted (`clients` in the config adds names); any other
   name is `other`. The exporter is a small text renderer over the in-process registry, so the
   package takes no Prometheus client dependency.
 - Log: JSONL on standard error (or `logFile`), service `pg-claude-code-recorder`, fields `ts`,
@@ -570,7 +570,7 @@ Removal takes a settled Conversation's files out of the Claude directory once it
 except `extract`**. Keys (all in `config.toml`): `remove.enable`, `remove.after`, `remove.maxPerRun` (50),
 `remove.maxPerHour` (200), `held.recheck`, `format.holdRate` (0.01: a source whose bad-line or unknown-key
 rate over the last day is above it is not removed; the scan runs before `remove` takes the settler's run lock, so a slow scan cannot hold up the settle tick, and it is re-read under the lock right before any removal) and `doctor.interval` (24h; doctor also runs from a timer
-inside the daemon, so no external scheduler is needed).
+inside the daemon, so no external scheduler is needed). The doctor keys are described under "Doctor" below.
 
 The order, so a crash at any point loses nothing: re-run the check and compare each Claude file's full hash
 with the archive (in clone mode the archive is first written and verified from the clone); commit "removal
@@ -592,9 +592,33 @@ pg-claude-code-recorder extract <session> [--to DIR]     # byte-exact, mtime now
 pg-claude-code-recorder doctor                           # exit 9 on a mismatch; writes doctor.json
 ```
 
+### Doctor
+
+`doctor` verifies every copy against its original by full hash at least once per `doctor.interval` plus one cycle. It does
+this in byte-budgeted slices that do not hold the copier lock across files: each slice hashes at most
+`doctor.bytes_per_slice` (256 MiB) of the copy, one slice runs every `doctor.slice_every` (1m, at least 1s), and a cursor
+file in the state directory carries the position and the mismatches found so far, so a restart loses nothing.
+**The byte budget counts bytes of one side, the copy**: the original is read as well, so the disk reads of a slice are about
+twice the budget. A file or copy that was reclaimed between the snapshot and the hash is requeued once and then dropped
+(`doctor_slices_total{outcome="skipped_gone"}`); a mismatch is always re-hashed under the lock before it is repaired. A
+slice deferred because the copy is lagging counts as `deferred` and stretches the cycle. `doctor.bytes_per_slice = 0`
+selects the old synchronous doctor.
+
+At start the daemon projects the cycle length (copy bytes over `doctor.bytes_per_slice`, rounded up, times
+`doctor.slice_every`; `doctor_projected_cycle_seconds`) and refuses to start when it exceeds `doctor.interval`, unless
+`doctor.allow_slow_cycle = true`. The CLI `doctor` runs inside the daemon: a run during a rolling cycle completes the remaining
+work synchronously and prints the cycle state when it is mid-way.
+
+`doctor_last_run_timestamp` is the end of the last completed cycle, not of a slice. `doctor_mismatch_files` is updated after
+every slice, so a find is visible within minutes and the `doctor-mismatch` alert does not wait for the cycle end; `doctor.json`
+is written at the cycle end. Signals: `doctor_cycle_progress_ratio`, `doctor_cycle_duration_seconds`,
+`doctor_cursor_age_seconds`, `doctor_projected_cycle_seconds`, `doctor_slice_duration_seconds` (a plain histogram),
+`doctor_slices_total{outcome}` (ok, deferred, error, skipped_gone) and `doctor_race_skips_total`; the dashboard panels are
+"doctor cycle progress" and "doctor slice duration".
+
 Removal is run by the operator first: run `remove --all-eligible --yes` on a roughly fixed period (the daemon removes nothing on its own while `remove.enable` is false, the default).
 Readiness checklist for the later opt-in of automatic removal: the daemon-down alert is registered (phase 7c); `doctor` has
-compared every copy against the Claude files and its last run is recent; pa-monitor `sessions` and ccpool resume
+completed a rolling cycle over every copy (its last completed cycle is recent); pa-monitor `sessions` and ccpool resume
 have moved to the recorder; the state directory is backed up (excluding `recorder.sock` and temporary files);
 `remove --dry-run` prints what would go and how many GB.
 
@@ -696,6 +720,11 @@ no requests, so `conversation.show` clients see a stall or the daemon-offline er
 `daemon-down` alert can page after 2 minutes (expect one page or silence it), and the disk is low, so watch free
 space. Do not kill the daemon: a SIGKILL leaves the WAL to be replayed on the next open. The checkpoint is done when
 `status` answers again and `wal_bytes` drops; the `wal_truncate_done` event (with `duration_ms`) says so in the log.
+The periodic path avoids that stall: when `wal.truncate_above` (512 MiB; 0 disables it) is set and the WAL file is over it,
+the backfill has finished (`caught_up` is 1), none was tried in the last hour and a fresh passive checkpoint just taken
+reached every frame, the checkpoint loop runs one TRUNCATE checkpoint. Its outcome is `wal_truncate_total{outcome}`
+(ok, busy, error) with `wal_truncate_duration_seconds`, and the `wal_truncate_start` and `wal_truncate_done` events carry
+`source=periodic`. The `wal-large` alert fires at 1 GiB, twice the default `wal.truncate_above`.
 The first apply after that change pays this once, and a rollback (revert the commit and apply again) pays it again.
 Launchd settings (`KeepAlive`, `ExitTimeOut`) live outside this package and were not checked. The operator runs the
 apply.
@@ -805,8 +834,9 @@ because the `daemon-down` alert is registered (phase 7c): turn automatic removal
 Readiness checklist, all of it before setting `remove.enable = true`:
 
 1. The `daemon-down` alert is registered and not firing (and `doctor-mismatch`, `data-loss` and `removal-stuck` are quiet).
-2. `doctor` has compared every copy against the Claude files by full hash, and its last run is recent: `doctor_last_run_timestamp` is
-   non-zero and under 2 days old (a stale doctor, or one that never ran, is not ready) with `doctor_mismatch_files` at 0.
+2. `doctor` has completed a rolling cycle that verified every copy against the Claude files by full hash, and that cycle is recent:
+   `doctor_last_run_timestamp` (the end of the last completed cycle) is
+   non-zero and under 2 days old (`doctor.interval` plus one cycle) (a stale doctor, or one that never ran, is not ready) with `doctor_mismatch_files` at 0.
 3. The clients have moved: pa-monitor `sessions` and ccpool resume read the recorder, not the Claude directory.
 4. The state directory is backed up (excluding `recorder.sock` and temporary files).
 5. `pg-claude-code-recorder remove --dry-run` prints what would go and how many GB, and that is what you expect.

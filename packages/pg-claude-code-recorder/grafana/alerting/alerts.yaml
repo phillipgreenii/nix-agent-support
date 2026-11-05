@@ -392,7 +392,7 @@ groups:
           severity: critical
         annotations:
           summary: "pg-claude-code-recorder doctor reports a mismatch, or its last run is over 2 days old"
-          description: "doctor_mismatch_files is above 0 (a copy differs from its Claude file), or doctor_last_run_timestamp is non-zero and older than 172800 seconds (2 days: the doctor timer is broken). A last run of 0 means doctor has not run yet since the state directory was created (the daemon first runs it one doctor.interval after start), which the removal readiness checklist treats as not ready. Both are visible as gauges, never as a log line. A stale doctor also blocks the removal readiness checklist. Run pg-claude-code-recorder doctor (exit 9 on a mismatch; it writes doctor.json)."
+          description: "doctor_mismatch_files is above 0 (a copy differs from its Claude file), or doctor_last_run_timestamp (the end of the last COMPLETED rolling cycle, not of a slice) is non-zero and older than 172800 seconds (2 days: doctor.interval plus one cycle with the default 24h interval, so the rolling doctor is not finishing cycles). A cycle that is mid-way never moves the timestamp, but doctor_mismatch_files is updated after every slice, so a find still pages within minutes. A last run of 0 means doctor has not completed a cycle yet since the state directory was created (the daemon first runs one doctor.interval after start), which the removal readiness checklist treats as not ready. Both are visible as gauges, never as a log line. A stale doctor also blocks the removal readiness checklist. Run pg-claude-code-recorder doctor (exit 9 on a mismatch; it writes doctor.json)."
         data:
           - refId: A
             relativeTimeRange:

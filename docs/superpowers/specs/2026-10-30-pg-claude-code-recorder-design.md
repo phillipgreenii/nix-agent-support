@@ -1174,12 +1174,12 @@ Conversation held longer than 3 days, and free space above `minFreeBytes` (defau
 
 Notes on the subcommands that carry policy:
 
-| Subcommand | Behavior                                                                                                                                                              |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `held`     | lists held Conversations with reason codes; `--retry` re-runs the check now instead of waiting for `held.recheck`                                                     |
-| `remove`   | `--dry-run` prints what would go and how many GB and removes nothing; a real run is capped by `remove.maxPerRun` and `remove.maxPerHour` and needs `remove.enable`    |
-| `doctor`   | compares every copy with its Claude file by full hash, checks the journal against the index and settled archives against their manifests, and exits 9 on any mismatch |
-| `extract`  | the rules in "Settle, removal and extract"; `--to <dir>` writes elsewhere and never touches the Claude directory                                                      |
+| Subcommand | Behavior                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `held`     | lists held Conversations with reason codes; `--retry` re-runs the check now instead of waiting for `held.recheck`                                                                                                                                                                                                                                                                                                    |
+| `remove`   | `--dry-run` prints what would go and how many GB and removes nothing; a real run is capped by `remove.maxPerRun` and `remove.maxPerHour` and needs `remove.enable`                                                                                                                                                                                                                                                   |
+| `doctor`   | verifies every copy against its original by full hash at least once per `doctor.interval` plus one cycle, in byte-budgeted slices that do not hold the copier lock across files (`doctor.bytes_per_slice`, `doctor.slice_every`; `doctor_last_run_timestamp` is the end of the last completed cycle), checks the journal against the index and settled archives against their manifests, and exits 9 on any mismatch |
+| `extract`  | the rules in "Settle, removal and extract"; `--to <dir>` writes elsewhere and never touches the Claude directory                                                                                                                                                                                                                                                                                                     |
 
 How the recorder command takes input and reports errors:
 
@@ -1470,7 +1470,7 @@ The thresholds are agent's calls. The rules carry promtool rule tests. `packages
   `held --retry` forces it. A Conversation held longer than N days raises an alert. A held
   Conversation is never settled, so its duplicate does not shrink.
 - **Turning removal on.** Readiness checklist: the daemon-down alert is
-  registered (removal is operator-run first; `remove.enable` is a later opt-in); `doctor` has compared every copy against the Claude files by full hash; pa-monitor
+  registered (removal is operator-run first; `remove.enable` is a later opt-in); `doctor` has verified every copy against the Claude files by full hash (a completed rolling cycle); pa-monitor
   `sessions` and ccpool resume have moved. `remove --dry-run` prints what would go and how many GB. A
   per-run and per-hour cap spreads the backlog instead of removing 3,016 Conversations at once, and
   `removal_backlog` is a metric. There is no undo other than `extract`; the documentation says so

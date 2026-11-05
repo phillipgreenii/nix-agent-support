@@ -89,6 +89,12 @@ A cursor is <epoch>:<sequence>. feed exits 6 when its wait ended with nothing (t
 still advances), and 7 (cursor_expired) when the cursor is from an old epoch, below the retention floor or
 beyond the head: take a snapshot and tail from its cursor. Delivery is at least once; de-duplicate by record id.
 
+Config keys for the doctor, WAL and read pool: doctor.bytes_per_slice (256 MiB of the copy per slice; the budget counts
+bytes of one side, the copy; 0 selects the old synchronous doctor), doctor.slice_every (1m), doctor.allow_slow_cycle (start
+even when the projected cycle is longer than doctor.interval), wal.truncate_above (512 MiB; the WAL size above which the
+checkpoint loop may run one TRUNCATE checkpoint an hour; 0 disables it) and query.max_connections (8; at least 2, 0 is
+unbounded).
+
 First run: enable the module, run status, and read coverage until caught_up is true.
 status and coverage exit 5 with the partial answer on stdout while the recorder is behind;
 --allow-partial turns that into 0 during the first backfill. status always answers, offline

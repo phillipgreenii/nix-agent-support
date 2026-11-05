@@ -1207,6 +1207,152 @@
           "legendFormat": "insert: {{table}}"
         }
       ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "doctor cycle progress",
+      "description": "Fraction of the current rolling doctor cycle that has been hashed (doctor_cycle_progress_ratio, 0 to 1), the age of the cycle cursor in seconds (doctor_cursor_age_seconds) and the projected cycle length (doctor_projected_cycle_seconds: total copy bytes over doctor.bytes_per_slice, times doctor.slice_every). The budget counts bytes of one side, the copy. A projection above doctor.interval refuses to start unless doctor.allow_slow_cycle is true. doctor_last_run_timestamp moves only when a cycle completes. Deferred slices (copy lag) extend a cycle. The doctor-mismatch alert covers a mismatch and a stale last run; no alert covers a slow cycle.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 120,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cursor age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "projected cycle"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_doctor_cycle_progress_ratio)",
+          "range": true,
+          "legendFormat": "progress"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_doctor_cursor_age_seconds)",
+          "range": true,
+          "legendFormat": "cursor age"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(pg_claude_code_recorder_doctor_projected_cycle_seconds)",
+          "range": true,
+          "legendFormat": "projected cycle"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "doctor slice duration",
+      "description": "p99 and p50 duration of one rolling doctor slice (doctor_slice_duration_seconds, a plain histogram), and slices per second by outcome (doctor_slices_total: ok, deferred, error, skipped_gone). A slice hashes at most doctor.bytes_per_slice bytes of the copy and does not hold the copier lock across files. For diagnosis only: no alert covers this panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 120,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "slices.*"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pg_claude_code_recorder_doctor_slice_duration_seconds_bucket[1h])))",
+          "range": true,
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(pg_claude_code_recorder_doctor_slice_duration_seconds_bucket[1h])))",
+          "range": true,
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(pg_claude_code_recorder_doctor_slices_total[1h]))",
+          "range": true,
+          "legendFormat": "slices {{outcome}}"
+        }
+      ]
     }
   ]
 }
