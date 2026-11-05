@@ -68,9 +68,12 @@ type Daemon struct {
 	st    *store.Store
 	cp    *copier.Copier
 	scope *scope.Scope
-	w     *watcher.Watcher
-	ckpt  *fileCheckpoint
-	prs   *parser.Parser
+	// walkedIdent is the last sweep's walked files (set and read inside one sweep
+	// pass, under the watcher's lock).
+	walkedIdent []watcher.FileInfo
+	w           *watcher.Watcher
+	ckpt        *fileCheckpoint
+	prs         *parser.Parser
 	// lag is the maintained parse-lag state, fed by the store's OnOffsets hook and
 	// seeded once at start; the gauge and status refreshes read it.
 	lag *parser.Lag
@@ -259,6 +262,7 @@ func Open(opt Options) (*Daemon, error) {
 		SweepFiles:    d.scope.SweepFiles(),
 		Sink:          d.sink,
 		OnSweep:       d.onSweep,
+		OnSweepWalked: d.onSweepWalked,
 		SweepTimer:    func(step func() error) error { return d.runLoop(obs.LoopWatcherSweep, step) },
 		Checkpoint:    d.ckpt,
 		SweepInterval: cfg.SweepInterval,
@@ -367,10 +371,16 @@ func (d *Daemon) sink(e watcher.Event) {
 // deletions (a missing path with no file of the same identity elsewhere), and
 // on the first sweep copies newest first with a throttle, so the most recent
 // Conversations are safe first and the laptop stays usable.
+// onSweepWalked records the identity of every file the sweep walked, before
+// the scope filter. A file renamed to a name the allowlist rejects but that
+// stays in a walked directory (projects/p/X.jsonl to projects/p/.orphaned-X.jsonl)
+// is the same file: its old path is closed, not tombstoned as deleted.
+func (d *Daemon) onSweepWalked(files []watcher.FileInfo) { d.walkedIdent = files }
+
 func (d *Daemon) onSweep(files []watcher.FileInfo) {
 	d.lastFullStatNS.Store(d.clock.Now().UnixNano())
-	found := make(map[copier.Identity]bool, len(files))
-	for _, f := range files {
+	found := make(map[copier.Identity]bool, len(files)+len(d.walkedIdent))
+	for _, f := range append(append([]watcher.FileInfo(nil), d.walkedIdent...), files...) {
 		var birth int64
 		if !f.Birth.IsZero() {
 			birth = f.Birth.UnixNano()

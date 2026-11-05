@@ -46,9 +46,7 @@ func walkWatchTree(root string, descend func(dir string) bool, checkRoot bool, a
 				}
 				return err
 			}
-			if dirReadHook != nil {
-				dirReadHook(path)
-			}
+			noteDirRead(path)
 			return nil
 		}
 		if emit != nil && d.Type().IsRegular() {

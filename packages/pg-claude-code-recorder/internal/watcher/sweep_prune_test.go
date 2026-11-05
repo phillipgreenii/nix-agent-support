@@ -30,13 +30,14 @@ func buildClaudeTree(t *testing.T, claude, ends string) []string {
 		proj + exSession + "/subagents/agent-1.meta.json",
 		proj + exSession + "/tool-results/r1.txt",
 		proj + exSession + "/tool-results/deep/r2.txt",
-		proj + exOther + "/scratchpad/s.md",
 		proj + exOther + "/workflows/w.json",
 	}
 	decoys := []string{
 		proj + "spikes-example/a.json",
 		proj + "spikes-example/deep/b.json",
 		proj + "memory/m.md",
+		proj + exOther + "/scratchpad/s.md",
+		proj + exOther + "/scratchpad/deep/t.json",
 		proj + "artifacts/a.bin",
 		proj + "not-a-uuid/subagents/agent-1.jsonl",
 		proj + exSession + "/other/x.json",
@@ -67,8 +68,7 @@ func runPrunedSweep(t *testing.T, name string, sweep sweepFn) {
 		sc := scope.New(claude, ends)
 
 		var read []string
-		dirReadHook = func(d string) { read = append(read, d) }
-		t.Cleanup(func() { dirReadHook = nil })
+		t.Cleanup(SetDirReadHook(func(d string) { read = append(read, d) }))
 
 		var got []string
 		for _, root := range sc.SweepDirs() {
@@ -135,13 +135,12 @@ func TestWatcherSweepsTargetsOnly(t *testing.T) {
 		backend:    &fakeBackend{},
 	})
 	var read []string
-	dirReadHook = func(d string) { read = append(read, d) }
-	t.Cleanup(func() { dirReadHook = nil })
+	t.Cleanup(SetDirReadHook(func(d string) { read = append(read, d) }))
 	if err := w.Rescan(); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(sink.paths()); n != 13 {
-		t.Errorf("swept %d files, want 13", n)
+	if n := len(sink.paths()); n != 12 {
+		t.Errorf("swept %d files, want 12", n)
 	}
 	for _, d := range read {
 		if d == claude || !sc.DescendDir(d) {

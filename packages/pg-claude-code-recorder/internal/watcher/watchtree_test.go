@@ -18,8 +18,7 @@ func TestWalkWatchTreeWatchesOnlyAllowedDirectories(t *testing.T) {
 	sc := scope.New(claude, ends)
 
 	var read []string
-	dirReadHook = func(d string) { read = append(read, d) }
-	t.Cleanup(func() { dirReadHook = nil })
+	t.Cleanup(SetDirReadHook(func(d string) { read = append(read, d) }))
 
 	var watched []string
 	add := func(d string) error { watched = append(watched, d); return nil }
@@ -37,7 +36,7 @@ func TestWalkWatchTreeWatchesOnlyAllowedDirectories(t *testing.T) {
 			t.Errorf("watched a directory outside the allowlist: %s", d)
 		}
 		if strings.Contains(d, "file-history") || strings.Contains(d, "plugins") ||
-			strings.Contains(d, "spikes-") || strings.Contains(d, "memory") || strings.Contains(d, "not-a-uuid") {
+			strings.Contains(d, "spikes-") || strings.Contains(d, "memory") || strings.Contains(d, "scratchpad") || strings.Contains(d, "not-a-uuid") {
 			t.Errorf("decoy watched: %s", d)
 		}
 	}
@@ -77,7 +76,7 @@ func TestWalkWatchTreeChecksANewDirectoryAgainstThePredicate(t *testing.T) {
 		t.Fatalf("allowed new directory not walked: watches=%d emitted=%v", n, emitted)
 	}
 	for _, p := range emitted {
-		if strings.Contains(p, "/other/") {
+		if strings.Contains(p, "/other/") || strings.Contains(p, "/scratchpad/") {
 			t.Errorf("emitted a file from a pruned directory: %s", p)
 		}
 	}

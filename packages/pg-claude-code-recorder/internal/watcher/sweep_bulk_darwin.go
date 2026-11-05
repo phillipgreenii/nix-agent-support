@@ -66,9 +66,7 @@ func platformSweep(root string, descend func(dir string) bool) ([]FileInfo, erro
 }
 
 func bulkWalk(dir string, descend func(dir string) bool, out *[]FileInfo) error {
-	if dirReadHook != nil {
-		dirReadHook(dir)
-	}
+	noteDirRead(dir)
 	entries, err := bulkReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

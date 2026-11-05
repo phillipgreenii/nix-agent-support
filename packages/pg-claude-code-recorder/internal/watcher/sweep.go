@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,7 +24,14 @@ type FileInfo struct {
 
 // dirReadHook, when set (tests only), is told every directory a sweep reads, so
 // a test can prove the walker never opened a directory outside the allowlist.
-var dirReadHook func(dir string)
+var dirReadHook atomic.Pointer[func(dir string)]
+
+// noteDirRead tells the hook (when set) that dir is about to be read.
+func noteDirRead(dir string) {
+	if fn := dirReadHook.Load(); fn != nil {
+		(*fn)(dir)
+	}
+}
 
 // walkSweep lists every regular file under root with a plain directory walk.
 // descend, when non-nil, runs on every subdirectory before it is read; false
@@ -43,9 +51,7 @@ func walkSweep(root string, descend func(dir string) bool) ([]FileInfo, error) {
 			if path != root && descend != nil && !descend(path) {
 				return filepath.SkipDir
 			}
-			if dirReadHook != nil {
-				dirReadHook(path)
-			}
+			noteDirRead(path)
 			return nil
 		}
 		if !d.Type().IsRegular() {
@@ -80,6 +86,10 @@ func lstatInfo(path string) (FileInfo, bool, error) {
 // tests prove a whole daemon never opens a directory outside the allowlist);
 // production code never calls it.
 func SetDirReadHook(fn func(dir string)) (restore func()) {
-	dirReadHook = fn
-	return func() { dirReadHook = nil }
+	if fn == nil {
+		dirReadHook.Store(nil)
+	} else {
+		dirReadHook.Store(&fn)
+	}
+	return func() { dirReadHook.Store(nil) }
 }

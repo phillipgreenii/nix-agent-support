@@ -61,10 +61,13 @@ directory:
 - `sessions/**`;
 - `projects/<project>/<name>` where the name ends in `.jsonl` (transcripts and `.status.jsonl`),
   `.session-mode.json` or `.compaction.json`;
-- `projects/<project>/<uuid>/subagents/**`, `.../tool-results/**`, `.../scratchpad/**` and
+- `projects/<project>/<uuid>/subagents/**`, `.../tool-results/**` and
   `.../workflows/**`, where a session directory is recognized by its UUID shape, never by a list of
   names to skip;
 - the control `ends` root, walked whole.
+
+A session directory name must be a lower-case UUID (`scope.IsUUID`, the same shape as `settle`'s
+session pattern); Claude writes lower-case ids, and an upper-case directory is not walked.
 
 Everything else (`file-history`, `plugins`, `security`, `paste-cache`, `usage-data`, `state`,
 `telemetry`, `shell-snapshots`, a non-UUID directory under a project such as `spikes-*`, `memory` or
@@ -73,10 +76,27 @@ neither walked nor ingested. The sweep roots are `projects/`, `sessions/` and th
 direct `lstat` of `history.jsonl`; the Claude directory itself is never read, and a directory the
 predicate rejects is skipped before it is opened (in both the darwin `getattrlistbulk` walk and the
 portable `WalkDir`). A hint for a rejected path costs one string comparison on its first path
-component. `scratchpad/` and `workflows/` stay because removal and extract carry them with their
-Conversation; the project-level files that no source reads were dropped. The FSEvents stream still
+component. The project-level files that no source reads were dropped. The FSEvents stream still
 covers the whole Claude directory (it cannot filter by subdirectory), so rejected events still
 arrive and are dropped by `Match`.
+
+`scratchpad/` is not ingested (an operator decision); `workflows/` is ingested as before. What that
+means for removal:
+
+- A Conversation whose directory holds a scratchpad file the recorder never recorded is removed as
+  usual; the file is left in place, untouched, and the session directory stays because it is not
+  empty.
+- A scratchpad file an EARLIER version already recorded stays in the store, is never re-ingested
+  (so its copy goes stale), and is ignored by removal: it belongs to no Conversation for the
+  stage, verify, hold and removal steps, so a change to it on disk cannot hold the Conversation, and
+  removal never deletes or quarantines it. Those old records stay until a one-time, operator-run
+  store cleanup removes them; extract of an already-settled Conversation still restores them from
+  its manifest.
+- Behavior change for renames: the sweep still reads the identity of every file in the directories
+  it walks, before the scope filter, so a file renamed from an ingested name to a rejected one in the
+  same walked directory (for example `projects/p/X.jsonl` to `projects/p/.orphaned-X.jsonl`) has its
+  old path closed, as before, and is not tombstoned as deleted. A file moved out of the walked
+  directories (for example into `file-history/`) is not seen, so its old path is tombstoned.
 
 The scale check `TestSoakPrunedSweep` (tag `soak`, over 100,000 synthetic files) runs in the
 `pg-claude-code-recorder-soak` check, never in the unit gate.
@@ -84,11 +104,19 @@ The scale check `TestSoakPrunedSweep` (tag `soak`, over 100,000 synthetic files)
 ### Linux: the inotify watch limit
 
 On Linux the watcher uses inotify (`CGO_ENABLED=0`, standard library only) with one watch per
-directory, and the sweep is a plain directory walk. inotify keeps no history, so every start
-sweeps. The kernel caps watches per user with `fs.inotify.max_user_watches`; the Claude
-directory needs roughly one watch per directory (about 13,000 on a large tree), so raise the
-limit above the directory count, for example `sysctl fs.inotify.max_user_watches=524288`. When
-the limit is hit, adding a watch fails with `ENOSPC` and `Start` returns that error. An inotify
+WATCHED directory, and the sweep is a plain directory walk. The watch walk uses the same directory
+predicate as the sweep (`watchtree.go`; only the inotify syscalls are in `backend_linux.go`), so
+only allowed directories get a watch: `projects/` and below down to the session directories and
+their `subagents`, `tool-results` and `workflows` trees, `sessions/`, and the ends root. A
+configured root (the Claude directory itself, the ends root) is always watched, so `history.jsonl`
+and a newly created `projects/` are seen; a directory created later is checked against the
+predicate first. The count is therefore the number of allowed directories, not of every
+directory in the Claude directory; the previous figure of about 13,000 described the unpruned walk and
+no longer applies (measure it on your tree). Linux runtime behavior of this walk has only been
+compile-checked. inotify keeps no history, so every start sweeps. The kernel caps watches per user
+with `fs.inotify.max_user_watches`; raise it above the allowed-directory count, for example
+`sysctl fs.inotify.max_user_watches=524288`. A symlinked `history.jsonl` is skipped (the sweep
+`lstat`s it and ingests regular files only), as it always was. When the limit is hit, adding a watch fails with `ENOSPC` and `Start` returns that error. An inotify
 queue overflow (`fs.inotify.max_queued_events`) triggers a sweep. Linux reports no birth time
 (`FileInfo.Birth` is zero).
 

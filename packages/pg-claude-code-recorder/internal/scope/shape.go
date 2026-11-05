@@ -18,19 +18,17 @@ import "strings"
 //	                               copies) are not accepted
 //	projects/<project>/<uuid>/subagents/**
 //	projects/<project>/<uuid>/tool-results/**
-//	projects/<project>/<uuid>/scratchpad/**
 //	projects/<project>/<uuid>/workflows/**
 //
 // A session directory is recognized by its UUID shape, never by a list of names
 // to skip, so spikes-*, memory, artifacts and any future directory under a
-// project are not walked. scratchpad and workflows stay because removal and
-// extract carry them with their Conversation (settle.SessionOf maps them to it).
+// project are not walked. scratchpad/ is not ingested (operator decision,
+// 2026-11-04); workflows/ stays exactly as it was.
 
 // sessionSubdirs are the directories of a session directory that are walked.
 var sessionSubdirs = map[string]bool{
 	"subagents":    true,
 	"tool-results": true,
-	"scratchpad":   true,
 	"workflows":    true,
 }
 

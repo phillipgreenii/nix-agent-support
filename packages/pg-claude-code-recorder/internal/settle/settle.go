@@ -42,6 +42,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
@@ -364,12 +365,21 @@ func (s *Settler) place(root string, f store.File, paths []string) (session, rel
 			continue
 		}
 		rel := p[len(root):]
+		// A recorded file the ingest allowlist now rejects (for example a
+		// scratchpad file an older version recorded) is stale: it is never
+		// re-ingested, so verifying or removing it would hold the Conversation
+		// forever. It belongs to no Conversation here and is left in place.
+		if !s.scope().Match(p).Ingest {
+			continue
+		}
 		if session, ok := SessionOf(rel); ok {
 			return session, rel, true
 		}
 	}
 	return "", "", false
 }
+
+func (s *Settler) scope() *scope.Scope { return scope.New(s.cfg.ClaudeDir, "") }
 
 func (s *Settler) claudeRoot() string { return strings.TrimRight(s.cfg.ClaudeDir, "/") + "/" }
 

@@ -54,6 +54,11 @@ type Config struct {
 	// OnSweep, when set, receives the full filtered file list of every
 	// successful sweep (identity for the copier's deletion decision).
 	OnSweep func([]FileInfo)
+	// OnSweepWalked, when set, receives every regular file the sweep walked
+	// BEFORE Filter, just ahead of OnSweep. Only its identities are meant to be
+	// used: a file renamed to a name Filter rejects (inside a walked directory)
+	// is still the same file, so its old path is closed, not tombstoned.
+	OnSweepWalked func([]FileInfo)
 	// SweepTimer, when set, runs every sweep pass through it: step is the whole
 	// pass (the directory walk, OnSweep and the per-file events), so the caller
 	// can time the walk as well as the callback. It returns step's error.
@@ -292,7 +297,7 @@ func (w *Watcher) sweep() error {
 
 // sweepLocked is one sweep pass; the caller holds w.mu.
 func (w *Watcher) sweepLocked() error {
-	var files []FileInfo
+	var files, walked []FileInfo
 	dirs := w.cfg.SweepDirs
 	if len(dirs) == 0 && len(w.cfg.SweepFiles) == 0 {
 		dirs = w.cfg.Roots
@@ -305,6 +310,7 @@ func (w *Watcher) sweepLocked() error {
 			}
 			return err
 		}
+		walked = append(walked, infos...)
 		for _, fi := range infos {
 			if w.cfg.Filter == nil || w.cfg.Filter(fi.Path) {
 				files = append(files, fi)
@@ -319,6 +325,9 @@ func (w *Watcher) sweepLocked() error {
 			}
 			return err
 		}
+		if regular {
+			walked = append(walked, fi)
+		}
 		if regular && (w.cfg.Filter == nil || w.cfg.Filter(p)) {
 			files = append(files, fi)
 		}
@@ -327,6 +336,9 @@ func (w *Watcher) sweepLocked() error {
 	w.lastSweep = now
 	w.state.LastSweep = now
 	w.saveLocked()
+	if w.cfg.OnSweepWalked != nil {
+		w.cfg.OnSweepWalked(walked)
+	}
 	if w.cfg.OnSweep != nil {
 		w.cfg.OnSweep(files)
 	}

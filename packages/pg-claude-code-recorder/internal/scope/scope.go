@@ -197,7 +197,7 @@ func (s *Scope) Classify(path string) (string, Mode) {
 		return SrcRegistry, Snapshot
 	case parts[0] != "projects":
 		return SrcUnparsed, Snapshot
-	case containsDir(parts, "workflows"), containsDir(parts, "scratchpad"), containsDir(parts, "memory"):
+	case containsDir(parts, "workflows"), containsDir(parts, "memory"):
 		return SrcUnparsed, Snapshot
 	case strings.HasPrefix(base, ".orphaned-"), strings.HasPrefix(base, ".superseded-"), base == "sessions-index.json":
 		return SrcUnparsed, Snapshot
