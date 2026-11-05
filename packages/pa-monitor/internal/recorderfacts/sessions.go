@@ -75,9 +75,35 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 	turns := client.Filter{Any: []client.Filter{typeIs("user"), typeIs("assistant")}}
 	base := []client.Filter{transcriptSource(), turns, main}
 
+	// A session whose first record is in [since, before) has a record in that
+	// window, so a bounded window first narrows the scan to the sessions active
+	// in it; the span below then covers only those sessions (one that began
+	// before since still reports its true first record and is dropped by the
+	// start-time check). With an open window the span stays the full scan.
+	spanWhere := base
+	if win := windowFilter(since, before); win != nil {
+		active, err := run(client.QueryRequest{
+			Where: &client.Filter{All: append(append([]client.Filter{}, base...), *win)},
+			Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var act []any
+		for _, r := range active.Rows {
+			if sid := str(r[0]); sid != "" {
+				act = append(act, sid)
+			}
+		}
+		if len(act) == 0 {
+			return nil, nil
+		}
+		spanWhere = append(append([]client.Filter{}, base...), client.Filter{Field: "session", In: act})
+	}
+
 	// First and last record time per session.
 	span, err := run(client.QueryRequest{
-		Where:     &client.Filter{All: base},
+		Where:     &client.Filter{All: spanWhere},
 		Group:     []string{"session"},
 		Aggregate: []client.Agg{{Fn: "min", Field: "time", As: "first"}, {Fn: "max", Field: "time", As: "last"}},
 		Limit:     10000,
@@ -184,6 +210,21 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 	return out, nil
 }
 
+// windowFilter is the record-time filter for [since, before); nil when open.
+func windowFilter(since, before time.Time) *client.Filter {
+	if since.IsZero() && before.IsZero() {
+		return nil
+	}
+	r := &client.Range{}
+	if !since.IsZero() {
+		r.Gte = since.UTC().Format(time.RFC3339)
+	}
+	if !before.IsZero() {
+		r.Lt = before.UTC().Format(time.RFC3339)
+	}
+	return &client.Filter{Field: "time", Range: r}
+}
+
 // lineRecord selects the one record per transcript line (its blocks are item 0..).
 var lineRecord = client.Filter{Field: "item", Eq: json.RawMessage("-1")}
 
@@ -210,15 +251,8 @@ func (f *Facts) Search(ctx context.Context, query, sessionID string, since, befo
 	if sessionID != "" {
 		all = append(all, client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sessionID))})
 	}
-	if !since.IsZero() || !before.IsZero() {
-		r := &client.Range{}
-		if !since.IsZero() {
-			r.Gte = since.UTC().Format(time.RFC3339)
-		}
-		if !before.IsZero() {
-			r.Lt = before.UTC().Format(time.RFC3339)
-		}
-		all = append(all, client.Filter{Field: "time", Range: r})
+	if win := windowFilter(since, before); win != nil {
+		all = append(all, *win)
 	}
 	req := client.SearchRequest{Mode: "word", Q: query, Where: &client.Filter{All: all}, Fields: []string{"assistant_text", "user_text"}, Limit: 200}
 	if substring {

@@ -77,3 +77,26 @@ func TestSessionsAndSearchReportDaemonOffline(t *testing.T) {
 		t.Errorf("Search err = %v", err)
 	}
 }
+
+// TestSessionsWindowKeepsTrueStartAndExcludesEarlierSessions: a bounded window
+// narrows the scan, but a session that began before the window is still
+// dropped (its first record is not in the window) and one that began inside is
+// kept with its true start.
+func TestSessionsWindowKeepsTrueStartAndExcludesEarlierSessions(t *testing.T) {
+	_, f := recorderWithTranscript(t)
+	ctx := context.Background()
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 0, 0, 0, 0, time.UTC) }
+	in, err := f.Sessions(ctx, day(29), day(30))
+	if err != nil || len(in) != 1 || !in[0].StartedAt.Equal(time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("window around start: %v %v", in, err)
+	}
+	late := time.Date(2026, 10, 29, 10, 0, 5, 0, time.UTC)
+	got, err := f.Sessions(ctx, late, day(30))
+	if err != nil || len(got) != 0 {
+		t.Errorf("session began before window: %v %v", got, err)
+	}
+	empty, err := f.Sessions(ctx, day(1), day(2))
+	if err != nil || len(empty) != 0 {
+		t.Errorf("empty window: %v %v", empty, err)
+	}
+}
