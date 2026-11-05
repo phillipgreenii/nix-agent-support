@@ -60,3 +60,5 @@ deleteRules:
     uid: pg-ccrec-loop-stalled
   - orgId: 1
     uid: pg-ccrec-request-slow
+  - orgId: 1
+    uid: pg-ccrec-schema-rebuild-required

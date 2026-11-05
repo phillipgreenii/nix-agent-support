@@ -237,10 +237,19 @@ file aside, so it is a deliberate operator step, not a side effect of a launch a
 rebuild would also make a downgrade-and-upgrade flap silently cost an hour. The rebuild command already exists
 and is safe to run (`index.db.pre-rebuild` keeps the old file).
 
-Operator steps: stop the launch agent, run `pg-claude-code-recorder rebuild`, start the launch agent. The
-alerting signal is the `schema_rebuild_required` log event and the `status` offline answer (exit 3, launch agent
-state, log path). Launchd restarts the refused daemon until the operator acts; a `KeepAlive` that ignores exit 8
-lives in the launch agent module outside this package and was not changed here.
+Operator steps: stop the launch agent, run `pg-claude-code-recorder rebuild`, start the launch agent
+(`launchctl kickstart gui/$(id -u)/com.phillipg.pg-claude-code-recorder`).
+
+Launch agent: the agent's script runs `serve` and turns exit 8 into exit 0, and its `KeepAlive` is
+`{ SuccessfulExit = false; }` (launchd's dictionary cannot key on one exit code), so a refused start runs once
+and stays stopped instead of looping, while a crash (any other non-zero exit) is still restarted. SIGTERM and
+SIGINT are forwarded to the daemon. A start after the next login or boot runs once more and refuses again until
+the rebuild is done.
+
+Alerting: the `schema_rebuild_required` log event is shipped to Loki by the daemon's log source and the Grafana
+rule `pg-ccrec-schema-rebuild-required` fires on any such event in the last hour (it clears an hour later;
+`pg-ccrec-daemon-down` stays up until the daemon is back). The `status` offline answer (exit 3, launch agent
+state, log path) shows the same state on the command line.
 
 ## Conventions for later packets
 
@@ -596,7 +605,7 @@ Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 
 | File                                  | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `alerting/alerts.yaml`                | eighteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `alerting/alerts.yaml`                | nineteen Grafana rules, uid `pg-ccrec-<name>`, registered by `darwin/modules/pg-claude-code-recorder` while a daemon is deployed                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `alerting/alerts-delete.yaml`         | the `deleteRules`-only twin (same uids), registered instead while no daemon is deployed; the two are never loaded together                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `alerting/rule-tests/`                | one promtool test file per rule, run through `packages/pg-connector/grafana/check-alert-rules.sh`                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pg_claude_code_recorder_metrics.txt` | the metric catalogue (the Signals table): name, type, labels, with the enumerated label values                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -608,7 +617,7 @@ Files under `grafana/` (the location follows `packages/pg-connector/grafana`):
 Flake checks (build one with `nix build .#checks.<system>.<name>`): `test-pg-claude-code-recorder-alert-rules`,
 `test-pg-claude-code-recorder-alert-structure` and `test-pg-claude-code-recorder-signals-registration`. Every rule uid is also in
 `registeredRuleUIDs` of `packages/pg-router-probe/cmd/pg-router-probe/run.go` (a deployment that passes its own `--rule-uid` list replaces
-that list and must carry the eighteen too).
+that list and must carry the nineteen too).
 
 Alerts and their thresholds (the thresholds are the builder's calls; a literal that stands for a config default is named in the rule):
 

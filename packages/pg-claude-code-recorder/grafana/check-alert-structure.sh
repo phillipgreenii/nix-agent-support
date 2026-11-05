@@ -10,7 +10,7 @@
 # Needs yq (mikefarah), jq, grep. Every failure line starts with RULE-Sn so a mutant can assert the
 # exact rule that fired.
 #
-#   S1  exactly the eighteen expected uids, each once, each of the form pg-ccrec-<name> and at most
+#   S1  exactly the nineteen expected uids, each once, each of the form pg-ccrec-<name> and at most
 #       40 characters (Grafana's cap)
 #   S2  one group pg-claude-code-recorder in folder Claude Agents, no folderUid anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description (the
@@ -69,7 +69,7 @@ EXPECTED_UIDS=(
   pg-ccrec-removal-backlog pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
   pg-ccrec-crash-share pg-ccrec-removal-stuck pg-ccrec-settle-tick-slow
   pg-ccrec-field-type-mismatch pg-ccrec-cpu-high pg-ccrec-wal-large pg-ccrec-loop-stalled
-  pg-ccrec-request-slow
+  pg-ccrec-request-slow pg-ccrec-schema-rebuild-required
 )
 # Rules removed from alerts.yaml that alerts-delete.yaml MUST still delete (Grafana keeps a
 # file-provisioned rule live after its file entry is dropped): free-space (removed 2026-11-04 on
@@ -94,7 +94,7 @@ check() {
       ([.groups[].rules[].uid] | sort) as $u
       | ($u == $exp)
         and ($u | all(. | test("^pg-ccrec-[a-z0-9-]+$") and (length <= 40)))' >/dev/null; then
-    rule_fail "RULE-S1: the rule uids are not exactly the eighteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
+    rule_fail "RULE-S1: the rule uids are not exactly the nineteen expected pg-ccrec-<name> uids, each once, each at most 40 characters"
   fi
   # S2
   if ! printf '%s' "$j" | jq -e '
@@ -119,8 +119,11 @@ check() {
   # S4
   if ! printf '%s' "$j" | jq -e '
       .groups[].rules | all(
-        (.data[] | select(.refId == "A") | .datasourceUid == "prometheus" and .model.instant == true))' >/dev/null; then
-    rule_fail "RULE-S4: refId A must use datasourceUid prometheus with instant: true"
+        . as $r | .data[] | select(.refId == "A") |
+          if $r.uid == "pg-ccrec-schema-rebuild-required"
+          then (.datasourceUid == "loki" and .model.queryType == "instant")
+          else (.datasourceUid == "prometheus" and .model.instant == true) end)' >/dev/null; then
+    rule_fail "RULE-S4: refId A must use datasourceUid prometheus with instant: true (only schema-rebuild-required reads loki, with queryType instant)"
   fi
   # S5
   if ! printf '%s' "$j" | jq -e --argjson na "$nodata" '
@@ -158,8 +161,9 @@ check() {
       and (expr("control-inbox-gone") | contains("state=\"gone\"") and (contains("never_loaded") | not))
       and (expr("crash-share") | contains("> 20") and contains("registry_stale_at_discovery_total"))
       and (expr("loop-stalled") | contains("{loop=\"watcher_sweep\"} > 0)) > 2700 or") and contains("loop=~\"tracker_tick|tracker_poll\"} > 0)) > 120 or") and contains("{loop=\"status_refresh\"} > 0)) > 60 or") and contains("loop_in_flight_seconds > 600)") and (contains("parser_drain") | not))
-      and (expr("request-slow") | contains("> 50)") and contains("{le=\"10\"}"))' >/dev/null; then
-    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket)"
+      and (expr("request-slow") | contains("> 50)") and contains("{le=\"10\"}"))
+      and (expr("schema-rebuild-required") | contains("service_name=\"pg-claude-code-recorder\"") and contains("event=\"schema_rebuild_required\""))' >/dev/null; then
+    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket; schema-rebuild-required service_name and event)"
   fi
   # S8
   local ruids
@@ -235,6 +239,10 @@ mutant RULE-S7 "loop-stalled covering parser_drain" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-loop-stalled") | .data[0].model.expr) |= sub("status_refresh"; "parser_drain")'
 mutant RULE-S7 "request-slow without the request floor" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-request-slow") | .data[0].model.expr) |= sub("> 50[)]"; "> 0)")'
+mutant RULE-S4 "schema-rebuild-required back on a prometheus datasource" \
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-schema-rebuild-required") | .data[0].datasourceUid) = "prometheus"'
+mutant RULE-S7 "schema-rebuild-required matching the wrong event" \
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-schema-rebuild-required") | .data[0].model.expr) |= sub("schema_rebuild_required"; "open_failed")'
 mutant RULE-S8 "a twin uid that differs" \
   '.' '(.deleteRules[0].uid) = "pg-ccrec-other"'
 mutant RULE-S8 "a twin with a group" '.' '.groups = []'

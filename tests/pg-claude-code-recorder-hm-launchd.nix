@@ -131,6 +131,10 @@ let
   failedAssertions = c: lib.filter (a: !a.assertion) c.config.assertions;
   messages = c: map (a: a.message) (failedAssertions c);
   agent = "pg-claude-code-recorder";
+  # lib.hasInfix matches by regex, which refuses strings that carry store-path context
+  hasInfixCtx =
+    infix: s:
+    lib.hasInfix (builtins.unsafeDiscardStringContext infix) (builtins.unsafeDiscardStringContext s);
 
   on = case darwin { daemon.enable = true; } osWithObs;
   onNoPprof = case darwin {
@@ -265,11 +269,12 @@ let
 
     # ---- label and command --------------------------------------------------
     label = e.label == "com.phillipg.pg-claude-code-recorder";
-    command = e.script == "exec ${binary} serve --config ${(opts on).configFile} --pprof\n";
-    commandWithoutPprof =
-      (entryOf agent onNoPprof).script
-      == "exec ${binary} serve --config ${(opts onNoPprof).configFile}\n";
-    keepAlive = e.keepAlive == true;
+    command = hasInfixCtx "${binary} serve --config ${(opts on).configFile} --pprof &\n" e.script;
+    commandWithoutPprof = hasInfixCtx "${binary} serve --config ${(opts onNoPprof).configFile} &\n" (entryOf agent onNoPprof)
+    .script;
+    # exit 8 (schema_rebuild_required) is turned into exit 0 by the script, so KeepAlive restarts only after an unsuccessful exit
+    keepAliveOnlyAfterFailure = e.keepAlive == { SuccessfulExit = false; };
+    scriptTurnsRefusalIntoCleanExit = hasInfixCtx "if [ \"$rc\" -eq 8 ]; then\n  exit 0\nfi\nexit \"$rc\"" e.script;
     runAtLoad = e.runAtLoad == true;
     noExecPath = e.execPath == null;
     manageLogsDefault = e.manageLogs.enable == true;

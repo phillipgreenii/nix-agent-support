@@ -7602,6 +7602,31 @@
                     touch "$out"
                   '';
 
+              # pg-claude-code-recorder Loki rule (schema-rebuild-required): the LogQL pipeline of the
+              # rules file runs under `logcli --stdin` over the positive and negative fixture logs in
+              # grafana/alerting/rule-tests/loki/ (promtool cannot evaluate LogQL). Only the lint runs
+              # (check-loki-rules.sh's mutant self-test is bound to the Jira file's uids).
+              test-pg-claude-code-recorder-alert-loki-rules =
+                pkgs.runCommand "test-pg-claude-code-recorder-alert-loki-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.gnused
+                      pkgs.gnugrep
+                      pkgs.grafana-loki
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    alerts=${./packages/pg-claude-code-recorder/grafana/alerting/alerts.yaml}
+                    loki=${./packages/pg-claude-code-recorder/grafana/alerting/rule-tests/loki}
+                    bash ${./packages/pg-connector/grafana/check-loki-rules.sh} "$alerts" "$loki"
+                    touch "$out"
+                  '';
+
               # pg-claude-code-recorder alert structure: rules S1-S8 over the rules file, the metric
               # catalogue and the deleteRules twin, then the script's own mutant self-tests (a
               # 41-character uid, a missing noDataState, a missing guard, a twin that differs).
@@ -16832,6 +16857,7 @@
                       pkgs.gnugrep
                       pkgs.gnused
                       pkgs.bash
+                      pkgs.sqlite
                     ];
                   }
                   ''
@@ -16862,7 +16888,7 @@
                     mkdir -p "$w/claude" "$w/control/ends" "$w/h"
                     sed "s#/example/live#$w#g" ${r.live.configFile} > "$w/config.toml"
                     printf '%s' ${lib.escapeShellArg r.live.script} > entry.sh
-                    grep -q '^exec ${bin} serve --config ${r.live.configFile} --pprof$' entry.sh \
+                    grep -q '^${bin} serve --config ${r.live.configFile} --pprof &$' entry.sh \
                       || { echo "entry is not the serve command: $(cat entry.sh)" >&2; exit 1; }
                     sed "s#${r.live.configFile}#$w/config.toml#" entry.sh > entry.live.sh
 
@@ -16906,6 +16932,22 @@
                     rc=0
                     wait "$pid" || rc=$?
                     [ "$rc" = 0 ] || { echo "SIGTERM exit = $rc" >&2; cat "$w/daemon.out" >&2; exit 1; }
+
+                    # ---- the refusal: an older index.db schema makes `serve` exit 8
+                    # (schema_rebuild_required); the rendered command must then exit 0 so
+                    # KeepAlive = { SuccessfulExit = false; } does not restart it
+                    sqlite3 "$w/state/index.db" "UPDATE meta SET value = CAST(value AS INTEGER) - 1 WHERE key = 'schema_version'" \
+                      || { echo "cannot age the index.db schema" >&2; ls -R "$w/state" >&2; exit 1; }
+                    rc=0
+                    ( cd / && exec env -i "''${envs[@]}" ${bin} serve --config "$w/config.toml" ) >"$w/refused.out" 2>&1 || rc=$?
+                    [ "$rc" = 8 ] || { echo "serve on an older schema exited $rc, want 8:" >&2; cat "$w/refused.out" >&2; exit 1; }
+                    grep -q schema_rebuild_required "$w/refused.out" \
+                      || { echo "no schema_rebuild_required event:" >&2; cat "$w/refused.out" >&2; exit 1; }
+                    rc=0
+                    ( cd / && exec env -i "''${envs[@]}" ${pkgs.bash}/bin/bash "$TMPDIR/entry.live.sh" ) >"$w/wrapped.out" 2>&1 || rc=$?
+                    [ "$rc" = 0 ] || { echo "the rendered command exited $rc on a refusal, want 0:" >&2; cat "$w/wrapped.out" >&2; exit 1; }
+                    grep -q schema_rebuild_required "$w/wrapped.out" \
+                      || { echo "wrapped run did not refuse:" >&2; cat "$w/wrapped.out" >&2; exit 1; }
                     touch $out
                   '';
 

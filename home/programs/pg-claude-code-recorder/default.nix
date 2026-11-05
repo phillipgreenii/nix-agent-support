@@ -456,11 +456,35 @@ in
             inherit label;
             # The whole command; the config's store path carries the config hash,
             # so a changed config or binary changes the job and restarts it.
+            #
+            # `serve` exits 8 (refused) with a schema_rebuild_required event when
+            # index.db has an older schema than the binary needs; only an operator
+            # `pg-claude-code-recorder rebuild` clears that, so restarting it is a
+            # loop. launchd's KeepAlive dictionary cannot key on one exit code, so
+            # the script turns exit 8 into exit 0 and keepAlive restarts only after
+            # an unsuccessful exit. SIGTERM and SIGINT are forwarded to the daemon
+            # (it exits 0 on them, as before). After the operator's rebuild, start
+            # the job again (`launchctl kickstart gui/$(id -u)/<label>`).
             script = ''
-              exec ${cfg.package}/bin/pg-claude-code-recorder serve --config ${configFile}${lib.optionalString cfg.pprof.enable " --pprof"}
+              ${cfg.package}/bin/pg-claude-code-recorder serve --config ${configFile}${lib.optionalString cfg.pprof.enable " --pprof"} &
+              pid=$!
+              trap 'kill -TERM "$pid" 2>/dev/null || true' TERM INT
+              rc=0
+              wait "$pid" || rc=$?
+              if kill -0 "$pid" 2>/dev/null; then
+                # a trapped signal interrupted the first wait: collect the real status
+                rc=0
+                wait "$pid" || rc=$?
+              fi
+              if [ "$rc" -eq 8 ]; then
+                exit 0
+              fi
+              exit "$rc"
             '';
             runAtLoad = true;
-            keepAlive = true;
+            keepAlive = {
+              SuccessfulExit = false;
+            };
             serviceConfig = {
               StandardOutPath = "${logDir}/launchd-stdout.log";
               StandardErrorPath = "${logDir}/launchd-stderr.log";
