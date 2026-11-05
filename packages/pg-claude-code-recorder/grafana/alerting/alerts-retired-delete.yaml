@@ -3,7 +3,7 @@
 #
 # Grafana keeps a file-provisioned rule live after its entry is dropped from the rules file: only a
 # `deleteRules:` entry for its uid removes it, applied on a provisioning reload or restart. The
-# free-space rule (removed from alerts.yaml on the operator ruling of Phillip, 2026-11-04: "there
+# free-space rule (removed from alerts.yaml on an operator ruling, 2026-11-04: "there
 # shouldn't be a pg-claud-code-recorder specific file system alert.") therefore kept firing on a
 # machine that had already provisioned it, because the deleteRules entry lived only in
 # alerts-delete.yaml, which the darwin module registers solely while no daemon is deployed.
