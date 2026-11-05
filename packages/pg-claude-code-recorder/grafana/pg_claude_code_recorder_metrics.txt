@@ -41,6 +41,9 @@
 #   field (query_filter_fields_total) a catalogued field name (bounded by the catalog)
 #   source (torn_tail_age_seconds) the source name (about 10 values)
 #   outcome (requests_total)       the wire outcome name
+#   step (step_seconds_total, step_calls_total)  read parse insert savepoint commit other (the partition of the time inside
+#                                  ParseAll; other is added once per ParseAll call; the label is step because stage is taken)
+#   table (insert_table_seconds_total)  records fields texts fts sessions ext other (an estimate: one line in 16 is timed and scaled)
 pg_claude_code_recorder_dropped_bytes_total counter reason
 pg_claude_code_recorder_copy_lag_bytes gauge -
 pg_claude_code_recorder_copy_lag_seconds gauge -
@@ -147,3 +150,9 @@ pg_claude_code_recorder_wal_truncate_total counter outcome
 pg_claude_code_recorder_wal_truncate_duration_seconds histogram -
 pg_claude_code_recorder_query_timeouts_total counter op
 pg_claude_code_recorder_request_cancelled_total counter op,reason
+pg_claude_code_recorder_step_seconds_total counter step
+pg_claude_code_recorder_step_calls_total counter step
+pg_claude_code_recorder_insert_table_seconds_total counter table
+pg_claude_code_recorder_parse_file_duration_seconds histogram -
+pg_claude_code_recorder_seen_rows gauge -
+pg_claude_code_recorder_seen_load_seconds gauge -

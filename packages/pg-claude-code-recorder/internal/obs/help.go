@@ -105,5 +105,9 @@ var helpTexts = map[string]string{
 	MDoctorSlices:             "Rolling doctor slices, by outcome (a skipped_gone is a file whose copy was reclaimed under the slice).",
 	MDoctorProjectedCycle:     "Projected rolling doctor cycle length in seconds: copy bytes over the slice budget, times the slice interval.",
 	MDoctorRaceSkips:          "Doctor findings dropped because the file changed between the snapshot and the re-check.",
+	MStepSeconds:              "Seconds of the parse path by step: read, parse, insert, savepoint, commit and other (other is ParseAll's remainder, added once per ParseAll call).",
+	MStepCalls:                "Calls of each parse step: chunk reads, lines parsed, lines inserted, per-file savepoints, batch commits and ParseAll calls.",
+	MInsertTableSeconds:       "Estimated seconds of the insert step's statements by table, from one line in 16 scaled up; lookups are not in the split.",
+	MParseFileDuration:        "Distribution of the seconds one file's generation took in one parse call (read, parse and insert).",
 	MDoctorCursorAge:          "Seconds since the rolling doctor cursor was last written (0 when no cycle is open).",
 }

@@ -107,7 +107,7 @@ func insertExt(tx *pstx, id int64, rows map[int]*extRow) error {
 			}
 		}
 		q := "INSERT OR REPLACE INTO " + reg[ti].Table() + "(" + strings.Join(cols, ",") + ") VALUES(" + strings.Join(marks, ",") + ")"
-		if _, err := tx.Exec(q, args...); err != nil {
+		if _, err := tx.ExecL(tblExt, q, args...); err != nil {
 			return err
 		}
 	}

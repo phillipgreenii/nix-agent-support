@@ -56,7 +56,7 @@ func (p *Parser) sessionRef(tx *pstx, id, project string, firstNS int64) (int64,
 	if project != "" {
 		proj = project
 	}
-	if _, err := tx.Exec(`INSERT INTO sessions(session_id,project,first_time_ns) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING`, id, proj, firstNS); err != nil {
+	if _, err := tx.ExecL(tblSessions, `INSERT INTO sessions(session_id,project,first_time_ns) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING`, id, proj, firstNS); err != nil {
 		return 0, err
 	}
 	var ref int64

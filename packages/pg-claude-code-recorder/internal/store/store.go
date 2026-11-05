@@ -55,6 +55,9 @@ import (
 type Options struct {
 	FS  fsx.FS   // state-directory file system (OS when nil)
 	Obs *obs.Obs // events and metrics (discarding when nil)
+	// StepClock is the clock of the parse step timers: a monotonic duration
+	// (a real monotonic clock when nil). Tests drive it by hand.
+	StepClock func() time.Duration
 	// ReplayOnly opens for comparison: it never appends an epoch record.
 	ReplayOnly bool
 	// Rebuild forces a rebuild of index.db from the journal: the existing
@@ -171,6 +174,9 @@ type Store struct {
 	freeFn   func(string) (int64, error)
 	// prof holds the phase timings of a bulk rebuild's finish (see rebuildprofile.go).
 	prof RebuildProfile
+	// steps and stepClock are the parse step statistics (stepstats.go).
+	steps     stepState
+	stepClock func() time.Duration
 
 	Reader // the read methods over the read pool (ReadTx hands out one over a transaction)
 
@@ -251,6 +257,9 @@ func Open(dir string, opt Options) (*Store, error) {
 		opt.NoTrigramIndex, opt.ExtensionTables = true, true
 	}
 	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, readMaxOpen: opt.ReadMaxOpenConns, journalLimit: opt.JournalSizeLimit}
+	if s.stepClock = opt.StepClock; s.stepClock == nil {
+		s.stepClock = monotonicNow
+	}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}

@@ -8,3 +8,10 @@ var ablateNoPrepare bool
 
 // SetAblationNoPrepare sets the hook; call it before parsing.
 func SetAblationNoPrepare(v bool) { ablateNoPrepare = v }
+
+// ablateNoStepTimers skips the clock reads of the step timers (see the store's
+// hook of the same name).
+var ablateNoStepTimers bool
+
+// SetAblationNoStepTimers sets the hook; call it before parsing.
+func SetAblationNoStepTimers(v bool) { ablateNoStepTimers = v }

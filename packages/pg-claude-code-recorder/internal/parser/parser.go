@@ -63,6 +63,11 @@ type Parser struct {
 
 	run sync.Mutex // one parse at a time
 
+	// slow keeps the slowest files of a ParseAll (steps.go).
+	slow slowest
+	// lineSeq counts the lines inserted, for the statement sampling.
+	lineSeq int64
+
 	// filesDone and filesTotal track ParseAll for a progress reader.
 	filesDone, filesTotal atomic.Int64
 
@@ -209,10 +214,29 @@ func (p *Parser) ParseAll() (first error) {
 	p.filesDone.Store(0)
 	p.filesTotal.Store(int64(len(files)))
 	p.cfg.Store.BulkBegin()
+	p.slow.mu.Lock()
+	p.slow.files = nil
+	p.slow.mu.Unlock()
+	timed := !ablateNoStepTimers && p.cfg.Store.StepTimers()
+	now := p.cfg.Store.StepNow()
+	var t0 time.Duration
+	var before store.StepStats
+	if timed {
+		t0, before = now(), p.cfg.Store.Steps()
+	}
 	defer func() {
 		p.filesDone.Store(int64(len(files)))
 		if err := p.cfg.Store.BulkEnd(); err != nil && first == nil {
 			first = err
+		}
+		if timed {
+			// other is the remainder of the call: the wall time less the five
+			// measured steps, so the six steps always sum to the call.
+			d := p.cfg.Store.Steps().Sub(before)
+			other := int64(now()-t0) - (d.StepNS[store.StepRead] + d.StepNS[store.StepParse] + d.StepNS[store.StepInsert] + d.StepNS[store.StepSavepoint] + d.StepNS[store.StepCommit])
+			var o store.StepStats
+			o.StepNS[store.StepOther], o.StepCalls[store.StepOther] = max(other, 0), 1
+			p.cfg.Store.AddSteps(o)
 		}
 	}()
 	for i, f := range files {
@@ -318,6 +342,12 @@ type genWork struct {
 	commits []store.CopyCommit
 	start   int64
 	end     int64
+	// rel, start0, end0 and stepNS feed the per-file step figures: the path
+	// (hashed, never printed), the bytes the call had to parse and the
+	// nanoseconds of read, parse and insert it took.
+	rel          string
+	start0, end0 int64
+	stepNS       int64
 }
 
 // parseFiles parses the unparsed bytes of every generation of the files, in one
@@ -378,6 +408,9 @@ func (p *Parser) parseFiles(ids []int64) (int, error) {
 		}
 	}
 	n, err := p.runWork(work)
+	for _, w := range work {
+		p.noteFile(w)
+	}
 	total += n
 	if err != nil && first == nil {
 		first = err
@@ -401,7 +434,10 @@ func (p *Parser) prepGen(f store.File, src source.Source, g store.Generation) (*
 		return nil, err
 	}
 	commits, _ := p.cfg.Store.CopyCommits(f.ID)
-	return &genWork{f: f, src: src, caps: caps, g: g, fh: fh, commits: commits, start: g.ParseOffset, end: g.CopyOffset}, nil
+	return &genWork{
+		f: f, src: src, caps: caps, g: g, fh: fh, commits: commits, start: g.ParseOffset, end: g.CopyOffset,
+		rel: rel, start0: g.ParseOffset, end0: g.CopyOffset,
+	}, nil
 }
 
 // runWork parses the generations in group-commit transactions. When a
@@ -451,6 +487,7 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 		fn := func(rawTx *sql.Tx) error {
 			tx := newPS(rawTx)
 			defer tx.Close()
+			tx.acc = p.newAcc()
 			cnt, bytes, advancedAny = 0, 0, false
 			for i, w := range work {
 				next[i] = w.start
@@ -466,6 +503,7 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 						return err
 					}
 					n, err := p.chunk(tx, w.fh, w.f, w.src, w.caps, w.g, w.commits, cur, w.end, &cnt)
+					w.stepNS += p.flushSteps(tx)
 					if err != nil {
 						return err
 					}
@@ -615,6 +653,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 	run := func(rawTx *sql.Tx) error {
 		tx := newPS(rawTx)
 		defer tx.Close()
+		tx.acc = p.newAcc()
 		if reparse {
 			if err := p.clearGen(tx, f.ID, g.Gen); err != nil {
 				return err
@@ -630,6 +669,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		off := start
 		for off < end {
 			n, err := p.chunk(tx, fh, f, src, caps, g, commits, off, end, &count)
+			p.flushSteps(tx)
 			if err != nil {
 				return err
 			}
@@ -709,12 +749,23 @@ func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Sou
 	g store.Generation, commits []store.CopyCommit, off, end int64, count *int,
 ) (int64, error) {
 	size := int64(p.cfg.ChunkBytes)
+	a := tx.acc
+	timed := a != nil && a.on
 	for {
 		if off+size > end {
 			size = end - off
 		}
 		buf := make([]byte, size)
-		if _, err := fh.ReadAt(buf, off); err != nil && err != io.EOF {
+		var tr time.Duration
+		if timed {
+			tr = a.now()
+		}
+		_, err := fh.ReadAt(buf, off)
+		if timed {
+			a.st.StepNS[store.StepRead] += int64(a.now() - tr)
+			a.st.StepCalls[store.StepRead]++
+		}
+		if err != nil && err != io.EOF {
 			return 0, err
 		}
 		nl := bytes.LastIndexByte(buf, '\n')
@@ -731,6 +782,9 @@ func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Sou
 		}
 		buf = buf[:nl+1]
 		consumed := int64(len(buf))
+		if timed {
+			a.st.BytesRead += consumed
+		}
 		pos := int64(0)
 		for pos < consumed {
 			e := bytes.IndexByte(buf[pos:], '\n')
@@ -747,7 +801,18 @@ func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Sou
 				}
 				continue
 			}
+			// Three clock reads per line: before and after Parse, and after insert.
+			var t0, t1 time.Duration
+			if timed {
+				t0 = a.now()
+			}
 			recs, err := src.Parse(caps, line)
+			if timed {
+				t1 = a.now()
+				a.st.StepNS[store.StepParse] += int64(t1 - t0)
+				a.st.StepCalls[store.StepParse]++
+				a.st.Lines++
+			}
 			if err != nil {
 				if err := p.bad(tx, f, g, abs, ll, err.Error()); err != nil {
 					return 0, err
@@ -755,8 +820,19 @@ func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Sou
 				continue
 			}
 			seen := seenAt(commits, g.Gen, abs)
-			if err := p.insert(tx, f, src, caps, g, abs, ll, recs, seen); err != nil {
-				return 0, err
+			if timed {
+				*a.seq++
+				a.sample, a.inInsert = *a.seq%sampleEvery == 0, true
+			}
+			ierr := p.insert(tx, f, src, caps, g, abs, ll, recs, seen)
+			if timed {
+				a.inInsert = false
+				a.st.StepNS[store.StepInsert] += int64(a.now() - t1)
+				a.st.StepCalls[store.StepInsert]++
+				a.st.Records += int64(len(recs))
+			}
+			if ierr != nil {
+				return 0, ierr
 			}
 			*count += len(recs)
 		}
@@ -885,11 +961,11 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		}
 		var res sql.Result
 		if p.cfg.Store.HasSessionText() {
-			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			res, err = tx.ExecL(tblRecords, `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref,
 				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType], ownTime)
 		} else {
-			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			res, err = tx.ExecL(tblRecords, `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), tns, ref,
 				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType], ownTime)
 		}
@@ -904,7 +980,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 				if fl.S == "" {
 					continue
 				}
-				tr, err := tx.Exec(`INSERT INTO texts(rec_id,field,kind) VALUES(?,?,?)`, id, fl.Name, string(fl.Kind))
+				tr, err := tx.ExecL(tblTexts, `INSERT INTO texts(rec_id,field,kind) VALUES(?,?,?)`, id, fl.Name, string(fl.Kind))
 				if err != nil {
 					return err
 				}
@@ -913,7 +989,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 				if fl.Kind == source.KindOpaque && p.cfg.Store.HasTrigram() {
 					tbl = "fts_tri"
 				}
-				if _, err := tx.Exec(`INSERT INTO `+tbl+`(rowid, body) VALUES(?,?)`, tid, fl.S); err != nil {
+				if _, err := tx.ExecL(tblFTS, `INSERT INTO `+tbl+`(rowid, body) VALUES(?,?)`, tid, fl.S); err != nil {
 					return err
 				}
 				continue
@@ -957,7 +1033,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 			}
 			// One row per (rec_id, name_id): a repeated name keeps the LAST value
 			// and replaces the whole row, so s, n and f never mix two values.
-			if _, err := tx.Exec(`INSERT INTO fields(rec_id,name_id,s,n,f) VALUES(?,?,?,?,?)
+			if _, err := tx.ExecL(tblFields, `INSERT INTO fields(rec_id,name_id,s,n,f) VALUES(?,?,?,?,?)
 ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded.f`, id, nid, s, n, fv); err != nil {
 				return err
 			}
@@ -1262,12 +1338,30 @@ type pstx struct {
 	*sql.Tx
 	st   map[string]*sql.Stmt
 	sess *sessionBatch // session activity of this transaction, see flushSessions
+	acc  *stepAcc      // step timers of this transaction (nil: none)
 }
+
+// The insert tables of ExecL, matching store.Table* and obs.InsertTables.
+const (
+	tblRecords  = store.TableRecords
+	tblFields   = store.TableFields
+	tblTexts    = store.TableTexts
+	tblFTS      = store.TableFTS
+	tblSessions = store.TableSessions
+	tblExt      = store.TableExt
+	tblOther    = store.TableOther
+)
 
 func newPS(tx *sql.Tx) *pstx { return &pstx{Tx: tx, st: map[string]*sql.Stmt{}} }
 
-// Exec prepares q on first use.
+// Exec prepares q on first use. Inside insert it is attributed to the "other"
+// table; use ExecL to name the table.
 func (p *pstx) Exec(q string, args ...any) (sql.Result, error) {
+	return p.ExecL(tblOther, q, args...)
+}
+
+// exec runs q on its prepared statement.
+func (p *pstx) exec(q string, args ...any) (sql.Result, error) {
 	if ablateNoPrepare {
 		return p.Tx.Exec(q, args...)
 	}

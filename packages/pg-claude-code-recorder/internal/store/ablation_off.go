@@ -9,3 +9,6 @@ const (
 	ablateDSNExtra    = ""
 	ablateNoSavepoint = false
 )
+
+// ablateNoStepTimers turns the step clock reads off; false in a normal build.
+const ablateNoStepTimers = false

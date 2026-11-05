@@ -1163,6 +1163,50 @@
           "legendFormat": "waits per second"
         }
       ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "parse step split",
+      "description": "Where the parse path spends its time, as seconds per second by step: read (copy reads), parse (decoding a line), insert (writing a record and its rows), savepoint (the per-file SAVEPOINT and RELEASE of a bulk rebuild), commit (batch commits) and other (the remainder of ParseAll, added once per ParseAll call). The insert tables are an estimate from one line in 16. For diagnosis only: no alert covers this panel",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (step) (rate(pg_claude_code_recorder_step_seconds_total[5m]))",
+          "range": true,
+          "legendFormat": "{{step}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (table) (rate(pg_claude_code_recorder_insert_table_seconds_total[5m]))",
+          "range": true,
+          "legendFormat": "insert: {{table}}"
+        }
+      ]
     }
   ]
 }

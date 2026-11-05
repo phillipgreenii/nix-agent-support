@@ -23,3 +23,10 @@ func SetAblation(journal, dsnExtra string, noSavepoint bool) {
 	}
 	ablateJournal, ablateDSNExtra, ablateNoSavepoint = journal, dsnExtra, noSavepoint
 }
+
+// ablateNoStepTimers skips the clock reads of the step timers, so the harness
+// can price them: baseline with timers on against baseline with them off.
+var ablateNoStepTimers bool
+
+// SetAblationNoStepTimers sets the hook; call it before Open.
+func SetAblationNoStepTimers(v bool) { ablateNoStepTimers = v }

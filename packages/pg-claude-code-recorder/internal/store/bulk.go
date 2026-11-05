@@ -336,7 +336,9 @@ func (s *Store) commitBatchLocked() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.prof.CommitSec += time.Since(t0).Seconds()
+	took := time.Since(t0)
+	s.prof.CommitSec += took.Seconds()
+	s.addStep(StepCommit, took.Nanoseconds())
 	committed = true
 	s.bCommits++
 	for _, h := range s.wrHooks {
@@ -357,8 +359,18 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 		s.btx = tx
 	}
 	tx := s.btx
+	timed := !ablateNoSavepoint && !ablateNoStepTimers
+	var spNS int64
 	if !ablateNoSavepoint {
-		if _, err := tx.Exec(`SAVEPOINT bulk_write`); err != nil {
+		var t0 time.Duration
+		if timed {
+			t0 = s.stepClock()
+		}
+		_, err := tx.Exec(`SAVEPOINT bulk_write`)
+		if timed {
+			spNS = int64(s.stepClock() - t0)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -376,7 +388,14 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 	if ablateNoSavepoint {
 		return nil
 	}
+	var t0 time.Duration
+	if timed {
+		t0 = s.stepClock()
+	}
 	_, err := tx.Exec(`RELEASE bulk_write`)
+	if timed {
+		s.addStep(StepSavepoint, spNS+int64(s.stepClock()-t0))
+	}
 	if err != nil {
 		s.rbEpoch.Add(1)
 	}

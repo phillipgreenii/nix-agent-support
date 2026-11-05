@@ -249,7 +249,7 @@ func (a *app) rebuild(args []string) int {
 	rep := startRebuildReporter(log, cfg.StateDir, *every, func() rebuildSample {
 		recs, commits := d.Store().BulkTotals()
 		done, total := d.Parser().FileProgress()
-		return rebuildSample{records: recs, commits: commits, filesDone: done, filesTotal: total}
+		return rebuildSample{records: recs, commits: commits, filesDone: done, filesTotal: total, steps: d.Store().Steps()}
 	})
 	started := time.Now()
 	perr := d.Parser().ParseAll()
@@ -261,7 +261,7 @@ func (a *app) rebuild(args []string) int {
 		perr = d.Store().FinishRebuild()
 	}
 	if perr == nil {
-		logRebuildProfile(log, d.Store(), cfg.StateDir, time.Since(started), parseWall)
+		logRebuildProfile(log, d.Store(), d.Parser().SlowestFiles(), cfg.StateDir, time.Since(started), parseWall)
 	}
 	epoch := d.Store().Epoch()
 	if err := d.Close(); err != nil && perr == nil {

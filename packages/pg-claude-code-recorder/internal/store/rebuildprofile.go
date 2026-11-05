@@ -17,6 +17,10 @@ type RebuildProfile struct {
 	FTSOptimize   float64 `json:"fts_optimize_sec"`
 	CheckpointSec float64 `json:"checkpoint_sec"`
 	FinishSec     float64 `json:"finish_sec"`
+	// Steps is where the parse time went: seconds per step (read, parse,
+	// insert, savepoint, commit; other is the remainder of the parse wall, set
+	// by the caller that knows it), the insert table split and the work done.
+	Steps StepStats `json:"steps"`
 }
 
 // RebuildProfile returns the timings measured so far by the batch commits and
@@ -26,6 +30,7 @@ func (s *Store) RebuildProfile() RebuildProfile {
 	defer s.mu.Unlock()
 	p := s.prof
 	p.Commits = s.bCommits
+	p.Steps = s.Steps()
 	return p
 }
 

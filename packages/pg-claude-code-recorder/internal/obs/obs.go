@@ -302,6 +302,13 @@ const (
 	MDoctorProjectedCycle = "doctor_projected_cycle_seconds"
 	MDoctorRaceSkips      = "doctor_race_skips_total"
 	MDoctorCursorAge      = "doctor_cursor_age_seconds"
+	// The parse step counters: step_seconds_total and step_calls_total by step
+	// (Steps), insert_table_seconds_total by table (InsertTables) and one
+	// duration histogram per file per parse call.
+	MStepSeconds          = "step_seconds_total"
+	MStepCalls            = "step_calls_total"
+	MInsertTableSeconds   = "insert_table_seconds_total"
+	MParseFileDuration    = "parse_file_duration_seconds"
 	EvQuarantined         = "quarantined"
 	EvQuarantineRestored  = "quarantine_restored"
 	EvQuarantineOrphan    = "quarantine_orphan_found_on_start"
@@ -314,6 +321,15 @@ const (
 
 // DoctorOutcomes are the outcome values of doctor_slices_total.
 var DoctorOutcomes = []string{"ok", "deferred", "error", "skipped_gone"}
+
+// Steps are the step values of step_seconds_total and step_calls_total: the
+// partition of the time inside ParseAll. The label is step, not stage, because
+// stage already labels conversations_by_stage.
+var Steps = []string{"read", "parse", "insert", "savepoint", "commit", "other"}
+
+// InsertTables are the table values of insert_table_seconds_total: the split
+// of the insert step by the table a statement writes.
+var InsertTables = []string{"records", "fields", "texts", "fts", "sessions", "ext", "other"}
 
 // SkipReasons are the removal reasons of skipped_files_total{reason}; each is
 // registered at zero at start, so the first increase fires.
@@ -432,6 +448,13 @@ func (o *Obs) RegisterStandard() {
 	for _, oc := range DoctorOutcomes {
 		o.Reg.Add(MDoctorSlices, map[string]string{"outcome": oc}, 0)
 	}
+	for _, st := range Steps {
+		o.Reg.Add(MStepSeconds, map[string]string{"step": st}, 0)
+		o.Reg.Add(MStepCalls, map[string]string{"step": st}, 0)
+	}
+	for _, tb := range InsertTables {
+		o.Reg.Add(MInsertTableSeconds, map[string]string{"table": tb}, 0)
+	}
 	o.Reg.Add(MQuarantineMismatch, nil, 0)
 	o.Reg.Add(MRemovedTotal, nil, 0)
 	for _, r := range SkipReasons {
@@ -502,6 +525,7 @@ func (o *Obs) RegisterStandard() {
 		{MCopierLockWait, LoopBuckets},
 		{MStoreWriteLockWait, LoopBuckets},
 		{MDoctorSliceDuration, LoopBuckets},
+		{MParseFileDuration, LoopBuckets},
 	} {
 		o.Reg.RegisterHist(h.name, h.bounds)
 	}
