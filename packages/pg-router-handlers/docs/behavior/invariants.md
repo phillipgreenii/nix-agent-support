@@ -561,7 +561,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     unlink and rmdir is a filesystem event for every listener on the host (measured 2026-11-04:
     about 284,000 events from two monorepo worktrees, and every delete method emits the same count).
     Every removal this handler performs (the two-phase teardown, the orphan and closed-bead
-    reconciles, the leaked-worktree sweep and dispatch-time cleanup) MUST keep git's own refusals
+    reconciles, the leaked-worktree sweep, dispatch-time cleanup and the operator-run nix
+    worktree sweep, which calls the `remove-worktree` subcommand and never deletes a tree itself) MUST keep git's own refusals
     (not a linked worktree, locked, and for a non-forced removal uncommitted or untracked files),
     stop the worktree's own git fsmonitor daemon (the `core.fsmonitor` setting itself stays on),
     rename the tree aside into a `.trash` directory beside the per-bead worktrees (one rename; the

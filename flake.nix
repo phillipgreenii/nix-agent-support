@@ -11352,13 +11352,15 @@
                 assert lib.length worktreeReclaimEntry.variants == 1;
                 assert worktreeReclaimVariant.aggressiveness == 1;
                 # decision item 5's own guard: neither script ever passes
-                # `--force` to `git worktree remove` (the dry-run variant
-                # never even calls it) -- the safety guard is git's own
-                # native dirty-worktree refusal, not reimplemented here.
+                # `--force`, and never runs an unpaced `git worktree remove`
+                # (an unlink event per file); the removal goes through the
+                # handler's paced `remove-worktree` subcommand, which keeps
+                # git's own dirty/locked refusals.
                 assert !lib.hasInfix "--force" worktreeReclaimVariant.dryRunCommand;
                 assert !lib.hasInfix "--force" worktreeReclaimVariant.removeCommand;
                 assert !lib.hasInfix "worktree remove" worktreeReclaimVariant.dryRunCommand;
-                assert lib.hasInfix "worktree remove" worktreeReclaimVariant.removeCommand;
+                assert lib.hasInfix " remove-worktree " worktreeReclaimVariant.removeCommand;
+                assert !lib.hasInfix "git -C \"$wt\" worktree remove" worktreeReclaimVariant.removeCommand;
                 assert lib.hasInfix "status --porcelain" worktreeReclaimVariant.dryRunCommand;
                 assert lib.hasInfix "status --porcelain" worktreeReclaimVariant.removeCommand;
                 # disabled module: zero behavior change (no registry entry

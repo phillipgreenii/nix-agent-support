@@ -99,7 +99,7 @@ func TestRun_SubcommandSet(t *testing.T) {
 	// The ccpool-specific subcommands are real: with no arguments, split and
 	// pool-capacity are usage errors from their own parsers (not "unknown
 	// subcommand"), and pool-capacity -h prints help with exit 0.
-	for _, sub := range []string{"pool-capacity", "janitor", "split"} {
+	for _, sub := range []string{"pool-capacity", "janitor", "remove-worktree", "split"} {
 		if got := run([]string{sub}); got != conformance.ExitUsage {
 			t.Errorf("%s with no arguments: exit %d, want %d", sub, got, conformance.ExitUsage)
 		}
@@ -129,7 +129,7 @@ func TestRun_SubcommandSet(t *testing.T) {
 // twelve subcommands this binary dispatches, and none of the old binary's
 // retired spellings.
 func TestHelp_ListsExactlyItsOwnSubcommands(t *testing.T) {
-	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "janitor", "split", "query", "version", "help"}
+	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "janitor", "remove-worktree", "split", "query", "version", "help"}
 	for _, sub := range want {
 		if !strings.Contains(usageLine, sub) {
 			t.Errorf("usageLine lacks %q", sub)

@@ -548,12 +548,20 @@ let
   # itself -- contributing to an inert option when the reclaimer isn't
   # separately enabled is harmless).
   #
+  # Paced removal: the sweep never deletes a tree itself and never runs `git
+  # worktree remove` (which unlinks every file at full speed, one filesystem
+  # event per path). It calls the handler's `remove-worktree` subcommand, the
+  # same paced path the Go teardown uses (internal/worktree's throttled
+  # opener): stop the worktree's fsmonitor daemon (core.fsmonitor stays on),
+  # rename the tree into `<worktreeDir>/.trash`, prune the registration, and
+  # delete the trash in rate-limited batches.
+  #
   # Deletion safety guard (decision item 5), applied identically here and in
-  # the Go dispatch-completion path: `git worktree remove` (no `--force`)
-  # refuses on its own whenever the worktree is dirty (uncommitted changes) --
-  # gitclient's own documented native behavior, mirrored here at the shell
-  # level rather than reimplemented, so both removal paths rely on the SAME
-  # underlying guarantee. An explicit `git status --porcelain` pre-check adds
+  # the Go dispatch-completion path: the removal never forces, and refuses on
+  # its own whenever the worktree is dirty (uncommitted changes), locked or not
+  # a linked worktree -- the SAME refusals as `git worktree remove` (no
+  # `--force`), implemented once in that throttled opener, so both removal
+  # paths rely on the SAME underlying guarantee. An explicit `git status --porcelain` pre-check adds
   # a clearer skip message (and lets the dry-run variant report a skip
   # without attempting a mutating command at all). A best-effort check for
   # `index.lock`/`HEAD.lock` under the worktree's own git-dir additionally
@@ -618,7 +626,7 @@ let
         ${
           if apply then
             ''
-              if git -C "$wt" worktree remove "$wt" 2>&1; then
+              if ${ccpoolAdapterBin} remove-worktree "$wt" 2>&1; then
                 echo "pg-router-ccpool-handler-worktrees: removed: $wt"
                 n=$((n + 1))
                 # Branch delete (bead pg2-ci75j): x/gitclient's RemoveWorktree
