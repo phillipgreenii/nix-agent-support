@@ -306,6 +306,28 @@ func (o *oracle) compare() {
 	}
 	diff("stage rows", stageDump(o.scan), stageDump(o.ev))
 	diff("stage_changed events", eventDump(o.scan), eventDump(o.ev))
+	diff("gauges", gaugeDump(o.scan), gaugeDump(o.ev))
+}
+
+// gaugeDump lists the stage, held and pending-byte gauges of e's settler: the
+// scan settler sets them from scratch every tick, the event settler from its
+// kept maps after a wake.
+func gaugeDump(e *env) []string {
+	reg := e.obs.Reg
+	var out []string
+	for _, st := range gaugeStages {
+		v, _ := reg.Gauge(obs.MConversationsByStage, map[string]string{"stage": st})
+		out = append(out, fmt.Sprintf("stage %s %v", st, v))
+	}
+	for _, r := range Reasons {
+		v, _ := reg.Gauge(obs.MHeldConversations, map[string]string{"reason": r})
+		out = append(out, fmt.Sprintf("held %s %v", r, v))
+	}
+	for _, name := range []string{obs.MOldestHeldAge, obs.MBytesPendingSettle} {
+		v, _ := reg.Gauge(name, nil)
+		out = append(out, fmt.Sprintf("%s %v", name, v))
+	}
+	return out
 }
 
 // run plays the script: acts maps a minute to its actions, applied in order.

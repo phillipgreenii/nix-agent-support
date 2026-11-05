@@ -217,6 +217,10 @@ type Settler struct {
 	pubCounts map[string]int
 	pubAt     time.Time
 
+	// gauges are the incrementally kept stage counts and gauge inputs (see
+	// counts.go); guarded by mu.
+	gauges *gaugeState
+
 	// The quarantine directory list the gauge refresh reuses between ticks.
 	qmu            sync.Mutex
 	qdirs          []string
@@ -275,7 +279,7 @@ func New(cfg Config) *Settler {
 	if cfg.Holders == nil {
 		cfg.Holders = LsofHolders
 	}
-	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}}
+	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}, gauges: newGaugeState()}
 	if cfg.Copier != nil {
 		// Every file-state change the copier commits (a backfill batch, a
 		// tombstone, a new generation, the settler's and doctor's own) feeds the
@@ -1743,18 +1747,17 @@ func (s *Settler) LastCounts() (counts map[string]int, at time.Time, ok bool) {
 	return counts, s.pubAt, true
 }
 
-// refresh derives every Conversation's stage, emits the stage changes and sets
-// the gauges.
+// refresh derives every Conversation's stage from scratch, emits the stage
+// changes through transition, rebuilds the kept counts and gauge inputs, and sets
+// the gauges. It is the reconciliation's half of the incremental bookkeeping: in
+// event mode it compares the stage counts kept since the last reconciliation
+// with what the store says now, logs a difference once and meters it.
 func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now time.Time) {
-	reg := s.cfg.Obs.Reg
 	rows, _ := s.st.Stages()
 	persisted := map[string]store.StageRow{}
 	for _, r := range rows {
 		persisted[r.Session] = r
 	}
-	counts := map[string]int{}
-	held := map[string]int{}
-	var oldest float64
 	offsets, _ := s.st.CopyOffsets()
 	arch, _ := s.st.AllRanges()
 	archived := map[[2]int64]int64{}
@@ -1770,7 +1773,14 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 			pendingByFile[k[0]] += p
 		}
 	}
-	var pending int64
+	checkDrift := s.cfg.Mode == ModeEvent && s.seeded
+	kept := s.keptCounts()
+	// What the kept counts should equal: the stage each Conversation was last
+	// published in (the ones this settler has never published are not in them).
+	expect := map[string]int{}
+	ng := newGaugeState()
+	fileSession := map[int64]string{}
+	var rescued float64
 	for session, c := range groups {
 		stage := StageQuiet
 		switch r, ok := persisted[session]; {
@@ -1779,19 +1789,28 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 		case ok:
 			stage = r.Stage
 		}
-		counts[stage]++
-		if stage == StageHeld {
-			r := persisted[session]
-			held[r.Reason]++
-			if age := now.Sub(time.Unix(0, r.SinceNS)).Seconds(); age > oldest {
-				oldest = age
+		s.mu.Lock()
+		prev, known := s.last[session]
+		s.mu.Unlock()
+		if known {
+			expect[prev]++
+			if prev != stage {
+				rescued++
 			}
 		}
-		if stage == StageQuiet || stage == StageHeld {
-			for _, f := range c.files {
-				pending += pendingByFile[f.ID]
-			}
+		var pend int64
+		for _, f := range c.files {
+			pend += pendingByFile[f.ID]
+			fileSession[f.ID] = session
 		}
+		s.mu.Lock()
+		ng.setStage(session, stage)
+		var held *heldFact
+		if r, ok := persisted[session]; ok && stage == StageHeld {
+			held = &heldFact{reason: r.Reason, sinceNS: r.SinceNS}
+		}
+		ng.setFacts(session, held, pend, nil)
+		s.mu.Unlock()
 		s.transition(session, s.priorStage(session, stage), stage)
 	}
 	for session, r := range persisted {
@@ -1799,25 +1818,11 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 			continue
 		}
 		if r.Stage == store.StageRemoved || r.Stage == store.StageRemovalPending {
-			counts[r.Stage]++
+			expect[r.Stage]++
+			ng.setStage(session, r.Stage)
 		}
 	}
-	s.refreshRemovalGauges(groups, live, now)
-	pub := make(map[string]int, len(gaugeStages))
-	for _, st := range gaugeStages {
-		reg.Set(obs.MConversationsByStage, map[string]string{"stage": st}, float64(counts[st]))
-		pub[st] = counts[st]
-	}
-	s.mu.Lock()
-	s.pubCounts, s.pubAt = pub, now
-	s.mu.Unlock()
-	for _, r := range Reasons {
-		reg.Set(obs.MHeldConversations, map[string]string{"reason": r}, float64(held[r]))
-	}
-	reg.Set(obs.MOldestHeldAge, nil, oldest)
-	reg.Set(obs.MBytesPendingSettle, nil, float64(pending))
 	if facts, err := s.st.TornTails(); err == nil {
-		bySource := map[string]float64{}
 		ids := make([]int64, 0, len(facts))
 		for _, t := range facts {
 			ids = append(ids, t.File)
@@ -1831,13 +1836,30 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 			src[f.ID] = f.Source
 		}
 		for _, t := range facts {
-			age := now.Sub(time.Unix(0, t.AtNS)).Seconds()
-			if age > bySource[src[t.File]] {
-				bySource[src[t.File]] = age
+			owner := fileSession[t.File]
+			m := ng.torn[owner]
+			if m == nil {
+				m = map[string]int64{}
+				ng.torn[owner] = m
+			}
+			if old, ok := m[src[t.File]]; !ok || t.AtNS < old {
+				m[src[t.File]] = t.AtNS
 			}
 		}
-		for source, age := range bySource {
-			reg.Set(obs.MTornTailAge, map[string]string{"source": source}, age)
+	}
+	if checkDrift {
+		reg := s.cfg.Obs.Reg
+		if !sameCounts(kept, expect) {
+			s.cfg.Obs.Log.Warn("settle_counts_drift", "kept", fmtCounts(kept), "scratch", fmtCounts(expect))
+			reg.Add(obs.MSettleCountsDrift, nil, 1)
+		}
+		if rescued > 0 {
+			reg.Add(obs.MSettleReconcileRescued, nil, rescued)
 		}
 	}
+	s.mu.Lock()
+	s.gauges = ng
+	s.mu.Unlock()
+	s.refreshRemovalGauges(groups, live, now)
+	s.publishGauges(now)
 }

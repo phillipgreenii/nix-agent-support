@@ -135,10 +135,15 @@ const (
 	MSettleDirtySessions = "settle_dirty_sessions"
 	MSettleDueQueueDepth = "settle_due_queue_depth"
 	MSettleWakes         = "settle_wakes_total"
-	EvSettleTickStuck    = "settle_tick_stuck"
-	EvSettleTickSlow     = "settle_tick_slow"
-	EvWALTruncateStart   = "wal_truncate_start"
-	EvWALTruncateDone    = "wal_truncate_done"
+	// Reconcile healing: sessions whose stage changed during a reconcile that no
+	// event caused, and reconciles that found the incrementally kept counts
+	// different from the from-scratch ones.
+	MSettleReconcileRescued = "settle_reconcile_rescued_total"
+	MSettleCountsDrift      = "settle_counts_drift_total"
+	EvSettleTickStuck       = "settle_tick_stuck"
+	EvSettleTickSlow        = "settle_tick_slow"
+	EvWALTruncateStart      = "wal_truncate_start"
+	EvWALTruncateDone       = "wal_truncate_done"
 )
 
 // Metric names of the process, Go runtime and WAL-size collectors.
@@ -425,6 +430,8 @@ func (o *Obs) RegisterStandard() {
 	for _, r := range []string{"dirty", "due", "reconcile", "poll"} {
 		o.Reg.Add(MSettleWakes, map[string]string{"reason": r}, 0)
 	}
+	o.Reg.Add(MSettleReconcileRescued, nil, 0)
+	o.Reg.Add(MSettleCountsDrift, nil, 0)
 	o.Reg.Set(MWALFrames, nil, 0)
 	o.Reg.Set(MWALCheckpointedFrames, nil, 0)
 	o.Reg.Set(MWALCheckpointLastTime, nil, 0)

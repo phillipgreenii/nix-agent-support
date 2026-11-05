@@ -95,6 +95,18 @@ func TestWakeCostDoesNotDependOnTheNumberOfSettledConversations(t *testing.T) {
 	if ws.Examined != 1 {
 		t.Fatalf("wake examined %d Conversations, want the 1 dirtied", ws.Examined)
 	}
+	// The gauges come from the kept maps: no statement that reads a whole table.
+	for _, whole := range []string{
+		"FROM files ORDER BY id",
+		"FROM generations ORDER BY file_id, gen",
+		"copy_offset FROM generations",
+		"FROM ranges ORDER BY file_id,gen,from_off",
+		"FROM torn_tails ORDER BY file_id,gen",
+	} {
+		if n := cnt.Matching(whole); n != 0 {
+			t.Errorf("wake issued %d whole-table statements %q", n, whole)
+		}
+	}
 	if q > wakeQueryBound {
 		t.Fatalf("wake issued %d store queries with %d settled Conversations, bound %d", q, n, wakeQueryBound)
 	}

@@ -63,6 +63,8 @@ var helpTexts = map[string]string{
 	MSettleDirtySessions:      "Conversations in the settler's dirty set at the last wake (event mode).",
 	MSettleDueQueueDepth:      "Entries in the settler's due-time queue at the last wake (event mode).",
 	MSettleWakes:              "Settle wakes by trigger: dirty, due, reconcile or poll (event mode).",
+	MSettleReconcileRescued:   "Sessions whose stage changed in a settle reconcile that no event caused.",
+	MSettleCountsDrift:        "Reconciles that found the incrementally kept settle counts different from the from-scratch ones.",
 	MProcessCPUSeconds:        "CPU seconds used by the daemon process.",
 	MGoGoroutines:             "Goroutines in the daemon process.",
 	MGoHeapAlloc:              "Bytes of allocated heap objects.",

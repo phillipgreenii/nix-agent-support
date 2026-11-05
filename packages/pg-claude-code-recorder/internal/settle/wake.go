@@ -82,6 +82,7 @@ func (s *Settler) priorStage(session, now string) string {
 func (s *Settler) transition(session, from, to string) {
 	s.mu.Lock()
 	s.last[session] = to
+	s.gauges.setStage(session, to)
 	reason := s.reasons[session]
 	delete(s.reasons, session)
 	s.mu.Unlock()
@@ -302,18 +303,33 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 			}
 		}
 	}
-	for session := range touched {
-		if s.gcache[session] == nil {
+	for _, session := range sortedKeys(touched) {
+		var row *store.StageRow
+		if r, ok, err := s.st.Stage(session); err == nil && ok {
+			row = &r
+		}
+		c := s.gcache[session]
+		if c == nil {
+			// No files any more: only a removal stage is counted, as refresh does.
+			s.mu.Lock()
+			if row != nil && (row.Stage == store.StageRemoved || row.Stage == store.StageRemovalPending) {
+				s.gauges.setStage(session, row.Stage)
+			} else {
+				s.gauges.setStage(session, "")
+			}
+			s.mu.Unlock()
 			continue
 		}
 		to := StageQuiet
 		if live[session] {
 			to = StageLive
-		} else if row, ok, err := s.st.Stage(session); err == nil && ok {
+		} else if row != nil {
 			to = row.Stage
 		}
 		s.transition(session, s.priorStage(session, to), to)
+		s.noteSession(c, to, row)
 	}
+	s.publishGauges(now)
 	s.publishNext()
 	return stats, first
 }
