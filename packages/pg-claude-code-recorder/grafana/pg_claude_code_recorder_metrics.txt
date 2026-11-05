@@ -25,6 +25,7 @@
 #   result (ingest_results_total)  copied new_generation unchanged skipped snapshot link missing tombstone raced error
 #                                  (the copier.Result.Action strings, hyphens mapped to underscores, plus error for an
 #                                  ingest that returned an error)
+#   outcome (doctor_slices_total)  ok deferred error skipped_gone
 #   outcome (sweep_files_total)    walked unchanged_candidate (a sweep skips an unchanged_candidate that was already caught up)
 #   state (control_inbox_state)    present gone never_loaded
 #   outcome (end_reason_source_files_total)  ingested removed invalid
@@ -84,6 +85,13 @@ pg_claude_code_recorder_conversations_removed_total counter -
 pg_claude_code_recorder_skipped_files_total counter reason
 pg_claude_code_recorder_doctor_last_run_timestamp gauge -
 pg_claude_code_recorder_doctor_mismatch_files gauge -
+pg_claude_code_recorder_doctor_slice_duration_seconds histogram -
+pg_claude_code_recorder_doctor_cycle_progress_ratio gauge -
+pg_claude_code_recorder_doctor_cycle_duration_seconds gauge -
+pg_claude_code_recorder_doctor_slices_total counter outcome
+pg_claude_code_recorder_doctor_projected_cycle_seconds gauge -
+pg_claude_code_recorder_doctor_race_skips_total counter -
+pg_claude_code_recorder_doctor_cursor_age_seconds gauge -
 pg_claude_code_recorder_bad_lines_total counter -
 pg_claude_code_recorder_unknown_keys_total counter -
 pg_claude_code_recorder_field_type_mismatch_total counter source,type,field
