@@ -172,7 +172,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Removal backlog",
-      "description": "Settled Conversations eligible for removal that have not been removed (the removal-backlog alert fires above 24 hours of remove.maxPerHour), their bytes and the age of the oldest quarantined file.",
+      "description": "Settled Conversations eligible for removal that have not been removed (the removal-due alert fires on the quiet share or the time since the last removal run, not on this count), their bytes and the age of the oldest quarantined file.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

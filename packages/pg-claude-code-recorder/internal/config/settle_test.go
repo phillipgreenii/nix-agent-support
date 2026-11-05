@@ -97,3 +97,26 @@ func TestSettleLoopKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovalDueKeys(t *testing.T) {
+	d := Defaults(env(map[string]string{"HOME": "/h"}))
+	if d.RemoveDueShare != 0.10 || d.RemoveDueEvery != 30*24*time.Hour {
+		t.Fatalf("defaults %v %v", d.RemoveDueShare, d.RemoveDueEvery)
+	}
+	p := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(p, []byte("[remove]\ndueShare = 0.25\ndueEvery = \"14d\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p, true, env(map[string]string{"HOME": "/h"}))
+	if err != nil || c.RemoveDueShare != 0.25 || c.RemoveDueEvery != 14*24*time.Hour {
+		t.Fatalf("%v %+v", err, c)
+	}
+	for _, bad := range []string{"[remove]\ndueShare = 0\n", "[remove]\ndueShare = 1.5\n", "[remove]\ndueEvery = \"soon\"\n"} {
+		if err := os.WriteFile(p, []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p, true, env(map[string]string{"HOME": "/h"})); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}

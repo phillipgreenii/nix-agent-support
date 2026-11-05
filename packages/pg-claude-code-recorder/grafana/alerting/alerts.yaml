@@ -5,7 +5,7 @@
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
 # Nineteen rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
-# parse-stuck, held-old, unknown-key-burst, data-loss, removal-backlog, doctor-mismatch,
+# parse-stuck, held-old, unknown-key-burst, data-loss, removal-due, doctor-mismatch,
 # control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow), plus schema-rebuild-required (the one Loki rule: a log event, not a metric). Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
@@ -335,9 +335,14 @@ groups:
                     type: gt
                     params: [0]
 
-      # Removal backlog. 4800 STANDS FOR 24 x remove.maxPerHour (200).
-      - uid: pg-ccrec-removal-backlog
-        title: pg-claude-code-recorder removal backlog is large
+      # Removal due. Removal is an operator-run command, so the recorder says when to run it:
+      # removal_due is 1 when the share of settled Conversations quiet longer than remove.after is
+      # over remove.dueShare (default 0.10), or quiet Conversations exist and no removal run has
+      # completed within remove.dueEvery (default 30 days). The thresholds live in the daemon config,
+      # not in this rule. It replaces the removal-backlog rule (a queue over 24 hours of
+      # remove.maxPerHour), whose premise was automatic removal.
+      - uid: pg-ccrec-removal-due
+        title: pg-claude-code-recorder removal is due
         condition: C
         for: 30m
         noDataState: OK
@@ -345,8 +350,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-claude-code-recorder removal backlog is over 24 hours of remove.maxPerHour"
-          description: "removal_backlog_conversations is above 4800 (24 hours at the default remove.maxPerHour of 200): removal cannot keep up. The literal 4800 stands for 24 x the remove.maxPerHour default; change it with that option. Run pg-claude-code-recorder remove --dry-run to see what would go."
+          summary: "pg-claude-code-recorder removal is due: run remove --dry-run, then remove --all-eligible --yes"
+          description: "removal_due is 1: over remove.dueShare (default 10 percent) of the settled Conversations have been quiet longer than remove.after (default 30 days), or quiet Conversations exist and no removal run completed within remove.dueEvery (default 30 days). Run pg-claude-code-recorder remove --dry-run to see what would go, then pg-claude-code-recorder remove --all-eligible --yes."
         data:
           - refId: A
             relativeTimeRange:
@@ -357,7 +362,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "max(pg_claude_code_recorder_removal_backlog_conversations)"
+              expr: "max(pg_claude_code_recorder_removal_due)"
           - refId: B
             datasourceUid: __expr__
             model:
@@ -374,7 +379,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [4800]
+                    params: [0]
 
       # Doctor. Alerts on a non-zero mismatch gauge or a stale last run, never on a log line. Both
       # series are registered at zero at start; a last run of 0 (never ran, first run is one

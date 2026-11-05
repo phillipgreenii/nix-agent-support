@@ -141,7 +141,12 @@ func (s *Settler) Remove(opt RemoveOptions) (RemoveReport, error) {
 		h()
 	}
 	defer s.lockRun("remove")()
-	return s.removeLocked(opt, s.cfg.Clock.Now(), early)
+	rep, err := s.removeLocked(opt, s.cfg.Clock.Now(), early)
+	if err == nil && !opt.DryRun {
+		// An operator run that completed counts even when it removed nothing.
+		s.recordRemovalRun(s.cfg.Clock.Now())
+	}
+	return rep, err
 }
 
 func (s *Settler) hourCount(now time.Time) int {
@@ -164,6 +169,9 @@ func (s *Settler) removeLocked(opt RemoveOptions, now time.Time, early *formatCa
 	defer func() {
 		if !opt.DryRun && len(rep.Removed) > 0 {
 			s.markRemovalGauges()
+			if err == nil {
+				s.recordRemovalRun(now)
+			}
 		}
 	}()
 	return s.removeLockedBody(opt, now, early)
@@ -1165,6 +1173,7 @@ func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]
 		settled = append(settled, c)
 	}
 	newest, size := s.backlogFacts(settled)
+	defer func() { s.setRemovalDue(len(settled), convs, now) }()
 	for _, c := range settled {
 		if t, ok := newest[c.session]; !ok || now.Sub(t) < s.cfg.RemoveAfter {
 			continue

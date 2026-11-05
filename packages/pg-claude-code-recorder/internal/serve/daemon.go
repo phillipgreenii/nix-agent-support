@@ -250,6 +250,7 @@ func Open(opt Options) (*Daemon, error) {
 		ClaudeDir: cfg.ClaudeDir, After: cfg.SettleAfter, Recheck: cfg.HeldRecheck, HeldAlertAfter: cfg.HeldMaxAge,
 		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
+		DueShare: cfg.RemoveDueShare, DueEvery: cfg.RemoveDueEvery,
 		HoldRate: cfg.FormatHoldRate,
 		Mode:     cfg.SettleMode, Reconcile: cfg.SettleReconcile, MinWake: cfg.SettleMinWake,
 		DoctorInterval: cfg.DoctorInterval, DoctorBytesPerSlice: cfg.DoctorBytesPerSlice, DoctorSliceEvery: cfg.DoctorSliceEvery,

@@ -290,6 +290,9 @@ const (
 	MQuarantineMismatch  = "removal_quarantine_mismatch_total"
 	MRemovalBacklogConvs = "removal_backlog_conversations"
 	MRemovalBacklogBytes = "removal_backlog_bytes"
+	MRemovalQuietShare   = "removal_quiet_share"
+	MRemovalLastRun      = "removal_last_run_timestamp"
+	MRemovalDue          = "removal_due"
 	MRemovedTotal        = "conversations_removed_total"
 	MSkippedFiles        = "skipped_files_total"
 	MDoctorLastRun       = "doctor_last_run_timestamp"
@@ -442,7 +445,7 @@ func (o *Obs) RegisterStandard() {
 	o.Reg.Set(MBytesPendingSettle, nil, 0)
 	o.Reg.Set(MLowSpace, nil, 0)
 	o.Reg.Add(MSettled, nil, 0)
-	for _, g := range []string{MQuarantineFiles, MQuarantineBytes, MQuarantineOldestAge, MRemovalBacklogConvs, MRemovalBacklogBytes, MDoctorLastRun, MDoctorMismatchFiles} {
+	for _, g := range []string{MQuarantineFiles, MQuarantineBytes, MQuarantineOldestAge, MRemovalBacklogConvs, MRemovalBacklogBytes, MRemovalQuietShare, MRemovalLastRun, MRemovalDue, MDoctorLastRun, MDoctorMismatchFiles} {
 		o.Reg.Set(g, nil, 0)
 	}
 	for _, g := range []string{MDoctorCycleProgress, MDoctorCycleDuration, MDoctorProjectedCycle, MDoctorCursorAge} {

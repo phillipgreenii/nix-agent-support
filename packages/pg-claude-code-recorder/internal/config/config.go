@@ -60,6 +60,12 @@ type Config struct {
 	// the most Conversations one removal pass, and one hour, may remove.
 	RemoveMaxPerRun  int
 	RemoveMaxPerHour int
+	// RemoveDueShare is remove.dueShare (default 0.10): removal is due when the share of
+	// settled Conversations quiet longer than remove.after is over it. RemoveDueEvery is
+	// remove.dueEvery (default 30 days): removal is also due when quiet Conversations
+	// exist and no removal run has completed within it.
+	RemoveDueShare float64
+	RemoveDueEvery time.Duration
 	// FormatHoldRate is format.holdRate: a source whose bad-line or unknown-key
 	// rate over the last day exceeds it is not removed (default 1%).
 	FormatHoldRate float64
@@ -154,10 +160,12 @@ type file struct {
 		Retention string `toml:"retention"`
 	} `toml:"feed"`
 	Remove struct {
-		After      string `toml:"after"`
-		Enable     bool   `toml:"enable"`
-		MaxPerRun  *int   `toml:"maxPerRun"`
-		MaxPerHour *int   `toml:"maxPerHour"`
+		After      string   `toml:"after"`
+		Enable     bool     `toml:"enable"`
+		MaxPerRun  *int     `toml:"maxPerRun"`
+		MaxPerHour *int     `toml:"maxPerHour"`
+		DueShare   *float64 `toml:"dueShare"`
+		DueEvery   string   `toml:"dueEvery"`
 	} `toml:"remove"`
 	Format struct {
 		HoldRate *float64 `toml:"holdRate"`
@@ -277,6 +285,8 @@ func Defaults(getenv func(string) string) Config {
 		RemoveAfter:         30 * 24 * time.Hour,
 		RemoveMaxPerRun:     50,
 		RemoveMaxPerHour:    200,
+		RemoveDueShare:      0.10,
+		RemoveDueEvery:      30 * 24 * time.Hour,
 		FormatHoldRate:      0.01,
 		DoctorInterval:      24 * time.Hour,
 		DoctorBytesPerSlice: 256 << 20,
@@ -368,6 +378,12 @@ func apply(c *Config, f file) error {
 		}
 		c.RemoveMaxPerHour = *f.Remove.MaxPerHour
 	}
+	if f.Remove.DueShare != nil {
+		if *f.Remove.DueShare <= 0 || *f.Remove.DueShare > 1 {
+			return fmt.Errorf("remove.dueShare must be above 0 and at most 1")
+		}
+		c.RemoveDueShare = *f.Remove.DueShare
+	}
 	if f.Format.HoldRate != nil {
 		if *f.Format.HoldRate < 0 || *f.Format.HoldRate > 1 {
 			return fmt.Errorf("format.holdRate must be between 0 and 1")
@@ -410,6 +426,7 @@ func apply(c *Config, f file) error {
 		{"query.timeout", f.Query.Timeout, &c.QueryTimeout},
 		{"feed.retention", f.Feed.Retention, &c.FeedRetention},
 		{"remove.after", f.Remove.After, &c.RemoveAfter},
+		{"remove.dueEvery", f.Remove.DueEvery, &c.RemoveDueEvery},
 		{"doctor.interval", f.Doctor.Interval, &c.DoctorInterval},
 		{"doctor.slice_every", f.Doctor.SliceEvery, &c.DoctorSliceEvery},
 		{"copy.throttle", f.Copy.Throttle, &c.CopyThrottle},

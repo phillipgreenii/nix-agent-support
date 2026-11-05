@@ -71,15 +71,16 @@ done
 EXPECTED_UIDS=(
   pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-copy-lag pg-ccrec-parse-stuck
   pg-ccrec-held-old pg-ccrec-unknown-key-burst pg-ccrec-data-loss
-  pg-ccrec-removal-backlog pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
+  pg-ccrec-removal-due pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
   pg-ccrec-crash-share pg-ccrec-removal-stuck pg-ccrec-settle-tick-slow
   pg-ccrec-field-type-mismatch pg-ccrec-cpu-high pg-ccrec-wal-large pg-ccrec-loop-stalled
   pg-ccrec-request-slow pg-ccrec-schema-rebuild-required
 )
 # Rules removed from alerts.yaml that alerts-delete.yaml MUST still delete (Grafana keeps a
 # file-provisioned rule live after its file entry is dropped): free-space (removed 2026-11-04 on
-# the operator ruling "there shouldn't be a pg-claud-code-recorder specific file system alert").
-RETIRED_UIDS=(pg-ccrec-free-space)
+# the operator ruling "there shouldn't be a pg-claud-code-recorder specific file system alert") and
+# removal-backlog (replaced by removal-due 2026-11-05, removal being operator-run).
+RETIRED_UIDS=(pg-ccrec-free-space pg-ccrec-removal-backlog)
 NODATA_ALERTING=(pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-doctor-mismatch)
 
 # check <alerts> <deletes> <retired>: print RULE-Sn lines for each failing rule (at most one line per rule).

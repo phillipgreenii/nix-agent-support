@@ -158,7 +158,10 @@ type Config struct {
 	RemoveAfter  time.Duration
 	MaxPerRun    int
 	MaxPerHour   int
-	HoldRate     float64
+	// DueShare is remove.dueShare and DueEvery remove.dueEvery: when removal counts as due.
+	DueShare float64
+	DueEvery time.Duration
+	HoldRate float64
 	// Holders lists the processes that hold path open (the real one asks lsof).
 	Holders func(path string) ([]int, error)
 	// FS is the file system removal and extract act on in the Claude directory
@@ -259,6 +262,8 @@ type Settler struct {
 	rgAt    time.Time
 	// removalGaugeRefreshes counts refreshRemovalGauges calls (test seam).
 	removalGaugeRefreshes atomic.Int64
+	// lastRemovalRun is the end of the last completed removal run (guarded by mu).
+	lastRemovalRun time.Time
 }
 
 // New returns a Settler.
@@ -304,6 +309,12 @@ func New(cfg Config) *Settler {
 	}
 	if cfg.MaxPerHour <= 0 {
 		cfg.MaxPerHour = 200
+	}
+	if cfg.DueShare <= 0 {
+		cfg.DueShare = 0.10
+	}
+	if cfg.DueEvery <= 0 {
+		cfg.DueEvery = 30 * 24 * time.Hour
 	}
 	if cfg.HoldRate <= 0 {
 		cfg.HoldRate = 0.01
