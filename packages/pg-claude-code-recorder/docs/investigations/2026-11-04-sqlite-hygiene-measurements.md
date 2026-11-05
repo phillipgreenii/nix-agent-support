@@ -315,3 +315,37 @@ Evidence (all from the sections above, on the copy):
 
 Outcome: **no change**. No code, schema or config is changed for this decision. If a later hot statement
 shows a plan that statistics would fix, revisit with a lowered `analysis_limit` (not measured here).
+
+## Session index decision: no change (no optional index, no rebuild-indexes command)
+
+Decision rule, fixed before any code: build a `records(session, source, time_ns)` index only if a measured
+query (the query operation with a session filter ordered by time, or search) scans a session index and sorts
+with a wall time above 1 s on the copy, and the index's estimated size is acceptable.
+
+Which layout the database uses: the copy is schema_version 3. In that layout the legacy `records.session`
+column and its two indexes (`records_session`, `records_session_source_time`, listed in `legacySessionIndexes`
+in `internal/store/derived.go`) do not exist; the equivalent composite already exists as the required index
+`records_session_ref_source_time(session_ref, source, time_ns)` (750,747,648 bytes, `dbstat` table above),
+created on every open through `layoutIndexes` / `sessionRefIndexes`. In the legacy layout the same composite
+is `records_session_source_time(session, source, time_ns)`, also required. So the index under decision
+already exists in both layouts; there is nothing to add, and `records_session` is not a redundant prefix in
+a v3 database (it is not there).
+
+Evidence on the copy (S5, S6, S10 above):
+
+- The statements that filter on a session (S5 `cwdQueryRef`, S6 `fileFactsQueryRef`) use
+  `records_session_ref_source_time` and run in 0.042 s and 0.080 s warm (0.272 s and 0.210 s cold), no sort on
+  a session scan.
+- The only statement over 1 s is S10 (2.354 s cold, 0.101 s warm). It does not scan a session index and sort:
+  the planner chose `records_type (type=?)` ordered by `r.id` because the session is known only through a
+  scalar subquery. A second index with the same leading columns cannot fix that choice (the existing one is
+  already available and not picked), and the plan did not change after statistics existed (ANALYZE section).
+  S10 is hand-built, so a real generated `query` statement may differ; that is a query-shape question, not an
+  index gap.
+
+Write amplification and size: a second copy of the same key would add about 0.75 GB (the existing index's
+size, 750,747,648 bytes) and one more index update per ingested record, for no plan benefit.
+
+Outcome: **no change**. No code, schema or config is changed; there is no optional-index split and no
+`rebuild-indexes` command. Revisit only if a generated `query` statement is measured scanning a session index
+and sorting above 1 s.
