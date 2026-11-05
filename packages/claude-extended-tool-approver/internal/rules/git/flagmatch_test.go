@@ -786,6 +786,13 @@ var exactTokenExemptions = []exactTokenExemption{
 			"abbreviated spelling never reaches it in the first place — git's handle_options() accepts " +
 			"no abbreviation here either",
 	},
+	{
+		fn:        "isSafeMsgFilterSed",
+		mechanism: "*",
+		reason: "this is an ALLOWLIST gate for the one approved filter-branch shape, not a danger test: " +
+			"an abbreviated spelling (`--msg-fil`, `--forc`) simply fails to match and falls to the " +
+			"default abstain, so shortening a flag can only move the verdict toward abstain, never toward approve",
+	},
 }
 
 func isExempt(fn, mechanism string) (string, bool) {

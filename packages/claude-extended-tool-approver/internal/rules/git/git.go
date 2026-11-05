@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -487,12 +488,26 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
 	}
-	// filter-branch: approve (history rewriting used by agents for commit cleanup)
+	// filter-branch: ABSTAINS by default; exactly one narrow shape stays approved.
+	//
+	// Operator ruling (Phillip, 2026-11-05), verbatim: "typically, i would not expect
+	// an agent to use filter-branch. if it is doing something smaller, then it can use
+	// rebase commands. if it is larger, then i would want it to write a script which has
+	// checks and tests to ensure the filter-branch doesn't do the wrong thing. it is
+	// very powerful. if can constraint to simple save uses, then i'm ok with that."
+	// Every filter flag (--msg-filter, --tree-filter, --index-filter, --env-filter,
+	// --commit-filter, ...) RUNS A SHELL COMMAND per commit, so the verdict cannot rest
+	// on the verb. The one approved shape is isSafeMsgFilterSed: a single --msg-filter
+	// whose script is a whitelisted sed expression over an explicit bounded range. The
+	// redirected-context Ask comes first and is unchanged.
 	if subcmd == "filter-branch" {
 		if hasRedirectEnvVar(envs, cwd) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
+		if !isSafeMsgFilterSed(rest) {
+			return r.refuse("git: git filter-branch runs shell commands over history; use rebase for small edits or a tested script for large ones; deferring to prompt")
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git filter-branch: sed --msg-filter over a bounded range", Module: r.Name()}, nil
 	}
 	// tag: always reject — tags cause confusion in this workflow
 	if subcmd == "tag" {
@@ -2398,6 +2413,55 @@ func hasFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+var (
+	// filterBranchRangeRE is an explicit bounded range `<from>..<to>`; both sides are
+	// plain revision spellings (no `-`-leading, no shell or glob metacharacters, no `...`).
+	filterBranchRangeRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./~^@-]*\.\.[A-Za-z0-9_][A-Za-z0-9_./~^@-]*$`)
+	// filterBranchSedRE whitelists the whole msg-filter script: `sed` plus ONE quoted
+	// expression that is either `/PAT/d` or `s/PAT/REPL/` with an optional `g` flag.
+	// PAT and REPL are drawn from a closed character set, so no sed command or flag
+	// that can run or write (e, w, r, and the s///e and s///w flags), no `;`, `{}`,
+	// newline, `\`, `&`, backtick, quote or `$(` can occur. `$` is allowed only as the
+	// final PAT character, where it is followed by `/` (literal inside double quotes).
+	filterBranchSedRE = regexp.MustCompile(`^sed (?:"` + fbExpr + `"|'` + fbExpr + `')$`)
+)
+
+const (
+	fbPat  = `\^?[A-Za-z0-9 _:.-]+\$?`
+	fbRepl = `[A-Za-z0-9 _:.-]*`
+	fbExpr = `(?:/` + fbPat + `/d|s/` + fbPat + `/` + fbRepl + `/g?)`
+)
+
+// isSafeMsgFilterSed reports whether args (after `filter-branch`) are exactly: an
+// optional -f/--force, one `--msg-filter <script>` (separate token) whose script
+// matches filterBranchSedRE, and one bounded `<from>..<to>` range, in any order.
+// Anything else (another flag, a second filter, `--`, `--all`, extra operands, the
+// `=` spelling) is not the carve-out.
+func isSafeMsgFilterSed(args []string) bool {
+	var script, rng string
+	var haveScript, haveRange bool
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-f" || a == "--force":
+		case a == "--msg-filter":
+			if haveScript || i+1 >= len(args) {
+				return false
+			}
+			i++
+			script, haveScript = args[i], true
+		case filterBranchRangeRE.MatchString(a) && strings.Count(a, "..") == 1 && !strings.Contains(a, "..."):
+			if haveRange {
+				return false
+			}
+			rng, haveRange = a, true
+		default:
+			return false
+		}
+	}
+	return haveScript && haveRange && rng != "" && filterBranchSedRE.MatchString(script)
 }
 
 // hasRedirectEnvVar reports whether git will run against a redirected repository —

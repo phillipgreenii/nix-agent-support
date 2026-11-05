@@ -444,18 +444,101 @@ func TestGit_RebaseInteractiveWithSequenceEditor_Approve(t *testing.T) {
 
 func TestGit_FilterBranch_Approve(t *testing.T) {
 	r := New(nil)
+	verdictOf := func(cmd string) hookio.RuleResult {
+		return hookio.Verdict(r.Evaluate(&hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}))
+	}
 	approve := []string{
 		`FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --msg-filter 'sed "/^Refs: NO-JIRA$/d"' HEAD~4..HEAD`,
 		`git filter-branch --msg-filter 'sed "s/old/new/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter "sed 's/old/new/g'" abc1234^..HEAD`,
+		`git -C /tmp/wt filter-branch -f --msg-filter 'sed "/^Refs: NO-JIRA$/d"' HEAD~4..HEAD`,
 	}
 	for _, cmd := range approve {
-		input := &hookio.HookInput{
+		got := verdictOf(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_FilterBranch_Abstains pins the operator ruling (2026-11-05): filter-branch
+// abstains unless it is exactly the sed --msg-filter carve-out. The negative controls
+// cover the sed commands/flags that can run or write (e, w, r), every other filter
+// flag, shell metacharacters in the script, and unbounded or missing ranges.
+func TestGit_FilterBranch_Abstains(t *testing.T) {
+	r := New(nil)
+	verdictOf := func(cmd string) hookio.RuleResult {
+		return hookio.Verdict(r.Evaluate(&hookio.HookInput{
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
-		}
-		got := hookio.Verdict(r.Evaluate(input))
-		if got.Decision != hookio.Approve {
-			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}))
+	}
+	cmds := []string{
+		// Other filter flags run shell commands.
+		`git filter-branch --tree-filter 'rm -f secrets' HEAD~2..HEAD`,
+		`git filter-branch --index-filter 'git rm --cached -r x' HEAD~2..HEAD`,
+		`git filter-branch --env-filter 'export GIT_AUTHOR_NAME=x' HEAD~2..HEAD`,
+		`git filter-branch --commit-filter 'git commit-tree "$@"' HEAD~2..HEAD`,
+		`git filter-branch --subdirectory-filter sub HEAD~2..HEAD`,
+		`git filter-branch --msg-filter cat HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'rm -rf /tmp/x' HEAD~2..HEAD`,
+		// msg-filter plus a second filter flag.
+		`git filter-branch --msg-filter 'sed "s/a/b/"' --tree-filter 'rm x' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' --msg-filter 'sed "s/c/d/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter='sed "s/a/b/"' HEAD~2..HEAD`,
+		// sed e / w / r negative controls, as commands and as s flags.
+		`git filter-branch --msg-filter 'sed "e"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "1e touch /tmp/pwn"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/e"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/touch x/e"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "w /tmp/out"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/w /tmp/out"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "r /etc/passwd"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "/a/r /etc/passwd"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "/a/d;e"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "/a/d;w /tmp/out"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed -e "s/a/b/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed -i "s/a/b/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed -f /tmp/script' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/I"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/gp"' HEAD~2..HEAD`,
+		// Shell injection around or inside the script.
+		`git filter-branch --msg-filter 'sed "s/a/b/"; touch /tmp/pwn' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/" | sh' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/$(touch x)/"' HEAD~2..HEAD`,
+		"git filter-branch --msg-filter 'sed \"s/a/`touch x`/\"' HEAD~2..HEAD",
+		`git filter-branch --msg-filter 'sed "s/a/${HOME}/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/" > /tmp/x' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"
+touch x' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b\ne/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/&/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/;s/c/d/"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "{e}"' HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s|a|b|"' HEAD~2..HEAD`,
+		// Ranges that are missing, unbounded, or not a plain range.
+		`git filter-branch --msg-filter 'sed "s/a/b/"'`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' -- --all`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' --all`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' HEAD~2..`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' ..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' HEAD~2...HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' HEAD~2..HEAD HEAD~9..HEAD~5`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' HEAD~2..HEAD extra`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' '$(touch x)..HEAD'`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' --prune-empty HEAD~2..HEAD`,
+		`git filter-branch --msg-filter 'sed "s/a/b/"' -d /tmp/x HEAD~2..HEAD`,
+		`git filter-branch`,
+		`git -C /tmp/wt filter-branch --tree-filter 'rm x' HEAD~2..HEAD`,
+	}
+	for _, cmd := range cmds {
+		got := verdictOf(cmd)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain", cmd, got.Decision, got.Reason)
 		}
 	}
 }
