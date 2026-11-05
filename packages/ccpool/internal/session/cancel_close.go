@@ -200,7 +200,9 @@ func (s *Service) closeLocked(ctx context.Context, externalID, reason string, pu
 	tmuxName := TmuxName(s.d.Prefix, externalID)
 	if s.d.Tmux.HasSession(tmuxName) {
 		// deliverCommand clears the input line itself, so no separate clear here.
-		if err := s.deliverCommand(ctx, externalID, tmuxName, "/exit"); err != nil {
+		// A session that stayed after /exit is not a failed close: the exit was
+		// delivered, so fall through to waitGone and the force kill.
+		if err := s.deliverCommand(ctx, externalID, tmuxName, "/exit"); err != nil && !errors.Is(err, ErrSessionStayed) {
 			return err
 		}
 		if !s.waitGone(tmuxName, 3*time.Second) {

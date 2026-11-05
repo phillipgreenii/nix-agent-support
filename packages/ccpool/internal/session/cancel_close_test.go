@@ -350,6 +350,41 @@ func TestClose_forceKillsWhenExitIgnored(t *testing.T) {
 	}
 }
 
+func TestClose_forceKillsWhenSessionStayedAfterExit(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: true} // stays live after /exit
+	ctl := &fakeControl{err: fmt.Errorf("pg-claude-control stop: exit 9: %w", ErrSessionStayed)}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Control: ctl, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Close(ctx, "a", false); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(ctl.stops) != 1 {
+		t.Errorf("stops = %v, want one Stop", ctl.stops)
+	}
+	if !tm.killed {
+		t.Error("close must force-kill a session that stayed after /exit")
+	}
+}
+
+func TestClose_otherStopErrorSkipsForceKill(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: true}
+	ctl := &fakeControl{err: errors.New("pg-claude-control stop: exit 2: usage")}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Control: ctl, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Close(ctx, "a", false); err == nil {
+		t.Fatal("Close must return an unrelated Stop error")
+	}
+	if tm.killed {
+		t.Error("an unrelated Stop error must not force-kill")
+	}
+}
+
 func TestClose_purgeDeletesRow(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)

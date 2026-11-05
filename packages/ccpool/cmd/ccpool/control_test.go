@@ -61,3 +61,21 @@ func TestControlClientErrorMapping(t *testing.T) {
 		t.Errorf("missing command: err = %v; want ErrNoControl", err)
 	}
 }
+
+func TestControlClientSessionStayedMapping(t *testing.T) {
+	ctx := context.Background()
+	var calls []ctlCall
+	err := fakeControl(ctlSessionStayed, nil, &calls).Stop(ctx, "s")
+	if !errors.Is(err, session.ErrSessionStayed) {
+		t.Fatalf("exit 9: err = %v; want ErrSessionStayed", err)
+	}
+	if errors.Is(err, session.ErrNoControl) {
+		t.Errorf("exit 9 must not map to ErrNoControl: %v", err)
+	}
+	for _, exit := range []int{ctlNoSuchProcess, ctlNoControlMod, ctlNotAccepting} {
+		err := fakeControl(exit, nil, &calls).Stop(ctx, "s")
+		if !errors.Is(err, session.ErrNoControl) || errors.Is(err, session.ErrSessionStayed) {
+			t.Errorf("exit %d: err = %v; want ErrNoControl only", exit, err)
+		}
+	}
+}

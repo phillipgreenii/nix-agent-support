@@ -20,6 +20,7 @@ const (
 	ctlNoSuchProcess = 3 // not a running Claude
 	ctlNoControlMod  = 4 // the Claude has no control mod
 	ctlNotAccepting  = 5 // the inbox has no reader, or its buffer is full
+	ctlSessionStayed = 9 // stop: exit was sent but the process is still running
 )
 
 // controlRunFunc runs the control command and reports its exit code and stderr.
@@ -63,6 +64,8 @@ func (c *controlClient) do(ctx context.Context, stdin string, args ...string) er
 		return nil
 	case ctlNoSuchProcess, ctlNoControlMod, ctlNotAccepting:
 		return fmt.Errorf("%w: pg-claude-control exit %d: %s", session.ErrNoControl, exit, stderr)
+	case ctlSessionStayed:
+		return fmt.Errorf("%w: pg-claude-control %s: exit %d: %s", session.ErrSessionStayed, args[0], exit, stderr)
 	}
 	return fmt.Errorf("pg-claude-control %s: exit %d: %s", args[0], exit, stderr)
 }

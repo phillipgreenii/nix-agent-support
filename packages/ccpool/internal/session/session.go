@@ -218,6 +218,12 @@ var claudeChildMarkers = []string{
 // the tmux terminal it holds. Any other error is a real failure.
 var ErrNoControl = errors.New("claude is not reachable by control")
 
+// ErrSessionStayed is what a Control returns from Stop when the exit was
+// delivered but the Claude process stayed running (it answered with its
+// "stop the scheduled tasks and exit, or stay" prompt). A close then continues
+// to the force kill instead of failing; any other Stop error still fails it.
+var ErrSessionStayed = errors.New("claude stayed running after exit was delivered")
+
 // Control sends requests to a running Claude through pg-claude-control (docket
 // pg2-v77tsx). Control does not depend on the recorder. tmux stays the holder of
 // a worker's terminal: launch, liveness, pane stability and the final kill.
