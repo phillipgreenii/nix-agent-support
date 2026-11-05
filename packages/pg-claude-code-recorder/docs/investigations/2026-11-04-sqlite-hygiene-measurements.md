@@ -296,3 +296,22 @@ MEAS sqlite_stat1_exists_after=1
 The copy (about 13.4 GB) and the scratch scripts and logs under `$HOME/.cache` were deleted at the end of the
 run (`rm -rf` of the scratch directory). No file under `$STATE` was written; no code, config or schema in
 the repository changed, and the two throwaway test files were removed before the commit.
+
+## ANALYZE decision: no change (PRAGMA optimize not implemented)
+
+Decision rule, fixed before any code: run `PRAGMA optimize` (default `analysis_limit`) on connection close and
+once a day from the doctor loop only if, after `PRAGMA optimize` on the database copy, at least one of the
+hot read statements S1 to S11 changes plan or changes measured time by more than 2x. A bare `ANALYZE` is never
+run on the 13.4 GB file.
+
+Evidence (all from the sections above, on the copy):
+
+- Plans: with `sqlite_stat1` present after the optimize run, the `EXPLAIN QUERY PLAN` of S1 to S11 was
+  identical to the plans recorded before. No plan changed, including S10, which keeps choosing `records_type`.
+- Times: the largest warm change was S10 from 0.101 s to 0.089 s and S1 from 0.043 s to 0.033 s (S1 ratio
+  0.043 / 0.033 = 1.3x, S10 ratio 0.101 / 0.089 = 1.1x), all under the 2x threshold and within noise.
+- Cost: the first `PRAGMA optimize` took 143.107 s (limit 5 s), so even if it had helped, the 5 s skip rule
+  would skip the call as the daemon would run it today.
+
+Outcome: **no change**. No code, schema or config is changed for this decision. If a later hot statement
+shows a plan that statistics would fix, revisit with a lowered `analysis_limit` (not measured here).
