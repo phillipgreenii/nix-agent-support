@@ -17,22 +17,54 @@ func fakeRun(reply string, code int, err error, got *[][]string) Runner {
 
 func TestBDArgv(t *testing.T) {
 	var got [][]string
-	b := BD{Run: fakeRun("", 0, nil, &got)}
-	_ = b.Comment("i", "t")
-	_ = b.Close("i", "r")
-	_ = b.Release("i")
-	_ = b.HandOver("i")
-	_ = b.Claim("i", "act")
+	b := BD{Run: fakeRun("", 0, nil, &got)}.WithActor("act")
+	bd := b.(BD)
+	_ = bd.Comment("i", "t")
+	_ = bd.Close("i", "r")
+	_ = bd.Release("i")
+	_ = bd.HandOver("i")
+	_ = bd.Claim("i", "act")
 	want := [][]string{
-		{"bd", "comments", "add", "i", "--actor", "pg-rescue-triage", "t"},
-		{"bd", "close", "i", "--reason", "r"},
-		{"bd", "update", "i", "--status", "open", "--assignee", ""},
-		{"bd", "update", "i", "--status", "open", "--assignee", "", "--add-label", "human"},
+		{"bd", "comments", "add", "i", "--actor", "act", "t"},
+		{"bd", "close", "i", "--reason", "r", "--actor", "act"},
+		{"bd", "update", "i", "--status", "open", "--assignee", "", "--actor", "act"},
+		{"bd", "update", "i", "--status", "open", "--assignee", "", "--add-label", "human", "--actor", "act"},
 		{"bd", "update", "i", "--claim", "--actor", "act"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q", got)
 	}
+}
+
+// With no actor resolved (BEADS_ACTOR unset) every write still carries one
+// and the same one.
+func TestBDWritesShareDefaultActorWhenUnset(t *testing.T) {
+	t.Setenv("BEADS_ACTOR", "")
+	var got [][]string
+	bd := BD{Run: fakeRun("", 0, nil, &got)}
+	_ = bd.Claim("i", DefaultActor)
+	_ = bd.Comment("i", "t")
+	_ = bd.Close("i", "r")
+	_ = bd.Release("i")
+	_ = bd.HandOver("i")
+	if len(got) != 5 {
+		t.Fatalf("calls = %q", got)
+	}
+	for _, argv := range got {
+		i := indexOf(argv, "--actor")
+		if i < 0 || i+1 >= len(argv) || argv[i+1] != DefaultActor {
+			t.Fatalf("write without the shared actor: %q", argv)
+		}
+	}
+}
+
+func indexOf(s []string, v string) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestBDShowAndCommentsDecodeEnvelope(t *testing.T) {

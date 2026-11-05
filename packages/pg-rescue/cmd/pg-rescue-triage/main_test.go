@@ -50,3 +50,39 @@ func TestExitCodes(t *testing.T) {
 		t.Fatalf("tracker failure: %d", got)
 	}
 }
+
+type actorTr struct {
+	tr
+	actor *string
+}
+
+func (a actorTr) WithActor(s string) triage.Tracker { *a.actor = s; return a.tr }
+
+func TestActorIsThreadedToTracker(t *testing.T) {
+	var got string
+	env := func(k string) string {
+		switch k {
+		case "PG_ROUTER_ITEM_ID":
+			return "x-1"
+		case "BEADS_ACTOR":
+			return "boss"
+		}
+		return ""
+	}
+	var out, errb bytes.Buffer
+	skipped := tr{item: triage.Item{ID: "x-1", Status: "closed"}}
+	run(nil, env, "h", actorTr{tr: skipped, actor: &got}, &out, &errb)
+	if got != "boss" {
+		t.Fatalf("actor = %q", got)
+	}
+	got = ""
+	run(nil, func(k string) string {
+		if k == "PG_ROUTER_ITEM_ID" {
+			return "x-1"
+		}
+		return ""
+	}, "h", actorTr{tr: skipped, actor: &got}, &out, &errb)
+	if got != "pg-rescue-triage" {
+		t.Fatalf("default actor = %q", got)
+	}
+}

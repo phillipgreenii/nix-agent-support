@@ -19,6 +19,26 @@ type Runner func(ctx context.Context, argv []string) (stdout []byte, exitCode in
 type BD struct {
 	Run     Runner
 	Timeout time.Duration
+	// Actor is the identity every write carries; empty means DefaultActor.
+	Actor string
+}
+
+// DefaultActor is the write identity when none was resolved.
+const DefaultActor = "pg-rescue-triage"
+
+// WithActor returns a copy of b whose writes all carry actor (empty keeps the
+// default), so the claim and the later close, release and hand-over agree: bd
+// refuses a write whose actor differs from the claimant.
+func (b BD) WithActor(actor string) Tracker {
+	b.Actor = actor
+	return b
+}
+
+func (b BD) actor() string {
+	if b.Actor == "" {
+		return DefaultActor
+	}
+	return b.Actor
 }
 
 // ExecRunner runs argv for real.
@@ -104,25 +124,25 @@ func (b BD) Claim(id, actor string) error {
 
 // Comment implements Tracker.
 func (b BD) Comment(id, text string) error {
-	_, _, err := b.do("comments", "add", id, "--actor", "pg-rescue-triage", text)
+	_, _, err := b.do("comments", "add", id, "--actor", b.actor(), text)
 	return err
 }
 
 // Close implements Tracker.
 func (b BD) Close(id, reason string) error {
-	_, _, err := b.do("close", id, "--reason", reason)
+	_, _, err := b.do("close", id, "--reason", reason, "--actor", b.actor())
 	return err
 }
 
 // Release implements Tracker: the status change and the assignee clear are
 // one call.
 func (b BD) Release(id string) error {
-	_, _, err := b.do("update", id, "--status", "open", "--assignee", "")
+	_, _, err := b.do("update", id, "--status", "open", "--assignee", "", "--actor", b.actor())
 	return err
 }
 
 // HandOver implements Tracker.
 func (b BD) HandOver(id string) error {
-	_, _, err := b.do("update", id, "--status", "open", "--assignee", "", "--add-label", "human")
+	_, _, err := b.do("update", id, "--status", "open", "--assignee", "", "--add-label", "human", "--actor", b.actor())
 	return err
 }

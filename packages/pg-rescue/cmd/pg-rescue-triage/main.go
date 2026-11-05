@@ -39,6 +39,9 @@ func run(args []string, getenv func(string) string, host string, tr triage.Track
 	if *actor == "" {
 		*actor = "pg-rescue-triage"
 	}
+	if w, ok := tr.(interface{ WithActor(string) triage.Tracker }); ok {
+		tr = w.WithActor(*actor)
+	}
 	out, err := triage.Run(tr, triage.Options{ItemID: *itemID, Actor: *actor, Host: *hostFlag})
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-rescue-triage: %v\n", err)
