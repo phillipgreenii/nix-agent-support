@@ -70,9 +70,6 @@ type Config struct {
 	// exist and no removal run has completed within it.
 	RemoveDueShare float64
 	RemoveDueEvery time.Duration
-	// FormatHoldRate is format.holdRate: a source whose bad-line or unknown-key
-	// rate over the last day exceeds it is not removed (default 1%).
-	FormatHoldRate float64
 	// DoctorInterval is doctor.interval: how often the daemon runs doctor itself.
 	DoctorInterval time.Duration
 	// DoctorBytesPerSlice is doctor.bytes_per_slice: the bytes of the copy one
@@ -171,9 +168,6 @@ type file struct {
 		DueShare   *float64 `toml:"dueShare"`
 		DueEvery   string   `toml:"dueEvery"`
 	} `toml:"remove"`
-	Format struct {
-		HoldRate *float64 `toml:"holdRate"`
-	} `toml:"format"`
 	Doctor struct {
 		Interval       string `toml:"interval"`
 		BytesPerSlice  *int64 `toml:"bytes_per_slice"`
@@ -297,7 +291,6 @@ func Defaults(getenv func(string) string) Config {
 		RemoveMaxPerHour:    200,
 		RemoveDueShare:      0.10,
 		RemoveDueEvery:      30 * 24 * time.Hour,
-		FormatHoldRate:      0.01,
 		DoctorInterval:      24 * time.Hour,
 		DoctorBytesPerSlice: 256 << 20,
 		DoctorSliceEvery:    time.Minute,
@@ -393,12 +386,6 @@ func apply(c *Config, f file) error {
 			return fmt.Errorf("remove.dueShare must be above 0 and at most 1")
 		}
 		c.RemoveDueShare = *f.Remove.DueShare
-	}
-	if f.Format.HoldRate != nil {
-		if *f.Format.HoldRate < 0 || *f.Format.HoldRate > 1 {
-			return fmt.Errorf("format.holdRate must be between 0 and 1")
-		}
-		c.FormatHoldRate = *f.Format.HoldRate
 	}
 	if f.Query.ReadCacheMiB != nil {
 		if *f.Query.ReadCacheMiB < 1 {

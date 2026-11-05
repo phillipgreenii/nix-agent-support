@@ -931,6 +931,7 @@ func (p *Parser) bad(tx *pstx, f store.File, g store.Generation, off int64, ln i
 	if len(reason) > 200 {
 		reason = reason[:200]
 	}
+	p.cfg.Obs.Reg.Add(MLinesParsed, nil, 1)
 	p.cfg.Obs.Reg.Add(MBadLines, map[string]string{"source": f.Source}, 1)
 	_, err := tx.Exec(`INSERT OR REPLACE INTO bad_lines(file_id,gen,off,len,reason) VALUES(?,?,?,?,?)`, f.ID, g.Gen, off, ln, reason)
 	return err
@@ -950,6 +951,9 @@ func seenAt(commits []store.CopyCommit, gen int, off int64) int64 {
 
 // Metric names the parser adds to the shared registry.
 const (
+	// MLinesParsed counts every line handed to the parser, stored or bad, so
+	// bad_lines_total over it is the bad-line rate.
+	MLinesParsed   = "lines_parsed_total"
 	MBadLines      = "bad_lines_total"
 	MUnknownKeys   = "unknown_keys_total"
 	MParseLagSecs  = "parse_lag_seconds"
@@ -1004,6 +1008,9 @@ func ownTimestamp(r source.Record, tns int64) int {
 }
 
 func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record) error {
+	// One line handed to the parser and stored: the denominator of the bad-line
+	// rate alert (a bad line counts in bad() instead).
+	p.cfg.Obs.Reg.Add(MLinesParsed, nil, 1)
 	unk := map[[2]string]int{}
 	nameID := func(name string) (int64, error) { return p.fieldNameID(tx, name) }
 	// Fields a source declares into an extension table, only where the table exists.

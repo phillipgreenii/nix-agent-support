@@ -94,7 +94,6 @@ var clearBy = map[string]string{
 	BlockInProgress:      "wait: a removal is finishing; restart the recorder if it stays",
 	BlockRemoved:         "pg-claude-code-recorder extract <session> to restore it",
 	BlockQuietAge:        "wait: removal needs remove.after of quiet (a write resets the age)",
-	BlockFormat:          "update the parser for the new Claude Code format, then pg-claude-code-recorder held --retry",
 	BlockNoFiles:         "nothing to remove: no file of the Conversation is in the Claude directory",
 }
 
@@ -148,7 +147,7 @@ func (s *Settler) WhereCtx(ctx context.Context, session string) (WhereInfo, erro
 		info.Manifest = json.RawMessage(settled.Manifest)
 	}
 	if c != nil {
-		blocked, next := s.blockers(c, row, hasRow, live[session], now, nil)
+		blocked, next := s.blockers(c, row, hasRow, live[session], now)
 		info.BlockedBy = blocked
 		if !next.IsZero() {
 			info.NextEligible = &next

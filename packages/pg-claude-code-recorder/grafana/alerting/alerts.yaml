@@ -265,7 +265,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-claude-code-recorder saw over 100 new unknown keys in an hour"
-          description: "More than 100 new distinct JSON keys (source, type, key) the parser had never seen arrived in the last hour (unknown_keys_total, counted once per distinct key, not per occurrence): Claude Code probably added a field. A source whose unknown-key rate is above format.holdRate is not removed. Run pg-claude-code-recorder coverage to see the keys, then update the parser structs and re-parse."
+          description: "More than 100 new distinct JSON keys (source, type, key) the parser had never seen arrived in the last hour (unknown_keys_total, counted once per distinct key, not per occurrence): Claude Code probably added a field. The share of bad lines has its own rule, pg-ccrec-bad-line-rate. Run pg-claude-code-recorder coverage to see the keys, then update the parser structs and re-parse."
         data:
           - refId: A
             relativeTimeRange:
@@ -294,6 +294,49 @@ groups:
                 - evaluator:
                     type: gt
                     params: [100]
+
+      # Bad-line rate: the share of parsed lines that were bad over a day. Removal no longer judges the
+      # parse (a matching archive hash is enough), so a wrong parse is caught here instead. The 100-line
+      # floor keeps a near-idle day from alerting on one bad line.
+      - uid: pg-ccrec-bad-line-rate
+        title: pg-claude-code-recorder high bad-line rate
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder: more than 1 percent of the lines parsed in the last day were bad"
+          description: "bad_lines_total over lines_parsed_total for the last day is above 1 percent: Claude Code probably changed its line format, or the parser regressed. Originals are still removed once their archive matches by hash, and the archive keeps every byte, so nothing is lost: run pg-claude-code-recorder coverage to see the bad lines, fix the parser, then re-parse."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum(increase(pg_claude_code_recorder_bad_lines_total[1d])) / (sum(increase(pg_claude_code_recorder_lines_parsed_total[1d])) > 100)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.01]
 
       # Data loss: any increase of any reason in an hour. Every reason series is registered at zero at
       # start, so the first increase is visible.

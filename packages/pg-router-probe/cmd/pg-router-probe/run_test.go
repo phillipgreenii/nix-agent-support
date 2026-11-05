@@ -377,6 +377,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-ccrec-parse-stuck",
 		"pg-ccrec-held-old",
 		"pg-ccrec-unknown-key-burst",
+		"pg-ccrec-bad-line-rate",
 		"pg-ccrec-data-loss",
 		"pg-ccrec-removal-due",
 		"pg-ccrec-doctor-mismatch",

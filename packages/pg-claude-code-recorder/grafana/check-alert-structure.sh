@@ -70,7 +70,7 @@ done
 
 EXPECTED_UIDS=(
   pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-copy-lag pg-ccrec-parse-stuck
-  pg-ccrec-held-old pg-ccrec-unknown-key-burst pg-ccrec-data-loss
+  pg-ccrec-held-old pg-ccrec-unknown-key-burst pg-ccrec-bad-line-rate pg-ccrec-data-loss
   pg-ccrec-removal-due pg-ccrec-doctor-mismatch pg-ccrec-control-inbox-gone
   pg-ccrec-crash-share pg-ccrec-removal-stuck pg-ccrec-settle-tick-slow
   pg-ccrec-field-type-mismatch pg-ccrec-cpu-high pg-ccrec-wal-large pg-ccrec-loop-stalled

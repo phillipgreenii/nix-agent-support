@@ -298,6 +298,10 @@ func TestParsedRecordsAnswerQueryAndSearchThroughTheDaemonOps(t *testing.T) {
 	if v, _ := d.Obs().Reg.Counter("bad_lines_total", map[string]string{"source": claudetranscript.Name}); v != 1 {
 		t.Fatalf("bad_lines_total %v", v)
 	}
+	// The rate alert divides bad lines by every line parsed, so the bad line is in it too.
+	if v, _ := d.Obs().Reg.Counter("lines_parsed_total", nil); v < 2 {
+		t.Fatalf("lines_parsed_total %v, want the stored lines plus the bad one", v)
+	}
 	if _, werr := d.opQuery(context.Background(), []byte(`{"where":{"field":"nope","exists":true}}`)); werr == nil || werr.Name != wire.ErrBadRequest {
 		t.Fatalf("bad field: %v", werr)
 	}

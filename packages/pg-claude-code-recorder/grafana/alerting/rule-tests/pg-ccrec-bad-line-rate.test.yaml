@@ -1,0 +1,63 @@
+# promtool unit tests for the pg-ccrec-bad-line-rate alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as `alert: <uid>`
+# with `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator), the rule's `for`
+# and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, series names carry the pg_claude_code_recorder_ prefix.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: 2 bad lines in every 100 parsed (2 percent) fires after the 15m for
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_lines_parsed_total{job="pg-claude-code-recorder"}
+        values: "0+100x2000"
+      - series: pg_claude_code_recorder_bad_lines_total{job="pg-claude-code-recorder"}
+        values: "0+2x2000"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: pg-ccrec-bad-line-rate
+        exp_alerts: []
+      - eval_time: 1500m
+        alertname: pg-ccrec-bad-line-rate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: 1 bad line in every 200 parsed (0.5 percent) does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_lines_parsed_total{job="pg-claude-code-recorder"}
+        values: "0+200x2000"
+      - series: pg_claude_code_recorder_bad_lines_total{job="pg-claude-code-recorder"}
+        values: "0+1x2000"
+    alert_rule_test:
+      - eval_time: 1500m
+        alertname: pg-ccrec-bad-line-rate
+        exp_alerts: []
+
+  - name: every line bad but under 100 lines parsed in the day does not fire (the floor)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_lines_parsed_total{job="pg-claude-code-recorder"}
+        values: "0+0.01x2000"
+      - series: pg_claude_code_recorder_bad_lines_total{job="pg-claude-code-recorder"}
+        values: "0+0.01x2000"
+    alert_rule_test:
+      - eval_time: 1500m
+        alertname: pg-ccrec-bad-line-rate
+        exp_alerts: []
+
+  - name: no bad-line series at all (nothing was ever bad) gives no alert
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_lines_parsed_total{job="pg-claude-code-recorder"}
+        values: "0+100x2000"
+    alert_rule_test:
+      - eval_time: 1500m
+        alertname: pg-ccrec-bad-line-rate
+        exp_alerts: []

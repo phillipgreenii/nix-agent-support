@@ -66,3 +66,5 @@ deleteRules:
     uid: pg-ccrec-request-slow
   - orgId: 1
     uid: pg-ccrec-schema-rebuild-required
+  - orgId: 1
+    uid: pg-ccrec-bad-line-rate

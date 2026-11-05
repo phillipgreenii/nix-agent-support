@@ -168,7 +168,7 @@ import (
 // pg-claude-code-recorder/grafana/alerting/alerts.yaml, docket pg2-v77tsx phase 7c;
 // registered by darwin/modules/pg-claude-code-recorder while the daemon is deployed):
 // daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old,
-// unknown-key-burst, data-loss, removal-due, doctor-mismatch, control-inbox-gone,
+// unknown-key-burst, bad-line-rate, data-loss, removal-due, doctor-mismatch, control-inbox-gone,
 // crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled, request-slow, schema-rebuild-required and blocked-no-space. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
@@ -217,6 +217,7 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-parse-stuck",
 	"pg-ccrec-held-old",
 	"pg-ccrec-unknown-key-burst",
+	"pg-ccrec-bad-line-rate",
 	"pg-ccrec-data-loss",
 	"pg-ccrec-removal-due",
 	"pg-ccrec-doctor-mismatch",

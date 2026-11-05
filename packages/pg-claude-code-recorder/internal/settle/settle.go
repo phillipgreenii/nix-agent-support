@@ -120,11 +120,6 @@ type Hooks struct {
 	BeforeQuarantine func(session, path string)
 	AfterQuarantine  func(session, path string)
 	BeforeUnlink     func(session, path string)
-	// InFormatScan runs at the start of each per-source format-hold scan (a test
-	// makes the scan slow here); AfterFormatPrescan runs in Remove after the
-	// early scan and before the run lock is requested.
-	InFormatScan       func(source string)
-	AfterFormatPrescan func()
 	// OnHash runs once for every full-content hash the settler computes, with
 	// the path of the file it reads (a copy, an original or a clone); a test
 	// counts hashes per file here.
@@ -153,7 +148,7 @@ type Config struct {
 
 	// RemoveEnable is remove.enable; RemoveAfter remove.after (30 days);
 	// MaxPerRun and MaxPerHour are remove.maxPerRun (50) and remove.maxPerHour
-	// (200); HoldRate is format.holdRate (0.01).
+	// (200).
 	RemoveEnable bool
 	RemoveAfter  time.Duration
 	MaxPerRun    int
@@ -161,7 +156,6 @@ type Config struct {
 	// DueShare is remove.dueShare and DueEvery remove.dueEvery: when removal counts as due.
 	DueShare float64
 	DueEvery time.Duration
-	HoldRate float64
 	// Holders lists the processes that hold path open (the real one asks lsof).
 	Holders func(path string) ([]int, error)
 	// FS is the file system removal and extract act on in the Claude directory
@@ -315,9 +309,6 @@ func New(cfg Config) *Settler {
 	}
 	if cfg.DueEvery <= 0 {
 		cfg.DueEvery = 30 * 24 * time.Hour
-	}
-	if cfg.HoldRate <= 0 {
-		cfg.HoldRate = 0.01
 	}
 	if cfg.Holders == nil {
 		cfg.Holders = LsofHolders
@@ -682,7 +673,7 @@ func (s *Settler) tickLocked() (TickStats, error) {
 	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable {
 		removal := func() error {
-			_, err := s.removeLocked(RemoveOptions{}, now, nil)
+			_, err := s.removeLocked(RemoveOptions{}, now)
 			return err
 		}
 		if s.cfg.Timer != nil {

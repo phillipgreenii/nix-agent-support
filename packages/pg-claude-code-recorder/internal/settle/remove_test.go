@@ -488,25 +488,6 @@ func TestLiveProcessBlocksRemoval(t *testing.T) {
 	}
 }
 
-func TestFormatHoldKeepsFilesWhenTheParseLooksWrong(t *testing.T) {
-	e := newRemoveEnv(t, false)
-	e.write(e.transcript(), line(1)+"{broken\n{broken\n{broken\n", e.clk.Now().Add(-removeAge-time.Hour), false)
-	e.ingest(e.transcript())
-	e.parseAll()
-	e.tickSettleOnly()
-	if e.stage() != StageSettled {
-		t.Fatalf("stage %s (a bad line counts as parsed)", e.stage())
-	}
-	rep := e.remove(sess)
-	if len(rep.Removed) != 0 || !hasReason(e.skipReasons(rep, sess), BlockFormat) {
-		t.Fatalf("%+v", rep)
-	}
-	e.reconfig(func(c *Config) { c.HoldRate = 0.9 })
-	if rep := e.remove(sess); len(rep.Removed) != 1 {
-		t.Fatalf("a high holdRate should let it go: %+v", rep)
-	}
-}
-
 // seedAs seeds a second Conversation (a different session id).
 func (e *env) seedAs(id string, age time.Duration) {
 	e.t.Helper()

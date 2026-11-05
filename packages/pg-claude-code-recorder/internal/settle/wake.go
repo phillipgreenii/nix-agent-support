@@ -304,7 +304,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		var rep RemoveReport
 		run := func() error {
 			var e error
-			rep, e = s.removeLocked(RemoveOptions{Sessions: names}, now, nil)
+			rep, e = s.removeLocked(RemoveOptions{Sessions: names}, now)
 			return e
 		}
 		if s.cfg.Timer != nil {
