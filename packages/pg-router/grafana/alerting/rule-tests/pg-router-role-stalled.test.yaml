@@ -8,7 +8,7 @@
 # per scrape (the real gauge is scraped every 30s; only the shape matters). The age gauge is
 # 0 while an offer is in flight, which these cases model as zeros inside a growing age.
 # pg_router_failures_total{class=~"declined|handler-error"} is the recent-offer clause: a
-# counter that rose in the last hour.
+# counter that rose in the last hour, neutral reasons (origin-unavailable, skipped-*) excluded.
 #
 # The age exceeds 1800s at minute 31 (the 32nd scrape), so with `for: 5m` the alert is Pending
 # from 31m and Firing from 36m: not firing at 34m, firing at 40m.
@@ -92,6 +92,33 @@ tests:
               role: worker
               severity: critical
       # More than an hour after it, the offer is no longer recent.
+      - eval_time: 100m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+
+  - name: neutral declines after a fault burst do not keep the alert alive, fault declines still do
+    interval: 1m
+    input_series:
+      # The fault burst (launch-failed) stops at minute 20; neutral skips keep rising to the
+      # end. Age and count stay sticky. Fault declines alone leave the recent-offer clause
+      # until minute 80 (20 + 1h); the neutral series must not extend it.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "5x300"
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x20 20x280"
+      - series: pg_router_failures_total{class="declined",reason="skipped-bead-not-open",role="worker",job="pg-router"}
+        values: "0+1x300"
+      - series: pg_router_failures_total{class="declined",reason="origin-unavailable",role="worker",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-router-role-stalled
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: critical
       - eval_time: 100m
         alertname: pg-router-role-stalled
         exp_alerts: []

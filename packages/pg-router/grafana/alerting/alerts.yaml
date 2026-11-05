@@ -1655,6 +1655,11 @@ groups:
       #      "declined|handler-error"}[1h]) > 0`, so a role that has simply been idle
       #      (nothing bound to it arrived) never fires, however old its age and however
       #      many failures the counters still hold from before the idle spell.
+      # For the "stalled" rule the recent offer excludes the NEUTRAL reasons (origin-unavailable
+      # and skipped-*): a neutral skip is no failing offer, and counting it let a role whose
+      # fault burst had cleared keep firing, or re-fire, on skips alone because the age and
+      # the count are sticky until progress. Only the failures counter is filtered; the
+      # busy rule keeps the plain class filter.
       # The age alone, the count alone or the recent offer alone never fires. The value
       # the rule evaluates is the age (seconds), so the usual `gt 0` threshold node over
       # the filtered result applies. The age is by role only; the alert keeps the `role`
@@ -1685,7 +1690,7 @@ groups:
           severity: critical
         annotations:
           summary: "pg-router role {{ $labels.role }} has made no progress for over 30 minutes and its last offers keep failing"
-          description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 30 minutes (1800 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_unsuccessful_since_progress is 5 or more, and the role was offered work in the last hour (pg_router_failures_total, class declined or handler-error, rose). Progress is an accepted offer with no handler error, or with a budget-stop, usage-limit or triager error (the role did run); the unsuccessful count is handler errors and exit-9 declines of kind fault (a ccpool session that failed before it was ready, launch-failed). Check `pg-router status` for the role, the handler's error text in events.jsonl, and `ccpool list`. A role with nothing to do never fires this."
+          description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 30 minutes (1800 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_unsuccessful_since_progress is 5 or more, and the role had a failing offer in the last hour (pg_router_failures_total, class declined or handler-error, rose, not counting the neutral reasons origin-unavailable and skipped-*, which are no fault and do not keep this alert alive). Progress is an accepted offer with no handler error, or with a budget-stop, usage-limit or triager error (the role did run); the unsuccessful count is handler errors and exit-9 declines of kind fault (a ccpool session that failed before it was ready, launch-failed). Check `pg-router status` for the role, the handler's error text in events.jsonl, and `ccpool list`. A role with nothing to do never fires this."
         data:
           - refId: A
             relativeTimeRange:
@@ -1696,7 +1701,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (max by (role) (max_over_time(pg_router_role_last_progress_age_seconds[15m])) > 1800) and on(role) (max by (role) (pg_router_role_unsuccessful_since_progress) >= 5) and on(role) (sum by (role) (increase(pg_router_failures_total{class=~"declined|handler-error"}[1h])) > 0)
+              expr: (max by (role) (max_over_time(pg_router_role_last_progress_age_seconds[15m])) > 1800) and on(role) (max by (role) (pg_router_role_unsuccessful_since_progress) >= 5) and on(role) (sum by (role) (increase(pg_router_failures_total{class=~"declined|handler-error",reason!~"origin-unavailable|skipped-.+"}[1h])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1725,7 +1730,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router role {{ $labels.role }} has made no progress for over 4 hours and has been declined busy"
-          description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 4 hours (14400 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_busy_since_progress is 1 or more, and the role was offered work in the last hour (pg_router_failures_total, class declined or handler-error, rose). Busy is an exit-9 decline of kind busy, no kind, or a kind core does not know (a full pool, a session already in flight); neutral declines and shutdown hand-backs do not count. Lower severity than pg-router-role-stalled, which covers a role whose offers fail outright. Check `pg-router status` and the handler's pool for what the role is waiting on. A role with nothing to do never fires this."
+          description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 4 hours (14400 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_busy_since_progress is 1 or more, and the role had a failing offer in the last hour (pg_router_failures_total, class declined or handler-error, rose, not counting the neutral reasons origin-unavailable and skipped-*, which are no fault and do not keep this alert alive). Busy is an exit-9 decline of kind busy, no kind, or a kind core does not know (a full pool, a session already in flight); neutral declines and shutdown hand-backs do not count. Lower severity than pg-router-role-stalled, which covers a role whose offers fail outright. Check `pg-router status` and the handler's pool for what the role is waiting on. A role with nothing to do never fires this."
         data:
           - refId: A
             relativeTimeRange:
@@ -1736,7 +1741,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (max by (role) (max_over_time(pg_router_role_last_progress_age_seconds[15m])) > 14400) and on(role) (max by (role) (pg_router_role_busy_since_progress) >= 1) and on(role) (sum by (role) (increase(pg_router_failures_total{class=~"declined|handler-error"}[1h])) > 0)
+              expr: (max by (role) (max_over_time(pg_router_role_last_progress_age_seconds[15m])) > 14400) and on(role) (max by (role) (pg_router_role_busy_since_progress) >= 1) and on(role) (sum by (role) (increase(pg_router_failures_total{class=~"declined|handler-error",reason!~"origin-unavailable|skipped-.+"}[1h])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:

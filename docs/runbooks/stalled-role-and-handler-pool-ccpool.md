@@ -116,7 +116,9 @@ The `decline_kind` is what the alert counts. Only `fault` declines (`capacity-un
 `pool-unreadable`, `low-disk`, `launch-failed`) and handler errors count as unsuccessful; `busy`
 declines (`at-capacity`, `session-in-flight`, `command-busy`) feed the quieter
 `pg-router-role-busy-long` alert ("pg-router role has been busy a long time (by role)") instead, and
-`neutral` ones (`origin-unavailable`, `skipped-*`) count toward neither.
+`neutral` ones (`origin-unavailable`, `skipped-*`) count toward neither, and a neutral decline
+does not count as a recent failing offer either, so a role whose fault declines are more than an
+hour old resolves even while it keeps getting neutral skips.
 
 - `launch-failed` is the pre-ready decline: the session never became ready. `evidence` is the
   redacted tail of what the launch returned, which is where a `pg-wrap[<stage>]:` line appears when
