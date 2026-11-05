@@ -779,10 +779,28 @@ restart. A wake waits for a running reconcile (the settler's run lock), which is
 duration. In `event` mode `settle_tick_duration_seconds` is the duration of a wake or a reconcile and
 `settle_tick_examined_total` counts sessions processed per wake.
 
+### files.last_copy_ns: the last-seen signal of an append-mode file
+
+`files.last_copy_ns` is the recorder time of a file's newest copy commit. Applying a journal commit record sets it
+(`MAX` of the old value and the record's time, in the same statement that sets `last_size`), so it is derived from the
+journal: a replay reproduces it, and the doctor dump compares it as a `files` column. The settler's idle decision and
+the removal backlog gauge (`LastSeenByFile`, and `Settler.lastSeen` for one file) take the newest of it, the file's
+snapshot versions and tombstones, with the file's first-seen time as the floor, and no longer read the `commits`
+table. It matters only after the original is gone (while the original exists its mtime decides). An append-mode file
+has no snapshots, so without this column an actively copied file would look idle once its original was removed.
+
+How an existing database gets the column (no schema version bump): `Open` runs `ALTER TABLE files ADD COLUMN
+last_copy_ns INTEGER NOT NULL DEFAULT 0` when the column is missing and, in the same step, fills it once from
+`SELECT file_id, MAX(seen_ns) FROM commits GROUP BY file_id`. A bump would instead force a full rebuild of a multi-GB
+database for a column one aggregate can fill; measured on the live 13 GB database (106,500 commits over 54,900 files,
+90,602 files rows) the aggregate takes 44 ms. The backfill value equals what a replay computes, so a migrated and a
+rebuilt database agree. A file with no commit keeps 0, and the backfill never runs again once the column exists, so
+dropping the `commits` table later leaves it untouched.
+
 ### Removal gauges are approximate
 
 `removal_backlog_conversations` and `removal_backlog_bytes` are computed from what the event-driven flow already stored:
-the newest last-seen time of a Conversation's files (copy commits, snapshots, tombstones, first seen) and the bytes the
+the newest last-seen time of a Conversation's files (`files.last_copy_ns`, snapshots, tombstones, first seen) and the bytes the
 database holds for them (copy offset or snapshot size), in two batched statements however many Conversations there are.
 They never stat an original file and refresh at most every 5 minutes (or right after a removal, a restore or a doctor
 run). The original's modification time can be newer than the last-seen time (a change not ingested yet), so a

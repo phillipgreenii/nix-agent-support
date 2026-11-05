@@ -390,8 +390,9 @@ func (s *Reader) CopyCommits(file int64) ([]CopyCommit, error) {
 }
 
 // LastSeenByFile returns, in one aggregate statement, the newest time the
-// recorder saw each of the given files change: the latest of its copy commits,
-// snapshot versions and tombstones. A file with none of those is absent from
+// recorder saw each of the given files change: the latest of its last copy
+// commit (files.last_copy_ns, derived from the journal), snapshot versions and
+// tombstones. A file with none of those is absent from
 // the map. The ids travel as one JSON array parameter, so the statement count
 // does not depend on how many files are asked for.
 func (s *Reader) LastSeenByFile(ids []int64) (map[int64]int64, error) {
@@ -404,7 +405,7 @@ func (s *Reader) LastSeenByFile(ids []int64) (map[int64]int64, error) {
 		return nil, err
 	}
 	rows, err := s.q.Query(`SELECT file_id, MAX(ns) FROM (
-SELECT file_id, seen_ns AS ns FROM commits WHERE file_id IN (SELECT value FROM json_each(?1))
+SELECT id AS file_id, last_copy_ns AS ns FROM files WHERE last_copy_ns>0 AND id IN (SELECT value FROM json_each(?1))
 UNION ALL SELECT file_id, seen_ns FROM snapshots WHERE file_id IN (SELECT value FROM json_each(?1))
 UNION ALL SELECT file_id, at_ns FROM tombstones WHERE file_id IN (SELECT value FROM json_each(?1))
 ) GROUP BY file_id`, string(arg))
@@ -523,7 +524,7 @@ func (s *Reader) Dump() (string, error) {
 	var b strings.Builder
 	tables := []struct{ name, q string }{
 		{"meta", `SELECT key||'='||value FROM meta WHERE key IN ('epoch','schema_version') ORDER BY key`},
-		{"files", `SELECT id||'|'||source||'|'||mode||'|'||dev||'|'||ino||'|'||birth_ns||'|'||first_hash||'|'||link_target||'|'||state||'|'||first_seen_ns||'|'||last_size||'|'||cur_gen||'|'||deleted_ns FROM files ORDER BY id`},
+		{"files", `SELECT id||'|'||source||'|'||mode||'|'||dev||'|'||ino||'|'||birth_ns||'|'||first_hash||'|'||link_target||'|'||state||'|'||first_seen_ns||'|'||last_size||'|'||last_copy_ns||'|'||cur_gen||'|'||deleted_ns FROM files ORDER BY id`},
 		{"paths", `SELECT file_id||'|'||path||'|'||first_seen_ns||'|'||COALESCE(closed_ns,'') FROM paths ORDER BY file_id,path,first_seen_ns`},
 		{"generations", `SELECT file_id||'|'||gen||'|'||method||'|'||reason||'|'||start_ns||'|'||copy_offset||'|'||tail_hash||'|'||tail_len FROM generations ORDER BY file_id,gen`},
 		{"commits", `SELECT file_id||'|'||gen||'|'||seq||'|'||from_off||'|'||to_off||'|'||seen_ns FROM commits ORDER BY seq`},

@@ -343,3 +343,96 @@ func TestOpenAddsTheLookupColumnsAndTablesToAnExistingStore(t *testing.T) {
 		}
 	}
 }
+
+// files.last_copy_ns is the time of the file's newest copy commit, maintained
+// by applying the journal: a replay of the journal yields the same value (the
+// Dump carries it in the files table), a commit applied late with an older time
+// does not lower it, and a snapshot or tombstone does not touch it.
+func TestLastCopyNSIsDerivedFromTheJournalAndSurvivesReplay(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := s.NewFileID()
+	if err := s.Commit(
+		&Rec{T: TFile, At: 10, File: id, Source: "claude-transcript", Mode: "append", Dev: 1, Ino: 2, Birth: 3},
+		&Rec{T: TGen, At: 11, File: id, Gen: 1, Method: "bytes", Reason: "first"},
+		&Rec{T: TCommit, At: 500, File: id, Gen: 1, From: 0, To: 5, Size: 5, Tail: 1, TailLen: 1},
+		&Rec{T: TCommit, At: 300, File: id, Gen: 1, From: 5, To: 9, Size: 9, Tail: 1, TailLen: 1},
+		&Rec{T: TTomb, At: 900, File: id, Path: "/c/x"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	var got int64
+	if err := s.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, id).Scan(&got); err != nil || got != 500 {
+		t.Fatalf("last_copy_ns %d, %v; want 500", got, err)
+	}
+	dump, err := s.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dump, "|500|") {
+		t.Fatalf("doctor dump lacks last_copy_ns:\n%s", dump)
+	}
+	replay, err := ReplayDump(filepath.Join(dir, JournalName))
+	if err != nil || replay != dump {
+		t.Fatalf("replay differs: %v\n%s\n---\n%s", err, replay, dump)
+	}
+	var m map[int64]int64
+	err = s.ReadTx(func(rd *Reader) (e error) {
+		m, e = rd.LastSeenByFile([]int64{id})
+		return e
+	})
+	if err != nil || m[id] != 900 {
+		t.Fatalf("LastSeenByFile %v, %v; want the tombstone 900", m, err)
+	}
+	_ = s.Close()
+}
+
+// A database that predates files.last_copy_ns gets the column at the next open,
+// filled once from the newest commit of each file (a file with none keeps 0);
+// the schema version does not change and a second open changes nothing, even
+// with the commits table gone.
+func TestOpenAddsLastCopyColumnAndBackfillsItFromCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	a, b := s.NewFileID(), s.NewFileID()
+	if err := s.Commit(
+		&Rec{T: TFile, At: 10, File: a, Source: "claude-transcript", Mode: "append", Dev: 1, Ino: 2, Birth: 3},
+		&Rec{T: TGen, At: 11, File: a, Gen: 1, Method: "bytes", Reason: "first"},
+		&Rec{T: TCommit, At: 40, File: a, Gen: 1, From: 0, To: 5, Size: 5, Tail: 1, TailLen: 1},
+		&Rec{T: TCommit, At: 70, File: a, Gen: 1, From: 5, To: 9, Size: 9, Tail: 1, TailLen: 1},
+		&Rec{T: TFile, At: 10, File: b, Source: "claude-transcript", Mode: "append", Dev: 1, Ino: 3, Birth: 3},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.wdb.Exec(`ALTER TABLE files DROP COLUMN last_copy_ns`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		s = open(t, dir)
+		if i == 1 {
+			if _, err := s.wdb.Exec(`DROP TABLE commits`); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s = open(t, dir)
+		}
+		var ga, gb int64
+		if err := s.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, a).Scan(&ga); err != nil || ga != 70 {
+			t.Fatalf("open %d: file a last_copy_ns %d, %v; want 70", i, ga, err)
+		}
+		if err := s.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, b).Scan(&gb); err != nil || gb != 0 {
+			t.Fatalf("open %d: file b last_copy_ns %d, %v; want 0", i, gb, err)
+		}
+		if s.SchemaVersion() != SchemaVersion {
+			t.Fatalf("schema_version %d, the column must not change it", s.SchemaVersion())
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

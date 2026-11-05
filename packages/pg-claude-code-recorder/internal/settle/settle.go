@@ -883,26 +883,12 @@ func (s *Settler) lastSeen(f store.File) time.Time {
 	if v, ok := s.seen[f.ID]; ok {
 		return time.Unix(0, max(ns, v))
 	}
-	if cc, err := s.st.CopyCommits(f.ID); err == nil {
-		for _, c := range cc {
-			if c.SeenNS > ns {
-				ns = c.SeenNS
-			}
-		}
-	}
-	if sn, err := s.st.Snapshots(f.ID); err == nil {
-		for _, x := range sn {
-			if x.SeenNS > ns {
-				ns = x.SeenNS
-			}
-		}
-	}
-	if ts, err := s.st.Tombstones(f.ID); err == nil {
-		for _, t := range ts {
-			if t > ns {
-				ns = t
-			}
-		}
+	var got map[int64]int64
+	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+		got, err = rd.LastSeenByFile([]int64{f.ID})
+		return err
+	}); err == nil {
+		ns = max(ns, got[f.ID])
 	}
 	return time.Unix(0, ns)
 }

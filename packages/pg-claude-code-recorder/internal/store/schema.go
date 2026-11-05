@@ -28,6 +28,12 @@ package store
 // The seen table (the last observation of each file by any actor, see seen.go)
 // was added to version 4 without a version bump: a new table needs no rebuild,
 // and Open only refuses a version below SchemaVersion.
+//
+// files.last_copy_ns (the time of the file's newest copy commit, the settler's
+// last-seen signal for an append-mode file) was added to version 4 without a
+// version bump: Open adds the column in place and backfills it once from the
+// commits table (addLastCopyColumn). Replaying the journal reproduces the same
+// value, so a migrated and a rebuilt database agree.
 const SchemaVersion = 4
 
 const schemaSQL = `
@@ -44,6 +50,7 @@ CREATE TABLE IF NOT EXISTS files(
   state TEXT NOT NULL DEFAULT 'ok',
   first_seen_ns INTEGER NOT NULL,
   last_size INTEGER NOT NULL DEFAULT 0,
+  last_copy_ns INTEGER NOT NULL DEFAULT 0,
   cur_gen INTEGER NOT NULL DEFAULT 0,
   deleted_ns INTEGER NOT NULL DEFAULT 0
 );
