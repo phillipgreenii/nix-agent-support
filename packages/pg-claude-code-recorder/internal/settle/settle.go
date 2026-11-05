@@ -125,6 +125,10 @@ type Hooks struct {
 	// early scan and before the run lock is requested.
 	InFormatScan       func(source string)
 	AfterFormatPrescan func()
+	// OnHash runs once for every full-content hash the settler computes, with
+	// the path of the file it reads (a copy, an original or a clone); a test
+	// counts hashes per file here.
+	OnHash func(path string)
 }
 
 // Config configures a Settler.
@@ -361,6 +365,9 @@ type conv struct {
 	session string
 	files   []store.File
 	rel     map[int64]string
+	// hm memoizes the copy hashes of one settle or removal, whose copier lock is
+	// held throughout; nil outside one, where nothing is memoized.
+	hm map[hashKey]uint64
 }
 
 // place returns the Conversation a file belongs to and its path relative to the
@@ -1075,6 +1082,43 @@ func hashFile(path string) (uint64, int64, error) {
 	return h, fi.Size(), err
 }
 
+// hashOriginal hashes the file at path in full.
+func (s *Settler) hashOriginal(path string) (uint64, int64, error) {
+	if h := s.cfg.Hooks.OnHash; h != nil {
+		h(path)
+	}
+	return hashFile(path)
+}
+
+// hashKey names one hash of a copy: its file, generation and byte count.
+type hashKey struct {
+	file int64
+	gen  int
+	n    int64
+}
+
+// hashCopy hashes the first n bytes of a copy's generation read through the
+// pointer. openErr is the pointer's open error; readErr the hash's.
+func (s *Settler) hashCopy(c *conv, file int64, gen int, n int64) (h uint64, openErr, readErr error) {
+	k := hashKey{file, gen, n}
+	if h, ok := c.hm[k]; ok {
+		return h, nil, nil
+	}
+	ptr, err := s.st.OpenPointer(file, gen)
+	if err != nil {
+		return 0, err, nil
+	}
+	defer func() { _ = ptr.Close() }()
+	if hk := s.cfg.Hooks.OnHash; hk != nil {
+		hk(s.st.CopyPath(file, gen))
+	}
+	h, readErr = hashReader(ptr, n)
+	if readErr == nil && c.hm != nil {
+		c.hm[k] = h
+	}
+	return h, nil, readErr
+}
+
 // lastNewline returns the offset after the last newline in the first n bytes of
 // the pointer (0 when there is none).
 func lastNewline(p *store.Pointer, n int64) (int64, error) {
@@ -1121,7 +1165,7 @@ func (s *Settler) check(c *conv, quiet bool, now time.Time) (fails []Failure, re
 			}
 			fails = append(fails, fl...)
 		default:
-			fl, rg, err := s.checkAppend(f, rel, quiet, now)
+			fl, rg, err := s.checkAppend(c, f, rel, quiet, now)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1146,7 +1190,7 @@ func (s *Settler) checkSnapshot(f store.File, rel string) ([]Failure, error) {
 	if orig == "" {
 		return nil, nil
 	}
-	h, size, err := hashFile(orig)
+	h, size, err := s.hashOriginal(orig)
 	if err != nil {
 		return nil, nil
 	}
@@ -1159,7 +1203,7 @@ func (s *Settler) checkSnapshot(f store.File, rel string) ([]Failure, error) {
 	return nil, nil
 }
 
-func (s *Settler) checkAppend(f store.File, rel string, quiet bool, now time.Time) (fails []Failure, regen bool, err error) {
+func (s *Settler) checkAppend(c *conv, f store.File, rel string, quiet bool, now time.Time) (fails []Failure, regen bool, err error) {
 	if f.CurGen == 0 {
 		return nil, false, nil
 	}
@@ -1233,13 +1277,11 @@ func (s *Settler) checkAppend(f store.File, rel string, quiet bool, now time.Tim
 		}
 	}
 	if len(fails) == 0 && s.cfg.Copier.CloneMode() && orig != "" {
-		ptr, err := s.st.OpenPointer(f.ID, g.Gen)
-		if err != nil {
-			return nil, false, err
+		ch, openErr, cerr := s.hashCopy(c, f.ID, g.Gen, g.CopyOffset)
+		if openErr != nil {
+			return nil, false, openErr
 		}
-		ch, cerr := hashReader(ptr, g.CopyOffset)
-		_ = ptr.Close()
-		oh, osize, oerr := hashFile(orig)
+		oh, osize, oerr := s.hashOriginal(orig)
 		if cerr == nil && oerr == nil && (oh != ch || osize != g.CopyOffset) {
 			regen = true
 		}
@@ -1262,6 +1304,8 @@ func tailMatches(orig string, g store.Generation) bool {
 
 // settleLocked checks and settles one Conversation. The copier's lock is held.
 func (s *Settler) settleLocked(c *conv, now time.Time, wasHeld bool) (Outcome, error) {
+	c.hm = map[hashKey]uint64{}
+	defer func() { c.hm = nil }()
 	out := Outcome{Session: c.session, Stage: StageQuiet}
 	newest := s.newest(c)
 	quiet := now.Sub(newest) >= s.cfg.After || s.LowSpace()
@@ -1388,15 +1432,13 @@ func (s *Settler) manifest(c *conv, method string, now time.Time) (store.Manifes
 				mf.Generations = append(mf.Generations, store.ManifestGen{Gen: g.Gen, Size: g.CopyOffset})
 				if g.Gen == f.CurGen {
 					mf.Size = g.CopyOffset
-					ptr, err := s.st.OpenPointer(f.ID, g.Gen)
-					if err != nil {
+					h, openErr, herr := s.hashCopy(c, f.ID, g.Gen, g.CopyOffset)
+					if openErr != nil {
 						if g.CopyOffset == 0 {
 							continue
 						}
-						return m, err
+						return m, openErr
 					}
-					h, herr := hashReader(ptr, g.CopyOffset)
-					_ = ptr.Close()
 					if herr != nil {
 						return m, herr
 					}
@@ -1599,12 +1641,10 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 		if h := s.cfg.Hooks.BeforeClone; h != nil {
 			h(f.ID)
 		}
-		ptr, err := s.st.OpenPointer(f.ID, g.Gen)
-		if err != nil {
-			return false, err
+		want, openErr, herr := s.hashCopy(c, f.ID, g.Gen, g.CopyOffset)
+		if openErr != nil {
+			return false, openErr
 		}
-		want, herr := hashReader(ptr, g.CopyOffset)
-		_ = ptr.Close()
 		if herr != nil {
 			return false, herr
 		}
@@ -1629,7 +1669,7 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 			discard(fmt.Sprintf("clone is %d bytes, committed offset %d", fi.Size(), g.CopyOffset), f.ID)
 			return false, nil
 		}
-		got, _, herr := hashFile(tmp)
+		got, _, herr := s.hashOriginal(tmp)
 		if herr != nil {
 			return false, herr
 		}

@@ -722,10 +722,17 @@ func (c *Copier) appendStep(f store.File, src *os.File, size int64, path string)
 		}
 		return step{Action: "new-generation"}, nil
 	}
+	// prevTail is the last bytes of the copy when the tail check already read
+	// them (or the copy is empty), so the append can build the new tail from it.
+	var prevTail []byte
+	havePrev := g.CopyOffset == 0
 	if g.CopyOffset > 0 {
-		ok, err := c.tailMatches(f, g, src)
+		ok, tail, err := c.tailMatches(f, g, src)
 		if err != nil {
 			return step{}, err
+		}
+		if ok && int64(len(tail)) == min(int64(TailSize), g.CopyOffset) {
+			prevTail, havePrev = tail, true
 		}
 		if !ok {
 			if err := c.startGeneration(f, src, "tail_mismatch", true); err != nil {
@@ -734,7 +741,7 @@ func (c *Copier) appendStep(f store.File, src *os.File, size int64, path string)
 			return step{Action: "new-generation"}, nil
 		}
 	}
-	n, err := c.appendBytes(f, g, src, size)
+	n, err := c.appendBytes(f, g, src, size, prevTail, havePrev)
 	if err != nil {
 		return step{}, err
 	}
@@ -763,23 +770,23 @@ func (c *Copier) trimCopy(cp string, to int64) error {
 // tailMatches compares the last bytes of the copy with the file at the same
 // position. The tail comes from the sidecar when it matches its recorded hash;
 // otherwise it is re-read from the copy (a lost sidecar costs nothing).
-func (c *Copier) tailMatches(f store.File, g store.Generation, src *os.File) (bool, error) {
+func (c *Copier) tailMatches(f store.File, g store.Generation, src *os.File) (bool, []byte, error) {
 	tail, err := c.tailBytes(f, g)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if len(tail) == 0 {
-		return true, nil
+		return true, nil, nil
 	}
 	got := make([]byte, len(tail))
 	n, err := src.ReadAt(got, g.CopyOffset-int64(len(tail)))
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
+		return false, nil, err
 	}
 	if n != len(tail) {
-		return false, nil
+		return false, nil, nil
 	}
-	return string(got) == string(tail), nil
+	return string(got) == string(tail), tail, nil
 }
 
 func (c *Copier) tailBytes(f store.File, g store.Generation) ([]byte, error) {
@@ -871,8 +878,9 @@ func (c *Copier) readTailOf(cp string, off int64) ([]byte, error) {
 }
 
 // appendBytes reads from the committed offset, writes exactly the bytes read,
-// fsyncs, and only then commits the new offset.
-func (c *Copier) appendBytes(f store.File, g store.Generation, src *os.File, size int64) (int64, error) {
+// fsyncs, and only then commits the new offset. prevTail is the copy's last bytes before this
+// append when havePrev (it saves re-reading them from the copy).
+func (c *Copier) appendBytes(f store.File, g store.Generation, src *os.File, size int64, prevTail []byte, havePrev bool) (int64, error) {
 	off := g.CopyOffset
 	var data []byte
 	chunk := make([]byte, c.cfg.Chunk)
@@ -911,6 +919,12 @@ func (c *Copier) appendBytes(f store.File, g store.Generation, src *os.File, siz
 	var tail []byte
 	if len(data) >= TailSize {
 		tail = data[len(data)-TailSize:]
+	} else if havePrev {
+		joined := append(append(make([]byte, 0, len(prevTail)+len(data)), prevTail...), data...)
+		if len(joined) > TailSize {
+			joined = joined[len(joined)-TailSize:]
+		}
+		tail = joined
 	} else if c.st.ArchivedTo(f.ID, g.Gen) > 0 {
 		tail, err = c.readTailArchived(f.ID, g.Gen, newOff)
 		if err != nil {

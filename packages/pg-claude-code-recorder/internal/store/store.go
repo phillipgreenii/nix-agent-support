@@ -60,6 +60,9 @@ type Options struct {
 	StepClock func() time.Duration
 	// ReplayOnly opens for comparison: it never appends an epoch record.
 	ReplayOnly bool
+	// decoded, when set, is the journal in dir already parsed (a replay of bytes the
+	// caller decoded); Open then does not read it again.
+	decoded *decodedJournal
 	// Rebuild forces a rebuild of index.db from the journal: the existing
 	// database is set aside (index.db.pre-rebuild) and the feed epoch bumps.
 	// It is also the way past a database whose schema_version is newer than
@@ -270,7 +273,14 @@ func Open(dir string, opt Options) (*Store, error) {
 	}
 	jpath := filepath.Join(dir, JournalName)
 	endPhase := phaseOf(opt.Phase, "store_journal_read")
-	recs, good, torn, err := readJournal(jpath)
+	var recs []Rec
+	var good, torn int64
+	var err error
+	if opt.decoded != nil {
+		recs, good, torn = opt.decoded.recs, opt.decoded.good, opt.decoded.torn
+	} else {
+		recs, good, torn, err = readJournal(jpath)
+	}
 	endPhase()
 	if err != nil {
 		return nil, err

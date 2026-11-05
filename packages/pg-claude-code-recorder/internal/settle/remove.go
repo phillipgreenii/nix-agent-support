@@ -504,6 +504,8 @@ func (s *Settler) skipFile(reason string) {
 // held. It returns whether the Conversation is now removed and, when it is not,
 // the stable reason.
 func (s *Settler) removeConversation(c *conv, now time.Time) (bool, string, error) {
+	c.hm = map[hashKey]uint64{}
+	defer func() { c.hm = nil }()
 	fails, regen, err := s.check(c, true, now)
 	if err != nil {
 		return false, "", err

@@ -193,17 +193,12 @@ func (s *Settler) doctorJournal(add func(DoctorMismatch)) {
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: "reading the journal: " + err.Error()})
 		return
 	}
-	defer fz.Remove()
-	delta, err := store.JournalDelta(fz.Path)
-	if err != nil {
-		add(DoctorMismatch{Kind: MismatchJournal, Detail: "reading the journal: " + err.Error()})
-		return
-	}
+	delta := fz.Delta()
 	if fz.LastSeq > delta.LastGoodSeq {
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("the index applied sequence %d, the journal's last intact sequence is %d", fz.LastSeq, delta.LastGoodSeq)})
 		return
 	}
-	replay, rerr := store.ReplayDump(fz.Path)
+	replay, rerr := fz.Replay()
 	switch {
 	case rerr != nil:
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("dump: replay=%v", rerr)})

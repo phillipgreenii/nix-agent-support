@@ -556,19 +556,25 @@ func (s *Reader) Dump() (string, error) {
 // ReplayDump replays the journal at journalPath into a scratch state directory
 // and returns its Dump. The scratch directory is removed.
 func ReplayDump(journalPath string) (string, error) {
+	data, err := os.ReadFile(journalPath)
+	if err != nil {
+		return "", err
+	}
+	return replayDump(data, nil)
+}
+
+// replayDump replays journal bytes into a scratch directory; dec, when not nil,
+// is the bytes already decoded.
+func replayDump(data []byte, dec *decodedJournal) (string, error) {
 	dir, err := os.MkdirTemp("", "ccrec-replay-")
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	data, err := os.ReadFile(journalPath)
-	if err != nil {
-		return "", err
-	}
 	if err := os.WriteFile(dir+"/"+JournalName, data, 0o600); err != nil {
 		return "", err
 	}
-	st, err := Open(dir, Options{ReplayOnly: true})
+	st, err := Open(dir, Options{ReplayOnly: true, decoded: dec})
 	if err != nil {
 		return "", err
 	}

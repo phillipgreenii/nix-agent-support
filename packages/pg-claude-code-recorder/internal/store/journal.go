@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 )
 
 // readJournal parses the journal at path. It returns the intact records, the
@@ -20,6 +22,16 @@ func readJournal(path string) (recs []Rec, goodLen int64, tornBytes int64, err e
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	recs, goodLen, tornBytes = decodeJournal(data)
+	return recs, goodLen, tornBytes, nil
+}
+
+// journalDecodes counts decodeJournal calls (a test reads it).
+var journalDecodes atomic.Int64
+
+// decodeJournal parses journal bytes the way readJournal describes.
+func decodeJournal(data []byte) (recs []Rec, goodLen int64, tornBytes int64) {
+	journalDecodes.Add(1)
 	var off int64
 	for off < int64(len(data)) {
 		nl := bytes.IndexByte(data[off:], '\n')
@@ -33,7 +45,7 @@ func readJournal(path string) (recs []Rec, goodLen int64, tornBytes int64, err e
 		recs = append(recs, r)
 		off += int64(nl) + 1
 	}
-	return recs, off, int64(len(data)) - off, nil
+	return recs, off, int64(len(data)) - off
 }
 
 // TornJournalDelta describes the torn tail of a journal: the last intact
@@ -59,46 +71,65 @@ func JournalDelta(path string) (TornJournalDelta, error) {
 }
 
 // JournalFreeze is a consistent view of the journal and the index, both taken
-// at one instant: no commit was in flight between reading the two.
+// at one instant: no commit was in flight between reading the two. It holds
+// the journal's bytes in memory and decodes them once, for both the delta and
+// the replay.
 type JournalFreeze struct {
-	// Path is a private copy of the journal; Remove deletes it.
-	Path string
 	// LastSeq is the last sequence the index had applied.
 	LastSeq int64
 	// Live is the index's Dump.
 	Live string
-	dir  string
+
+	data []byte
+	once sync.Once
+	dec  decodedJournal
 }
 
-// Remove deletes the journal copy.
-func (j JournalFreeze) Remove() { _ = os.RemoveAll(j.dir) }
+// decodedJournal is a journal parsed once.
+type decodedJournal struct {
+	recs []Rec
+	good int64
+	torn int64
+}
 
-// FreezeJournal copies the journal and reads the index's last sequence and
-// Dump while holding the write lock. A commit writes the journal first and the
-// index second, both under that lock, so reading either without it can see the
+func (j *JournalFreeze) decoded() *decodedJournal {
+	j.once.Do(func() { j.dec.recs, j.dec.good, j.dec.torn = decodeJournal(j.data) })
+	return &j.dec
+}
+
+// FreezeJournal reads the journal and the index's last sequence and Dump while
+// holding the write lock. A commit writes the journal first and the index
+// second, both under that lock, so reading either without it can see the
 // journal ahead of the index (a false journal_differs_from_index on a live
-// daemon). The copy is then checked and replayed outside the lock.
-func (s *Store) FreezeJournal() (JournalFreeze, error) {
-	dir, err := os.MkdirTemp("", "ccrec-freeze-")
-	if err != nil {
-		return JournalFreeze{}, err
-	}
-	j := JournalFreeze{dir: dir, Path: dir + "/" + JournalName}
+// daemon). The bytes are then checked and replayed outside the lock.
+func (s *Store) FreezeJournal() (*JournalFreeze, error) {
+	j := &JournalFreeze{}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	data, err := os.ReadFile(filepath.Join(s.dir, JournalName))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		j.Remove()
-		return JournalFreeze{}, err
+		return nil, err
 	}
-	if err := os.WriteFile(j.Path, data, 0o600); err != nil {
-		j.Remove()
-		return JournalFreeze{}, err
-	}
+	j.data = data
 	j.LastSeq = s.lastSeq
 	if j.Live, err = s.Dump(); err != nil {
-		j.Remove()
-		return JournalFreeze{}, err
+		return nil, err
 	}
 	return j, nil
+}
+
+// Delta describes the frozen journal's torn tail, like JournalDelta.
+func (j *JournalFreeze) Delta() TornJournalDelta {
+	d := j.decoded()
+	var last int64
+	if len(d.recs) > 0 {
+		last = d.recs[len(d.recs)-1].Seq
+	}
+	return TornJournalDelta{LastGoodSeq: last, TornBytes: d.torn}
+}
+
+// Replay replays the frozen journal into a scratch state directory and returns
+// its Dump, like ReplayDump, without reading or decoding the journal again.
+func (j *JournalFreeze) Replay() (string, error) {
+	return replayDump(j.data, j.decoded())
 }
