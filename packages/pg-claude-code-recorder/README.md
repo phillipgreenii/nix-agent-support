@@ -28,6 +28,10 @@ the `-linux-cross-compile` check (`GOOS=linux CGO_ENABLED=0 go vet ./...`) keeps
 | `faults`      | fault injection                                                                                                | guarded by `-integration-tests-gating`                                        |
 | `soak`        | soak (`checks.<system>.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`) | guarded by `-integration-tests-gating`                                        |
 
+The `ablation` tag is a development measurement harness for the rebuild's write path, not a tier
+and not a check: it is never part of a gate, and its build is only vetted by the gating check
+below. When and how to run it: `docs/ablation/README.md`.
+
 `TestUnitTierHasNoIntegrationTests` fails a unit-tier test file that execs a built binary,
 builds Go, or needs a real external tool. `pg-claude-code-recorder-integration-tests-gating`
 proves each tag splits every package that carries it and that the module vets with and

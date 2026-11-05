@@ -13,7 +13,7 @@ package parser_test
 //	  ./ablation.test -test.run TestAblation -test.v
 //
 // PG_CCREC_ABLATION_LIST holds one "<size> <path>" line per transcript file.
-// Variants are described in docs/insert-ablation.md.
+// Variants are described in docs/ablation/README.md.
 
 import (
 	"bufio"

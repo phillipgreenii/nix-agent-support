@@ -58,7 +58,7 @@ PG_CCREC_ABLATION_LIST=corpus.txt PG_CCREC_ABLATION_WORK=/tmp/work \
 `corpus.txt` has one `<size> <absolute path>` line per transcript file. Results are appended to
 `out/results.jsonl` and a CPU profile is written to `out/<variant>.<run>.cpu.pb.gz`; read it with
 `go tool pprof -top`. The results and the top-15 profile entries of this study are in
-`insert-ablation-results.jsonl` and `insert-ablation-profiles.txt` in this directory.
+`2026-11-05-insert-cost-results.jsonl` and `2026-11-05-insert-cost-profiles.txt` in this directory.
 
 ## Corpus
 
@@ -83,7 +83,7 @@ under-represents the biggest tool_result bodies.
 Seven or more runs of the baseline, four of most variants (the machine ran at a load average near
 25 to 30 with other agents, so single runs differ by up to 25 percent; the table gives the median
 and the best run). Records per second is 180,459 divided by wall seconds. Raw numbers per run are
-in `insert-ablation-results.jsonl`.
+in `2026-11-05-insert-cost-results.jsonl`.
 
 | Variant | Change                                          | Runs | Wall median (s) | Wall best (s) | Records/s median | Records/s best | Median vs V1             |
 | ------- | ----------------------------------------------- | ---- | --------------- | ------------- | ---------------- | -------------- | ------------------------ |

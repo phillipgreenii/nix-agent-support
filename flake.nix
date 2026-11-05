@@ -6682,7 +6682,7 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       fail() { echo "pg-claude-code-recorder-integration-tests-gating: $*" >&2; exit 1; }
-                      for tag in integration faults soak loadtest; do
+                      for tag in integration faults soak loadtest ablation; do
                         pkgs=$(grep -rl --include='*_test.go' "^//go:build $tag" . | xargs -r -n1 dirname | sort -u || true)
                         if [ "$tag" = integration ] && [ -z "$pkgs" ]; then
                           fail "no test file carries //go:build integration"
@@ -6695,7 +6695,7 @@
                         go vet -tags "$tag" ./... || fail "go vet of the $tag build failed"
                       done
                       go vet ./... || fail "go vet of the default build failed"
-                      echo "pg-claude-code-recorder-integration-tests-gating: the integration, faults, soak and loadtest tags split every package that carries them; every build vets clean"
+                      echo "pg-claude-code-recorder-integration-tests-gating: the integration, faults, soak, loadtest and ablation tags split every package that carries them; every build vets clean"
                       runHook postBuild
                     '';
                   });

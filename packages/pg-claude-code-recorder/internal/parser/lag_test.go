@@ -48,7 +48,6 @@ func newLagKit(t *testing.T) *testkit.Kit {
 func lagGauges(k *testkit.Kit) (b, s, p float64) {
 	r, _ := k.Parser.RebuildLag()
 	return float64(r.LagBytes), r.LagSecs, r.Progress
-	return b, s, p
 }
 
 func lagEqual(t *testing.T, k *testkit.Kit, l *parser.Lag, label string) {
