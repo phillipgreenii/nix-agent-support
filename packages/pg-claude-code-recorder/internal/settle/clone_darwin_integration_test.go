@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
 // Integration tier (V-4): needs real APFS cloning, which the nix build sandbox
@@ -50,5 +51,12 @@ func TestRealClonefileSettleRestoresSharedBlocks(t *testing.T) {
 	after, err := sys.PrivateSize(cp)
 	if err != nil || after != 0 {
 		t.Fatalf("private size after settle = %d (%v), want 0 (blocks shared again)", after, err)
+	}
+	// The daemon's own measurement agrees with the direct one.
+	if v, _ := e.obs.Reg.Counter(obs.MSettleCloneBefore, nil); int64(v) != before {
+		t.Fatalf("settle_clone_private_before_bytes_total = %v, want %d", v, before)
+	}
+	if v, _ := e.obs.Reg.Counter(obs.MSettleCloneAfter, nil); v != 0 {
+		t.Fatalf("settle_clone_private_after_bytes_total = %v, want 0", v)
 	}
 }

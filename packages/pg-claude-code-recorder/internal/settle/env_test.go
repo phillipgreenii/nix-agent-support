@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,9 @@ var t0 = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 type fakeClone struct {
 	ok    bool
 	calls int
+	// private is the private size reported for a preserved copy; a clone (a
+	// path ending ".tmp") reports 0, as a fresh APFS clone does.
+	private int64
 }
 
 func (f *fakeClone) Probe(string, string) (bool, string) { return f.ok, "test" }
@@ -47,7 +51,13 @@ func (f *fakeClone) Clone(src, dst string) error {
 	}
 	return out.Close()
 }
-func (f *fakeClone) PrivateSize(string) (int64, error) { return 0, nil }
+
+func (f *fakeClone) PrivateSize(p string) (int64, error) {
+	if strings.HasSuffix(p, ".tmp") {
+		return 0, nil
+	}
+	return f.private, nil
+}
 
 type env struct {
 	t       *testing.T

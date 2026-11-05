@@ -664,6 +664,26 @@ The first apply after that change pays this once, and a rollback (revert the com
 Launchd settings (`KeepAlive`, `ExitTimeOut`) live outside this package and were not checked. The operator runs the
 apply.
 
+### Clone re-sharing on settle (APFS)
+
+In clone mode the copier seeds a copy with `clonefile`, and an append then gives that copy private blocks. The settle
+step re-clones the copy from the Claude original, which shares those blocks again. The `clone_private_*` series
+(`clone_private_size_max_bytes`, `clone_private_size_total_bytes`, `clone_private_files_total`) are set only when the
+copier creates a clone and are cumulative since daemon start, so a settle never moves them; there is no
+`clone_private_size_bytes`. The settle measurement is:
+
+- `settle_clone_private_before_bytes_total` and `settle_clone_private_after_bytes_total`: cumulative since daemon start,
+  the `ATTR_CMNEXT_PRIVATESIZE` of each preserved copy just before the settle re-clone replaced it, and of the clone that
+  replaced it. A re-share is `rate(before) - rate(after)` (or the difference of the two totals across a settle); after
+  is about 0 on APFS. Neither moves on Linux, in byte mode, or when the private size cannot be read.
+- the `settle_clone_private` log event, one per file settled: `session`, `file`, `before_bytes`, `after_bytes`. Use it to
+  repeat the live check on one Conversation: `rg settle_clone_private <recorder log>` after its settle, and expect
+  `after_bytes` far below `before_bytes` for a file the copier appended to.
+
+A unit test (fake clone policy) holds the counters and the event; an integration-tier test on real APFS
+(`go test -tags integration -run Clonefile ./internal/settle`) holds that the real private size drops to 0 and that the
+counters agree with it.
+
 ### Settle cadence
 
 `settle.mode` picks the loop. `scan` (the default) runs the whole-store settle tick once a minute. `event` keeps a dirty

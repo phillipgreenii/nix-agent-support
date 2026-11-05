@@ -135,6 +135,13 @@ const (
 	MSettleDirtySessions = "settle_dirty_sessions"
 	MSettleDueQueueDepth = "settle_due_queue_depth"
 	MSettleWakes         = "settle_wakes_total"
+	// Clone-mode settle re-sharing: the private (unshared) bytes of the preserved
+	// copies just before the settle re-clone replaced them, and of the clones that
+	// replaced them, summed since the daemon started. before minus after is the
+	// space the settle gave back to the Claude original.
+	MSettleCloneBefore = "settle_clone_private_before_bytes_total"
+	MSettleCloneAfter  = "settle_clone_private_after_bytes_total"
+	EvSettleClonePriv  = "settle_clone_private"
 	// Reconcile healing: sessions whose stage changed during a reconcile that no
 	// event caused, and reconciles that found the incrementally kept counts
 	// different from the from-scratch ones.
@@ -470,6 +477,8 @@ func (o *Obs) RegisterStandard() {
 	for _, r := range []string{"dirty", "due", "reconcile", "poll"} {
 		o.Reg.Add(MSettleWakes, map[string]string{"reason": r}, 0)
 	}
+	o.Reg.Add(MSettleCloneBefore, nil, 0)
+	o.Reg.Add(MSettleCloneAfter, nil, 0)
 	o.Reg.Add(MSettleReconcileRescued, nil, 0)
 	o.Reg.Add(MSettleCountsDrift, nil, 0)
 	o.Reg.Set(MWALFrames, nil, 0)

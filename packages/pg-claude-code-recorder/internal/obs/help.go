@@ -64,6 +64,8 @@ var helpTexts = map[string]string{
 	MSettleDirtySessions:      "Conversations in the settler's dirty set at the last wake (event mode).",
 	MSettleDueQueueDepth:      "Entries in the settler's due-time queue at the last wake (event mode).",
 	MSettleWakes:              "Settle wakes by trigger: dirty, due, reconcile or poll (event mode).",
+	MSettleCloneBefore:        "Private (unshared) bytes of the preserved copies just before a clone-mode settle replaced them, since the daemon started.",
+	MSettleCloneAfter:         "Private (unshared) bytes of the clones that replaced the preserved copies at settle, since the daemon started; before minus after is the space re-shared.",
 	MSettleReconcileRescued:   "Sessions whose stage changed in a settle reconcile that no event caused.",
 	MSettleCountsDrift:        "Reconciles that found the incrementally kept settle counts different from the from-scratch ones.",
 	MProcessCPUSeconds:        "CPU seconds used by the daemon process.",

@@ -409,6 +409,33 @@ func TestCloneModeReclonesAndKeepsCopy(t *testing.T) {
 	}
 }
 
+// The settle re-clone measures the private size of the copy it replaces and of
+// the clone that replaces it, so a re-share shows as before minus after.
+func TestCloneModeSettleReportsPrivateSizeBeforeAndAfter(t *testing.T) {
+	e := newEnv(t, true)
+	e.clone.private = 4096
+	e.seed(4, 48*time.Hour)
+	for _, n := range []string{obs.MSettleCloneBefore, obs.MSettleCloneAfter} {
+		if v, ok := e.obs.Reg.Counter(n, nil); !ok || v != 0 {
+			t.Fatalf("%s before settle = %v %v, want registered at 0", n, v, ok)
+		}
+	}
+	e.tick()
+	if e.stage() != StageSettled {
+		t.Fatalf("stage %s", e.stage())
+	}
+	if v, _ := e.obs.Reg.Counter(obs.MSettleCloneBefore, nil); v != 4096 {
+		t.Fatalf("before bytes = %v, want 4096", v)
+	}
+	if v, _ := e.obs.Reg.Counter(obs.MSettleCloneAfter, nil); v != 0 {
+		t.Fatalf("after bytes = %v, want 0", v)
+	}
+	evs := e.obs.EventsNamed(obs.EvSettleClonePriv)
+	if len(evs) != 1 || evs[0].Attrs["before_bytes"] != "4096" || evs[0].Attrs["after_bytes"] != "0" {
+		t.Fatalf("events %+v", evs)
+	}
+}
+
 func TestCloneWriteBetweenCheckAndCloneDiscards(t *testing.T) {
 	e := newEnv(t, true)
 	e.seed(4, 48*time.Hour)

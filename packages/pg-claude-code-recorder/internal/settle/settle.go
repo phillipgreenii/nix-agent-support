@@ -1585,6 +1585,10 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 		f   store.File
 		g   store.Generation
 		tmp string
+		// privBefore and privAfter are the private sizes of the preserved copy and
+		// of its clone; known is false when the platform cannot report them.
+		privBefore, privAfter int64
+		known                 bool
 	}
 	var clones []cl
 	discard := func(why string, file int64) {
@@ -1627,7 +1631,13 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 			discard("clone failed: "+err.Error(), f.ID)
 			return false, nil
 		}
-		clones = append(clones, cl{f, g, tmp})
+		x := cl{f: f, g: g, tmp: tmp}
+		if b, berr := policy.PrivateSize(s.st.CopyPath(f.ID, g.Gen)); berr == nil {
+			if a, aerr := policy.PrivateSize(tmp); aerr == nil {
+				x.privBefore, x.privAfter, x.known = b, a, true
+			}
+		}
+		clones = append(clones, x)
 		fi, err := os.Stat(tmp)
 		if err != nil {
 			return false, err
@@ -1667,6 +1677,15 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 		}
 	}
 	faults.At("settle.after-rename")
+	for _, x := range clones {
+		if !x.known {
+			continue
+		}
+		s.cfg.Obs.Reg.Add(obs.MSettleCloneBefore, nil, float64(x.privBefore))
+		s.cfg.Obs.Reg.Add(obs.MSettleCloneAfter, nil, float64(x.privAfter))
+		s.cfg.Obs.Event(obs.EvSettleClonePriv, "session", c.session, "file", strconv.FormatInt(x.f.ID, 10),
+			"before_bytes", strconv.FormatInt(x.privBefore, 10), "after_bytes", strconv.FormatInt(x.privAfter, 10))
+	}
 	m, err := s.manifest(c, "clone", now)
 	if err != nil {
 		return false, err
