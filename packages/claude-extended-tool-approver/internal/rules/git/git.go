@@ -3508,6 +3508,14 @@ func execSinkFlagReason(subcmd string, rest []string) (string, bool) {
 		flags = []string{"upload-pack"}
 	case "push":
 		flags = []string{"receive-pack", "exec"}
+	case "rebase":
+		// `--exec <cmd>` / `-x <cmd>` run a shell command after each rebased commit.
+		// Measured on git 2.54.0 (rebaseexec_test.go): --exec, --exec=, -x, -x<cmd>, a
+		// cluster (-ix) and abbreviations (--exe, --ex=) each RAN the command.
+		flags = []string{"exec"}
+		if rebaseHasShortX(rest) {
+			return "git rebase -x runs a shell command after each commit (the short spelling of --exec); deferring to prompt", true
+		}
 	default:
 		return "", false
 	}
@@ -3517,6 +3525,30 @@ func execSinkFlagReason(subcmd string, rest []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// rebaseHasShortX reports whether rest has a short-flag cluster carrying `x`
+// (`git rebase -x`). Unlike cmdparse.HasShortFlag it stops scanning a cluster at a
+// value-taking short (`-X<strategy>`, `-s<strategy>`, `-C<n>`, `-S<key>`), whose
+// glued value is not more flag letters (`-Xsubtree=lex` is not `-x`). It stops at `--`.
+func rebaseHasShortX(rest []string) bool {
+	for _, a := range rest {
+		if a == "--" {
+			return false
+		}
+		if len(a) < 2 || a[0] != '-' || a[1] == '-' {
+			continue
+		}
+		for i := 1; i < len(a); i++ {
+			switch a[i] {
+			case 'x':
+				return true
+			case 'X', 's', 'C', 'S':
+				i = len(a)
+			}
+		}
+	}
+	return false
 }
 
 // outputFlagReason reports whether rest carries `--output[=<path>]` (any abbreviation
