@@ -236,6 +236,10 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_BEADS_PREFIX` — expected bead prefix, asserted at precheck (default `zr`, a
   deployment-specific default — set it to your prefix)
 - `PG_ROUTER_CONFIG` — explicit `config.toml` path (default `<RepoRoot>/.pg-router/config.toml`)
+- `PG_ROUTER_LOAD_BACKOFF_THRESHOLD` — host 1-minute load average above which the long-running
+  producer tick skips polling sources (it still dispatches, expires and publishes; skipped sources
+  stay due and are polled by the first tick at or below the threshold). 0 or less disables; an
+  unreadable load never backs off (default 50)
 - `PG_ROUTER_BUDGET_TOKENS` — per-worker token budget; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_COST` — per-worker cost budget in cents; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_TIME` — per-worker wall-clock budget in seconds (default 1500)

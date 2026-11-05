@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/pg-router/internal/config"
 )
 
 // load1 reports the host's 1-minute load average, for the producer-tick
@@ -53,4 +55,19 @@ func parseSysctlLoadavg(s string) (float64, bool) {
 	}
 	v, err := strconv.ParseFloat(f[0], 64)
 	return v, err == nil
+}
+
+// loadBackoff reports whether the producer pass should be skipped this tick:
+// the host load1 is above cfg.LoadBackoffThreshold. A threshold of 0 or less
+// disables it, and an unreadable load never backs off (fail open, so a missing
+// sysctl cannot silence every source). The load comes from the load1 package var.
+func loadBackoff(cfg config.Config) (float64, bool) {
+	if cfg.LoadBackoffThreshold <= 0 {
+		return 0, false
+	}
+	l, ok := load1()
+	if !ok {
+		return 0, false
+	}
+	return l, l > cfg.LoadBackoffThreshold
 }

@@ -1390,7 +1390,18 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 	// PublishTick, or one failing source would stop the very work that frees the
 	// log (at the hard limit the loop would wedge for good). rpt is whatever the
 	// pass managed to record before it stopped.
-	rpt, err := o.ProduceTick(ctx, q)
+	// Load backoff: above cfg.LoadBackoffThreshold the producer pass is skipped
+	// (beads list sources were killed at their 40s deadline while load1 was 80 to
+	// 140, and each poll is more subprocess load). Everything else in the tick
+	// still runs; the skipped sources stay due and are polled by the first tick
+	// at or below the threshold.
+	var rpt discover.ProduceReport
+	var err error
+	if l, over := loadBackoff(cfg); over {
+		slog.Warn("producer tick skipped: host load above the backoff threshold", "load1", l, "threshold", cfg.LoadBackoffThreshold)
+	} else {
+		rpt, err = o.ProduceTick(ctx, q)
+	}
 	if err != nil && ctx.Err() != nil {
 		// The router's own shutdown cancelled the tick (bead pg2-zdowv,
 		// DEC-OBS-8): expected, not a producer failure.

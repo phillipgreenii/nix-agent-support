@@ -40,6 +40,13 @@ type Config struct {
 	MaxWorker     int
 	MaxWait       time.Duration
 	PollInterval  time.Duration
+	// LoadBackoffThreshold is the host 1-minute load average above which the
+	// long-running producer tick skips producing (it still dispatches, expires and
+	// publishes), so pull sources stop adding subprocess load to an overloaded host
+	// and stop dying on their list deadline. Skipped sources stay due and are
+	// polled by the first tick at or below the threshold. 0 or less disables the
+	// backoff. Default DefaultLoadBackoffThreshold; env PG_ROUTER_LOAD_BACKOFF_THRESHOLD.
+	LoadBackoffThreshold float64
 	// RetryBackoff is the pool-wide DEFAULT handler retry cadence (INV-FAIL-2,
 	// pg2-0c8yz): how long the core waits before re-offering a pre-accept
 	// decline, before an event's own expiresAt bounds it. A per-role
@@ -290,6 +297,7 @@ func Default() Config {
 		MaxWorker:             1,
 		MaxWait:               1800 * time.Second,
 		PollInterval:          10 * time.Second,
+		LoadBackoffThreshold:  DefaultLoadBackoffThreshold,
 		RetryBackoff:          backoff.Default(),
 		CompactThresholdBytes: DefaultCompactThresholdBytes,
 		MaxLogBytes:           DefaultMaxLogBytes,
@@ -338,6 +346,7 @@ func Load() (Config, error) {
 	c.WorktreeDir = envStr("PG_ROUTER_WORKTREE_DIR", c.WorktreeDir)
 	c.MaxWait = envSecs("PG_ROUTER_MAX_WAIT", c.MaxWait)
 	c.PollInterval = envSecs("PG_ROUTER_POLL_INTERVAL", c.PollInterval)
+	c.LoadBackoffThreshold = envFloat("PG_ROUTER_LOAD_BACKOFF_THRESHOLD", c.LoadBackoffThreshold)
 	c.Effort = envStr("PG_ROUTER_EFFORT", c.Effort)
 	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
 	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
@@ -945,6 +954,18 @@ func envBytes(key string, def int64) (int64, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return n, nil
+}
+
+// DefaultLoadBackoffThreshold is the load1 above which producer ticks back off.
+const DefaultLoadBackoffThreshold = 50.0
+
+func envFloat(key string, def float64) float64 {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func envInt(key string, def int) int {

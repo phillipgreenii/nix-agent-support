@@ -1818,3 +1818,17 @@ func TestWorkedExampleOrphanChecks(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadBackoffThreshold(t *testing.T) {
+	if got := Default().LoadBackoffThreshold; got != 50 {
+		t.Errorf("default LoadBackoffThreshold = %v, want 50", got)
+	}
+	t.Setenv("PG_ROUTER_LOAD_BACKOFF_THRESHOLD", "72.5")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LoadBackoffThreshold != 72.5 {
+		t.Errorf("LoadBackoffThreshold = %v, want 72.5 from env", c.LoadBackoffThreshold)
+	}
+}
