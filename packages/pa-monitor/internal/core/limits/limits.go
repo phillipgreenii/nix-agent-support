@@ -11,7 +11,6 @@ package limits
 
 import (
 	"encoding/json"
-	"os"
 	"time"
 )
 
@@ -86,18 +85,6 @@ func boundedReset(r Record, reset func(Record) *int64, maxHorizon time.Duration)
 		return nil
 	}
 	return rst
-}
-
-// ReadStatusRecords parses every line of one status.jsonl and returns each
-// parseable, ts-bearing record. Malformed / ts-less lines are skipped, not fatal;
-// an unreadable file yields nil. Reads the whole file (files are tiny) and
-// hand-splits on '\n' to avoid bufio.Scanner's default token-size limit.
-func ReadStatusRecords(path string) []Record {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return ParseStatusRecords(data)
 }
 
 // ParseStatusRecords parses status.jsonl bytes the way ReadStatusRecords does,

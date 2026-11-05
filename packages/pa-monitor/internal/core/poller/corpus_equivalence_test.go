@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus/corpustest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
@@ -60,7 +60,7 @@ func eqTranscript(t *testing.T, home, cwd, filename string, mtime time.Time, lin
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, filename)
-	body := strings.Join(lines, "\n") + "\n"
+	body := strings.Join(stamp(lines, mtime), "\n") + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -77,13 +77,27 @@ func eqSubagent(t *testing.T, mainPath, agentName string, mtime time.Time, lines
 		t.Fatal(err)
 	}
 	path := filepath.Join(sub, agentName)
-	body := strings.Join(lines, "\n") + "\n"
+	body := strings.Join(stamp(lines, mtime), "\n") + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, mtime, mtime); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// stamp gives each line without a timestamp the file's time: the recorder takes
+// a record's time from the line, so a fixture line that carries none would be
+// stamped with the wall clock and make the runs differ.
+func stamp(lines []string, at time.Time) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		if !strings.Contains(l, `"timestamp"`) && strings.HasPrefix(l, "{") {
+			l = `{"timestamp":"` + at.UTC().Format(time.RFC3339) + `",` + l[1:]
+		}
+		out[i] = l
+	}
+	return out
 }
 
 // buildEquivalenceCorpus writes a shared ~/.claude covering the cases where the
@@ -136,16 +150,15 @@ func buildEquivalenceCorpus(t *testing.T) (sessionsDir, home string, pidAlive fu
 // given corpus. The old inline path was removed in pg2-66h9g, so the Monitor is
 // the only corpus reader; the source-level equivalence vs the native pricer /
 // sibling limits source lives in corpus_pricing_equivalence_test.go.
-func newMonitorPoller(sessionsDir, home string, pidAlive func(int) bool, now time.Time) *Poller {
-	mon := corpus.New(home, &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: pidAlive})
+func newMonitorPoller(t *testing.T, sessionsDir, home string, pidAlive func(int) bool, now time.Time) *Poller {
+	t.Helper()
+	m := corpustest.StartMirror(t, sessionsDir, home, pidAlive)
+	mon := corpus.New(m.Facts, m.Discovery())
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())
 	mon.Register(corpus.NewUsagePricingObserver(eqPrices))
 	mon.Register(corpus.NewLimitsObserver())
 	return &Poller{
-		SessionsDir:   sessionsDir,
-		ClaudeHome:    home,
-		PidAlive:      pidAlive,
 		IdleThreshold: time.Hour,
 		Now:           func() time.Time { return now },
 		Monitor:       mon,
@@ -164,14 +177,14 @@ func TestSnapshot_CorpusMonitor_MetricParity(t *testing.T) {
 	ctx := context.Background()
 
 	rec := newFakeRec()
-	p := newMonitorPoller(sessionsDir, home, pidAlive, now)
+	p := newMonitorPoller(t, sessionsDir, home, pidAlive, now)
 	p.SetPhaseRecorder(rec)
 
 	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatal(err)
 	}
-	if rec.scans["full"] == 0 {
-		t.Errorf("cold scan: RecordScan(full) not emitted from the Monitor tail; scans=%v", rec.scans)
+	if rec.scans["feed"] == 0 {
+		t.Errorf("cold scan: RecordScan(feed) not emitted from the Monitor tail; scans=%v", rec.scans)
 	}
 	if rec.phases["discover"] == 0 {
 		t.Errorf("discover phase not emitted from the Monitor; phases=%v", rec.phases)
@@ -179,11 +192,15 @@ func TestSnapshot_CorpusMonitor_MetricParity(t *testing.T) {
 	if rec.spawns["git_branch"] == 0 {
 		t.Errorf("git_branch subprocess metric not emitted from the poller; spawns=%v", rec.spawns)
 	}
-	// Second scan on the unchanged corpus -> cache_hit from the Monitor tail.
+	// Second scan on the unchanged corpus: the Monitor reports another feed
+	// fold, which reads nothing (steady state).
 	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatal(err)
 	}
-	if rec.scans["cache_hit"] == 0 {
-		t.Errorf("second scan: RecordScan(cache_hit) not emitted from the Monitor tail; scans=%v", rec.scans)
+	if rec.scans["feed"] < 2 {
+		t.Errorf("second scan: RecordScan(feed) not emitted from the Monitor; scans=%v", rec.scans)
+	}
+	if got := p.Monitor.LinesFoldedLastScan(); got != 0 {
+		t.Errorf("second scan folded %d lines, want none", got)
 	}
 }

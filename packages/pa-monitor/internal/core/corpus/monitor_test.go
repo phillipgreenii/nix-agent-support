@@ -1,184 +1,281 @@
 package corpus
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus/corpustest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session/sessiontest"
-	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
-// stubEnv keeps Discoverer hermetic (no ps -E subprocess per session).
-func stubEnv(string, int) (map[string]string, error) { return map[string]string{}, nil }
+const cwd = "/example/proj"
 
-func writeSessionRecord(t *testing.T, sessionsDir string, pid int, sessID, cwd, name string) {
+var t0 = time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+
+func ts(d time.Duration) string { return t0.Add(d).Format(time.RFC3339) }
+
+func userLine(sid string, at time.Duration, text string) string {
+	return fmt.Sprintf(`{"type":"user","timestamp":%q,"sessionId":%q,"message":{"role":"user","content":[{"type":"text","text":%q}]}}`, ts(at), sid, text)
+}
+
+func assistantLine(sid string, at time.Duration, model string, in, out int) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"sessionId":%q,"message":{"id":"m-%d","role":"assistant","model":%q,"usage":{"input_tokens":%d,"output_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[]}}`, ts(at), sid, int(at/time.Second), model, in, out)
+}
+
+func titleLine(sid, title string) string {
+	return fmt.Sprintf(`{"type":"custom-title","timestamp":%q,"customTitle":%q,"sessionId":%q}`, ts(0), title, sid)
+}
+
+func apiErrorLine(sid string, at time.Duration, kind, text string) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"sessionId":%q,"error":%q,"isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":%q}]}}`, ts(at), sid, kind, text)
+}
+
+func statusLine(sid string, tsSec int64, pct float64, reset int64) string {
+	return fmt.Sprintf(`{"ts":%d,"session_id":%q,"five_hour_pct":%v,"five_hour_resets_at":%d}`, tsSec, sid, pct, reset)
+}
+
+type rig struct {
+	env *corpustest.Env
+	m   *Monitor
+	so  *SessionSnapshotObserver
+	seo *SubagentErrorObserver
+	po  *UsagePricingObserver
+	lo  *LimitsObserver
+}
+
+func newRig(t *testing.T) *rig {
 	t.Helper()
-	nameField := ""
-	if name != "" {
-		nameField = fmt.Sprintf(`,"name":%q`, name)
+	e := corpustest.Start(t)
+	m := New(e.Facts, e.Discovery())
+	r := &rig{
+		env: e, m: m, so: NewSessionSnapshotObserver(), seo: NewSubagentErrorObserver(),
+		po: NewUsagePricingObserver(usage.PriceTable{Default: usage.ModelPrices{InputPerMTok: 5, OutputPerMTok: 25}}), lo: NewLimitsObserver(),
 	}
-	js := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":%q,"startedAt":1776000000000,"kind":"interactive","entrypoint":"cli"%s}`,
-		pid, sessID, cwd, nameField)
-	if err := os.WriteFile(filepath.Join(sessionsDir, fmt.Sprintf("%d.json", pid)), []byte(js), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	m.Register(r.so)
+	m.Register(r.seo)
+	m.Register(r.po)
+	m.Register(r.lo)
+	return r
 }
 
-func newMonitorWithObservers(home string, disc session.Discovery) (*Monitor, *SessionSnapshotObserver, *SubagentErrorObserver) {
-	m := New(home, disc)
-	so := NewSessionSnapshotObserver()
-	seo := NewSubagentErrorObserver()
-	m.Register(so)
-	m.Register(seo)
-	return m, so, seo
-}
-
-func TestScan_PopulatesProjectionsAndTopology(t *testing.T) {
-	root := t.TempDir()
-	sessionsDir := filepath.Join(root, "sessions")
-	home := filepath.Join(root, "claude-home")
-	cwd := "/tmp/proj"
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dir := projectDir(t, home, cwd)
-
-	writeSessionRecord(t, sessionsDir, 111, "s1", cwd, "Alpha")
-	main := writeTranscript(t, dir, "s1.jsonl", time.Unix(1000, 0),
-		titleLine("Alpha"), assistantLine("claude-x", 100, 50))
-	sub := subagentsDirFor(t, main)
-	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1500, 0),
-		apiErrorLine("server_error", "boom", "2026-07-20T10:00:00Z"))
-
-	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
-	m, _, _ := newMonitorWithObservers(home, disc)
-
-	sessions, err := m.Scan(time.Unix(2000, 0))
+func (r *rig) scan(t *testing.T) []*session.Session {
+	t.Helper()
+	s, err := r.m.Scan(t0.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
+	return s
+}
+
+func TestScan_ResolvesByTitleAndFoldsTranscriptAndSubagents(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "Alpha", true)
+	// The file named for the session id is NOT the one titled "Alpha": the title wins.
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "old"), assistantLine("s1", time.Second, "claude-x", 1, 1))
+	r.env.Put(corpustest.TranscriptRel(cwd, "s2"), titleLine("s2", "Alpha"), userLine("s2", time.Minute, "hello"), assistantLine("s2", 2*time.Minute, "claude-x", 100, 50))
+	r.env.Put(corpustest.SubagentRel(cwd, "s2", "a1"), apiErrorLine("s2", 3*time.Minute, "server_error", "boom"))
+
+	sessions := r.scan(t)
 	if len(sessions) != 1 {
-		t.Fatalf("got %d sessions, want 1", len(sessions))
+		t.Fatalf("sessions = %d, want 1", len(sessions))
 	}
-
-	snap, ok := m.SessionSnapshot("s1")
-	if !ok || snap.TotalTokens != 50 || snap.Model != "claude-x" {
-		t.Fatalf("SessionSnapshot(s1) = (%+v, %v), want tokens=50 model=claude-x", snap, ok)
+	ref, mtime, ok := r.m.ResolvedPath("s1")
+	if !ok || ref == "" {
+		t.Fatalf("ResolvedPath not ok: %q %v", ref, ok)
 	}
-	subErr, ok := m.SubagentError("s1")
-	if !ok || subErr == nil || subErr.Kind != transcript.ErrServerError || !subErr.FromSubagent {
-		t.Fatalf("SubagentError(s1) = (%+v, %v), want server_error FromSubagent", subErr, ok)
+	if !mtime.Equal(t0.Add(2 * time.Minute)) {
+		t.Errorf("mtime = %v, want the title-matched transcript's last record", mtime)
 	}
-	gotPath, gotMtime, gotOK := m.ResolvedPath("s1")
-	if !gotOK || gotPath != main || !gotMtime.Equal(time.Unix(1000, 0)) {
-		t.Fatalf("ResolvedPath(s1) = (%q, %v, %v), want (%q, 1000, true)", gotPath, gotMtime, gotOK, main)
+	snap, _ := r.m.SessionSnapshot("s1")
+	if snap.FirstPrompt != "hello" || snap.TotalTokens != 50 {
+		t.Errorf("snapshot = %+v, want the Alpha transcript's fold", snap)
 	}
-	if got := m.MaxActivity("s1"); !got.Equal(time.Unix(1500, 0)) {
-		t.Fatalf("MaxActivity(s1) = %v, want 1500 (subagent newer than transcript)", got)
+	subErr, ok := r.m.SubagentError("s1")
+	if !ok || subErr == nil || !subErr.FromSubagent || subErr.Text != "boom" {
+		t.Fatalf("SubagentError = %+v %v, want the subagent's terminal error", subErr, ok)
 	}
-	// The session slice carries the resolved mtime for the poller.
-	if !sessions[0].TranscriptMTime.Equal(time.Unix(1000, 0)) {
-		t.Fatalf("session TranscriptMTime = %v, want 1000", sessions[0].TranscriptMTime)
+	if got := r.m.MaxActivity("s1"); !got.Equal(t0.Add(3 * time.Minute)) {
+		t.Errorf("MaxActivity = %v, want the subagent's newer record time", got)
 	}
 }
 
-func TestScan_DeadPidSessionEnriched(t *testing.T) {
-	root := t.TempDir()
-	sessionsDir := filepath.Join(root, "sessions")
-	home := filepath.Join(root, "claude-home")
-	cwd := "/tmp/dead"
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dir := projectDir(t, home, cwd)
-	writeSessionRecord(t, sessionsDir, 222, "dead1", cwd, "")
-	writeTranscript(t, dir, "dead1.jsonl", time.Unix(1000, 0), assistantLine("claude-y", 10, 7))
-
-	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return false }, ReadEnv: stubEnv}
-	m, _, _ := newMonitorWithObservers(home, disc)
-	sessions, err := m.Scan(time.Unix(2000, 0))
-	if err != nil || len(sessions) != 1 {
-		t.Fatalf("Scan = (%d sessions, %v), want 1 dead-PID session enriched", len(sessions), err)
-	}
-	if sessions[0].PidAlive {
-		t.Fatalf("expected dead PID")
-	}
-	snap, ok := m.SessionSnapshot("dead1")
-	if !ok || snap.TotalTokens != 7 {
-		t.Fatalf("dead-PID SessionSnapshot = (%+v, %v), want tokens=7 (still enriched)", snap, ok)
+func TestScan_FallsBackToSessionIDThenNewest(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s9"), userLine("s9", time.Hour, "newest"))
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "mine"))
+	r.scan(t)
+	if snap, _ := r.m.SessionSnapshot("s1"); snap.FirstPrompt != "mine" {
+		t.Errorf("FirstPrompt = %q, want the session-id file even though another is newer", snap.FirstPrompt)
 	}
 }
 
-func TestScan_PrunesVanishedSessionState(t *testing.T) {
-	root := t.TempDir()
-	sessionsDir := filepath.Join(root, "sessions")
-	home := filepath.Join(root, "claude-home")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dirA := projectDir(t, home, "/tmp/a")
-	dirB := projectDir(t, home, "/tmp/b")
-	writeSessionRecord(t, sessionsDir, 111, "sa", "/tmp/a", "")
-	writeSessionRecord(t, sessionsDir, 222, "sb", "/tmp/b", "")
-	mainA := writeTranscript(t, dirA, "sa.jsonl", time.Unix(1000, 0), assistantLine("m", 1, 1))
-	mainB := writeTranscript(t, dirB, "sb.jsonl", time.Unix(1000, 0), assistantLine("m", 1, 1))
-	// Subagents so the subagent-tail cache is populated (and thus prunable).
-	writeTranscript(t, subagentsDirFor(t, mainA), "agent-1.jsonl", time.Unix(1000, 0), apiErrorLine("server_error", "x", "2026-07-20T10:00:00Z"))
-	writeTranscript(t, subagentsDirFor(t, mainB), "agent-1.jsonl", time.Unix(1000, 0), apiErrorLine("server_error", "x", "2026-07-20T10:00:00Z"))
+func TestScan_IncrementalEqualsCold(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	rel := corpustest.TranscriptRel(cwd, "s1")
+	r.env.Put(rel, userLine("s1", 0, "hello"), assistantLine("s1", time.Second, "claude-x", 100, 50))
+	r.scan(t)
+	r.env.Add(rel, assistantLine("s1", 2*time.Second, "claude-x", 200, 30))
+	r.scan(t)
+	warm, _ := r.m.SessionSnapshot("s1")
 
-	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
-	m, _, _ := newMonitorWithObservers(home, disc)
-	if _, err := m.Scan(time.Unix(2000, 0)); err != nil {
+	cold := New(r.env.Facts, r.env.Discovery())
+	so := NewSessionSnapshotObserver()
+	cold.Register(so)
+	if _, err := cold.Scan(t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.topo) != 2 || len(m.tt.cache) != 2 {
-		t.Fatalf("after first scan: topo=%d tt.cache=%d, want 2/2", len(m.topo), len(m.tt.cache))
+	coldSnap, _ := so.Snapshot("s1")
+	if !reflect.DeepEqual(warm, coldSnap) {
+		t.Fatalf("incremental != cold:\n warm=%+v\ncold=%+v", warm, coldSnap)
 	}
-	// Session sb vanishes.
-	if err := os.Remove(filepath.Join(sessionsDir, "222.json")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.Scan(time.Unix(3000, 0)); err != nil {
-		t.Fatal(err)
-	}
-	if len(m.topo) != 1 || len(m.tt.cache) != 1 || len(m.st.cache) != 1 {
-		t.Fatalf("after prune: topo=%d tt.cache=%d st.cache=%d, want 1/1/1", len(m.topo), len(m.tt.cache), len(m.st.cache))
-	}
-	if _, ok := m.SessionSnapshot("sb"); ok {
-		t.Fatalf("vanished session sb still in SessionSnapshot projection")
+	if warm.TotalTokens != 80 || warm.FirstPrompt != "hello" {
+		t.Fatalf("unexpected snapshot %+v", warm)
 	}
 }
 
-// TestScan_WatchPathsIncludeRegistryFiles pins that the fast-tier watch set
-// carries each discovered session's registry file and the registry directory (so
-// a registry-only state change or a newly-created registry file is seen fast).
-func TestScan_WatchPathsIncludeRegistryFiles(t *testing.T) {
-	root := t.TempDir()
-	sessionsDir := filepath.Join(root, "sessions")
-	home := filepath.Join(root, "claude-home")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatal(err)
+func TestScan_SteadyStateReadsNothing(t *testing.T) {
+	r := newRig(t)
+	for i := 0; i < 3; i++ {
+		sid := fmt.Sprintf("s%d", i)
+		r.env.Register(100+i, sid, cwd, "", true)
+		r.env.Put(corpustest.TranscriptRel(cwd, sid), userLine(sid, 0, "x"), assistantLine(sid, time.Second, "claude-x", 1, 1))
 	}
-	dir := projectDir(t, home, "/tmp/w")
-	writeSessionRecord(t, sessionsDir, 111, "sw", "/tmp/w", "")
-	main := writeTranscript(t, dir, "sw.jsonl", time.Unix(1000, 0), assistantLine("m", 1, 1))
+	r.scan(t)
+	if r.m.LinesFoldedLastScan() == 0 || r.m.FilesFoldedLastScan() != 3 {
+		t.Fatalf("cold scan folded %d lines in %d files", r.m.LinesFoldedLastScan(), r.m.FilesFoldedLastScan())
+	}
+	r.scan(t)
+	if r.m.LinesFoldedLastScan() != 0 || r.m.FilesFoldedLastScan() != 0 {
+		t.Errorf("steady scan folded %d lines in %d files, want none", r.m.LinesFoldedLastScan(), r.m.FilesFoldedLastScan())
+	}
+	if got := r.m.QueriesLastScan(); got != 1 {
+		t.Errorf("steady scan made %d recorder calls, want 1 (one feed poll)", got)
+	}
+}
 
-	disc := &sessiontest.FileDiscoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
-	m, _, _ := newMonitorWithObservers(home, disc)
-	if _, err := m.Scan(time.Unix(2000, 0)); err != nil {
+func TestScan_AppliesResetBeforeFolding(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	rel := corpustest.TranscriptRel(cwd, "s1")
+	r.env.Put(rel, userLine("s1", 0, "first draft"), assistantLine("s1", time.Second, "claude-x", 100, 900))
+	r.scan(t)
+	if snap, _ := r.m.SessionSnapshot("s1"); snap.TotalTokens != 900 {
+		t.Fatalf("before rewrite: %+v", snap)
+	}
+	// Replace the file's bytes: the recorder starts a new generation and says so
+	// with a reset entry; nothing of the old lines may survive in the fold.
+	r.env.Put(rel, userLine("s1", 0, "second draft"), assistantLine("s1", time.Second, "claude-x", 1, 7))
+	r.scan(t)
+	snap, _ := r.m.SessionSnapshot("s1")
+	if snap.FirstPrompt != "second draft" || snap.TotalTokens != 7 {
+		t.Fatalf("after rewrite: %+v, want only the new bytes", snap)
+	}
+}
+
+func TestScan_PricesTranscriptsOfNoSessionInsideTheWindowOnly(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "x"), assistantLine("s1", time.Second, "claude-x", 1000, 100))
+	// A transcript of an ended-and-gone session, recent: priced. An ancient one: not read.
+	r.env.Put(corpustest.TranscriptRel(cwd, "gone"), assistantLine("gone", 2*time.Second, "claude-x", 2000, 200))
+	old := strings.ReplaceAll(assistantLine("old", 0, "claude-x", 9000, 900), ts(0), "2025-01-01T00:00:00Z")
+	r.env.Put(corpustest.TranscriptRel(cwd, "old"), old)
+	r.scan(t)
+	if got, want := len(r.po.recs), 2; got != want {
+		t.Errorf("pricing holds %d transcripts, want %d (session + recent, not ancient)", got, want)
+	}
+	if blk := r.m.Block(t0.Add(time.Hour)); blk == nil {
+		t.Errorf("no active block from recent records")
+	}
+	if ok, err := r.m.CostProbed(); !ok || err != nil {
+		t.Errorf("CostProbed = %v %v", ok, err)
+	}
+}
+
+func TestScan_FoldsStatusFilesIntoLimits(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "x"))
+	reset := t0.Add(4 * time.Hour).Unix()
+	r.env.Put(corpustest.StatusRel(cwd, "s1"), statusLine("s1", t0.Unix(), 40, reset))
+	r.scan(t)
+	lim := r.m.Limits()
+	if lim == nil || lim.FiveHourPct == nil || *lim.FiveHourPct != 40 {
+		t.Fatalf("Limits = %+v, want 40%%", lim)
+	}
+	r.env.Add(corpustest.StatusRel(cwd, "s1"), statusLine("s1", t0.Unix()+60, 55, reset))
+	r.scan(t)
+	if lim := r.m.Limits(); lim == nil || *lim.FiveHourPct != 55 {
+		t.Fatalf("Limits after append = %+v, want 55%%", lim)
+	}
+}
+
+func TestScan_PicksUpASessionDiscoveredLater(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "one"))
+	r.scan(t)
+	r.env.Register(222, "s2", "/example/other", "", true)
+	r.env.Put(corpustest.TranscriptRel("/example/other", "s2"), userLine("s2", 0, "two"))
+	r.scan(t)
+	if snap, _ := r.m.SessionSnapshot("s2"); snap.FirstPrompt != "two" {
+		t.Errorf("s2 snapshot = %+v", snap)
+	}
+}
+
+func TestScan_ReadsNoClaudeFile(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	rel := corpustest.TranscriptRel(cwd, "s1")
+	r.env.Put(rel, userLine("s1", 0, "hello"), assistantLine("s1", time.Second, "claude-x", 10, 5))
+	r.env.Unreadable()
+	r.scan(t)
+	if snap, _ := r.m.SessionSnapshot("s1"); snap.FirstPrompt != "hello" || snap.TotalTokens != 5 {
+		t.Fatalf("snapshot without file access = %+v", snap)
+	}
+}
+
+func TestScan_RecorderDownIsDaemonOfflineWithNoFallback(t *testing.T) {
+	r := newRig(t)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "hello"))
+	r.scan(t)
+	r.env.Stop()
+	_, err := r.m.Scan(t0.Add(time.Hour))
+	if !errors.Is(err, session.ErrDaemonOffline) {
+		t.Fatalf("Scan with the recorder down = %v, want daemon offline", err)
+	}
+}
+
+// TestNoCodeOpensAClaudeFile pins that the corpus package never reads a
+// transcript, subagent or status file itself: those calls are gone from it.
+func TestNoCodeOpensAClaudeFile(t *testing.T) {
+	banned := []string{"os.Open", "os.ReadFile", "os.ReadDir", "os.Stat", "os.Lstat", "TailLines", "ScanIncremental", "LastAPIError", "ReadStatusRecords"}
+	entries, err := os.ReadDir(".")
+	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]bool{}
-	for _, p := range m.WatchPaths() {
-		got[p] = true
-	}
-	for _, want := range []string{main, filepath.Join(sessionsDir, "111.json"), sessionsDir} {
-		if !got[want] {
-			t.Errorf("WatchPaths missing %q; got %v", want, m.WatchPaths())
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Clean(e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range banned {
+			if strings.Contains(string(b), call) {
+				t.Errorf("%s calls %s: the corpus must read through the recorder", e.Name(), call)
+			}
 		}
 	}
 }

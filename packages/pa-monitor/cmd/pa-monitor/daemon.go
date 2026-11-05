@@ -387,9 +387,6 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 // composition root — is where the concrete adapter is named; the poller and
 // daemon see only the CostPricer port.
 func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cache *provider.Cache) (*poller.Poller, *block.Tracker, *week.Tracker) {
-	home, _ := os.UserHomeDir()
-	claudeHome := filepath.Join(home, ".claude")
-
 	// The recorder is the one source of registrations and liveness: no
 	// ~/.claude/sessions read and no pid probe, and no fallback to them.
 	facts := recorderfacts.New(client.Options{Name: "pa-monitor-daemon"})
@@ -411,7 +408,7 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 
 	p := &poller.Poller{
 		Registry:           facts,
-		ClaudeHome:         claudeHome,
+		Facts:              facts,
 		PlanTier:           cfg.PlanTier,
 		BlockCapUSD:        acct.BlockCap(),
 		WorkingThreshold:   cfg.WorkingThreshold,
@@ -435,7 +432,7 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 	// the provider cache. The Discoverer reads process env through the provider
 	// cache (session-id keyed, WhilePIDAlive), so `ps -E` runs once per session,
 	// not once per tick.
-	mon := corpus.New(claudeHome, &session.Discoverer{
+	mon := corpus.New(facts, &session.Discoverer{
 		Registry: facts,
 		ReadEnv:  cache.Env,
 	})

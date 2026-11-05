@@ -34,10 +34,11 @@ func recorderWithLiveSession(t *testing.T) *clienttest.Env {
 // process): the session and its liveness come from the recorder's Process facts.
 func TestProducerReadsSessionsAndLivenessFromTheRecorder(t *testing.T) {
 	e := recorderWithLiveSession(t)
+	facts := recorderfacts.New(client.Options{Socket: e.Socket})
 	p := &Poller{
-		Registry:   recorderfacts.New(client.Options{Socket: e.Socket}),
-		ClaudeHome: t.TempDir(),
-		Now:        func() time.Time { return time.UnixMilli(recStartMs + 60000) },
+		Registry: facts,
+		Facts:    facts,
+		Now:      func() time.Time { return time.UnixMilli(recStartMs + 60000) },
 	}
 	ds, err := p.Producer().Assemble(context.Background(), time.UnixMilli(recStartMs+60000))
 	if err != nil {
@@ -58,10 +59,11 @@ func TestProducerReadsSessionsAndLivenessFromTheRecorder(t *testing.T) {
 func TestProducerReportsDaemonOfflineAndDoesNotFallBack(t *testing.T) {
 	e := recorderWithLiveSession(t)
 	e.Stop()
+	facts := recorderfacts.New(client.Options{Socket: e.Socket})
 	p := &Poller{
-		Registry:   recorderfacts.New(client.Options{Socket: e.Socket}),
-		ClaudeHome: e.ClaudeDir,
-		Now:        func() time.Time { return time.UnixMilli(recStartMs + 60000) },
+		Registry: facts,
+		Facts:    facts,
+		Now:      func() time.Time { return time.UnixMilli(recStartMs + 60000) },
 	}
 	ds, err := p.Producer().Assemble(context.Background(), time.UnixMilli(recStartMs+60000))
 	if err != nil {

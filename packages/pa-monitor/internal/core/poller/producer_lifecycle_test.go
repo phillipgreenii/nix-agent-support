@@ -14,10 +14,10 @@ import (
 // cancels + joins so publishing ceases.
 func TestProducer_Lifecycle_StartSeedsStopJoins(t *testing.T) {
 	sessionsDir, home, pidAlive := buildEquivalenceCorpus(t)
-	p := newMonitorPoller(sessionsDir, home, pidAlive, time.Now())
+	p := newMonitorPoller(t, sessionsDir, home, pidAlive, time.Now())
 	prod := p.Producer()
 	prod.Now = time.Now // real clock so GeneratedAt advances between publishes
-	prod.Interval = 2 * time.Millisecond
+	prod.SetChangeSource(&feedChangeSource{interval: 2 * time.Millisecond})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -60,10 +60,10 @@ func TestProducer_Lifecycle_StartSeedsStopJoins(t *testing.T) {
 // batch, so the two touch disjoint state — no data race.
 func TestProducer_ConcurrentPublishAndSnapshot_NoRace(t *testing.T) {
 	sessionsDir, home, pidAlive := buildEquivalenceCorpus(t)
-	p := newMonitorPoller(sessionsDir, home, pidAlive, time.Now())
+	p := newMonitorPoller(t, sessionsDir, home, pidAlive, time.Now())
 	prod := p.Producer()
 	prod.Now = time.Now
-	prod.Interval = time.Millisecond
+	prod.SetChangeSource(&feedChangeSource{interval: time.Millisecond})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -82,10 +82,10 @@ func TestProducer_ConcurrentPublishAndSnapshot_NoRace(t *testing.T) {
 // the observer set is fixed once the producer goroutine owns the Monitor.
 func TestProducer_RegisterAfterStartPanics(t *testing.T) {
 	sessionsDir, home, pidAlive := buildEquivalenceCorpus(t)
-	p := newMonitorPoller(sessionsDir, home, pidAlive, time.Now())
+	p := newMonitorPoller(t, sessionsDir, home, pidAlive, time.Now())
 	prod := p.Producer()
 	prod.Now = time.Now
-	prod.Interval = time.Second
+	prod.SetChangeSource(&feedChangeSource{interval: time.Second})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

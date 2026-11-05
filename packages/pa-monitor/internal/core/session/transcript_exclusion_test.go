@@ -1,10 +1,7 @@
 package session
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 )
 
 // TestIsTranscriptFile is the ADR 0021 §2 truth table: a real transcript ends in
@@ -53,54 +50,5 @@ func TestIsStatusSiblingFile(t *testing.T) {
 		if got := IsStatusSiblingFile(c.name); got != c.want {
 			t.Errorf("IsStatusSiblingFile(%q) = %v, want %v", c.name, got, c.want)
 		}
-	}
-}
-
-// TestResolveTranscriptIgnoresStatusFile proves a frequently-rewritten
-// <id>.status.jsonl is NEVER selected as the transcript, even when it is the
-// newest file by mtime (the load-bearing failure mode from ADR 0021 §2).
-func TestResolveTranscriptIgnoresStatusFile(t *testing.T) {
-	home := t.TempDir()
-	dir := filepath.Join(home, "projects", "-Users-me-proj")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// The real transcript is older; the status file is the newest by mtime.
-	tx := writeTranscript(t, dir, "sess-1.jsonl", "", time.Now().Add(-1*time.Hour))
-	statusPath := filepath.Join(dir, "sess-1.status.jsonl")
-	if err := os.WriteFile(statusPath, []byte(`{"ts":1700000000,"five_hour_pct":34}`+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if err := os.Chtimes(statusPath, now, now); err != nil {
-		t.Fatal(err)
-	}
-
-	s := &Session{Cwd: "/Users/me/proj", SessionID: "sess-1"}
-	path, _, ok := ResolveTranscript(home, s)
-	if !ok {
-		t.Fatal("ResolveTranscript ok=false, want true (real transcript present)")
-	}
-	if path != tx {
-		t.Errorf("ResolveTranscript picked %q, want the real transcript %q (never the status file)", path, tx)
-	}
-}
-
-// TestResolveTranscriptReturnsFalseWhenOnlyStatusFilePresent guards the case where
-// a directory holds ONLY a status file: it must resolve to nothing, not select the
-// status file.
-func TestResolveTranscriptReturnsFalseWhenOnlyStatusFilePresent(t *testing.T) {
-	home := t.TempDir()
-	dir := filepath.Join(home, "projects", "-Users-me-proj")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	statusPath := filepath.Join(dir, "sess-1.status.jsonl")
-	if err := os.WriteFile(statusPath, []byte(`{"ts":1700000000}`+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := &Session{Cwd: "/Users/me/proj", SessionID: "sess-1"}
-	if _, _, ok := ResolveTranscript(home, s); ok {
-		t.Error("ResolveTranscript ok=true, want false (only a status file present)")
 	}
 }

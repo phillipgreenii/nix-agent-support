@@ -1,33 +1,34 @@
 package corpus
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
+	"sort"
 	"time"
+
+	ct "github.com/phillipgreenii/claude-transcript"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
-// Monitor is the single owner of corpus discovery, transcript resolution, and
-// per-file tailing. One Scan per tick joins the session registry with the project
-// transcripts, resolves each session's transcript once (offset-tailed title cache),
-// tails the transcript + subagent files each active session needs, AND walks the
-// in-window transcript + status-sibling supersets so the UsagePricing and Limits
-// observers are fed from the SAME single decode — feeding the registered observers
-// and exposing per-session topology (resolved path, mtime, maxActivity) plus the
-// pricing/limits projections. Phase 1 runs Scan synchronously from Poller.Snapshot;
-// the producer goroutine + DerivedState arrive in phase 3.
+// Monitor is the single owner of the corpus read. It reads Claude's transcripts,
+// subagent files and status files from the recorder (the change feed names which
+// files changed; the raw bytes of the new lines come from the recorder), never
+// from the files themselves. One Scan per tick joins the session registry with
+// the transcripts the recorder holds, resolves each session's transcript,
+// folds the new lines of every changed file once, and feeds the registered
+// observers (the session snapshot, the subagent error, the pricing and the
+// limits projections) from that single fold. A recorder that is not answering
+// makes Scan return session.ErrDaemonOffline; there is no fallback to files.
 type Monitor struct {
-	claudeHome string
-	disc       session.Discovery
-	rec        Recorder
-
-	titles *titleCache
-	tt     *transcriptTail
-	st     *subagentTail
-	stat   *statusTail
-	walker *corpusWalker
+	disc session.Discovery
+	rec  Recorder
+	rd   *reader
 
 	observers  []Observer
 	sessionObs *SessionSnapshotObserver
@@ -37,35 +38,20 @@ type Monitor struct {
 
 	topo map[string]sessionTopology
 
-	// watch is the fast-tier ChangeSource watch set from the last Scan: the active
-	// sessions' resolved transcript paths + all status-sibling paths + the session
-	// registry files and directory. The producer
-	// hands this to the ChangeSource so its ≤1s poll stats the low-latency set
-	// (active transcripts + status) for size/mtime changes (design §6).
-	watch []string
-
-	// perf deltas from the last Scan (Monitor-initiated work; proxies for opens,
-	// which happen inside transcript.ScanIncremental / transcript.LastAPIError /
-	// limits.ReadStatusRecords).
-	lastTitleProbes  int
-	lastScans        int
-	lastReadDirs     int
-	lastFileReads    int
-	lastStatusReads  int
-	lastPricingFiles int
+	// perf figures of the last Scan.
+	lastQueries int
+	lastLines   int
+	lastFiles   int
+	lastKept    int
 }
 
-// New constructs a Monitor over claudeHome using disc for session discovery.
-func New(claudeHome string, disc session.Discovery) *Monitor {
+// New constructs a Monitor that reads files through facts and discovers
+// sessions through disc.
+func New(facts Facts, disc session.Discovery) *Monitor {
 	return &Monitor{
-		claudeHome: claudeHome,
-		disc:       disc,
-		titles:     newTitleCache(),
-		tt:         newTranscriptTail(),
-		st:         newSubagentTail(),
-		stat:       newStatusTail(),
-		walker:     newCorpusWalker(),
-		topo:       map[string]sessionTopology{},
+		disc: disc,
+		rd:   newReader(facts),
+		topo: map[string]sessionTopology{},
 	}
 }
 
@@ -94,13 +80,14 @@ func (m *Monitor) SetPhaseRecorder(r any) {
 	}
 }
 
-// pricingWindow is the mtime window the Monitor opens transcript files within for
-// pricing: the current ISO week (so CurrentWeekly sees every this-week record)
-// plus a 12h block-anchor safety margin for early-week (a 5h block can span the
-// week boundary). Files older than this are never opened (design §2/§8). The only
-// resulting divergence from the old unbounded pricer is >1 week of continuous
-// activity with no >=5h gap, which re-phases the local block estimate (documented,
-// estimate-only — the authoritative server-side 5h% flows through Limits).
+// pricingWindow is the age of record the Monitor folds transcripts for pricing:
+// the current ISO week (so CurrentWeekly sees every this-week record) plus a 12h
+// block-anchor safety margin for early-week (a 5h block can span the week
+// boundary). Transcripts older than this are not read unless a session needs
+// them. The only resulting divergence from the old unbounded pricer is >1 week of
+// continuous activity with no >=5h gap, which re-phases the local block estimate
+// (documented, estimate-only; the authoritative server-side 5h% flows through
+// Limits).
 func pricingWindow(now time.Time) time.Duration {
 	const floor = 12 * time.Hour
 	if sinceMonday := now.Sub(usage.MondayAnchor(now)); sinceMonday > floor {
@@ -109,18 +96,13 @@ func pricingWindow(now time.Time) time.Duration {
 	return floor
 }
 
-// Scan discovers sessions, resolves + tails each one's transcript and subagent
-// files once, walks the in-window transcript + status-sibling supersets for the
-// pricing/limits observers, populates observers + topology, and prunes all
-// Monitor-owned state to the active set. It records the "discover" phase around
-// ONLY Discover() (resolve/tail cost is reported via RecordScan, so wrapping the
-// whole Scan in "discover" would double-count — S1). Returns the discovered
-// sessions with TranscriptMTime set from resolution.
+// Scan discovers sessions, brings the recorder's changes into the per-file
+// folds, resolves each session's transcript, populates the observers and
+// topology, and prunes the Monitor's state to what is still wanted. It records
+// the "discover" phase around ONLY Discover(). Returns the discovered sessions
+// with TranscriptMTime set from resolution (the time of the transcript's last
+// record).
 func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
-	titleBase, scanBase := m.titles.opens, m.tt.scans
-	readDirBase, readBase := m.st.readDirs, m.st.reads
-	statusReadBase := m.stat.reads
-
 	if m.pricingObs != nil {
 		m.pricingObs.resetErr()
 	}
@@ -132,134 +114,201 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 		return nil, err
 	}
 
+	ids := make([]string, 0, len(sessions))
 	activeIDs := make(map[string]bool, len(sessions))
-	activeDirs := make(map[string]bool, len(sessions))
-	activePaths := make(map[string]bool)       // transcript paths (sessions ∪ in-window walk)
-	activeStatusPaths := make(map[string]bool) // status-sibling paths
-	foldedPaths := make(map[string]bool)       // transcript paths already folded in the session loop
-	newTopo := make(map[string]sessionTopology, len(sessions))
-
 	for _, s := range sessions {
+		ids = append(ids, s.SessionID)
 		activeIDs[s.SessionID] = true
-		activeDirs[projDir(m.claudeHome, s)] = true
+	}
 
-		path, mtime, ok := m.titles.resolve(m.claudeHome, s)
-		if ok {
-			s.TranscriptMTime = mtime
-		}
+	m.rd.queries, m.rd.linesFolded, m.rd.filesFolded = 0, 0, 0
+	foldStart := time.Now()
+	foldErr, err := m.sync(now, ids)
+	if err != nil {
+		return nil, err
+	}
+	recordScan(m.rec, "feed", time.Since(foldStart), int64(m.rd.linesFolded))
 
-		snap, records, ferr := m.tt.fold(path, mtime, m.rec)
-		if m.sessionObs != nil && m.sessionObs.Criteria().matches(Transcript, mtime, true, now) {
-			m.sessionObs.set(s.SessionID, snap)
-		}
-		if path != "" {
-			activePaths[path] = true
-			foldedPaths[path] = true
-			// Route the active session's transcript records to pricing from the
-			// SAME fold — the file is opened once for both projections.
-			if m.pricingObs != nil {
-				m.pricingObs.setRecords(path, records)
-				m.pricingObs.noteScanErr(ferr)
+	keep := map[string]bool{} // files still wanted (by ref)
+	newTopo := make(map[string]sessionTopology, len(sessions))
+	cutoff := now.Add(-pricingWindow(now))
+	for _, s := range sessions {
+		fs := m.resolve(s)
+		if fs == nil {
+			if m.sessionObs != nil && m.sessionObs.Criteria().matches(Transcript, time.Time{}, true, now) {
+				m.sessionObs.set(s.SessionID, transcript.Snapshot{})
 			}
+			newTopo[s.SessionID] = sessionTopology{}
+			continue
 		}
+		keep[fs.ref] = true
+		s.TranscriptMTime = fs.last
 
-		subErr, maxSubMtime := m.st.fold(s.SessionID, path)
-		maxAct := laterOf(mtime, maxSubMtime)
+		if m.sessionObs != nil && m.sessionObs.Criteria().matches(Transcript, fs.last, true, now) {
+			m.sessionObs.set(s.SessionID, fs.snap)
+		}
+		subErr, maxSub := m.subagents(fs, keep)
+		maxAct := laterOf(fs.last, maxSub)
 		if m.subErrObs != nil && m.subErrObs.Criteria().matches(Subagent, maxAct, true, now) {
 			m.subErrObs.set(s.SessionID, subErr)
 		}
-
-		newTopo[s.SessionID] = sessionTopology{resolvedPath: path, mtime: mtime, maxActivity: maxAct, ok: ok}
+		newTopo[s.SessionID] = sessionTopology{resolvedPath: fs.ref, mtime: fs.last, maxActivity: maxAct, ok: true}
 	}
 	m.topo = newTopo
 
-	// Corpus walk: fold in-window transcripts NOT already folded (pricing
-	// superset) + status siblings (limits), each read at most once. Skipped
-	// entirely when neither observer is registered (phase-1a Monitors).
-	if m.pricingObs != nil || m.limitsObs != nil {
-		files, werr := m.walker.walk(m.claudeHome, pricingWindow(now), now)
-		if werr != nil && m.pricingObs != nil {
-			m.pricingObs.noteScanErr(werr)
-		}
-		for _, wf := range files {
-			switch wf.class {
-			case Transcript:
-				if m.pricingObs == nil || foldedPaths[wf.path] {
-					continue // no pricing consumer, or already folded (session loop routed it)
-				}
-				activePaths[wf.path] = true
-				_, records, ferr := m.tt.fold(wf.path, wf.mtime, m.rec)
-				m.pricingObs.setRecords(wf.path, records)
-				m.pricingObs.noteScanErr(ferr)
-			case StatusSibling:
-				if m.limitsObs == nil {
-					continue
-				}
-				activeStatusPaths[wf.path] = true
-				m.limitsObs.setRecords(wf.path, m.stat.foldFile(wf.path, wf.size, wf.mtime))
+	// Feed the pricing and limits observers from the same fold, then prune every
+	// Monitor-owned map to the files still wanted: a transcript in the pricing
+	// window, a session's own files, and every status file.
+	for ref, fs := range m.rd.files {
+		switch fs.kind {
+		case kindStatus:
+			keep[ref] = true
+		default:
+			if fs.last.After(cutoff) || keep[ref] {
+				keep[ref] = true
 			}
 		}
 	}
-
-	// Prune ALL Monitor-owned state to the active set every Scan — else these maps
-	// grow for the daemon's lifetime, the exact defect this epic fixes (S2).
-	m.tt.prune(activePaths)
-	m.st.prune(activeIDs)
-	m.stat.prune(activeStatusPaths)
-	m.titles.prune(activeDirs)
+	for ref, fs := range m.rd.files {
+		if !keep[ref] {
+			delete(m.rd.files, ref)
+			continue
+		}
+		switch fs.kind {
+		case kindStatus:
+			if m.limitsObs != nil {
+				m.limitsObs.setRecords(ref, fs.status)
+			}
+		default:
+			if m.pricingObs != nil {
+				m.pricingObs.setRecords(ref, fs.records)
+			}
+		}
+	}
 	if m.pricingObs != nil {
-		m.pricingObs.prunePaths(activePaths)
+		m.pricingObs.noteScanErr(foldErr)
+		m.pricingObs.prunePaths(keep)
 	}
 	if m.limitsObs != nil {
-		m.limitsObs.prunePaths(activeStatusPaths)
+		m.limitsObs.prunePaths(keep)
 	}
 	for _, o := range m.observers {
 		o.Prune(activeIDs)
 	}
 
-	// Build the fast-tier watch set: active sessions' resolved transcripts + all
-	// status siblings + the session registry files (and their directory, so a
-	// newly-created registry file is seen too). A registry-only state change
-	// (e.g. busy -> waiting at a permission prompt) writes no transcript line, so
-	// without these it would wait for the slow-tier rescan. Order is irrelevant
-	// (the ChangeSource stats into a map).
-	watch := make([]string, 0, 2*len(newTopo)+len(activeStatusPaths)+1)
-	if dd, ok := m.disc.(interface{ Dir() string }); ok && dd.Dir() != "" {
-		watch = append(watch, dd.Dir())
-	}
-	for _, s := range sessions {
-		if s.RegistryPath != "" {
-			watch = append(watch, s.RegistryPath)
-		}
-	}
-	for _, tp := range newTopo {
-		if tp.resolvedPath != "" {
-			watch = append(watch, tp.resolvedPath)
-		}
-	}
-	for sp := range activeStatusPaths {
-		watch = append(watch, sp)
-	}
-	m.watch = watch
-
-	m.lastTitleProbes = m.titles.opens - titleBase
-	m.lastScans = m.tt.scans - scanBase
-	m.lastReadDirs = m.st.readDirs - readDirBase
-	m.lastFileReads = m.st.reads - readBase
-	m.lastStatusReads = m.stat.reads - statusReadBase
-	m.lastPricingFiles = len(activePaths)
-
+	m.lastQueries, m.lastLines, m.lastFiles, m.lastKept = m.rd.queries, m.rd.linesFolded, m.rd.filesFolded, len(m.rd.files)
 	return sessions, nil
 }
 
-// WatchPaths returns the fast-tier ChangeSource watch set from the last Scan:
-// the active sessions' resolved transcript paths, all status-sibling paths, and
-// the session registry files (plus the registry directory).
-// The producer feeds it to the ChangeSource after each Assemble.
-func (m *Monitor) WatchPaths() []string { return m.watch }
+// sync brings the per-file folds up to date with the recorder. The error it
+// returns is fatal for the Scan (the recorder is not answering); foldErr is the
+// first per-file read error, which only degrades pricing.
+func (m *Monitor) sync(now time.Time, ids []string) (foldErr, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	c, err := m.rd.facts.Client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := now.Add(-pricingWindow(now))
+	if m.rd.cursor == "" {
+		if err := m.rd.bootstrap(ctx, c, cutoff, ids); err != nil {
+			return nil, m.rd.facts.Wrap(err)
+		}
+	} else if err := m.rd.drain(ctx, c); err != nil {
+		if !errors.Is(err, client.ErrCursorExpired) {
+			return nil, m.rd.facts.Wrap(err)
+		}
+		// The cursor fell off the feed's retention: start over from the inventory.
+		m.rd.cursor = ""
+		if err := m.rd.bootstrap(ctx, c, cutoff, ids); err != nil {
+			return nil, m.rd.facts.Wrap(err)
+		}
+	}
+	if err := m.rd.ensureSessions(ctx, c, ids); err != nil {
+		return nil, m.rd.facts.Wrap(err)
+	}
+	foldErr = m.rd.foldDirty(ctx, c)
+	if foldErr != nil && (errors.Is(foldErr, client.ErrDown) || errors.Is(foldErr, client.ErrUnavailable)) {
+		return nil, m.rd.facts.Wrap(foldErr)
+	}
+	return foldErr, nil
+}
 
-// ResolvedPath returns sessionID's resolved transcript path + mtime, and whether
-// a transcript exists (ok=false when the project dir is missing/empty).
+// resolve picks the transcript file of s: the one whose custom title is the
+// session's name, else the file named for the session id, else the newest in
+// its project; nil when the recorder holds none.
+func (m *Monitor) resolve(s *session.Session) *fileState {
+	slug := filepath.Base(filepath.Dir(s.TranscriptPath("")))
+	var cands []*fileState
+	for _, fs := range m.rd.files {
+		if fs.kind == kindTranscript && fs.project == slug {
+			cands = append(cands, fs)
+		}
+	}
+	if len(cands) == 0 {
+		for _, fs := range m.rd.files {
+			if fs.kind == kindTranscript && fs.session == s.SessionID {
+				cands = append(cands, fs)
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return nil
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if !cands[i].last.Equal(cands[j].last) {
+			return cands[i].last.After(cands[j].last)
+		}
+		return cands[i].ref < cands[j].ref
+	})
+	if s.Name != "" {
+		for _, fs := range cands {
+			if fs.title == s.Name {
+				return fs
+			}
+		}
+	}
+	for _, fs := range cands {
+		if fs.session == s.SessionID {
+			return fs
+		}
+	}
+	return cands[0]
+}
+
+// subagents returns the latest terminal api error among the subagent files of
+// main's session (tagged FromSubagent) and the newest record time over them,
+// and marks those files as wanted.
+func (m *Monitor) subagents(main *fileState, keep map[string]bool) (*transcript.ErrorRecord, time.Time) {
+	var best *transcript.ErrorRecord
+	var maxLast time.Time
+	for ref, fs := range m.rd.files {
+		if fs.kind != kindSubagent || fs.session != main.session || fs.project != main.project {
+			continue
+		}
+		keep[ref] = true
+		maxLast = laterOf(maxLast, fs.last)
+		e := fs.snap.LastError
+		if e == nil || e.Kind == "" || !e.IsTerminal {
+			continue
+		}
+		if best == nil || e.At.After(best.At) {
+			cp := *e
+			best = &cp
+		}
+	}
+	if best == nil {
+		return nil, maxLast
+	}
+	best.IsContextLimit = ct.IsContextLimit(best.Kind, best.Text)
+	best.FromSubagent = true
+	return best, maxLast
+}
+
+// ResolvedPath returns sessionID's resolved transcript (the recorder's file
+// reference, an opaque key) and the time of its last record, and whether a
+// transcript exists.
 func (m *Monitor) ResolvedPath(sessionID string) (string, time.Time, bool) {
 	t, ok := m.topo[sessionID]
 	if !ok {
@@ -327,11 +376,9 @@ func (m *Monitor) Limits() *limits.Limits {
 	return m.limitsObs.Current()
 }
 
-// Perf-guard proxies for the last Scan (see the field doc for why these are
-// Monitor-initiated counts rather than raw os.Open counts).
-func (m *Monitor) TitleProbesLastScan() int       { return m.lastTitleProbes }
-func (m *Monitor) TranscriptScansLastScan() int   { return m.lastScans }
-func (m *Monitor) SubagentReadDirsLastScan() int  { return m.lastReadDirs }
-func (m *Monitor) SubagentFileReadsLastScan() int { return m.lastFileReads }
-func (m *Monitor) StatusReadsLastScan() int       { return m.lastStatusReads }
-func (m *Monitor) PricingFilesLastScan() int      { return m.lastPricingFiles }
+// Perf-guard figures of the last Scan: the recorder calls it made, the lines
+// and files it folded, and the files it holds.
+func (m *Monitor) QueriesLastScan() int     { return m.lastQueries }
+func (m *Monitor) LinesFoldedLastScan() int { return m.lastLines }
+func (m *Monitor) FilesFoldedLastScan() int { return m.lastFiles }
+func (m *Monitor) FilesHeldLastScan() int   { return m.lastKept }

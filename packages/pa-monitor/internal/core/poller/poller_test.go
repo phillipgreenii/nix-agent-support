@@ -51,12 +51,9 @@ func TestSnapshotZeroesStaleRateLimitResetsAt(t *testing.T) {
 	// "resets 1pm (UTC)" → reset = 2026-05-05 13:00 UTC. With Now() far past that
 	// (2026-05-06), the enrichment must show RateLimitResetsAt zero.
 	sessionsDir, claudeHome := makeRateLimitFixture(t, "2026-05-05T00:00:00Z")
-	p := &Poller{
-		SessionsDir: sessionsDir,
-		ClaudeHome:  claudeHome,
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC) },
-	}
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
+		Now: func() time.Time { return time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC) },
+	})
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -78,12 +75,9 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 	// past — within stalePauseGrace). The reset MUST be preserved so the auto-
 	// resume path can still fire.
 	sessionsDir, claudeHome := makeRateLimitFixture(t, "2026-05-05T00:00:00Z")
-	p := &Poller{
-		SessionsDir: sessionsDir,
-		ClaudeHome:  claudeHome,
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Date(2026, 5, 5, 13, 2, 0, 0, time.UTC) },
-	}
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
+		Now: func() time.Time { return time.Date(2026, 5, 5, 13, 2, 0, 0, time.UTC) },
+	})
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -103,12 +97,9 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 }
 
 func TestSnapshotProducesTree(t *testing.T) {
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
+	p := mirrored(t, "../../../tests/fixtures/sessions", "../../../tests/fixtures/claude-home", func(int) bool { return true }, &Poller{
+		Now: func() time.Time { return time.Now() },
+	})
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -140,12 +131,9 @@ func (f *fakeRec) RecordSubprocess(k string, _ time.Duration)    { f.spawns[k]++
 // fixture idiom used by TestSnapshotProducesTree above.
 func newTestPoller(t *testing.T) *Poller {
 	t.Helper()
-	return &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
+	return mirrored(t, "../../../tests/fixtures/sessions", "../../../tests/fixtures/claude-home", func(int) bool { return true }, &Poller{
+		Now: func() time.Time { return time.Now() },
+	})
 }
 
 func TestSnapshotRecordsPhases(t *testing.T) {
@@ -180,7 +168,7 @@ func TestSnapshotRecordsPhases(t *testing.T) {
 	// skipped (guarded by `if p.WriteService != nil`); not asserted here.
 	// The fixture session's transcript is new to this Poller instance, so the
 	// first Snapshot must take the scan cache-MISS branch.
-	if rec.scans["full"] == 0 && rec.scans["incremental"] == 0 {
+	if rec.scans["feed"] == 0 {
 		t.Error("scan not recorded on cache-miss branch")
 	}
 	if rec.spawns["git_branch"] == 0 {
@@ -192,12 +180,9 @@ func TestSnapshotRecordsPhases(t *testing.T) {
 }
 
 func TestSnapshotEnrichmentFields(t *testing.T) {
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
+	p := mirrored(t, "../../../tests/fixtures/sessions", "../../../tests/fixtures/claude-home", func(int) bool { return true }, &Poller{
+		Now: func() time.Time { return time.Now() },
+	})
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -262,13 +247,10 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 		calls = append(calls, call{cwd, branch})
 		return nil, nil
 	}
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-		Providers:   cache,
-	}
+	p := mirrored(t, "../../../tests/fixtures/sessions", "../../../tests/fixtures/claude-home", func(int) bool { return true }, &Poller{
+		Now:       func() time.Time { return time.Now() },
+		Providers: cache,
+	})
 	_, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -359,12 +341,9 @@ func makeSubagentDisruptFixture(t *testing.T) (string, string) {
 
 func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
 	sessionsDir, claudeHome := makeSubagentDisruptFixture(t)
-	p := &Poller{
-		SessionsDir: sessionsDir,
-		ClaudeHome:  claudeHome,
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC) },
-	}
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
+		Now: func() time.Time { return time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC) },
+	})
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -423,15 +402,13 @@ func TestPoller_WritesToStores(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, dir, "a.json", `{"pid":12345,"sessionId":"sid-a","cwd":"/p"}`)
 
-	p := &Poller{
-		SessionsDir:      dir,
-		PidAlive:         func(int) bool { return true },
+	p := mirrored(t, dir, "", func(int) bool { return true }, &Poller{
 		WorkingThreshold: 30 * time.Second,
 		IdleThreshold:    10 * time.Minute,
 		Now:              time.Now,
 		Signalers:        nil,
 		WriteService:     ws,
-	}
+	})
 	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -477,9 +454,7 @@ func TestPoller_PersistsLabels(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, dir, "a.json", `{"pid":12345,"sessionId":"sid-a","cwd":"/p"}`)
 
-	p := &Poller{
-		SessionsDir:      dir,
-		PidAlive:         func(int) bool { return true },
+	p := mirrored(t, dir, "", func(int) bool { return true }, &Poller{
 		WorkingThreshold: 30 * time.Second,
 		IdleThreshold:    10 * time.Minute,
 		Now:              time.Now,
@@ -487,7 +462,7 @@ func TestPoller_PersistsLabels(t *testing.T) {
 		Labeler: func(sv *aggregate.SessionView) map[string]string {
 			return map[string]string{"workspace.scope": "acme"}
 		},
-	}
+	})
 	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -621,19 +596,17 @@ func makeErrorFixture(t *testing.T, errKind, errText string, superseded bool) (s
 	return sessionsDir, claudeHome
 }
 
-func newErrorPoller(sessionsDir, claudeHome string, now time.Time) *Poller {
-	return &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:         func(int) bool { return true },
+func newErrorPoller(t *testing.T, sessionsDir, claudeHome string, now time.Time) *Poller {
+	return mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
 		Now:              func() time.Time { return now },
 		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
-	}
+	})
 }
 
 func TestSnapshotBlocker_AuthFailureIsHumanAuthn(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	sd, ch := makeErrorFixture(t, "authentication_failed", "HTTP 401", false)
-	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	sv := snapshotSession(t, newErrorPoller(t, sd, ch, now))
 	if sv.Status != session.Blocked || sv.Blocker != session.HumanAuthn {
 		t.Errorf("401 → status=%v blocker=%v, want Blocked/human_authn", sv.Status, sv.Blocker)
 	}
@@ -646,7 +619,7 @@ func TestSnapshotBlocker_TerminalRateLimitIsUsageLimit(t *testing.T) {
 	// terminal rate-limit MUST override busy → blocked/usage_limit (the live
 	// findev-deep-dive mis-report this ADR corrects).
 	sd, ch := makeErrorFixture(t, "rate_limit", "You've hit your org's monthly spend limit", false)
-	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	sv := snapshotSession(t, newErrorPoller(t, sd, ch, now))
 	if sv.Status != session.Blocked || sv.Blocker != session.UsageLimit {
 		t.Errorf("terminal 429 → status=%v blocker=%v, want Blocked/usage_limit", sv.Status, sv.Blocker)
 	}
@@ -655,7 +628,7 @@ func TestSnapshotBlocker_TerminalRateLimitIsUsageLimit(t *testing.T) {
 func TestSnapshotBlocker_GenericTerminalErrorIsError(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	sd, ch := makeErrorFixture(t, "server_error", "API Error 500", false)
-	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	sv := snapshotSession(t, newErrorPoller(t, sd, ch, now))
 	if sv.Status != session.Blocked || sv.Blocker != session.ErrorBlocker {
 		t.Errorf("generic terminal error → status=%v blocker=%v, want Blocked/error", sv.Status, sv.Blocker)
 	}
@@ -666,7 +639,7 @@ func TestSnapshotBlocker_SupersededErrorIsWorking(t *testing.T) {
 	// Same terminal-shaped error but a newer user message supersedes it, so the
 	// error is NOT current (IsTerminal=false). busy is trusted → Working.
 	sd, ch := makeErrorFixture(t, "rate_limit", "You've hit your limit", true)
-	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	sv := snapshotSession(t, newErrorPoller(t, sd, ch, now))
 	if sv.Status != session.Working || sv.Blocker != session.NoBlocker {
 		t.Errorf("superseded error → status=%v blocker=%v, want Working/none", sv.Status, sv.Blocker)
 	}
@@ -698,12 +671,10 @@ func TestSnapshotVerdict_BusyIsWorking(t *testing.T) {
 	// busy status, but the main transcript is 20 min stale (subagent run).
 	// busy is TRUSTED → Working, never demoted.
 	sessionsDir, claudeHome := makeRegistryFixture(t, "busy", "", now.Add(-20*time.Minute), now.Add(-20*time.Minute))
-	p := &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:         func(int) bool { return true },
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
 		Now:              func() time.Time { return now },
 		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
-	}
+	})
 	if got := snapshotStatus(t, p); got != session.Working {
 		t.Errorf("busy stale-transcript Status = %v, want Working (trusted)", got)
 	}
@@ -713,13 +684,11 @@ func TestSnapshotVerdict_FreshWaitingIsBlockedHumanInput(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	// waiting + transcript fresh relative to statusUpdatedAt → blocked/human_input.
 	sessionsDir, claudeHome := makeRegistryFixture(t, "waiting", "permission prompt", now.Add(-30*time.Second), now.Add(-30*time.Second))
-	p := &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:         func(int) bool { return true },
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
 		Now:              func() time.Time { return now },
 		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
 		WaitingFreshWindow: 60 * time.Second,
-	}
+	})
 	sv := snapshotSession(t, p)
 	if sv.Status != session.Blocked || sv.Blocker != session.HumanInput {
 		t.Errorf("fresh waiting → status=%v blocker=%v, want Blocked/human_input", sv.Status, sv.Blocker)
@@ -732,14 +701,12 @@ func TestSnapshotVerdict_StaleWaitingFallsThrough(t *testing.T) {
 	// "waiting" flag falls through (NOT WaitingForHuman). With an alive pid the
 	// existing Dormant→Idle clamp keeps the freshest-transcript session Idle.
 	sessionsDir, claudeHome := makeRegistryFixture(t, "waiting", "permission prompt", now.Add(-16*time.Hour), now.Add(-15*time.Minute))
-	p := &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:           func(int) bool { return true },
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
 		Now:                func() time.Time { return now },
 		WorkingThreshold:   30 * time.Second,
 		IdleThreshold:      10 * time.Minute,
 		WaitingFreshWindow: 60 * time.Second,
-	}
+	})
 	got := snapshotStatus(t, p)
 	if got == session.Blocked {
 		t.Errorf("stale waiting Status = %v, want non-blocked (fell through)", got)
@@ -755,13 +722,11 @@ func TestSnapshotVerdict_DeadIdleStaleIsLongIdle(t *testing.T) {
 	// refinement (ADR 0024: Dormant is no longer a status; the alive-pid clamp
 	// does not apply to dead pids).
 	sessionsDir, claudeHome := makeRegistryFixture(t, "idle", "", now.Add(-15*time.Minute), now.Add(-15*time.Minute))
-	p := &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:         func(int) bool { return false },
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return false }, &Poller{
 		Now:              func() time.Time { return now },
 		WorkingThreshold: 30 * time.Second,
 		IdleThreshold:    10 * time.Minute,
-	}
+	})
 	sv := snapshotSession(t, p)
 	if sv.Status != session.Idle || !sv.LongIdle {
 		t.Errorf("dead idle 15m-old → status=%v longIdle=%v, want Idle/true", sv.Status, sv.LongIdle)
@@ -771,12 +736,10 @@ func TestSnapshotVerdict_DeadIdleStaleIsLongIdle(t *testing.T) {
 func TestSnapshotVerdict_IdleStatusFreshIsIdle(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	sessionsDir, claudeHome := makeRegistryFixture(t, "idle", "", now.Add(-5*time.Second), now.Add(-5*time.Second))
-	p := &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:         func(int) bool { return true },
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
 		Now:              func() time.Time { return now },
 		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
-	}
+	})
 	if got := snapshotStatus(t, p); got != session.Idle {
 		t.Errorf("fresh idle Status = %v, want Idle", got)
 	}
@@ -786,12 +749,10 @@ func TestSnapshotVerdict_DeadPidNeverWorking(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	// busy + fresh transcript, but pid is dead → must not be Working.
 	sessionsDir, claudeHome := makeRegistryFixture(t, "busy", "", now.Add(-5*time.Second), now.Add(-5*time.Second))
-	p := &Poller{
-		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
-		PidAlive:         func(int) bool { return false },
+	p := mirrored(t, sessionsDir, claudeHome, func(int) bool { return false }, &Poller{
 		Now:              func() time.Time { return now },
 		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
-	}
+	})
 	if got := snapshotStatus(t, p); got == session.Working {
 		t.Errorf("dead pid Status = Working, want not-Working")
 	}

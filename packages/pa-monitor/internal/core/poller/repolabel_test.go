@@ -17,7 +17,7 @@ func TestProducer_PublishesRepoLabels(t *testing.T) {
 	now := time.Unix(1_776_000_300, 0)
 	ctx := context.Background()
 
-	p := newMonitorPoller(sessionsDir, home, pidAlive, now)
+	p := newMonitorPoller(t, sessionsDir, home, pidAlive, now)
 	pc := provider.New(func() time.Time { return now })
 	pc.FetchRepoLabel = func(cwd string) (string, bool) {
 		if cwd == "/w/a" {

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
@@ -16,7 +17,7 @@ import (
 // the producer-owned Monitor.
 func TestMonitorLimitsWeekly_ReadPublishedDerivedState(t *testing.T) {
 	now := time.Unix(1_776_000_300, 0)
-	p := &Poller{Now: func() time.Time { return now }}
+	p := &Poller{Monitor: corpus.New(nil, nil), Now: func() time.Time { return now }}
 	prod := p.Producer()
 
 	wantLimits := &limits.Limits{}
@@ -39,7 +40,7 @@ func TestMonitorLimitsWeekly_ReadPublishedDerivedState(t *testing.T) {
 // rather than touching the producer's Monitor/providers. Nil before the first
 // publish; the published map afterward.
 func TestMonitorPRByDir_ReadPublishedDerivedState(t *testing.T) {
-	p := &Poller{Now: func() time.Time { return time.Unix(1_776_000_300, 0) }}
+	p := &Poller{Monitor: corpus.New(nil, nil), Now: func() time.Time { return time.Unix(1_776_000_300, 0) }}
 	prod := p.Producer()
 
 	if got := p.MonitorPRByDir(); got != nil {

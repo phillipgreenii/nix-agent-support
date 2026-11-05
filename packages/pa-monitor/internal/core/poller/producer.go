@@ -35,17 +35,14 @@ type Producer struct {
 	// poller's SetPhaseRecorder. discover is fired by the Monitor itself.
 	Rec PhaseRecorder
 
-	// Interval is the SLOW-tier cadence — the periodic full rescan that catches
-	// newly-in-window (non-active) files. 0 defaults to 5s. FastInterval is the
-	// fast-tier poll that stats the active set + status siblings for size/mtime
-	// changes (low-latency); 0 defaults to 1s (capped at Interval). Ignored when a
+	// Interval is the cadence of the recorder feed poll. It is raised to
+	// MinFeedInterval (5 s) when lower; 0 means the minimum. Ignored when a
 	// ChangeSource is injected via SetChangeSource.
-	Interval     time.Duration
-	FastInterval time.Duration
+	Interval time.Duration
 
 	ref atomic.Pointer[DerivedState]
 
-	// changes drives the loop cadence (two-tier default, or an injected source).
+	// changes drives the loop cadence (feed cadence, or an injected source).
 	changes ChangeSource
 
 	// Lifecycle (modeled on service.WriteService): Start seeds one synchronous
@@ -61,21 +58,13 @@ type Producer struct {
 // called before Start.
 func (pr *Producer) SetChangeSource(cs ChangeSource) { pr.changes = cs }
 
-// ensureChangeSource builds the two-tier default from Interval/FastInterval when
-// none was injected.
+// ensureChangeSource builds the feed-cadence default from Interval when none was
+// injected.
 func (pr *Producer) ensureChangeSource() ChangeSource {
 	if pr.changes != nil {
 		return pr.changes
 	}
-	slow := pr.Interval
-	if slow <= 0 {
-		slow = 5 * time.Second
-	}
-	fast := pr.FastInterval
-	if fast <= 0 || fast > slow {
-		fast = min(slow, time.Second)
-	}
-	pr.changes = newTwoTierChangeSource(fast, slow, pr.now)
+	pr.changes = newFeedChangeSource(pr.Interval)
 	return pr.changes
 }
 
@@ -104,7 +93,6 @@ func (pr *Producer) Start(ctx context.Context) {
 		// no concurrent assembler, and thereafter only pr.loop assembles.
 		if ds, err := pr.Assemble(cctx, pr.now()); err == nil {
 			pr.Publish(ds)
-			cs.SetWatch(pr.Monitor.WatchPaths())
 		}
 		pr.wg.Add(1)
 		go pr.loop(cctx, cs)
@@ -133,7 +121,6 @@ func (pr *Producer) loop(ctx context.Context, cs ChangeSource) {
 		}
 		if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
 			pr.Publish(ds)
-			cs.SetWatch(pr.Monitor.WatchPaths())
 		}
 	}
 }

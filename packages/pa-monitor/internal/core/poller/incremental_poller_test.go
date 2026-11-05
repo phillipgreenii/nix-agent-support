@@ -80,7 +80,9 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 	sessionsDir, claudeHome, cwd, tpath := makeSessionFixture(t, 99010, "inc-sess", initial)
 	now := func() time.Time { return time.Date(2026, 4, 23, 10, 1, 0, 0, time.UTC) }
 
-	warm := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now}
+	warm, mir := mirroredWith(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
+		Now: now,
+	})
 
 	t1, _, err := assembleAndSnapshot(t, warm, context.Background())
 	if err != nil {
@@ -103,10 +105,7 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	future := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(tpath, future, future); err != nil {
-		t.Fatal(err)
-	}
+	mir.Sync()
 
 	t2, _, err := assembleAndSnapshot(t, warm, context.Background()) // incremental fold path
 	if err != nil {
@@ -114,7 +113,9 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 	}
 	got := findSession(t, t2, cwd)
 
-	cold := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now}
+	cold := mirrored(t, sessionsDir, claudeHome, func(int) bool { return true }, &Poller{
+		Now: now,
+	})
 	t3, _, err := assembleAndSnapshot(t, cold, context.Background()) // cold full parse
 	if err != nil {
 		t.Fatal(err)

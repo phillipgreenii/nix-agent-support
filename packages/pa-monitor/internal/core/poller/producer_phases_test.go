@@ -16,7 +16,7 @@ func TestProducer_Assemble_FiresProducerPhases(t *testing.T) {
 	ctx := context.Background()
 
 	rec := newFakeRec()
-	p := newMonitorPoller(sessionsDir, home, pidAlive, now)
+	p := newMonitorPoller(t, sessionsDir, home, pidAlive, now)
 	p.SetPhaseRecorder(rec)
 
 	if _, err := p.Producer().Assemble(ctx, now); err != nil {

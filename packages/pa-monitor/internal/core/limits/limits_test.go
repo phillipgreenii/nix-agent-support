@@ -2,7 +2,6 @@ package limits
 
 import (
 	"math"
-	"os"
 	"testing"
 	"time"
 )
@@ -169,21 +168,17 @@ func TestCurrentEmptyReturnsNil(t *testing.T) {
 	}
 }
 
-// TestReadStatusRecordsSkipsTslessAndUnparseable proves the file parser drops
+// TestParseStatusRecordsSkipsTslessAndUnparseable proves the parser drops
 // ts-less and malformed lines and keeps the good ones.
-func TestReadStatusRecordsSkipsTslessAndUnparseable(t *testing.T) {
-	path := t.TempDir() + "/s.status.jsonl"
+func TestParseStatusRecordsSkipsTslessAndUnparseable(t *testing.T) {
 	body := `{"five_hour_pct":50,"five_hour_resets_at":1000}
 not json
 {"ts":1234,"five_hour_pct":80,"five_hour_resets_at":1000}
 
 `
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	recs := ReadStatusRecords(path)
+	recs := ParseStatusRecords([]byte(body))
 	if len(recs) != 1 {
-		t.Fatalf("ReadStatusRecords len = %d, want 1 (ts-less + malformed + blank dropped)", len(recs))
+		t.Fatalf("ParseStatusRecords len = %d, want 1 (ts-less + malformed + blank dropped)", len(recs))
 	}
 	if recs[0].TS == nil || *recs[0].TS != 1234 {
 		t.Errorf("kept record ts = %v, want 1234", recs[0].TS)

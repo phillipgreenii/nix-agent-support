@@ -1,25 +1,15 @@
 package corpus
 
-import (
-	"path/filepath"
-	"time"
+import "time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-)
-
-// sessionTopology is the Monitor's per-session resolution + activity summary,
-// read by the poller in place of the inline ResolveTranscript + maxActivity.
+// sessionTopology is one session's resolved transcript (the recorder's file
+// reference), the time of its last record, and the newest activity over the
+// transcript and its subagent files.
 type sessionTopology struct {
 	resolvedPath string
 	mtime        time.Time
 	maxActivity  time.Time
 	ok           bool
-}
-
-// projDir returns claudeHome/projects/<slug> for a session's cwd, reusing
-// session.Session.TranscriptPath so the slug rule stays single-sourced.
-func projDir(claudeHome string, s *session.Session) string {
-	return filepath.Dir(s.TranscriptPath(claudeHome))
 }
 
 func laterOf(a, b time.Time) time.Time {

@@ -30,7 +30,7 @@ func TestDerivedState_Determinism(t *testing.T) {
 	ctx := context.Background()
 
 	build := func() (*aggregate.Tree, bool) {
-		p := newMonitorPoller(sessionsDir, home, pidAlive, now)
+		p := newMonitorPoller(t, sessionsDir, home, pidAlive, now)
 		tree, keep, err := assembleAndSnapshot(t, p, ctx)
 		if err != nil {
 			t.Fatalf("assembleAndSnapshot: %v", err)
