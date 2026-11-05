@@ -21,6 +21,7 @@ func fixtureLines(tb testing.TB) [][]byte {
 	}
 	var out [][]byte
 	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(nil, 4<<20) // one fixture line is a large tool_result
 	for sc.Scan() {
 		out = append(out, append([]byte(nil), sc.Bytes()...))
 	}
