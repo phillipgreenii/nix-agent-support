@@ -432,11 +432,16 @@ caller's deadline keeps most of what it read. The cache is disposable: deleting 
 full re-read, and a corrupt or outdated file is ignored and rebuilt. `sessions --stats` prints one
 line to stderr with the files listed, parsed and reused, the cache writes and the cache size.
 
-`pa-monitor sessions` with no `--since`, `--before` or `--all` lists only the sessions that started in
-the last 7 days: the recorder's unbounded scan of every transcript record outruns its query deadline
-on a large tree. The document then carries `"defaulted_since": "<RFC3339>"` and stderr says so; `--all`
-asks for every session and may hit that deadline. The recorder's substring scan (`search --substring`) walks records newest first from the time index, so
-`--since` bounds it, and it stops at a byte budget or the deadline rather than reading every copy.
+`pa-monitor sessions` and `pa-monitor search [--substring] <query>` look back at most 7 days, because
+pa-monitor only shows recent sessions. With no `--since` the window is the last 7 days (for `sessions`
+the document then carries `"defaulted_since": "<RFC3339>"` and stderr says so). `--since` may narrow
+the window, never widen it: a `--since` older than 7 days before now is a usage error (exit 2), not a
+silent clamp, and there is no `--all`. History older than 7 days is searched with
+`pg-claude-code-recorder search` or `query` directly. `sessions` lists sessions whose first record
+falls in `[--since, --before)`; `search` takes `--session <id>`, `--since` and `--before` the same way.
+The recorder's substring scan (`search --substring`) walks records newest first from the time index and
+always runs inside the window. If a query still hits the recorder's 30 s deadline, the error says to
+narrow it with `--since` (or `--session` for `search`) or to use the recorder directly.
 
 ## Profiling (pprof)
 

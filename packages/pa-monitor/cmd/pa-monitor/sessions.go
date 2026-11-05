@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"sort"
 	"time"
 
@@ -57,66 +56,53 @@ type sessionRecordJSON struct {
 // so an empty window encodes as [] and never null.
 type sessionsJSONDoc struct {
 	Sessions []sessionRecordJSON `json:"sessions"`
-	// DefaultedSince is set only when the call named no window and no --all, so
-	// the list was bounded to sessions that started at or after this time (the
-	// default window); a caller reading the whole history passes --all.
+	// DefaultedSince is set only when the call named no --since, so the list
+	// was bounded to sessions that started at or after this time (the default
+	// 7-day window).
 	DefaultedSince string `json:"defaulted_since,omitempty"`
-}
-
-// defaultSessionsWindow bounds a `sessions` call that names no --since, --before
-// or --all. The recorder's unbounded scan of every transcript record outruns the
-// recorder's query deadline on a large tree, while a 7-day window answers within
-// it.
-const defaultSessionsWindow = 7 * 24 * time.Hour
-
-// sessionsWindow returns the window a `sessions` call runs with: the given
-// bounds, or (none given and all unset) the default window ending now. The
-// third result is the start of the default window, zero when none was applied.
-func sessionsWindow(since, before time.Time, all bool, now time.Time) (time.Time, time.Time, time.Time) {
-	if all || !since.IsZero() || !before.IsZero() {
-		return since, before, time.Time{}
-	}
-	d := now.Add(-defaultSessionsWindow)
-	return d, before, d
 }
 
 // parseSessionsArgs parses `sessions`' own argv: an optional "--json" flag
 // (accepted but not required — sessions has no text mode, exactly like
 // search), optional "--since <bound>"/"--before <bound>" value flags and an
 // optional "--stats" flag (one line of scan statistics on stderr), in any
-// order. An absent bound is the zero time.Time (open on that side). now is
-// injected for testability; production callers pass time.Now().UTC().
-func parseSessionsArgs(args []string, now time.Time) (since, before time.Time, stats bool, err error) {
+// order. The returned since is already resolved against the 7-day look-back
+// (see resolveWindow); defaulted is the start of the default window, zero when
+// --since was given. now is injected for testability; production callers pass
+// time.Now().UTC().
+func parseSessionsArgs(args []string, now time.Time) (since, before time.Time, stats bool, defaulted time.Time, err error) {
 	rest, _ := stripJSONFlag(args)
 	for i := 0; i < len(rest); i++ {
 		switch rest[i] {
 		case "--since":
 			if i+1 >= len(rest) {
-				return time.Time{}, time.Time{}, false, errors.New("sessions: --since requires a value")
+				return time.Time{}, time.Time{}, false, time.Time{}, errors.New("sessions: --since requires a value")
 			}
 			since, err = parseTimeBound(rest[i+1], now)
 			if err != nil {
-				return time.Time{}, time.Time{}, false, fmt.Errorf("sessions: --since: %w", err)
+				return time.Time{}, time.Time{}, false, time.Time{}, fmt.Errorf("sessions: --since: %w", err)
 			}
 			i++
 		case "--before":
 			if i+1 >= len(rest) {
-				return time.Time{}, time.Time{}, false, errors.New("sessions: --before requires a value")
+				return time.Time{}, time.Time{}, false, time.Time{}, errors.New("sessions: --before requires a value")
 			}
 			before, err = parseTimeBound(rest[i+1], now)
 			if err != nil {
-				return time.Time{}, time.Time{}, false, fmt.Errorf("sessions: --before: %w", err)
+				return time.Time{}, time.Time{}, false, time.Time{}, fmt.Errorf("sessions: --before: %w", err)
 			}
 			i++
 		case "--stats":
 			stats = true
-		case "--all":
-			// handled by the caller (sessionsWindow): open window, no default bound
 		default:
-			return time.Time{}, time.Time{}, false, fmt.Errorf("sessions: unexpected argument %q", rest[i])
+			return time.Time{}, time.Time{}, false, time.Time{}, fmt.Errorf("sessions: unexpected argument %q", rest[i])
 		}
 	}
-	return since, before, stats, nil
+	since, before, defaulted, err = resolveWindow("sessions", since, before, now)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, time.Time{}, err
+	}
+	return since, before, stats, defaulted, nil
 }
 
 // truncateRunes cuts s to at most max runes. When it cuts, the last rune of the
@@ -213,7 +199,8 @@ func writeSessions(w io.Writer, lister sessionLister, since, before time.Time, p
 }
 
 // runSessions implements the `sessions` subcommand: `pa-monitor sessions
-// [--json] [--since <bound>] [--before <bound>] [--all] [--stats]`. It reads the
+// [--json] [--since <bound>] [--before <bound>] [--stats]`. The window is the
+// last 7 days unless --since narrows it; an older start is a usage error. It reads the
 // recorder; while the recorder is down it says "cannot list sessions: the
 // recorder is not available (socket <path>)" and exits 1
 // (there is no fallback to the transcript files). Exit codes follow search: 2
@@ -221,14 +208,13 @@ func writeSessions(w io.Writer, lister sessionLister, since, before time.Time, p
 // accepted and ignored (there is no scan to report).
 func runSessions(args []string) {
 	now := time.Now().UTC()
-	since, before, _, err := parseSessionsArgs(args, now)
+	since, before, _, defaulted, err := parseSessionsArgs(args, now)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(exitUsage)
 	}
-	since, before, defaulted := sessionsWindow(since, before, slices.Contains(args, "--all"), now)
 	if !defaulted.IsZero() {
-		fmt.Fprintf(os.Stderr, "sessions: no window given; listing sessions that started since %s (7d). Pass --since/--before to choose, or --all for every session (may exceed the recorder query deadline).\n", defaulted.Format(time.RFC3339))
+		fmt.Fprintf(os.Stderr, "sessions: no --since given; listing sessions that started since %s (7d, the most pa-monitor looks back). Pass --since to narrow it.\n", defaulted.Format(time.RFC3339))
 	}
 	cfg, err := configLoad()
 	if err != nil {
@@ -238,7 +224,7 @@ func runSessions(args []string) {
 	prices := account.LoadAccount(cfg).PriceTable()
 	facts := recorderfacts.New(client.Options{Name: "pa-monitor-sessions"})
 	if err := writeSessions(os.Stdout, facts, since, before, prices, cfg.FirstPromptMaxChars, defaulted); err != nil {
-		fmt.Fprintf(os.Stderr, "sessions: %v\n", facts.Unavailable("list sessions", err))
+		fmt.Fprintf(os.Stderr, "sessions: %v\n", withNarrowHint(facts.Unavailable("list sessions", err), "--since"))
 		os.Exit(exitGeneric)
 	}
 }

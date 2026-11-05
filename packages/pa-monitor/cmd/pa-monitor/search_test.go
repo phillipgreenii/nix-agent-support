@@ -22,6 +22,7 @@ func TestParseSearchArgs(t *testing.T) {
 		{"with since duration", []string{"flaky", "--since", "24h"}, "flaky", "", false},
 		{"with since days", []string{"flaky", "--since", "7d"}, "flaky", "", false},
 		{"with before rfc3339", []string{"flaky", "--before", "2026-09-18T00:00:00Z"}, "flaky", "", false},
+		{"since older than 7 days", []string{"flaky", "--since", "8d"}, "", "", true},
 		{"no query", []string{}, "", "", true},
 		{"two positional", []string{"flaky", "other"}, "", "", true},
 		{"dangling --session", []string{"flaky", "--session"}, "", "", true},

@@ -96,8 +96,9 @@ func isAllDigits(s string) bool {
 // no text-output mode, so this flag is a no-op kept only for command-line
 // symmetry with status/info), and optional "--session <id>"/"--since
 // <bound>"/"--before <bound>" value flags — any of these MAY appear in any
-// order. now is injected for testability; production callers pass
-// time.Now().UTC().
+// order. The returned since is already resolved against the 7-day look-back
+// (see resolveWindow): it defaults to 7 days ago and an older one is an error.
+// now is injected for testability; production callers pass time.Now().UTC().
 func parseSearchArgs(args []string, now time.Time) (query, sessionID string, since, before time.Time, substring bool, err error) {
 	rest, _ := stripJSONFlag(args)
 	var positional []string
@@ -136,6 +137,10 @@ func parseSearchArgs(args []string, now time.Time) (query, sessionID string, sin
 	if len(positional) != 1 {
 		return "", "", time.Time{}, time.Time{}, false, fmt.Errorf("search: expected exactly one query argument, got %d", len(positional))
 	}
+	since, before, _, err = resolveWindow("search", since, before, now)
+	if err != nil {
+		return "", "", time.Time{}, time.Time{}, false, err
+	}
 	return positional[0], sessionID, since, before, substring, nil
 }
 
@@ -146,7 +151,7 @@ type searcher interface {
 }
 
 // searchSessions searches for query (in sessionID only, when non-empty) within
-// [since, before) (either may be the zero time, meaning unbounded) through
+// [since, before) (before may be the zero time, meaning open) through
 // srch and writes the result as JSON to w.
 func searchSessions(w io.Writer, srch searcher, query, sessionID string, since, before time.Time, substring bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -167,8 +172,9 @@ func searchSessions(w io.Writer, srch searcher, query, sessionID string, since, 
 }
 
 // runSearch implements the `search` subcommand: `pa-monitor search
-// [--json] [--substring] <query> [--session <id>] [--since <bound>] [--before <bound>]`. It
-// asks the recorder; while the recorder is down it says "cannot search: the
+// [--json] [--substring] <query> [--session <id>] [--since <bound>] [--before <bound>]`.
+// The window is the last 7 days unless --since narrows it; an older start is a
+// usage error. It asks the recorder; while the recorder is down it says "cannot search: the
 // recorder is not available (socket <path>)" and exits 1 (no fallback to the transcript files).
 func runSearch(args []string) {
 	query, sessionID, since, before, substring, err := parseSearchArgs(args, time.Now().UTC())
@@ -178,7 +184,7 @@ func runSearch(args []string) {
 	}
 	facts := recorderfacts.New(client.Options{Name: "pa-monitor-search"})
 	if err := searchSessions(os.Stdout, facts, query, sessionID, since, before, substring); err != nil {
-		fmt.Fprintf(os.Stderr, "search: %v\n", facts.Unavailable("search", err))
+		fmt.Fprintf(os.Stderr, "search: %v\n", withNarrowHint(facts.Unavailable("search", err), "--since or --session"))
 		os.Exit(exitGeneric)
 	}
 }

@@ -320,8 +320,7 @@ timestamp, and MUST NOT apply a bound it cannot honor precisely without setting 
 The PR (GitHub `updated:` qualifier), Jira (JQL `updated`) and beads (`updated_at`) backends honor
 it; a backend that does not read the keys (Slack threads, calendar) returns its unbounded result,
 which `--help` states. A bounded `list` never serves the umbrella entity-cache fallback, since
-cached entries are not window-filtered. For `search` only the agent-session backend reads the keys
-(forwarding them to `pa-monitor search --since/--before`); the PR and Jira backends already take a
+cached entries are not window-filtered. For `search` the PR and Jira backends take a
 native qualifier inside the query text.
 
 `changes` NEVER passes a range: the ledger derives removals from `present_ids`, so a bounded

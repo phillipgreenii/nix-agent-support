@@ -143,7 +143,7 @@ func TestTruncateRunes(t *testing.T) {
 
 func TestParseSessionsArgs(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
-	since, before, stats, err := parseSessionsArgs([]string{"--since", "7d", "--before", "2026-09-24T00:00:00Z", "--json"}, now)
+	since, before, stats, _, err := parseSessionsArgs([]string{"--since", "7d", "--before", "2026-09-24T00:00:00Z", "--json"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,21 +156,22 @@ func TestParseSessionsArgs(t *testing.T) {
 	if stats {
 		t.Error("stats = true without --stats")
 	}
-	since, before, stats, err = parseSessionsArgs(nil, now)
-	if err != nil || !since.IsZero() || !before.IsZero() || stats {
-		t.Errorf("no args: got (%v, %v, %v, %v), want open bounds and no stats", since, before, stats, err)
+	since, before, stats, def, err := parseSessionsArgs(nil, now)
+	wantStart := now.Add(-7 * 24 * time.Hour)
+	if err != nil || !since.Equal(wantStart) || !def.Equal(wantStart) || !before.IsZero() || stats {
+		t.Errorf("no args: got (%v, %v, %v, %v, %v), want the 7-day default window and no stats", since, before, def, stats, err)
 	}
-	if _, _, stats, err := parseSessionsArgs([]string{"--stats", "--since", "1d"}, now); err != nil || !stats {
+	if _, _, stats, _, err := parseSessionsArgs([]string{"--stats", "--since", "1d"}, now); err != nil || !stats {
 		t.Errorf("--stats: got (%v, %v), want stats", stats, err)
 	}
 	for _, bad := range [][]string{
-		{"--since", "not-a-time"}, {"--before", "nope"}, {"--since"}, {"--before"}, {"stray"},
+		{"--since", "not-a-time"}, {"--before", "nope"}, {"--since"}, {"--before"}, {"stray"}, {"--all"},
 	} {
-		if _, _, _, err := parseSessionsArgs(bad, now); err == nil {
+		if _, _, _, _, err := parseSessionsArgs(bad, now); err == nil {
 			t.Errorf("parseSessionsArgs(%v) = nil error, want an error", bad)
 		}
 	}
-	if _, _, _, err := parseSessionsArgs([]string{"--since", "not-a-time"}, now); err == nil || !strings.Contains(err.Error(), "--since") {
+	if _, _, _, _, err := parseSessionsArgs([]string{"--since", "not-a-time"}, now); err == nil || !strings.Contains(err.Error(), "--since") {
 		t.Errorf("error %v should name --since", err)
 	}
 }
@@ -258,32 +259,6 @@ func TestSearchSubstringMatchesMidWordOnlyWhenAsked(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "example-s1") {
 		t.Errorf("word search matched a mid-word fragment: %s", buf.String())
-	}
-}
-
-func TestSessionsWindowDefaultsToSevenDaysUnlessBoundedOrAll(t *testing.T) {
-	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
-	wantStart := now.Add(-7 * 24 * time.Hour)
-	since, before, def := sessionsWindow(time.Time{}, time.Time{}, false, now)
-	if !since.Equal(wantStart) || !before.IsZero() || !def.Equal(wantStart) {
-		t.Errorf("no window: got (%v, %v, %v), want since=default=%v", since, before, def, wantStart)
-	}
-	given := now.Add(-time.Hour)
-	for name, c := range map[string]struct {
-		since, before time.Time
-		all           bool
-	}{
-		"since":  {given, time.Time{}, false},
-		"before": {time.Time{}, given, false},
-		"all":    {time.Time{}, time.Time{}, true},
-	} {
-		s, b, d := sessionsWindow(c.since, c.before, c.all, now)
-		if !s.Equal(c.since) || !b.Equal(c.before) || !d.IsZero() {
-			t.Errorf("%s: got (%v, %v, %v), want the bounds unchanged and no default", name, s, b, d)
-		}
-	}
-	if _, _, _, err := parseSessionsArgs([]string{"--all"}, now); err != nil {
-		t.Errorf("--all: %v", err)
 	}
 }
 

@@ -52,6 +52,8 @@ func usageText() string {
 	}
 	b.WriteString("\nExamples:\n")
 	b.WriteString("  pa-monitor nudge <session:<id>|path:<p>|cmux:<ws>> [--text=...] [--cancel]\n")
+	b.WriteString("  pa-monitor sessions [--since <bound>] [--before <bound>]   (looks back at most 7 days)\n")
+	b.WriteString("  pa-monitor search [--substring] <query> [--session <id>] [--since <bound>] [--before <bound>]   (looks back at most 7 days)\n")
 	return b.String()
 }
 
