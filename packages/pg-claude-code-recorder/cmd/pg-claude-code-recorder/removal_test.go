@@ -269,3 +269,40 @@ func TestDoctorPrintsTheCycleStateWhenItTookOverARollingCycle(t *testing.T) {
 		t.Fatalf("%d %s", code, out.String())
 	}
 }
+
+func TestSweepForceStartsAndWaitsUntilTheDaemonReportsCompletion(t *testing.T) {
+	sock := filepath.Join(shortDir(t), "s.sock")
+	s := server.New(obs.New(nil), nil, func() any { return map[string]any{} })
+	var reqs []serve.SweepRequest
+	polls := 0
+	s.Register("sweep", server.KindQuery, func(_ context.Context, b []byte) (any, *wire.Error) {
+		var req serve.SweepRequest
+		_ = json.Unmarshal(b, &req)
+		reqs = append(reqs, req)
+		if req.Force {
+			return serve.SweepAnswer{Started: true, Running: true}, nil
+		}
+		polls++
+		return serve.SweepAnswer{Running: polls < 3, Completed: map[bool]int64{true: 1}[polls >= 3]}, nil
+	})
+	if err := s.Listen(sock); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	a, out, _ := testApp(nil)
+	a.pollEvery = time.Millisecond
+	if code := runCLI(t, a, "sweep", "--force", "--wait", "--socket", sock); code != 0 || !strings.Contains(out.String(), "finished") {
+		t.Fatalf("%d %s", code, out.String())
+	}
+	if len(reqs) != 4 || !reqs[0].Force || reqs[1].Force {
+		t.Fatalf("requests %+v", reqs)
+	}
+	a, out, _ = testApp(nil)
+	if code := runCLI(t, a, "sweep", "--force", "--socket", sock); code != 0 || !strings.Contains(out.String(), "started") {
+		t.Fatalf("%d %s", code, out.String())
+	}
+	a, _, errw := testApp(nil)
+	if code := runCLI(t, a, "sweep", "--socket", sock); code != 2 || !strings.Contains(errw.String(), "--force") {
+		t.Fatalf("without --force: %d %q", code, errw.String())
+	}
+}

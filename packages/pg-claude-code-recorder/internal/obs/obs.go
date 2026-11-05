@@ -234,7 +234,7 @@ var SweepOutcomes = []string{SweepWalked, SweepUnchangedCandidate, SweepSkipped}
 // why a walked file is not known to be unchanged. new: the path was not seen
 // before; size, mtime: that field differs from the last observation; ino: the
 // device, inode or birth time differs; not_cached: the observation matches but
-// the path is not in the caught-up cache (or its verification is due).
+// the path is not in the caught-up cache.
 var SweepChangeReasons = []string{"new", "size", "mtime", "ino", "not_cached"}
 
 // IngestResultLabel maps a copier.Result.Action string to its result label

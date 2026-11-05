@@ -139,10 +139,13 @@ Sweep pacing: `sweep.max_files_per_second` (default 100, `0` unlimited) caps how
 second the sweep and the first catch-up ingest; hint-driven ingest of live files is never paced, so
 copy lag is unaffected by the cap except that a catch-up holds the watcher's lock (a pass over N
 files takes at least N / rate seconds, so keep N / rate under the 600 s `loop-stalled` pass bound:
-57,000 files need at least 95 files per second). `sweep.verify_every` (default 24h, `0` verifies on
-every sweep, otherwise at least `sweep.interval`) is how long a sweep trusts a caught-up file before
-ingesting it again; each file's first deadline is a stable per-path point in that window, so the
-re-verification is a trickle (57,000 / 86,400 = 0.66 files per second), not a daily burst.
+57,000 files need at least 95 files per second). A sweep skips a file the copier last found caught up when its size, mtime and inode are unchanged, and
+nothing expires that skip on a timer (`sweep.verify_every` was retired: a config that still sets it is
+refused at start with a message naming it). The full verification runs only on request:
+`pg-claude-code-recorder sweep --force [--wait]` empties the skip cache and the `seen` table and starts a
+sweep now that ingests every file (`--wait` blocks until it finishes). Residual risk: a rewrite that keeps
+the same size, mtime and inode is invisible to the incremental sweep; it is found by the doctor (its 24 h
+cycle) or by `sweep --force`.
 The caught-up cache is persisted in the `seen` table of `index.db` (path, file id, device, inode, birth
 time, size, mtime, generation; derived data, see `docs/schema-v3-design.md` 5.1), so a restart skips every
 file that has not changed instead of ingesting all of them again. The first start after an upgrade finds

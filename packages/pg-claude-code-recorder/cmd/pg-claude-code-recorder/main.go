@@ -80,6 +80,8 @@ func (a *app) run(args []string) int {
 		return a.extract(args[1:])
 	case "doctor":
 		return a.doctor(args[1:])
+	case "sweep":
+		return a.sweep(args[1:])
 	}
 	return a.emitError(false, wire.ErrUsage, fmt.Sprintf("unknown subcommand %q; try --help", args[0]))
 }

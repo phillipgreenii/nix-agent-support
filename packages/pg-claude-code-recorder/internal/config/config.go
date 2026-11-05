@@ -78,12 +78,6 @@ type Config struct {
 	// hour (default 512 MiB; 0 disables TRUNCATE).
 	WALTruncateAbove int64
 	MetricsAddr      string
-	// VerifyEvery is sweep.verify_every: how long the incremental sweep trusts a
-	// caught-up file before ingesting it again (default 24 h). Each file's
-	// deadline is spread across the window, so the re-verification is a steady
-	// trickle (files / verify_every per second) and not a daily burst. 0
-	// disables skipping: every sweep ingests every file.
-	VerifyEvery time.Duration
 	// MaxFilesPerSecond is sweep.max_files_per_second: the most files per second
 	// the sweep and the first catch-up ingest (hint-driven ingest of live files
 	// is never paced). 0 means unlimited. Default 100; a pass over N files then
@@ -136,9 +130,9 @@ type file struct {
 	Clients         []string `toml:"clients"`
 	MinFreeBytes    *int64   `toml:"minFreeBytes"`
 	Sweep           struct {
-		Interval          string `toml:"interval"`
-		VerifyEvery       string `toml:"verify_every"`
-		MaxFilesPerSecond *int   `toml:"max_files_per_second"`
+		Interval          string  `toml:"interval"`
+		VerifyEvery       *string `toml:"verify_every"`
+		MaxFilesPerSecond *int    `toml:"max_files_per_second"`
 	} `toml:"sweep"`
 	Status struct {
 		Fresh string `toml:"fresh"`
@@ -261,7 +255,6 @@ func Defaults(getenv func(string) string) Config {
 		ClaudeDir:           claude,
 		StateDir:            state,
 		SweepInterval:       15 * time.Minute,
-		VerifyEvery:         24 * time.Hour,
 		MaxFilesPerSecond:   100,
 		StatusFresh:         2 * time.Minute,
 		MinFreeBytes:        20 << 30,
@@ -401,7 +394,6 @@ func apply(c *Config, f file) error {
 		dst *time.Duration
 	}{
 		{"sweep.interval", f.Sweep.Interval, &c.SweepInterval},
-		{"sweep.verify_every", f.Sweep.VerifyEvery, &c.VerifyEvery},
 		{"status.fresh", f.Status.Fresh, &c.StatusFresh},
 		{"wait.max", f.Wait.Max, &c.WaitMax},
 		{"query.timeout", f.Query.Timeout, &c.QueryTimeout},
@@ -447,8 +439,8 @@ func apply(c *Config, f file) error {
 		}
 		c.WALTruncateAbove = *f.WAL.TruncateAbove
 	}
-	if c.VerifyEvery < 0 || (c.VerifyEvery > 0 && c.VerifyEvery < c.SweepInterval) {
-		return fmt.Errorf("sweep.verify_every: %s must be 0 (verify every sweep) or at least sweep.interval (%s)", c.VerifyEvery, c.SweepInterval)
+	if f.Sweep.VerifyEvery != nil {
+		return fmt.Errorf("sweep.verify_every was retired: the daemon no longer re-ingests every file on a timer; remove the key, and run `pg-claude-code-recorder sweep --force` to verify on request")
 	}
 	if c.DoctorSliceEvery < time.Second {
 		return fmt.Errorf("doctor.slice_every: %s is under the 1s minimum", c.DoctorSliceEvery)

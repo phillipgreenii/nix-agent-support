@@ -1,9 +1,7 @@
 package serve
 
 import (
-	"hash/fnv"
 	"sync"
-	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -72,7 +70,6 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 		}
 	}
 	candidates := 0
-	now := d.clock.Now()
 	next := make(map[string]seenFile, len(files))
 	for _, fi := range files {
 		cur := seenOf(fi)
@@ -82,7 +79,7 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 			d.obs.Reg.Add(obs.MSweepChanged, map[string]string{"reason": changeReason(prev, cur, had)}, 1)
 			continue
 		}
-		if cu, ok := d.seen.caught[fi.Path]; !ok || cu.seen != cur || !now.Before(cu.until) {
+		if cu, ok := d.seen.caught[fi.Path]; !ok || cu.seen != cur {
 			d.obs.Reg.Add(obs.MSweepChanged, map[string]string{"reason": "not_cached"}, 1)
 		}
 		birth := cur.birthNS
@@ -111,39 +108,12 @@ func changeReason(prev, cur seenFile, had bool) string {
 }
 
 // caughtUp is a path the copier ingested to "unchanged" (fully caught up) when
-// it last looked, with what the walk reported then. until is when the skip
-// expires and the path is ingested again (the full verification, which catches
-// what size, mtime and inode cannot: a rewrite that keeps all three).
-//
-// Deadlines are spread over the verify_every window so the re-verification is a
-// steady trickle, not a daily burst: a path first cached gets a deadline
-// at a point of the window fixed by a hash of the path; once it has been
-// re-verified it gets the full window, and the spread it started with persists.
+// it last looked, with what the walk reported then. The entry never expires on
+// its own: a rewrite that keeps size, mtime and inode is found by the doctor
+// or by a forced sweep (forceSweep), which empties the cache.
 type caughtUp struct {
-	seen  seenFile
-	file  int64
-	until time.Time
-}
-
-// verifyOffset is the fraction of the window, in [0,1), at which a path is first
-// re-verified: a stable FNV-1a hash of the path.
-func verifyOffset(path string) float64 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(path))
-	return float64(h.Sum32()) / float64(1<<32)
-}
-
-// verifyDeadline returns the skip deadline for a caught-up entry. c is the previous entry for the path
-// (ok false when the path was never cached).
-func (d *Daemon) verifyDeadline(path string, prev caughtUp, had bool, now time.Time) time.Time {
-	every := d.cfg.VerifyEvery
-	if had && !prev.until.IsZero() {
-		if prev.until.After(now) {
-			return prev.until // not yet due: keep the spread deadline
-		}
-		return now.Add(every) // re-verified now: a full window
-	}
-	return now.Add(time.Duration(verifyOffset(path) * float64(every)))
+	seen seenFile
+	file int64
 }
 
 // skipUnchanged reports whether a sweep event needs no ingest: the path was
@@ -161,18 +131,14 @@ func (d *Daemon) skipUnchanged(e watcher.Event) bool {
 }
 
 // caughtMatches reports the file id of a path whose cached caught-up entry
-// still matches the walk's view of it and is not yet due for verification.
+// still matches the walk's view of it.
 // It changes nothing: the start-up backfill uses it to leave such a path alone,
 // and the sweep event that follows takes the skip (and counts it).
 func (d *Daemon) caughtMatches(path string, fi watcher.FileInfo) (int64, bool) {
-	if d.cfg.VerifyEvery <= 0 {
-		return 0, false
-	}
-	now := d.clock.Now()
 	d.seen.mu.Lock()
 	c, ok := d.seen.caught[path]
 	d.seen.mu.Unlock()
-	if !ok || c.seen != seenOf(fi) || !now.Before(c.until) {
+	if !ok || c.seen != seenOf(fi) {
 		return 0, false
 	}
 	return c.file, true
@@ -197,7 +163,17 @@ func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	if d.seen.caught == nil {
 		d.seen.caught = map[string]caughtUp{}
 	}
-	prev, had := d.seen.caught[e.Path]
-	d.seen.caught[e.Path] = caughtUp{seen: seenOf(e.Info), file: res.File, until: d.verifyDeadline(e.Path, prev, had, d.clock.Now())}
+	d.seen.caught[e.Path] = caughtUp{seen: seenOf(e.Info), file: res.File}
 	d.seenDB.remember(e.Path, res.File, seenOf(e.Info))
+}
+
+// clearSkipCache empties the in-memory caught-up cache and the persisted seen
+// table, so the next sweep ingests every file. The caller holds the watcher's
+// lock (it runs in the sweep's OnSweep hook, before the sweep's events).
+func (d *Daemon) clearSkipCache() {
+	d.seen.mu.Lock()
+	d.seen.caught = map[string]caughtUp{}
+	d.seen.mu.Unlock()
+	d.seenDB.clear()
+	d.setSeenGauge()
 }

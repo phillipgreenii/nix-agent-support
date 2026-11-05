@@ -76,6 +76,16 @@ func (s *seenStore) maybeFlush() {
 	}
 }
 
+// clear drops the pending batch and empties the table.
+func (s *seenStore) clear() {
+	s.mu.Lock()
+	s.put, s.del, s.oldest = map[string]store.SeenRow{}, map[string]bool{}, time.Time{}
+	s.mu.Unlock()
+	if err := s.st.SeenTruncate(); err != nil && s.onError != nil {
+		s.onError(err)
+	}
+}
+
 // flush writes the pending batch. A failure is reported and the batch dropped.
 func (s *seenStore) flush() {
 	s.mu.Lock()
@@ -130,7 +140,7 @@ func (d *Daemon) loadSeen() {
 	for _, r := range rows {
 		sf := seenFile{dev: r.Dev, ino: r.Ino, size: r.Size, mtimeNS: r.MTimeNS, birthNS: r.BirthNS}
 		d.seen.m[r.Path] = sf
-		d.seen.caught[r.Path] = caughtUp{seen: sf, file: r.File, until: d.verifyDeadline(r.Path, caughtUp{}, false, start)}
+		d.seen.caught[r.Path] = caughtUp{seen: sf, file: r.File}
 	}
 	d.seen.mu.Unlock()
 	d.obs.Reg.Set(obs.MSeenLoadSeconds, nil, d.clock.Now().Sub(start).Seconds())

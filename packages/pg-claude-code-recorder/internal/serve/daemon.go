@@ -114,6 +114,13 @@ type Daemon struct {
 	seen sweepSeen
 	// seenDB persists the caught-up observations (the seen table).
 	seenDB *seenStore
+	// forcePending asks the next sweep to empty the skip caches first; the
+	// forced-sweep state below is guarded by forceMu.
+	forcePending atomic.Bool
+	forceMu      sync.Mutex
+	forceRunning bool
+	forceDone    int64
+	forceErr     string
 	// sweepPace caps the files the sweep and the catch-up ingest per second.
 	sweepPace *pacer
 
@@ -401,6 +408,9 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 		}
 		found[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}] = true
 	}
+	if d.forcePending.CompareAndSwap(true, false) {
+		d.clearSkipCache()
+	}
 	d.countSweepFiles(files)
 	d.seenDB.prune(files)
 	d.setSeenGauge()
@@ -510,6 +520,7 @@ func (d *Daemon) registerOps() {
 	d.srv.Register("remove", server.KindQuery, d.opRemove)
 	d.srv.Register("extract", server.KindQuery, d.opExtract)
 	d.srv.Register("doctor", server.KindQuery, d.opDoctor)
+	d.srv.Register("sweep", server.KindQuery, d.opSweep)
 }
 
 // Start opens the listener and the exporter and starts the watcher.

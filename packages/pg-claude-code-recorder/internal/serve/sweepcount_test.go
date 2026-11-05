@@ -1,9 +1,11 @@
 package serve
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -222,49 +224,106 @@ func TestIngestPathRegistryLocksAreMeasured(t *testing.T) {
 
 func copierResult() copier.Result { return copier.Result{} }
 
-// A same-size, same-mtime rewrite is invisible to the incremental sweep; the
-// periodic full verification (a cached entry past its deadline) ingests every
-// file again and so finds it.
-func TestSweepSkipsUnchangedUntilFullVerification(t *testing.T) {
-	e := newEnv(t, false)
-	old := time.Now().Add(-time.Hour)
+// A same-size, same-mtime rewrite is invisible to the incremental sweep, and
+// nothing expires the skip on a timer: a quiet file stays skipped after more
+// than 24 hours of clock time. A forced sweep (the sweep --force request)
+// ingests every file again, finds the rewrite, and the sweeps after it skip again.
+func TestSweepSkipsUnchangedUntilForced(t *testing.T) {
+	e, d, clk := fakeClockDaemon(t, nil)
+	old := t0.Add(-time.Hour)
 	p := e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
-	d := e.open(t)
+	e.transcript("b.jsonl", "{\"type\":\"user\"}\n", old)
 	sweep := func() {
 		t.Helper()
 		if err := d.Watcher().Rescan(); err != nil {
 			t.Fatal(err)
 		}
 	}
+	ingested := func() float64 {
+		return ingestCount(d, "unchanged") + ingestCount(d, "new_generation") + ingestCount(d, "copied")
+	}
 	sweep() // first copy
 	sweep() // caught up: cached
-	before := ingestCount(d, "unchanged")
+	before := ingested()
 	sweep()
-	if got := ingestCount(d, "unchanged") - before; got != 0 {
+	if got := ingested() - before; got != 0 {
 		t.Fatalf("cached sweep ingested %v files, want 0", got)
 	}
-	// Same size and mtime, different bytes: not detected by a skipping sweep.
+	// Same size and mtime, different bytes: not detected by a skipping sweep,
+	// not even after more than 24 hours.
 	if err := os.WriteFile(p, []byte("{\"type\":\"asst\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(p, old, old); err != nil {
 		t.Fatal(err)
 	}
+	clk.Advance(48 * time.Hour)
 	sweep()
-	if got := ingestCount(d, "unchanged") - before; got != 0 {
-		t.Fatalf("sweep ingested %v files after a same-size same-mtime rewrite, want 0 (documented limit)", got)
+	if got := ingested() - before; got != 0 {
+		t.Fatalf("sweep ingested %v files 48 h later, want 0 (no periodic purge)", got)
 	}
-	// Age the verification: the next sweep ingests everything again.
-	d.seen.mu.Lock()
-	for k, c := range d.seen.caught {
-		c.until = d.clock.Now().Add(-time.Minute)
-		d.seen.caught[k] = c
-	}
-	d.seen.mu.Unlock()
+	// Forced: every file is ingested again.
+	d.forcePending.Store(true)
 	sweep()
-	after := ingestCount(d, "unchanged") + ingestCount(d, "new_generation") + ingestCount(d, "copied")
-	if after-before < 1 {
-		t.Fatalf("verification sweep ingested nothing")
+	if got := ingested() - before; got != 2 {
+		t.Fatalf("forced sweep ingested %v files, want 2", got)
+	}
+	if d.forcePending.Load() {
+		t.Fatal("the forced sweep left the request pending")
+	}
+	// Later sweeps skip again (the rewritten file takes one more sweep to be
+	// found caught up, as after any new generation).
+	sweep()
+	mid := ingested()
+	sweep()
+	if got := ingested() - mid; got != 0 {
+		t.Fatalf("sweep after the forced one ingested %v files, want 0", got)
+	}
+}
+
+// The sweep operation clears the persisted seen table as well as the cache,
+// runs the sweep in the background and reports completion.
+func TestSweepOpForceClearsSeenTableAndCompletes(t *testing.T) {
+	e := newEnv(t, false)
+	old := time.Now().Add(-time.Hour)
+	e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
+	d := e.open(t)
+	for i := 0; i < 2; i++ {
+		if err := d.Watcher().Rescan(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.seenDB.flush()
+	if n, err := d.st.SeenCount(); err != nil || n == 0 {
+		t.Fatalf("seen table has %d rows (%v), want some", n, err)
+	}
+	// A request without force starts nothing.
+	ans, werr := d.opSweep(context.Background(), []byte("{}"))
+	if werr != nil || ans.(SweepAnswer).Started {
+		t.Fatalf("status request: %+v %v", ans, werr)
+	}
+	ans, werr = d.opSweep(context.Background(), []byte(`{"force":true}`))
+	if werr != nil || !ans.(SweepAnswer).Started {
+		t.Fatalf("force request: %+v %v", ans, werr)
+	}
+	// The background pass is short (one small file); yield until it reports done.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		a, _ := d.opSweep(context.Background(), nil)
+		if !a.(SweepAnswer).Running && a.(SweepAnswer).Completed == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("forced sweep did not complete")
+		}
+		runtime.Gosched()
+	}
+	if n, _ := d.st.SeenCount(); n != 1 {
+		// the forced sweep re-ingested the file and re-recorded it
+		d.seenDB.flush()
+		if n, _ = d.st.SeenCount(); n != 1 {
+			t.Fatalf("seen table has %d rows after the forced sweep, want 1", n)
+		}
 	}
 }
 
@@ -327,20 +386,18 @@ func TestSweepChangeReasons(t *testing.T) {
 	cases := []struct {
 		name   string
 		walked watcher.FileInfo
-		seen   bool // the path has a prior observation
-		cached bool // and a caught-up entry matching it
-		expiry time.Duration
+		seen   bool   // the path has a prior observation
+		cached bool   // and a caught-up entry matching it
 		want   string // "" means no reason
 	}{
-		{"new", base, false, false, time.Hour, "new"},
-		{"size", with(func(f *watcher.FileInfo) { f.Size++ }), true, true, time.Hour, "size"},
-		{"mtime", with(func(f *watcher.FileInfo) { f.ModTime = t0.Add(time.Second) }), true, true, time.Hour, "mtime"},
-		{"ino", with(func(f *watcher.FileInfo) { f.Ino++ }), true, true, time.Hour, "ino"},
-		{"birth", with(func(f *watcher.FileInfo) { f.Birth = t0.Add(time.Second) }), true, true, time.Hour, "ino"},
-		{"dev", with(func(f *watcher.FileInfo) { f.Dev++ }), true, true, time.Hour, "ino"},
-		{"not_cached", base, true, false, time.Hour, "not_cached"},
-		{"cache_expired", base, true, true, -time.Minute, "not_cached"},
-		{"identical_cached_walk", base, true, true, time.Hour, ""},
+		{"new", base, false, false, "new"},
+		{"size", with(func(f *watcher.FileInfo) { f.Size++ }), true, true, "size"},
+		{"mtime", with(func(f *watcher.FileInfo) { f.ModTime = t0.Add(time.Second) }), true, true, "mtime"},
+		{"ino", with(func(f *watcher.FileInfo) { f.Ino++ }), true, true, "ino"},
+		{"birth", with(func(f *watcher.FileInfo) { f.Birth = t0.Add(time.Second) }), true, true, "ino"},
+		{"dev", with(func(f *watcher.FileInfo) { f.Dev++ }), true, true, "ino"},
+		{"not_cached", base, true, false, "not_cached"},
+		{"identical_cached_walk", base, true, true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -351,7 +408,7 @@ func TestSweepChangeReasons(t *testing.T) {
 				d.seen.m = map[string]seenFile{base.Path: seenOf(base)}
 			}
 			if tc.cached {
-				d.seen.caught = map[string]caughtUp{base.Path: {seen: seenOf(base), file: 1, until: now.Add(tc.expiry)}}
+				d.seen.caught = map[string]caughtUp{base.Path: {seen: seenOf(base), file: 1}}
 			}
 			d.countSweepFiles([]watcher.FileInfo{tc.walked})
 			for _, r := range obs.SweepChangeReasons {

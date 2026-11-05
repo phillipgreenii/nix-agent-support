@@ -38,6 +38,7 @@ var cancelExempt = map[string]string{
 	"status":  "answers from the snapshot the status loop keeps, issues no query",
 	"remove":  "mutates the archive and the index; cancelling half way would leave partial state",
 	"extract": "copies archive files and commits stage rows; cancelling half way would leave partial state",
+	"sweep":   "starts a background sweep and answers from daemon state, no store read",
 	"doctor":  "verifies files on disk and writes its report; a long file walk, not a pool read",
 }
 

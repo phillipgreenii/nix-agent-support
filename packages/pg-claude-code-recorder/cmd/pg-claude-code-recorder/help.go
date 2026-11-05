@@ -25,6 +25,7 @@ Usage:
   pg-claude-code-recorder remove   [<session>...] [--dry-run] [--yes] [--all-eligible] [--json]
   pg-claude-code-recorder extract  <session> [--to DIR] [--json]   restore a removed Conversation (claude --resume works)
   pg-claude-code-recorder doctor   [--json]   compare every copy with its Claude file by full hash (rolling slices of doctor.bytes_per_slice; a run during a cycle completes it); exit 9 on a mismatch
+  pg-claude-code-recorder sweep    --force [--wait] [--json]   empty the skip cache and the seen table and ingest every file now (the full verification; it never runs on a timer)
   pg-claude-code-recorder version
 
 Common flags:

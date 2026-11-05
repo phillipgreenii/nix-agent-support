@@ -81,33 +81,3 @@ func TestSweepAndCatchUpRespectTheCapAndStillFinish(t *testing.T) {
 		t.Fatalf("only %v of %d files ingested", n, files)
 	}
 }
-
-// The 24-hour re-verification is a trickle: first deadlines spread over the
-// window, and a re-verified path gets a full window.
-func TestVerifyDeadlinesSpreadAcrossTheWindow(t *testing.T) {
-	_, d, clk := fakeClockDaemon(t, nil)
-	d.cfg.VerifyEvery = 24 * time.Hour
-	now := clk.Now()
-	buckets := make([]int, 24)
-	for i := 0; i < 24000; i++ {
-		until := d.verifyDeadline(fmt.Sprintf("/p/%d.jsonl", i), caughtUp{}, false, now)
-		off := until.Sub(now)
-		if off < 0 || off >= 24*time.Hour {
-			t.Fatalf("first deadline %v outside the window", off)
-		}
-		buckets[int(off/time.Hour)]++
-	}
-	for h, c := range buckets {
-		if c < 700 || c > 1300 { // uniform is 1000 per hour
-			t.Fatalf("hour %d holds %d of 24000 deadlines: not spread (%v)", h, c, buckets)
-		}
-	}
-	prev := caughtUp{until: now.Add(-time.Second)}
-	if got := d.verifyDeadline("/p/a", prev, true, now); got.Sub(now) != 24*time.Hour {
-		t.Fatalf("re-verified path got %v, want a full window", got.Sub(now))
-	}
-	prev = caughtUp{until: now.Add(time.Hour)}
-	if got := d.verifyDeadline("/p/a", prev, true, now); got.Sub(now) != time.Hour {
-		t.Fatalf("not-yet-due path moved its deadline to %v", got.Sub(now))
-	}
-}
