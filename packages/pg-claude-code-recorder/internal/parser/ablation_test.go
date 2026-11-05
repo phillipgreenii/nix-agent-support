@@ -199,6 +199,7 @@ type abVariant struct {
 	dsnExtra    string // extra DSN pragmas for every connection
 	noSavepoint bool
 	noPrepare   bool
+	noTimers    bool     // the step timers read no clock (prices the timers: V1 against V1T0)
 	setup       []string // DDL run on the empty index before the parse
 	dropFTS     bool     // replace fts_word with a plain table
 }
@@ -215,14 +216,16 @@ func abIgnoreDDL(tables ...string) []string {
 
 func abVariants() map[string]abVariant {
 	return map[string]abVariant{
-		"V1":  {name: "V1"},
-		"V2":  {name: "V2", dropFTS: true},
-		"V2b": {name: "V2b", dropFTS: true, setup: abIgnoreDDL("texts")},
-		"V3":  {name: "V3", setup: abIgnoreDDL("fields")},
-		"V4":  {name: "V4", noSavepoint: true},
-		"V5":  {name: "V5", journal: "MEMORY"},
-		"V5b": {name: "V5b", journal: "OFF"},
-		"V6":  {name: "V6", noPrepare: true},
+		"V1": {name: "V1"},
+		// V1T0 is the baseline with the step timers' clock reads removed.
+		"V1T0": {name: "V1T0", noTimers: true},
+		"V2":   {name: "V2", dropFTS: true},
+		"V2b":  {name: "V2b", dropFTS: true, setup: abIgnoreDDL("texts")},
+		"V3":   {name: "V3", setup: abIgnoreDDL("fields")},
+		"V4":   {name: "V4", noSavepoint: true},
+		"V5":   {name: "V5", journal: "MEMORY"},
+		"V5b":  {name: "V5b", journal: "OFF"},
+		"V6":   {name: "V6", noPrepare: true},
 		// V9 keeps the savepoint but asks for temp_store=MEMORY (does the
 		// sub-journal stay in memory without changing journal_mode?).
 		"V9": {name: "V9", dsnExtra: "&_pragma=temp_store(2)"},
@@ -350,6 +353,8 @@ func TestAblation(t *testing.T) {
 
 	store.SetAblation(v.journal, v.dsnExtra, v.noSavepoint)
 	parser.SetAblationNoPrepare(v.noPrepare)
+	parser.SetAblationNoStepTimers(v.noTimers)
+	store.SetAblationNoStepTimers(v.noTimers)
 	o := obs.New(nil)
 	st, err := store.Open(dir, store.Options{V3Layout: true, Obs: o, Rebuild: true, BulkRebuild: true})
 	if err != nil {

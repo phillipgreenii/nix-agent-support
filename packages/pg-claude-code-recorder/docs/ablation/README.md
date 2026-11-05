@@ -96,3 +96,14 @@ change behavior when the build tag is absent.
 | Date       | Question                                        | Results                             |
 | ---------- | ----------------------------------------------- | ----------------------------------- |
 | 2026-11-05 | Where does the rebuild's SQLite insert time go? | `2026-11-05-insert-cost-results.md` |
+
+## Pricing the step timers
+
+Variant `V1T0` is the baseline with the step timers' clock reads removed (the hooks
+`SetAblationNoStepTimers` in the `store` and `parser` packages), so `V1` against `V1T0` is the cost of the
+timers. The cost of one clock read is `go test -bench StepClockRead ./internal/store/`: 25 to 46 ns on the
+2026-11-05 host under load (median of five runs 36 ns). A line costs 3 reads plus about 2 on average for the
+sampled statements, so about 5 reads, or 0.25 percent of a 21 s parse of 300,000 lines (300,000 x 5 x 36 ns =
+0.054 s). A synthetic corpus (86 MB, built by repeating the repository's transcript fixture) run five times per
+variant under a load average of 36 to 47 varied by more than 50 percent between runs of the same variant, so
+the harness could not resolve a 1 percent difference on that host; rerun it on a quiet machine.
