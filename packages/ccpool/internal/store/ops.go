@@ -255,6 +255,9 @@ func (s *Store) Delete(ctx context.Context, externalID string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM session_metadata WHERE external_id = ?`, externalID); err != nil {
 		return fmt.Errorf("delete meta for %q: %w", externalID, err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM originals_probe WHERE external_id = ?`, externalID); err != nil {
+		return fmt.Errorf("delete originals probe for %q: %w", externalID, err)
+	}
 	return tx.Commit()
 }
 

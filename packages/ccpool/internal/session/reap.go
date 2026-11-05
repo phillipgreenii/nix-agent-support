@@ -440,7 +440,7 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string, now time.T
 			return nil
 		}
 		fresh := s.isFreshStarting(r)
-		resumable, rerr := s.resumable(r)
+		resumable, rerr := s.resumableForReap(ctx, r, now)
 		if rerr != nil {
 			return fmt.Errorf("check resumable: %w", rerr) // the probe is down: never prune on a guess
 		}

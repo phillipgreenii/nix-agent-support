@@ -39,6 +39,16 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   MUST exclude every dead closed record, so a not-live `working` count holds only records nobody
   closed. A per-pool count of records by kind (live, dead closed, dead unclosed) MUST be served
   alongside it. (ADR 0119, ADR 0086)
+- **`INV-POOL-11`** <!-- uuid: 9cb167c9-b47d-4a3e-9b6d-8e5a2f1c7d03 --> — **A sweep MUST NOT ask
+  the recorder again about a dead record whose conversation it recently confirmed present.** When
+  the sweep finds a session no longer live, it checks that the conversation's original transcript
+  is still present; once that check answers "present" for a record, the sweep MUST reuse the
+  answer for the same transcript for one hour, across sweeps, and so a sweep over unchanged dead
+  records MUST send the recorder no such request. Only a "present" answer is reused, and a changed
+  transcript path invalidates it. An answer is never reused to keep a record whose check could not
+  be made: a recorder that does not answer MUST read as "daemon offline" and the sweep MUST leave
+  the record alone, never treat the conversation as gone (`INV-POOL-2`). A record whose original
+  transcript disappears is therefore pruned at the first sweep after the reused answer expires.
 
 - **`INV-POOL-4`** <!-- uuid: 627882d5-f2ad-4be6-97be-f24e6963f0c1 --> — **A pool MUST NOT accept
   work while the account's usage window is at its limit.** Whenever the co-resident monitor's

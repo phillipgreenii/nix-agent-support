@@ -573,6 +573,41 @@ func (s *Service) resumable(row store.Session) (bool, error) {
 	return s.d.Exister.Exists(row.TranscriptPath), nil
 }
 
+// originalsProbeTTL is how long a "present" answer from the recorder is reused
+// by the reap sweep for the same transcript path (INV-POOL-11).
+const originalsProbeTTL = time.Hour
+
+// originalsCache is the optional Store extension that persists the last
+// "present" answer across sweeps (each sweep is its own process).
+type originalsCache interface {
+	OriginalsConfirmedAt(ctx context.Context, externalID, transcriptPath string) (int64, bool, error)
+	SetOriginalsConfirmed(ctx context.Context, externalID, transcriptPath string, at int64) error
+}
+
+// resumableForReap is resumable with a cross-sweep memory of positive answers: a
+// dead row whose originals the recorder confirmed present within originalsProbeTTL
+// is not asked about again. Only "present" is stored, and a probe error is
+// returned as is (never reused, never read as "gone"), so a recorder outage
+// still leaves the row alone.
+func (s *Service) resumableForReap(ctx context.Context, row store.Session, now time.Time) (bool, error) {
+	oc, ok := s.d.Store.(originalsCache)
+	if !ok || row.TranscriptPath == "" {
+		return s.resumable(row)
+	}
+	if at, found, err := oc.OriginalsConfirmedAt(ctx, row.ExternalID, row.TranscriptPath); err == nil && found {
+		if age := now.Sub(time.Unix(at, 0)); age >= 0 && age < originalsProbeTTL {
+			return true, nil
+		}
+	}
+	res, err := s.resumable(row)
+	if err == nil && res {
+		if serr := oc.SetOriginalsConfirmed(ctx, row.ExternalID, row.TranscriptPath, now.Unix()); serr != nil {
+			slog.Debug("ccpool: could not remember originals probe", "err", serr)
+		}
+	}
+	return res, err
+}
+
 // isFreshStarting guards the fresh-session race: a row still in `starting`
 // younger than the prune grace must NOT be pruned even when no transcript exists
 // yet (the SessionStart hook may not have written one).
