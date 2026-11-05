@@ -48,11 +48,14 @@ type Config struct {
 	QueryTimeout  time.Duration // deadline of every read (query.timeout)
 	// ReadCacheMiB and ReadMmapMiB bound the memory of each read connection:
 	// the SQLite page cache and the memory map (0 maps nothing).
-	ReadCacheMiB  int
-	ReadMmapMiB   int
-	FeedRetention time.Duration
-	RemoveAfter   time.Duration
-	RemoveEnable  bool
+	ReadCacheMiB int
+	ReadMmapMiB  int
+	// MaxConnections is query.max_connections: the read pool's open-connection
+	// bound (at least 2; 0 means unbounded).
+	MaxConnections int
+	FeedRetention  time.Duration
+	RemoveAfter    time.Duration
+	RemoveEnable   bool
 	// RemoveMaxPerRun is remove.maxPerRun and RemoveMaxPerHour remove.maxPerHour:
 	// the most Conversations one removal pass, and one hour, may remove.
 	RemoveMaxPerRun  int
@@ -127,9 +130,10 @@ type file struct {
 		MaxWaiters *int   `toml:"maxWaiters"`
 	} `toml:"wait"`
 	Query struct {
-		Timeout      string `toml:"timeout"`
-		ReadCacheMiB *int   `toml:"readCacheMiB"`
-		ReadMmapMiB  *int   `toml:"readMmapMiB"`
+		Timeout        string `toml:"timeout"`
+		ReadCacheMiB   *int   `toml:"readCacheMiB"`
+		ReadMmapMiB    *int   `toml:"readMmapMiB"`
+		MaxConnections *int   `toml:"max_connections"`
 	} `toml:"query"`
 	Feed struct {
 		Retention string `toml:"retention"`
@@ -251,6 +255,7 @@ func Defaults(getenv func(string) string) Config {
 		DoctorInterval:      24 * time.Hour,
 		DoctorBytesPerSlice: 256 << 20,
 		DoctorSliceEvery:    time.Minute,
+		MaxConnections:      8,
 		CopyThrottle:        2 * time.Millisecond,
 		SettleAfter:         24 * time.Hour,
 		SettleMode:          "scan",
@@ -352,6 +357,12 @@ func apply(c *Config, f file) error {
 			return fmt.Errorf("query.readMmapMiB must not be negative")
 		}
 		c.ReadMmapMiB = *f.Query.ReadMmapMiB
+	}
+	if f.Query.MaxConnections != nil {
+		if n := *f.Query.MaxConnections; n != 0 && n < 2 {
+			return fmt.Errorf("query.max_connections must be at least 2 (0 means unbounded)")
+		}
+		c.MaxConnections = *f.Query.MaxConnections
 	}
 	c.MetricsAddr = f.Metrics.Addr
 	for _, d := range []struct {

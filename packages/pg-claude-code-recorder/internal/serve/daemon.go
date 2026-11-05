@@ -182,7 +182,7 @@ func Open(opt Options) (*Daemon, error) {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
 	endPhase()
-	st, err := store.Open(cfg.StateDir, store.Options{V3Layout: true, Phase: su.storeHook, Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB)})
+	st, err := store.Open(cfg.StateDir, store.Options{V3Layout: true, Phase: su.storeHook, Obs: o, Rebuild: opt.Rebuild, BulkRebuild: opt.BulkRebuild, DriverName: opt.StoreDriver, ReadTimeout: cfg.QueryTimeout, ReadCacheKiB: cfg.ReadCacheMiB << 10, ReadMmapBytes: readMmapBytes(cfg.ReadMmapMiB), ReadMaxOpenConns: readMaxOpenConns(cfg.MaxConnections)})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -946,6 +946,16 @@ func readMmapBytes(mib int) int64 {
 		return -1
 	}
 	return int64(mib) << 20
+}
+
+// readMaxOpenConns converts query.max_connections to the store option: 0
+// (unbounded in the config) is a negative bound, which the store spells as
+// unbounded, since the store's own zero means its default.
+func readMaxOpenConns(n int) int {
+	if n <= 0 {
+		return -1
+	}
+	return n
 }
 
 // lastTickInfo is what status reports of the last completed settle tick.

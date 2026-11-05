@@ -95,6 +95,10 @@ type Options struct {
 	// (DefaultReadMmapBytes when zero, negative disables mapping). Mapped pages
 	// are shared, evictable file cache, not private memory.
 	ReadMmapBytes int64
+	// ReadMaxOpenConns is the most connections the read pool opens at once
+	// (DefaultReadMaxOpenConns when zero, negative means unbounded). Excess
+	// readers wait on the pool until a slot frees or their context ends.
+	ReadMaxOpenConns int
 	// NoTrigramIndex builds a NEW index.db without the trigram table fts_tri:
 	// the parser then indexes opaque fields (tool bodies) in the word index
 	// fts_word. An existing index.db that already has fts_tri keeps it and its
@@ -149,6 +153,7 @@ type Store struct {
 	stmtCtx      stmtCtxFunc
 	readCacheKiB int   // cache_size of each read connection, KiB
 	readMmap     int64 // mmap_size ceiling of each read connection, bytes
+	readMaxOpen  int   // read pool open-connection bound (0 default, negative unbounded)
 	dir          string
 	fs           fsx.FS
 	obs          *obs.Obs
@@ -245,7 +250,7 @@ func Open(dir string, opt Options) (*Store, error) {
 	if opt.V3Layout {
 		opt.NoTrigramIndex, opt.ExtensionTables = true, true
 	}
-	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, journalLimit: opt.JournalSizeLimit}
+	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, readMaxOpen: opt.ReadMaxOpenConns, journalLimit: opt.JournalSizeLimit}
 	if s.journalLimit <= 0 {
 		s.journalLimit = JournalSizeLimit
 	}
@@ -494,6 +499,12 @@ func (s *Store) openDB(path string, bulk bool) error {
 	}
 	r.SetConnMaxLifetime(readConnMaxLifetime)
 	r.SetConnMaxIdleTime(readConnMaxIdleTime)
+	switch {
+	case s.readMaxOpen == 0:
+		r.SetMaxOpenConns(DefaultReadMaxOpenConns)
+	case s.readMaxOpen > 0:
+		r.SetMaxOpenConns(s.readMaxOpen)
+	}
 	r.SetMaxIdleConns(readMaxIdleConns)
 	s.Reader = Reader{q: r}
 	// A passive checkpoint can run for minutes on a large backlog: it gets its

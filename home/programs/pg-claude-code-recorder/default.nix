@@ -93,6 +93,7 @@ let
       max = cfg.wait.max;
       maxWaiters = cfg.wait.maxWaiters;
     };
+    query.max_connections = cfg.query.maxConnections;
     held = {
       recheck = cfg.held.recheck;
       alertAfter = cfg.held.alertAfter;
@@ -313,6 +314,17 @@ in
         default = 256;
         description = "Waiter limit.";
       };
+    };
+
+    query.maxConnections = lib.mkOption {
+      type = lib.types.addCheck lib.types.int (n: n == 0 || n >= 2);
+      default = 8;
+      description = ''
+        Most connections the read pool opens at once (config key
+        `query.max_connections`). Readers beyond it queue on the pool, so the
+        memory of the read connections stops growing with the number of
+        concurrent readers. At least 2; 0 means unbounded (the way back).
+      '';
     };
 
     held = {

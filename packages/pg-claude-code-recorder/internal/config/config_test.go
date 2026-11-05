@@ -101,3 +101,27 @@ func TestGraceWindowFallbackIsOffByDefaultAndCanBeEnabled(t *testing.T) {
 		t.Fatalf("%v %+v", err, c)
 	}
 }
+
+func TestQueryMaxConnectionsDefaultAndValidation(t *testing.T) {
+	if c := Defaults(env(map[string]string{"HOME": "/h"})); c.MaxConnections != 8 {
+		t.Fatalf("default %d, want 8", c.MaxConnections)
+	}
+	load := func(v string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(p, []byte("[query]\nmax_connections = "+v+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, env(map[string]string{"HOME": "/h"}))
+	}
+	for _, v := range []string{"1", "-1"} {
+		if _, err := load(v); err == nil {
+			t.Fatalf("max_connections = %s accepted", v)
+		}
+	}
+	for v, want := range map[string]int{"0": 0, "2": 2, "16": 16} {
+		c, err := load(v)
+		if err != nil || c.MaxConnections != want {
+			t.Fatalf("max_connections = %s: %d, %v", v, c.MaxConnections, err)
+		}
+	}
+}

@@ -175,6 +175,11 @@ let
     settings.doctor.interval = "6h";
   } osWithObs;
 
+  onMaxConn = case darwin {
+    daemon.enable = true;
+    query.maxConnections = 0;
+  } osWithObs;
+
   # the control module coupling
   controlCoupled =
     case
@@ -364,6 +369,10 @@ let
     observabilityFollowsSystem =
       (opts on).observability.enable == true && (opts onNoPprof).observability.enable == false;
     valueChangeChangesRenderedConfig = toString (rendered onOtherSettle) != toString (rendered on);
+    maxConnectionsDefaultRendered =
+      (opts on).query.maxConnections == 8 && (data on).query.max_connections == 8;
+    maxConnectionsOverrideRendered =
+      (data onSettings).query.max_connections == 8 && (data onMaxConn).query.max_connections == 0;
     settingsMerge =
       (data onSettings).doctor.interval == "6h" && (data onSettings).remove.after == "30d";
     configFileIsAStorePath = lib.hasPrefix builtins.storeDir (toString (opts on).configFile);

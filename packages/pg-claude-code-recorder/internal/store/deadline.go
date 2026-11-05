@@ -27,6 +27,10 @@ const (
 	readConnMaxLifetime = 6 * time.Hour
 	readConnMaxIdleTime = 30 * time.Minute
 	readMaxIdleConns    = 4
+	// DefaultReadMaxOpenConns bounds the read pool's open connections, so memory
+	// (a page cache and a map per connection) stops growing with the number of
+	// concurrent readers; the rest queue on the pool.
+	DefaultReadMaxOpenConns = 8
 )
 
 // Read connection memory. Both are ceilings per connection: SQLite fills the

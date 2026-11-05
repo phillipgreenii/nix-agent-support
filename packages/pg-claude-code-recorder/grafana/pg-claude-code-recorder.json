@@ -1106,6 +1106,63 @@
           "legendFormat": "{{op}}"
         }
       ]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "read pool wait",
+      "description": "Time readers spent queued for a read connection, as seconds waited per second (left axis) and readers that had to wait per second (right axis), read pool only. A line above 0 means the pool bound (query.max_connections) is queueing readers. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 112,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "waits per second"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(pg_claude_code_recorder_db_wait_seconds_total{pool=\"read\"}[5m]))",
+          "range": true,
+          "legendFormat": "seconds waited per second"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(pg_claude_code_recorder_db_wait_total{pool=\"read\"}[5m]))",
+          "range": true,
+          "legendFormat": "waits per second"
+        }
+      ]
     }
   ]
 }
