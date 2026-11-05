@@ -170,7 +170,8 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `db_in_use_connections`, `db_idle_connections`, `db_wait_total`, `db_wait_seconds_total`,
   `field_type_mismatch_total{source,type,field}` (a catalogued field whose value did not convert losslessly to its
   declared type; see `internal/source/storage.go`; registered when first incremented, so a clean run has no series),
-  `db_max_lifetime_closed_total` and `db_max_idle_closed_total` (label `pool`: `read` or `write`; a rising
+  `sweep_files_total{outcome}` (walked, unchanged_candidate, skipped) and `sweep_changed_total{reason}` (new, size, mtime, ino,
+  not_cached: why a walked file is not known unchanged), `db_max_lifetime_closed_total` and `db_max_idle_closed_total` (label `pool`: `read` or `write`; a rising
   `db_wait_seconds_total` means callers queue for a connection). The `client` label is whitelisted (`clients` in the config adds names); any other
   name is `other`. The exporter is a small text renderer over the in-process registry, so the
   package takes no Prometheus client dependency.

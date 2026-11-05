@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 )
 
 func ingestCount(d *Daemon, result string) float64 {
@@ -308,5 +310,94 @@ func TestSweepSkipsUnchangedSnapshotFiles(t *testing.T) {
 	sweep()
 	if got := ingestCount(d, "snapshot") - snapBefore; got != 1 {
 		t.Fatalf("a changed snapshot file was stored %v times, want 1", got)
+	}
+}
+
+func changedCount(d *Daemon, reason string) float64 {
+	v, _ := d.obs.Reg.Counter(obs.MSweepChanged, map[string]string{"reason": reason})
+	return v
+}
+
+// Each change reason is counted once for a file that differs in exactly that
+// way from the last observation; an identical second walk counts none.
+func TestSweepChangeReasons(t *testing.T) {
+	t0 := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	base := watcher.FileInfo{Path: "/p/a.jsonl", Dev: 1, Ino: 10, Birth: t0, Size: 100, ModTime: t0}
+	with := func(f func(*watcher.FileInfo)) watcher.FileInfo { fi := base; f(&fi); return fi }
+	cases := []struct {
+		name   string
+		walked watcher.FileInfo
+		seen   bool // the path has a prior observation
+		cached bool // and a caught-up entry matching it
+		expiry time.Duration
+		want   string // "" means no reason
+	}{
+		{"new", base, false, false, time.Hour, "new"},
+		{"size", with(func(f *watcher.FileInfo) { f.Size++ }), true, true, time.Hour, "size"},
+		{"mtime", with(func(f *watcher.FileInfo) { f.ModTime = t0.Add(time.Second) }), true, true, time.Hour, "mtime"},
+		{"ino", with(func(f *watcher.FileInfo) { f.Ino++ }), true, true, time.Hour, "ino"},
+		{"birth", with(func(f *watcher.FileInfo) { f.Birth = t0.Add(time.Second) }), true, true, time.Hour, "ino"},
+		{"dev", with(func(f *watcher.FileInfo) { f.Dev++ }), true, true, time.Hour, "ino"},
+		{"not_cached", base, true, false, time.Hour, "not_cached"},
+		{"cache_expired", base, true, true, -time.Minute, "not_cached"},
+		{"identical_cached_walk", base, true, true, time.Hour, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newEnv(t, false).open(t)
+			now := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)
+			d.clock = clock.NewFake(now)
+			if tc.seen {
+				d.seen.m = map[string]seenFile{base.Path: seenOf(base)}
+			}
+			if tc.cached {
+				d.seen.caught = map[string]caughtUp{base.Path: {seen: seenOf(base), file: 1, until: now.Add(tc.expiry)}}
+			}
+			d.countSweepFiles([]watcher.FileInfo{tc.walked})
+			for _, r := range obs.SweepChangeReasons {
+				want := 0.0
+				if r == tc.want {
+					want = 1
+				}
+				if got := changedCount(d, r); got != want {
+					t.Errorf("reason %s = %v, want %v", r, got, want)
+				}
+			}
+		})
+	}
+}
+
+// Negative control: a second walk identical to the first, with every file
+// caught up, counts no change reason and every file skipped.
+func TestIdenticalSecondWalkHasNoChangeReasons(t *testing.T) {
+	e := newEnv(t, false)
+	old := time.Now().Add(-time.Hour)
+	for _, n := range []string{"a.jsonl", "b.jsonl", "c.jsonl"} {
+		e.transcript(n, "{\"type\":\"user\"}\n", old)
+	}
+	d := e.open(t)
+	sweep := func() {
+		t.Helper()
+		if err := d.Watcher().Rescan(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sweep()
+	sweep() // caught up and cached
+	var before float64
+	for _, r := range obs.SweepChangeReasons {
+		before += changedCount(d, r)
+	}
+	skipped := sweepCount(d, obs.SweepSkipped)
+	sweep()
+	var after float64
+	for _, r := range obs.SweepChangeReasons {
+		after += changedCount(d, r)
+	}
+	if after != before {
+		t.Errorf("identical walk counted %v change reasons", after-before)
+	}
+	if got := sweepCount(d, obs.SweepSkipped) - skipped; got != 3 {
+		t.Errorf("skipped = %v, want 3", got)
 	}
 }

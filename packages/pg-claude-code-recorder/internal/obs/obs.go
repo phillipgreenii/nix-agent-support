@@ -195,11 +195,13 @@ var WALTruncateOutcomes = []string{"ok", "busy", "error"}
 const (
 	MIngestResults          = "ingest_results_total"
 	MSweepFiles             = "sweep_files_total"
+	MSweepChanged           = "sweep_changed_total"
 	MLagRebuild             = "lag_rebuild_total"
 	MCopierLockWait         = "copier_lock_wait_seconds"
 	MStoreWriteLockWait     = "store_write_lock_wait_seconds"
 	SweepWalked             = "walked"
 	SweepUnchangedCandidate = "unchanged_candidate"
+	SweepSkipped            = "skipped"
 )
 
 // LagRebuildResults are the values of the result label of lag_rebuild_total.
@@ -217,7 +219,14 @@ var IngestResults = []string{
 const ResultError = "error"
 
 // SweepOutcomes are the values of the outcome label of sweep_files_total.
-var SweepOutcomes = []string{SweepWalked, SweepUnchangedCandidate}
+var SweepOutcomes = []string{SweepWalked, SweepUnchangedCandidate, SweepSkipped}
+
+// SweepChangeReasons are the values of the reason label of sweep_changed_total:
+// why a walked file is not known to be unchanged. new: the path was not seen
+// before; size, mtime: that field differs from the last observation; ino: the
+// device, inode or birth time differs; not_cached: the observation matches but
+// the path is not in the caught-up cache (or its verification is due).
+var SweepChangeReasons = []string{"new", "size", "mtime", "ino", "not_cached"}
 
 // IngestResultLabel maps a copier.Result.Action string to its result label
 // value: hyphens become underscores (new-generation is new_generation).
@@ -435,6 +444,9 @@ func (o *Obs) RegisterStandard() {
 	}
 	for _, oc := range SweepOutcomes {
 		o.Reg.Add(MSweepFiles, map[string]string{"outcome": oc}, 0)
+	}
+	for _, r := range SweepChangeReasons {
+		o.Reg.Add(MSweepChanged, map[string]string{"reason": r}, 0)
 	}
 	for _, l := range PassLoops() {
 		for _, out := range []string{OutcomeOK, OutcomeError} {

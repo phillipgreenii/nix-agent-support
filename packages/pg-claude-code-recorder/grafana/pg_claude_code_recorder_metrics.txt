@@ -26,7 +26,8 @@
 #                                  (the copier.Result.Action strings, hyphens mapped to underscores, plus error for an
 #                                  ingest that returned an error)
 #   outcome (doctor_slices_total)  ok deferred error skipped_gone
-#   outcome (sweep_files_total)    walked unchanged_candidate (a sweep skips an unchanged_candidate that was already caught up)
+#   outcome (sweep_files_total)    walked unchanged_candidate skipped (a sweep skips an unchanged_candidate that was already caught up)
+#   reason (sweep_changed_total)   new size mtime ino not_cached (why a walked file is not known unchanged; ino is dev, inode or birth)
 #   state (control_inbox_state)    present gone never_loaded
 #   outcome (end_reason_source_files_total)  ingested removed invalid
 #   verb (control_requests_total)  submit interrupt run read ping other
@@ -108,6 +109,7 @@ pg_claude_code_recorder_loop_last_timestamp_seconds gauge loop
 pg_claude_code_recorder_loop_in_flight_seconds gauge loop
 pg_claude_code_recorder_ingest_results_total counter result
 pg_claude_code_recorder_sweep_files_total counter outcome
+pg_claude_code_recorder_sweep_changed_total counter reason
 pg_claude_code_recorder_copier_lock_wait_seconds histogram -
 pg_claude_code_recorder_store_write_lock_wait_seconds histogram -
 pg_claude_code_recorder_settle_tick_examined_total counter -

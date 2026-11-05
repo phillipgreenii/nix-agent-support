@@ -17,6 +17,7 @@ type seenFile struct {
 	dev, ino uint64
 	size     int64
 	mtimeNS  int64
+	birthNS  int64
 }
 
 // sweepSeen is the per-path last observation behind sweep_files_total
@@ -30,7 +31,11 @@ type sweepSeen struct {
 }
 
 func seenOf(fi watcher.FileInfo) seenFile {
-	return seenFile{dev: fi.Dev, ino: fi.Ino, size: fi.Size, mtimeNS: fi.ModTime.UnixNano()}
+	var birth int64
+	if !fi.Birth.IsZero() {
+		birth = fi.Birth.UnixNano()
+	}
+	return seenFile{dev: fi.Dev, ino: fi.Ino, size: fi.Size, mtimeNS: fi.ModTime.UnixNano(), birthNS: birth}
 }
 
 // noteSeen records a watcher event's observation of its path (and forgets a
@@ -66,17 +71,20 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 		}
 	}
 	candidates := 0
+	now := d.clock.Now()
 	next := make(map[string]seenFile, len(files))
 	for _, fi := range files {
 		cur := seenOf(fi)
 		next[fi.Path] = cur
-		if d.seen.m[fi.Path] != cur {
+		prev, had := d.seen.m[fi.Path]
+		if prev != cur {
+			d.obs.Reg.Add(obs.MSweepChanged, map[string]string{"reason": changeReason(prev, cur, had)}, 1)
 			continue
 		}
-		var birth int64
-		if !fi.Birth.IsZero() {
-			birth = fi.Birth.UnixNano()
+		if cu, ok := d.seen.caught[fi.Path]; !ok || cu.seen != cur || !now.Before(cu.until) {
+			d.obs.Reg.Add(obs.MSweepChanged, map[string]string{"reason": "not_cached"}, 1)
 		}
+		birth := cur.birthNS
 		if sz, ok := last[copier.Identity{Dev: fi.Dev, Ino: fi.Ino, Birth: birth}]; ok && sz == fi.Size {
 			candidates++
 		}
@@ -84,6 +92,21 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 	d.seen.m = next
 	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepWalked}, float64(len(files)))
 	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepUnchangedCandidate}, float64(candidates))
+}
+
+// changeReason names the first way cur differs from the last observation prev
+// of the same path (had false: never observed).
+func changeReason(prev, cur seenFile, had bool) string {
+	switch {
+	case !had:
+		return "new"
+	case prev.size != cur.size:
+		return "size"
+	case prev.mtimeNS != cur.mtimeNS:
+		return "mtime"
+	default:
+		return "ino"
+	}
 }
 
 // caughtUp is a path the copier ingested to "unchanged" (fully caught up) when
@@ -138,6 +161,7 @@ func (d *Daemon) skipUnchanged(e watcher.Event) bool {
 		return false
 	}
 	d.prs.Notify(c.file)
+	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepSkipped}, 1)
 	return true
 }
 
