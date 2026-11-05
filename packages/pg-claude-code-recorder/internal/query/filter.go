@@ -62,6 +62,12 @@ type builder struct {
 	// for an index.db in the new layout (Engine.TypedStorage).
 	typed   bool
 	storage map[string]source.Storage
+	// idWalk keeps the planner from choosing an index for the low-selectivity
+	// record columns (source, type, item) in a filter. A feed page reads records
+	// in id order and stops at its limit, so the cheap plan walks the id range;
+	// an index on such a column makes the planner read every matching row and
+	// sort them (the page then costs the whole table, not the page).
+	idWalk bool
 }
 
 // sessionIDExpr reads a record's natural session id through its session_ref;
@@ -276,6 +282,11 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 	}
 	if isTyped && tf.ext {
 		e = tf.typed
+	}
+	if b.idWalk && !byRef {
+		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") {
+			e = "+" + e // unary plus: an expression, so no index can serve it
+		}
 	}
 	switch {
 	case f.Eq != nil:

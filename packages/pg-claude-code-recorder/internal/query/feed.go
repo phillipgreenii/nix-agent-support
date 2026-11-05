@@ -75,10 +75,11 @@ type Selected struct {
 // LimitOf applies the default (1,000) and maximum (10,000) page size.
 func LimitOf(n int) int { return limitOf(n) }
 
-// Select reads up to Limit+1 records in id order (the caller trims and sets
-// more).
-func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
+// selectQuery compiles a Selection into its statement, arguments, field names
+// and columns.
+func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec, *wire.Error) {
 	b := e.builder()
+	b.idWalk = true
 	names := sel.Project
 	if len(names) == 0 {
 		names = []string{"type", "session", "time"}
@@ -87,13 +88,13 @@ func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Erro
 	for i, n := range names {
 		c, err := b.col(n)
 		if err != nil {
-			return nil, err
+			return "", nil, nil, nil, err
 		}
 		cols[i] = c
 	}
 	wsql, wargs, err := b.where(sel.Where)
 	if err != nil {
-		return nil, err
+		return "", nil, nil, nil, err
 	}
 	e.noteFilter("feed", b)
 	selects := []string{"r.id", "r.file_id", "r.gen", "r.off", "r.item"}
@@ -105,6 +106,18 @@ func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Erro
 	// Statement text order: the field joins, the id bounds, the filter, the limit.
 	args := append(append([]any{}, b.joinArgs...), sel.AfterID, sel.UpToID)
 	args = append(append(args, wargs...), limitOf(sel.Limit)+1)
+	return q, args, names, cols, nil
+}
+
+// Select reads up to Limit+1 records in id order (the caller trims and sets
+// more). The filter's source, type and item tests never pick an index, so the
+// statement walks the id range and stops at its limit instead of reading every
+// matching row of the table and sorting them.
+func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
+	q, args, names, cols, werr := e.selectQuery(sel)
+	if werr != nil {
+		return nil, werr
+	}
 	rs, qerr := tx.Query(q, args...)
 	if qerr != nil {
 		return nil, wire.FromErr(qerr)
