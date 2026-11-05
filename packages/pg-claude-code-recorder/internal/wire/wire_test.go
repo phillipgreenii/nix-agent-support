@@ -13,7 +13,7 @@ func TestExitForFollowsTheDocumentedMapping(t *testing.T) {
 	for name, want := range map[string]int{
 		ErrBadRequest: 2, ErrUsage: 2, ErrUnavailable: 3, ErrDaemonOffline: 3, ErrNotFound: 4,
 		ErrBusy: 5, ErrBehind: 5, ErrWaitTimeout: 6, ErrQueryTimeout: 6, ErrCursorExpired: 7,
-		ErrRemovalDisabled: 8, ErrTargetExists: 8, ErrHeldByLive: 8,
+		ErrRemovalDisabled: 8, ErrTargetExists: 8, ErrHeldByLive: 8, ErrSchemaRebuildRequired: 8,
 		ErrInternal: 1, "something_new": 1,
 	} {
 		if got := ExitFor(name); got != want {

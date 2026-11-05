@@ -17,6 +17,8 @@ func actionable(name, msg, socket string) string {
 		return fmt.Sprintf("the daemon on %s is unavailable: %s; check its log, then retry", socket, msg)
 	case wire.ErrBehind, wire.ErrBusy:
 		return msg + "; the answer is partial, retry later or pass --allow-partial during the first backfill"
+	case wire.ErrSchemaRebuildRequired:
+		return msg + "; stop the launch agent, run \"pg-claude-code-recorder rebuild\" (it takes hours on a large index; the old file is kept as index.db.pre-rebuild), then start the launch agent again"
 	case wire.ErrUsage, wire.ErrBadRequest:
 		return msg + "; see pg-claude-code-recorder --help"
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/serve"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -53,6 +55,14 @@ func (a *app) serve(args []string) int {
 	defer stopPprof()
 	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, MetricsAddr: metricsAddr, Rebuild: rebuild})
 	if err != nil {
+		var older *store.SchemaOlderError
+		if errors.As(err, &older) {
+			// Refuse rather than rebuild: a rebuild runs for hours with the daemon
+			// down, so the operator starts it deliberately (see the README).
+			log.Error("schema_rebuild_required", "found", older.Found, "known", older.Known,
+				"command", "pg-claude-code-recorder rebuild", "err", err.Error())
+			return a.emitError(false, wire.ErrSchemaRebuildRequired, err.Error())
+		}
 		log.Error("open_failed", "err", err.Error())
 		return a.emitError(false, wire.ErrUnavailable, fmt.Sprintf("cannot start: %v", err))
 	}

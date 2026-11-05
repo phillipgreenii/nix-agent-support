@@ -62,6 +62,9 @@ const (
 	ErrRemovalDisabled = "removal_disabled"
 	ErrTargetExists    = "target_exists"
 	ErrHeldByLive      = "held_by_live_process"
+	// ErrSchemaRebuildRequired: serve refused to start because index.db was
+	// written by an older schema; an operator runs the rebuild command.
+	ErrSchemaRebuildRequired = "schema_rebuild_required"
 )
 
 // ExitFor maps a stable error name to the recorder command's exit code.
@@ -79,7 +82,7 @@ func ExitFor(name string) int {
 		return ExitDegraded
 	case ErrCursorExpired:
 		return ExitCursor
-	case ErrRemovalDisabled, ErrTargetExists, ErrHeldByLive:
+	case ErrRemovalDisabled, ErrTargetExists, ErrHeldByLive, ErrSchemaRebuildRequired:
 		return ExitRefused
 	}
 	return ExitUnexpected

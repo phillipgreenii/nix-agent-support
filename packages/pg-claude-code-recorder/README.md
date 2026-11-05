@@ -223,6 +223,25 @@ launch agent state (`launchctl list <label>`, label from `PG_CLAUDE_CODE_RECORDE
 default `com.phillipg.pg-claude-code-recorder` until phase 7a names it), the log path and the
 state directory size read from disk, and exits 3.
 
+### Schema bump: refuse to start, do not rebuild implicitly
+
+Decision: when `index.db` carries an older `schema_version` than the binary needs, `serve` refuses to start
+(option b) rather than rebuilding on its own (option a). It logs one `schema_rebuild_required` error event
+(`found`, `known`, `command`), prints `error: schema_rebuild_required` with the rebuild steps, leaves `index.db`
+untouched and exits 8 (refused). A newer `schema_version` and other open failures keep the generic `open_failed`
+path.
+
+Rationale: a full rebuild is not bounded in any useful way (4758 s for 17.0M records on 2026-11-04, and it grows
+with the journal), runs with the daemon's socket down, needs the free-space preflight to pass and sets the old
+file aside, so it is a deliberate operator step, not a side effect of a launch agent restart. An automatic
+rebuild would also make a downgrade-and-upgrade flap silently cost an hour. The rebuild command already exists
+and is safe to run (`index.db.pre-rebuild` keeps the old file).
+
+Operator steps: stop the launch agent, run `pg-claude-code-recorder rebuild`, start the launch agent. The
+alerting signal is the `schema_rebuild_required` log event and the `status` offline answer (exit 3, launch agent
+state, log path). Launchd restarts the refused daemon until the operator acts; a `KeepAlive` that ignores exit 8
+lives in the launch agent module outside this package and was not changed here.
+
 ## Conventions for later packets
 
 - External commands go through `github.com/phillipgreenii/x`'s `cmdrun`, as `pg-router-probe` does.
