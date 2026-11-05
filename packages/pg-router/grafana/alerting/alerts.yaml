@@ -2158,3 +2158,69 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # Oldest pending age per listener role (pg_router_listener_oldest_pending_age_seconds{role},
+      # the age of the oldest item still pending for that role's listener; 0 when nothing is
+      # pending). Operator ruling (Phillip, 2026-11-02): there is no alert on the per-listener
+      # pending count gauge (pg_router_listener_pending) itself yet, because its tuning is per
+      # listener and not understood; the oldest pending age is the better indicator, with
+      # thresholds to be decided after a few days of real values.
+      #
+      # Threshold derivation, from the local Prometheus, window 2026-11-02 17:59 UTC to
+      # 2026-11-05 22:08 UTC (3.17 days = 274095 s, 8388 samples per role at ~30 s scrapes, 20
+      # roles), `max_over_time` and `quantile_over_time` over `[4d]` per role:
+      #   - highest max of a healthy role: review 7994 s (2.2 h), repo-verify 5123 s (1.4 h),
+      #     feedback 5056 s (1.4 h), drain-pg2 4275 s (1.2 h), repo-sync 4099 s (1.1 h);
+      #   - the two escalation triagers and the split triager are slower by design:
+      #     zr-escalation-triager max 12472 s (3.5 h), pg2-split-triager max 9523 s (2.6 h);
+      #   - pg2-escalation-triager max 21737 s (6.0 h), reached only in the last 12 h of the
+      #     window and above 6 h for 0.07 % of samples: a real backlog (the triager jam),
+      #     which is what this rule must catch.
+      # Threshold: 14400 s (4 h) = 1.8 x the highest healthy-role max (review, 7994 s, so
+      # 14400 / 7994 = 1.80) and 1.15 x the largest triager max that was a normal busy spell
+      # (zr-escalation-triager, 12472 s; 14400 / 12472 = 1.15), while staying below the
+      # real jam (21737 s). With this threshold the only role that would have fired in the
+      # window is pg2-escalation-triager, for the jam. `for: 30m` so one slow item that
+      # drains does not fire. Severity warning: the notifier pages on critical only. The
+      # age is by role; the rule has no pending-count clause, per the ruling above.
+      # Revisit the 14400 here and in internal/alertrules/listener_oldest_pending_test.go
+      # together once a longer baseline exists (the window above is short).
+      - uid: pg-router-listener-oldest-pending
+        title: pg-router listener has had work pending a long time (by role)
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router listener has had an item pending for over 4 hours"
+          description: "pg_router_listener_oldest_pending_age_seconds, the age of the oldest item still pending for a role's listener, stayed above 4 hours (14400 s) for 30 minutes for at least one role (the role label is on the alert). The threshold is 1.8 times the highest oldest-pending age of any healthy role over about three days of local data (7994 s) and below the one real backlog seen in that window (21737 s). Check `pg-router status` for the role's queue and busy declines, and the role's handler pool, for what the item is waiting on."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (role) (pg_router_listener_oldest_pending_age_seconds) > 14400
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

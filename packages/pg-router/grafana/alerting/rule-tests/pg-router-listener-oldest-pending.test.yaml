@@ -1,0 +1,69 @@
+# promtool unit tests for the pg-router-listener-oldest-pending alert: the oldest pending age of a
+# role's listener above 14400 s (4 h), for 30m, severity warning. Run by the flake check
+# test-pg-router-alert-rules, which wraps the Grafana rule's refId A as `alert: <uid>`.
+#
+# Time model: 1m interval; "0+60x400" grows one minute of age per scrape, so the age passes
+# 14400 s at minute 241 and, with `for: 30m`, fires from minute 271.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: age over 4h for 30m fires, warning, by role
+    interval: 1m
+    input_series:
+      - series: pg_router_listener_oldest_pending_age_seconds{role="pg2-escalation-triager",job="pg-router"}
+        values: "0+60x400"
+    alert_rule_test:
+      - eval_time: 245m
+        alertname: pg-router-listener-oldest-pending
+        exp_alerts: []
+      - eval_time: 280m
+        alertname: pg-router-listener-oldest-pending
+        exp_alerts:
+          - exp_labels:
+              role: pg2-escalation-triager
+              severity: warning
+
+  - name: ages at or below 4h, and a slow item that drains, never fire
+    interval: 1m
+    input_series:
+      # The highest healthy-role observation (about 2.2 h), held for the whole run.
+      - series: pg_router_listener_oldest_pending_age_seconds{role="review",job="pg-router"}
+        values: "7994x400"
+      # Exactly 14400 s is not above the threshold.
+      - series: pg_router_listener_oldest_pending_age_seconds{role="repo-verify",job="pg-router"}
+        values: "14400x400"
+      # Over 4h for only 20 minutes (minutes 241 to 260), then drained to 0.
+      - series: pg_router_listener_oldest_pending_age_seconds{role="feedback",job="pg-router"}
+        values: "0+60x260 0x140"
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-listener-oldest-pending
+        exp_alerts: []
+
+  - name: only the role over the threshold fires
+    interval: 1m
+    input_series:
+      - series: pg_router_listener_oldest_pending_age_seconds{role="pg2-escalation-triager",job="pg-router"}
+        values: "21737x400"
+      - series: pg_router_listener_oldest_pending_age_seconds{role="review",job="pg-router"}
+        values: "7994x400"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-router-listener-oldest-pending
+        exp_alerts:
+          - exp_labels:
+              role: pg2-escalation-triager
+              severity: warning
+
+  - name: no series never fires
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router"}
+        values: "1x400"
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-listener-oldest-pending
+        exp_alerts: []
