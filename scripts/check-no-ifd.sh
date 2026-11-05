@@ -19,8 +19,8 @@
 #
 # Nix stops at the FIRST IFD site per set, so a failure lists the first site, not
 # necessarily all of them: fix it and re-run. A run takes one to three minutes
-# (it evaluates every check); run it through `pg-nix-log-wrapped` and a timeout
-# or `bgrun`. The one in-sandbox guard that runs under `nix build` is
+# (it evaluates every check); run it with a timeout
+# or through `bgrun`. The one in-sandbox guard that runs under `nix build` is
 # `checks.<system>.test-claude-hook-router-no-ifd`; a full drvPath evaluation
 # needs every flake input fetched, which a build sandbox cannot do.
 #

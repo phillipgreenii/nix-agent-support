@@ -333,7 +333,7 @@ only while editing files under `home/programs/claude-status-line/`.
   `checks.<system>.test-claude-hook-router-no-ifd` (real `nix-instantiate` with
   `allow-import-from-derivation=false` over that module, plus an IFD negative control) and
   `scripts/check-no-ifd.sh` (all of `checks`, `packages`, `devShells` for one system; run it through
-  `pg-nix-log-wrapped`/`bgrun`, with the workspace `--override-input` siblings).
+  `bgrun`, with the workspace `--override-input` siblings).
 
 ## Beads Labels
 
