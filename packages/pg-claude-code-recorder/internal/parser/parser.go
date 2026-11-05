@@ -135,7 +135,43 @@ func New(cfg Config) *Parser {
 	}
 	p.routes = lookupRoutes(cfg.Sources)
 	p.ext, _ = extRoutes(cfg.Sources)
+	p.registerSignals()
 	return p
+}
+
+// KnownRecordTypes are the record types that get their own value of the type
+// label of unknown_keys_total; every other type is counted under "other", so
+// the label stays bounded however many types the data invents.
+var KnownRecordTypes = []string{
+	"user", "assistant", "system", "summary", "progress", "attachment",
+	"queue-operation", "file-history-snapshot",
+	"text", "thinking", "redacted_thinking", "tool_use", "tool_result", "image",
+	"history", "tool_result_body", "registry_deleted", "unknown",
+}
+
+// OtherType is the type label value of a record type not in KnownRecordTypes.
+const OtherType = "other"
+
+// TypeLabel maps a record type to its bounded label value.
+func TypeLabel(t string) string {
+	for _, k := range KnownRecordTypes {
+		if k == t {
+			return t
+		}
+	}
+	return OtherType
+}
+
+// registerSignals registers every series of bad_lines_total{source} and
+// unknown_keys_total{source,type} at zero for the configured sources, so each
+// series exists from start and increase() sees a first burst.
+func (p *Parser) registerSignals() {
+	for _, s := range p.cfg.Sources {
+		p.cfg.Obs.Reg.Add(MBadLines, map[string]string{"source": s.Name()}, 0)
+		for _, t := range append(append([]string{}, KnownRecordTypes...), OtherType) {
+			p.cfg.Obs.Reg.Add(MUnknownKeys, map[string]string{"source": s.Name(), "type": t}, 0)
+		}
+	}
 }
 
 // HasSource reports whether a parser exists for the source name.
@@ -895,7 +931,7 @@ func (p *Parser) bad(tx *pstx, f store.File, g store.Generation, off int64, ln i
 	if len(reason) > 200 {
 		reason = reason[:200]
 	}
-	p.cfg.Obs.Reg.Add(MBadLines, nil, 1)
+	p.cfg.Obs.Reg.Add(MBadLines, map[string]string{"source": f.Source}, 1)
 	_, err := tx.Exec(`INSERT OR REPLACE INTO bad_lines(file_id,gen,off,len,reason) VALUES(?,?,?,?,?)`, f.ID, g.Gen, off, ln, reason)
 	return err
 }
@@ -1078,13 +1114,21 @@ ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded
 		p.countMismatches(src.Name(), r)
 	}
 	for k, c := range unk {
-		p.cfg.Obs.Reg.Add(MUnknownKeys, nil, float64(c))
 		if _, err := tx.Exec(`INSERT INTO unknown_keys(file_id,gen,source,rtype,path,count) VALUES(?,?,?,?,?,?)
 ON CONFLICT(file_id,gen,source,rtype,path) DO UPDATE SET count=count+excluded.count`, f.ID, g.Gen, src.Name(), k[0], k[1], c); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO unknown_keys_total(source,rtype,path,count) VALUES(?,?,?,?)
-ON CONFLICT(source,rtype,path) DO UPDATE SET count=count+excluded.count`, src.Name(), k[0], k[1], c); err != nil {
+		// unknown_keys_total counts first-seen distinct (source, type, key)
+		// tuples: it moves only when the aggregate row is created, so a backfill
+		// or steady traffic of already-seen keys does not move it.
+		res, err := tx.Exec(`INSERT INTO unknown_keys_total(source,rtype,path,count) VALUES(?,?,?,?)
+ON CONFLICT(source,rtype,path) DO NOTHING`, src.Name(), k[0], k[1], c)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			p.cfg.Obs.Reg.Add(MUnknownKeys, map[string]string{"source": src.Name(), "type": TypeLabel(k[0])}, 1)
+		} else if _, err := tx.Exec(`UPDATE unknown_keys_total SET count=count+? WHERE source=? AND rtype=? AND path=?`, c, src.Name(), k[0], k[1]); err != nil {
 			return err
 		}
 	}

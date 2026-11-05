@@ -46,6 +46,31 @@ tests:
         alertname: pg-ccrec-unknown-key-burst
         exp_alerts: []
 
+  - name: a series registered at zero that first jumps above 100 fires (first-appears-above-100)
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_unknown_keys_total{job="pg-claude-code-recorder",source="claude-transcript",type="other"}
+        values: "0x10 150x200"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: pg-ccrec-unknown-key-burst
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-ccrec-unknown-key-burst
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a backfill that adds no new distinct keys (counter stays at its few distinct tuples) does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_unknown_keys_total{job="pg-claude-code-recorder",source="claude-transcript",type="user"}
+        values: "0 3x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-ccrec-unknown-key-burst
+        exp_alerts: []
+
   - name: an absent counter gives no alert
     interval: 1m
     input_series:

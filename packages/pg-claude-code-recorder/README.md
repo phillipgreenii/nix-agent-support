@@ -754,9 +754,10 @@ each `true` or `false`; never a label such as crashed), `registry_stale_at_disco
 `requests_total{client,op,outcome}` where `client` is a whitelisted name and anything else is `other`. No label is per file or per
 session. The catalogue file lists every name with its type and labels.
 
-Two exporter facts the alerts rely on: `bad_lines_total` and `unknown_keys_total` carry no `source` or `type` label (the design listed
-them by source and type; the exporter has none), and they are registered when first incremented rather than at zero, so a first burst
-that starts from an absent series reads as no increase until the second scrape.
+Two exporter facts the alerts rely on: `bad_lines_total{source}` and `unknown_keys_total{source,type}` are registered at zero for every
+configured source (and, for the second, every known record type plus `other`) at start, so a first burst reads as an increase from 0;
+and `unknown_keys_total` counts first-seen distinct (source, type, key) tuples, not occurrences (the per-occurrence totals stay in the
+`unknown_keys` and `unknown_keys_total` tables and `coverage`), so a backfill of known keys does not move it.
 
 ### Apply and restart
 

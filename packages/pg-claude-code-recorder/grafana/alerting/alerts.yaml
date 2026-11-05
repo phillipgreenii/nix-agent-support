@@ -252,7 +252,9 @@ groups:
                     type: gt
                     params: [259200]
 
-      # Unknown-key burst, design threshold: more than 100 new keys in an hour.
+      # Unknown-key burst, design threshold: more than 100 new distinct keys in an hour. unknown_keys_total
+      # counts first-seen (source, type, key) tuples, not occurrences, so a backfill of known keys is silent;
+      # every source and type series is registered at zero at start, so a first burst above 100 is an increase.
       - uid: pg-ccrec-unknown-key-burst
         title: pg-claude-code-recorder many new unknown keys
         condition: C
@@ -263,7 +265,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-claude-code-recorder saw over 100 new unknown keys in an hour"
-          description: "More than 100 JSON keys the parser does not know arrived in the last hour (unknown_keys_total): Claude Code probably added a field. A source whose unknown-key rate is above format.holdRate is not removed. Run pg-claude-code-recorder coverage to see the keys, then update the parser structs and re-parse."
+          description: "More than 100 new distinct JSON keys (source, type, key) the parser had never seen arrived in the last hour (unknown_keys_total, counted once per distinct key, not per occurrence): Claude Code probably added a field. A source whose unknown-key rate is above format.holdRate is not removed. Run pg-claude-code-recorder coverage to see the keys, then update the parser structs and re-parse."
         data:
           - refId: A
             relativeTimeRange:

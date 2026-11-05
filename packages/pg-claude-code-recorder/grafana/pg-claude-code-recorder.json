@@ -751,7 +751,7 @@
       "id": 20,
       "type": "timeseries",
       "title": "Unknown key growth",
-      "description": "New JSON keys the parser does not know, per hour (a stepped increase means Claude Code added a field), and the rate over the rate interval. More than 100 in an hour fires the unknown-key-burst alert.",
+      "description": "New distinct (source, type, key) tuples the parser had never seen, per hour; each is counted once however often it recurs, so a backfill of known keys adds nothing (a stepped increase means Claude Code added a field), and the rate over the rate interval. More than 100 in an hour fires the unknown-key-burst alert.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

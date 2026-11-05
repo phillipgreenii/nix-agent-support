@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudetranscript"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -294,7 +295,7 @@ func TestParsedRecordsAnswerQueryAndSearchThroughTheDaemonOps(t *testing.T) {
 			t.Fatalf("gauge %s not exported", g)
 		}
 	}
-	if v, _ := d.Obs().Reg.Counter("bad_lines_total", nil); v != 1 {
+	if v, _ := d.Obs().Reg.Counter("bad_lines_total", map[string]string{"source": claudetranscript.Name}); v != 1 {
 		t.Fatalf("bad_lines_total %v", v)
 	}
 	if _, werr := d.opQuery(context.Background(), []byte(`{"where":{"field":"nope","exists":true}}`)); werr == nil || werr.Name != wire.ErrBadRequest {
