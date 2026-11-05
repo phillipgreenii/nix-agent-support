@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -225,6 +226,9 @@ func newChangesCmd() *cobra.Command {
 		}
 		changesArgs = append(changesArgs, "--output", "json")
 		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), changesArgs, beadsDirEnv(beadsDir))
+		if errors.Is(err, errBudgetSkipped) {
+			return writeItems(cmd.OutOrStdout(), []rawItem{})
+		}
 		if err != nil {
 			return err
 		}

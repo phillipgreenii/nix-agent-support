@@ -159,6 +159,18 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 			Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false}],"changes":[]}`,
 			Stderr: "pg-connector: total failure: no backend succeeded\n",
 		}
+	case "budget_denied":
+		// pg-connector's own total-failure outcome (exit 3) for a pinned
+		// beads backend whose bd budget refused the call: the one reason is
+		// the backend's own wire error text.
+		return reply{Code: 3, Stdout: `{"sources":[{"backend":"b1","source":"b1","status":"degraded","version":1,"truncated":false,"reason":"unavailable: ` + budgetDeniedWire + `"}],"changes":[],"entities":[],"present_ids":[]}`}
+	case "budget_denied_mixed":
+		return reply{Code: 3, Stdout: `{"sources":[` +
+			`{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"unavailable: ` + budgetDeniedWire + `"},` +
+			`{"backend":"b2","status":"degraded","version":1,"truncated":false,"reason":"bd show failed: dolt connection refused"}` +
+			`],"changes":[]}`}
+	case "bd_failure":
+		return reply{Code: 3, Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"unavailable: bd list timed out after 40s"}],"changes":[]}`}
 	case "total_failure_with_reason":
 		// bead pg2-wa5uk: the exact observed real-world shape — a single
 		// degraded backend (rate-limited), no other healthy source, so
@@ -305,3 +317,8 @@ func mustUnmarshalItems(t *testing.T, stdout string) []rawItem {
 }
 
 var _ io.Writer = (*writerBuf)(nil)
+
+// budgetDeniedWire is the wire text pg-connector-issue-beads gives a call its
+// bd budget refused (its BudgetDeniedMessage); TestBudgetDeniedMessageMatches
+// in the connector module pins the same text.
+const budgetDeniedWire = "bd budget denied (retryable): no bd slot or per-minute window entry was free within the wait bound; retry the call"

@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -123,10 +124,15 @@ func invokeOrFail(ctx context.Context, stderr io.Writer, args []string, extraEnv
 		return nil, errFailed
 	}
 	if !classifyExit(res.exitCode) {
+		reasons := failureReasons(res.stdout)
+		if allBudgetDenied(reasons) {
+			fmt.Fprintln(stderr, "pg-router-source-pg-connector: poll skipped: the bd budget was full ("+strings.Join(reasons, "; ")+")")
+			return nil, errBudgetSkipped
+		}
 		if len(res.stderr) > 0 {
 			_, _ = stderr.Write(res.stderr)
 		}
-		if reasons := failureReasons(res.stdout); len(reasons) > 0 {
+		if len(reasons) > 0 {
 			fmt.Fprintln(stderr, strings.Join(reasons, "; "))
 		}
 		return nil, errFailed
@@ -187,6 +193,33 @@ func failureReasons(stdout []byte) []string {
 		reasons = append(reasons, backend+": "+s.Reason)
 	}
 	return reasons
+}
+
+// budgetDeniedMarker is the text pg-connector-issue-beads puts in the error
+// of a call its bd budget refused ("bd budget denied (retryable): ..."). It
+// travels through pg-connector as a sources[] reason, which is how this
+// adapter recognises the denial.
+const budgetDeniedMarker = "bd budget denied (retryable)"
+
+// errBudgetSkipped is returned by invokeOrFail when the call failed only
+// because a beads backend's bd budget had no free slot within its wait
+// bound. The verbs treat it as a skipped poll: exit 0 with an empty item
+// array, not a failure.
+var errBudgetSkipped = errors.New("poll skipped: bd budget full")
+
+// allBudgetDenied reports whether reasons is non-empty and every reason is a
+// bd budget denial. Any other reason, or none at all, is not a denial, so a
+// genuine bd failure stays a failure.
+func allBudgetDenied(reasons []string) bool {
+	if len(reasons) == 0 {
+		return false
+	}
+	for _, r := range reasons {
+		if !strings.Contains(r, budgetDeniedMarker) {
+			return false
+		}
+	}
+	return true
 }
 
 // beadsDirEnv builds the extraEnv slice runPgConnector appends when

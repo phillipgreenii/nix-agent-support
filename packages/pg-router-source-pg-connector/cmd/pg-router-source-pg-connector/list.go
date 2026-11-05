@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -64,6 +65,9 @@ func newListCmd() *cobra.Command {
 		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(),
 			[]string{entityType, "list", "--query", query, "--backend", backend, "--output", "json"},
 			beadsDirEnv(beadsDir))
+		if errors.Is(err, errBudgetSkipped) {
+			return writeItems(cmd.OutOrStdout(), []rawItem{})
+		}
 		if err != nil {
 			return err
 		}

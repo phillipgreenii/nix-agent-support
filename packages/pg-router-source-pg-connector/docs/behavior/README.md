@@ -195,11 +195,31 @@ This binary's own exit-code scheme is deliberately just two values, never pg-con
 | 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                                                                   |
 | 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries (a `cursor_expired:` reason included) is appended too (bead `pg2-wa5uk`) |
 
-A pinned poll (`--backend <binary>`) against a beads backend can also exit 1 because the backend's own
-`bd` budget had no free slot within its wait bound: pg-connector then reports `unavailable`, which
-is **retryable**, so the poll is simply repeated at the next tick. The budget's wait bound is shorter
-than the shortest pinned poll interval (10 seconds), so a denied poll has ended before the next one
-starts. This adapter does not retry it and holds no state about it.
+A pinned poll (`--backend <binary>`) against a beads backend can find the backend's own `bd`
+budget with no free slot within its wait bound: pg-connector then reports `unavailable`, which is
+**retryable**. This adapter treats that outcome as a **skipped poll**, not a failure: it exits 0,
+prints an empty item array (`[]`) on stdout and one line on stderr saying the poll was skipped
+because the `bd` budget was full. pg-router therefore sees a poll that found nothing new, logs no
+"source failed" warning and counts no source failure, and the source is polled again at its next
+tick. The decision, with the options it was weighed against:
+
+- **Chosen: map the denial to a skipped poll in this adapter.** A denial is the budget doing its job
+  (capping load on the tracker's dolt server), not a fault in the source, and it happens before any
+  `bd` process starts, so nothing was read, written or acknowledged: pg-connector's ledger cursor
+  does not move, and the next poll sees everything this one would have. The denial is recognised
+  only when pg-connector's own failed call reported at least one `sources[]` reason and EVERY
+  reason carries the marker text `bd budget denied (retryable)`. A genuine `bd` failure (a crash, a
+  timeout, an auth error), a degraded row with any other reason, a failure with no reason, and a
+  mixture of a denial with any other reason are all still failures with exit 1.
+- **Rejected: raise the budget's wait bound.** The bound MUST stay shorter than the shortest pinned
+  poll interval (10 seconds) so a denied poll ends before the next starts; a bound of about 15
+  seconds breaks that, and a longer wait does not stop a denial when the budget stays full, it only
+  delays it.
+- **Rejected: reserve read slots for pg-router.** Interactive and drain `bd` calls share the one
+  budget on purpose; a router-only reserve idles slots they could use and changes the capacity
+  model for a condition that is already harmless.
+
+For `sweep`, a denial on any named query skips the whole poll (empty array), never a partial list.
 
 `sweep`'s own "zero query names given" case never reaches a pg-connector subprocess at all — it
 is classified directly as the same non-zero exit, with this adapter's own usage message on

@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -57,6 +58,9 @@ func newSweepCmd() *cobra.Command {
 			}
 			listArgs = append(listArgs, "--output", "json")
 			out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), listArgs, env)
+			if errors.Is(err, errBudgetSkipped) {
+				return writeItems(cmd.OutOrStdout(), []rawItem{})
+			}
 			if err != nil {
 				return err
 			}
