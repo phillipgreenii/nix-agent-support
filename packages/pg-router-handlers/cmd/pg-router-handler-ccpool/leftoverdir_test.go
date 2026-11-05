@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,6 +42,12 @@ func (h *sweepHarness) age(path string) {
 	if err := os.Chtimes(path, old, old); err != nil {
 		h.t.Fatal(err)
 	}
+}
+
+// trashName names a trash entry the way the mover does, stamped age before the
+// harness clock.
+func (h *sweepHarness) trashName(bead string, age time.Duration) string {
+	return fmt.Sprintf("%s.%d", bead, h.nowFixed.Add(-age).UnixNano())
 }
 
 func (h *sweepHarness) trashEntries() []string {
@@ -125,7 +132,7 @@ func TestLeftover_dispatchHealsAndEnsureSucceeds(t *testing.T) {
 // the bead path; the next sweep purges it.
 func TestLeftover_killedDeleteLeavesTrashNotTheBeadPath(t *testing.T) {
 	h := newSweepHarness(t)
-	trash := filepath.Join(h.wtDir, trashDirName, "zr-k.123")
+	trash := filepath.Join(h.wtDir, trashDirName, h.trashName("zr-k", time.Hour))
 	if err := os.MkdirAll(filepath.Join(trash, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +141,7 @@ func TestLeftover_killedDeleteLeavesTrashNotTheBeadPath(t *testing.T) {
 	}
 	h.age(trash)
 	// A young entry (a delete still running) is left alone.
-	young := filepath.Join(h.wtDir, trashDirName, "zr-j.456")
+	young := filepath.Join(h.wtDir, trashDirName, h.trashName("zr-j", 0))
 	if err := os.MkdirAll(young, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -309,5 +316,52 @@ func TestLeftover_symlinkTargetIsNeverTouched(t *testing.T) {
 	h.sweep()
 	if !h.exists(filepath.Join(target, "precious")) {
 		t.Error("the symlink target must never be followed")
+	}
+}
+
+// The orphan/janitor reconcile finds a half-drained trash entry (a paced worktree
+// delete cut short by its budget or a restart) and finishes it, still paced:
+// the first pass is cut short, the second completes, and no pause is ever a
+// real sleep.
+func TestLeftover_sweepFinishesHalfDrainedTrashPaced(t *testing.T) {
+	h := newSweepHarness(t)
+	trash := filepath.Join(h.wtDir, trashDirName, h.trashName("zr-k", time.Hour))
+	for i := 0; i < 5; i++ {
+		d := filepath.Join(trash, "d"+string(rune('a'+i)))
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for j := 0; j < 10; j++ {
+			if err := os.WriteFile(filepath.Join(d, "f"+string(rune('a'+j))), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	h.age(trash)
+
+	var pauses []time.Duration
+	old := pacedRemoval
+	t.Cleanup(func() { pacedRemoval = old })
+	pacedRemoval = pacedRemover{worktree.Removal{
+		BatchSize: 20,
+		Pause:     time.Second,
+		Sleep: func(_ context.Context, d time.Duration) error {
+			pauses = append(pauses, d)
+			if len(pauses) == 1 {
+				return context.Canceled // the first pass is interrupted after one batch
+			}
+			return nil
+		},
+	}}
+	h.sweep()
+	if !h.exists(trash) {
+		t.Fatal("an interrupted purge must leave the remainder for the next sweep")
+	}
+	h.sweep()
+	if h.exists(trash) {
+		t.Error("the next sweep must finish the half-drained trash")
+	}
+	if len(pauses) < 2 {
+		t.Errorf("pauses = %d, want the purge paced across batches", len(pauses))
 	}
 }

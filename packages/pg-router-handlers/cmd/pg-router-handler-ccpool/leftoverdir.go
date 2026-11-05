@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
+	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 )
 
 // Unregistered leftover directories.
@@ -252,7 +253,7 @@ func reclaimLeftoverDir(ctx context.Context, role roles.Role, deps executor.Deps
 		slog.Warn("worktree sweep: cannot move the leftover directory aside; keeping it", "bead", l.bead, "path", l.path, "err", err)
 		return false
 	}
-	if err := os.RemoveAll(trash); err != nil {
+	if err := pacedRemoval.DrainErr(ctx, trash); err != nil {
 		slog.Warn("worktree sweep: leftover directory moved aside but not fully deleted (a later sweep purges the trash)", "bead", l.bead, "trash", trash, "err", err)
 	}
 	slog.Info("worktree sweep: unregistered leftover directory reclaimed", "bead", l.bead, "path", l.path, "role", role.Name, "age", l.age)
@@ -262,10 +263,25 @@ func reclaimLeftoverDir(ctx context.Context, role roles.Role, deps executor.Deps
 	return true
 }
 
+// pacedRemoval is the rate-limit every bulk delete here uses (a worktree or
+// leftover tree is tens of thousands of files, and each unlink is a filesystem
+// event for every listener). Tests substitute a recording Sleep.
+var pacedRemoval = pacedRemover{worktree.Removal{}}
+
+// pacedRemover adds the error-only drain the leftover reclaim wants.
+type pacedRemover struct{ worktree.Removal }
+
+// DrainErr drains path and returns only a failure; an unfinished (budget-cut)
+// drain is not a failure, the trash purge finishes it.
+func (p pacedRemover) DrainErr(ctx context.Context, path string) error {
+	_, err := p.DrainTree(ctx, path)
+	return err
+}
+
 // purgeTrash deletes trash entries older than grace (a delete that was killed
-// part-way). Everything in the trash was moved there by reclaimLeftoverDir
+// part-way or cut short by its budget), paced like the original delete. Everything in the trash was moved there by reclaimLeftoverDir
 // after the plain-tree check; RemoveAll never follows a symlink.
-func purgeTrash(dir string, now time.Time, grace time.Duration) {
+func purgeTrash(ctx context.Context, dir string, now time.Time, grace time.Duration) {
 	trashRoot := filepath.Join(dir, trashDirName)
 	entries, err := os.ReadDir(trashRoot)
 	if err != nil {
@@ -273,13 +289,33 @@ func purgeTrash(dir string, now time.Time, grace time.Duration) {
 	}
 	for _, e := range entries {
 		info, err := os.Lstat(filepath.Join(trashRoot, e.Name()))
-		if err != nil || now.Sub(info.ModTime()) < grace {
+		if err != nil || trashAge(e.Name(), info.ModTime(), now) < grace {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(trashRoot, e.Name())); err != nil {
+		st, err := pacedRemoval.DrainTree(ctx, filepath.Join(trashRoot, e.Name()))
+		if err != nil {
 			slog.Warn("worktree sweep: cannot purge a trash entry", "entry", e.Name(), "err", err)
 			continue
 		}
-		slog.Info("worktree sweep: purged an interrupted leftover delete", "entry", e.Name())
+		if !st.Done {
+			slog.Info("worktree sweep: trash entry only partly purged this pass (paced; the next sweep continues)", "entry", e.Name(), "ops", st.Ops)
+			continue
+		}
+		slog.Info("worktree sweep: purged an interrupted leftover delete", "entry", e.Name(), "ops", st.Ops, "batches", st.Batches)
 	}
+}
+
+// trashAge is how long ago a trash entry was created. Entries are named
+// <bead>.<unix nanos of the move>, and that stamp is used when present because a
+// paced delete keeps changing the entry's own mtime (every removed child touches
+// it), which would otherwise push a half-drained entry's next purge a full grace
+// window out after each pass. An entry without a parseable stamp falls back to
+// its mtime.
+func trashAge(name string, mtime, now time.Time) time.Duration {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		if ns, err := strconv.ParseInt(name[i+1:], 10, 64); err == nil && ns > 1e17 {
+			return now.Sub(time.Unix(0, ns))
+		}
+	}
+	return now.Sub(mtime)
 }

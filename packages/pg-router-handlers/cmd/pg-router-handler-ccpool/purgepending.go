@@ -145,7 +145,7 @@ func removeWorktreeForPurge(ctx context.Context, open worktree.Opener, repoRoot,
 		return true
 	}
 	if unregisteredWorktreeDir(s.CWD, worktreeDir) {
-		if err := os.RemoveAll(s.CWD); err != nil {
+		if err := pacedRemoval.RemoveTree(ctx, s.CWD); err != nil {
 			slog.Warn("teardown: could not delete the unregistered worktree directory; purge stays deferred",
 				"session", s.ExternalID, "cwd", s.CWD, "err", err)
 			return false

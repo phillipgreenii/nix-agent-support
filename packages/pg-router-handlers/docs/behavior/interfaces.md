@@ -124,6 +124,9 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   retries (one per closed-bead reconcile; for the default pool, the shutdown sweep too) rather than a worktree
   no record leads to. While such a teardown is unfinished, the record is never absorbed
   (`INV-CCH-30`). This marking is a `ccpool` metadata write, never a `ccpool` label.
+  The worktree removal itself is paced (`INV-CCH-20`): the tree is renamed into a `.trash` directory
+  and deleted in batches with a pause between them, so a large checkout never produces one burst of
+  filesystem events.
   A role configured to pre-fetch also runs `git` in the per-bead worktree before the session
   launches (`INV-CCH-21`): it resolves or fetches one commit from the configured remote, checks it
   out detached, and writes two files under an ignored directory of the worktree.

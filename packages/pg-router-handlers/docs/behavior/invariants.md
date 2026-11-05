@@ -557,6 +557,21 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   transcript can be pruned by the pool's own reaper first. Not covered, accepted: the retry removes
   one worktree per reconcile, so a backlog drains over several runs. Bead `pg2-kqegi`; closes the gap in
   which a purge-first teardown left a half-removed worktree no record led to (`pg2-me0t1`).
+  - **Paced removal.** Removing a worktree MUST NOT unlink its files at full speed, because each
+    unlink and rmdir is a filesystem event for every listener on the host (measured 2026-11-04:
+    about 284,000 events from two monorepo worktrees, and every delete method emits the same count).
+    Every removal this handler performs (the two-phase teardown, the orphan and closed-bead
+    reconciles, the leaked-worktree sweep and dispatch-time cleanup) MUST keep git's own refusals
+    (not a linked worktree, locked, and for a non-forced removal uncommitted or untracked files),
+    stop the worktree's own git fsmonitor daemon (the `core.fsmonitor` setting itself stays on),
+    rename the tree aside into a `.trash` directory beside the per-bead worktrees (one rename; the
+    worktree path is free and git's registration is pruned at once, so the removal is complete for
+    every other rule here), and delete the trash in batches: 500 unlink or rmdir calls, then a
+    250 ms pause, within a 3 minute budget per removal. A delete cut short by the budget, a restart
+    or a crash MUST leave only the trash entry; the janitor's worktree sweep MUST finish it on a
+    later pass (an entry is retried once its creation stamp, the number in its name, is older than
+    the sweep grace window), and a record whose worktree is in the trash is purged as for any
+    removed worktree. A trash entry is never a candidate for the leaked-worktree sweep.
 
 - **`INV-CCH-21`** — a role with worktree isolation MAY be configured to pre-fetch. When it is,
   the handler MUST, after the per-bead worktree exists and BEFORE the session is launched (so no

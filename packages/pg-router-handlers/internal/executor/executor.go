@@ -26,7 +26,6 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/usage"
 	"github.com/phillipgreenii/pg-router-handlers/internal/watchdog"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
-	"github.com/phillipgreenii/x/gitclient"
 )
 
 // DispatchContext is one (role, item) dispatch. This module's own local
@@ -150,9 +149,7 @@ func (d Deps) gitOpener() worktree.Opener {
 	if d.GitOpener != nil {
 		return d.GitOpener
 	}
-	return func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
-		return gitclient.New(ctx, dir)
-	}
+	return worktree.GitOpener
 }
 
 func (d Deps) clock() time.Time {
