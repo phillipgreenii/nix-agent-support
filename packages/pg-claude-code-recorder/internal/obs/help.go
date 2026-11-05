@@ -13,7 +13,7 @@ var helpTexts = map[string]string{
 	MCopyLagSeconds:           "Age in seconds of the oldest uncopied source data.",
 	MCopyLagHistogram:         "Distribution of the copy lag in seconds.",
 	MHeartbeat:                "Unix time of the last completed sweep.",
-	MStateUsedBytes:           "Bytes used by the state directory.",
+	MStateUsedBytes:           "Database-derived bytes of the state directory (copies, index, journal, checkpoint); excludes archives, manifests and orphans.",
 	MRequestsTotal:            "Requests served, by client, op and outcome.",
 	MQueryDuration:            "Distribution of query request durations in seconds, by op.",
 	MQueryTimeouts:            "Requests that hit the query deadline, by op.",

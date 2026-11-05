@@ -163,7 +163,10 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   packet (7a) chooses the port and registers the scrape. Series: `dropped_bytes_total{reason}`
   (every reason registered at zero), `copy_lag_bytes`, `copy_lag_seconds`,
   `copy_lag_seconds_histogram`, `last_sweep_timestamp_seconds` (the heartbeat),
-  `state_used_bytes`, `requests_total{client,op,outcome}`,
+  `state_used_bytes` (database-derived with no directory walk: the copies the database lists plus
+  `index.db`, its `-wal`/`-shm`, the journal and the watcher checkpoint, plus `quarantine_bytes`;
+  it excludes archives, manifests, the doctor cursor and orphans, so it steps down when first
+  deployed), `requests_total{client,op,outcome}`,
   `query_duration_seconds{op}`, `feed_latency_seconds{op}` (no unlabelled series: use `sum without (op)`),
   `requests_inflight{op}`, `wait_duration_seconds`, `backfill_files_*`,
   `caught_up`, and the loop and process series: `settle_tick_duration_seconds`,

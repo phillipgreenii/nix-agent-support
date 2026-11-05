@@ -137,7 +137,6 @@ type Daemon struct {
 	truncate   func(time.Duration) (bool, error)
 	usedMu     sync.Mutex
 	usedBytes  int64
-	usedAt     time.Time
 	stop       chan struct{}
 	stopOnce   sync.Once
 	refreshing sync.WaitGroup
@@ -910,15 +909,16 @@ func (d *Daemon) refreshGaugesPass() {
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)
 	}
+	// Database-derived, no walk (see StateUsedBytes); a failed read keeps the
+	// last figure.
 	d.usedMu.Lock()
-	if now := d.clock.Now(); d.usedAt.IsZero() || now.Sub(d.usedAt) > time.Minute {
-		d.usedBytes = DirBytes(d.cfg.StateDir)
-		d.usedAt = now
+	if u, err := StateUsedBytes(&d.st.Reader, d.cfg.StateDir); err == nil {
+		d.usedBytes = u
 	}
 	used := d.usedBytes
 	d.usedMu.Unlock()
-	// The quarantined files are still on disk until their unlink: they count in
-	// the used figure.
+	// The quarantined files sit beside the Claude originals, not in the state
+	// directory or the tables StateUsedBytes sums, so they are added on top.
 	qb, _ := d.obs.Reg.Gauge(obs.MQuarantineBytes, nil)
 	d.obs.Reg.Set(obs.MStateUsedBytes, nil, float64(used)+qb)
 }

@@ -230,6 +230,31 @@ func (s *Reader) CopyOffsets() (map[[2]int64]int64, error) {
 	return out, rows.Err()
 }
 
+// copyBytesQuery sums the bytes the recorder's copies of Claude files occupy,
+// from the database alone (no directory walk). A generation's copy holds
+// copy_offset bytes until the archive covers it and the copy is deleted
+// (ReclaimLocked: the archived prefix reaches copy_offset); its tail sidecar
+// holds tail_len bytes either way. A snapshot version holds size bytes until
+// an archive range exists for it (then its stored bytes are deleted). The
+// rows themselves stay after a reclaim, so the query must not count them.
+const copyBytesQuery = `SELECT
+ (SELECT COALESCE(SUM(g.tail_len + CASE WHEN g.copy_offset > 0 AND EXISTS (
+     SELECT 1 FROM ranges r WHERE r.file_id=g.file_id AND r.gen=g.gen AND r.to_off>=g.copy_offset)
+   THEN 0 ELSE g.copy_offset END),0) FROM generations g)
+ +
+ (SELECT COALESCE(SUM(sn.size),0) FROM snapshots sn WHERE NOT EXISTS (
+     SELECT 1 FROM ranges r WHERE r.file_id=sn.file_id AND r.gen=sn.version))`
+
+// CopyBytes is the database-derived size of the copies and sidecars under
+// copies/ (approximate: archives, manifests and orphans are not counted).
+func (s *Reader) CopyBytes() (int64, error) {
+	var n int64
+	if err := s.q.QueryRow(copyBytesQuery).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // OffsetTotals is the sum of copy and parse offsets over a file's generations.
 type OffsetTotals struct{ Copy, Parse int64 }
 
