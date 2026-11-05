@@ -382,6 +382,10 @@ func oracleScript(o *oracle) map[int][]oAct {
 		5: cat(each("append", head(o.group(cSettledReal)[3:], 2)...), each("touchAge", head(quiet[1:], 1)...), each("touch", head(quiet[3:], 2)...), each("touch", head(recent, 2)...)),
 		// process exits, and settled Conversations gaining a process
 		10: cat(each("liveOff", head(live, 5)...), each("liveOn", head(settled, 3)...)),
+		// a held Conversation whose original gets a new mtime with no copier
+		// commit: the scan returns it to quiet (new_writes) within the minute
+		// and the event loop has to notice without a signal.
+		8:  each("touch", head(o.group(cHeldTail), 1)...),
 		15: {{"lowOn", 0}},
 		// held.recheck is 20 minutes here: the unparsed file is released by the
 		// recheck deadline alone, the grown original by a dirty signal.

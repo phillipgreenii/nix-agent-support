@@ -154,6 +154,39 @@ func (s *Settler) schedule(c *conv, stage string, errored bool, now time.Time, r
 	}
 }
 
+// heldRewritten returns the held Conversations whose newest original mtime is
+// later than the moment they were held. Only an mtime change reaches this: the
+// copier's commits feed the dirty set, but a file given a new mtime without a
+// copier commit does not, and the scan moves such a Conversation from held back
+// to quiet within a minute. The check stats the files of the held Conversations
+// only (a handful), not the store, so no per-minute full scan returns. The run
+// lock is held.
+func (s *Settler) heldRewritten() map[string]bool {
+	s.mu.Lock()
+	var held []string
+	for session, stage := range s.last {
+		if stage == StageHeld {
+			held = append(held, session)
+		}
+	}
+	s.mu.Unlock()
+	out := map[string]bool{}
+	for _, session := range held {
+		c := s.gcache[session]
+		if c == nil {
+			continue
+		}
+		row, ok, err := s.st.Stage(session)
+		if err != nil || !ok || row.Stage != StageHeld {
+			continue
+		}
+		if s.newest(c).After(time.Unix(0, row.SinceNS)) {
+			out[session] = true
+		}
+	}
+	return out
+}
+
 // Wake runs one event-driven pass at now. Before the first reconciliation it
 // is the reconciliation.
 func (s *Settler) Wake(now time.Time) (TickStats, error) {
@@ -193,6 +226,11 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		}
 	}
 	s.liveSeen = copySet(live)
+	for session := range s.heldRewritten() {
+		if !live[session] {
+			work[session] = true
+		}
+	}
 	if flip {
 		rows, _ := s.st.Stages()
 		settled := map[string]bool{}
