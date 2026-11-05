@@ -77,8 +77,9 @@ conversations rows are newest first (default --since 7d, --limit 50); each carri
 label, the evidence used, the stage, whether the originals exist and the line to resume it. An empty
 --crashed result exits 0 and says how many unknown rows have a stale registry file. --ended cannot be
 combined with --crashed or --suspected-crash (exit 2).
-Removal is off by default (remove.enable = false). There is no undo except extract. Before turning it on:
-the daemon-down alert is registered and a host-level disk monitor covers the state directory volume, doctor has run clean (it also runs from a timer inside the
+Removal is off by default (remove.enable = false): the operator runs remove (--all-eligible, --yes to apply) on a
+roughly fixed period and the daemon removes nothing on its own. There is no undo except extract. Before turning on
+automatic removal later: the daemon-down alert is registered, doctor has run clean (it also runs from a timer inside the
 daemon, doctor.interval), pa-monitor sessions and ccpool resume have moved to the recorder, the state directory
 is backed up, and remove --dry-run prints what would go and how many GB. remove acts on the named Conversations
 or, with --all-eligible, on every settled one older than remove.after; it never bypasses the age. Without --yes

@@ -583,7 +583,8 @@ pg-claude-code-recorder extract <session> [--to DIR]     # byte-exact, mtime now
 pg-claude-code-recorder doctor                           # exit 9 on a mismatch; writes doctor.json
 ```
 
-Removal readiness checklist: the daemon-down alert is registered (phase 7c) and a host-level disk monitor covers the state directory volume; `doctor` has
+Removal is run by the operator first: run `remove --all-eligible --yes` on a roughly fixed period (the daemon removes nothing on its own while `remove.enable` is false, the default).
+Readiness checklist for the later opt-in of automatic removal: the daemon-down alert is registered (phase 7c); `doctor` has
 compared every copy against the Claude files and its last run is recent; pa-monitor `sessions` and ccpool resume
 have moved to the recorder; the state directory is backed up (excluding `recorder.sock` and temporary files);
 `remove --dry-run` prints what would go and how many GB.
@@ -772,14 +773,16 @@ larger change to consider only if batching is not enough. The decision is record
 
 ### Turning on `remove.enable`
 
+**Operator-run removal comes first.** Start by running `pg-claude-code-recorder remove --all-eligible --yes` yourself on a roughly fixed period (preview with `remove --dry-run`); the daemon does not remove on its own. `remove.enable` (automatic removal) stays `false` by default and is a later opt-in, not the first step. The recorder does not judge host disk space and has no host free-space alert; it alerts only when it cannot do its own job for lack of space.
+
 **There is no undo other than `extract`.** Once `remove.enable` is true, the recorder removes the Claude files of Conversations settled
 and quiet for `remove.after`; resuming a removed Conversation needs an `extract`, and so the recorder. This section is written only
-because the `daemon-down` alert is registered (phase 7c) and a host-level disk monitor covers the state directory volume: turn removal on only while both are live
+because the `daemon-down` alert is registered (phase 7c): turn automatic removal on only while it is live
 (`darwin/modules/pg-claude-code-recorder` registers `alerts.yaml` while a daemon is deployed).
 
 Readiness checklist, all of it before setting `remove.enable = true`:
 
-1. The `daemon-down` alert is registered and not firing, and the host-level disk monitor covers the state directory volume (and `doctor-mismatch`, `data-loss` and `removal-stuck` are quiet).
+1. The `daemon-down` alert is registered and not firing (and `doctor-mismatch`, `data-loss` and `removal-stuck` are quiet).
 2. `doctor` has compared every copy against the Claude files by full hash, and its last run is recent: `doctor_last_run_timestamp` is
    non-zero and under 2 days old (a stale doctor, or one that never ran, is not ready) with `doctor_mismatch_files` at 0.
 3. The clients have moved: pa-monitor `sessions` and ccpool resume read the recorder, not the Claude directory.
