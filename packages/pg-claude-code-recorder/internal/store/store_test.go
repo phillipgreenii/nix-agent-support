@@ -491,7 +491,7 @@ func TestFeedMarksAtIndexIsCreatedByOpenAndGainedByAnOlderDatabase(t *testing.T)
 }
 
 func TestBulkRebuildCreatesFeedMarksAtIndex(t *testing.T) {
-	s, err := Open(t.TempDir(), Options{Rebuild: true, BulkRebuild: true})
+	s, err := Open(t.TempDir(), Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
