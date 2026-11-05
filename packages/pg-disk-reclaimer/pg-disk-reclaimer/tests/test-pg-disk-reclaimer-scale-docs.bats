@@ -243,3 +243,20 @@ flat() {
   [[ $text == *"at most once"* ]]
   [[ $text == *"no command prompts mid-run"* ]]
 }
+
+@test "--help, the tldr page and the scale document each mention --yes, --no and 'mutually exclusive'" {
+  local text name
+  run bash "$SCRIPT" --help
+  [ "$status" -eq 0 ]
+  local -A texts=(
+    [help]="$(tr -s '[:space:]' ' ' <<<"$output")"
+    [tldr]="$(flat "$SCRIPTS_DIR/pg-disk-reclaimer.md")"
+    [scale]="$(flat "$SCALE_DOC")"
+  )
+  for name in help tldr scale; do
+    text="${texts[$name]}"
+    [[ $text == *"--yes"* ]] || { echo "$name lacks --yes" >&2; return 1; }
+    [[ $text == *"--no"* ]] || { echo "$name lacks --no" >&2; return 1; }
+    [[ $text == *"mutually exclusive"* ]] || { echo "$name lacks 'mutually exclusive'" >&2; return 1; }
+  done
+}

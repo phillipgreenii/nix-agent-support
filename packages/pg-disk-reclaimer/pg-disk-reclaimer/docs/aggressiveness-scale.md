@@ -22,11 +22,12 @@ document are to be interpreted as described in RFC 2119.
 - Confirmation gate: one run prompts AT MOST ONCE, and that one answer gates
   the whole run.
   - `reclaim --apply` MUST ask for interactive confirmation when any selected
-    variant's level is `>= 4`. It MUST ask before any `removeCommand` runs, and
+    variant's level is `>= 4`, except when `--yes` or `--no` answers it (below). It MUST ask before any `removeCommand` runs, and
     it MUST NOT prompt at any other point of the run.
   - Before the prompt, `reclaim` MUST print the plan: each selected item with
     its size. The prompt MUST be visible on the controlling terminal, and the
-    answer MUST be read from that terminal, never from stdin. Because the plan
+    answer MUST be read from that terminal, never from stdin, unless `--yes` or
+    `--no` answers it without reading anything. Because the plan
     goes to standard output, which MAY be redirected to a file or a pager while
     the prompt goes to the terminal, the prompt text itself MUST name the item
     count and each level `>= 4` item with its size.
@@ -36,7 +37,8 @@ document are to be interpreted as described in RFC 2119.
     the "not confirmed" line then starts on its own line.
   - A declined confirmation MUST run nothing and exit with status 2. When a
     confirmation is needed but there is no controlling terminal, `reclaim` MUST
-    say so, run nothing and exit with status 3; it MUST NOT report that as a
+    say so, run nothing and exit with status 3 (`--yes` and `--no` need no
+    terminal, so they never exit 3); it MUST NOT report that as a
     decline. A bad explicit item id does not change either status: a decline or
     no terminal still exits 2 or 3, never 1.
   - A selected item whose `path` does not exist is skipped before the plan, so

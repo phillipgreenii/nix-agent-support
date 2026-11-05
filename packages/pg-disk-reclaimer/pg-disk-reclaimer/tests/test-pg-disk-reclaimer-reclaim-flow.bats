@@ -356,7 +356,76 @@ gated_registry() {
   [[ $output == *"add --apply"* ]]
   run cmd_reclaim --aggressiveness 5 --no
   [ "$status" -eq 1 ]
+  [[ $output == *"add --apply"* ]]
   [[ $output != *"dry"* ]]
+}
+
+@test "the plan prints before the answer under --no and --yes (mutant: answer moved ahead of the plan)" {
+  gated_registry
+  run cmd_reclaim --aggressiveness 5 --apply --no
+  local plan nc
+  plan=$(line_no 'hi4: size: 2.0M')
+  nc=$(grep -n 'not confirmed; nothing was run' <<<"$output" | head -1 | cut -d: -f1)
+  [ -n "$plan" ] && [ -n "$nc" ]
+  [ "$plan" -lt "$nc" ]
+  run cmd_reclaim --aggressiveness 5 --apply --yes
+  local out
+  plan=$(line_no 'hi4: size: 2.0M')
+  out=$(line_no 'rm-hi4')
+  [ -n "$plan" ] && [ -n "$out" ]
+  [ "$plan" -lt "$out" ]
+}
+
+@test "--yes with --apply and no level 4+ item runs normally and never calls pgdr_confirm" {
+  install_registry "$(item lo 1 'echo 1024' 'echo dry' 'echo rm-lo')"
+  pgdr_confirm() {
+    echo "PROMPT-ASKED"
+    return 2
+  }
+  run cmd_reclaim --aggressiveness 5 --apply --yes
+  [ "$status" -eq 0 ]
+  [[ $output != *"PROMPT-ASKED"* ]]
+  [[ $output == *"rm-lo"* ]]
+}
+
+@test "a level 4 item with a missing path plus a level 1 item: --yes and --no gate nothing and the level 1 item runs" {
+  install_registry \
+    "$(item lo 1 'echo 1024' 'echo dry' 'echo rm-lo')" \
+    "$(item gone4 4 'echo 1024' 'echo dry' 'echo rm-gone4' "$TEST_DIR/does-not-exist")"
+  pgdr_confirm() {
+    echo "PROMPT-ASKED"
+    return 2
+  }
+  local flag
+  for flag in --yes --no; do
+    run cmd_reclaim --aggressiveness 5 --apply "$flag"
+    [ "$status" -eq 0 ]
+    [[ $output != *"PROMPT-ASKED"* ]]
+    [[ $output != *"not confirmed"* ]]
+    [[ $output == *"rm-lo"* ]]
+    [[ $output != *"rm-gone4"* ]]
+  done
+}
+
+@test "a bad explicit id with --no exits 2, and with --yes still runs the good ids and exits 1" {
+  gated_registry
+  run cmd_reclaim --aggressiveness 5 --apply --no lo hi4 no-such-id
+  [ "$status" -eq 2 ]
+  [[ $output == *"not confirmed; nothing was run"* ]]
+  [[ $output != *"rm-"* ]]
+  run cmd_reclaim --aggressiveness 5 --apply --yes lo hi4 no-such-id
+  [ "$status" -eq 1 ]
+  [[ $output == *"rm-lo"* ]]
+  [[ $output == *"rm-hi4"* ]]
+}
+
+@test "cmd_auto rejects --yes and --no as unknown arguments" {
+  local flag
+  for flag in --yes --no; do
+    run cmd_auto "$flag"
+    [ "$status" -eq 1 ]
+    [[ $output == *"unknown argument '$flag'"* ]]
+  done
 }
 
 # --- answer parsing (item 10) ---------------------------------------------
