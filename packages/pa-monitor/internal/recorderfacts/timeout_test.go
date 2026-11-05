@@ -64,7 +64,7 @@ func TestSessionsAndSearchReportATimeoutNotDaemonOffline(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: want an error", name)
 		}
-		if errors.Is(err, session.ErrDaemonOffline) || strings.Contains(err.Error(), "daemon offline") {
+		if errors.Is(err, session.ErrDaemonOffline) || strings.Contains(err.Error(), "the recorder is not available") {
 			t.Errorf("%s: a late answer must not read as daemon offline: %v", name, err)
 		}
 		if !errors.Is(err, client.ErrQueryTimeout) || !strings.Contains(err.Error(), "query_timeout") {
@@ -79,5 +79,21 @@ func TestAbsentDaemonIsStillOffline(t *testing.T) {
 	_, err := f.Sessions(context.Background(), time.Time{}, time.Time{})
 	if !errors.Is(err, session.ErrDaemonOffline) {
 		t.Fatalf("err = %v, want daemon offline", err)
+	}
+}
+
+// Unavailable names the action, the recorder and the socket for an offline
+// error, and leaves every other error (a timeout, say) untouched.
+func TestUnavailableNamesTheRecorderAndSocket(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "absent.sock")
+	f := New(client.Options{Socket: sock})
+	_, err := f.Sessions(context.Background(), time.Time{}, time.Time{})
+	want := "cannot list sessions: the recorder is not available (socket " + sock + ")"
+	if got := f.Unavailable("list sessions", err); got == nil || got.Error() != want || !errors.Is(got, session.ErrDaemonOffline) {
+		t.Fatalf("Unavailable = %v, want %q wrapping ErrDaemonOffline", got, want)
+	}
+	other := errors.New("boom")
+	if got := f.Unavailable("search", other); got != other {
+		t.Errorf("a non-offline error must pass through unchanged, got %v", got)
 	}
 }

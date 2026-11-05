@@ -131,12 +131,12 @@ func TestStateAwaitingWiring(t *testing.T) {
 }
 
 // TestStateAndResultRefuseWhenDaemonOffline: the fact-reading commands say
-// "daemon offline" and fail instead of guessing from files.
+// "the recorder is not available" and fail instead of guessing from files.
 func TestRequireFactsDaemonOffline(t *testing.T) {
 	useDownRecorder(t)
 	out, code := captureStderr(t, func() int { return requireFacts("state") })
-	if code != 1 || !strings.Contains(out, "daemon offline") {
-		t.Fatalf("requireFacts with the recorder down = %d, %q; want 1 and daemon offline", code, out)
+	if code != 1 || !strings.Contains(out, "the recorder is not available") {
+		t.Fatalf("requireFacts with the recorder down = %d, %q; want 1 and the recorder not available", code, out)
 	}
 	useRecorder(t)
 	if code := requireFacts("state"); code != 0 {

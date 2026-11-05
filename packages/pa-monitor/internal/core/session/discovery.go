@@ -10,9 +10,10 @@ import (
 )
 
 // ErrDaemonOffline is what discovery reports while the recorder daemon is not
-// answering. There is no fallback to Claude's files: "daemon offline" is what
-// pa-monitor shows (operator 2026-10-28).
-var ErrDaemonOffline = errors.New("daemon offline")
+// answering. There is no fallback to Claude's files: the command fails and says
+// the recorder is not available, so it is never mistaken for pa-monitor's own
+// daemon being down and never answers with a guess about the thing asked.
+var ErrDaemonOffline = errors.New("the recorder is not available")
 
 // Registry is where discovery reads the live registrations and the liveness of
 // each Process from: the recorder's Process facts (recorderfacts.Facts). It

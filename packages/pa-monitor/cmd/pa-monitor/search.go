@@ -168,8 +168,8 @@ func searchSessions(w io.Writer, srch searcher, query, sessionID string, since, 
 
 // runSearch implements the `search` subcommand: `pa-monitor search
 // [--json] [--substring] <query> [--session <id>] [--since <bound>] [--before <bound>]`. It
-// asks the recorder; while the recorder is down it says "daemon offline" and
-// exits 1 (no fallback to the transcript files).
+// asks the recorder; while the recorder is down it says "cannot search: the
+// recorder is not available (socket <path>)" and exits 1 (no fallback to the transcript files).
 func runSearch(args []string) {
 	query, sessionID, since, before, substring, err := parseSearchArgs(args, time.Now().UTC())
 	if err != nil {
@@ -178,7 +178,7 @@ func runSearch(args []string) {
 	}
 	facts := recorderfacts.New(client.Options{Name: "pa-monitor-search"})
 	if err := searchSessions(os.Stdout, facts, query, sessionID, since, before, substring); err != nil {
-		fmt.Fprintf(os.Stderr, "search: %v\n", err)
+		fmt.Fprintf(os.Stderr, "search: %v\n", facts.Unavailable("search", err))
 		os.Exit(exitGeneric)
 	}
 }

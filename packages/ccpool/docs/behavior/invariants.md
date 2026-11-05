@@ -46,7 +46,7 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   answer for the same transcript for one hour, across sweeps, and so a sweep over unchanged dead
   records MUST send the recorder no such request. Only a "present" answer is reused, and a changed
   transcript path invalidates it. An answer is never reused to keep a record whose check could not
-  be made: a recorder that does not answer MUST read as "daemon offline" and the sweep MUST leave
+  be made: a recorder that does not answer MUST read as "the recorder is not available" and the sweep MUST leave
   the record alone, never treat the conversation as gone (`INV-POOL-2`). A record whose original
   transcript disappears is therefore pruned at the first sweep after the reused answer expires.
 

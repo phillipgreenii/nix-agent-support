@@ -2,15 +2,15 @@
 // registrations of the running Claude processes, whether each is alive, and the
 // sessions and search results the CLIs print. It reads them through the
 // recorder's Go client package and never from Claude's files; while the recorder
-// is not answering it reports session.ErrDaemonOffline ("daemon offline") and
-// does not fall back (operator 2026-10-28: "daemon offline is what happens when
-// off line").
+// is not answering it reports session.ErrDaemonOffline ("the recorder is not
+// available") and does not fall back to guessing from files.
 package recorderfacts
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -73,6 +73,26 @@ func (f *Facts) wrap(err error) error {
 		f.c = nil
 		f.mu.Unlock()
 		return session.ErrDaemonOffline
+	}
+	return err
+}
+
+// Socket is the recorder socket this reader dials: the explicit option, else the
+// environment variable or default path the client would discover.
+func (f *Facts) Socket() string {
+	if f.opts.Socket != "" {
+		return f.opts.Socket
+	}
+	return client.DefaultSocket(f.opts.Getenv)
+}
+
+// Unavailable words a failed recorder-backed command: when err says the
+// recorder is not answering it names what could not be done and the socket,
+// "cannot <action>: the recorder is not available (socket <path>)"; any other
+// error is returned unchanged.
+func (f *Facts) Unavailable(action string, err error) error {
+	if errors.Is(err, session.ErrDaemonOffline) {
+		return fmt.Errorf("cannot %s: %w (socket %s)", action, err, f.Socket())
 	}
 	return err
 }

@@ -214,7 +214,8 @@ func writeSessions(w io.Writer, lister sessionLister, since, before time.Time, p
 
 // runSessions implements the `sessions` subcommand: `pa-monitor sessions
 // [--json] [--since <bound>] [--before <bound>] [--all] [--stats]`. It reads the
-// recorder; while the recorder is down it says "daemon offline" and exits 1
+// recorder; while the recorder is down it says "cannot list sessions: the
+// recorder is not available (socket <path>)" and exits 1
 // (there is no fallback to the transcript files). Exit codes follow search: 2
 // for an argument error, 1 for a runtime error, 0 otherwise. --stats is
 // accepted and ignored (there is no scan to report).
@@ -237,7 +238,7 @@ func runSessions(args []string) {
 	prices := account.LoadAccount(cfg).PriceTable()
 	facts := recorderfacts.New(client.Options{Name: "pa-monitor-sessions"})
 	if err := writeSessions(os.Stdout, facts, since, before, prices, cfg.FirstPromptMaxChars, defaulted); err != nil {
-		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sessions: %v\n", facts.Unavailable("list sessions", err))
 		os.Exit(exitGeneric)
 	}
 }

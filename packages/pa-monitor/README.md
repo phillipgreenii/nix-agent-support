@@ -7,7 +7,7 @@ Per-user daemon + TUI for monitoring active Claude Code sessions. Renders contex
 Two cooperating processes per OS user:
 
 - **`pa-monitor daemon`** — long-running, owns all state. Polls sessions, tracks 5h blocks and the weekly limit, manages caffeinate, dispatches nudges, emits OTel. Started by a LaunchAgent at login on macOS (`darwin/modules/pa-monitor`), or by a `systemd --user` service on NixOS (`nixos/modules/pa-monitor`, gated on the same `phillipgreenii.programs.pa-monitor.daemon.enable` HM option).
-- **Clients** (TUI, CLI, cmux-bridge) — talk to the daemon over a Unix domain socket (gRPC). Stateless beyond per-process render caches. When the daemon is unreachable, clients show "daemon offline" rather than fabricating data from disk.
+- **Clients** (TUI, CLI, cmux-bridge) — talk to the daemon over a Unix domain socket (gRPC). Stateless beyond per-process render caches. When the daemon is unreachable, clients (the CLIs and the TUI) say the recorder is not available, and the CLIs fail with a message naming the recorder and its socket, rather than fabricating data from disk.
 
 ## Quick start
 

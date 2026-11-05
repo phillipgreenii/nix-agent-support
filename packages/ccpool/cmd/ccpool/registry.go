@@ -58,7 +58,7 @@ type registryFacts struct {
 const procStartLayout = "Mon Jan _2 15:04:05 2006"
 
 // registryVerdictWith is registryVerdict with the fact source injected. The only
-// error is a fact read that failed (a recorder that is down: "daemon offline");
+// error is a fact read that failed (a recorder that is down: "the recorder is not available");
 // no match or a dead process is (zero, false, nil).
 func registryVerdictWith(sessionsDir, claudeSessionID, transcriptPath string, freshWindow time.Duration, f registryFacts) (ct.ActivityVerdict, bool, error) {
 	if claudeSessionID == "" {

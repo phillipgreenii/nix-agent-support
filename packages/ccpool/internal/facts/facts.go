@@ -25,8 +25,10 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
-// ErrDaemonOffline is what a fact read reports when the recorder does not answer.
-var ErrDaemonOffline = errors.New("daemon offline")
+// ErrDaemonOffline is what a fact read reports when the recorder does not
+// answer. Its text names the recorder so it is never read as another daemon
+// being down, and a failed read never answers with a guess.
+var ErrDaemonOffline = errors.New("the recorder is not available")
 
 // Reader reads facts from one recorder daemon. It is safe for concurrent use.
 type Reader struct {

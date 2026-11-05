@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,17 +94,28 @@ func TestSearchSessionsFromTheRecorder(t *testing.T) {
 	}
 }
 
-// TestSessionsAndSearchSayDaemonOffline: the recorder is stopped and the
-// transcript file is still on disk; neither command reads it.
-func TestSessionsAndSearchSayDaemonOffline(t *testing.T) {
+// TestSessionsAndSearchSayRecorderNotAvailable: the recorder is stopped and the
+// transcript file is still on disk; neither command reads it, and both fail
+// with a message that names the recorder, what could not be done and the socket.
+func TestSessionsAndSearchSayRecorderNotAvailable(t *testing.T) {
 	e, f := cliFacts(t)
 	e.Stop()
 	var buf bytes.Buffer
-	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10, time.Time{}); err != session.ErrDaemonOffline {
+	err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10, time.Time{})
+	if !errors.Is(err, session.ErrDaemonOffline) {
 		t.Errorf("sessions err = %v", err)
 	}
-	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}, false); err != session.ErrDaemonOffline {
+	want := "cannot list sessions: the recorder is not available (socket " + e.Socket + ")"
+	if got := f.Unavailable("list sessions", err).Error(); got != want {
+		t.Errorf("sessions message = %q, want %q", got, want)
+	}
+	err = searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}, false)
+	if !errors.Is(err, session.ErrDaemonOffline) {
 		t.Errorf("search err = %v", err)
+	}
+	want = "cannot search: the recorder is not available (socket " + e.Socket + ")"
+	if got := f.Unavailable("search", err).Error(); got != want {
+		t.Errorf("search message = %q, want %q", got, want)
 	}
 	if buf.Len() != 0 {
 		t.Errorf("output written while offline: %s", buf.String())
@@ -165,7 +177,7 @@ func TestParseSessionsArgs(t *testing.T) {
 
 // TestSessionsExitCodeAndHelp exercises the real binary: a bad bound exits 2
 // naming --since on stderr, and with no recorder answering `sessions` says
-// "daemon offline" and exits 1 instead of reading the transcript files.
+// "the recorder is not available" and exits 1 instead of reading the transcript files.
 func TestSessionsExitCodeAndHelp(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
@@ -197,8 +209,24 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 	if !ok || ee.ExitCode() != exitGeneric || len(out) != 0 {
 		t.Fatalf("no recorder: err = %v out = %q, want exit 1 and no output", err, out)
 	}
-	if !strings.Contains(stderr.String(), "daemon offline") {
-		t.Errorf("stderr %q should say daemon offline", stderr.String())
+	absent := filepath.Join(home, "absent.sock")
+	wantMsg := "sessions: cannot list sessions: the recorder is not available (socket " + absent + ")"
+	if !strings.Contains(stderr.String(), wantMsg) || strings.Contains(stderr.String(), "daemon offline") {
+		t.Errorf("stderr %q should say %q and not daemon offline", stderr.String(), wantMsg)
+	}
+
+	cmd = exec.Command(bin, "search", "x")
+	cmd.Env = env
+	stderr.Reset()
+	cmd.Stderr = &stderr
+	out, err = cmd.Output()
+	ee, ok = err.(*exec.ExitError)
+	if !ok || ee.ExitCode() != exitGeneric || len(out) != 0 {
+		t.Fatalf("search, no recorder: err = %v out = %q, want exit 1 and no output", err, out)
+	}
+	wantMsg = "search: cannot search: the recorder is not available (socket " + absent + ")"
+	if !strings.Contains(stderr.String(), wantMsg) || strings.Contains(stderr.String(), "daemon offline") {
+		t.Errorf("stderr %q should say %q and not daemon offline", stderr.String(), wantMsg)
 	}
 }
 

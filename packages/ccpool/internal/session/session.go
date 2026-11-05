@@ -567,7 +567,7 @@ func (s *Service) claudeSessionResumable(row store.Session) bool {
 }
 
 // resumable is claudeSessionResumable with the probe's error: an Exister that is
-// a CheckedExister (the recorder-backed one) fails with "daemon offline" instead
+// a CheckedExister (the recorder-backed one) fails with "the recorder is not available" instead
 // of answering false, so a recorder outage never reads as "the session is gone".
 func (s *Service) resumable(row store.Session) (bool, error) {
 	if row.TranscriptPath == "" || s.d.Exister == nil {

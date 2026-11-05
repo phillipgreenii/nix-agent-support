@@ -173,7 +173,7 @@ func TestProcessAliveUnknownIsFalse(t *testing.T) {
 }
 
 // TestDaemonOffline: with the recorder stopped every fact read fails with
-// "daemon offline", and Ping (the dispatch gate) says so.
+// "the recorder is not available", and Ping (the dispatch gate) says so.
 func TestDaemonOffline(t *testing.T) {
 	e := clienttest.Start(t)
 	e.Write(filepath.Join("projects", e.Project, sess+".jsonl"), userLine("2026-01-01T00:00:01Z", "hi"))
@@ -210,7 +210,7 @@ func TestDaemonOffline(t *testing.T) {
 	if _, ok := r.FirstMessageActivity(path); ok {
 		t.Error("FirstMessageActivity with the recorder down must report no turn")
 	}
-	if msg := facts.ErrDaemonOffline.Error(); msg != "daemon offline" {
+	if msg := facts.ErrDaemonOffline.Error(); msg != "the recorder is not available" {
 		t.Errorf("message = %q", msg)
 	}
 }
