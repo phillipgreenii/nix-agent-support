@@ -1079,6 +1079,42 @@ func (s *Settler) refreshRemovalGaugesIfDue(groups map[string]*conv, live map[st
 	s.rgAt = now
 }
 
+// backlogRecomputeAfter is how long the removal backlog gauges reuse a settled
+// Conversation's newest modification time and byte size. Finding them costs a
+// path lookup, an lstat and two store reads per file, and a settled Conversation
+// that changes leaves the Settled stage, so a stale entry only delays the gauge.
+const backlogRecomputeAfter = 15 * time.Minute
+
+// backlogEntry is what the backlog gauges last computed for one Conversation.
+type backlogEntry struct {
+	newest time.Time
+	bytes  int64
+	at     time.Time
+}
+
+// backlogFacts returns the Conversation's newest modification time and total
+// copied bytes, from the cache while the entry is younger than
+// backlogRecomputeAfter.
+func (s *Settler) backlogFacts(session string, c *conv, now time.Time) (time.Time, int64) {
+	s.qmu.Lock()
+	e, ok := s.backlog[session]
+	s.qmu.Unlock()
+	if d := now.Sub(e.at); ok && d >= 0 && d < backlogRecomputeAfter {
+		return e.newest, e.bytes
+	}
+	e = backlogEntry{newest: s.newest(c), at: now}
+	for _, f := range c.files {
+		e.bytes += s.fileBytes(f)
+	}
+	s.qmu.Lock()
+	if s.backlog == nil {
+		s.backlog = map[string]backlogEntry{}
+	}
+	s.backlog[session] = e
+	s.qmu.Unlock()
+	return e.newest, e.bytes
+}
+
 // refreshRemovalGauges sets the quarantine gauges and the removal backlog.
 func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]bool, now time.Time) {
 	s.removalGaugeRefreshes.Add(1)
@@ -1114,14 +1150,20 @@ func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]
 		if r.Stage != StageSettled || c == nil || live[r.Session] {
 			continue
 		}
-		if now.Sub(s.newest(c)) < s.cfg.RemoveAfter {
+		newest, bytes := s.backlogFacts(r.Session, c, now)
+		if now.Sub(newest) < s.cfg.RemoveAfter {
 			continue
 		}
 		convs++
-		for _, f := range c.files {
-			back += s.fileBytes(f)
+		back += bytes
+	}
+	s.qmu.Lock()
+	for session, e := range s.backlog {
+		if d := now.Sub(e.at); d < 0 || d >= backlogRecomputeAfter {
+			delete(s.backlog, session)
 		}
 	}
+	s.qmu.Unlock()
 	reg.Set(obs.MRemovalBacklogConvs, nil, float64(convs))
 	reg.Set(obs.MRemovalBacklogBytes, nil, float64(back))
 }

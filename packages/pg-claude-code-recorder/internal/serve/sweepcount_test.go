@@ -262,3 +262,48 @@ func TestSweepSkipsUnchangedUntilFullVerification(t *testing.T) {
 		t.Fatalf("verification sweep ingested nothing")
 	}
 }
+
+// A snapshot-mode file (a tool result here) that the copier found unchanged is
+// as caught up as an append file: the next sweep must skip it instead of
+// reading and hashing it again, and a change to it must still be copied.
+func TestSweepSkipsUnchangedSnapshotFiles(t *testing.T) {
+	e := newEnv(t, false)
+	old := time.Now().Add(-time.Hour)
+	dir := filepath.Join(e.claude, "projects", "example-proj", "sess-1", "tool-results")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "out.txt")
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("result one\n")
+	e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
+	d := e.open(t)
+	sweep := func() {
+		t.Helper()
+		if err := d.Watcher().Rescan(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sweep() // first copy of both
+	sweep() // ingested to unchanged and cached
+	before := ingestCount(d, "unchanged")
+	sweep()
+	if got := ingestCount(d, "unchanged") - before; got != 0 {
+		t.Fatalf("a sweep over unchanged files ingested %v of them, want 0 (snapshot and append alike)", got)
+	}
+	// A real change (new size) is not skipped.
+	write("result one and more\n")
+	snapBefore := ingestCount(d, "snapshot")
+	sweep()
+	if got := ingestCount(d, "snapshot") - snapBefore; got != 1 {
+		t.Fatalf("a changed snapshot file was stored %v times, want 1", got)
+	}
+}

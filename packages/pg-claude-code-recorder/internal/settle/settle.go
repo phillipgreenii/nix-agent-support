@@ -255,6 +255,9 @@ type Settler struct {
 	rgAt    time.Time
 	// removalGaugeRefreshes counts refreshRemovalGauges calls (test seam).
 	removalGaugeRefreshes atomic.Int64
+	// The per-Conversation facts the removal backlog gauges reuse between ticks
+	// (see backlogFacts); guarded by qmu.
+	backlog map[string]backlogEntry
 }
 
 // New returns a Settler.

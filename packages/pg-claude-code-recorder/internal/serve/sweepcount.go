@@ -6,7 +6,6 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 )
 
@@ -130,17 +129,18 @@ func (d *Daemon) skipUnchanged(e watcher.Event) bool {
 	return true
 }
 
-// noteCaughtUp records the outcome of an ingest. Only an append-mode file the
-// copier found already caught up is cached; anything else (a copy that may be
-// partial, an error, a snapshot or a link) is ingested again next sweep.
+// noteCaughtUp records the outcome of an ingest. Only a file the copier found
+// already caught up ("unchanged": an append file with nothing left to copy, or a
+// snapshot whose content hash matches its latest version) is cached; anything
+// else (a copy that may be partial, an error) is ingested again next sweep.
+// Snapshot files (tool results, subagent metadata, registry files) are about
+// half of what a sweep walks, so leaving them out would keep every one of them
+// read and hashed on every sweep. The sweep walk only reports regular files, so
+// a link never reaches here.
 func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	d.seen.mu.Lock()
 	defer d.seen.mu.Unlock()
 	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 {
-		delete(d.seen.caught, e.Path)
-		return
-	}
-	if _, mode := d.scope.Classify(e.Path); mode != scope.Append {
 		delete(d.seen.caught, e.Path)
 		return
 	}
