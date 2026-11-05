@@ -38,7 +38,8 @@ let
 
   # The rule files and dashboard are created by the alerts packet (7c); the
   # paths are the contract. Registered files are never loaded together: the
-  # rules while the daemon is deployed, the deleteRules-only twin otherwise.
+  # rules plus the retired-only deleteRules file while the daemon is deployed,
+  # the full deleteRules-only twin otherwise.
   grafanaDir = ../../../packages/pg-claude-code-recorder/grafana;
 in
 {
@@ -77,17 +78,19 @@ in
         };
       };
 
-      # The rules file while the daemon is deployed; otherwise the
-      # deleteRules-only twin, because Grafana keeps a file-provisioned rule
-      # live after its file is dropped (pg-connector-github, pg2-susum).
-      alertRuleFiles = [
-        (
-          if daemonDeployed then
-            grafanaDir + "/alerting/alerts.yaml"
-          else
-            grafanaDir + "/alerting/alerts-delete.yaml"
-        )
-      ];
+      # While the daemon is deployed: the rules file plus the retired-only
+      # deleteRules file (a rule removed from the rules file stays live in
+      # Grafana until a deleteRules entry names it, and that entry must load in
+      # the same deployment that drops the rule). Otherwise the full
+      # deleteRules-only twin, never alongside the rules it names.
+      alertRuleFiles =
+        if daemonDeployed then
+          [
+            (grafanaDir + "/alerting/alerts.yaml")
+            (grafanaDir + "/alerting/alerts-retired-delete.yaml")
+          ]
+        else
+          [ (grafanaDir + "/alerting/alerts-delete.yaml") ];
 
       dashboardProviders = lib.mkIf daemonDeployed {
         pg-claude-code-recorder = {

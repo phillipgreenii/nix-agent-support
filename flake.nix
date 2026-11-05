@@ -3818,6 +3818,7 @@
                   grafana = ./packages/pg-claude-code-recorder/grafana;
                   rulesFile = grafana + "/alerting/alerts.yaml";
                   deleteFile = grafana + "/alerting/alerts-delete.yaml";
+                  retiredFile = grafana + "/alerting/alerts-retired-delete.yaml";
                   failed = c: lib.filter (a: !a.assertion) c.assertions;
                   nothing =
                     c:
@@ -3842,7 +3843,12 @@
                 assert o.logSources.pg-claude-code-recorder.serviceName == "pg-claude-code-recorder";
                 assert o.logSources.pg-claude-control.path == "/example/state/pg-claude-control/requests.jsonl";
                 assert o.logSources.pg-claude-control.serviceName == "pg-claude-control";
-                assert o.alertRuleFiles == [ rulesFile ];
+                # the retired-only file rides next to the rules, so the removed free-space rule is deleted
+                assert
+                  o.alertRuleFiles == [
+                    rulesFile
+                    retiredFile
+                  ];
                 assert !(lib.elem deleteFile o.alertRuleFiles);
                 assert lib.attrNames o.dashboardProviders == [ "pg-claude-code-recorder" ];
                 assert failed enabled == [ ];
@@ -7627,8 +7633,8 @@
                     touch "$out"
                   '';
 
-              # pg-claude-code-recorder alert structure: rules S1-S8 over the rules file, the metric
-              # catalogue and the deleteRules twin, then the script's own mutant self-tests (a
+              # pg-claude-code-recorder alert structure: rules S1-S9 over the rules file, the metric
+              # catalogue, the deleteRules twin and the retired-only file, then the script's own mutant self-tests (a
               # 41-character uid, a missing noDataState, a missing guard, a twin that differs).
               test-pg-claude-code-recorder-alert-structure =
                 pkgs.runCommand "test-pg-claude-code-recorder-alert-structure"
@@ -7646,8 +7652,9 @@
                     alerts=${./packages/pg-claude-code-recorder/grafana/alerting/alerts.yaml}
                     catalog=${./packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt}
                     deletes=${./packages/pg-claude-code-recorder/grafana/alerting/alerts-delete.yaml}
-                    bash "$script" "$alerts" "$catalog" "$deletes"
-                    bash "$script" --self-test "$alerts" "$catalog" "$deletes"
+                    retired=${./packages/pg-claude-code-recorder/grafana/alerting/alerts-retired-delete.yaml}
+                    bash "$script" "$alerts" "$catalog" "$deletes" "$retired"
+                    bash "$script" --self-test "$alerts" "$catalog" "$deletes" "$retired"
                     touch "$out"
                   '';
 

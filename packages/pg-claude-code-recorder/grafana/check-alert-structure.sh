@@ -30,6 +30,10 @@
 #       the uids of S1 plus the retired uids (RETIRED_UIDS: rules removed from the rules file whose
 #       already-provisioned copies Grafana keeps live until a deleteRules entry names them), each once,
 #       each with orgId 1
+#   S9  the retired-only file (alerts-retired-delete.yaml, registered NEXT TO the rules file while the
+#       daemon is deployed) is apiVersion 1, has no groups, and its deleteRules entries are exactly
+#       RETIRED_UIDS, each once, each with orgId 1, so a deployed daemon still deletes the retired rules
+#       and no uid is both a live rule and deleted
 #
 # Exit codes: 0 clean (self-test: the real inputs pass and every mutant fails with exactly its own
 # rule), 2 usage error or unreadable input or a missing tool, 3 a rule failed (1 is reserved for
@@ -37,7 +41,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: check-alert-structure.sh [--self-test] <alerts.yaml> <metrics-catalog.txt> <alerts-delete.yaml>" >&2
+  echo "usage: check-alert-structure.sh [--self-test] <alerts.yaml> <metrics-catalog.txt> <alerts-delete.yaml> <alerts-retired-delete.yaml>" >&2
   exit 2
 }
 
@@ -46,11 +50,12 @@ if [ "${1:-}" = "--self-test" ]; then
   selftest=1
   shift
 fi
-[ "$#" -eq 3 ] || usage
+[ "$#" -eq 4 ] || usage
 alerts="$1"
 catalog="$2"
 deletes="$3"
-for f in "$alerts" "$catalog" "$deletes"; do
+retired="$4"
+for f in "$alerts" "$catalog" "$deletes" "$retired"; do
   [ -r "$f" ] || {
     echo "check-alert-structure.sh: cannot read $f" >&2
     exit 2
@@ -77,11 +82,12 @@ EXPECTED_UIDS=(
 RETIRED_UIDS=(pg-ccrec-free-space)
 NODATA_ALERTING=(pg-ccrec-daemon-down pg-ccrec-heartbeat-stale pg-ccrec-doctor-mismatch)
 
-# check <alerts> <deletes>: print RULE-Sn lines for each failing rule (at most one line per rule).
+# check <alerts> <deletes> <retired>: print RULE-Sn lines for each failing rule (at most one line per rule).
 check() {
-  local a="$1" d="$2" j dj fails=""
+  local a="$1" d="$2" r="$3" j dj rj fails=""
   j="$(yq -o=json -I=0 '.' "$a")"
   dj="$(yq -o=json -I=0 '.' "$d")"
+  rj="$(yq -o=json -I=0 '.' "$r")"
   local expected
   expected="$(printf '%s\n' "${EXPECTED_UIDS[@]}" | jq -R . | jq -sc 'sort')"
   local nodata
@@ -175,21 +181,31 @@ check() {
       and (.deleteRules | all(.orgId == 1))' >/dev/null; then
     rule_fail "RULE-S8: the deleteRules twin must be apiVersion 1, have no groups, and list exactly the rule uids plus the retired uids, each once with orgId 1"
   fi
+  # S9
+  local retiredJson
+  retiredJson="$(printf '%s\n' "${RETIRED_UIDS[@]}" | jq -R . | jq -sc 'sort')"
+  if ! printf '%s' "$rj" | jq -e --argjson exp "$retiredJson" '
+      (.apiVersion == 1)
+      and (has("groups") | not)
+      and ((.deleteRules | map(.uid) | sort) == $exp)
+      and (.deleteRules | all(.orgId == 1))' >/dev/null; then
+    rule_fail "RULE-S9: the retired-only delete file must be apiVersion 1, have no groups, and list exactly the retired uids, each once with orgId 1"
+  fi
   printf '%s' "$fails"
 }
 
 if [ "$selftest" -eq 0 ]; then
-  out="$(check "$alerts" "$deletes")"
+  out="$(check "$alerts" "$deletes" "$retired")"
   if [ -n "$out" ]; then
     printf '%s' "$out" >&2
     exit 3
   fi
-  echo "OK: alert structure (S1-S8) holds for $alerts and $deletes"
+  echo "OK: alert structure (S1-S8) holds for $alerts, $deletes and $retired"
   exit 0
 fi
 
 # --self-test: the real inputs must pass, and each mutant must fail with exactly its own rule.
-out="$(check "$alerts" "$deletes")"
+out="$(check "$alerts" "$deletes" "$retired")"
 if [ -n "$out" ]; then
   printf '%s' "$out" >&2
   echo "FAIL: the real inputs do not pass" >&2
@@ -198,15 +214,17 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 n=0
-# mutant <expected-rule> <description> <yq expression over alerts> [<yq expression over deletes>]
+# mutant <expected-rule> <description> <yq expression over alerts> [<yq over deletes> [<yq over retired>]]
 mutant() {
-  local want="$1" desc="$2" ya="$3" yd="${4:-.}" a d got
+  local want="$1" desc="$2" ya="$3" yd="${4:-.}" yr="${5:-.}" a d r got
   n=$((n + 1))
   a="$work/alerts.$n.yaml"
   d="$work/deletes.$n.yaml"
   yq "$ya" "$alerts" >"$a"
   yq "$yd" "$deletes" >"$d"
-  got="$(check "$a" "$d" | grep -o '^RULE-S[0-9]*' | sort -u | tr '\n' ' ')"
+  r="$work/retired.$n.yaml"
+  yq "$yr" "$retired" >"$r"
+  got="$(check "$a" "$d" "$r" | grep -o '^RULE-S[0-9]*' | sort -u | tr '\n' ' ')"
   if [ "$got" != "$want " ]; then
     echo "FAIL: mutant '$desc' expected exactly $want, got: ${got:-nothing}" >&2
     exit 3
@@ -248,4 +266,9 @@ mutant RULE-S8 "a twin uid that differs" \
 mutant RULE-S8 "a twin with a group" '.' '.groups = []'
 mutant RULE-S8 "a twin that no longer deletes the retired free-space uid" \
   '.' 'del(.deleteRules[] | select(.uid == "pg-ccrec-free-space"))'
+mutant RULE-S9 "a retired file that drops the free-space uid" '.' '.' \
+  'del(.deleteRules[] | select(.uid == "pg-ccrec-free-space"))'
+mutant RULE-S9 "a retired file that also deletes a live rule" '.' '.' \
+  '.deleteRules += [{"orgId": 1, "uid": "pg-ccrec-copy-lag"}]'
+mutant RULE-S9 "a retired file with a group" '.' '.' '.groups = []'
 echo "OK: $n mutants each fail with exactly their own rule"

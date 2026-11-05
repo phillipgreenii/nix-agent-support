@@ -1,0 +1,21 @@
+# Explicit deletion of the retired pg-claude-code-recorder alert rules, for a deployment where the
+# daemon IS deployed.
+#
+# Grafana keeps a file-provisioned rule live after its entry is dropped from the rules file: only a
+# `deleteRules:` entry for its uid removes it, applied on a provisioning reload or restart. The
+# free-space rule (removed from alerts.yaml on the operator ruling of Phillip, 2026-11-04: "there
+# shouldn't be a pg-claud-code-recorder specific file system alert.") therefore kept firing on a
+# machine that had already provisioned it, because the deleteRules entry lived only in
+# alerts-delete.yaml, which the darwin module registers solely while no daemon is deployed.
+#
+# darwin/modules/pg-claude-code-recorder registers THIS file next to alerts.yaml while the daemon is
+# deployed (the alerts-delete.yaml twin carries every uid and is registered alone otherwise; the two
+# delete files are never loaded together). It lists only retired uids, none of which is a rule uid of
+# alerts.yaml. Rule S9 of check-alert-structure.sh (flake check
+# test-pg-claude-code-recorder-alert-structure) pins that, and the darwin-module test pins the
+# registration. Keep the entries for as long as any Grafana database may still hold the rule; they are
+# harmless once it is gone.
+apiVersion: 1
+deleteRules:
+  - orgId: 1
+    uid: pg-ccrec-free-space
