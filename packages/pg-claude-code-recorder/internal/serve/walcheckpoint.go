@@ -92,6 +92,7 @@ func (d *Daemon) maybeTruncate() {
 	case terr != nil:
 		outcome = "error"
 		d.obs.Log.Warn("wal_truncate_failed", "err", terr.Error())
+		d.noteNoSpace(obs.OpIndexCheckpoint, terr)
 	case busy:
 		outcome = "busy"
 	}
@@ -145,6 +146,7 @@ func (d *Daemon) checkpointOnce(cp func() (int, int, error)) {
 			d.lastCkptWarn = end
 			d.obs.Log.Warn("wal_checkpoint_failed", "err", err.Error(), "locked", strings.Contains(err.Error(), "locked"))
 		}
+		d.noteNoSpace(obs.OpIndexCheckpoint, err)
 	} else {
 		reg.Set(obs.MWALFrames, nil, float64(log))
 		reg.Set(obs.MWALCheckpointedFrames, nil, float64(done))

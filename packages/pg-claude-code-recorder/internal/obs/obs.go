@@ -63,8 +63,13 @@ const (
 	EvRebuildRefused   = "rebuild_refused_low_space"
 	EvRebuildPreflight = "rebuild_preflight"
 	MRebuildRefused    = "rebuild_refused_total"
-	ClientOther        = "other"
-	UnknownClientLbl   = "client"
+	// MBlockedNoSpace counts, by op, the times the recorder could not do one of
+	// its own operations because the volume had no room for it; EvBlockedNoSpace
+	// is the log event with the figures (see nospace.go).
+	MBlockedNoSpace  = "blocked_no_space_total"
+	EvBlockedNoSpace = "blocked_no_space"
+	ClientOther      = "other"
+	UnknownClientLbl = "client"
 )
 
 // Metric and event names of the Process and Conversation facts.
@@ -411,6 +416,9 @@ func (o *Obs) RegisterStandard() {
 	}
 	o.Reg.Add(MIndexRebuilds, nil, 0)
 	o.Reg.Add(MRebuildRefused, nil, 0)
+	for _, op := range NoSpaceOps {
+		o.Reg.Add(MBlockedNoSpace, map[string]string{"op": op}, 0)
+	}
 	o.Reg.Add(MQueryTimeouts, map[string]string{"op": "unknown"}, 0)
 	o.Reg.Add(MStaleDiscovery, nil, 0)
 	o.Reg.Add(MStaleFifosRemoved, nil, 0)

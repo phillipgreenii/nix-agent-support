@@ -164,12 +164,12 @@ import (
 // the call deadline, the signals that would justify a beads daemon. Registered
 // the same way, with no escalation label.
 //
-// The nineteen pg-ccrec-* rules of the recorder's alert file (packages/
+// The twenty pg-ccrec-* rules of the recorder's alert file (packages/
 // pg-claude-code-recorder/grafana/alerting/alerts.yaml, docket pg2-v77tsx phase 7c;
 // registered by darwin/modules/pg-claude-code-recorder while the daemon is deployed):
 // daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old,
 // unknown-key-burst, data-loss, removal-due, doctor-mismatch, control-inbox-gone,
-// crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled, request-slow and schema-rebuild-required. Registered the same way, with no escalation label.
+// crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled, request-slow, schema-rebuild-required and blocked-no-space. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
 // pg-router-pr-dispatch-failed (pg2-87pjb1: three or more pr.changed dispatches
@@ -225,6 +225,7 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-removal-stuck",
 	"pg-ccrec-settle-tick-slow",
 	"pg-ccrec-field-type-mismatch",
+	"pg-ccrec-blocked-no-space",
 	"pg-ccrec-cpu-high",
 	"pg-ccrec-wal-large",
 	"pg-ccrec-loop-stalled",

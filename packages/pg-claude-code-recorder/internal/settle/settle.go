@@ -340,6 +340,19 @@ func New(cfg Config) *Settler {
 	return s
 }
 
+// freeBytesStr is the free bytes of the state directory as a decimal string, ""
+// when it cannot be read; it feeds the "had" figure of a no-space event.
+func (s *Settler) freeBytesStr() string {
+	if s.cfg.Free == nil {
+		return ""
+	}
+	free, err := s.cfg.Free.Free(s.st.Dir())
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(free, 10)
+}
+
 // LowSpace reports whether the last pass found the state directory below minFreeBytes.
 func (s *Settler) LowSpace() bool {
 	s.mu.Lock()
@@ -1576,6 +1589,7 @@ func (s *Settler) settleBytes(c *conv, now time.Time) (bool, error) {
 	if len(items) > 0 {
 		res, err := store.WriteSegmentFile(s.fs, s.st.SegDir(c.session), seg, mb, items)
 		if err != nil {
+			s.cfg.Obs.NoteNoSpace(obs.OpArchive, err, "", s.freeBytesStr())
 			return false, err
 		}
 		s.cfg.Obs.Event(obs.EvArchiveWritten, "session", c.session, "segment", seg, "bytes", strconv.FormatInt(res.Size, 10), "ranges", strconv.Itoa(len(ranges)))

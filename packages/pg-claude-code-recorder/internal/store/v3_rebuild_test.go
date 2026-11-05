@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +109,16 @@ func TestRebuildRefusedBelowTheFreeSpaceFloorLeavesTheIndexInPlace(t *testing.T)
 	}
 	if evs := o.EventsNamed(obs.EvRebuildRefused); len(evs) != 1 || evs[0].Attrs["free_bytes"] == "" || evs[0].Attrs["need_bytes"] == "" {
 		t.Fatalf("events %v", evs)
+	}
+
+	// The refusal is also the "could not rebuild for lack of space" signal:
+	// counted by op and logged with the figures needed and had.
+	if v, _ := o.Reg.Counter(obs.MBlockedNoSpace, map[string]string{"op": obs.OpRebuild}); v != 1 {
+		t.Fatalf("%s{op=rebuild} = %v, want 1", obs.MBlockedNoSpace, v)
+	}
+	if evs := o.EventsNamed(obs.EvBlockedNoSpace); len(evs) != 1 || evs[0].Attrs["op"] != obs.OpRebuild ||
+		evs[0].Attrs["needed_bytes"] != strconv.FormatInt(need, 10) || evs[0].Attrs["had_bytes"] != strconv.FormatInt(need-1, 10) {
+		t.Fatalf("blocked events %v", evs)
 	}
 
 	// Exactly at the floor it proceeds.

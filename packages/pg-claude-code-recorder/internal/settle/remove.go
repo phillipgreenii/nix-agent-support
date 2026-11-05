@@ -547,6 +547,7 @@ func (s *Settler) removeConversation(c *conv, now time.Time) (bool, string, erro
 	// removal and changes nothing.
 	if err := s.durabilityBarrier(pl); err != nil {
 		s.cfg.Obs.Log.Warn("removal_barrier_failed", "session", pl.Session, "err", err.Error())
+		s.cfg.Obs.NoteNoSpace(obs.OpRemovalBarrier, err, "", s.freeBytesStr())
 		return false, BlockBarrier, nil
 	}
 	if err := s.commitPending(pl, now, true); err != nil {

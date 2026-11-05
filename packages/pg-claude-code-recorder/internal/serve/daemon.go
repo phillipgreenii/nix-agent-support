@@ -363,6 +363,7 @@ func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Resu
 	result := obs.ResultError
 	if err != nil {
 		d.obs.Log.Warn("ingest_failed", "path", p, "err", err.Error())
+		d.noteNoSpace(obs.OpCopy, err)
 	} else {
 		result = obs.IngestResultLabel(res.Action)
 	}
@@ -585,6 +586,7 @@ func (d *Daemon) parseLoop() {
 	defer d.refreshing.Done()
 	if err := d.prs.ParseAll(); err != nil {
 		d.obs.Log.Warn("parse_all_failed", "err", err.Error())
+		d.noteNoSpace(obs.OpParseIndex, err)
 	}
 	d.firstParseOnce.Do(func() { close(d.firstParse) })
 	for {
@@ -606,6 +608,7 @@ func (d *Daemon) parseLoop() {
 func (d *Daemon) drainParsed() {
 	if err := d.runLoop(obs.LoopParserDrain, d.prs.Drain); err != nil {
 		d.obs.Log.Warn("parse_failed", "err", err.Error())
+		d.noteNoSpace(obs.OpParseIndex, err)
 	}
 }
 

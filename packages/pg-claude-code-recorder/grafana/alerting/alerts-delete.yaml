@@ -53,6 +53,8 @@ deleteRules:
   - orgId: 1
     uid: pg-ccrec-unknown-key-burst
   - orgId: 1
+    uid: pg-ccrec-blocked-no-space
+  - orgId: 1
     uid: pg-ccrec-field-type-mismatch
   - orgId: 1
     uid: pg-ccrec-cpu-high

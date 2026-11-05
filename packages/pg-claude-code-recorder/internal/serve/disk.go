@@ -4,8 +4,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
@@ -66,4 +68,17 @@ func StateUsedBytes(r *store.Reader, stateDir string) (int64, error) {
 		}
 	}
 	return total, nil
+}
+
+// noteNoSpace records "could not do op for lack of space" when err is a
+// no-space failure, with the free bytes the state directory has now.
+func (d *Daemon) noteNoSpace(op string, err error) {
+	if !obs.IsNoSpace(err) {
+		return
+	}
+	had := ""
+	if free, ferr := FreeBytes(d.cfg.StateDir); ferr == nil {
+		had = strconv.FormatInt(free, 10)
+	}
+	d.obs.NoteNoSpace(op, err, "", had)
 }

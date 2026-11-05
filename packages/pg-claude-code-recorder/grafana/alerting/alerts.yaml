@@ -4,9 +4,9 @@
 # packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
-# Nineteen rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# Twenty rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
 # parse-stuck, held-old, unknown-key-burst, data-loss, removal-due, doctor-mismatch,
-# control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow), plus schema-rebuild-required (the one Loki rule: a log event, not a metric). Each uid is
+# control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus blocked-no-space (the recorder could not do an operation for lack of space), plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow), plus schema-rebuild-required (the one Loki rule: a log event, not a metric). Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
 # packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
@@ -622,6 +622,50 @@ groups:
               editorMode: code
               instant: true
               expr: "sum by (source, type, field) (increase(pg_claude_code_recorder_field_type_mismatch_total[1h]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Blocked for lack of space. The recorder could not do one of its own operations because the
+      # volume had no room for it (operator ruling, Phillip, 2026-11-05: "it can alert me that it
+      # can't do its own job because insufficient space"). It keys on the recorder's own refusal or
+      # failure (blocked_no_space_total, by op), never on a host free-space level.
+      - uid: pg-ccrec-blocked-no-space
+        title: pg-claude-code-recorder could not do its job for lack of space
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder could not do an operation because there was no room for it"
+          description: 'blocked_no_space_total increased in the last 30 minutes for the op shown (copy, parse_index, archive, removal_barrier, index_checkpoint or rebuild): the recorder tried that operation and the volume was full. Read the blocked_no_space events in the recorder log ({service_name="pg-claude-code-recorder"} | json | event="blocked_no_space") for the needed and had bytes, run pg-claude-code-recorder status, then free space in the state directory.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum by (op) (increase(pg_claude_code_recorder_blocked_no_space_total[30m]))"
           - refId: B
             datasourceUid: __expr__
             model:

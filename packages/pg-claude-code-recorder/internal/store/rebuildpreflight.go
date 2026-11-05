@@ -75,6 +75,7 @@ func (s *Store) rebuildPreflight(dbPath string) error {
 	}
 	if got < need {
 		s.obs.Reg.Add(obs.MRebuildRefused, nil, 1)
+		s.obs.NoteBlocked(obs.OpRebuild, "rebuild preflight refused", strconv.FormatInt(need, 10), strconv.FormatInt(got, 10))
 		s.obs.Event(obs.EvRebuildRefused, "free_bytes", strconv.FormatInt(got, 10), "need_bytes", strconv.FormatInt(need, 10),
 			"old_index_bytes", strconv.FormatInt(old, 10), "estimated_new_bytes", strconv.FormatInt(est, 10))
 		return &InsufficientSpaceError{Dir: s.dir, FreeBytes: got, NeedBytes: need, OldBytes: old, EstimateNew: est}

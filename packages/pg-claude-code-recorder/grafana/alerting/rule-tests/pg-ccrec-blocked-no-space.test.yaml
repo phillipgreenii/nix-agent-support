@@ -1,0 +1,66 @@
+# promtool unit tests for the pg-ccrec-blocked-no-space alert. Run by the flake check
+# test-pg-claude-code-recorder-alert-rules through packages/pg-connector/grafana/check-alert-rules.sh,
+# which generates rules.yml next to this file (see pg-ccrec-field-type-mismatch.test.yaml).
+#
+# Time model: one sample per 1m scrape. The series is registered at zero when the daemon starts, so
+# a rise from 0 is a real increase. The alert keys on the recorder's own refusal counter and never
+# on a free-space level: no case here feeds a free-bytes series.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an increase fires with the op label and severity warning
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_blocked_no_space_total{op="archive"}
+        values: "0x10 2x100"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-ccrec-blocked-no-space
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-ccrec-blocked-no-space
+        exp_alerts:
+          - exp_labels:
+              op: archive
+              severity: warning
+
+  - name: a counter registered at zero and never incremented does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_blocked_no_space_total{op="copy"}
+        values: "0x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-ccrec-blocked-no-space
+        exp_alerts: []
+
+  - name: low host free space alone does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_blocked_no_space_total{op="copy"}
+        values: "0x200"
+      - series: pg_claude_code_recorder_state_dir_low_space
+        values: "1x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-ccrec-blocked-no-space
+        exp_alerts: []
+
+  - name: the alert clears once the increase is more than 30 minutes old
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_blocked_no_space_total{op="rebuild"}
+        values: "0x10 1x200"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-ccrec-blocked-no-space
+        exp_alerts:
+          - exp_labels:
+              op: rebuild
+              severity: warning
+      - eval_time: 90m
+        alertname: pg-ccrec-blocked-no-space
+        exp_alerts: []
