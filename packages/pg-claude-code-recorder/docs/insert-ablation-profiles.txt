@@ -1,0 +1,265 @@
+=== V0 (run 1)
+Duration: 13.38s, Total samples = 12190ms (91.12%)
+Dropped 178 nodes (cum <= 60.95ms)
+Showing top 15 nodes out of 112
+      flat  flat%   sum%        cum   cum%
+    2440ms 20.02% 20.02%     2440ms 20.02%  encoding/json.stateInString
+    1720ms 14.11% 34.13%     1720ms 14.11%  syscall.rawsyscalln
+    1540ms 12.63% 46.76%     1540ms 12.63%  runtime.madvise
+    1240ms 10.17% 56.93%     3140ms 25.76%  encoding/json.checkValid
+     870ms  7.14% 64.07%     1760ms 14.44%  encoding/json.(*decodeState).skip
+     790ms  6.48% 70.55%      790ms  6.48%  runtime.kevent
+     280ms  2.30% 72.85%      280ms  2.30%  runtime.pthread_cond_wait
+     250ms  2.05% 74.90%      250ms  2.05%  encoding/json.(*decodeState).rescanLiteral
+     230ms  1.89% 76.78%      230ms  1.89%  runtime.usleep
+     220ms  1.80% 78.59%      220ms  1.80%  runtime.pthread_cond_signal
+     170ms  1.39% 79.98%      210ms  1.72%  regexp.(*machine).add
+     160ms  1.31% 81.30%      180ms  1.48%  encoding/json.unquoteBytes
+     150ms  1.23% 82.53%      150ms  1.23%  regexp/syntax.(*Inst).MatchRunePos
+
+=== V1 (run 1)
+Duration: 30.96s, Total samples = 28s (90.43%)
+Dropped 549 nodes (cum <= 0.14s)
+Showing top 15 nodes out of 279
+      flat  flat%   sum%        cum   cum%
+     6.46s 23.07% 23.07%      6.46s 23.07%  syscall.rawsyscalln
+     2.72s  9.71% 32.79%      2.73s  9.75%  encoding/json.stateInString
+     1.96s  7.00% 39.79%      1.96s  7.00%  runtime.madvise
+     1.59s  5.68% 45.46%      3.77s 13.46%  encoding/json.checkValid
+     1.48s  5.29% 50.75%      1.67s  5.96%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     1.02s  3.64% 54.39%      1.98s  7.07%  encoding/json.(*decodeState).skip
+     0.78s  2.79% 57.18%      0.78s  2.79%  runtime.pthread_cond_signal
+     0.63s  2.25% 59.43%     12.87s 45.96%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.49s  1.75% 61.18%      1.59s  5.68%  modernc.org/sqlite/lib._fts5UnicodeTokenize
+     0.43s  1.54% 62.71%      0.43s  1.54%  runtime.pthread_cond_wait
+     0.35s  1.25% 63.96%      0.35s  1.25%  runtime.kevent
+     0.30s  1.07% 65.04%      0.30s  1.07%  runtime.usleep
+     0.27s  0.96% 66.00%      0.27s  0.96%  runtime.memmove
+
+=== V2 (run 1)
+Duration: 25.64s, Total samples = 22.88s (89.25%)
+Dropped 491 nodes (cum <= 0.11s)
+Showing top 15 nodes out of 239
+      flat  flat%   sum%        cum   cum%
+     4.54s 19.84% 19.84%      4.54s 19.84%  syscall.rawsyscalln
+     2.63s 11.49% 31.34%      2.67s 11.67%  encoding/json.stateInString
+     1.72s  7.52% 38.85%      1.72s  7.52%  runtime.madvise
+     1.46s  6.38% 45.24%      3.58s 15.65%  encoding/json.checkValid
+     1.18s  5.16% 50.39%      1.32s  5.77%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     0.91s  3.98% 54.37%      0.91s  3.98%  runtime.pthread_cond_signal
+     0.81s  3.54% 57.91%      8.16s 35.66%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.66s  2.88% 60.80%      1.62s  7.08%  encoding/json.(*decodeState).skip
+     0.48s  2.10% 62.89%      0.48s  2.10%  runtime.pthread_cond_wait
+     0.47s  2.05% 64.95%      0.47s  2.05%  runtime.memmove
+     0.36s  1.57% 66.52%      0.36s  1.57%  runtime.kevent
+     0.33s  1.44% 67.96%      0.35s  1.53%  encoding/json.(*decodeState).rescanLiteral
+     0.29s  1.27% 69.23%      0.29s  1.27%  runtime.usleep
+
+=== V2b (run 1)
+Duration: 21.61s, Total samples = 20.03s (92.71%)
+Dropped 393 nodes (cum <= 0.10s)
+Showing top 15 nodes out of 226
+      flat  flat%   sum%        cum   cum%
+     4.55s 22.72% 22.72%      4.55s 22.72%  syscall.rawsyscalln
+     2.34s 11.68% 34.40%      2.34s 11.68%  encoding/json.stateInString
+     1.76s  8.79% 43.19%      1.76s  8.79%  runtime.madvise
+     1.34s  6.69% 49.88%      3.11s 15.53%  encoding/json.checkValid
+     1.16s  5.79% 55.67%      1.28s  6.39%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     0.89s  4.44% 60.11%      1.73s  8.64%  encoding/json.(*decodeState).skip
+     0.62s  3.10% 63.21%      0.62s  3.10%  runtime.pthread_cond_signal
+     0.54s  2.70% 65.90%      0.54s  2.70%  runtime.memmove
+     0.42s  2.10% 68.00%      0.42s  2.10%  runtime.kevent
+     0.38s  1.90% 69.90%      7.35s 36.69%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.38s  1.90% 71.79%      0.38s  1.90%  runtime.usleep
+     0.31s  1.55% 73.34%      0.31s  1.55%  runtime.pthread_cond_wait
+     0.25s  1.25% 74.59%      0.26s  1.30%  regexp.(*machine).add
+
+=== V3 (run 1)
+Duration: 29.27s, Total samples = 26.91s (91.93%)
+Dropped 585 nodes (cum <= 0.13s)
+Showing top 15 nodes out of 248
+      flat  flat%   sum%        cum   cum%
+     8.69s 32.29% 32.29%      8.69s 32.29%  syscall.rawsyscalln
+     2.24s  8.32% 40.62%      2.24s  8.32%  encoding/json.stateInString
+     1.80s  6.69% 47.31%      1.80s  6.69%  runtime.madvise
+     1.23s  4.57% 51.88%      3.05s 11.33%  encoding/json.checkValid
+     0.81s  3.01% 54.89%      1.62s  6.02%  encoding/json.(*decodeState).skip
+     0.81s  3.01% 57.90%      0.81s  3.01%  runtime.pthread_cond_signal
+     0.75s  2.79% 60.68%      0.94s  3.49%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     0.51s  1.90% 62.58%     14.17s 52.66%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.40s  1.49% 64.07%      0.40s  1.49%  runtime.pthread_cond_wait
+     0.35s  1.30% 65.37%      0.35s  1.30%  cmpbody
+     0.32s  1.19% 66.56%      0.32s  1.19%  runtime.memmove
+     0.29s  1.08% 67.63%      0.29s  1.08%  runtime.kevent
+     0.29s  1.08% 68.71%      0.29s  1.08%  runtime.usleep
+
+=== V4 (run 1)
+Duration: 25.34s, Total samples = 23040ms (90.91%)
+Dropped 520 nodes (cum <= 115.20ms)
+Showing top 15 nodes out of 299
+      flat  flat%   sum%        cum   cum%
+    2620ms 11.37% 11.37%     2630ms 11.41%  encoding/json.stateInString
+    1800ms  7.81% 19.18%     1800ms  7.81%  runtime.madvise
+    1750ms  7.60% 26.78%     1750ms  7.60%  runtime.pthread_cond_signal
+    1470ms  6.38% 33.16%     3650ms 15.84%  encoding/json.checkValid
+    1420ms  6.16% 39.32%     1640ms  7.12%  modernc.org/sqlite/lib._sqlite3MemMalloc
+    1040ms  4.51% 43.84%     1880ms  8.16%  encoding/json.(*decodeState).skip
+    1010ms  4.38% 48.22%     1010ms  4.38%  syscall.rawsyscalln
+     770ms  3.34% 51.56%     7150ms 31.03%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     500ms  2.17% 53.73%     1080ms  4.69%  modernc.org/sqlite/lib._sqlite3Fts5HashWrite
+     490ms  2.13% 55.86%     1640ms  7.12%  modernc.org/sqlite/lib._fts5UnicodeTokenize
+     470ms  2.04% 57.90%      470ms  2.04%  runtime.kevent
+     400ms  1.74% 59.64%      400ms  1.74%  runtime.pthread_cond_wait
+     370ms  1.61% 61.24%      370ms  1.61%  runtime.memmove
+
+=== V5 (run 1)
+Duration: 25.65s, Total samples = 23.41s (91.28%)
+Dropped 509 nodes (cum <= 0.12s)
+Showing top 15 nodes out of 300
+      flat  flat%   sum%        cum   cum%
+     2.77s 11.83% 11.83%      2.79s 11.92%  encoding/json.stateInString
+     2.20s  9.40% 21.23%      2.47s 10.55%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     2.07s  8.84% 30.07%      2.07s  8.84%  runtime.madvise
+     1.94s  8.29% 38.36%      1.94s  8.29%  runtime.pthread_cond_signal
+     1.26s  5.38% 43.74%      3.39s 14.48%  encoding/json.checkValid
+     1.19s  5.08% 48.83%      1.19s  5.08%  syscall.rawsyscalln
+     0.89s  3.80% 52.63%      1.95s  8.33%  encoding/json.(*decodeState).skip
+     0.71s  3.03% 55.66%      7.47s 31.91%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.65s  2.78% 58.44%      0.65s  2.78%  runtime.pthread_cond_wait
+     0.49s  2.09% 60.53%      1.58s  6.75%  modernc.org/sqlite/lib._fts5UnicodeTokenize
+     0.45s  1.92% 62.45%      0.45s  1.92%  runtime.kevent
+     0.35s  1.50% 63.95%      0.35s  1.50%  modernc.org/sqlite/lib._pcacheManageDirtyList
+     0.28s  1.20% 65.14%      1.06s  4.53%  modernc.org/sqlite/lib._sqlite3Fts5HashWrite
+
+=== V5b (run 1)
+Duration: 23.64s, Total samples = 22320ms (94.43%)
+Dropped 506 nodes (cum <= 111.60ms)
+Showing top 15 nodes out of 270
+      flat  flat%   sum%        cum   cum%
+    2660ms 11.92% 11.92%     2660ms 11.92%  runtime.madvise
+    2500ms 11.20% 23.12%     2500ms 11.20%  runtime.pthread_cond_signal
+    2180ms  9.77% 32.89%     2180ms  9.77%  encoding/json.stateInString
+    1560ms  6.99% 39.87%     1690ms  7.57%  modernc.org/sqlite/lib._sqlite3MemMalloc
+    1110ms  4.97% 44.85%     2800ms 12.54%  encoding/json.checkValid
+    1070ms  4.79% 49.64%     1070ms  4.79%  syscall.rawsyscalln
+     800ms  3.58% 53.23%     1530ms  6.85%  encoding/json.(*decodeState).skip
+     550ms  2.46% 55.69%     6580ms 29.48%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     540ms  2.42% 58.11%      540ms  2.42%  runtime.pthread_cond_wait
+     520ms  2.33% 60.44%      520ms  2.33%  runtime.kevent
+     390ms  1.75% 62.19%     1260ms  5.65%  modernc.org/sqlite/lib._fts5UnicodeTokenize
+     320ms  1.43% 63.62%      320ms  1.43%  modernc.org/sqlite/lib._pcacheManageDirtyList
+     320ms  1.43% 65.05%      320ms  1.43%  runtime.memmove
+
+=== V6 (run 1)
+Duration: 35.72s, Total samples = 33.33s (93.31%)
+Dropped 638 nodes (cum <= 0.17s)
+Showing top 15 nodes out of 262
+      flat  flat%   sum%        cum   cum%
+     9.19s 27.57% 27.57%      9.19s 27.57%  syscall.rawsyscalln
+     2.83s  8.49% 36.06%      2.83s  8.49%  runtime.madvise
+     2.28s  6.84% 42.90%      2.30s  6.90%  encoding/json.stateInString
+     1.33s  3.99% 46.89%      1.59s  4.77%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     0.96s  2.88% 49.77%      2.71s  8.13%  encoding/json.checkValid
+     0.89s  2.67% 52.45%      0.89s  2.67%  runtime.pthread_cond_signal
+     0.79s  2.37% 54.82%      1.56s  4.68%  encoding/json.(*decodeState).skip
+     0.52s  1.56% 56.38%     14.23s 42.69%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.45s  1.35% 57.73%      0.45s  1.35%  runtime.pthread_cond_wait
+     0.43s  1.29% 59.02%      3.83s 11.49%  modernc.org/sqlite/lib._yy_reduce
+     0.41s  1.23% 60.25%      0.41s  1.23%  modernc.org/libc.(*TLS).Free
+     0.39s  1.17% 61.42%      0.39s  1.17%  modernc.org/libc.(*TLS).Alloc
+     0.38s  1.14% 62.56%      0.38s  1.14%  runtime.kevent
+
+=== V8 (run 1)
+Duration: 17.30s, Total samples = 16.46s (95.16%)
+Dropped 424 nodes (cum <= 0.08s)
+Showing top 15 nodes out of 171
+      flat  flat%   sum%        cum   cum%
+     4.19s 25.46% 25.46%      4.19s 25.46%  syscall.rawsyscalln
+     2.12s 12.88% 38.34%      2.12s 12.88%  encoding/json.stateInString
+     1.84s 11.18% 49.51%      1.84s 11.18%  runtime.madvise
+     1.10s  6.68% 56.20%      2.80s 17.01%  encoding/json.checkValid
+     0.86s  5.22% 61.42%      1.60s  9.72%  encoding/json.(*decodeState).skip
+     0.57s  3.46% 64.88%      0.57s  3.46%  runtime.pthread_cond_signal
+     0.47s  2.86% 67.74%      0.47s  2.86%  runtime.kevent
+     0.30s  1.82% 69.56%      0.30s  1.82%  runtime.pthread_cond_wait
+     0.28s  1.70% 71.26%      4.87s 29.59%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.25s  1.52% 72.78%      0.25s  1.52%  runtime.usleep
+     0.24s  1.46% 74.24%      0.24s  1.46%  encoding/json.(*decodeState).rescanLiteral
+     0.19s  1.15% 75.39%      0.19s  1.15%  runtime.pthread_kill
+     0.15s  0.91% 76.31%      0.15s  0.91%  runtime.memmove
+
+=== V9 (run 8)
+Duration: 29.08s, Total samples = 26650ms (91.66%)
+Dropped 565 nodes (cum <= 133.25ms)
+Showing top 15 nodes out of 303
+      flat  flat%   sum%        cum   cum%
+    3260ms 12.23% 12.23%     3260ms 12.23%  encoding/json.stateInString
+    2280ms  8.56% 20.79%     2280ms  8.56%  runtime.madvise
+    1920ms  7.20% 27.99%     1920ms  7.20%  runtime.pthread_cond_signal
+    1770ms  6.64% 34.63%     2050ms  7.69%  modernc.org/sqlite/lib._sqlite3MemMalloc
+    1760ms  6.60% 41.24%     4220ms 15.83%  encoding/json.checkValid
+    1370ms  5.14% 46.38%     1370ms  5.14%  syscall.rawsyscalln
+    1100ms  4.13% 50.51%     2400ms  9.01%  encoding/json.(*decodeState).skip
+     880ms  3.30% 53.81%     8340ms 31.29%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     410ms  1.54% 55.35%      410ms  1.54%  runtime.kevent
+     380ms  1.43% 56.77%     1540ms  5.78%  modernc.org/sqlite/lib._fts5UnicodeTokenize
+     370ms  1.39% 58.16%     1110ms  4.17%  modernc.org/sqlite/lib._sqlite3Fts5HashWrite
+     330ms  1.24% 59.40%      330ms  1.24%  runtime.memmove
+     310ms  1.16% 60.56%      310ms  1.16%  runtime.usleep
+
+=== V7.A_per_row_prepared (run 1)
+Duration: 3.31s, Total samples = 3130ms (94.53%)
+Dropped 65 nodes (cum <= 15.65ms)
+Showing top 15 nodes out of 154
+      flat  flat%   sum%        cum   cum%
+    1500ms 47.92% 47.92%     1640ms 52.40%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     180ms  5.75% 53.67%      180ms  5.75%  syscall.rawsyscalln
+     150ms  4.79% 58.47%     2510ms 80.19%  modernc.org/sqlite/lib._sqlite3VdbeExec
+      60ms  1.92% 60.38%       60ms  1.92%  modernc.org/libc.(*TLS).Alloc
+      60ms  1.92% 62.30%      310ms  9.90%  modernc.org/sqlite/lib._sqlite3BtreeIndexMoveto
+      60ms  1.92% 64.22%       60ms  1.92%  modernc.org/sqlite/lib._sqlite3Get8byte
+      60ms  1.92% 66.13%       80ms  2.56%  runtime.tryDeferToSpanScan
+      50ms  1.60% 67.73%      140ms  4.47%  modernc.org/memory.(*Allocator).mmap
+      50ms  1.60% 69.33%      400ms 12.78%  modernc.org/sqlite/lib._balance_nonroot
+      50ms  1.60% 70.93%      160ms  5.11%  modernc.org/sqlite/lib._vdbeRecordCompareInt
+      50ms  1.60% 72.52%       50ms  1.60%  runtime.mmap
+      40ms  1.28% 73.80%       40ms  1.28%  modernc.org/sqlite/lib._releaseMemArray
+      40ms  1.28% 75.08%       40ms  1.28%  runtime.(*gcBits).bytep
+
+=== V7.B_multi_row_per_record (run 1)
+Duration: 2.53s, Total samples = 2.35s (92.85%)
+Dropped 72 nodes (cum <= 0.01s)
+Showing top 15 nodes out of 132
+      flat  flat%   sum%        cum   cum%
+     1.13s 48.09% 48.09%      1.14s 48.51%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     0.11s  4.68% 52.77%      1.86s 79.15%  modernc.org/sqlite/lib._sqlite3VdbeExec
+     0.10s  4.26% 57.02%      0.10s  4.26%  runtime.memmove
+     0.10s  4.26% 61.28%      0.10s  4.26%  syscall.rawsyscalln
+     0.07s  2.98% 64.26%      0.10s  4.26%  runtime.tryDeferToSpanScan
+     0.04s  1.70% 65.96%      0.05s  2.13%  modernc.org/sqlite/lib._sqlite3VdbeRecordCompareWithSkip
+     0.03s  1.28% 67.23%      0.03s  1.28%  database/sql/driver.IsValue
+     0.03s  1.28% 68.51%      0.03s  1.28%  modernc.org/libc.(*TLS).Alloc
+     0.03s  1.28% 69.79%      0.03s  1.28%  modernc.org/sqlite/lib._sqlite3Get8byte
+     0.03s  1.28% 71.06%      0.03s  1.28%  modernc.org/sqlite/lib._sqlite3VdbeMemShallowCopy
+     0.03s  1.28% 72.34%      0.03s  1.28%  runtime.(*spanInlineMarkBits).tryAcquire
+     0.03s  1.28% 73.62%      0.03s  1.28%  runtime.mallocgcTiny
+     0.02s  0.85% 74.47%      0.02s  0.85%  modernc.org/memory.(*Allocator).UintptrMalloc
+
+=== V7.C_multi_row_500 (run 1)
+Duration: 2.01s, Total samples = 1860ms (92.65%)
+Showing top 15 nodes out of 170
+      flat  flat%   sum%        cum   cum%
+     720ms 38.71% 38.71%      730ms 39.25%  modernc.org/sqlite/lib._sqlite3MemMalloc
+     300ms 16.13% 54.84%      300ms 16.13%  runtime.madvise
+     110ms  5.91% 60.75%      110ms  5.91%  syscall.rawsyscalln
+      60ms  3.23% 63.98%     1220ms 65.59%  modernc.org/sqlite/lib._sqlite3VdbeExec
+      60ms  3.23% 67.20%       60ms  3.23%  runtime.memclrNoHeapPointers
+      60ms  3.23% 70.43%       80ms  4.30%  runtime.tryDeferToSpanScan
+      30ms  1.61% 72.04%       30ms  1.61%  modernc.org/libc.X__builtin___memcpy_chk
+      30ms  1.61% 73.66%       60ms  3.23%  modernc.org/sqlite/lib._insertCellFast
+      30ms  1.61% 75.27%       70ms  3.76%  modernc.org/sqlite/lib._pageInsertArray
+      30ms  1.61% 76.88%       40ms  2.15%  modernc.org/sqlite/lib._sqlite3VdbeRecordCompareWithSkip
+      20ms  1.08% 77.96%       20ms  1.08%  modernc.org/libc.GoString
+      20ms  1.08% 79.03%       20ms  1.08%  modernc.org/sqlite/lib._allocateSpace
+      20ms  1.08% 80.11%      200ms 10.75%  modernc.org/sqlite/lib._balance_nonroot
+      20ms  1.08% 81.18%       20ms  1.08%  modernc.org/sqlite/lib._pageFindSlot

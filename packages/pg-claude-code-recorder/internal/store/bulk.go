@@ -357,8 +357,10 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 		s.btx = tx
 	}
 	tx := s.btx
-	if _, err := tx.Exec(`SAVEPOINT bulk_write`); err != nil {
-		return err
+	if !ablateNoSavepoint {
+		if _, err := tx.Exec(`SAVEPOINT bulk_write`); err != nil {
+			return err
+		}
 	}
 	mark := s.pendLen()
 	if err := fn(tx); err != nil {
@@ -370,6 +372,9 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 	}
 	if point != "" {
 		faults.At(point)
+	}
+	if ablateNoSavepoint {
+		return nil
 	}
 	_, err := tx.Exec(`RELEASE bulk_write`)
 	if err != nil {

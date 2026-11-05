@@ -1242,6 +1242,9 @@ func (p *Parser) fieldNameID(tx *pstx, name string) (int64, error) {
 
 // QueryRow runs a single-row query on a statement prepared once per transaction.
 func (p *pstx) QueryRow(q string, args ...any) *sql.Row {
+	if ablateNoPrepare {
+		return p.Tx.QueryRow(q, args...)
+	}
 	st, ok := p.st[q]
 	if !ok {
 		var err error
@@ -1265,6 +1268,9 @@ func newPS(tx *sql.Tx) *pstx { return &pstx{Tx: tx, st: map[string]*sql.Stmt{}} 
 
 // Exec prepares q on first use.
 func (p *pstx) Exec(q string, args ...any) (sql.Result, error) {
+	if ablateNoPrepare {
+		return p.Tx.Exec(q, args...)
+	}
 	st, ok := p.st[q]
 	if !ok {
 		var err error

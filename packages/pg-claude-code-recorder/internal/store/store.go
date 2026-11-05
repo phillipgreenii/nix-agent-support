@@ -385,7 +385,7 @@ func phaseOf(hook func(string) func(), name string) func() {
 }
 
 func (s *Store) openDB(path string, bulk bool) error {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+	dsn := "file:" + path + "?_pragma=journal_mode(" + ablateJournal + ")&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)" + ablateDSNExtra
 	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
 	// it; it caps the WAL file left behind when the WAL restarts.
 	wdsn := dsn + "&_pragma=journal_size_limit(" + strconv.Itoa(s.journalLimit) + ")"
