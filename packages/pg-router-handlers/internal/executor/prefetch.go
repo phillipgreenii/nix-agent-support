@@ -228,7 +228,13 @@ func (r *ccpoolRun) prefetch(ctx context.Context, pf roles.PrefetchConfig, d Dis
 	if force {
 		checkout = append(checkout, "--force")
 	}
-	if err := git(ctx, wt, io.Discard, append(checkout, rev)...); err != nil {
+	err = git(ctx, wt, io.Discard, append(checkout, rev)...)
+	if err != nil && r.recoverCorruptIndex(ctx, gitDir, wt, d, err) {
+		// The per-worktree index was truncated or corrupt (a checkout killed
+		// mid-write); it is removed, so a forced checkout rebuilds it.
+		err = git(ctx, wt, io.Discard, "checkout", "--detach", "--quiet", "--force", rev)
+	}
+	if err != nil {
 		return fail("checkout", err)
 	}
 	if marker != "" {
@@ -307,6 +313,56 @@ func (r *ccpoolRun) recoverPoisonedCheckout(ctx context.Context, gitDir, wt stri
 	}
 	slog.Warn("dispatch: worktree pre-fetch: recovering a worktree left by a killed checkout",
 		"role", d.Role.Name, "bead", d.Item.ID, "worktree", wt, "staleLock", lockErr == nil, "marker", markErr == nil)
+	return true
+}
+
+// corruptIndexMessages are the fragments git prints when it cannot read a
+// worktree's index file.
+var corruptIndexMessages = []string{
+	"index file smaller than expected",
+	"index file corrupt",
+	"bad index file sha1 signature",
+	"bad index version",
+	"unknown index entry format",
+}
+
+// recoverCorruptIndex handles a checkout that failed because the per-worktree
+// index is truncated or corrupt, which a killed checkout can leave behind even
+// after its lock and marker were cleared. The index is a cache of the tree, and
+// this is a handler-owned scratch worktree, so the recovery deletes
+// <gitdir>/index and reports true so the caller retries with --force, which
+// rebuilds it. Files that the old commit tracked and the new one does not stay
+// behind as untracked, so the worktree is then not clean, which only matters to
+// a non-force removal. It does nothing (false) for any other failure, when the
+// gitdir is unknown, or when a live session shares the worktree. It never
+// repairs the info/exclude lookup: that needs a valid gitdir, so a worktree
+// whose gitdir is gone stays a logged, best-effort pre-fetch failure.
+func (r *ccpoolRun) recoverCorruptIndex(ctx context.Context, gitDir, wt string, d DispatchContext, checkoutErr error) bool {
+	if gitDir == "" {
+		return false
+	}
+	corrupt := false
+	for _, m := range corruptIndexMessages {
+		if strings.Contains(checkoutErr.Error(), m) {
+			corrupt = true
+			break
+		}
+	}
+	if !corrupt {
+		return false
+	}
+	if r.deps.CC != nil && r.worktreeSharedWithLivePeer(ctx, "", wt) {
+		slog.Warn("dispatch: worktree pre-fetch: corrupt index but a live session shares the worktree; not recovering",
+			"role", d.Role.Name, "bead", d.Item.ID, "worktree", wt)
+		return false
+	}
+	idx := filepath.Join(gitDir, "index")
+	if err := os.Remove(idx); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("dispatch: worktree pre-fetch: cannot remove corrupt index", "path", idx, "err", err)
+		return false
+	}
+	slog.Warn("dispatch: worktree pre-fetch: removed a corrupt worktree index; retrying the checkout with --force",
+		"role", d.Role.Name, "bead", d.Item.ID, "worktree", wt, "err", checkoutErr)
 	return true
 }
 

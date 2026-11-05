@@ -597,6 +597,17 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   daemon's own credentials and so fails wherever the daemon cannot fetch; a commit already local
   is trusted as is. Bead `pg2-hh32y`.
 
+  Recovery of a worktree left by a killed pre-fetch checkout (decision, 2026-11-04): the
+  handler-owned scratch worktree is repaired, not left to the session. A stale `index.lock` or an
+  unfinished-checkout marker (and no live session sharing the worktree) makes the next checkout
+  forced. A checkout that fails because the per-worktree index is truncated or corrupt ("index file
+  smaller than expected" and the like) has that index file deleted and is retried once with
+  `--force`, which rebuilds it; this is skipped while a live session shares the worktree. Files the
+  old commit tracked and the new one does not remain as untracked files afterwards. The failure to
+  locate `info/exclude` is EXPECTED, not repaired, when the worktree's gitdir is missing or
+  unreadable: nothing is created and the pre-fetch fails best effort, the session doing the steps
+  itself.
+
 - **`INV-CCH-22`** <!-- uuid: 347d82ef-4149-4a35-945b-754ba35a8e6a --> — before a dispatch preflights anything that costs a session (capacity,
   isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
   cost, that the dispatch is still worth running, and MUST launch no session and write nothing

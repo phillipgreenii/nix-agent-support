@@ -161,6 +161,65 @@ func TestPrefetchRealGit_markerWithoutLockForcesCleanCheckout(t *testing.T) {
 	f.wantRecovered(t, r)
 }
 
+// A killed checkout can leave the per-worktree index truncated. The next
+// dispatch removes it and the forced checkout rebuilds it.
+func TestPrefetchRealGit_truncatedIndexIsRebuilt(t *testing.T) {
+	f := newKilledCheckoutFixture(t)
+	f.setSmudge(t, "cat")
+	idx := filepath.Join(f.gitDir, "index")
+	b, err := os.ReadFile(idx)
+	if err != nil || len(b) < 40 {
+		t.Fatalf("fixture bug: index %v, %d bytes", err, len(b))
+	}
+	// Shorter than the index header plus checksum: git reports "index file
+	// smaller than expected", the failure seen from a killed checkout.
+	if err := os.WriteFile(idx, b[:10], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &ccpoolRun{deps: Deps{Cfg: config.Config{}}}
+	if !f.prefetch(r, "") {
+		t.Fatal("pre-fetch did not recover a truncated index")
+	}
+	f.wantRecovered(t, r)
+}
+
+// A live session sharing the worktree may be using the index: leave it alone
+// and fail the pre-fetch (the session does the steps itself).
+func TestPrefetchRealGit_truncatedIndexKeptWhileLiveSessionShares(t *testing.T) {
+	f := newKilledCheckoutFixture(t)
+	f.setSmudge(t, "cat")
+	idx := filepath.Join(f.gitDir, "index")
+	b, _ := os.ReadFile(idx)
+	if err := os.WriteFile(idx, b[:10], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "peer", CWD: f.wt, Live: true, State: ccpool.StateWorking}}}}
+	r := &ccpoolRun{deps: Deps{Cfg: config.Config{}, CC: cc}}
+	if f.prefetch(r, "") {
+		t.Fatal("pre-fetch succeeded over a live session's corrupt index")
+	}
+	if got, err := os.ReadFile(idx); err != nil || len(got) != 10 {
+		t.Errorf("a live session's index was touched: %v, %d bytes", err, len(got))
+	}
+}
+
+// A worktree whose gitdir is gone cannot locate info/exclude either; that is
+// the expected, best-effort failure and no output files are created.
+func TestPrefetchRealGit_missingGitdirFailsBestEffort(t *testing.T) {
+	f := newKilledCheckoutFixture(t)
+	f.setSmudge(t, "cat")
+	if err := os.RemoveAll(f.gitDir); err != nil {
+		t.Fatal(err)
+	}
+	r := &ccpoolRun{deps: Deps{Cfg: config.Config{}}}
+	if f.prefetch(r, "") {
+		t.Fatal("pre-fetch succeeded without a worktree gitdir")
+	}
+	if _, err := os.Stat(filepath.Join(f.wt, prefetchDirName, prefetchDiffName)); err == nil {
+		t.Error("output files were created for a broken worktree")
+	}
+}
+
 // A live session sharing the worktree may own the lock: leave it alone.
 func TestPrefetchRealGit_liveSessionKeepsLockAndTree(t *testing.T) {
 	f := newKilledCheckoutFixture(t)
