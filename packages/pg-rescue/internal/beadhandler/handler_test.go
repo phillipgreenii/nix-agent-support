@@ -628,8 +628,12 @@ func TestCreateFlags(t *testing.T) {
 	if c.Value("priority") != "P1" || c.Value("issue-type") != "bug" {
 		t.Errorf("args %v", c.Args)
 	}
-	if got := c.Values("metadata"); len(got) != 1 || got[0] != "pg_rescue_fingerprint="+s.rep.Fingerprint {
-		t.Errorf("metadata %v", got)
+	found := false
+	for _, m := range c.Values("metadata") {
+		found = found || m == "pg_rescue_fingerprint="+s.rep.Fingerprint
+	}
+	if !found {
+		t.Errorf("metadata %v lacks the fingerprint", c.Values("metadata"))
 	}
 }
 

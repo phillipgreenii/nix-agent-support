@@ -38,6 +38,9 @@ type Runtime struct {
 	Now     func() time.Time
 	// Env feeds the shared template data (random nonce, git toplevel, cwd).
 	Env tmpldata.Env
+	// Snapshot probes the live state at a directory; nil means the real
+	// read-only git probe (Snapshot).
+	Snapshot func(dir string) (State, string)
 	// Watch starts the orphan watcher; the returned func stops it.
 	Watch func(cleanup func()) (stop func())
 }
@@ -135,6 +138,12 @@ func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
 	if err != nil {
 		return contract.Result{}, err
 	}
+	snap := rt.Snapshot
+	if snap == nil {
+		snap = Snapshot
+	}
+	state, kind := snap(data.Cwd)
+	stateJSON := state.JSON()
 
 	if annotateID != "" {
 		if err := conn.comment(annotateID, body); err != nil {
@@ -158,7 +167,7 @@ func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
 			return contract.Result{}, err
 		}
 		if match := findOpenMatch(items, fingerprint); match != "" {
-			if err := conn.comment(match, body); err != nil {
+			if err := conn.comment(match, strings.TrimRight(body, "\n")+"\n\n"+snapshotBlock(td.FiledAt, kind, stateJSON)); err != nil {
 				return contract.Result{}, err
 			}
 			return result(ActionUpdated, match, "Updated "+match), nil
@@ -186,6 +195,14 @@ func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
 	}
 	if fingerprint != "" {
 		spec.metadata[metaFingerprint] = fingerprint
+	}
+	for k, v := range map[string]string{
+		metaHost: data.Host, metaCwd: data.Cwd, metaFiledAt: td.FiledAt,
+		metaState: stateJSON, metaStateKind: kind,
+	} {
+		if v != "" {
+			spec.metadata[k] = v
+		}
 	}
 	id, err := conn.create(spec)
 	if err != nil {
