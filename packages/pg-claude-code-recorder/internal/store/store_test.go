@@ -272,7 +272,7 @@ func TestNewerSchemaSaysHowToProceedAndRebuildIsThatWay(t *testing.T) {
 		t.Fatalf("newer schema: %v", err)
 	}
 	o := obs.New(nil)
-	s2, err := Open(dir, Options{Rebuild: true, Obs: o})
+	s2, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, Obs: o})
 	if err != nil {
 		t.Fatalf("--rebuild is the way past it: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestAForcedRebuildBumpsTheEpochAndKeepsEveryObservation(t *testing.T) {
 	want, _ := s.Dump()
 	epoch := s.Epoch()
 	_ = s.Close()
-	s2, err := Open(dir, Options{Rebuild: true})
+	s2, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}

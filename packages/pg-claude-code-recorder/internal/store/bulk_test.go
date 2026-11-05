@@ -34,7 +34,7 @@ func syncMode(t *testing.T, s *Store) int {
 
 func TestUnfinishedBulkRebuildIsRefusedAndRebuildRecovers(t *testing.T) {
 	dir := seededDir(t)
-	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +47,14 @@ func TestUnfinishedBulkRebuildIsRefusedAndRebuildRecovers(t *testing.T) {
 	if _, err := Open(dir, Options{}); !errors.As(err, &unfinished) {
 		t.Fatalf("a normal open of an unfinished rebuild: %v, want UnfinishedRebuildError", err)
 	}
-	if _, err := Open(dir, Options{Rebuild: true}); err != nil {
+	if _, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true}); err != nil {
 		t.Fatalf("a rerun rebuild must replace the half file: %v", err)
 	}
 }
 
 func TestFinishBulkRebuildClearsTheMarkerAndRestoresTheRunningSetting(t *testing.T) {
 	dir := seededDir(t)
-	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestFinishBulkRebuildClearsTheMarkerAndRestoresTheRunningSetting(t *testing
 
 func TestBulkBatchCommitsOnBudgetAndRollsBackOnlyAFailedWrite(t *testing.T) {
 	dir := seededDir(t)
-	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true, BulkRecords: 10})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true, BulkRecords: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestBulkBatchCommitsOnBudgetAndRollsBackOnlyAFailedWrite(t *testing.T) {
 // batch; the real SIGKILL variant is in bulk_kill_test.go (integration tier).
 func TestCrashMidBatchLeavesAFileTheNextStartRefuses(t *testing.T) {
 	dir := seededDir(t)
-	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true, BulkRecords: 1})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true, BulkRecords: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestCrashMidBatchLeavesAFileTheNextStartRefuses(t *testing.T) {
 // name the rows, and leave the file marked unfinished (never drop a row).
 func TestDeferredUniqueIndexViolationFailsTheRebuildAndReportsTheRows(t *testing.T) {
 	dir := seededDir(t)
-	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}

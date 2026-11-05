@@ -54,7 +54,7 @@ func TestMeasureDeferredIndexes(t *testing.T) {
 	}
 	run := func(name string, inline bool) int64 {
 		dir := seededDir(t)
-		s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+		s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 		if err != nil {
 			t.Fatal(err)
 		}

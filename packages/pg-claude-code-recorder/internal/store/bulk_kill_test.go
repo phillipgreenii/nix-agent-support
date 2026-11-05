@@ -19,7 +19,7 @@ const bulkKillEnv = "PG_CCREC_BULK_KILL_DIR"
 // that has an uncommitted batch open.
 func TestKilledBulkRebuildLeavesAFileTheNextStartRefuses(t *testing.T) {
 	if dir := os.Getenv(bulkKillEnv); dir != "" {
-		s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+		s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 		if err != nil {
 			os.Exit(2)
 		}
@@ -49,7 +49,7 @@ func TestKilledBulkRebuildLeavesAFileTheNextStartRefuses(t *testing.T) {
 	if _, err := Open(dir, Options{ReplayOnly: true}); !errors.As(err, &unfinished) {
 		t.Fatalf("a replay-only open must refuse too: %v", err)
 	}
-	s, err := Open(dir, Options{Rebuild: true})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true})
 	if err != nil {
 		t.Fatalf("rerunning the rebuild: %v", err)
 	}

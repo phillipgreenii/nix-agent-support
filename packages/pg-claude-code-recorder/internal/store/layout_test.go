@@ -12,7 +12,7 @@ func hasTable(t *testing.T, s *Store, name string) bool {
 }
 
 func TestNewLayoutBulkRebuildHasNoTrigramTable(t *testing.T) {
-	s, err := Open(t.TempDir(), Options{NoTrigramIndex: true, Rebuild: true, BulkRebuild: true})
+	s, err := Open(t.TempDir(), Options{FreeBytes: ampleFreeBytes, NoTrigramIndex: true, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}

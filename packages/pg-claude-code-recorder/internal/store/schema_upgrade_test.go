@@ -111,7 +111,7 @@ func TestOlderSchemaIsRefusedUntouchedAndRebuildKeepsTheOldFile(t *testing.T) {
 		t.Fatal("an older schema was treated as corruption")
 	}
 
-	s, err := Open(dir, Options{Rebuild: true})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestExistingStoreWithoutTheMarkStaysOnTheTextSessionAndBuildsNoIndex(t *tes
 // with the other deferred indexes at the end of the load.
 func TestBulkRebuildIsMarkedAndBuildsTheSessionRefIndexAfterTheLoad(t *testing.T) {
 	dir := seededDir(t)
-	s, err := Open(dir, Options{Rebuild: true, BulkRebuild: true})
+	s, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true, BulkRebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}

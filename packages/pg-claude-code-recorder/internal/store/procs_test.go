@@ -41,7 +41,7 @@ func TestProcObservationsAreIdempotentAndSurviveARebuild(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s2, err := Open(dir, Options{Rebuild: true})
+	s2, err := Open(dir, Options{FreeBytes: ampleFreeBytes, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
