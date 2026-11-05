@@ -3,11 +3,13 @@ package serve
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store/countdriver"
 )
 
@@ -170,5 +172,79 @@ func TestSeenTablePrunesPathsThatAreGone(t *testing.T) {
 	rescan(t, d)
 	if n, _ := d.st.SeenCount(); n != 1 {
 		t.Fatalf("rows after a removed file = %d, want 1", n)
+	}
+}
+
+// A snapshot file whose stored identity went stale while its content did not
+// change (the device number of a volume changes across a reboot) is re-stamped
+// by the sweep that finds it unchanged, so the table written then survives the
+// next restart: that restart's first sweep skips every walked file, sees none
+// as new and ingests none.
+func TestSeenTableSurvivesARestartAfterTheDeviceNumberChanged(t *testing.T) {
+	e := newEnv(t, false)
+	old := time.Now().Add(-time.Hour)
+	dir := filepath.Join(e.claude, "projects", "example-proj", "0f8fad5b-d9cb-469f-a165-70867728950e", "tool-results")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"one.txt", "two.txt"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte("result "+n+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
+	const walked = 3
+
+	d, _ := e.openCounted(t)
+	rescan(t, d)
+	rescan(t, d)
+	// Age every snapshot file's stored device, as another boot would have.
+	all, err := d.st.AllFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	aged := 0
+	for _, f := range all {
+		if f.Mode == "snapshot" {
+			if err := d.st.Commit(&store.Rec{T: store.TIdent, At: time.Now().UnixNano(), File: f.ID, Dev: f.Dev + 2, Ino: f.Ino, Birth: f.Birth}); err != nil {
+				t.Fatal(err)
+			}
+			aged++
+		}
+	}
+	if aged != 2 {
+		t.Fatalf("aged %d snapshot files, want 2", aged)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start with the stale identities: the rows of the aged files do not load,
+	// the sweep re-stamps them.
+	d, _ = e.openCounted(t)
+	rescan(t, d)
+	rescan(t, d)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, _ = e.openCounted(t)
+	defer func() { _ = d.Close() }()
+	if v, _ := d.obs.Reg.Gauge(obs.MSeenRows, nil); v != walked {
+		t.Fatalf("seen_rows loaded after the restart = %v, want %d", v, walked)
+	}
+	rescan(t, d)
+	if got := changedCount(d, "new"); got != 0 {
+		t.Fatalf("%v walked files were new on the first sweep after a restart, want 0", got)
+	}
+	if got := sweepCount(d, obs.SweepSkipped); got != walked {
+		t.Fatalf("skipped = %v of %d walked", got, walked)
+	}
+	if got := totalIngests(d); got != 0 {
+		t.Fatalf("the first sweep after a restart ingested %v files, want 0", got)
 	}
 }

@@ -156,6 +156,10 @@ file that has not changed instead of ingesting all of them again. The first star
 the table empty, logs `seen empty: full verification sweep` and runs one full sweep; the table is also
 emptied by `serve --rebuild`, by a restored database and by a build with another seen epoch. Gauges:
 `seen_rows` and `seen_load_seconds`.
+A row loads only while its device, inode and birth time still equal the file's stored identity. A snapshot
+file whose device number changed (for example across a reboot) without its content changing has that
+identity re-stamped by the sweep that finds it unchanged, so the first sweep after a restart on an unchanged
+tree skips every walked file. The one sweep after such a change still ingests those files once.
 
 First run copies newest first with a per-file throttle (`copy.throttle`, default 2ms after each
 file that moved bytes), and answers `degraded: true` (exit 5 from the command, partial answer on

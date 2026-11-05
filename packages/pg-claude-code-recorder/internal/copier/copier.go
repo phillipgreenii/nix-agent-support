@@ -525,6 +525,15 @@ func (c *Copier) ingestSnapshot(path string, fi fs.FileInfo, source string) (Res
 	}
 	revived := f.State == "deleted"
 	if perr == nil && prev.Hash == h && !revived {
+		// A file whose identity moved under an unchanged content (a device
+		// number that changed across a reboot or a remount) keeps its row's
+		// stale identity otherwise: the seen table compares its rows against
+		// the row's identity, so every such file would look new at each start.
+		if f.Dev != id.Dev || f.Ino != id.Ino || f.Birth != id.Birth {
+			if err := c.commit(&store.Rec{T: store.TIdent, At: now, File: f.ID, Dev: id.Dev, Ino: id.Ino, Birth: id.Birth}); err != nil {
+				return Result{}, err
+			}
+		}
 		return Result{Action: "unchanged", File: f.ID}, nil
 	}
 	version := prev.Version + 1
