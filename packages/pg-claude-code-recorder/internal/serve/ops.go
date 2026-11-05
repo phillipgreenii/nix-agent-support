@@ -106,14 +106,13 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 	var files []store.File
 	var curPaths map[int64][]string
 	var byGen, parse map[genKey]int64 // statAll: copy and parse offsets
-	var lagGens map[int64][]parser.GenLag
+	lagGens := d.lag.Generations()
 	var fresh map[int64]bool
 	var err error
 	if mode == statLazy {
 		if files, curPaths, err = d.statusRows(rd, seq); err != nil {
 			return wire.Coverage{}, err
 		}
-		lagGens = d.lag.Generations()
 		fresh = d.freshTouched(d.clock.Now())
 	} else {
 		if files, err = rd.AllFiles(); err != nil {
@@ -164,26 +163,23 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 		}
 		var fc wire.FileCoverage
 		var parseS float64
-		if mode == statLazy {
-			var gl parser.GenLag
-			for _, g := range lagGens[f.ID] {
-				if g.Gen == f.CurGen {
-					gl = g
-				}
+		var gl parser.GenLag
+		for _, g := range lagGens[f.ID] {
+			if g.Gen == f.CurGen {
+				gl = g
 			}
+		}
+		if mode == statLazy {
 			var stat bool
 			fc, stat = d.lazyFileCoverage(f, p, gl, fresh[f.ID], now)
 			if stat {
 				exceptions++
 			}
-			if fc.ParseLagBytes > 0 && !gl.FrontSeen.IsZero() {
-				parseS = now.Sub(gl.FrontSeen).Seconds()
-			}
 		} else {
 			fc = d.fileCoverage(f, p, byGen[genKey{f.ID, f.CurGen}], parse[genKey{f.ID, f.CurGen}], now)
-			if fc.ParseLagBytes > 0 {
-				parseS = parseLagSeconds(rd, f.ID, f.CurGen, fc.ParseOffset, now)
-			}
+		}
+		if fc.ParseLagBytes > 0 && !gl.UnparsedSince.IsZero() {
+			parseS = max(0, now.Sub(gl.UnparsedSince).Seconds())
 		}
 		if fc.ParseLagBytes > 0 {
 			if fc.ParseLagBytes > cov.ParseLagBytesMax {
@@ -285,8 +281,8 @@ func (d *Daemon) lazyFileCoverage(f store.File, p string, gl parser.GenLag, fres
 		fc.CopyOffset, fc.ParseOffset = gl.CopyOffset, gl.ParseOffset
 		if lag := fc.Size - fc.CopyOffset; lag > 0 {
 			fc.CopyLagBytes = lag
-			if !gl.FrontSeen.IsZero() {
-				fc.CopyLagS = max(0, now.Sub(gl.FrontSeen).Seconds())
+			if !gl.UnparsedSince.IsZero() {
+				fc.CopyLagS = max(0, now.Sub(gl.UnparsedSince).Seconds())
 			}
 		}
 	} else {
@@ -440,23 +436,6 @@ func Verdict(st wire.Status, minFree int64) (healthy bool, verdict, short string
 		return false, fmt.Sprintf("behind: %d bytes free is below minFreeBytes %d", st.FreeBytes, minFree), "behind"
 	}
 	return true, fmt.Sprintf("healthy: copy lag %.0fs, parse lag %.0fs, nothing held, %d bytes free", st.CopyLagS, st.ParseLagS, st.FreeBytes), "ok"
-}
-
-// parseLagSeconds is how long the byte at the parse offset has waited: the time
-// since the recorder saw it.
-func parseLagSeconds(rd *store.Reader, file int64, gen int, off int64, now time.Time) float64 {
-	cc, err := rd.CopyCommits(file)
-	if err != nil {
-		return 0
-	}
-	for i := len(cc) - 1; i >= 0; i-- {
-		if c := cc[i]; c.Gen == gen && c.From <= off && off < c.To {
-			if s := now.Sub(time.Unix(0, c.SeenNS)).Seconds(); s > 0 {
-				return s
-			}
-		}
-	}
-	return 0
 }
 
 func (d *Daemon) opQuery(ctx context.Context, body []byte) (any, *wire.Error) {

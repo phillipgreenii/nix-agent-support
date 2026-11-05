@@ -47,7 +47,7 @@ func TestRefreshGaugesIssuesNoWholeTableReads(t *testing.T) {
 	if !ok {
 		t.Fatal("rebuild failed")
 	}
-	if gaugeVal(d, "parse_lag_bytes") != float64(r.LagBytes) || gaugeVal(d, "parse_lag_seconds") != r.LagSecs ||
+	if gaugeVal(d, "parse_lag_bytes") != float64(r.LagBytes) ||
 		gaugeVal(d, "parse_progress") != r.Progress || gaugeVal(d, "unknown_kinds") != float64(r.Kinds) {
 		t.Fatalf("gauges differ from rebuildLag %+v", r)
 	}

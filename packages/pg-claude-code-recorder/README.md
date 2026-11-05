@@ -222,7 +222,14 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
 - The copy and parse lag gauges (`copy_lag_bytes`, `copy_lag_seconds`, parse lag) are maintained from commits: each
   copier and parser commit adjusts the lag state, so a refresh reads no whole table. `lag_rebuild_total{result}`
   (`match` or `drift`) counts the periodic reconcile against a full rebuild, and a `lag_drift` warning is logged when
-  the maintained state differed from the rebuilt one.
+  the maintained state differed from the rebuilt one (lag bytes and unknown kinds; lag seconds is not compared).
+- Parse lag seconds (`parse_lag_seconds`, `parse_lag_s` in `status --json`) is how long parse has been behind copy:
+  one in-memory value per generation, the time copy first got ahead of parse. It is set when the copy offset advances
+  past the parse offset while they were equal and cleared when parse catches up; a further copy or a partial parse
+  does not move it. The figure is the oldest such value over generations, and `status` health reads it (behind at 60
+  s or more). It is not read from the commits table, so a restart cannot recover it: at start every generation with
+  parse behind copy is seeded to "now", which understates the lag once after a restart and is correct from then on.
+  It is not part of the doctor comparison, since a journal replay cannot know parse progress.
 
 ### pprof and the profiling harness
 

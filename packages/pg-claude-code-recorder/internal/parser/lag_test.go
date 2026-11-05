@@ -14,9 +14,9 @@ import (
 )
 
 // The maintained lag state against the oracle (Parser.RebuildLag) on one real
-// store: lag bytes, lag seconds and progress are equal after every step,
-// compared exactly (the clock is injected, so lag seconds is the same float
-// expression on both sides). unknown_kinds is compared by the unknown-kinds
+// store: lag bytes and progress are equal after every step, compared exactly.
+// Lag seconds is not compared (its origin is in memory only; see
+// lag_internal_test.go). unknown_kinds is compared by the unknown-kinds
 // work, not here.
 //
 // Every statement `rg -n 'copy_offset|parse_offset' internal` finds that
@@ -44,18 +44,19 @@ func newLagKit(t *testing.T) *testkit.Kit {
 	return testkit.NewWithClock(t, clock.NewFake(lagNow))
 }
 
-// lagGauges returns the oracle's three gauges.
-func lagGauges(k *testkit.Kit) (b, s, p float64) {
+// lagGauges returns the oracle's two gauges (it has no lag seconds: that origin
+// is in memory only).
+func lagGauges(k *testkit.Kit) (b, p float64) {
 	r, _ := k.Parser.RebuildLag()
-	return float64(r.LagBytes), r.LagSecs, r.Progress
+	return float64(r.LagBytes), r.Progress
 }
 
 func lagEqual(t *testing.T, k *testkit.Kit, l *parser.Lag, label string) {
 	t.Helper()
-	wb, ws, wp := lagGauges(k)
-	gb, gs, gp := l.Gauges(lagNow)
-	if float64(gb) != wb || gs != ws || gp != wp {
-		t.Fatalf("%s: maintained (bytes %d, secs %v, progress %v) != oracle (%v, %v, %v)", label, gb, gs, gp, wb, ws, wp)
+	wb, wp := lagGauges(k)
+	gb, _, gp := l.Gauges(lagNow)
+	if float64(gb) != wb || gp != wp {
+		t.Fatalf("%s: maintained (bytes %d, progress %v) != oracle (%v, %v)", label, gb, gp, wb, wp)
 	}
 }
 
@@ -147,7 +148,7 @@ func TestLagEquivalenceRandomSteps(t *testing.T) {
 	}
 }
 
-func TestLagPartialParseMovesOriginToTheNextCommit(t *testing.T) {
+func TestLagPartialParseKeepsTheOrigin(t *testing.T) {
 	k := newLagKit(t)
 	l := startLag(t, k)
 	a := k.Add("example-proj", "example-session-1.jsonl", fmt.Sprintf(lagLine, 1, 1))
@@ -157,12 +158,12 @@ func TestLagPartialParseMovesOriginToTheNextCommit(t *testing.T) {
 	k.Parse() // parses the two whole lines; the torn tail stays
 	lagEqual(t, k, l, "partial parse")
 	gs := l.FileGenerations(a)
-	if len(gs) != 1 || gs[0].ParseOffset >= gs[0].CopyOffset || gs[0].FrontSeen.IsZero() {
+	if len(gs) != 1 || gs[0].ParseOffset >= gs[0].CopyOffset || gs[0].UnparsedSince.IsZero() {
 		t.Fatalf("generation snapshot after a partial parse: %+v", gs)
 	}
 	_, secs, _ := l.Gauges(lagNow)
-	if want := float64(lagNow.UnixNano()-gs[0].FrontSeen.UnixNano()) / 1e9; secs != want {
-		t.Fatalf("lag seconds %v is not measured from the tail commit's seen time (%v)", secs, want)
+	if want := float64(lagNow.UnixNano()-gs[0].UnparsedSince.UnixNano()) / 1e9; secs != want {
+		t.Fatalf("lag seconds %v is not measured from the unparsed-since origin (%v)", secs, want)
 	}
 }
 
@@ -258,8 +259,17 @@ func TestLagStartupRecovery(t *testing.T) {
 	k.Reopen()
 	l := startLag(t, k)
 	lagEqual(t, k, l, "seeded after restart")
-	if b, s, _ := l.Gauges(lagNow); b == 0 || s == 0 {
-		t.Fatalf("the seed lost the unparsed bytes: bytes %d secs %v", b, s)
+	// Parse behind copy at start is seeded to "now": the lag bytes are kept and
+	// the seconds start from zero (the clock is fixed at lagNow).
+	if b, s, _ := l.Gauges(lagNow); b == 0 || s != 0 {
+		t.Fatalf("the seed lost the unparsed bytes or did not start from now: bytes %d secs %v", b, s)
+	}
+	for _, gs := range l.Generations() {
+		for _, g := range gs {
+			if g.CopyOffset > g.ParseOffset && !g.UnparsedSince.Equal(lagNow) {
+				t.Fatalf("seeded origin = %v, want now (%v)", g.UnparsedSince, lagNow)
+			}
+		}
 	}
 	// The state keeps tracking after the seed.
 	k.Parse()

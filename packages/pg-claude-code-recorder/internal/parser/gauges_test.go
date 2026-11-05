@@ -10,8 +10,9 @@ import (
 )
 
 // oracleGauges is the parse-lag computation as it was written over every
-// generation row (AllGenerations), kept here to pin the aggregate version.
-func oracleGauges(t *testing.T, k *testkit.Kit, now int64) (lagBytes, lagSecs, progress float64) {
+// generation row (AllGenerations), kept here to pin the aggregate version. It
+// has no lag seconds: that figure comes from an in-memory origin.
+func oracleGauges(t *testing.T, k *testkit.Kit) (lagBytes, progress float64) {
 	t.Helper()
 	files, err := k.Store.AllFiles()
 	if err != nil {
@@ -26,7 +27,6 @@ func oracleGauges(t *testing.T, k *testkit.Kit, now int64) (lagBytes, lagSecs, p
 		byID[f.ID] = f.Source
 	}
 	var lb, copied, parsed int64
-	var ls float64
 	for _, g := range gens {
 		src, ok := byID[g.File]
 		if !ok || !k.Parser.HasSource(src) {
@@ -38,23 +38,13 @@ func oracleGauges(t *testing.T, k *testkit.Kit, now int64) (lagBytes, lagSecs, p
 			if lag > lb {
 				lb = lag
 			}
-			cc, _ := k.Store.CopyCommits(g.File)
-			for i := len(cc) - 1; i >= 0; i-- {
-				c := cc[i]
-				if c.Gen == g.Gen && c.From <= g.ParseOffset && g.ParseOffset < c.To {
-					if d := float64(now-c.SeenNS) / 1e9; d > ls {
-						ls = d
-					}
-					break
-				}
-			}
 		}
 	}
 	prog := 1.0
 	if copied > 0 {
 		prog = float64(parsed) / float64(copied)
 	}
-	return float64(lb), ls, prog
+	return float64(lb), prog
 }
 
 func TestRebuildLagMatchesTheAllGenerationsComputation(t *testing.T) {
@@ -66,13 +56,13 @@ func TestRebuildLagMatchesTheAllGenerationsComputation(t *testing.T) {
 	// Fully parsed: nothing lags.
 	check := func(label string) {
 		t.Helper()
-		wb, ws, wp := oracleGauges(t, k, now.UnixNano())
+		wb, wp := oracleGauges(t, k)
 		r, ok := k.Parser.RebuildLag()
 		if !ok {
 			t.Fatalf("%s: rebuild failed", label)
 		}
 		for name, c := range map[string][2]float64{
-			parser.MParseLagBytes: {float64(r.LagBytes), wb}, parser.MParseLagSecs: {r.LagSecs, ws}, parser.MParseProgress: {r.Progress, wp},
+			parser.MParseLagBytes: {float64(r.LagBytes), wb}, parser.MParseProgress: {r.Progress, wp},
 		} {
 			if c[0] != c[1] {
 				t.Errorf("%s: %s = %v, want %v", label, name, c[0], c[1])

@@ -19,14 +19,16 @@ import (
 //     lag; a deleted file is not special here;
 //   - a source without a parser (HasSource false) is left out of the sums, the
 //     maximum and the oldest-unparsed value;
-//   - the lag-seconds origin is the seen time of the commit that CONTAINS the
-//     generation's parse offset, so after a partial parse it moves to the next
-//     commit's time. Each generation keeps its unparsed commits as an ordered
-//     span list (dropped as the parse offset passes them, so it is bounded by
-//     the unparsed commits);
-//   - the oldest-unparsed value is the minimum, over generations, of the front
-//     span's seen time, kept in a lazily pruned heap: an entry is valid only
-//     if its generation's front span still equals it.
+//   - the lag-seconds origin is one in-memory value per generation, the time
+//     copy first got ahead of parse (set when the copy offset advances past the
+//     parse offset while they were equal, cleared when parse catches up). A
+//     partial parse does not move it, and a second copy while still behind does
+//     not reset it. It is NOT in the commits table: at start every generation
+//     with parse behind copy is seeded to "now", so the lag is understated once
+//     after a restart and correct from then on;
+//   - the oldest-unparsed value is the minimum of that origin over generations,
+//     kept in a lazily pruned heap: an entry is valid only while its
+//     generation's origin still equals it.
 //
 // Both offsets only ever grow (the store's guards), so an update applies the
 // larger of the old and the new value; a repeated or stale delivery changes
@@ -35,6 +37,7 @@ import (
 type lagState struct {
 	hasSource func(string) bool
 	sourceOf  func(file int64) (string, bool)
+	now       func() time.Time // the injected clock, for the start-up seed
 
 	mu               sync.Mutex
 	counted          map[int64]bool // file -> its source has a parser (positive lookups only)
@@ -54,14 +57,12 @@ type lagKey struct {
 	gen  int
 }
 
-type lagSpan struct{ from, to, seen int64 }
-
 type lagGen struct {
 	copy, parse int64
-	spans       []lagSpan // unparsed commits, ordered; to > parse
+	since       int64 // unix ns copy first got ahead of parse; 0 when parse has caught up
 	counted     bool
-	lastLag     int64   // the lag last pushed on the max heap
-	front       lagSpan // the front span last pushed on the old heap (zero: none)
+	lastLag     int64 // the lag last pushed on the max heap
+	lastSince   int64 // the origin last pushed on the old heap (0: none)
 }
 
 type lagEvent struct {
@@ -76,18 +77,20 @@ type GenLag struct {
 	Gen         int
 	CopyOffset  int64
 	ParseOffset int64
-	// FrontSeen is the seen time of the unparsed commit containing the parse
-	// offset; the zero time when nothing is unparsed (or the commit is unknown).
-	FrontSeen time.Time
+	// UnparsedSince is the time copy first got ahead of parse (the start-up
+	// time for a generation already behind at start); the zero time when
+	// parse has caught up.
+	UnparsedSince time.Time
 }
 
-func newLagState(hasSource func(string) bool, sourceOf func(int64) (string, bool)) *lagState {
-	return &lagState{hasSource: hasSource, sourceOf: sourceOf, counted: map[int64]bool{}, gens: map[lagKey]*lagGen{}}
+func newLagState(hasSource func(string) bool, sourceOf func(int64) (string, bool), now func() time.Time) *lagState {
+	return &lagState{hasSource: hasSource, sourceOf: sourceOf, now: now, counted: map[int64]bool{}, gens: map[lagKey]*lagGen{}}
 }
 
 // StartLag creates the maintained lag state, subscribes it to the store's
-// OnOffsets hook and seeds it from the store with one whole-table read (the
-// same read UpdateGauges does, run once). The hook is subscribed first and its
+// OnOffsets hook and seeds it from the store with one read of the files and
+// generations (every generation with parse behind copy starts its lag clock at
+// the current time). The hook is subscribed first and its
 // deliveries are held until the seed is loaded, then replayed over it, so no
 // change between the read and the subscription is lost; deliveries are
 // idempotent, so one already inside the read is harmless.
@@ -99,7 +102,7 @@ func (p *Parser) StartLag() (*Lag, error) {
 			return "", false
 		}
 		return f.Source, true
-	})
+	}, p.cfg.Clock.Now)
 	l.seeding = true
 	st.OnOffsets(l.hook)
 	err := st.ReadTx(func(rd *store.Reader) error {
@@ -111,11 +114,7 @@ func (p *Parser) StartLag() (*Lag, error) {
 		if err != nil {
 			return err
 		}
-		commits, err := rd.UnparsedCommits()
-		if err != nil {
-			return err
-		}
-		l.seed(files, gens, commits)
+		l.seed(files, gens)
 		return nil
 	})
 	if err != nil {
@@ -129,9 +128,10 @@ func (p *Parser) StartLag() (*Lag, error) {
 }
 
 // seed loads the read and replays the held deliveries.
-func (l *lagState) seed(files []store.File, gens []store.Generation, commits []store.UnparsedCommit) {
+func (l *lagState) seed(files []store.File, gens []store.Generation) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	start := l.now().UnixNano()
 	for _, f := range files {
 		if l.hasSource(f.Source) {
 			l.counted[f.ID] = true
@@ -141,14 +141,12 @@ func (l *lagState) seed(files []store.File, gens []store.Generation, commits []s
 		k := lagKey{g.File, g.Gen}
 		lg := &lagGen{copy: g.CopyOffset, parse: g.ParseOffset, counted: l.counted[g.File]}
 		l.gens[k] = lg
+		if lg.copy > lg.parse {
+			lg.since = start
+		}
 		if lg.counted {
 			l.sumCopy += lg.copy
 			l.sumPars += lg.parse
-		}
-	}
-	for _, c := range commits {
-		if lg := l.gens[lagKey{c.File, c.Gen}]; lg != nil {
-			lg.spans = append(lg.spans, lagSpan{c.From, c.To, c.SeenNS})
 		}
 	}
 	for k, lg := range l.gens {
@@ -195,8 +193,8 @@ func (l *lagState) applyLocked(e lagEvent) {
 		lg = &lagGen{counted: l.fileCounted(e.file)}
 		l.gens[k] = lg
 	}
+	wasBehind := lg.copy > lg.parse
 	if e.copy > lg.copy {
-		lg.spans = append(lg.spans, lagSpan{from: lg.copy, to: e.copy, seen: e.at})
 		if lg.counted {
 			l.sumCopy += e.copy - lg.copy
 		}
@@ -208,19 +206,21 @@ func (l *lagState) applyLocked(e lagEvent) {
 		}
 		lg.parse = e.parse
 	}
+	switch {
+	case lg.copy <= lg.parse:
+		lg.since = 0
+	case !wasBehind:
+		lg.since = e.at
+		if lg.since <= 0 {
+			lg.since = l.now().UnixNano()
+		}
+	}
 	l.refresh(k, lg)
 }
 
-// refresh drops the spans the parse offset has passed and pushes the changed
-// lag and front span of a counted generation on the heaps.
+// refresh pushes the changed lag and unparsed-since origin of a counted
+// generation on the heaps.
 func (l *lagState) refresh(k lagKey, lg *lagGen) {
-	n := 0
-	for n < len(lg.spans) && lg.spans[n].to <= lg.parse {
-		n++
-	}
-	if n > 0 {
-		lg.spans = append(lg.spans[:0:0], lg.spans[n:]...)
-	}
 	if !lg.counted {
 		return
 	}
@@ -230,28 +230,15 @@ func (l *lagState) refresh(k lagKey, lg *lagGen) {
 			heap.Push(&l.maxH, lagMaxEntry{lag: lag, key: k})
 		}
 	}
-	fr := lg.frontSpan()
-	if fr != lg.front {
-		lg.front = fr
-		if fr.seen > 0 {
-			heap.Push(&l.oldH, lagOldEntry{span: fr, key: k})
+	if lg.since != lg.lastSince {
+		lg.lastSince = lg.since
+		if lg.since > 0 {
+			heap.Push(&l.oldH, lagOldEntry{since: lg.since, key: k})
 		}
 	}
 	if len(l.maxH) > 4*len(l.gens)+64 || len(l.oldH) > 4*len(l.gens)+64 {
 		l.compact()
 	}
-}
-
-// frontSpan is the unparsed commit that contains the parse offset (zero when
-// there is none, which the oracle skips).
-func (g *lagGen) frontSpan() lagSpan {
-	if g.copy <= g.parse || len(g.spans) == 0 {
-		return lagSpan{}
-	}
-	if s := g.spans[0]; s.from <= g.parse && g.parse < s.to {
-		return s
-	}
-	return lagSpan{}
 }
 
 // compact rebuilds both heaps from the generations, shedding stale entries.
@@ -264,8 +251,8 @@ func (l *lagState) compact() {
 		if lg.lastLag > 0 {
 			l.maxH = append(l.maxH, lagMaxEntry{lag: lg.lastLag, key: k})
 		}
-		if lg.front.seen > 0 {
-			l.oldH = append(l.oldH, lagOldEntry{span: lg.front, key: k})
+		if lg.lastSince > 0 {
+			l.oldH = append(l.oldH, lagOldEntry{since: lg.lastSince, key: k})
 		}
 	}
 	heap.Init(&l.maxH)
@@ -273,8 +260,8 @@ func (l *lagState) compact() {
 }
 
 // Gauges returns the figures UpdateGauges computes: the largest per-generation
-// lag in bytes, the age in seconds of the oldest unparsed commit (the seen time
-// of the commit containing each lagging generation's parse offset), and
+// lag in bytes, the age in seconds of the oldest unparsed-since origin (the time
+// copy got ahead of parse, per lagging generation), and
 // parsed/copied bytes (1 when nothing was copied).
 func (l *lagState) Gauges(now time.Time) (lagBytes int64, lagSecs, progress float64) {
 	l.mu.Lock()
@@ -289,8 +276,8 @@ func (l *lagState) Gauges(now time.Time) (lagBytes int64, lagSecs, progress floa
 	}
 	for len(l.oldH) > 0 {
 		top := l.oldH[0]
-		if lg := l.gens[top.key]; lg != nil && lg.counted && lg.frontSpan() == top.span {
-			if d := float64(now.UnixNano()-top.span.seen) / 1e9; d > 0 {
+		if lg := l.gens[top.key]; lg != nil && lg.counted && lg.since == top.since {
+			if d := float64(now.UnixNano()-top.since) / 1e9; d > 0 {
 				lagSecs = d
 			}
 			break
@@ -335,8 +322,8 @@ func (l *lagState) FileGenerations(file int64) []GenLag {
 
 func (l *lagState) genLag(k lagKey, lg *lagGen) GenLag {
 	out := GenLag{Gen: k.gen, CopyOffset: lg.copy, ParseOffset: lg.parse}
-	if fr := lg.frontSpan(); fr.seen > 0 {
-		out.FrontSeen = time.Unix(0, fr.seen)
+	if lg.since > 0 {
+		out.UnparsedSince = time.Unix(0, lg.since)
 	}
 	return out
 }
@@ -361,13 +348,13 @@ func (h *lagMaxHeap) Pop() any {
 }
 
 type lagOldEntry struct {
-	span lagSpan
-	key  lagKey
+	since int64
+	key   lagKey
 }
 type lagOldHeap []lagOldEntry
 
 func (h lagOldHeap) Len() int           { return len(h) }
-func (h lagOldHeap) Less(i, j int) bool { return h[i].span.seen < h[j].span.seen }
+func (h lagOldHeap) Less(i, j int) bool { return h[i].since < h[j].since }
 func (h lagOldHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h *lagOldHeap) Push(x any)        { *h = append(*h, x.(lagOldEntry)) }
 func (h *lagOldHeap) Pop() any {

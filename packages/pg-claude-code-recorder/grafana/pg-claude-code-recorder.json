@@ -16,7 +16,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Copy and parse lag",
-      "description": "Age of the oldest byte the recorder has seen but not yet copied (copy lag) and not yet parsed (parse lag), in seconds. The copy-lag alert fires above 120 s for 10 minutes; parse-stuck fires when parse lag bytes stay above 0 with no progress.",
+      "description": "Age of the oldest byte the recorder has seen but not yet copied (copy lag) and, for parse lag, how long parse has been behind copy (since the recorder copied bytes parse had not yet reached; after a restart it counts from the restart), in seconds. The copy-lag alert fires above 120 s for 10 minutes; parse-stuck fires when parse lag bytes stay above 0 with no progress.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

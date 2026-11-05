@@ -867,7 +867,8 @@ func (d *Daemon) setMaintainedLagGauges() {
 // from the rebuilt figures, which the first reconcile then compares against.
 func (d *Daemon) startLagRebuild() {
 	if r, ok := d.prs.RebuildLag(); ok {
-		d.prs.SetLagGauges(r.LagBytes, r.LagSecs, r.Progress, r.Kinds)
+		_, secs, _ := d.lag.Gauges(d.clock.Now()) // the rebuild has no lag seconds
+		d.prs.SetLagGauges(r.LagBytes, secs, r.Progress, r.Kinds)
 	}
 }
 
@@ -898,20 +899,19 @@ func (d *Daemon) lagReconcileLoop() {
 }
 
 // reconcileLag compares the maintained lag figures with a whole-table rebuild:
-// bytes and unknown kinds exactly, lag seconds within one second. A difference
+// bytes and unknown kinds exactly. Lag seconds is not compared: its origin is
+// in memory only and a rebuild cannot know it. A difference
 // logs WARN lag_drift with both values and counts result=drift, else match.
 func (d *Daemon) reconcileLag() {
 	r, ok := d.prs.RebuildLag()
 	if !ok {
 		return
 	}
-	b, secs, _ := d.lag.Gauges(d.clock.Now())
+	b, _, _ := d.lag.Gauges(d.clock.Now())
 	kinds := d.unknown.Count()
-	dsec := secs - r.LagSecs
-	if b != r.LagBytes || kinds != r.Kinds || dsec > 1 || dsec < -1 {
+	if b != r.LagBytes || kinds != r.Kinds {
 		d.obs.Log.Warn("lag_drift",
 			"maintained_lag_bytes", b, "rebuilt_lag_bytes", r.LagBytes,
-			"maintained_lag_seconds", secs, "rebuilt_lag_seconds", r.LagSecs,
 			"maintained_unknown_kinds", kinds, "rebuilt_unknown_kinds", r.Kinds)
 		d.obs.Reg.Add(obs.MLagRebuild, map[string]string{"result": "drift"}, 1)
 		return

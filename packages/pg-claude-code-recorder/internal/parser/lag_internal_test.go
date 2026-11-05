@@ -4,7 +4,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
+
+// lagTestNow is the injected clock of lagTestState, for the seed.
+var lagTestNow = time.Unix(0, 50_000_000_000)
 
 func lagTestState() *lagState {
 	return newLagState(func(s string) bool { return s != "none" }, func(file int64) (string, bool) {
@@ -12,48 +17,105 @@ func lagTestState() *lagState {
 			return "none", true
 		}
 		return "src", true
-	})
+	}, func() time.Time { return lagTestNow })
 }
 
 func at(ns int64) time.Time { return time.Unix(0, ns) }
 
-// The oldest-unparsed heap is lazy: an entry stays until it is on top, and is
-// valid only while its generation's front span still equals it.
-func TestLagOldestUnparsedHeapIsLazilyPruned(t *testing.T) {
+// secs returns the lag seconds at the injected time now.
+func secs(l *lagState, now time.Time) float64 {
+	_, s, _ := l.Gauges(now)
+	return s
+}
+
+// Copy ahead of parse for N seconds reports N; after parse catches up it
+// reports 0; a second copy while still behind does NOT reset the origin (a
+// "latest copy time" design gets this wrong, so resetting on every copy fails
+// here); a partial parse does not move the origin either.
+func TestLagSecondsRunFromWhenCopyFirstGotAheadOfParse(t *testing.T) {
 	l := lagTestState()
-	now := at(10_000_000_000)
-	l.hook(1, 1, 10, 0, at(1_000_000_000)) // gen 1: [0,10) seen 1s
-	l.hook(1, 1, 20, 0, at(2_000_000_000)) // second span [10,20) seen 2s
-	l.hook(2, 1, 5, 0, at(3_000_000_000))  // another file: [0,5) seen 3s
-	if _, s, _ := l.Gauges(now); s != 9 {
-		t.Fatalf("oldest = %v s, want 9 (seen 1s)", s)
+	const s = int64(1_000_000_000)
+	l.hook(1, 1, 10, 0, at(100*s)) // copy gets ahead at t=100
+	if got := secs(l, at(107*s)); got != 7 {
+		t.Fatalf("lag = %v s, want 7", got)
 	}
-	// Parse passes the first span of gen 1: the origin moves to its second
-	// commit (2s), the stale entry (1s) is pruned when it reaches the top.
-	l.hook(1, 1, 20, 10, at(0))
-	if _, s, _ := l.Gauges(now); s != 8 {
-		t.Fatalf("after the partial parse oldest = %v s, want 8 (seen 2s)", s)
+	l.hook(1, 1, 20, 0, at(105*s)) // a second copy while still behind
+	if got := secs(l, at(107*s)); got != 7 {
+		t.Fatalf("after a second copy lag = %v s, want 7 (the origin must not reset)", got)
 	}
-	// Parse catches up on gen 1: only file 2's span remains.
-	l.hook(1, 1, 20, 20, at(0))
-	if _, s, _ := l.Gauges(now); s != 7 {
-		t.Fatalf("oldest = %v s, want 7 (seen 3s)", s)
+	l.hook(1, 1, 20, 10, at(106*s)) // partial parse, still behind
+	if got := secs(l, at(110*s)); got != 10 {
+		t.Fatalf("after a partial parse lag = %v s, want 10 (the origin must not move)", got)
 	}
-	l.hook(2, 1, 5, 5, at(0))
-	if b, s, p := l.Gauges(now); b != 0 || s != 0 || p != 1 {
-		t.Fatalf("idle gauges = %d, %v, %v", b, s, p)
+	l.hook(1, 1, 20, 20, at(111*s)) // parse catches up
+	if got := secs(l, at(120*s)); got != 0 {
+		t.Fatalf("caught up: lag = %v s, want 0", got)
+	}
+	l.hook(1, 1, 30, 20, at(130*s)) // copy gets ahead again: a new origin
+	if got := secs(l, at(133*s)); got != 3 {
+		t.Fatalf("a new lag episode = %v s, want 3", got)
 	}
 }
 
-// Spans are dropped as the parse offset passes them, so the list is bounded by
-// the unparsed commits.
-func TestLagSpanListIsBounded(t *testing.T) {
+// The reported figure is the maximum over generations (the oldest origin), and
+// a generation caught up drops out of it.
+func TestLagSecondsIsTheOldestOriginAcrossGenerations(t *testing.T) {
 	l := lagTestState()
-	for i := int64(1); i <= 1000; i++ {
-		l.hook(1, 1, i*10, (i-1)*10, at(i))
+	const s = int64(1_000_000_000)
+	l.hook(1, 1, 10, 0, at(100*s))
+	l.hook(2, 1, 5, 0, at(103*s))
+	if got := secs(l, at(110*s)); got != 10 {
+		t.Fatalf("oldest = %v s, want 10", got)
 	}
-	if n := len(l.gens[lagKey{1, 1}].spans); n != 1 {
-		t.Fatalf("%d spans kept, want 1", n)
+	l.hook(1, 1, 10, 10, at(0))
+	if got := secs(l, at(110*s)); got != 7 {
+		t.Fatalf("after gen 1 caught up = %v s, want 7", got)
+	}
+	l.hook(2, 1, 5, 5, at(0))
+	if b, sc, p := l.Gauges(at(110 * s)); b != 0 || sc != 0 || p != 1 {
+		t.Fatalf("idle gauges = %d, %v, %v", b, sc, p)
+	}
+}
+
+// A restart (a new lagState seeded from the tables) with parse behind copy
+// reports from "now": every such generation starts at the injected time, and a
+// caught-up one has no origin.
+func TestLagSeedStartsBehindGenerationsAtNow(t *testing.T) {
+	l := lagTestState()
+	l.seed(
+		[]store.File{{ID: 1, Source: "src"}, {ID: 2, Source: "src"}},
+		[]store.Generation{{File: 1, Gen: 1, CopyOffset: 100, ParseOffset: 40}, {File: 2, Gen: 1, CopyOffset: 7, ParseOffset: 7}},
+	)
+	if got := secs(l, lagTestNow); got != 0 {
+		t.Fatalf("lag right after the restart = %v s, want 0", got)
+	}
+	if got := secs(l, lagTestNow.Add(12*time.Second)); got != 12 {
+		t.Fatalf("12 s after the restart lag = %v s, want 12", got)
+	}
+	gs := l.Generations()
+	if !gs[1][0].UnparsedSince.Equal(lagTestNow) || !gs[2][0].UnparsedSince.IsZero() {
+		t.Fatalf("origins = %v / %v", gs[1][0].UnparsedSince, gs[2][0].UnparsedSince)
+	}
+}
+
+// The lag-seconds origin heap is lazy: a stale entry stays until it is on top
+// and is valid only while its generation's origin still equals it.
+func TestLagOldestOriginHeapIsLazilyPruned(t *testing.T) {
+	l := lagTestState()
+	const s = int64(1_000_000_000)
+	now := at(10 * s)
+	l.hook(1, 1, 10, 0, at(1*s))
+	l.hook(2, 1, 5, 0, at(3*s))
+	if got := secs(l, now); got != 9 {
+		t.Fatalf("oldest = %v s, want 9", got)
+	}
+	l.hook(1, 1, 10, 10, at(0)) // gen 1 caught up: its entry is stale
+	if got := secs(l, now); got != 7 {
+		t.Fatalf("oldest = %v s, want 7", got)
+	}
+	l.hook(1, 1, 20, 10, at(5*s)) // gen 1 behind again with a newer origin
+	if got := secs(l, now); got != 7 {
+		t.Fatalf("oldest = %v s, want 7 (gen 2 still older)", got)
 	}
 }
 

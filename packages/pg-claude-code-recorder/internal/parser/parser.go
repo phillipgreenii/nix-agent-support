@@ -1060,14 +1060,15 @@ ON CONFLICT(source,rtype,path) DO UPDATE SET count=count+excluded.count`, src.Na
 // Rebuilt is the lag figures RebuildLag computes from the whole tables.
 type Rebuilt struct {
 	LagBytes int64
-	LagSecs  float64
 	Progress float64
 	Kinds    int // distinct sources with a live file but no parser
 }
 
-// RebuildLag computes the parse-lag figures, parse progress and the unknown
-// kinds count from the whole tables (AllFiles, the lagging generations and
-// their copy commits). It is the reference the maintained state is compared
+// RebuildLag computes the parse lag in bytes, parse progress and the unknown
+// kinds count from the whole tables (AllFiles, OffsetTotalsByFile and the
+// lagging generations). It computes no lag seconds: the origin of that figure
+// (when copy got ahead of parse) is in-memory only, and nothing in the tables
+// or a journal replay records it. It is the reference the maintained state is compared
 // against: run once at start and again by the reconcile, never by a gauge
 // refresh. It sets no gauge. ok is false when a store read failed.
 func (p *Parser) RebuildLag() (r Rebuilt, ok bool) {
@@ -1096,7 +1097,6 @@ func (p *Parser) RebuildLag() (r Rebuilt, ok bool) {
 		copied += t.Copy
 		parsed += t.Parse
 	}
-	now := p.cfg.Clock.Now().UnixNano()
 	for _, g := range lagging {
 		f, found := fileByID(files, g.File)
 		if !found || !p.HasSource(f.Source) {
@@ -1104,12 +1104,6 @@ func (p *Parser) RebuildLag() (r Rebuilt, ok bool) {
 		}
 		if lag := g.CopyOffset - g.ParseOffset; lag > r.LagBytes {
 			r.LagBytes = lag
-		}
-		cc, _ := p.cfg.Store.CopyCommits(g.File)
-		if s := seenAt(cc, g.Gen, g.ParseOffset); s > 0 {
-			if d := float64(now-s) / 1e9; d > r.LagSecs {
-				r.LagSecs = d
-			}
 		}
 	}
 	r.Progress = 1.0
