@@ -212,8 +212,7 @@ What that fixes today:
   `MODULES` row and an allowlist file).
 - Pure Go for the recorder, except one darwin-only cgo file for FSEvents and the darwin system calls (`getattrlistbulk`, `clonefile`, the kqueue exit watch). Linux builds with `CGO_ENABLED=0` and uses inotify, `FICLONE` where the filesystem supports it, a plain directory walk for sweeps, and `pidfd_open` for Process exit (a one-second liveness poll that checks the start time where `pidfd_open` is unavailable); a cross-compile guard (`GOOS=linux CGO_ENABLED=0 go vet ./...`, the `pg-connector` precedent) keeps Linux building. SQLite through `modernc.org/sqlite`, already used by ccaudit, pa-monitor
   and ccpool at different versions (pa-monitor, pg-connector and pg-desk 1.61.0, work-report 1.59.0, ccpool and pg-ccaudit 1.52.0). The recorder
-  takes 1.61.0, whose bundled SQLite 3.54.1 has FTS5 with `contentless_delete`, its trigram
-  tokenizer and JSON functions, and lets Go register SQL functions, but it cannot load C
+  takes 1.61.0, whose bundled SQLite 3.54.1 has FTS5 with `contentless_delete` and JSON functions, and lets Go register SQL functions, but it cannot load C
   extensions. Go modules are built with gomod2nix.
 - File-change notification on darwin is FSEvents through a small cgo wrapper (operator 2026-10-28:
   "calls seem good"). `fsnotify` is not used: on darwin it is kqueue with one file descriptor per
@@ -830,13 +829,16 @@ sequence is assigned inside the write transaction. Waiters hold no read transact
 cannot pin the WAL; the recorder checkpoints on an interval. On darwin SQLite's `synchronous=FULL` issues a plain `fsync`, which does not flush the drive's cache, so the commits for "settled", "removal pending" and "removed" run with `PRAGMA fullfsync=ON` (`F_FULLFSYNC`), and the archive, the clone and their containing directories are flushed with `F_FULLFSYNC` before anything is deleted. The 9,000 to 12,000 commits per second measured in the spike used plain `fsync`; the cost with `F_FULLFSYNC` has not been measured.
 
 Full file contents MUST NOT be stored in the database (operator 2026-10-28: "i don't think we
-should have full file contents in the db"). Word search uses an FTS5 index and substring search an
-FTS5 trigram index, both contentless with `contentless_delete=1` (the trigram index is created with `case_sensitive 1`, and every substring hit is verified against the copy before it is returned): they hold tokens, and snippets and
-bodies are read from the copies through the pointers. A plain `INSERT` over an existing rowid indexes
-the row twice, so an update is a delete then an insert. A trigram query under three characters
-returns nothing, and the API says so. Only fields a source marks `text` or `opaque` are indexed for
-search; whole raw lines are not (agent's call; scanning copies covers a rare search for a field no
-source names).
+should have full file contents in the db"). Word search uses one FTS5 index, contentless with
+`contentless_delete=1`: it holds tokens, and snippets and bodies are read from the copies through the
+pointers. A plain `INSERT` over an existing rowid indexes the row twice, so an update is a delete then
+an insert. There is no trigram index (operator 2026-11-03, "A+B", and design decision 26). Substring
+search is a literal, case-sensitive scan over the recorder's own copies, narrowed by session, time, cwd or
+word-index candidates, with a bounded cost; it reads only the opaque fields (tool input, tool-result
+bodies, saved tool-result bodies, pasted contents), never assistant or user prose, and a prose
+substring search is not shipped (widening it would be a separate recorder change). Only fields a source
+marks `text` or `opaque` are indexed for search; whole raw lines are not (agent's call; scanning copies
+covers a rare search for a field no source names).
 
 ### Wire contract
 
@@ -1791,7 +1793,7 @@ Mutation testing is not part of this plan. The tiers:
   and a guard `TestUnitTierHasNoIntegrationTests`): the daemon over its socket, the real binary, a
   SIGKILL mid-copy and restart, and a LaunchAgent. Never in a hook, `run-unit-tests` or pre-land.
 - **Soak** (`//go:build soak`, its own check): a generated tree for first-run throughput, memory
-  ceiling, WAL growth and trigram index size; the unit tier keeps a steady-state "no rework" guard.
+  ceiling, WAL growth and index size; the unit tier keeps a steady-state "no rework" guard.
 - **Real Claude** (opt-in, never in a gate; needs a login and network): the spike scenarios as
   scripts against a throwaway `claude` in a private tmux, covering end reasons, heal and respawn,
   and an extract followed by `claude --resume`.
@@ -2148,7 +2150,7 @@ The 2026-10-30 six-dimension review found these; each is a requirement on the ph
 
 - Whether `paste-cache/` (pasted content that `history.jsonl` refers to by hash) and `file-history/`
   belong in a later version.
-- The size of the trigram index over tool inputs and result bodies; measure it on a copy of real data
+- The size of the word index over tool inputs and result bodies; measure it on a copy of real data
   before phase 2 is finished.
 - `history.jsonl` is described above as the only record of `/exit`, but a quick scan found
   `<command-name>/exit</command-name>` in at least three transcripts. Whether those are real markers or
