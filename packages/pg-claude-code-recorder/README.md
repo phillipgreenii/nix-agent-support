@@ -135,6 +135,15 @@ are Go duration strings with a `d` suffix for days. Keys a later phase owns are 
 `controlStateDir` is optional; when set, `<controlStateDir>/ends` is the watcher's second root and
 `coverage` lists it with its presence and file count.
 
+Sweep pacing: `sweep.max_files_per_second` (default 100, `0` unlimited) caps how many files per
+second the sweep and the first catch-up ingest; hint-driven ingest of live files is never paced, so
+copy lag is unaffected by the cap except that a catch-up holds the watcher's lock (a pass over N
+files takes at least N / rate seconds, so keep N / rate under the 600 s `loop-stalled` pass bound:
+57,000 files need at least 95 files per second). `sweep.verify_every` (default 24h, `0` verifies on
+every sweep, otherwise at least `sweep.interval`) is how long a sweep trusts a caught-up file before
+ingesting it again; each file's first deadline is a stable per-path point in that window, so the
+re-verification is a trickle (57,000 / 86,400 = 0.66 files per second), not a daily burst.
+
 First run copies newest first with a per-file throttle (`copy.throttle`, default 2ms after each
 file that moved bytes), and answers `degraded: true` (exit 5 from the command, partial answer on
 stdout) until the first full sweep is done; `--allow-partial` turns that into exit 0. Phase 1 has no

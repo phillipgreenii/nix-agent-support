@@ -125,3 +125,34 @@ func TestQueryMaxConnectionsDefaultAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSweepPacingKeysDefaultsAndValidation(t *testing.T) {
+	c := Defaults(env(map[string]string{"HOME": "/h"}))
+	if c.MaxFilesPerSecond != 100 || c.VerifyEvery != 24*time.Hour {
+		t.Fatalf("defaults %d %v", c.MaxFilesPerSecond, c.VerifyEvery)
+	}
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, env(map[string]string{"HOME": "/h"}))
+	}
+	got, err := load("[sweep]\nmax_files_per_second = 25\nverify_every = \"2d\"\n")
+	if err != nil || got.MaxFilesPerSecond != 25 || got.VerifyEvery != 48*time.Hour {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got, err = load("[sweep]\nmax_files_per_second = 0\nverify_every = \"0\"\n"); err != nil || got.MaxFilesPerSecond != 0 || got.VerifyEvery != 0 {
+		t.Fatalf("zero must mean unlimited / verify every sweep: %+v %v", got, err)
+	}
+	for _, bad := range []string{
+		"[sweep]\nmax_files_per_second = -1\n",
+		"[sweep]\nmax_files_per_second = 2000000\n",
+		"[sweep]\nverify_every = \"1m\"\n", // under the 15m sweep.interval
+		"[sweep]\nverify_every = \"-1h\"\n",
+	} {
+		if _, err := load(bad); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}

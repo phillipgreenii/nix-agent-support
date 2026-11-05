@@ -221,7 +221,7 @@ func TestIngestPathRegistryLocksAreMeasured(t *testing.T) {
 func copierResult() copier.Result { return copier.Result{} }
 
 // A same-size, same-mtime rewrite is invisible to the incremental sweep; the
-// periodic full verification (the cache older than verifyEvery) ingests every
+// periodic full verification (a cached entry past its deadline) ingests every
 // file again and so finds it.
 func TestSweepSkipsUnchangedUntilFullVerification(t *testing.T) {
 	e := newEnv(t, false)
@@ -254,7 +254,10 @@ func TestSweepSkipsUnchangedUntilFullVerification(t *testing.T) {
 	}
 	// Age the verification: the next sweep ingests everything again.
 	d.seen.mu.Lock()
-	d.seen.verifiedAt = d.clock.Now().Add(-verifyEvery - time.Minute)
+	for k, c := range d.seen.caught {
+		c.until = d.clock.Now().Add(-time.Minute)
+		d.seen.caught[k] = c
+	}
 	d.seen.mu.Unlock()
 	sweep()
 	after := ingestCount(d, "unchanged") + ingestCount(d, "new_generation") + ingestCount(d, "copied")

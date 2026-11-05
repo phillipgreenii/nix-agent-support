@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"hash/fnv"
 	"sync"
 	"time"
 
@@ -24,10 +25,8 @@ type seenFile struct {
 type sweepSeen struct {
 	mu sync.Mutex
 	m  map[string]seenFile
-	// caught is the incremental sweep's cache (see skipUnchanged); verifiedAt
-	// is when it was last emptied for a full verification.
-	caught     map[string]caughtUp
-	verifiedAt time.Time
+	// caught is the incremental sweep's cache (see skipUnchanged).
+	caught map[string]caughtUp
 }
 
 func seenOf(fi watcher.FileInfo) seenFile {
@@ -87,31 +86,40 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepUnchangedCandidate}, float64(candidates))
 }
 
-// verifyEvery is how long the incremental sweep trusts its caught-up cache. A
-// sweep that finds the cache older than this ingests every file again (a full
-// verification), which catches what size, mtime and inode cannot: a rewrite
-// that keeps all three.
-const verifyEvery = 24 * time.Hour
-
 // caughtUp is a path the copier ingested to "unchanged" (fully caught up) when
-// it last looked, with what the walk reported then.
+// it last looked, with what the walk reported then. until is when the skip
+// expires and the path is ingested again (the full verification, which catches
+// what size, mtime and inode cannot: a rewrite that keeps all three).
+//
+// Deadlines are spread over the verify_every window so the re-verification is a
+// steady trickle, not a daily burst: a path first cached gets a deadline
+// at a point of the window fixed by a hash of the path; once it has been
+// re-verified it gets the full window, and the spread it started with persists.
 type caughtUp struct {
-	seen seenFile
-	file int64
+	seen  seenFile
+	file  int64
+	until time.Time
 }
 
-// verifyIfDue empties the caught-up cache when the last full verification is
-// older than verifyEvery, so this sweep ingests everything. The cache starts
-// empty, so the first sweep after a start is always a full one. It runs under
-// the watcher's lock before the sweep's events.
-func (d *Daemon) verifyIfDue() {
-	now := d.clock.Now()
-	d.seen.mu.Lock()
-	defer d.seen.mu.Unlock()
-	if d.seen.verifiedAt.IsZero() || now.Sub(d.seen.verifiedAt) >= verifyEvery {
-		d.seen.caught = nil
-		d.seen.verifiedAt = now
+// verifyOffset is the fraction of the window, in [0,1), at which a path is first
+// re-verified: a stable FNV-1a hash of the path.
+func verifyOffset(path string) float64 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(path))
+	return float64(h.Sum32()) / float64(1<<32)
+}
+
+// verifyDeadline returns the skip deadline for a caught-up entry. c is the previous entry for the path
+// (ok false when the path was never cached).
+func (d *Daemon) verifyDeadline(path string, prev caughtUp, had bool, now time.Time) time.Time {
+	every := d.cfg.VerifyEvery
+	if had && !prev.until.IsZero() {
+		if prev.until.After(now) {
+			return prev.until // not yet due: keep the spread deadline
+		}
+		return now.Add(every) // re-verified now: a full window
 	}
+	return now.Add(time.Duration(verifyOffset(path) * float64(every)))
 }
 
 // skipUnchanged reports whether a sweep event needs no ingest: the path was
@@ -119,10 +127,14 @@ func (d *Daemon) verifyIfDue() {
 // A skipped file still tells the parser about itself, so a parse that failed
 // earlier is retried exactly as a full ingest would.
 func (d *Daemon) skipUnchanged(e watcher.Event) bool {
+	if d.cfg.VerifyEvery <= 0 {
+		return false
+	}
+	now := d.clock.Now()
 	d.seen.mu.Lock()
 	c, ok := d.seen.caught[e.Path]
 	d.seen.mu.Unlock()
-	if !ok || c.seen != seenOf(e.Info) {
+	if !ok || c.seen != seenOf(e.Info) || !now.Before(c.until) {
 		return false
 	}
 	d.prs.Notify(c.file)
@@ -147,5 +159,6 @@ func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	if d.seen.caught == nil {
 		d.seen.caught = map[string]caughtUp{}
 	}
-	d.seen.caught[e.Path] = caughtUp{seen: seenOf(e.Info), file: res.File}
+	prev, had := d.seen.caught[e.Path]
+	d.seen.caught[e.Path] = caughtUp{seen: seenOf(e.Info), file: res.File, until: d.verifyDeadline(e.Path, prev, had, d.clock.Now())}
 }

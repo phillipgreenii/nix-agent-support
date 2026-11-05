@@ -222,3 +222,12 @@ the next sweep within `sweep.interval`.
 
 Epic with seven children T1 to T7 and the edges above. Sizes: T1 M, T2 M, T3 M, T4 S, T5 S, T6 S, T7 S (gated
 verification). Labels `agent-support`, `pg-claude-code-recorder`.
+
+## Addendum (2026-11-05): paced sweep and spread verification
+
+`sweep.verify_every` is now a real config key (default 24 h, 0 verifies every sweep, otherwise at least
+`sweep.interval`). Instead of emptying the whole caught-up cache once per window (a burst of one full pass), each
+cached path carries its own deadline: the first one is a stable hash-of-path point inside the window, a re-verified
+path gets a full window, so the re-ingest is a steady trickle of files / verify_every per second. A new
+`sweep.max_files_per_second` (default 100, 0 unlimited) paces the sweep's own ingests and the first catch-up on the
+daemon clock; hint-driven ingest is not paced.

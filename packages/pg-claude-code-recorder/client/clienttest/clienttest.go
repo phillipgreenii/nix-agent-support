@@ -86,6 +86,7 @@ func Start(t *testing.T, opts ...Options) *Env {
 	e.Procs = proc.NewFake()
 	e.cfg = config.Defaults(func(string) string { return "" })
 	e.cfg.ClaudeDir, e.cfg.StateDir, e.cfg.Socket, e.cfg.CopyThrottle = e.ClaudeDir, e.StateDir, e.Socket, 0
+	e.cfg.MaxFilesPerSecond = 0
 	if len(opts) > 0 {
 		e.clk, e.events, e.real = opts[0].Clock, opts[0].Events, opts[0].RealProcs
 		if opts[0].Control {

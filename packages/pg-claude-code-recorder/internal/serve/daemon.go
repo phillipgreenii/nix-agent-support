@@ -112,6 +112,8 @@ type Daemon struct {
 
 	// seen is the last observation of each path (sweep_files_total).
 	seen sweepSeen
+	// sweepPace caps the files the sweep and the catch-up ingest per second.
+	sweepPace *pacer
 
 	// firstParse is closed once the start-up parse finished; the event settle
 	// loop makes its first pass after it.
@@ -192,7 +194,7 @@ func Open(opt Options) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, stop: make(chan struct{}), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
+	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, sweepPace: newPacer(opt.Clock, cfg.MaxFilesPerSecond), stop: make(chan struct{}), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
 	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
 	if err != nil {
@@ -366,8 +368,11 @@ func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Resu
 
 func (d *Daemon) sink(e watcher.Event) {
 	d.noteSeen(e)
-	if e.Sweep && d.skipUnchanged(e) {
-		return
+	if e.Sweep {
+		if d.skipUnchanged(e) {
+			return
+		}
+		d.sweepPace.wait() // the sweep's ingests only; a live file's hint is never paced
 	}
 	res, err := d.ingestErr(e.Path)
 	d.noteCaughtUp(e, res, err)
@@ -394,7 +399,6 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 		found[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}] = true
 	}
 	d.countSweepFiles(files)
-	d.verifyIfDue()
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}
@@ -435,14 +439,20 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	// sync (copier.IngestBatch); the newest-first order and the low-space check
 	// are unchanged. A batch is durable as a unit: a crash inside one leaves the
 	// files of that batch uncommitted and the next backfill copies them again.
-	for start := 0; start < len(sorted); start += backfillBatch {
+	batch := backfillBatch
+	if r := d.cfg.MaxFilesPerSecond; r > 0 {
+		// A paced catch-up uses batches of a tenth of a second's files, so the
+		// burst after a wait stays small against the cap.
+		batch = min(backfillBatch, max(1, r/10))
+	}
+	for start := 0; start < len(sorted); start += batch {
 		select {
 		case <-d.stop:
 			return
 		default:
 		}
 		var paths []string
-		for _, f := range sorted[start:min(start+backfillBatch, len(sorted))] {
+		for _, f := range sorted[start:min(start+batch, len(sorted))] {
 			if d.sett.LowSpace() {
 				// Low-space mode stops backfilling Conversations not yet copied.
 				if fl, _ := d.st.FilesByCurrentPath(f.Path); len(fl) == 0 {
@@ -451,6 +461,9 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 				}
 			}
 			paths = append(paths, f.Path)
+		}
+		for range paths {
+			d.sweepPace.wait() // catch-up shares the sweep's cap
 		}
 		for _, br := range d.cp.IngestBatch(paths) {
 			res := d.afterIngest(br.Path, br.Result, br.Err)

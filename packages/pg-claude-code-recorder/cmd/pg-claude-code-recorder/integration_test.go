@@ -101,7 +101,7 @@ func newDaemonEnv(t *testing.T) *daemonEnv {
 	if err := os.MkdirAll(filepath.Join(d.claude, "projects", "example-proj"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	conf := fmt.Sprintf("claudeDir = %q\nstateDir = %q\nsocket = %q\nlogFile = %q\n[copy]\nthrottle = \"0s\"\n",
+	conf := fmt.Sprintf("claudeDir = %q\nstateDir = %q\nsocket = %q\nlogFile = %q\n[copy]\nthrottle = \"0s\"\n[sweep]\nmax_files_per_second = 0\n",
 		d.claude, d.state, d.sock, d.logFile)
 	if err := os.WriteFile(d.cfg, []byte(conf), 0o600); err != nil {
 		t.Fatal(err)
