@@ -126,6 +126,9 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 		return "", fmt.Errorf("isolation for %s: %w", beadID, ErrNoWorktreeDir)
 	}
 	path := filepath.Join(worktreeDir, beadID)
+	// resumeBranch is set when an interrupted checkout held unique commits: the
+	// recreated worktree then starts at the branch's own tip, not repoRoot's HEAD.
+	resumeBranch := false
 	// Reuse: if the path is already a worktree root, keep it. A path that does
 	// not exist yet is never an existing worktree — treat that the same as the
 	// intended not-a-repository signal. Any OTHER error is a real failure (e.g.
@@ -138,9 +141,11 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 		if !ok || !HasStaleIndexLock(admin, time.Now(), StaleIndexLockAge) {
 			return path, nil
 		}
-		if err := discardInterrupted(ctx, open, reuse, path, repoRoot, beadID); err != nil {
+		keep, err := discardInterrupted(ctx, open, reuse, path, worktreeDir, repoRoot, beadID)
+		if err != nil {
 			return "", err
 		}
+		resumeBranch = keep
 		// fall through: create afresh
 	} else if !errors.Is(err, gitclient.ErrNotARepository) && !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("probe worktree %s: %w", path, err)
@@ -169,7 +174,13 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 	// CreateWorktree streams (returns a *gitclient.Handle once git has started);
 	// wait for it here, buffered, so a failure surfaces exactly as before. A nil
 	// Handle (a test fake that does no real git work) has nothing to wait on.
-	h, err := wm.CreateWorktree(ctx, path, branch, gitclient.CreateWorktreeOptions{ResetBranch: true})
+	createOpts := gitclient.CreateWorktreeOptions{ResetBranch: true}
+	if resumeBranch {
+		// -B <branch> <path> <branch>: re-attach to the branch's current tip, so
+		// its unique commits survive.
+		createOpts.StartPoint = branch
+	}
+	h, err := wm.CreateWorktree(ctx, path, branch, createOpts)
 	if err == nil && h != nil {
 		err = h.Wait()
 	}
@@ -280,8 +291,10 @@ func isRealDir(p string) bool {
 const StaleIndexLockAge = 10 * time.Minute
 
 // ErrInterruptedCheckout is returned by Ensure when an existing bead worktree is
-// an interrupted checkout but cannot be proven free of unique commits, so it is
-// neither reused nor discarded.
+// an interrupted checkout and the repo cannot say whether its branch holds
+// unique commits (no ref reader, or the commit count failed), so it is neither
+// reused nor discarded. A branch KNOWN to hold unique commits is recovered, not
+// refused (see discardInterrupted).
 var ErrInterruptedCheckout = errors.New("worktree: interrupted checkout (stale index.lock) with unique commits")
 
 // HasStaleIndexLock reports whether admin (a worktree's git admin directory)
@@ -313,24 +326,48 @@ func adminDir(path string) (string, bool) {
 	return filepath.Clean(admin), true
 }
 
-// discardInterrupted force-removes an interrupted-checkout worktree so Ensure can
-// recreate it, only when its branch holds no commit repoRoot's HEAD lacks.
-func discardInterrupted(ctx context.Context, open Opener, wt gitclient.WorktreeManager, path, repoRoot, beadID string) error {
+// discardInterrupted clears an interrupted-checkout worktree so Ensure can
+// recreate it. When repoRoot's HEAD lacks nothing the branch holds, the worktree
+// is force-removed and the caller recreates it at HEAD (returns false). When the
+// branch holds unique commits they live in the branch ref, so the directory is
+// NOT deleted: it is renamed into a sibling "<worktreeDir>-interrupted" holding
+// area (keeping any uncommitted edits recoverable), its stale registration is
+// pruned, and the caller re-attaches the worktree to the branch's own tip
+// (returns true). Refusing outright, as before, made every later dispatch of the
+// bead fail the same way forever. ErrInterruptedCheckout is now returned only
+// when uniqueness cannot be determined at all.
+func discardInterrupted(ctx context.Context, open Opener, wt gitclient.WorktreeManager, path, worktreeDir, repoRoot, beadID string) (bool, error) {
 	branch := "pg-router/" + beadID
 	root, err := open(ctx, repoRoot)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", repoRoot, err)
+		return false, fmt.Errorf("open %s: %w", repoRoot, err)
 	}
 	refs, ok := root.(gitclient.RefReader)
 	if !ok {
-		return fmt.Errorf("%s: %w", path, ErrInterruptedCheckout)
+		return false, fmt.Errorf("%s: %w", path, ErrInterruptedCheckout)
 	}
-	if ahead, err := refs.CommitsAhead(ctx, "HEAD", branch); err != nil || ahead > 0 {
-		return fmt.Errorf("%s: %w", path, ErrInterruptedCheckout)
+	ahead, err := refs.CommitsAhead(ctx, "HEAD", branch)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", path, ErrInterruptedCheckout)
+	}
+	if ahead > 0 {
+		aside := filepath.Join(worktreeDir+"-interrupted", fmt.Sprintf("%s-%d", beadID, time.Now().UnixNano()))
+		if err := os.MkdirAll(filepath.Dir(aside), 0o755); err != nil {
+			return false, fmt.Errorf("mkdir holding dir for %s: %w", path, err)
+		}
+		slog.Warn("worktree: moving interrupted checkout with unique commits aside and re-attaching its branch",
+			"path", path, "aside", aside, "branch", branch, "unique_commits", ahead)
+		if err := os.Rename(path, aside); err != nil {
+			return false, fmt.Errorf("move interrupted worktree %s aside: %w", path, err)
+		}
+		if err := root.PruneWorktrees(ctx); err != nil {
+			return false, fmt.Errorf("prune after moving %s aside: %w", path, err)
+		}
+		return true, nil
 	}
 	slog.Warn("worktree: discarding interrupted checkout (stale index.lock)", "path", path)
 	if err := wt.RemoveWorktree(ctx, path, true); err != nil {
-		return fmt.Errorf("remove interrupted worktree %s: %w", path, err)
+		return false, fmt.Errorf("remove interrupted worktree %s: %w", path, err)
 	}
-	return nil
+	return false, nil
 }

@@ -455,8 +455,13 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     entries are not edits; once every other guard holds (no row, no live process, no lock, no
     unique commit) it MUST be removed with force. A lock file that is not empty, or is younger than
     the grace window, MUST NOT be treated as an interrupted checkout. A dispatch MUST NOT reuse
-    such a worktree either: it discards it (with the same no-unique-commit proof) and creates a
-    fresh one;
+    such a worktree either. When the branch holds no commit the canonical clone's `HEAD` lacks, it
+    discards the worktree and creates a fresh one. When the branch DOES hold such commits (they live
+    in the branch ref), the dispatch MUST NOT fail and MUST NOT delete them: it moves the old
+    directory aside (so uncommitted edits stay recoverable), drops its stale registration, and
+    re-attaches a fresh worktree to the branch's own tip, so a redispatch of the bead proceeds
+    instead of failing the same way on every retry. Only when the commit count cannot be read does
+    it refuse, as an interrupted-checkout failure;
   - no live dispatch holds the per-bead worktree lock. Every dispatch of a role with worktree
     isolation MUST hold that lock, shared, from before it creates the worktree until it returns;
     the operating system drops it when its holder dies, so a killed handler stops protecting its

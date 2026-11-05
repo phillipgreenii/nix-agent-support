@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/x/gitclient"
 	"github.com/phillipgreenii/x/gitfixture"
@@ -607,5 +608,110 @@ func TestEnsure_emptyWorktreeDirFailsClearly(t *testing.T) {
 	}
 	if len(o.calls) != 0 || len(o.wtm.calls) != 0 {
 		t.Errorf("must not touch git: opens=%v creates=%v", o.calls, o.wtm.calls)
+	}
+}
+
+// Real git: a killed checkout (aged zero-byte index.lock) whose branch holds a
+// commit the repo HEAD lacks must be recovered, not refused: the branch keeps
+// its tip, the worktree is re-attached to it, the old directory (with its
+// uncommitted edit) is preserved aside, and a second Ensure just reuses it.
+func TestEnsure_interruptedCheckoutWithUniqueCommits_recoversBranchRealGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	repoRoot := newCommittedRepo(t)
+	wtDir := filepath.Join(t.TempDir(), "worktrees")
+	open := realOpener(t)
+	const bead = "zr-loop"
+	branch := "pg-router/" + bead
+
+	path, err := Ensure(ctx, open, wtDir, repoRoot, bead)
+	if err != nil {
+		t.Fatalf("first Ensure: %v", err)
+	}
+	// A unique commit on the bead branch, made inside the worktree.
+	if err := os.WriteFile(filepath.Join(path, "work.txt"), []byte("committed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wc, err := open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, ok := wc.(gitclient.Committer)
+	if !ok {
+		t.Fatalf("client %T lacks Committer", wc)
+	}
+	if err := cm.Add(ctx, "work.txt"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	h, err := cm.Commit(ctx, "unique work")
+	if err == nil {
+		err = h.Wait()
+	}
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	// An uncommitted edit, then the killed-checkout residue.
+	if err := os.WriteFile(filepath.Join(path, "scratch.txt"), []byte("uncommitted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	admin, ok := adminDir(path)
+	if !ok {
+		t.Fatal("no admin dir")
+	}
+	lock := filepath.Join(admin, "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * StaleIndexLockAge)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	tip := func() string {
+		rc, err := open(ctx, repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ahead, err := rc.(gitclient.RefReader).CommitsAhead(ctx, "HEAD", branch)
+		if err != nil {
+			t.Fatalf("CommitsAhead: %v", err)
+		}
+		return fmt.Sprint(ahead)
+	}
+	if got := tip(); got != "1" {
+		t.Fatalf("precondition: branch ahead = %s, want 1", got)
+	}
+
+	got, err := Ensure(ctx, open, wtDir, repoRoot, bead)
+	if err != nil {
+		t.Fatalf("Ensure over interrupted checkout with unique commits: %v", err)
+	}
+	if errors.Is(err, ErrInterruptedCheckout) {
+		t.Fatal("must not refuse")
+	}
+	if got != path {
+		t.Errorf("path = %q, want %q", got, path)
+	}
+	// Branch ref still holds its unique commit, and it is checked out in the new tree.
+	if g := tip(); g != "1" {
+		t.Errorf("branch ahead after recovery = %s, want 1 (tip lost)", g)
+	}
+	if b, err := os.ReadFile(filepath.Join(path, "work.txt")); err != nil || string(b) != "committed" {
+		t.Errorf("recovered worktree lacks the branch commit: %q %v", b, err)
+	}
+	// The uncommitted edit is preserved in the holding area, not deleted.
+	held, _ := filepath.Glob(filepath.Join(wtDir+"-interrupted", bead+"-*", "scratch.txt"))
+	if len(held) != 1 {
+		t.Errorf("uncommitted edit not preserved aside: %v", held)
+	}
+	// A second Ensure for the same bead no longer fails (no lock left).
+	got2, err := Ensure(ctx, open, wtDir, repoRoot, bead)
+	if err != nil || got2 != path {
+		t.Fatalf("second Ensure = %q, %v; want reuse of %q", got2, err, path)
+	}
+	if g := tip(); g != "1" {
+		t.Errorf("branch ahead after second Ensure = %s, want 1", g)
 	}
 }
