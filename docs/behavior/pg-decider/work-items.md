@@ -244,11 +244,11 @@ bd list --all --limit 0 --metadata-field repo=<repo> --metadata-field pr_number=
 blocked or closed item, and an assigned item whatever its status, is not. Given the PR's review items
 in every state, the rule applies the first row that holds:
 
-| Condition                                                          | Plan                                                                                                                            |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| An item of ANY state has `head_sha` equal to the PR's current head | Nothing: skip `review-pending` when one of them is open, else `already handled`                                                 |
-| An unclaimed item exists                                           | One `update` of that item: its `head_sha`, the head suffix of its `dedup_key` and its title move to the current head; no create |
-| Otherwise                                                          | One `create` for the current head                                                                                               |
+| Condition                                                          | Plan                                                                                                                                                                              |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An item of ANY state has `head_sha` equal to the PR's current head | One `close` of each unclaimed item whose `head_sha` is older (reason: superseded); with none, skip `review-pending` when one of them is open, else `already handled`              |
+| An unclaimed item exists                                           | One `update` of that item: its `head_sha`, the head suffix of its `dedup_key` and its title move to the current head; no create; any other unclaimed item is closed as superseded |
+| Otherwise                                                          | One `create` for the current head                                                                                                                                                 |
 
 Notes on the rule:
 
@@ -258,11 +258,17 @@ Notes on the rule:
   blocks a create, and a legacy closed item at the current head blocks one too.
 - **A burst of pushes yields one item.** While no reviewer has claimed the item, each push refreshes
   it, so the item that survives is the one for the head the burst ended on.
+- **An unclaimed item for an older head is retired once the current head has an item.** A reviewer
+  that died before closing its item, whose claim was later released, leaves an open unclaimed item
+  for an older head; with an item at the current head it would otherwise sit in the queue forever
+  and be offered again. It is closed as superseded by the item at the current head (as a merged PR
+  closes every open review item, `INV-DECIDER-31`), and the close is re-checked live like the
+  refresh.
 - **A claimed item for an older head is left alone.** Its reviewer is refused at submit when the head
   moved, and the new item lets the next reviewer start without waiting. A deferred or blocked item
   is left alone too and does not block the item for the new head.
-- **The refresh is re-checked live.** `apply` reads the item live before the update, and abandons
-  it as `skipped-stale` when a claim landed in the meantime (see "Executing actions" in
+- **The refresh is re-checked live.** `apply` reads the item live before the update or the
+  superseded close, and abandons it as `skipped-stale` when a claim landed in the meantime (see "Executing actions" in
   [`plan-and-apply.md`](plan-and-apply.md)). A refresh keeps the entity part of the item's key.
 - **A closed review item is never reopened.** The review rule alone creates review items, and no rule
   reopens one: a reopened PR whose head already has a reviewed item gets none, and a head that
@@ -476,9 +482,10 @@ not absent: it means unset.
 - **INV-DECIDER-29.** <!-- uuid: 8e24e8f0-d524-4dc8-8463-79b467ce3bd7 --> A PR MAY have several `review-pr` items over time. The review rule MUST
   create nothing when an item of any state has `head_sha` equal to the PR's current head (decided on
   metadata, never on the key), MUST otherwise refresh an unclaimed item (status `open`, no assignee)
-  in place or create one item for the current head, MUST leave a claimed, deferred or blocked item
-  alone, and MUST NOT reopen a closed review item. A refresh MUST NOT rewrite an item that was
-  claimed since the view was read.
+  in place or create one item for the current head, MUST close every other unclaimed item whose
+  `head_sha` is not the current head as superseded once an item exists at the current head, MUST
+  leave a claimed, deferred or blocked item alone, and MUST NOT reopen a closed review item. A
+  refresh or a superseded close MUST NOT rewrite an item that was claimed since the view was read.
 - **INV-DECIDER-30.** <!-- uuid: 9e18d7d6-f9f2-40cb-9e17-a46c52fda384 --> A work item that matches neither by `node_id` nor by title shape is
   unadoptable, and its disposition MUST be ADOPT or CLOSE; it MUST NOT be left alone.
 - **INV-DECIDER-31.** <!-- uuid: 212b3917-157b-4c58-bbb7-54fd4b0fc34d --> A merged or closed PR MUST have every open `review-pr` item of it closed, a

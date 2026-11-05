@@ -25,6 +25,9 @@ const (
 	// reviewTransitionRefreshHead is the transition of moving an unclaimed
 	// review item to the current head.
 	reviewTransitionRefreshHead = "refresh-head"
+	// reviewTransitionSupersedeClose is the transition of closing an unclaimed
+	// review item for an older head once an item exists at the current head.
+	reviewTransitionSupersedeClose = "supersede-close"
 )
 
 func init() {
@@ -43,6 +46,9 @@ func init() {
 //     its head_sha, its dedup_key suffix and its title move to the current head,
 //     so a burst of pushes before any claim yields one item;
 //   - else one item is created for the current head;
+//   - when an item exists at the current head, every UNCLAIMED item for an
+//     older head is closed as superseded by it (a claimed, deferred or blocked
+//     one is left alone);
 //   - a claimed item for an older head is left alone, and a closed one is never
 //     reopened: only this rule creates review items.
 //
@@ -87,6 +93,16 @@ func (reviewHeadAdvanced) Evaluate(in decide.Input) decide.Result {
 	}
 
 	if !force && len(atHead) > 0 {
+		cover := atHead[0]
+		for _, it := range atHead {
+			if it.Open() {
+				cover = it
+				break
+			}
+		}
+		if closes := reviewSupersedeCloses(items, cover.ID, head); len(closes) > 0 {
+			return decide.Result{Actions: closes}
+		}
 		open := atHead[0]
 		for _, it := range atHead {
 			if it.Open() {
@@ -104,6 +120,13 @@ func (reviewHeadAdvanced) Evaluate(in decide.Input) decide.Result {
 	var actions []action.Action
 	if target != nil {
 		actions = append(actions, reviewRefresh(*target, items, v, head, force))
+		// Any other unclaimed item is superseded by the refreshed one; closing it
+		// in the same plan keeps the rule at a fixed point after one apply.
+		for _, it := range items {
+			if it.ID != target.ID {
+				actions = append(actions, reviewSupersedeCloses([]workitem.Item{it}, target.ID, head)...)
+			}
+		}
 	} else {
 		actions = append(actions, reviewCreate(in, items, head, force))
 	}
@@ -111,6 +134,31 @@ func (reviewHeadAdvanced) Evaluate(in decide.Input) decide.Result {
 		actions = append(actions, reviewConsume(v, head)...)
 	}
 	return decide.Result{Actions: actions}
+}
+
+// reviewSupersedeCloses plans one close of each unclaimed item whose head_sha
+// is not the current head, as superseded by the item cover that holds the
+// current head. The apply step re-reads each item live (facts.transition) and
+// abandons the close when a claim landed since the view was read.
+func reviewSupersedeCloses(items []workitem.Item, cover, head string) []action.Action {
+	var acts []action.Action
+	for _, it := range items {
+		if it.Metadata["head_sha"] == head || !reviewUnclaimed(it) {
+			continue
+		}
+		target := it.ID
+		acts = append(acts, action.Action{
+			Op:     action.OpClose,
+			Kind:   string(workitem.KindReviewPR),
+			Target: &target,
+			Fields: action.Fields{Description: "superseded by " + cover + " at the current head " + head},
+			Facts: map[string]any{
+				"head_sha": head, "reviewed_head_sha": it.Metadata["head_sha"], "superseded_by": cover,
+				reviewTransitionFact: reviewTransitionSupersedeClose,
+			},
+		})
+	}
+	return acts
 }
 
 // reviewUnclaimed reports whether an item is free to be refreshed: its status

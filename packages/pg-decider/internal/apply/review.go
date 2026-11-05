@@ -21,17 +21,19 @@ import (
 const (
 	reviewFactTransition        = "transition"
 	reviewTransitionRefreshHead = "refresh-head"
+	reviewTransitionSupersede   = "supersede-close"
 	reviewStatusOpen            = "open"
 )
 
 // isReviewRefresh reports whether a is the review rule's refresh of an
-// unclaimed item.
+// unclaimed item, or its close of one superseded by an item at the current head.
 func isReviewRefresh(a action.Action) bool {
-	if a.Op != action.OpUpdate || a.Kind != string(workitem.KindReviewPR) {
+	if a.Kind != string(workitem.KindReviewPR) {
 		return false
 	}
 	t, _ := a.Facts[reviewFactTransition].(string)
-	return t == reviewTransitionRefreshHead
+	return a.Op == action.OpUpdate && t == reviewTransitionRefreshHead ||
+		a.Op == action.OpClose && t == reviewTransitionSupersede
 }
 
 // recheckReview is the live conditions of a refresh: the item is exactly open
@@ -52,6 +54,10 @@ func (r *runner) refreshReview(ctx context.Context, a action.Action, finish fini
 		return finish(OutcomeFailed, "", fmt.Errorf("%s action has no target work item", a.Op))
 	}
 	env, id := r.in.Env, *a.Target
+	what := "head refresh"
+	if a.Op == action.OpClose {
+		what = "supersede close"
+	}
 	// abandon writes nothing and no audit comment; the refresh repairs the stale
 	// store row so that the next run does not plan the same write again.
 	abandon := func(err error) Event {
@@ -63,9 +69,13 @@ func (r *runner) refreshReview(ctx context.Context, a action.Action, finish fini
 		return abandon(fmt.Errorf("live read of %s failed, nothing was written: %w", id, err))
 	}
 	if v := recheckReview(live); v.abandon {
-		return abandon(fmt.Errorf("head refresh of %s abandoned, %s since the view was read", id, v.reason))
+		return abandon(fmt.Errorf("%s of %s abandoned, %s since the view was read", what, id, v.reason))
 	}
-	if _, err := call(ctx, env, updateArgs(env, id, a.Fields, false)); err != nil {
+	args := updateArgs(env, id, a.Fields, false)
+	if a.Op == action.OpClose {
+		args = closeArgs(env, id, a)
+	}
+	if _, err := call(ctx, env, args); err != nil {
 		return finish(OutcomeFailed, id, err)
 	}
 	r.refresh(ctx, id)

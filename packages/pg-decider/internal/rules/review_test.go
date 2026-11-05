@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
@@ -204,6 +205,30 @@ func TestReviewHeadAdvancedClosedItemIsNotReopenedANewItemIsCreated(t *testing.T
 	as := reviewWantActions(t, "advanced_closed", 1)
 	reviewWantCreate(t, as[0], "bd-1", "mine")
 	reviewWantNoReopen(t, as)
+}
+
+// An open unclaimed item for an older head, once an item exists at the current
+// head, is closed as superseded: otherwise it sits in the queue forever.
+func TestReviewSupersededUnclaimedOlderItemIsClosed(t *testing.T) {
+	as := reviewWantActions(t, "superseded_open_older_closed_head", 1)
+	a := as[0]
+	if a.Op != action.OpClose || a.Target == nil || *a.Target != "bd-2" || a.Kind != "review-pr" {
+		t.Fatalf("want a close of bd-2, got %+v", a)
+	}
+	if a.Facts[reviewTransitionFact] != reviewTransitionSupersedeClose || a.Facts["superseded_by"] != "bd-3" {
+		t.Errorf("facts: %v", a.Facts)
+	}
+	if !strings.Contains(a.Fields.Description, "superseded") {
+		t.Errorf("reason: %q", a.Fields.Description)
+	}
+}
+
+func TestReviewClaimedOlderItemIsLeftAloneWhenAnItemExistsAtHead(t *testing.T) {
+	reviewWantSkip(t, "superseded_claimed_older_closed_head", action.ReasonAlreadyHandled)
+}
+
+func TestReviewClosedOlderItemIsNotClosedAgain(t *testing.T) {
+	reviewWantSkip(t, "superseded_older_closed_head_after", action.ReasonAlreadyHandled)
 }
 
 func TestReviewUnchangedHeadOpenItemIsReviewPending(t *testing.T) {

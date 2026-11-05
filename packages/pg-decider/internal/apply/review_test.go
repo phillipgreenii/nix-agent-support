@@ -149,3 +149,48 @@ func TestReviewRefreshReadsLiveOnlyForTheRefreshTransition(t *testing.T) {
 		t.Errorf("an update without the refresh transition made a live read: %q", got)
 	}
 }
+
+func reviewSupersedeAction() action.Action {
+	return action.Action{
+		Op: action.OpClose, Kind: "review-pr", Target: str(reviewRefreshID), Rule: "review.head-advanced",
+		Fields: action.Fields{Description: "superseded by rv-3 at the current head 9f3c1e2"},
+		Facts:  map[string]any{"transition": "supersede-close", "head_sha": "9f3c1e2"},
+	}
+}
+
+// A superseded close is re-read live: an unclaimed open item is closed.
+func TestReviewSupersedeCloseClosesAnUnclaimedItemAfterALiveRead(t *testing.T) {
+	d := newDouble(t, reviewRefreshShow(reviewRefreshLive("open", "")))
+	r := focusRun(t, d, nil, nil, nil, reviewSupersedeAction())
+	if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeApplied}) {
+		t.Fatalf("outcomes %v (events %+v)", outcomes(r), r.Events)
+	}
+	cl := focusLines(d, "pg-connector issue close")
+	if len(cl) != 1 || !strings.Contains(cl[0], "issue close "+reviewRefreshID) || !strings.Contains(cl[0], "superseded") {
+		t.Fatalf("closes = %q", cl)
+	}
+	if got := focusLines(d, "pg-connector issue show"); len(got) != 1 {
+		t.Errorf("want one live read, got %q", got)
+	}
+}
+
+// A claim that landed since the view was read abandons the close.
+func TestReviewSupersedeCloseIsAbandonedWhenAClaimLanded(t *testing.T) {
+	for name, live := range map[string]string{
+		"in progress": reviewRefreshLive("in_progress", "worker-1"),
+		"assigned":    reviewRefreshLive("open", "worker-1"),
+		"deferred":    reviewRefreshLive("deferred", ""),
+		"closed":      reviewRefreshLive("closed", ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newDouble(t, reviewRefreshShow(live))
+			r := focusRun(t, d, nil, nil, nil, reviewSupersedeAction())
+			if got := focusLines(d, "pg-connector issue close"); len(got) != 0 {
+				t.Fatalf("wrote %q", got)
+			}
+			if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeSkippedStale}) || r.ExitCode != 0 {
+				t.Fatalf("outcomes %v exit %d", outcomes(r), r.ExitCode)
+			}
+		})
+	}
+}
