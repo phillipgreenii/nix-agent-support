@@ -9349,6 +9349,54 @@
                     PG_DESK_E2E_PG_CONNECTOR = "${pkgs.pg-connector}/bin/pg-connector";
                   });
 
+              # pg-desk INTEGRATION tier. ON DEMAND ONLY: build it by hand when the
+              # heartbeat probe or the pg-connector client path changes
+              # (`nix build .#checks.<system>.pg-desk-integration-tests`). It MUST
+              # NOT be wired into any hook, run-unit-tests, pre-land or land gate.
+              # It runs only the `//go:build integration` test in cmd/pg-desk, which
+              # drives the REAL umbrella and the REAL GitHub backend client (as
+              # processes) against a socket with no daemon behind it; the built
+              # binaries are handed over by env var because the sandbox cannot
+              # build a sibling module. Fails when the test does not report PASS.
+              pg-desk-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-desk-integration-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-desk
+                      ./packages/pg-connector
+                      ./packages/pg-router-probe
+                    ];
+                  };
+                  modRoot = "pg-desk";
+                  gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    PG_DESK_E2E_PG_CONNECTOR = "${pkgs.pg-connector}/bin/pg-connector";
+                    PG_DESK_E2E_PG_CONNECTOR_GITHUB = "${pkgs.pg-connector-github}/bin/pg-connector-github";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/integration.log"
+                      if ! go test -tags integration -count=1 -v -timeout 10m \
+                        -run '^TestHeartbeatProbeWithTheDaemonDownLeavesTheSourceRowsStale$' \
+                        ./cmd/pg-desk > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-desk-integration-tests: FAILED" >&2
+                        exit 1
+                      fi
+                      if ! grep -q -- '^--- PASS: TestHeartbeatProbeWithTheDaemonDownLeavesTheSourceRowsStale ' "$log"; then
+                        cat "$log"
+                        echo "pg-desk-integration-tests: the test did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                      echo "pg-desk-integration-tests: the daemon-down heartbeat test reported PASS"
+                      runHook postBuild
+                    '';
+                  });
+
               # work-report: whole-module Go test gate, same Pattern-B shape as
               # pg-desk-go-tests above (go.mod `replace => ../pg-connector`).
               work-report-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
