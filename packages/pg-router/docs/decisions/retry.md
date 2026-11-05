@@ -65,7 +65,7 @@ narrow, **opt-in** exception, in the same spirit as `DEC-OBS-3`'s:
 - **Bounded.** At most `max_dispatch_retries` re-runs per event, hard-capped at 3 by config
   validation, and never past the event's `expiresAt` (`INV-EVT-4`: an attempt on an expired event
   is its last). The count is in memory only (`DEC-EVENT-1`: no attempt history on disk), so a
-  restart starts it over, still bounded by `expiresAt`.
+  restart starts it over, still bounded by `expiresAt`. _(Proposed, not ratified: `ADR 0121` would persist the count and add a bounded redrive.)_
 - **Mechanism: a pre-accept decline.** The failed attempt is reported to the queue as a decline, so
   the existing `INV-FAIL-2` cadence (exponential backoff with a cap) spaces the re-run and the
   per-handler serial FIFO is preserved. This is what stops a host-overload storm from amplifying:

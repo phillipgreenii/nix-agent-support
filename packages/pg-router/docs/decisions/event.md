@@ -46,6 +46,11 @@ anything, which is durable state bought for no behavioral gain.
 **Relation to `ADR 0031`.** `ADR 0031` decided the durable, ordered, de-duped queue and deliberately
 left the clock origin open. This entry closes that residue; the queue decision itself is unchanged.
 
+**Proposed amendment (not yet ratified).** `ADR 0121` proposes narrowing "no attempt history" to "no
+per-offer or per-decline history": the core would persist a retry count written only when a retry is
+scheduled, and a redrive generation carried on the event. Until the operator ratifies it, the decision
+above stands unchanged.
+
 **Not decided here.** The wire encoding of the two fields and the schema artifact that carries them
 are the implementation's own; the conformance suite (`INV-INTF-2`) is where the two sides reconcile.
 
