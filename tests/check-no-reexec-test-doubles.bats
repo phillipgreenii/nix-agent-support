@@ -107,6 +107,12 @@ check() { run --separate-stderr "$SCRIPT" --root "$ROOT" --allowlist "$ALLOW" "$
   [ "$status" -eq 2 ]
 }
 
+@test "a gitignored agent worktree under .claude/worktrees is not scanned" {
+  seed .claude/worktrees/other/pkg/a_test.go
+  check
+  [ "$status" -eq 0 ]
+}
+
 @test "the repository's own tree passes with its own allowlist" {
   run --separate-stderr "$SCRIPT" --root "$BATS_TEST_DIRNAME/.." --allowlist "$REPO_ALLOWLIST"
   [ "$status" -eq 0 ]

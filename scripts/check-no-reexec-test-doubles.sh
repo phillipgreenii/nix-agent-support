@@ -82,7 +82,7 @@ whole_tree=0
 if [ "${#files[@]}" -eq 0 ]; then
   whole_tree=1
   while IFS= read -r f; do files+=("$f"); done < <(
-    find . \( -name .git -o -name .worktrees -o -name vendor -o -name testdata -o -name node_modules \) -prune \
+    find . \( -name .git -o -name .worktrees -o -path ./.claude/worktrees -o -name vendor -o -name testdata -o -name node_modules \) -prune \
       -o -type f -name '*_test.go' -print | sed 's|^\./||' | sort
   )
 fi
