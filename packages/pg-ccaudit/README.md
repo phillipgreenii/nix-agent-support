@@ -477,6 +477,15 @@ snapshot) before the records that follow it. With the recorder down, ingest says
 "recorder offline", exits 0 and polls again at the next tick; it never falls back
 to the files.
 
+A snapshot is resumable: each page is committed together with its position (a
+`<subscription>.snapshot` row in `feed_cursors` holding the snapshot cursor and
+the next page token), and the subscription's own cursor is saved only with the
+last page. A run cut short by the recorder's read deadline therefore continues at
+the next page on the next run, and that (retryable) deadline error ends the cycle
+with "ingest cycle skipped ... will poll again later" and exit 0. A saved
+position the recorder rejects as expired restarts the snapshot from the first
+page.
+
 Known gap: the recorder does not index `promptSource`, so it is filled only on
 lines the ingest reads whole (user text, tool calls, error results).
 `status` and `query` no longer compare the index with the disk.

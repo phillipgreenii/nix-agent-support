@@ -245,3 +245,82 @@ func TestRecorderIngestRerunKeepsRawDerivedColumns(t *testing.T) {
 		t.Fatalf("a replayed line event dropped prompt_source: %q %v", src, err)
 	}
 }
+
+// A snapshot that spans more pages than one run gets to finish (the recorder's
+// read deadline cuts it) must continue at the next page on the next run, not
+// restart from the first page.
+func TestRecorderIngestResumesASnapshotAfterADeadline(t *testing.T) {
+	env := clienttest.Start(t)
+	env.Write(rel, userTyped+asstPlain+callOne+resErr+callTwo+resOK)
+	env.Settle()
+	db := openDB(t)
+	c := env.Dial(context.Background())
+
+	deadline := &client.Error{Name: "unavailable", Message: `Post "http://recorder/v1/snapshot": context deadline exceeded`}
+	var seen []client.SnapshotRequest
+	failAt := 3 // the third snapshot request of the first run hits the deadline
+	opt := RecorderOptions{Client: c, PageLimit: 1}
+	opt.beforeSnapshot = func(req client.SnapshotRequest) error {
+		seen = append(seen, req)
+		if len(seen) == failAt {
+			return deadline
+		}
+		return nil
+	}
+	_, err := RunRecorder(context.Background(), db, opt)
+	if err == nil || !client.Retryable(err) {
+		t.Fatalf("first run: want a retryable deadline error, got %v", err)
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM feed_cursors WHERE name = 'lines'`); n != 0 {
+		t.Fatalf("the lines cursor was saved before the snapshot finished")
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM events`); n != 2 {
+		t.Fatalf("events=%d after two committed pages, want 2", n)
+	}
+	var pos string
+	if err := db.QueryRow(`SELECT cursor FROM feed_cursors WHERE name = 'lines.snapshot'`).Scan(&pos); err != nil || pos == "" {
+		t.Fatalf("no snapshot position kept: %q %v", pos, err)
+	}
+
+	// The next run continues: its first snapshot request carries the saved
+	// position, and it finishes every subscription.
+	seen = nil
+	failAt = -1
+	if _, err := RunRecorder(context.Background(), db, opt); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(seen) == 0 || seen[0].At == "" || seen[0].Page == "" {
+		t.Fatalf("the second run restarted the snapshot: first request %+v", seen)
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM events`); n != 6 {
+		t.Fatalf("events=%d, want 6", n)
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM tool_calls`); n != 2 {
+		t.Fatalf("tool_calls=%d, want 2", n)
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM feed_cursors WHERE name LIKE '%.snapshot'`); n != 0 {
+		t.Fatalf("a finished snapshot left its position behind")
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM feed_cursors`); n != 4 {
+		t.Fatalf("cursors=%d, want one per subscription", n)
+	}
+}
+
+// A saved snapshot position the recorder no longer honours (its epoch changed)
+// restarts the snapshot instead of failing every run.
+func TestRecorderIngestRestartsASnapshotWithAnExpiredPosition(t *testing.T) {
+	env := clienttest.Start(t)
+	env.Write(rel, callOne+resErr)
+	env.Settle()
+	db := openDB(t)
+	if _, err := db.Exec(`INSERT INTO feed_cursors (name, cursor) VALUES ('lines.snapshot', '999:1|r1')`); err != nil {
+		t.Fatal(err)
+	}
+	st := recSweep(t, db, env.Dial(context.Background()))
+	if st.ToolCalls != 1 {
+		t.Fatalf("stats: %+v", st)
+	}
+	if n := rowCount(t, db, `SELECT COUNT(*) FROM events`); n != 2 {
+		t.Fatalf("events=%d, want 2", n)
+	}
+}

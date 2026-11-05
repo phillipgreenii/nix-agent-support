@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -132,8 +133,10 @@ func (b *Backoff) Reset() { b.next = 0 }
 // Retryable reports whether err is one the retry guidance backs off on: busy,
 // unavailable or a daemon that is down (a restart).
 func Retryable(err error) bool {
-	e, ok := err.(*Error)
-	if !ok {
+	// errors.As, not a type assertion: a caller that wraps the error with %w
+	// (a snapshot deadline, say) must still be told to poll again later.
+	var e *Error
+	if !errors.As(err, &e) {
 		return false
 	}
 	switch e.Name {

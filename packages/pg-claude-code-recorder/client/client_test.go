@@ -214,6 +214,9 @@ func TestBackoffStartsAtOneSecondDoublesAndStopsAtThirty(t *testing.T) {
 			t.Errorf("%s must be retryable", name)
 		}
 	}
+	if !client.Retryable(fmt.Errorf("snapshot lines: %w", &client.Error{Name: wire.ErrUnavailable})) {
+		t.Error("a wrapped unavailable (a snapshot deadline) must stay retryable")
+	}
 	for _, name := range []string{wire.ErrBadRequest, wire.ErrNotFound, wire.ErrCursorExpired} {
 		if client.Retryable(&client.Error{Name: name}) {
 			t.Errorf("%s must not be retryable", name)

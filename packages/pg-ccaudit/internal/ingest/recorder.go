@@ -61,6 +61,10 @@ type RecorderOptions struct {
 	Now func() time.Time
 	// Progress receives the final summary line. nil discards it.
 	Progress io.Writer
+
+	// beforeSnapshot is a test seam called before every snapshot request; a
+	// non-nil error stands in for that request failing (a recorder deadline).
+	beforeSnapshot func(req client.SnapshotRequest) error
 }
 
 // RecorderStats is the outcome of a recorder-backed sweep.
@@ -138,7 +142,7 @@ func RunRecorder(ctx context.Context, db *sql.DB, opt RecorderOptions) (Recorder
 			// A reset wiped the rows of a re-parsed file for every table. The other
 			// subscriptions' cursors may already be past the records that rewrite
 			// them, so they start over from a snapshot (idempotent upserts).
-			if _, err := db.ExecContext(ctx, `DELETE FROM feed_cursors WHERE name <> ?`, SubLines); err != nil {
+			if _, err := db.ExecContext(ctx, `DELETE FROM feed_cursors WHERE name NOT IN (?, ?)`, SubLines, snapName(SubLines)); err != nil {
 				return st, fmt.Errorf("rewind cursors after a reset: %w", err)
 			}
 		}
@@ -158,6 +162,15 @@ func loadCursor(ctx context.Context, db *sql.DB, name string) (string, error) {
 	}
 	return c, err
 }
+
+// snapName is the feed_cursors row that holds a subscription's snapshot
+// position while its initial snapshot is under way. The value is
+// "<at cursor>|<next page token>": the pair the recorder needs to continue the
+// snapshot at the next page. The row exists only between the first page and the
+// last, so a subscription's own cursor row is still absent (a cursor is saved
+// only with the last page) and a crash or a deadline resumes instead of
+// restarting from the first page.
+func snapName(sub string) string { return sub + ".snapshot" }
 
 func saveCursor(ctx context.Context, tx *sql.Tx, name, cur string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO feed_cursors (name, cursor) VALUES (?, ?)
@@ -187,7 +200,7 @@ func runSub(ctx context.Context, db *sql.DB, opt RecorderOptions, s subscription
 			}
 			return fmt.Errorf("feed %s: %w", s.name, err)
 		}
-		if err := applyEntries(ctx, db, opt, s.name, ans.Entries, ans.NextCursor, st); err != nil {
+		if err := applyEntries(ctx, db, opt, s.name, ans.Entries, cursorWriter(s.name, ans.NextCursor), st); err != nil {
 			return err
 		}
 		cur = ans.NextCursor
@@ -197,31 +210,87 @@ func runSub(ctx context.Context, db *sql.DB, opt RecorderOptions, s subscription
 	}
 }
 
+// cursorWriter saves cur as the subscription's cursor in the page's transaction.
+func cursorWriter(name, cur string) func(*sql.Tx) error {
+	if cur == "" {
+		return nil
+	}
+	return func(tx *sql.Tx) error {
+		return saveCursor(context.Background(), tx, name, cur)
+	}
+}
+
 // resync reads a snapshot of the subscription's filter and stores the cursor to
 // tail from. Records already held are upserted again, so it is safe to repeat.
+// Every page is committed together with the snapshot position, so a run that
+// ends part-way (a recorder deadline, a crash) continues at the next page on the
+// next run. A position the recorder no longer honours restarts from the top.
 func resync(ctx context.Context, db *sql.DB, opt RecorderOptions, s subscription, st *RecorderStats) (string, error) {
-	req := client.SnapshotRequest{Where: s.filter, Project: s.project, Limit: opt.PageLimit}
-	first, err := opt.Client.Snapshot(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("snapshot %s: %w", s.name, err)
+	cur, err := resumeSnapshot(ctx, db, opt, s, st)
+	if err == nil || !errors.Is(err, client.ErrCursorExpired) {
+		return cur, err
 	}
-	at := first.Cursor
-	page := first
-	for {
-		last := ""
-		if !page.More {
-			last = at
+	if _, derr := db.ExecContext(ctx, `DELETE FROM feed_cursors WHERE name = ?`, snapName(s.name)); derr != nil {
+		return "", fmt.Errorf("drop snapshot position %s: %w", s.name, derr)
+	}
+	return resumeSnapshot(ctx, db, opt, s, st)
+}
+
+func snapshot(ctx context.Context, opt RecorderOptions, s subscription, req client.SnapshotRequest) (*client.SnapshotAnswer, error) {
+	if opt.beforeSnapshot != nil {
+		if err := opt.beforeSnapshot(req); err != nil {
+			return nil, fmt.Errorf("snapshot %s: %w", s.name, err)
 		}
-		if err := applyEntries(ctx, db, opt, s.name, page.Entries, last, st); err != nil {
+	}
+	ans, err := opt.Client.Snapshot(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot %s: %w", s.name, err)
+	}
+	return ans, nil
+}
+
+func resumeSnapshot(ctx context.Context, db *sql.DB, opt RecorderOptions, s subscription, st *RecorderStats) (string, error) {
+	req := client.SnapshotRequest{Where: s.filter, Project: s.project, Limit: opt.PageLimit}
+	saved, err := loadCursor(ctx, db, snapName(s.name))
+	if err != nil {
+		return "", fmt.Errorf("read snapshot position %s: %w", s.name, err)
+	}
+	var at string
+	var page *client.SnapshotAnswer
+	if i := strings.Index(saved, "|"); i > 0 {
+		at, req.At, req.Page = saved[:i], saved[:i], saved[i+1:]
+	} else {
+		if page, err = snapshot(ctx, opt, s, req); err != nil {
 			return "", err
 		}
-		if !page.More {
+		at = page.Cursor
+		req.At = at
+	}
+	for {
+		if page == nil {
+			if page, err = snapshot(ctx, opt, s, req); err != nil {
+				return "", err
+			}
+		}
+		pg := page
+		page = nil
+		save := func(tx *sql.Tx) error {
+			if pg.More {
+				return saveCursor(ctx, tx, snapName(s.name), at+"|"+pg.NextPage)
+			}
+			if err := saveCursor(ctx, tx, s.name, at); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM feed_cursors WHERE name = ?`, snapName(s.name))
+			return err
+		}
+		if err := applyEntries(ctx, db, opt, s.name, pg.Entries, save, st); err != nil {
+			return "", err
+		}
+		if !pg.More {
 			return at, nil
 		}
-		req.At, req.Page = at, page.NextPage
-		if page, err = opt.Client.Snapshot(ctx, req); err != nil {
-			return "", fmt.Errorf("snapshot %s: %w", s.name, err)
-		}
+		req.Page = pg.NextPage
 	}
 }
 
@@ -277,10 +346,10 @@ func wantsLine(sub string, en client.Entry) bool {
 }
 
 // applyEntries writes one page in one transaction together with the new cursor
-// (cur, when non-empty), so a crash never leaves the cursor ahead of the data.
+// (finish, which saves the cursor or snapshot position), so a crash never leaves the cursor ahead of the data.
 // A reset is applied before the records after it, and a record already held is
 // an upsert on its natural key, so at-least-once delivery cannot double-count.
-func applyEntries(ctx context.Context, db *sql.DB, opt RecorderOptions, sub string, entries []client.Entry, cur string, st *RecorderStats) error {
+func applyEntries(ctx context.Context, db *sql.DB, opt RecorderOptions, sub string, entries []client.Entry, finish func(*sql.Tx) error, st *RecorderStats) error {
 	now := time.Now
 	if opt.Now != nil {
 		now = opt.Now
@@ -355,8 +424,8 @@ func applyEntries(ctx context.Context, db *sql.DB, opt RecorderOptions, sub stri
 			}
 		}
 	}
-	if cur != "" {
-		if err := saveCursor(ctx, tx, sub, cur); err != nil {
+	if finish != nil {
+		if err := finish(tx); err != nil {
 			return fmt.Errorf("save cursor %s: %w", sub, err)
 		}
 	}
