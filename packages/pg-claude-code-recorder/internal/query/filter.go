@@ -348,6 +348,10 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		if len(parts) == 0 {
 			return "", nil, badf("range of %q has no bounds", f.Field)
 		}
+		if e == "r.time_ns" {
+			// An untimed row stores 0, which is no time at all: no bound matches it.
+			parts = append([]string{"r.time_ns>0"}, parts...)
+		}
 		return strings.Join(parts, " AND "), args, nil
 	case f.Under != "":
 		if kind != source.KindPath {

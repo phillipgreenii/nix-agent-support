@@ -12,7 +12,7 @@ import (
 const Name = "session-mode"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // Mode is one session-mode file.
 type Mode struct {

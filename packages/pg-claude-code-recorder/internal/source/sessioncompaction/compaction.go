@@ -12,7 +12,7 @@ import (
 const Name = "session-compaction"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // Marker is one compaction file.
 type Marker struct {

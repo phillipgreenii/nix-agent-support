@@ -18,7 +18,7 @@ import (
 const Name = "session-registry"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // Entry is one registry file.
 type Entry struct {

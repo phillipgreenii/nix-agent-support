@@ -54,15 +54,13 @@ func (p *Parser) ParseTail(file int64, gen int) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	commits, _ := p.cfg.Store.CopyCommits(f.ID)
-	seen := seenAt(commits, g.Gen, g.ParseOffset)
 	err = p.cfg.Store.WithWrite("parse.before-commit", func(rawTx *sql.Tx) error {
 		tx := newPS(rawTx)
 		defer tx.Close()
 		if err := p.genReset(tx, f, src, g, g.ParseOffset); err != nil {
 			return err
 		}
-		if err := p.insert(tx, f, src, caps, g, g.ParseOffset, len(buf), recs, seen); err != nil {
+		if err := p.insert(tx, f, src, caps, g, g.ParseOffset, len(buf), recs); err != nil {
 			return err
 		}
 		res, err := tx.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, g.CopyOffset, f.ID, g.Gen, g.CopyOffset)

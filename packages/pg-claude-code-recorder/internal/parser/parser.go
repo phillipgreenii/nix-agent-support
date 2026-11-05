@@ -334,14 +334,13 @@ func (p *Parser) ParseFile(file int64) (int, error) { return p.parseFiles([]int6
 // genWork is one generation with bytes to parse: everything a transaction needs
 // to continue it from start.
 type genWork struct {
-	f       store.File
-	src     source.Source
-	caps    source.Captures
-	g       store.Generation
-	fh      *store.Pointer
-	commits []store.CopyCommit
-	start   int64
-	end     int64
+	f     store.File
+	src   source.Source
+	caps  source.Captures
+	g     store.Generation
+	fh    *store.Pointer
+	start int64
+	end   int64
 	// rel, start0, end0 and stepNS feed the per-file step figures: the path
 	// (hashed, never printed), the bytes the call had to parse and the
 	// nanoseconds of read, parse and insert it took.
@@ -433,9 +432,8 @@ func (p *Parser) prepGen(f store.File, src source.Source, g store.Generation) (*
 	if err != nil {
 		return nil, err
 	}
-	commits, _ := p.cfg.Store.CopyCommits(f.ID)
 	return &genWork{
-		f: f, src: src, caps: caps, g: g, fh: fh, commits: commits, start: g.ParseOffset, end: g.CopyOffset,
+		f: f, src: src, caps: caps, g: g, fh: fh, start: g.ParseOffset, end: g.CopyOffset,
 		rel: rel, start0: g.ParseOffset, end0: g.CopyOffset,
 	}, nil
 }
@@ -502,7 +500,7 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 					if err := p.genReset(tx, w.f, w.src, w.g, cur); err != nil {
 						return err
 					}
-					n, err := p.chunk(tx, w.fh, w.f, w.src, w.caps, w.g, w.commits, cur, w.end, &cnt)
+					n, err := p.chunk(tx, w.fh, w.f, w.src, w.caps, w.g, cur, w.end, &cnt)
 					w.stepNS += p.flushSteps(tx)
 					if err != nil {
 						return err
@@ -641,7 +639,6 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		return 0, err
 	}
 	defer func() { _ = fh.Close() }()
-	commits, _ := p.cfg.Store.CopyCommits(f.ID)
 
 	start := g.ParseOffset
 	if reparse {
@@ -668,7 +665,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		}
 		off := start
 		for off < end {
-			n, err := p.chunk(tx, fh, f, src, caps, g, commits, off, end, &count)
+			n, err := p.chunk(tx, fh, f, src, caps, g, off, end, &count)
 			p.flushSteps(tx)
 			if err != nil {
 				return err
@@ -746,7 +743,7 @@ WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.
 // newline within end. It returns the bytes consumed (0 when only a torn line is
 // left).
 func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Source, caps source.Captures,
-	g store.Generation, commits []store.CopyCommit, off, end int64, count *int,
+	g store.Generation, off, end int64, count *int,
 ) (int64, error) {
 	size := int64(p.cfg.ChunkBytes)
 	a := tx.acc
@@ -819,12 +816,11 @@ func (p *Parser) chunk(tx *pstx, fh *store.Pointer, f store.File, src source.Sou
 				}
 				continue
 			}
-			seen := seenAt(commits, g.Gen, abs)
 			if timed {
 				*a.seq++
 				a.sample, a.inInsert = *a.seq%sampleEvery == 0, true
 			}
-			ierr := p.insert(tx, f, src, caps, g, abs, ll, recs, seen)
+			ierr := p.insert(tx, f, src, caps, g, abs, ll, recs)
 			if timed {
 				a.inInsert = false
 				a.st.StepNS[store.StepInsert] += int64(a.now() - t1)
@@ -937,7 +933,7 @@ func ownTimestamp(r source.Record, tns int64) int {
 	return 0
 }
 
-func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
+func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record) error {
 	unk := map[[2]string]int{}
 	nameID := func(name string) (int64, error) { return p.fieldNameID(tx, name) }
 	// Fields a source declares into an extension table, only where the table exists.
@@ -946,7 +942,8 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		routes = p.ext[src.Name()]
 	}
 	for _, r := range recs {
-		tns := seen
+		// An untimed record stores 0: the copy time is not the record time.
+		var tns int64
 		if !r.Time.IsZero() {
 			tns = r.Time.UnixNano()
 		}

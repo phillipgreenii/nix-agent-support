@@ -11,9 +11,12 @@ type sessionBatch struct {
 }
 
 type sessionDelta struct {
-	last  int64
-	count int64
-	files map[int64]struct{}
+	last int64
+	// firstNS is the oldest nonzero record time seen in this transaction
+	// (0: every record was untimed).
+	firstNS int64
+	count   int64
+	files   map[int64]struct{}
 	// first is the first lookup id seen in this transaction for the version,
 	// entrypoint and user type slots (nil: none seen).
 	first [3]any
@@ -80,6 +83,9 @@ func (tx *pstx) noteSession(ref, tns, file int64, lk [lkCount]any) {
 	if tns > d.last {
 		d.last = tns
 	}
+	if tns > 0 && (d.firstNS == 0 || tns < d.firstNS) {
+		d.firstNS = tns
+	}
 	d.count++
 	d.files[file] = struct{}{}
 	for i, slot := range [3]int{lkVersion, lkEntrypoint, lkUserType} {
@@ -106,6 +112,13 @@ func (p *Parser) flushSessions(tx *pstx) error {
 ON CONFLICT(session_ref) DO UPDATE SET last_time_ns=MAX(last_time_ns,excluded.last_time_ns), record_count=record_count+excluded.record_count`,
 			ref, d.last, d.count); err != nil {
 			return err
+		}
+		// A session whose first record was untimed stored first_time_ns 0: the
+		// first timed record fills it, and a nonzero value is never changed.
+		if d.firstNS > 0 {
+			if _, err := tx.Exec(`UPDATE sessions SET first_time_ns=? WHERE session_ref=? AND first_time_ns=0`, d.firstNS, ref); err != nil {
+				return err
+			}
 		}
 		// The session's first version, entrypoint and user type: the first record
 		// that carries one fills it; a later one never changes it.

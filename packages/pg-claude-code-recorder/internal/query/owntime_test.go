@@ -142,3 +142,29 @@ func TestOwnTimestampServedFromTimeNs(t *testing.T) {
 		}
 	}
 }
+
+// A since/until time filter never returns an untimed row: its time_ns is 0, so
+// an upper bound alone must not match it.
+func TestTimeFilterNeverReturnsAnUntimedRow(t *testing.T) {
+	k := testkit.New(t)
+	k.Add("example-p1", "orig.jsonl", ownTimeFixture)
+	k.Parse()
+	if n := k.Count(`SELECT COUNT(*) FROM records WHERE item=-1 AND time_ns=0`); n != 2 {
+		t.Fatalf("%d untimed lines stored with time 0, want 2", n)
+	}
+	for _, req := range []string{
+		`{"where":{"field":"time","range":{"to":"2030-01-01T00:00:00Z"}},"select":["uuid"],"order":[{"by":"uuid"}]}`,
+		`{"where":{"field":"time","range":{"lte":"2030-01-01T00:00:00Z"}},"select":["uuid"],"order":[{"by":"uuid"}]}`,
+		`{"where":{"field":"time","range":{"gte":"1970-01-01T00:00:00Z"}},"select":["uuid"],"order":[{"by":"uuid"}]}`,
+	} {
+		a := qe(t, k.Engine, req)
+		for _, r := range a.Rows {
+			if len(r) == 1 && r[0] == "o3" || r[0] == "o4" {
+				t.Fatalf("%s returned an untimed line: %s", req, js(a.Rows))
+			}
+		}
+		if len(a.Rows) == 0 {
+			t.Fatalf("%s returned nothing", req)
+		}
+	}
+}

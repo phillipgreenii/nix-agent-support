@@ -23,7 +23,8 @@ const Name = "claude-transcript"
 
 // ParserVersion is stamped on every record; bump it to re-parse stored copies.
 // Version 2 added the saved_to field of a tool_result.
-const ParserVersion = 2
+// Version 3 stores time 0 for a line with no timestamp of its own.
+const ParserVersion = 3
 
 // savedToRe finds the path a tool_result preview says the full output was saved
 // to: the part from "projects/" on, a suffix of the saved-to path and the

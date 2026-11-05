@@ -17,7 +17,7 @@ import (
 const Name = "claude-tool-result-body"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // Source implements source.Source.
 type Source struct{}

@@ -17,7 +17,7 @@ import (
 const Name = "claude-control-end"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // RelPrefix is the path prefix of an end file as the parser sees it: the ends
 // root lies outside the Claude directory, so the parser names its files

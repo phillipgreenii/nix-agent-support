@@ -14,7 +14,7 @@ import (
 const Name = "claude-subagent-meta"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 1
+const ParserVersion = 2
 
 // Meta is one meta.json file.
 type Meta struct {

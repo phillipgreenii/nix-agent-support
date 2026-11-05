@@ -221,3 +221,33 @@ func TestCwdQueryPlanStartsFromTheSessionIndex(t *testing.T) {
 		}
 	}
 }
+
+// An untimed transcript row (time_ns 0) is not a time: it is never the newest
+// cwd source and never the last activity, even when it was written after the
+// last timed row.
+func TestUntimedTranscriptRowsAreIgnored(t *testing.T) {
+	for _, byRef := range []bool{false, true} {
+		f := newCwdFixture(t)
+		f.rec("s", transcript, 100, [2]any{"cwd", "/timed"})
+		f.rec("s", transcript, 0, [2]any{"cwd", "/untimed"})
+		f.rec("only-untimed", transcript, 0, [2]any{"cwd", "/untimed"})
+		f.recFile("s", transcript, 5, 0)
+
+		q := cwdQuery
+		if byRef {
+			q = cwdQueryRef
+		}
+		var cwd sql.NullString
+		err := f.db.QueryRow(q, "s").Scan(&cwd)
+		if err != nil || cwd.String != "/timed" {
+			t.Fatalf("byRef=%v: cwd %q err %v, want /timed", byRef, cwd.String, err)
+		}
+		if err := f.db.QueryRow(q, "only-untimed").Scan(&cwd); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("byRef=%v: an untimed-only session has a cwd: %q %v", byRef, cwd.String, err)
+		}
+		last, _, err := sessionFileFacts(f.db, "s", byRef)
+		if err != nil || last != 100 {
+			t.Fatalf("byRef=%v: last activity %d err %v, want 100", byRef, last, err)
+		}
+	}
+}

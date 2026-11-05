@@ -15,7 +15,7 @@ import (
 const Name = "claude-history"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 2
+const ParserVersion = 3
 
 // Entry is one history.jsonl line.
 type Entry struct {

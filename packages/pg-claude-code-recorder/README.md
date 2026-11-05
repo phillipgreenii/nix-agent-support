@@ -338,6 +338,15 @@ field, which has always read `time_ns`, is the indexed way to bound a time. Ever
 because no version 3 file was ever deployed, rebuilding straight to version 4 is the one rebuild to run (see
 "Rebuild").
 
+**Untimed records carry no time.** A record whose line has no timestamp of its own stores `time_ns = 0` and
+`own_time = 0`, not the time the recorder copied it (a record time is stored only when it is known to be the
+record's own). A child record keeps its line's time. Every reader of `time_ns` skips a zero: a session's first
+and last time and the lifecycle last-activity and cwd lookups ignore untimed rows, and a `time` range filter
+never matches one (so a lone upper bound does not return them). Existing rows are re-derived through the parser
+version: a source whose stamped `ParserVersion` differs from the stored one is re-parsed from its stored
+snapshots on the next parse, so this change bumps every source's version (transcript and history to 3, the
+others to 2) and the live daemon re-parses on first start; the copies, not the rows, are the source of truth.
+
 ```sh
 echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}' | pg-claude-code-recorder query
 echo '{"mode":"substring","q":"--no-verify","fields":["tool_use.input"]}' | pg-claude-code-recorder search

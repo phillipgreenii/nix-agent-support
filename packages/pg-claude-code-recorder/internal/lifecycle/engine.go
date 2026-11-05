@@ -383,7 +383,7 @@ func (m *model) conversation(session string) (Conversation, bool) {
 // purpose: it can fail at prepare time. TestCwdQueryPlanStartsFromTheSessionIndex
 // guards the plan.
 const cwdQuery = `SELECT f.s FROM records r CROSS JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
-WHERE r.session=? AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
+WHERE r.session=? AND r.source='claude-transcript' AND r.time_ns>0 ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
 
 // fileFactsQuery reads, for one session's transcript records, the newest
 // write per file in one grouped statement. The newest write overall is the
@@ -400,7 +400,7 @@ const fileFactsQuery = `SELECT file_id, MAX(time_ns) FROM records WHERE session=
 // too), while these facts are about the transcript only, so reading them would
 // change the answer.
 const cwdQueryRef = `SELECT f.s FROM records r CROSS JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='cwd')
-WHERE r.session_ref=(SELECT session_ref FROM sessions WHERE session_id=?) AND r.source='claude-transcript' ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
+WHERE r.session_ref=(SELECT session_ref FROM sessions WHERE session_id=?) AND r.source='claude-transcript' AND r.time_ns>0 ORDER BY r.time_ns DESC, r.id DESC LIMIT 1`
 
 const fileFactsQueryRef = `SELECT file_id, MAX(time_ns) FROM records WHERE session_ref=(SELECT session_ref FROM sessions WHERE session_id=?) AND source='claude-transcript' GROUP BY file_id ORDER BY file_id`
 
