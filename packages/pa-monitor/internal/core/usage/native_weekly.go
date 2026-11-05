@@ -1,6 +1,9 @@
 package usage
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // MondayAnchor returns the 00:00 UTC of the Monday on or before t. ccusage
 // anchors weekly buckets on Monday; the store/proto paths parse the Period as a
@@ -40,8 +43,15 @@ func CurrentWeekly(records []Record, prices PriceTable, now time.Time) *WeeklyEn
 		return nil
 	}
 	var cost float64
-	for model, tok := range byModel {
-		c, _ := prices.Cost(model, tok)
+	// Sum in model order: a float sum over a map would differ in the last
+	// digits between runs.
+	models := make([]string, 0, len(byModel))
+	for model := range byModel {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	for _, model := range models {
+		c, _ := prices.Cost(model, byModel[model])
 		cost += c
 	}
 	return &WeeklyEntry{

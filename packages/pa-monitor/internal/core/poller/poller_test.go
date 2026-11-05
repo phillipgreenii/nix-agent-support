@@ -311,7 +311,7 @@ func makeSubagentDisruptFixture(t *testing.T) (string, string) {
 	cwd := filepath.Join(root, "cwd")
 	slug := claudeSlug(cwd)
 	projectDir := filepath.Join(claudeHome, "projects", slug)
-	sessID := "sub-sess"
+	sessID := "0b1c2d3e-0000-4000-8000-000000000001"
 	subagentsDir := filepath.Join(projectDir, sessID, "subagents")
 	for _, d := range []string{sessionsDir, projectDir, cwd, subagentsDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -351,7 +351,7 @@ func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
 	var found bool
 	for _, d := range tree.Dirs {
 		for _, s := range d.Sessions {
-			if s.SessionID != "sub-sess" {
+			if s.SessionID != "0b1c2d3e-0000-4000-8000-000000000001" {
 				continue
 			}
 			found = true

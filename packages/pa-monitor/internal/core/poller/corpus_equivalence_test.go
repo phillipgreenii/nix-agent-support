@@ -116,22 +116,22 @@ func buildEquivalenceCorpus(t *testing.T) (sessionsDir, home string, pidAlive fu
 	t2 := time.Unix(1_776_000_200, 0)
 
 	// 1) Named "Alpha", no main error -> subagent terminal error IS surfaced.
-	eqSession(t, sessionsDir, 900001, "alpha", "Alpha", "/w/a")
-	aMain := eqTranscript(t, home, "/w/a", "alpha.jsonl", t1,
+	eqSession(t, sessionsDir, 900001, "0b1c2d3e-0000-4000-8000-000000000002", "Alpha", "/w/a")
+	aMain := eqTranscript(t, home, "/w/a", "0b1c2d3e-0000-4000-8000-000000000002.jsonl", t1,
 		eqUserPrompt("hi-alpha"), eqTitle("Alpha"), eqAssistant("claude-a", 100, 40))
 	eqSubagent(t, aMain, "agent-1.jsonl", t1, eqAPIError("server_error", "boom", "2026-07-20T10:00:00Z"))
 
 	// 2) Main terminal error present -> subagent error must NOT override it (gate).
-	eqSession(t, sessionsDir, 900002, "mainerr", "", "/w/b")
-	bMain := eqTranscript(t, home, "/w/b", "mainerr.jsonl", t1,
+	eqSession(t, sessionsDir, 900002, "0b1c2d3e-0000-4000-8000-000000000003", "", "/w/b")
+	bMain := eqTranscript(t, home, "/w/b", "0b1c2d3e-0000-4000-8000-000000000003.jsonl", t1,
 		eqUserPrompt("hi-b"), eqAssistant("claude-b", 50, 20),
 		eqAPIError("server_error", "main-boom", "2026-07-20T11:00:00Z"))
 	eqSubagent(t, bMain, "agent-1.jsonl", t1, eqAPIError("rate_limit", "sub-boom", "2026-07-20T10:00:00Z"))
 
 	// 3) Dead PID with subagents NEWER than transcript: dead branch uses
 	//    TranscriptMTime, not maxActivity — both paths must agree.
-	eqSession(t, sessionsDir, 900003, "dead", "", "/w/c")
-	cMain := eqTranscript(t, home, "/w/c", "dead.jsonl", t0,
+	eqSession(t, sessionsDir, 900003, "0b1c2d3e-0000-4000-8000-000000000004", "", "/w/c")
+	cMain := eqTranscript(t, home, "/w/c", "0b1c2d3e-0000-4000-8000-000000000004.jsonl", t0,
 		eqUserPrompt("hi-c"), eqAssistant("claude-c", 10, 5))
 	eqSubagent(t, cMain, "agent-1.jsonl", t2) // newer, but no error
 

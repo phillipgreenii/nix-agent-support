@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"sort"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
@@ -72,14 +73,36 @@ func (o *UsagePricingObserver) prunePaths(activePaths map[string]bool) {
 	}
 }
 
-// flatten concatenates every path's records. Order is irrelevant: ActiveBlock
-// sorts by timestamp and CurrentWeekly sums, so map-iteration order cannot change
-// either result (unlike the Limits fold's newestPct tiebreak).
+// flatten concatenates every file's records in a content order (time, model,
+// tokens). The block and weekly costs are float sums, and neither the map's
+// iteration order nor the recorder's file numbering is stable between runs, so an
+// order taken from either would let two runs over the same records differ in the
+// last digits.
 func (o *UsagePricingObserver) flatten() []usage.Record {
 	var all []usage.Record
 	for _, r := range o.recs {
 		all = append(all, r...)
 	}
+	sort.SliceStable(all, func(i, j int) bool {
+		a, b := all[i], all[j]
+		if !a.Timestamp.Equal(b.Timestamp) {
+			return a.Timestamp.Before(b.Timestamp)
+		}
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		x, y := a.Tokens, b.Tokens
+		if x.Input != y.Input {
+			return x.Input < y.Input
+		}
+		if x.Output != y.Output {
+			return x.Output < y.Output
+		}
+		if x.CacheCreation != y.CacheCreation {
+			return x.CacheCreation < y.CacheCreation
+		}
+		return x.CacheRead < y.CacheRead
+	})
 	return all
 }
 

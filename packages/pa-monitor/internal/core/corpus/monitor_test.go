@@ -79,8 +79,8 @@ func TestScan_ResolvesByTitleAndFoldsTranscriptAndSubagents(t *testing.T) {
 	r.env.Register(111, "s1", cwd, "Alpha", true)
 	// The file named for the session id is NOT the one titled "Alpha": the title wins.
 	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "old"), assistantLine("s1", time.Second, "claude-x", 1, 1))
-	r.env.Put(corpustest.TranscriptRel(cwd, "s2"), titleLine("s2", "Alpha"), userLine("s2", time.Minute, "hello"), assistantLine("s2", 2*time.Minute, "claude-x", 100, 50))
-	r.env.Put(corpustest.SubagentRel(cwd, "s2", "a1"), apiErrorLine("s2", 3*time.Minute, "server_error", "boom"))
+	r.env.Put(corpustest.TranscriptRel(cwd, "0b1c2d3e-0000-4000-8000-000000000005"), titleLine("0b1c2d3e-0000-4000-8000-000000000005", "Alpha"), userLine("0b1c2d3e-0000-4000-8000-000000000005", time.Minute, "hello"), assistantLine("0b1c2d3e-0000-4000-8000-000000000005", 2*time.Minute, "claude-x", 100, 50))
+	r.env.Put(corpustest.SubagentRel(cwd, "0b1c2d3e-0000-4000-8000-000000000005", "a1"), apiErrorLine("0b1c2d3e-0000-4000-8000-000000000005", 3*time.Minute, "server_error", "boom"))
 
 	sessions := r.scan(t)
 	if len(sessions) != 1 {

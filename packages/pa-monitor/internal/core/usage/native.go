@@ -74,8 +74,15 @@ func ActiveBlock(records []Record, prices PriceTable, now time.Time) *Block {
 	}
 
 	var cost float64
-	for model, tok := range last.tokens {
-		c, _ := prices.Cost(model, tok)
+	// Sum in model order: a float sum over a map would differ in the last
+	// digits between runs.
+	models := make([]string, 0, len(last.tokens))
+	for model := range last.tokens {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	for _, model := range models {
+		c, _ := prices.Cost(model, last.tokens[model])
 		cost += c
 	}
 	return &Block{
