@@ -269,7 +269,7 @@ func TestSweepSkipsUnchangedUntilFullVerification(t *testing.T) {
 func TestSweepSkipsUnchangedSnapshotFiles(t *testing.T) {
 	e := newEnv(t, false)
 	old := time.Now().Add(-time.Hour)
-	dir := filepath.Join(e.claude, "projects", "example-proj", "sess-1", "tool-results")
+	dir := filepath.Join(e.claude, "projects", "example-proj", "0f8fad5b-d9cb-469f-a165-70867728950e", "tool-results")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
