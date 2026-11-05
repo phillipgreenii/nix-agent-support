@@ -17,7 +17,14 @@ package store
 // migrated: Open refuses it with a SchemaOlderError and the rebuild builds the
 // version 3 layout (Options.V3Layout, which the daemon always sets), after the
 // free-space preflight (see rebuildpreflight.go).
-const SchemaVersion = 3
+//
+// Version 4 adds records.own_time, a marker that the line carried its own
+// timestamp (so records.time_ns is that timestamp, not the time the recorder saw
+// the bytes). The parser then stores no timestamp fields row and the query layer
+// serves the timestamp field from time_ns where the marker is set. A version 3
+// database is not migrated: Open refuses it with a SchemaOlderError and the
+// rebuild builds the version 4 layout.
+const SchemaVersion = 4
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);

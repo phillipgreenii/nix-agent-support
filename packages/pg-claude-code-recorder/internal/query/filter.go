@@ -148,6 +148,9 @@ func (b *builder) expr(name string) (string, source.Kind, *wire.Error) {
 	if d, ok := b.pathFact(stored); ok {
 		return "COALESCE(" + a + ".s," + d + ")", kind, nil
 	}
+	if d, ok := ownTimeFact(stored, kind); ok {
+		return "COALESCE(" + a + ".n," + d + ")", kind, nil
+	}
 	switch kind {
 	case source.KindInt, source.KindBool, source.KindTime:
 		return a + ".n", kind, nil
@@ -379,6 +382,8 @@ func (b *builder) exists(field string, want bool) (string, []any, *wire.Error) {
 			cond = t.present
 		} else if d, ok := b.pathFact(stored); ok {
 			cond = "COALESCE(" + b.alias(stored) + ".s," + d + ") IS NOT NULL"
+		} else if d, ok := ownTimeFact(stored, kind); ok {
+			cond = "COALESCE(" + b.alias(stored) + ".n," + d + ") IS NOT NULL"
 		} else {
 			cond = b.alias(stored) + ".rec_id IS NOT NULL"
 		}
@@ -493,6 +498,20 @@ func (b *builder) addPathJoin() {
 		`ORDER BY p.closed_ns IS NOT NULL, CASE WHEN p.closed_ns IS NULL THEN p.path END, p.first_seen_ns, p.path LIMIT 1)`)
 	pre := strings.TrimRight(b.claudeDir, "/") + "/"
 	b.joinArgs = append(b.joinArgs, len(pre), pre)
+}
+
+// ownTimeFact returns the SQL expression that serves the timestamp field from
+// records.time_ns for a record marked as having its own timestamp (own_time).
+// The parser stores no timestamp fields row for such a record; a row that is
+// stored anyway (an older database, or a value that differed from time_ns) wins.
+// A record without the marker (a line with no timestamp of its own, whose
+// time_ns is the observation time, and every child record) yields NULL, exactly
+// as the absent row did.
+func ownTimeFact(stored string, kind source.Kind) (string, bool) {
+	if stored != "timestamp" || kind != source.KindTime {
+		return "", false
+	}
+	return "CASE WHEN r.own_time=1 THEN r.time_ns END", true
 }
 
 // lookupTables maps the records lookup-id columns to their lookup tables.

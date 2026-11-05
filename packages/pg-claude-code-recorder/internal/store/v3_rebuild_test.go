@@ -33,8 +33,8 @@ func TestVersionTwoStoreIsRefusedAndRebuildsIntoTheVersionThreeLayout(t *testing
 
 	_, err := Open(dir, Options{V3Layout: true})
 	var older *SchemaOlderError
-	if !errors.As(err, &older) || older.Found != 2 || older.Known != 3 {
-		t.Fatalf("Open of a version 2 index: %v, want a SchemaOlderError 2 -> 3", err)
+	if !errors.As(err, &older) || older.Found != 2 || older.Known != SchemaVersion {
+		t.Fatalf("Open of a version 2 index: %v, want a SchemaOlderError 2 -> %d", err, SchemaVersion)
 	}
 	if sum(t, path) != before {
 		t.Fatal("refusing the older schema changed index.db")
@@ -52,7 +52,7 @@ func TestVersionTwoStoreIsRefusedAndRebuildsIntoTheVersionThreeLayout(t *testing
 	_ = s.Read().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&sessionCol)
 	_ = s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='fts_tri'`).Scan(&tri)
 	_ = s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='ext_assistant_usage'`).Scan(&ext)
-	if sessionCol != 0 || tri != 0 || ext != 1 || s.HasSessionText() || !s.SessionRefReady() || s.SchemaVersion() != 3 {
+	if sessionCol != 0 || tri != 0 || ext != 1 || s.HasSessionText() || !s.SessionRefReady() || s.SchemaVersion() != SchemaVersion {
 		t.Fatalf("not the v3 layout: session col %d, fts_tri %d, ext %d, ready %v, version %d", sessionCol, tri, ext, s.SessionRefReady(), s.SchemaVersion())
 	}
 	for _, ix := range []string{"records_session", "records_session_source_time"} {

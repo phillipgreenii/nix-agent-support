@@ -272,6 +272,18 @@ wire protocol, field names and answers are unchanged (a parity test rebuilds one
 compares them). Interning `source` and `type` was not taken. The daemon always builds this layout, and a
 `schema_version` 2 `index.db` is refused by a version 3 binary until it is rebuilt (see "Rebuild").
 
+**Schema version 4** adds `records.own_time`, a marker that the line carried its own `timestamp` (so
+`records.time_ns` is that value and not the time the recorder saw the bytes). A record with the marker gets no
+`timestamp` row in `fields`; the query layer serves the `timestamp` field (filter, `exists`, select, order,
+group, aggregate) from `time_ns` where the marker is set, and a line with no timestamp of its own, and every
+child record (which has none), still has no `timestamp`, exactly as before. The wire protocol, field names and
+answers are unchanged (a parity test compares the served answers with the former stored rows over lines with
+and without a timestamp). A `timestamp` range filter no longer uses the `fields_name_n` index; the `time`
+field, which has always read `time_ns`, is the indexed way to bound a time. Every `schema_version` 3 or older
+`index.db` is refused by a version 4 binary until it is rebuilt: **a rebuild to version 4 is required**, and
+because no version 3 file was ever deployed, rebuilding straight to version 4 is the one rebuild to run (see
+"Rebuild").
+
 ```sh
 echo '{"where":{"field":"type","eq":"assistant"},"group":["model"],"aggregate":[{"fn":"sum","field":"usage.output_tokens","distinct":"message.id","as":"output_tokens"}]}' | pg-claude-code-recorder query
 echo '{"mode":"substring","q":"--no-verify","fields":["tool_use.input"]}' | pg-claude-code-recorder search
@@ -374,7 +386,9 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   refused the same way, untouched and not migrated in place: stop the daemon and run `rebuild` (or
   `serve --rebuild`), which re-derives records, fields and text indexes from the journal and the
   copies into a new file and keeps the old one as `index.db.pre-rebuild`; nothing is deleted before
-  the operator has checked the new file. **Deploying `schema_version` 3**: the first start of a version 3
+  the operator has checked the new file. **Deploying `schema_version` 4** (which includes the version 3
+  layout below): a version 4 binary refuses an `index.db` of version 3 or older the same way, so run the one
+  rebuild below once, to version 4. **Deploying `schema_version` 3**: the first start of a version 3
   binary over a version 2 `index.db` fails with that message and the daemon stays down until the operator
   stops it and runs `pg-claude-code-recorder rebuild` (bulk mode, the daemon stopped). Before it moves
   anything the rebuild checks the free space of the state directory: it needs 85 percent of the size of

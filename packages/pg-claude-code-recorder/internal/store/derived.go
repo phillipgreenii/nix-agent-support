@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS records(
   branch_id INTEGER REFERENCES lk_branch(id),
   version_id INTEGER REFERENCES lk_version(id),
   entrypoint_id INTEGER REFERENCES lk_entrypoint(id),
-  user_type_id INTEGER REFERENCES lk_user_type(id)
+  user_type_id INTEGER REFERENCES lk_user_type(id),
+  own_time INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS lk_cwd(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;
 CREATE TABLE IF NOT EXISTS lk_branch(id INTEGER PRIMARY KEY, v TEXT NOT NULL UNIQUE) STRICT;

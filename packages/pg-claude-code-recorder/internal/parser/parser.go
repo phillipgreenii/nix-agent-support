@@ -837,6 +837,30 @@ func derivable(fl source.Field, caps source.Captures) bool {
 	return false
 }
 
+// ownTimestampField reports whether fl is the timestamp field row whose value
+// is exactly the record's time_ns, which a record carrying the own_time marker
+// serves from time_ns instead of from a stored row.
+func ownTimestampField(fl source.Field, tns int64) bool {
+	return fl.Name == "timestamp" && fl.Kind == source.KindTime && fl.N == tns
+}
+
+// ownTimestamp is the records.own_time marker: 1 when the record has its own
+// timestamp (Record.Time, not the observation time) and its timestamp field
+// holds exactly that value, so the timestamp field is answered from time_ns. A
+// child record has no timestamp field and so is never marked: its time_ns is the
+// line's time, but the child has no timestamp of its own to report.
+func ownTimestamp(r source.Record, tns int64) int {
+	if r.Time.IsZero() {
+		return 0
+	}
+	for _, fl := range r.Fields {
+		if ownTimestampField(fl, tns) {
+			return 1
+		}
+	}
+	return 0
+}
+
 func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record, seen int64) error {
 	unk := map[[2]string]int{}
 	nameID := func(name string) (int64, error) { return p.fieldNameID(tx, name) }
@@ -850,6 +874,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if !r.Time.IsZero() {
 			tns = r.Time.UnixNano()
 		}
+		ownTime := ownTimestamp(r, tns)
 		ref, err := p.sessionRef(tx, r.Session, caps["project"], tns)
 		if err != nil {
 			return err
@@ -860,13 +885,13 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		}
 		var res sql.Result
 		if p.cfg.Store.HasSessionText() {
-			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), r.Session, tns, ref,
-				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType])
+				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType], ownTime)
 		} else {
-			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			res, err = tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				f.ID, g.Gen, off, r.Item, ln, src.Name(), r.Type, src.Version(), tns, ref,
-				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType])
+				lk[lkCwd], lk[lkBranch], lk[lkVersion], lk[lkEntrypoint], lk[lkUserType], ownTime)
 		}
 		if err != nil {
 			return err
@@ -893,7 +918,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 				}
 				continue
 			}
-			if derivable(fl, caps) {
+			if derivable(fl, caps) || (ownTime == 1 && ownTimestampField(fl, tns)) {
 				continue
 			}
 			var s any
