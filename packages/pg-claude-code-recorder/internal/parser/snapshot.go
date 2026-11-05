@@ -53,6 +53,11 @@ func (p *Parser) insertReset(tx *pstx, f store.File, src source.Source, gen int)
 // parseSnapshots parses every stored version of a snapshot file that has no
 // records yet (or that an older parser version produced, when reparse is true
 // or the version differs) and the deletion records of its tombstones.
+//
+// It reads parse_state through Store.Read(), which sees committed state only
+// and is blind to the batch a bulk rebuild still has open; ParseAll flushes the
+// batch (BulkFlush) before it calls this for that reason. The newest stored
+// version is read once: parseVersion hands its bytes to parseTombstones.
 func (p *Parser) parseSnapshots(f store.File, src source.Source, reparse bool) (int, error) {
 	rel, ok := p.relPath(f.ID)
 	if !ok {
@@ -67,7 +72,8 @@ func (p *Parser) parseSnapshots(f store.File, src source.Source, reparse bool) (
 		return 0, err
 	}
 	total := 0
-	for _, sn := range snaps {
+	var lastRaw []byte // the newest version's bytes, when parseVersion read them
+	for i, sn := range snaps {
 		var v int
 		err := p.cfg.Store.Read().QueryRow(`SELECT version FROM parse_state WHERE file_id=? AND gen=?`, f.ID, sn.Version).Scan(&v)
 		have := err == nil
@@ -77,14 +83,17 @@ func (p *Parser) parseSnapshots(f store.File, src source.Source, reparse bool) (
 		if have && v == src.Version() && !reparse {
 			continue
 		}
-		n, err := p.parseVersion(f, src, caps, sn, have)
+		n, raw, err := p.parseVersion(f, src, caps, sn, have)
+		if i == len(snaps)-1 {
+			lastRaw = raw
+		}
 		total += n
 		if err != nil {
 			return total, err
 		}
 	}
 	if ts, ok := src.(source.Tombstoner); ok && len(snaps) > 0 {
-		n, err := p.parseTombstones(f, src, ts, caps, snaps[len(snaps)-1])
+		n, err := p.parseTombstones(f, src, ts, caps, snaps[len(snaps)-1], lastRaw)
 		total += n
 		if err != nil {
 			return total, err
@@ -104,21 +113,23 @@ func (p *Parser) reparseSnapshots(f store.File) error {
 	return err
 }
 
-func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captures, sn store.Snapshot, replace bool) (int, error) {
+// parseVersion parses one stored version and returns the bytes it read (nil
+// when it failed before reading them).
+func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captures, sn store.Snapshot, replace bool) (int, []byte, error) {
 	if replace {
 		// Replacing deletes by (file_id, gen): that needs the deferred indexes.
 		if err := p.cfg.Store.EnsureIndexes(); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 	}
 	fh, err := p.cfg.Store.OpenPointer(f.ID, sn.Version)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	raw, err := io.ReadAll(fh)
 	_ = fh.Close()
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	g := store.Generation{File: f.ID, Gen: sn.Version}
 	recs, perr := src.Parse(caps, raw)
@@ -157,12 +168,13 @@ func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captu
 		}
 		return p.mark(tx)
 	})
-	return count, err
+	return count, raw, err
 }
 
 // parseTombstones writes a deletion record for each tombstone of the file that
-// has none, under the file's latest stored version.
-func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tombstoner, caps source.Captures, last store.Snapshot) (int, error) {
+// has none, under the file's latest stored version. lastRaw is that version's
+// bytes when parseVersion just read them; nil makes this read them itself.
+func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tombstoner, caps source.Captures, last store.Snapshot, lastRaw []byte) (int, error) {
 	ats, err := p.cfg.Store.Tombstones(f.ID)
 	if err != nil {
 		return 0, err
@@ -173,10 +185,11 @@ func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tomb
 			return 0, err
 		}
 	}
-	var lastRaw []byte
-	if fh, err := p.cfg.Store.OpenPointer(f.ID, last.Version); err == nil {
-		lastRaw, _ = io.ReadAll(fh)
-		_ = fh.Close()
+	if lastRaw == nil {
+		if fh, err := p.cfg.Store.OpenPointer(f.ID, last.Version); err == nil {
+			lastRaw, _ = io.ReadAll(fh)
+			_ = fh.Close()
+		}
 	}
 	count := 0
 	for _, at := range ats {

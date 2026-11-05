@@ -249,7 +249,7 @@ func (p *Parser) ParseAll() (first error) {
 			if err := p.cfg.Store.BulkFlush(); err != nil && first == nil {
 				first = err
 			}
-			if _, err := p.ParseFile(f.ID); err != nil && first == nil {
+			if _, err := p.parseLoaded(f); err != nil && first == nil {
 				first = err
 			}
 			continue
@@ -260,7 +260,7 @@ func (p *Parser) ParseAll() (first error) {
 		if err := p.reparseStale(f); err != nil && first == nil {
 			first = err
 		}
-		if _, err := p.ParseFile(f.ID); err != nil && first == nil {
+		if _, err := p.parseLoaded(f); err != nil && first == nil {
 			first = err
 		}
 	}
@@ -273,6 +273,15 @@ func (p *Parser) FileProgress() (done, total int) {
 	return int(p.filesDone.Load()), int(p.filesTotal.Load())
 }
 
+// reparseStale re-parses each parsed generation of f whose parse_state version
+// differs from the source's. It reads parse_state through Store.Read(), which
+// sees committed state only and is blind to the batch a bulk rebuild still has
+// open; that is safe here because a generation's version row is written by the
+// parse of that generation, never by the pass before it in the same file.
+// ReparseGen advances ParseOffset, so a caller MUST re-read Generations after
+// this returns: a Generation fetched before it is stale and would be parsed
+// again from the old offset (in bulk mode a duplicate in records_ident,
+// reported only at FinishRebuild).
 func (p *Parser) reparseStale(f store.File) error {
 	src := p.bySrc[f.Source]
 	gens, err := p.cfg.Store.Generations(f.ID)
@@ -355,13 +364,7 @@ type genWork struct {
 func (p *Parser) parseFiles(ids []int64) (int, error) {
 	p.run.Lock()
 	defer p.run.Unlock()
-	var work []*genWork
-	defer func() {
-		for _, w := range work {
-			_ = w.fh.Close()
-		}
-	}()
-	total := 0
+	var files []store.File
 	var first error
 	for _, id := range ids {
 		f, err := p.cfg.Store.File(id)
@@ -371,6 +374,32 @@ func (p *Parser) parseFiles(ids []int64) (int, error) {
 			}
 			continue
 		}
+		files = append(files, f)
+	}
+	return p.parseStored(files, first)
+}
+
+// parseLoaded is ParseFile for a File the caller already holds (ParseAll got it
+// from AllFiles), so the file is not fetched a second time.
+func (p *Parser) parseLoaded(f store.File) (int, error) {
+	p.run.Lock()
+	defer p.run.Unlock()
+	return p.parseStored([]store.File{f}, nil)
+}
+
+// parseStored is the body of parseFiles for files already fetched; first is an
+// error from fetching them. The caller holds p.run. Generations are read here,
+// after any ReparseGen the caller ran, and never cached across it.
+func (p *Parser) parseStored(files []store.File, first error) (int, error) {
+	var work []*genWork
+	defer func() {
+		for _, w := range work {
+			_ = w.fh.Close()
+		}
+	}()
+	total := 0
+	for _, f := range files {
+		id := f.ID
 		src, ok := p.bySrc[f.Source]
 		if ok && f.Mode == "snapshot" {
 			n, err := p.parseSnapshots(f, src, false)
@@ -390,20 +419,32 @@ func (p *Parser) parseFiles(ids []int64) (int, error) {
 			}
 			continue
 		}
+		// The path and its source match depend on the file, not the generation:
+		// resolve them once, at the first generation with bytes to parse.
+		var rel string
+		var caps source.Captures
+		resolved, matched := false, false
 		for _, g := range gens {
 			if g.ParseOffset >= g.CopyOffset {
 				continue
 			}
-			w, err := p.prepGen(f, src, g)
+			if !resolved {
+				resolved = true
+				if rel, matched = p.relPath(f.ID); matched {
+					caps, matched = src.Match(rel)
+				}
+			}
+			if !matched {
+				continue
+			}
+			w, err := p.prepGen(f, src, g, rel, caps)
 			if err != nil {
 				if first == nil {
 					first = err
 				}
 				continue
 			}
-			if w != nil {
-				work = append(work, w)
-			}
+			work = append(work, w)
 		}
 	}
 	n, err := p.runWork(work)
@@ -417,17 +458,10 @@ func (p *Parser) parseFiles(ids []int64) (int, error) {
 	return total, first
 }
 
-// prepGen opens a generation's copy for a live parse. It returns nil when the
-// file has no path under the Claude directory or no source matches it.
-func (p *Parser) prepGen(f store.File, src source.Source, g store.Generation) (*genWork, error) {
-	rel, ok := p.relPath(f.ID)
-	if !ok {
-		return nil, nil
-	}
-	caps, ok := src.Match(rel)
-	if !ok {
-		return nil, nil
-	}
+// prepGen opens a generation's copy for a live parse; rel and caps are the
+// file's path under the Claude directory and its source match, resolved once
+// per file by the caller.
+func (p *Parser) prepGen(f store.File, src source.Source, g store.Generation, rel string, caps source.Captures) (*genWork, error) {
 	fh, err := p.cfg.Store.OpenPointer(f.ID, g.Gen)
 	if err != nil {
 		return nil, err
