@@ -30,6 +30,7 @@ mkGoApp {
     "cmd/pg-rescue-notify"
     "cmd/pg-rescue-bead"
     "cmd/pg-rescue-claude"
+    "cmd/pg-rescue-triage"
   ];
 
   # The tldr page is a committed pg-rescue.md copied into place the way
