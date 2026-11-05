@@ -69,6 +69,9 @@ func TestEventSettleLoopWakesOnItsTriggers(t *testing.T) {
 	if got := wakeCount(d, "reconcile"); got != 2 {
 		t.Fatalf("reconcile wakes = %v, want 2", got)
 	}
+	// loopDone fires inside the pass, before runTick records the duration, so
+	// stop the daemon first: Close waits for the loop to finish its last pass.
+	_ = d.Close()
 	// Each pass was one settle_tick run, so the wake duration histogram is the
 	// tick duration histogram.
 	if h := d.obs.Reg.Hist(obs.MSettleTickDuration); h == nil || h.Samples != 4 {
