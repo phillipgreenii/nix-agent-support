@@ -186,45 +186,13 @@ func (e *Engine) substring(ctx context.Context, tx store.Querier, req SearchRequ
 	if e.Res == nil {
 		return nil, wire.Errf(wire.ErrUnavailable, "substring search reads the recorder's copies and none are attached")
 	}
-	b := e.builder()
-	wsql, wargs, werr := b.where(req.Where)
+	q, args, fields, werr := e.substringQuery(req)
 	if werr != nil {
 		return nil, werr
-	}
-	e.noteFilter("search", b)
-	fields := e.opaqueFields()
-	if len(req.Fields) > 0 {
-		fields = fields[:0:0]
-		for _, f := range req.Fields {
-			stored, kind, err := b.resolve(f)
-			if err != nil {
-				return nil, err
-			}
-			if !kind.Searchable() {
-				return nil, badf("field %q is not a text or opaque field", f)
-			}
-			if kind == source.KindOpaque {
-				fields = append(fields, stored)
-			}
-		}
 	}
 	if len(fields) == 0 {
 		return ans, nil
 	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(fields)), ",")
-	gen := ""
-	if !req.OldGenerations {
-		gen = " AND r.gen=fl.cur_gen"
-	}
-	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, " + e.sessionCol() + ", r.time_ns" +
-		" FROM texts t JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id" +
-		gen + " " + strings.Join(b.joins, " ") +
-		" WHERE t.field IN (" + ph + ") AND (" + wsql + ") ORDER BY r.time_ns DESC, t.id DESC"
-	args := append([]any{}, b.joinArgs...)
-	for _, f := range fields {
-		args = append(args, f)
-	}
-	args = append(args, wargs...)
 	rs, qerr := tx.Query(q, args...)
 	if qerr != nil {
 		return nil, wire.FromErr(qerr)
@@ -282,6 +250,61 @@ func (e *Engine) substring(ctx context.Context, tx store.Querier, req SearchRequ
 		return nil, wire.FromErr(err)
 	}
 	return ans, nil
+}
+
+// substringQuery compiles a substring request into its candidate statement: the
+// records of the request's filter newest first, each with its opaque texts. It
+// returns no fields when the request names none to read.
+//
+// The statement is driven from records (CROSS JOIN fixes the order) and reaches
+// texts through texts_rec, so a time bound becomes a range seek and the scan
+// streams newest first, stopping at the byte budget or the deadline. Left to
+// itself the planner read every opaque text of the store and sorted them all
+// before the first candidate, which outran the query deadline whatever the
+// time bound. The source, type and item tests are marked as expressions so
+// that no records index outbids records_time.
+func (e *Engine) substringQuery(req SearchRequest) (string, []any, []string, *wire.Error) {
+	b := e.builder()
+	b.idWalk = true
+	wsql, wargs, werr := b.where(req.Where)
+	if werr != nil {
+		return "", nil, nil, werr
+	}
+	e.noteFilter("search", b)
+	fields := e.opaqueFields()
+	if len(req.Fields) > 0 {
+		fields = fields[:0:0]
+		for _, f := range req.Fields {
+			stored, kind, err := b.resolve(f)
+			if err != nil {
+				return "", nil, nil, err
+			}
+			if !kind.Searchable() {
+				return "", nil, nil, badf("field %q is not a text or opaque field", f)
+			}
+			if kind == source.KindOpaque {
+				fields = append(fields, stored)
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return "", nil, nil, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(fields)), ",")
+	gen := ""
+	if !req.OldGenerations {
+		gen = " AND r.gen=fl.cur_gen"
+	}
+	q := "SELECT t.field, r.id, r.file_id, r.gen, r.off, r.item, r.len, r.source, " + e.sessionCol() + ", r.time_ns" +
+		" FROM records r JOIN files fl ON fl.id=r.file_id CROSS JOIN texts t ON t.rec_id=r.id " +
+		strings.Join(b.joins, " ") +
+		" WHERE t.field IN (" + ph + ")" + gen + " AND (" + wsql + ") ORDER BY r.time_ns DESC, t.id DESC"
+	args := append([]any{}, b.joinArgs...)
+	for _, f := range fields {
+		args = append(args, f)
+	}
+	args = append(args, wargs...)
+	return q, args, fields, nil
 }
 
 // window returns the text around [from,to) with ellipses where it is cut.

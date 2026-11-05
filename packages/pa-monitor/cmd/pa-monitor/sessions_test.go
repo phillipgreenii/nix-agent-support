@@ -46,7 +46,7 @@ func cliFacts(t *testing.T) (*clienttest.Env, *recorderfacts.Facts) {
 func TestWriteSessionsFromTheRecorder(t *testing.T) {
 	_, f := cliFacts(t)
 	var buf bytes.Buffer
-	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10); err != nil {
+	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
@@ -70,7 +70,7 @@ func TestWriteSessionsFromTheRecorder(t *testing.T) {
 func TestWriteSessionsEmptyWindowIsEmptyArrayNotNull(t *testing.T) {
 	_, f := cliFacts(t)
 	var buf bytes.Buffer
-	if err := writeSessions(&buf, f, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), time.Time{}, defaultPrices(t), 10); err != nil {
+	if err := writeSessions(&buf, f, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), time.Time{}, defaultPrices(t), 10, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(buf.String()) != `{"sessions":[]}` {
@@ -99,7 +99,7 @@ func TestSessionsAndSearchSayDaemonOffline(t *testing.T) {
 	e, f := cliFacts(t)
 	e.Stop()
 	var buf bytes.Buffer
-	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10); err != session.ErrDaemonOffline {
+	if err := writeSessions(&buf, f, time.Time{}, time.Time{}, defaultPrices(t), 10, time.Time{}); err != session.ErrDaemonOffline {
 		t.Errorf("sessions err = %v", err)
 	}
 	if err := searchSessions(&buf, f, "flaky", "", time.Time{}, time.Time{}, false); err != session.ErrDaemonOffline {
@@ -230,5 +230,53 @@ func TestSearchSubstringMatchesMidWordOnlyWhenAsked(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "example-s1") {
 		t.Errorf("word search matched a mid-word fragment: %s", buf.String())
+	}
+}
+
+func TestSessionsWindowDefaultsToSevenDaysUnlessBoundedOrAll(t *testing.T) {
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	wantStart := now.Add(-7 * 24 * time.Hour)
+	since, before, def := sessionsWindow(time.Time{}, time.Time{}, false, now)
+	if !since.Equal(wantStart) || !before.IsZero() || !def.Equal(wantStart) {
+		t.Errorf("no window: got (%v, %v, %v), want since=default=%v", since, before, def, wantStart)
+	}
+	given := now.Add(-time.Hour)
+	for name, c := range map[string]struct {
+		since, before time.Time
+		all           bool
+	}{
+		"since":  {given, time.Time{}, false},
+		"before": {time.Time{}, given, false},
+		"all":    {time.Time{}, time.Time{}, true},
+	} {
+		s, b, d := sessionsWindow(c.since, c.before, c.all, now)
+		if !s.Equal(c.since) || !b.Equal(c.before) || !d.IsZero() {
+			t.Errorf("%s: got (%v, %v, %v), want the bounds unchanged and no default", name, s, b, d)
+		}
+	}
+	if _, _, _, err := parseSessionsArgs([]string{"--all"}, now); err != nil {
+		t.Errorf("--all: %v", err)
+	}
+}
+
+func TestWriteSessionsMarksADefaultedWindow(t *testing.T) {
+	_, f := cliFacts(t)
+	start := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		def  time.Time
+		want string
+	}{{start, "2020-01-01T00:00:00Z"}, {time.Time{}, ""}} {
+		var buf bytes.Buffer
+		if err := writeSessions(&buf, f, start, time.Time{}, defaultPrices(t), 10, c.def); err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := doc["defaulted_since"].(string)
+		if got != c.want {
+			t.Errorf("defaulted_since = %q, want %q (%s)", got, c.want, buf.String())
+		}
 	}
 }

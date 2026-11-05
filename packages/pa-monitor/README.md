@@ -432,6 +432,12 @@ caller's deadline keeps most of what it read. The cache is disposable: deleting 
 full re-read, and a corrupt or outdated file is ignored and rebuilt. `sessions --stats` prints one
 line to stderr with the files listed, parsed and reused, the cache writes and the cache size.
 
+`pa-monitor sessions` with no `--since`, `--before` or `--all` lists only the sessions that started in
+the last 7 days: the recorder's unbounded scan of every transcript record outruns its query deadline
+on a large tree. The document then carries `"defaulted_since": "<RFC3339>"` and stderr says so; `--all`
+asks for every session and may hit that deadline. The recorder's substring scan (`search --substring`) walks records newest first from the time index, so
+`--since` bounds it, and it stops at a byte budget or the deadline rather than reading every copy.
+
 ## Profiling (pprof)
 
 The daemon can expose Go's runtime profiler (`net/http/pprof`) for diagnosing CPU or memory use.
