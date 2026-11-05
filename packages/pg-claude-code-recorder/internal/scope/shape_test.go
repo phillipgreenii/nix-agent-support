@@ -25,6 +25,8 @@ func TestShapeAllowlist(t *testing.T) {
 		{p + exUUID + "/tool-results/r1.txt", true},
 		{p + exUUID + "/tool-results/deep/r2.txt", true},
 		{p + exUUID + "/workflows/w.json", true},
+		{p + exUUID + "/subagents/workflows/wf_1/agent-1.jsonl", true},
+		{p + exUUID + "/subagents/workflows/wf_1/agent-1.meta.json", true},
 		{"/ctl/ends/s.1.json", true},
 		// rejected classes
 		{p + "sessions-index.json", false},
@@ -67,6 +69,7 @@ func TestDescendDir(t *testing.T) {
 		{p, true},
 		{p + "/" + exUUID, true},
 		{p + "/" + exUUID + "/subagents", true},
+		{p + "/" + exUUID + "/subagents/workflows/wf_1", true},
 		{p + "/" + exUUID + "/tool-results", true},
 		{p + "/" + exUUID + "/tool-results/deep", true},
 		{p + "/" + exUUID + "/scratchpad", false},

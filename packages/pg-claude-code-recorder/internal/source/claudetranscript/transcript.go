@@ -180,6 +180,13 @@ func (*Source) Match(path string) (source.Captures, bool) {
 			"project": parts[1], "session": parts[2],
 			"agent": strings.TrimSuffix(strings.TrimPrefix(base, "agent-"), ".jsonl"),
 		}, true
+	case len(parts) == 7 && parts[3] == "subagents" && parts[4] == "workflows" && strings.HasPrefix(parts[5], "wf_") &&
+		strings.HasPrefix(base, "agent-") && strings.HasSuffix(base, ".jsonl"):
+		// A Workflow-tool subagent: subagents/workflows/wf_<id>/agent-<id>.jsonl.
+		return source.Captures{
+			"project": parts[1], "session": parts[2], "workflow": parts[5],
+			"agent": strings.TrimSuffix(strings.TrimPrefix(base, "agent-"), ".jsonl"),
+		}, true
 	}
 	return nil, false
 }
@@ -190,6 +197,7 @@ func (*Source) Catalog() map[string]source.Kind {
 	c["project"] = source.KindKeyword
 	c["file_session"] = source.KindID
 	c["agent_id"] = source.KindID
+	c["workflow_id"] = source.KindID
 	c["body_length"] = source.KindInt
 	c["tool_result.body"] = source.KindOpaque
 	c["saved_to"] = source.KindPath
@@ -234,6 +242,9 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 	}
 	if c["agent"] != "" {
 		lineRec.Fields = append(lineRec.Fields, source.Field{Name: "agent_id", Kind: source.KindID, S: c["agent"]})
+	}
+	if c["workflow"] != "" {
+		lineRec.Fields = append(lineRec.Fields, source.Field{Name: "workflow_id", Kind: source.KindID, S: c["workflow"]})
 	}
 	lineRec.Unknown = source.UnknownKeys(raw, lineType, "")
 	if line.Type == "" {

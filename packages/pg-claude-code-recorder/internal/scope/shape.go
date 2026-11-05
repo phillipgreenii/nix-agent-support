@@ -18,7 +18,10 @@ import "strings"
 //	                               copies) are not accepted
 //	projects/<project>/<uuid>/subagents/**
 //	projects/<project>/<uuid>/tool-results/**
-//	projects/<project>/<uuid>/workflows/**
+//	projects/<project>/<uuid>/workflows/**   (run files and scripts, unparsed)
+//
+// Workflow subagent files (subagents/workflows/wf_<id>/agent-*) are inside
+// subagents/** and are parsed.
 //
 // A session directory is recognized by its UUID shape, never by a list of names
 // to skip, so spikes-*, memory, artifacts and any future directory under a

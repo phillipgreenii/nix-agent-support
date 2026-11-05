@@ -464,14 +464,19 @@ func (c *Copier) ingestSnapshot(path string, fi fs.FileInfo, source string) (Res
 		return Result{}, err
 	}
 	for _, h := range holders {
-		if h.Mode == string(scope.Snapshot) {
+		// A holder recorded under another source (the path was unparsed before a
+		// scope change) is not continued: a file's source never changes, so the
+		// path starts a new file under the current source and closes the old one.
+		if h.Mode == string(scope.Snapshot) && h.Source == source {
 			f = h
 			break
 		}
 	}
 	if f.ID == 0 {
 		if h, err := c.st.SnapshotFileByPathHistory(path); err == nil {
-			f = h
+			if h.Source == source {
+				f = h
+			}
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return Result{}, err
 		}

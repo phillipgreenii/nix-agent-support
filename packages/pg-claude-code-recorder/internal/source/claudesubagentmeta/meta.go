@@ -44,17 +44,26 @@ func (*Source) Mode() source.Mode { return source.Snapshot }
 // Match takes the path relative to the Claude directory.
 func (*Source) Match(path string) (source.Captures, bool) {
 	parts := strings.Split(path, "/")
-	if len(parts) != 5 || parts[0] != "projects" || parts[3] != "subagents" {
+	if len(parts) < 5 || parts[0] != "projects" || parts[3] != "subagents" {
 		return nil, false
 	}
-	base := parts[4]
+	base := parts[len(parts)-1]
 	if !strings.HasPrefix(base, "agent-") || !strings.HasSuffix(base, ".meta.json") {
 		return nil, false
 	}
-	return source.Captures{
+	c := source.Captures{
 		"project": parts[1], "session": parts[2],
 		"agent": strings.TrimSuffix(strings.TrimPrefix(base, "agent-"), ".meta.json"),
-	}, true
+	}
+	switch {
+	case len(parts) == 5:
+	case len(parts) == 7 && parts[4] == "workflows" && strings.HasPrefix(parts[5], "wf_"):
+		// A Workflow-tool subagent: subagents/workflows/wf_<id>/agent-<id>.meta.json.
+		c["workflow"] = parts[5]
+	default:
+		return nil, false
+	}
+	return c, true
 }
 
 // Catalog lists the fields the source can produce.
@@ -63,6 +72,7 @@ func (*Source) Catalog() map[string]source.Kind {
 	c["project"] = source.KindKeyword
 	c["file_session"] = source.KindID
 	c["agent_id"] = source.KindID
+	c["workflow_id"] = source.KindID
 	return c
 }
 
@@ -76,5 +86,8 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 	rec.Fields = append(rec.Fields, source.Str("project", source.KindKeyword, c["project"])...)
 	rec.Fields = append(rec.Fields, source.Str("file_session", source.KindID, c["session"])...)
 	rec.Fields = append(rec.Fields, source.Str("agent_id", source.KindID, c["agent"])...)
+	if c["workflow"] != "" {
+		rec.Fields = append(rec.Fields, source.Str("workflow_id", source.KindID, c["workflow"])...)
+	}
 	return []source.Record{rec}, nil
 }

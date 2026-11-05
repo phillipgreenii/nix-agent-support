@@ -197,7 +197,12 @@ func (s *Scope) Classify(path string) (string, Mode) {
 		return SrcRegistry, Snapshot
 	case parts[0] != "projects":
 		return SrcUnparsed, Snapshot
-	case containsDir(parts, "workflows"), containsDir(parts, "memory"):
+	case containsDir(parts, "memory"):
+		return SrcUnparsed, Snapshot
+	case containsDir(parts, "workflows") && !containsDir(parts, "subagents"):
+		// Run files (workflows/wf_*.json) and saved scripts stay unparsed. A
+		// workflow subagent's files live under subagents/workflows/wf_*/ and fall
+		// through to the subagent cases below.
 		return SrcUnparsed, Snapshot
 	case strings.HasPrefix(base, ".orphaned-"), strings.HasPrefix(base, ".superseded-"), base == "sessions-index.json":
 		return SrcUnparsed, Snapshot

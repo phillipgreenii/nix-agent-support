@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
@@ -998,4 +999,50 @@ func mustFiles(t *testing.T, e *env) []store.File {
 		t.Fatal(err)
 	}
 	return fs
+}
+
+// A path that an older scope classified as unparsed snapshot (workflow
+// subagent files) is ingested under its new source: the old file row keeps its
+// stored versions but loses the path, and a new file row takes it over.
+func TestSourceChangeStartsANewFileAndClosesTheOldPath(t *testing.T) {
+	const wf = "projects/example-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_1/"
+	for _, c := range []struct {
+		name, file, src, mode string
+	}{
+		{"transcript", "agent-a1.jsonl", scope.SrcTranscript, "append"},
+		{"meta", "agent-a1.meta.json", scope.SrcSubagentMD, "snapshot"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			content := `{"agentType":"general-purpose"}` + "\n"
+			p := e.write(wf+c.file, content)
+			fi, _ := os.Lstat(p)
+			ident, _ := identityOf(p, fi)
+			// The state an older recorder left: the same path as unparsed snapshot.
+			old, err := e.cp.createFile(p, ident, scope.SrcUnparsed, string(scope.Snapshot), "", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := e.ingest(p)
+			if r.File == old.ID {
+				t.Fatal("the old unparsed row was continued")
+			}
+			nf := e.file(r.File)
+			if nf.Source != c.src || nf.Mode != c.mode {
+				t.Fatalf("new row %s/%s, want %s/%s", nf.Source, nf.Mode, c.src, c.mode)
+			}
+			if of := e.file(old.ID); of.Source != scope.SrcUnparsed {
+				t.Fatalf("old row source %s", of.Source)
+			}
+			if cur, _ := e.st.CurrentPaths(old.ID); len(cur) != 0 {
+				t.Fatalf("old row still holds %v", cur)
+			}
+			if cur, _ := e.st.CurrentPaths(r.File); len(cur) != 1 || cur[0] != p {
+				t.Fatalf("new row paths %v", cur)
+			}
+			if again := e.ingest(p); again.File != r.File {
+				t.Fatalf("second ingest moved to file %d", again.File)
+			}
+		})
+	}
 }
