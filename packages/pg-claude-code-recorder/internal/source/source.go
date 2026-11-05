@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -326,68 +325,6 @@ func catalog(rt reflect.Type, prefix string, out map[string]Kind) {
 	}
 }
 
-// UnknownKeys scans raw (one JSON object) and returns the dotted path of
-// every object key that the struct type t does not declare, once per
-// occurrence. Arrays of objects add "[]" to the path. Go's JSON decoder drops
-// unknown keys silently; this is how a new Claude Code field is noticed.
-//
-// Only the levels the struct type declares as objects are opened; the value
-// of a key typed as raw JSON or a scalar is never decoded.
-func UnknownKeys(raw []byte, t reflect.Type, prefix string) []string {
-	if !json.Valid(raw) {
-		return nil
-	}
-	var out []string
-	unknown(raw, t, prefix, &out)
-	sort.Strings(out)
-	return out
-}
-
-func unknown(raw json.RawMessage, t reflect.Type, path string, out *[]string) {
-	for t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	switch {
-	case t.Kind() == reflect.Slice:
-		et := t.Elem()
-		for et.Kind() == reflect.Ptr {
-			et = et.Elem()
-		}
-		if _, ok := structOf(et); !ok && et.Kind() != reflect.Slice {
-			return
-		}
-		var items []json.RawMessage
-		if json.Unmarshal(raw, &items) != nil {
-			return
-		}
-		for _, e := range items {
-			unknown(e, t.Elem(), path+"[]", out)
-		}
-	default:
-		st, ok := structOf(t)
-		if !ok {
-			return
-		}
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil {
-			return
-		}
-		known := planOf(st).known
-		for k, child := range obj {
-			p := k
-			if path != "" {
-				p = path + "." + k
-			}
-			ft, ok := known[k]
-			if !ok {
-				*out = append(*out, p)
-				continue
-			}
-			unknown(child, ft, p, out)
-		}
-	}
-}
-
 // fieldPlan is what Extract needs to know about one exported, JSON-named
 // struct field, worked out once per type instead of once per record.
 type fieldPlan struct {
@@ -462,7 +399,7 @@ func JSONRecord(typ, session string, raw []byte, v any) (Record, error) {
 	}
 	rec := Record{Type: typ, Item: ItemLine, Session: session}
 	rec.Fields = Extract(v, "")
-	rec.Unknown = UnknownKeys(raw, reflect.TypeOf(v).Elem(), "")
+	rec.Unknown = UnknownKeysValid(raw, reflect.TypeOf(v).Elem(), "")
 	return rec, nil
 }
 

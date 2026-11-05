@@ -3,7 +3,6 @@ package parser
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 )
 
 // ParseTail parses the bytes after the last newline of a generation's copy as a
@@ -47,7 +46,9 @@ func (p *Parser) ParseTail(file int64, gen int) (bool, error) {
 		return false, err
 	}
 	line := bytes.TrimSpace(buf)
-	if bytes.IndexByte(buf, '\n') >= 0 || !json.Valid(line) {
+	// No json.Valid pre-check: every append source decodes with json.Unmarshal,
+	// which rejects invalid JSON, and a parse error answers false below.
+	if bytes.IndexByte(buf, '\n') >= 0 {
 		return false, nil
 	}
 	recs, err := src.Parse(caps, line)

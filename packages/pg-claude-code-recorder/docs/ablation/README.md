@@ -107,3 +107,18 @@ sampled statements, so about 5 reads, or 0.25 percent of a 21 s parse of 300,000
 0.054 s). A synthetic corpus (86 MB, built by repeating the repository's transcript fixture) run five times per
 variant under a load average of 36 to 47 varied by more than 50 percent between runs of the same variant, so
 the harness could not resolve a 1 percent difference on that host; rerun it on a quiet machine.
+
+## Output-equivalence digest
+
+A change to how a line is decoded or to which rows a record produces MUST leave the stored tables unchanged.
+Two tests guard that, both using the digest in `internal/parser/digest_test.go` (an ordered content digest per
+table keyed by `(file_id, gen, off, item)`, with every allocation-order id joined to its value; it covers
+`records`, `fields`, `texts`, `ext_assistant_usage`, `unknown_keys`, `unknown_keys_total` and `bad_lines`):
+
+- `TestOutputEquivalenceDigest` is a unit test over the transcript source's fixture lines and compares with the
+  committed `internal/parser/testdata/equivalence.golden`. Regenerate it only from code known to be correct, with
+  `go test ./internal/parser/ -run TestOutputEquivalenceDigest -update-digest`.
+- `TestAblationDigest` (build tag `ablation`) runs the baseline bulk rebuild over a corpus list and writes
+  `$PG_CCREC_ABLATION_OUT/digest.$PG_CCREC_ABLATION_LABEL.txt`. Build one test binary from the code before the
+  change and one from the code after, run both on the same corpus list, and diff the two files; the rows MUST be
+  identical.

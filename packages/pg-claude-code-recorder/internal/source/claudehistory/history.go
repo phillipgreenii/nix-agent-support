@@ -83,6 +83,6 @@ func (*Source) Parse(_ source.Captures, raw []byte) ([]source.Record, error) {
 	if e.Timestamp != nil {
 		rec.Time = source.EpochTime(*e.Timestamp)
 	}
-	rec.Unknown = source.UnknownKeys(raw, reflect.TypeOf(Entry{}), "")
+	rec.Unknown = source.UnknownKeysValid(raw, reflect.TypeOf(Entry{}), "")
 	return []source.Record{rec}, nil
 }

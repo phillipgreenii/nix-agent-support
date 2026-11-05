@@ -110,6 +110,11 @@ func TestUnknownKeysAgreesWithMapDecodeOracle(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Errorf("%s %q prefix %q: got %#v want %#v", typ, in, prefix, got, want)
 				}
+				if json.Valid([]byte(in)) {
+					if got := UnknownKeysValid([]byte(in), typ, prefix); !reflect.DeepEqual(got, want) {
+						t.Errorf("valid %s %q prefix %q: got %#v want %#v", typ, in, prefix, got, want)
+					}
+				}
 			}
 		}
 	}

@@ -247,7 +247,7 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 	if c["workflow"] != "" {
 		lineRec.Fields = append(lineRec.Fields, source.Field{Name: "workflow_id", Kind: source.KindID, S: c["workflow"]})
 	}
-	lineRec.Unknown = source.UnknownKeys(raw, lineType, "")
+	lineRec.Unknown = source.UnknownKeysValid(raw, lineType, "") // raw decoded above, so it is valid JSON
 	if line.Type == "" {
 		lineRec.Type = "unknown"
 	}
@@ -271,9 +271,18 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 		}
 		return out, nil
 	}
-	var items []json.RawMessage
-	if err := json.Unmarshal(content, &items); err != nil {
-		return nil, err
+	// The line decoded, so its content is valid JSON: split the array by hand
+	// instead of decoding it into raw messages first. Any other shape takes the
+	// decoder, which keeps its errors (and the null case) as they were.
+	items, isArray := source.ArrayElements(content)
+	if !isArray {
+		var raws []json.RawMessage
+		if err := json.Unmarshal(content, &raws); err != nil {
+			return nil, err
+		}
+		for _, r := range raws {
+			items = append(items, r)
+		}
 	}
 	for i, it := range items {
 		var b Block
@@ -302,7 +311,7 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 				fields = append(fields, source.Field{Name: "saved_to", Kind: source.KindPath, S: to})
 			}
 		}
-		unk := source.UnknownKeys(it, blockType, "message.content[]")
+		unk := source.UnknownKeysValid(it, blockType, "message.content[]")
 		out = append(out, child(lineRec, i, typ, fields, unk))
 	}
 	return out, nil
@@ -329,22 +338,26 @@ func flatten(raw json.RawMessage) string {
 	if len(t) == 0 || bytes.Equal(t, []byte("null")) {
 		return ""
 	}
-	var s string
-	if json.Unmarshal(t, &s) == nil {
-		return s
-	}
-	var arr []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if json.Unmarshal(t, &arr) == nil {
-		parts := make([]string, 0, len(arr))
-		for _, b := range arr {
-			if b.Type == "text" {
-				parts = append(parts, b.Text)
-			}
+	switch t[0] {
+	case '"':
+		var s string
+		if json.Unmarshal(t, &s) == nil {
+			return s
 		}
-		return strings.Join(parts, " ")
+	case '[':
+		var arr []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(t, &arr) == nil {
+			parts := make([]string, 0, len(arr))
+			for _, b := range arr {
+				if b.Type == "text" {
+					parts = append(parts, b.Text)
+				}
+			}
+			return strings.Join(parts, " ")
+		}
 	}
 	return string(t)
 }
