@@ -48,6 +48,7 @@ func (d *Daemon) noteSeen(e watcher.Event) {
 	}
 	if e.Gone {
 		delete(d.seen.m, e.Path)
+		d.seenDB.forget(e.Path)
 		return
 	}
 	d.seen.m[e.Path] = seenOf(e.Info)
@@ -150,19 +151,31 @@ func (d *Daemon) verifyDeadline(path string, prev caughtUp, had bool, now time.T
 // A skipped file still tells the parser about itself, so a parse that failed
 // earlier is retried exactly as a full ingest would.
 func (d *Daemon) skipUnchanged(e watcher.Event) bool {
-	if d.cfg.VerifyEvery <= 0 {
+	file, ok := d.caughtMatches(e.Path, e.Info)
+	if !ok {
 		return false
+	}
+	d.prs.Notify(file)
+	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepSkipped}, 1)
+	return true
+}
+
+// caughtMatches reports the file id of a path whose cached caught-up entry
+// still matches the walk's view of it and is not yet due for verification.
+// It changes nothing: the start-up backfill uses it to leave such a path alone,
+// and the sweep event that follows takes the skip (and counts it).
+func (d *Daemon) caughtMatches(path string, fi watcher.FileInfo) (int64, bool) {
+	if d.cfg.VerifyEvery <= 0 {
+		return 0, false
 	}
 	now := d.clock.Now()
 	d.seen.mu.Lock()
-	c, ok := d.seen.caught[e.Path]
+	c, ok := d.seen.caught[path]
 	d.seen.mu.Unlock()
-	if !ok || c.seen != seenOf(e.Info) || !now.Before(c.until) {
-		return false
+	if !ok || c.seen != seenOf(fi) || !now.Before(c.until) {
+		return 0, false
 	}
-	d.prs.Notify(c.file)
-	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepSkipped}, 1)
-	return true
+	return c.file, true
 }
 
 // noteCaughtUp records the outcome of an ingest. Only a file the copier found
@@ -178,6 +191,7 @@ func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	defer d.seen.mu.Unlock()
 	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 {
 		delete(d.seen.caught, e.Path)
+		d.seenDB.forget(e.Path)
 		return
 	}
 	if d.seen.caught == nil {
@@ -185,4 +199,5 @@ func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	}
 	prev, had := d.seen.caught[e.Path]
 	d.seen.caught[e.Path] = caughtUp{seen: seenOf(e.Info), file: res.File, until: d.verifyDeadline(e.Path, prev, had, d.clock.Now())}
+	d.seenDB.remember(e.Path, res.File, seenOf(e.Info))
 }

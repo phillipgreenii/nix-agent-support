@@ -24,6 +24,10 @@ package store
 // serves the timestamp field from time_ns where the marker is set. A version 3
 // database is not migrated: Open refuses it with a SchemaOlderError and the
 // rebuild builds the version 4 layout.
+//
+// The seen table (the last observation of each file by any actor, see seen.go)
+// was added to version 4 without a version bump: a new table needs no rebuild,
+// and Open only refuses a version below SchemaVersion.
 const SchemaVersion = 4
 
 const schemaSQL = `
@@ -130,6 +134,16 @@ CREATE TABLE IF NOT EXISTS ranges(
   session TEXT NOT NULL,
   seg TEXT NOT NULL,
   PRIMARY KEY(file_id, gen, from_off)
+);
+CREATE TABLE IF NOT EXISTS seen(
+  path TEXT PRIMARY KEY,
+  file_id INTEGER NOT NULL,
+  dev INTEGER NOT NULL,
+  ino INTEGER NOT NULL,
+  birth_ns INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  mtime_ns INTEGER NOT NULL,
+  gen INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS torn_tails(
   file_id INTEGER NOT NULL,

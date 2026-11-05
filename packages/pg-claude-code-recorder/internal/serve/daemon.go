@@ -112,6 +112,8 @@ type Daemon struct {
 
 	// seen is the last observation of each path (sweep_files_total).
 	seen sweepSeen
+	// seenDB persists the caught-up observations (the seen table).
+	seenDB *seenStore
 	// sweepPace caps the files the sweep and the catch-up ingest per second.
 	sweepPace *pacer
 
@@ -195,6 +197,8 @@ func Open(opt Options) (*Daemon, error) {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
 	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, sweepPace: newPacer(opt.Clock, cfg.MaxFilesPerSecond), stop: make(chan struct{}), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
+	d.seenDB = newSeenStore(st, opt.Clock, func(err error) { o.Log.Warn("seen_write_failed", "err", err.Error()) })
+	d.loadSeen()
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
 	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
 	if err != nil {
@@ -399,6 +403,8 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 		found[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}] = true
 	}
 	d.countSweepFiles(files)
+	d.seenDB.prune(files)
+	d.setSeenGauge()
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}
@@ -453,6 +459,9 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 		}
 		var paths []string
 		for _, f := range sorted[start:min(start+batch, len(sorted))] {
+			if _, ok := d.caughtMatches(f.Path, f); ok {
+				continue // persisted as caught up and unchanged since: nothing to copy
+			}
 			if d.sett.LowSpace() {
 				// Low-space mode stops backfilling Conversations not yet copied.
 				if fl, _ := d.st.FilesByCurrentPath(f.Path); len(fl) == 0 {
@@ -926,6 +935,7 @@ func (d *Daemon) Close() error {
 	var errs []error
 	errs = append(errs, d.w.Close())
 	d.refreshing.Wait()
+	d.seenDB.flush()
 	d.tr.Close()
 	errs = append(errs, d.ckpt.Flush())
 	errs = append(errs, d.st.Close())

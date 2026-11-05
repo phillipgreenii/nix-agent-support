@@ -203,6 +203,8 @@ const (
 	MIngestResults          = "ingest_results_total"
 	MSweepFiles             = "sweep_files_total"
 	MSweepChanged           = "sweep_changed_total"
+	MSeenRows               = "seen_rows"
+	MSeenLoadSeconds        = "seen_load_seconds"
 	MLagRebuild             = "lag_rebuild_total"
 	MCopierLockWait         = "copier_lock_wait_seconds"
 	MStoreWriteLockWait     = "store_write_lock_wait_seconds"

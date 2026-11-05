@@ -143,6 +143,12 @@ files takes at least N / rate seconds, so keep N / rate under the 600 s `loop-st
 every sweep, otherwise at least `sweep.interval`) is how long a sweep trusts a caught-up file before
 ingesting it again; each file's first deadline is a stable per-path point in that window, so the
 re-verification is a trickle (57,000 / 86,400 = 0.66 files per second), not a daily burst.
+The caught-up cache is persisted in the `seen` table of `index.db` (path, file id, device, inode, birth
+time, size, mtime, generation; derived data, see `docs/schema-v3-design.md` 5.1), so a restart skips every
+file that has not changed instead of ingesting all of them again. The first start after an upgrade finds
+the table empty, logs `seen empty: full verification sweep` and runs one full sweep; the table is also
+emptied by `serve --rebuild`, by a restored database and by a build with another seen epoch. Gauges:
+`seen_rows` and `seen_load_seconds`.
 
 First run copies newest first with a per-file throttle (`copy.throttle`, default 2ms after each
 file that moved bytes), and answers `degraded: true` (exit 5 from the command, partial answer on

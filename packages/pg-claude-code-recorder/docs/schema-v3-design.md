@@ -262,6 +262,24 @@ they have a handful of values and a TEXT of 8 to 13 bytes costs about 0.3 GB at 
 builds it SHOULD re-measure and MAY intern them. Every column is nullable, because a source can omit any
 counter and `NULL` must mean "absent", never zero.
 
+### 5.1 The `seen` table (added to version 4, no version bump)
+
+`seen(path PRIMARY KEY, file_id, dev, ino, birth_ns, size, mtime_ns, gen)` records the last observation of
+each file by any actor (watcher event, sweep, ingest) once the copier found it caught up, so a restart can
+skip it instead of ingesting every file again. It is derived data: it is never written through `Rec` or the
+journal, a lost row costs one re-ingest, and a new table needs no rebuild (Open refuses only a version
+below `SchemaVersion`). Rows are written in small batches after the ingest and its commit.
+
+At start one read joins `seen` to `files` and keeps a row only when the file is not deleted, its `last_size`
+equals the row's `size`, its device, inode, birth time and current generation are the row's, and the path is
+still one of its open paths (a closed, renamed or tombstoned path is not). A change of size, mtime, inode or
+birth time invalidates the in-memory entry as before. A sweep that completes deletes the rows of paths it did
+not walk. The table is truncated when the build's seen epoch differs from the one stored in `meta`
+(`seen_epoch`, a downgrade then an upgrade), when the database identity differs (`meta` `seen_token` against
+the `seen.token` file beside `index.db`, so a restored backup mismatches), and by `serve --rebuild` (a new
+`index.db` with new file ids). The first start after an upgrade finds the table empty, logs
+`seen empty: full verification sweep` and runs one full sweep. Gauges: `seen_rows`, `seen_load_seconds`.
+
 ## 6. Type-change policy and drift detection
 
 The catalogue (`Catalog()` in `internal/source/source.go`, today a name to `Kind` map from the `ingest` struct
