@@ -36,7 +36,7 @@
 #
 # Build-time check of the rendered file (the implementer's choice, recorded
 # here): the phase-1d loader has no `config check` command and tolerates keys a
-# later phase owns (remove.*, held.*, settle.*, feed.*, wait.*), so the check
+# later phase owns (remove.*, held.*, feed.*, wait.*), so the check
 # runs the real `pg-claude-code-recorder status --json --config <file>` offline
 # against a socket that does not exist. A malformed file or a bad duration is a
 # usage error (exit 2); a loadable file answers "daemon offline" (exit 3).
@@ -76,7 +76,12 @@ let
     socket = cfg.socketPath;
     inherit (cfg) controlStateDir;
     blockList = cfg.blockList.extra;
-    settle.after = cfg.settle.after;
+    settle = {
+      after = cfg.settle.after;
+      mode = cfg.settle.mode;
+      reconcile = cfg.settle.reconcile;
+      min_wake = cfg.settle.min_wake;
+    };
     sweep.interval = cfg.sweep.interval;
     feed.retention = cfg.feed.retention;
     wait = {
@@ -209,7 +214,31 @@ in
       description = "Block-list additions. Rendered as `blockList`.";
     };
 
-    settle.after = durationOption "24h" "Quiet time before settling. Rendered as `settle.after`.";
+    settle = {
+      after = durationOption "24h" "Quiet time before settling. Rendered as `settle.after`.";
+      mode = lib.mkOption {
+        type = lib.types.enum [
+          "scan"
+          "event"
+        ];
+        default = "scan";
+        description = ''
+          The settle loop: `scan` runs the whole-store pass every minute;
+          `event` settles from a dirty set and a due-time queue and runs the
+          scan only as the reconciliation. Changing it needs a daemon restart.
+          Rendered as `settle.mode`.
+        '';
+      };
+      reconcile = durationOption "1h" ''
+        Interval of the full reconciliation scan in `event` mode (at least
+        1m); a missed event delays a settle by at most this long. Rendered as
+        `settle.reconcile`.
+      '';
+      min_wake = durationOption "5s" ''
+        Shortest time between two event wakes in `event` mode (at least 1s).
+        Rendered as `settle.min_wake`.
+      '';
+    };
 
     remove = {
       enable = lib.mkOption {

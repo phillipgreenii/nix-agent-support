@@ -154,6 +154,14 @@ let
     daemon.enable = true;
     settle.after = "12h";
   } osWithObs;
+  onEventSettle = case darwin {
+    daemon.enable = true;
+    settle = {
+      mode = "event";
+      reconcile = "2h";
+      min_wake = "10s";
+    };
+  } osWithObs;
   onSettings = case darwin {
     daemon.enable = true;
     settings.doctor.interval = "6h";
@@ -306,6 +314,13 @@ let
         == toString (opts on).configFile;
     removeDisabledByDefault = d.remove.enable == false && (opts on).remove.enable == false;
     settleAndRemoveDefaults = d.settle.after == "24h" && d.remove.after == "30d";
+    settleLoopDefaults =
+      d.settle.mode == "scan" && d.settle.reconcile == "1h" && d.settle.min_wake == "5s";
+    settleLoopKeysRendered =
+      let
+        r = data onEventSettle;
+      in
+      r.settle.mode == "event" && r.settle.reconcile == "2h" && r.settle.min_wake == "10s";
     otherDefaults =
       d.minFreeBytes == 21474836480
       && d.sweep.interval == "15m"

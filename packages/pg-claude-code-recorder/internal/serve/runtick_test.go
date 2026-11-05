@@ -64,7 +64,7 @@ func TestRunTickSuccessRecordsMetricsAndEvent(t *testing.T) {
 		t.Fatalf("last timestamp %v %v", v, ok)
 	}
 	if v, _ := d.obs.Reg.Counter(obs.MSettleTickExamined, nil); v != 7 {
-		t.Fatalf("examined %v", v)
+		t.Fatalf("sessions processed per wake %v, want the 7 the pass reported", v)
 	}
 	if v, _ := d.obs.Reg.Counter(obs.MSettleTickTransitions, nil); v != 3 {
 		t.Fatalf("transitions %v", v)

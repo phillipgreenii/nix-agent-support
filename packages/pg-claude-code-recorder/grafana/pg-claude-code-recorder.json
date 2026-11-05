@@ -304,7 +304,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "settle tick duration",
-      "description": "Duration of one settle tick in seconds: p50 and p99 over a window of at least 5 minutes (a tick runs once a minute, so a shorter window holds about one sample) and the last tick. The line at 60 s is the one-minute tick interval. The settle-tick-slow alert covers this panel.",
+      "description": "Duration of one settle tick in seconds: p50 and p99 over a window of at least 5 minutes (a tick runs once a minute, so a shorter window holds about one sample) and the last tick. The line at 60 s is the one-minute scan tick interval, which also bounds a settle.reconcile scan while that scan exists. In event mode a wake should finish well inside settle.min_wake (5 s by default). The settle-tick-slow alert covers this panel.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -324,6 +324,10 @@
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
               },
               {
                 "color": "red",
@@ -377,7 +381,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "settle tick work",
-      "description": "Conversations examined and stage transitions made by the settle tick, per second. no alert covers this panel yet",
+      "description": "Sessions processed per wake (settle_tick_examined_total, per second) and stage transitions made, per second. In scan mode a wake is one whole-store tick; in event mode it is one batch of dirty or due sessions. no alert covers this panel yet",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

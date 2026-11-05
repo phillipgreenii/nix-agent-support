@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,5 +61,38 @@ func TestQueryTimeoutDefaultsTo30sAndIsConfigurable(t *testing.T) {
 	c, err := Load(p, true, env(map[string]string{"HOME": "/h"}))
 	if err != nil || c.QueryTimeout != 5*time.Second {
 		t.Fatalf("%v %v", err, c.QueryTimeout)
+	}
+}
+
+func TestSettleLoopKeys(t *testing.T) {
+	e := env(map[string]string{"HOME": "/h"})
+	d := Defaults(e)
+	if d.SettleMode != "scan" || d.SettleReconcile != time.Hour || d.SettleMinWake != 5*time.Second {
+		t.Fatalf("defaults %q %v %v", d.SettleMode, d.SettleReconcile, d.SettleMinWake)
+	}
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "c.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, e)
+	}
+	c, err := load("[settle]\nmode = \"event\"\nreconcile = \"2h\"\nmin_wake = \"10s\"\n")
+	if err != nil || c.SettleMode != "event" || c.SettleReconcile != 2*time.Hour || c.SettleMinWake != 10*time.Second {
+		t.Fatalf("%v %+v", err, c)
+	}
+	// the floors are inclusive
+	if _, err := load("[settle]\nreconcile = \"1m\"\nmin_wake = \"1s\"\n"); err != nil {
+		t.Fatalf("floor values rejected: %v", err)
+	}
+	for _, bad := range []struct{ body, key string }{
+		{"[settle]\nmode = \"auto\"\n", "settle.mode"},
+		{"[settle]\nreconcile = \"59s\"\n", "settle.reconcile"},
+		{"[settle]\nmin_wake = \"999ms\"\n", "settle.min_wake"},
+		{"[settle]\nreconcile = \"soon\"\n", "settle.reconcile"},
+	} {
+		if _, err := load(bad.body); err == nil || !strings.Contains(err.Error(), bad.key) {
+			t.Fatalf("%q: err %v, want one naming %s", bad.body, err, bad.key)
+		}
 	}
 }

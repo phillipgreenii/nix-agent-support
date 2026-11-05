@@ -562,6 +562,26 @@ The first apply after that change pays this once, and a rollback (revert the com
 Launchd settings (`KeepAlive`, `ExitTimeOut`) live outside this package and were not checked. The operator runs the
 apply.
 
+### Settle cadence
+
+`settle.mode` picks the loop. `scan` (the default) runs the whole-store settle tick once a minute. `event` keeps a dirty
+set (sessions the copier or parser changed) and a due-time queue (the moment each quiet, held or removable session next
+needs a decision), and sleeps until the earliest of them, never waking twice within `settle.min_wake` (default 5 s).
+A full reconciliation scan, the same tick `scan` mode runs, runs at start and every `settle.reconcile` (default 1 h,
+at least 1 minute): a missed event delays a settle by at most that interval and never loses it. Both loops must reach the
+same decisions; an equivalence test holds that. `settle.mode` is read at start, so it changes only with a daemon
+restart. A wake waits for a running reconcile (the settler's run lock), which is hourly and takes up to a tick's
+duration. In `event` mode `settle_tick_duration_seconds` is the duration of a wake or a reconcile and
+`settle_tick_examined_total` counts sessions processed per wake.
+
+### A conversation did not settle when expected
+
+1. Run `pg-claude-code-recorder where <session>` for the session's stage and, when held, the reason.
+2. Check `settle.after` (default 24 h): every file of the Conversation must have been quiet that long, counted from the
+   original file's modification time, and a live Process keeps it from settling.
+3. In `event` mode, wait for the next reconcile (at most `settle.reconcile`): it re-evaluates every session. A session
+   that settles only then points at a missed event, so keep the log lines.
+
 ### Recorder CPU is high: what to look at
 
 1. Open the dashboard panel `recorder cpu cores` (CPU in cores, with the GC pause share as a second series).

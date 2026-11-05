@@ -150,7 +150,10 @@ type file struct {
 		Recheck    string `toml:"recheck"`
 	} `toml:"held"`
 	Settle struct {
-		After string `toml:"after"`
+		After     string `toml:"after"`
+		Mode      string `toml:"mode"`
+		Reconcile string `toml:"reconcile"`
+		MinWake   string `toml:"min_wake"`
 	} `toml:"settle"`
 	Parse struct {
 		MaxLineBytes *int `toml:"maxLineBytes"`
@@ -355,6 +358,8 @@ func apply(c *Config, f file) error {
 		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},
 		{"held.recheck", f.Held.Recheck, &c.HeldRecheck},
 		{"settle.after", f.Settle.After, &c.SettleAfter},
+		{"settle.reconcile", f.Settle.Reconcile, &c.SettleReconcile},
+		{"settle.min_wake", f.Settle.MinWake, &c.SettleMinWake},
 		{"process.graceWindow", f.Process.GraceWindow, &c.GraceWindow},
 		{"process.livenessInterval", f.Process.LivenessInterval, &c.LivenessInterval},
 	} {
@@ -366,6 +371,18 @@ func apply(c *Config, f file) error {
 			return fmt.Errorf("%s: %w", d.key, err)
 		}
 		*d.dst = v
+	}
+	if m := f.Settle.Mode; m != "" {
+		if m != "scan" && m != "event" {
+			return fmt.Errorf("settle.mode: %q is not scan or event", m)
+		}
+		c.SettleMode = m
+	}
+	if c.SettleReconcile < time.Minute {
+		return fmt.Errorf("settle.reconcile: %s is under the 1m minimum", c.SettleReconcile)
+	}
+	if c.SettleMinWake < time.Second {
+		return fmt.Errorf("settle.min_wake: %s is under the 1s minimum", c.SettleMinWake)
 	}
 	return nil
 }
