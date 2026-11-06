@@ -1,8 +1,7 @@
 # Display layer design: a mod-based session display
 
-Status: reviewed 2026-11-06 (see "Review"). Eighteen decisions are `accepted`;
-D3, D10 and D14 are `open`, each with a proposed amendment awaiting the
-operator.
+Status: reviewed 2026-11-06 (see "Review"). All 21 decisions are `accepted`;
+D3, D10 and D14 by operator ruling the same day.
 Date: 2026-11-05. Claude Code version the findings come from: 2.1.314.
 
 ## Intent
@@ -89,7 +88,7 @@ flowchart LR
         T["turn.step effort"]
         G["git HEAD and .git file reads"]
         P["gh pr view (cached)"]
-        R["recorder query (session name)"]
+        R["session registry entry (session name)"]
         E["env and assume state"]
     end
     subgraph Display["Display plugin (Mediator)"]
@@ -172,7 +171,7 @@ Rules:
 ### Alerts (status line)
 
 One aggregated row, prefixed by the engine `⚠ <plugin name>:`. The plugin that
-owns it SHOULD be named so the prefix reads well; the plugin is named `status`
+owns it SHOULD be named so the prefix reads well; the plugin is named `pgd`
 (D3), in its manifest, its marketplace entry and its directory.
 The row lists only items whose condition is true, highest priority first, and
 MUST drop the lowest-priority items itself when the width runs out instead of
@@ -211,7 +210,7 @@ Busy session:
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
  ❯
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⚠ status: wrapping up · 5h limit 83% · ctx 88% · assume expired
+  ⚠ pgd: wrapping up · 5h limit 83% · ctx 88% · assume expired
   ⏵⏵ auto mode on (shift+tab to cycle)
 ```
 
@@ -295,7 +294,7 @@ Every source MUST follow these rules:
 | Effort                     | `turn.step` event                                                                                    | Update on change; blank until the first turn                                                                                                                    |
 | Branch, worktree           | Read `.git/HEAD` and the `.git` file through `$.fs`; no `git` command                                | After `turn.complete` and `session.compact`, and when `$.session.cwd()` differs (read on those events; no cwd-change event exists); at most once per 10 seconds |
 | PR number and review state | `gh pr view` through `$.process.run` with branch and repo passed explicitly                          | At most every 5 minutes, and once when the branch changes; shared across sessions through the store if available                                                |
-| Session name (phase 4)     | The launch `-n` argument from `ps` once; the recorder `query` command for renames                    | Launch name once at start; recorder retry with backoff while empty, then every 5 minutes at most, only while the first button is drawn                          |
+| Session name (phase 4)     | The session's own entry in `~/.claude/sessions/<pid>.json` through `$.fs` (D10)                      | Found once at start; re-read after `turn.complete`, at most once per 10 seconds                                                                                 |
 | Session mode (phase 2)     | `session-mode show` through `$.process.run`, with `CLAUDE_CODE_SESSION_ID` passed in the run's `env` | On `turn.complete` and after a stop action; at most once per 10 seconds                                                                                         |
 | Assume state               | Process environment and a stored expiry                                                              | On assume actions and on a one-minute check                                                                                                                     |
 | dolt availability          | A cheap probe                                                                                        | At most every 30 seconds, while the alert row is enabled (not tied to the band being shown)                                                                     |
@@ -394,16 +393,18 @@ default-enabled like the existing control and tracker mods, with a Home Manager
 module that installs the binaries and settings it needs (the `pg-claude-control`
 module is the precedent). The nix wiring and a parity check come with it.
 
-Plugin name and directory (D3). The mod directory is `claude-marketplace/status`,
-and the manifest name and the marketplace entry name are both `status`, so the
-three agree as the marketplace parity check requires. The name `claude-display`
-cannot be used: `claude plugin validate` (Claude Code 2.1.314) refuses any plugin
-name starting `claude-` as reserved, and `claude plugin validate` accepts
-`status` (checked on a copy of the skeleton's mod directory renamed to `status`).
-What stays `claude-display` (decomposition and design choices, not plugin names):
-the Home Manager option namespace `phillipgreenii.programs.claude-display`, the
-log directory `$XDG_STATE_HOME/claude-display/`, the module path
-`home/programs/claude-display/` and the check names `test-claude-display-*`.
+Plugin name and directory (D3). Everything is named `pgd` (for "pg display";
+operator ruling, Phillip, 2026-11-06, verbatim: "go with pgd (of pg display). it
+is short and won't conflict with anything from claude. rename everything
+everywhere."): the mod directory `claude-marketplace/pgd`, the manifest name and
+the marketplace entry name (so the three agree as the marketplace parity check
+requires), the Home Manager option namespace `phillipgreenii.programs.pgd`, the
+module path `home/programs/pgd/`, the log directory `$XDG_STATE_HOME/pgd/` and the
+check names `test-pgd-*`. A name starting `claude-` cannot be used:
+`claude plugin validate` (Claude Code 2.1.314) refuses it as reserved. The
+skeleton first shipped as `status` (the plugin) and `claude-display` (the module);
+the rename to `pgd` is its own packet. The `display` noun and the `display_*`
+metric names keep their names unless the operator rules otherwise.
 
 Host access and the registration shape. `claude plugin validate` (Claude Code
 2.1.314) refuses a module that passes `$` itself as an argument ("$ itself is
@@ -477,14 +478,14 @@ runs `session-mode set-status stopping`.
 Fallbacks (cut lines). None of these sources blocks the others, and a failed
 source MUST leave only its own item blank:
 
-| Source fails             | Result                                                                                |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| `.git` file reads        | Branch and worktree rows are omitted from the Info modal                              |
-| Launch name and recorder | The first button shows the session id (a recorder-only failure keeps the launch name) |
-| `gh pr view`             | The PR row is omitted                                                                 |
-| Session mode read        | The mode button is not drawn                                                          |
-| Assume expiry source     | The button shows the role and raises no expiry alert                                  |
-| A contribution expires   | Its item disappears; nothing else changes                                             |
+| Source fails           | Result                                                   |
+| ---------------------- | -------------------------------------------------------- |
+| `.git` file reads      | Branch and worktree rows are omitted from the Info modal |
+| Session registry read  | The first button shows the session id                    |
+| `gh pr view`           | The PR row is omitted                                    |
+| Session mode read      | The mode button is not drawn                             |
+| Assume expiry source   | The button shows the role and raises no expiry alert     |
+| A contribution expires | Its item disappears; nothing else changes                |
 
 ## Efficiency architecture
 
@@ -528,7 +529,7 @@ a capability that is not yet available.
 | 1     | Display only, matching today's shell line: the band shows plain labels (session id, model and effort, context) and the status row shows alerts (limits, context, dolt). No buttons and no contribution path. The shell line keeps running beside it. Includes the source layer, cache, throttling, the opt-in switches (defaults match today's shell line: all on), counters with a no-op exporter, the OTLP spike, and the findings guide. | none                                                                                   |
 | 2     | Buttons with modals and panes for what the shell line already shows: Info (version, repo, worktree, branch, PR), Context and usage, Session mode (with stop). The labels from phase 1 become buttons. Ships the `display` noun (`alert` and `focus` surfaces) and its types contract, and the "wrapping up" alert.                                                                                                                          | phase 1                                                                                |
 | 3     | Retire the shell implementation: after the ZR plugin has adopted the `display` contract (sibling repo, the operator's schedule), set `statusLine` to the empty command and remove the part scripts. The settings delete filter is optional cleanup.                                                                                                                                                                                         | phase 2; ZR adoption (sibling repo)                                                    |
-| 4     | New capabilities, each independent of phase 3: the model and effort modal, Wrap up, Assume, transcript links, session name (launch argument, then recorder), and the Focus pane.                                                                                                                                                                                                                                                            | phase 2; Assume needs the open assume items; Focus items from pg-desk wait for pg-desk |
+| 4     | New capabilities, each independent of phase 3: the model and effort modal, Wrap up, Assume, transcript links, session name (the session registry entry), and the Focus pane.                                                                                                                                                                                                                                                                | phase 2; Assume needs the open assume items; Focus items from pg-desk wait for pg-desk |
 
 Phases 3 and 4 both follow phase 2 and MAY proceed in either order or together.
 The OTLP check in phase 1 is a spike: if the route is not allowed, phase 1 ships
@@ -573,7 +574,7 @@ Names (proposed, so a builder does not invent them):
   `display_draw_total{surface}`, `display_draw_duration_seconds{surface}`,
   `display_invalidate_total`, `display_invalidate_coalesced_total`.
 - Logs: one JSON line per event (time, level, source, message, error kind) to
-  `$XDG_STATE_HOME/claude-display/<session-id>.log`, rotated by size (the
+  `$XDG_STATE_HOME/pgd/<session-id>.log`, rotated by size (the
   builder picks the cap) and never read on a draw.
 
 ## Opt-in components
@@ -589,7 +590,7 @@ runtime.
 | assume           | No Assume button, modal, expiry alert, source or `$.env.set` |
 | session mode     | No mode button, modal or stop action                         |
 | PR status        | No `gh` source, no PR row                                    |
-| recorder name    | No recorder lookup; the id is shown                          |
+| recorder name    | No session registry read; the id is shown                    |
 | transcript links | No render hook                                               |
 | model and effort | No button or modal                                           |
 | Focus pane       | No button, pane or contribution storage                      |
@@ -597,7 +598,7 @@ runtime.
 
 The switches are options in the Home Manager module (rendered into the plugin's
 options), each defaulting to the operator's choice. Proposed option names under
-`phillipgreenii.programs.claude-display`: `enable`, `components.beads`,
+`phillipgreenii.programs.pgd`: `enable`, `components.beads`,
 `components.assume`, `components.sessionMode`, `components.prStatus`,
 `components.recorderName`, `components.links`, `components.modelEffort`,
 `components.focus`, plus `links` (the link list) and `alerts.thresholds`. Display reads them in
@@ -658,7 +659,7 @@ nix checks under `tests/` (the `pg-claude-control` module's check is the pattern
 | 1     | Cache: TTL hit and miss, one fetch in flight, backoff on failure; a draw starts no fetch, process or file read; redraw only on a changed value, with coalesced invalidates; alert fitting and priority drop by width, and no "no X" row; context color thresholds; effort blank until the first turn; each opt-in switch off registers no button, command, hook, timer or `$.env.set`; the `.git` parser against fixture files (branch, detached head, worktree pointer file); an assertion that no `git` command is run; the no-op exporter never blocks; `claude plugin validate` passes; a nix check that renders the module options; a check that the findings guide names the Claude Code version |
 | 2     | One test per button opening its modal and the one-item-per-line content of each; `session-mode show` and `set-status stopping` run against the real tool in a throwaway directory with the session id passed in `env`; the mode button hidden when no mode is active; every row of the Fallbacks table; `display.put` and `display.remove` with `ttlMs` expiry; the types contract compiles against the documented example                                                                                                                                                                                                                                                                             |
 | 3     | A nix eval check that the `statusLine` option set to the empty command renders and that other settings keys are untouched; the part scripts are gone with no dangling references (a repository search is a test)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 4     | Link rules: several entries, list order, no bead entry, no rewrite inside code; the launch-name parser against sample `ps` output; model switch through `config.set`; the effort and wrap-up pre-fills; the assume Apply setting exactly the four names and the expiry alert; an empty Focus pane                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 4     | Link rules: several entries, list order, no bead entry, no rewrite inside code; the registry-entry reader against sample registry files; model switch through `config.set`; the effort and wrap-up pre-fills; the assume Apply setting exactly the four names and the expiry alert; an empty Focus pane                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Opt-in, slow or many-session checks (the shared-store test with several real
 processes, a soak of many sessions) sit behind a build tag or switch with their own
@@ -668,55 +669,55 @@ Live-only items cannot be unit tests and MUST each be tracked as a separate
 verification item, with evidence from a real session: the engine collapse control
 hiding the band; a link click; modal focus walk; `$.env.set` seen by a model-run
 Bash call; AWS authentication after Apply; the OTLP route under the managed web
-policy; the recorder's title field; the `gh` git-lock impact; a real `/rename`;
+policy; a real `/rename`;
 the real wrap-up; cross-plugin tab behavior; and the layout at 80 columns.
 
 ## Decisions
 
-| #   | Decision                                                                           | Status                |
-| --- | ---------------------------------------------------------------------------------- | --------------------- |
-| D1  | One Display plugin owns the band and the alert line (approach A)                   | accepted              |
-| D2  | No `statusLine` collector; sources are mod APIs and file reads (F9, F12)           | accepted              |
-| D3  | Alerts are one fitted status row, plugin named `status` (accepted for now)         | open (see Review)     |
-| D4  | Band order: name or id, model and effort, context, mode, assume, Focus, Wrap up    | accepted              |
-| D5  | Each button opens its own modal pane                                               | accepted              |
-| D6  | Session mode modal has a stop action                                               | accepted              |
-| D7  | Context button colored by level                                                    | accepted              |
-| D8  | Contributions are pushed data through the `display` noun                           | accepted              |
-| D9  | No `git` command; read `.git` files; `gh` cached for PR state                      | accepted              |
-| D10 | Session name optional: launch argument once, recorder for renames, id fallback     | open (see Review)     |
-| D11 | Link types are a regex plus URL template list                                      | accepted              |
-| D12 | Effort and wrap-up buttons pre-fill the prompt; model applies directly             | accepted              |
-| D13 | Pulling is separate from drawing; a draw reads cache only                          | accepted              |
-| D14 | Shared sources go through the plugin store; one fetch per interval across sessions | open (see Review)     |
-| D15 | Four phases; shell line retired in phase 3; new capabilities in phase 4            | accepted              |
-| D16 | Metrics, errors and logs ship in phase 1 through one no-op-by-default exporter     | accepted (route open) |
-| D17 | Every component is opt-in and registers nothing when off                           | accepted              |
-| D18 | A mod findings guide, with the Claude Code version, is a phase 1 deliverable       | accepted              |
-| D19 | The shell line is retired by the empty `statusLine` command, after ZR adoption     | accepted              |
-| D20 | The `display` noun ships in phase 2; phases 3 and 4 follow phase 2 independently   | accepted              |
-| D21 | The mode button reads `session-mode show`; no change to that tool                  | accepted              |
+| #   | Decision                                                                         | Status                |
+| --- | -------------------------------------------------------------------------------- | --------------------- |
+| D1  | One Display plugin owns the band and the alert line (approach A)                 | accepted              |
+| D2  | No `statusLine` collector; sources are mod APIs and file reads (F9, F12)         | accepted              |
+| D3  | Alerts are one fitted status row; the plugin is named `pgd` everywhere           | accepted (ruling)     |
+| D4  | Band order: name or id, model and effort, context, mode, assume, Focus, Wrap up  | accepted              |
+| D5  | Each button opens its own modal pane                                             | accepted              |
+| D6  | Session mode modal has a stop action                                             | accepted              |
+| D7  | Context button colored by level                                                  | accepted              |
+| D8  | Contributions are pushed data through the `display` noun                         | accepted              |
+| D9  | No `git` command; read `.git` files; `gh` cached for PR state                    | accepted              |
+| D10 | Session name optional: the session registry entry, id fallback                   | accepted (ruling)     |
+| D11 | Link types are a regex plus URL template list                                    | accepted              |
+| D12 | Effort and wrap-up buttons pre-fill the prompt; model applies directly           | accepted              |
+| D13 | Pulling is separate from drawing; a draw reads cache only                        | accepted              |
+| D14 | Shared sources go through the plugin store, one key per source; no file fallback | accepted (ruling)     |
+| D15 | Four phases; shell line retired in phase 3; new capabilities in phase 4          | accepted              |
+| D16 | Metrics, errors and logs ship in phase 1 through one no-op-by-default exporter   | accepted (route open) |
+| D17 | Every component is opt-in and registers nothing when off                         | accepted              |
+| D18 | A mod findings guide, with the Claude Code version, is a phase 1 deliverable     | accepted              |
+| D19 | The shell line is retired by the empty `statusLine` command, after ZR adoption   | accepted              |
+| D20 | The `display` noun ships in phase 2; phases 3 and 4 follow phase 2 independently | accepted              |
+| D21 | The mode button reads `session-mode show`; no change to that tool                | accepted              |
 
 ## Review (2026-11-06)
 
 An agent review, delegated by the operator, checked each decision against the
 mod API types shipped with Claude Code 2.1.314, the sources of the tools the
-design calls, and three spikes run that day. Eighteen decisions are accepted as
-written. D3, D10 and D14 stay open: each has a defect in how it would be built
-and a proposed amendment that needs the operator's yes. Work packets written
-against D3, D10 or D14 MUST be reconciled with the operator's answer before they
+design calls, and three spikes run that day. Eighteen decisions were accepted as
+written. D3, D10 and D14 each had a defect in how it would be built; the
+operator ruled on all three the same day (see "Operator rulings"). Work packets
+written against D3, D10 or D14 MUST be reconciled with those rulings before they
 are worked.
 
 ### New findings
 
-| #   | Finding                                                                                                                                                                                                                                                                                                                                                                                                     | Evidence                                                                         |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| F13 | `$.fs.stat` and `$.fs.read` read a linked worktree's `.git` file and then its `gitdir`'s `HEAD` and `commondir`, all outside the working directory, with no denial. A detached worktree's `HEAD` is a bare commit id. In a main checkout `.git` is a directory, and reading it fails with `EISDIR`.                                                                                                         | Headless spike: a throwaway repository with a branch worktree and a detached one |
-| F14 | `gh pr view <branch> -R <owner>/<repo> --json ...` makes one API call and runs no `git`: it exited 0 with `git` absent from `PATH`, while a bare `gh pr view` in the same state failed with "unable to find git executable in PATH".                                                                                                                                                                        | `gh` 2.103.3, a closed PR in a private scratch repository                        |
-| F15 | `$.store` re-reads its file on every call and replaces it by rename on every `set`. Three concurrent sessions writing 50 distinct keys each kept 150 of 150 keys in two runs; a same-key race ended in valid JSON holding the last writer's value; a session saw another session's write within about 100 ms (its polling interval). The file is `~/.claude/plugins/store/<plugin>_<source>-<hash>.json`.   | Headless spike; a small sample, not a stress test                                |
-| F16 | `$.fs.write` overwrites a file in place (the inode is kept), and `$.fs` has no rename, move or delete.                                                                                                                                                                                                                                                                                                      | Headless spike with a hard link; the types file                                  |
-| F17 | Claude Code keeps a session registry file, `~/.claude/sessions/<pid>.json`, for headless and interactive sessions alike, holding `sessionId`, `name`, `nameSource` and `nameSince`. With `-n <name>` the entry's `name` is that name and `nameSource` is `user`; without it the name is derived from the working directory and `nameSource` is `derived`. Whether `/rename` rewrites the entry is untested. | Headless spike, four runs; the format is undocumented                            |
-| F18 | `claude plugin validate` accepts a `plugin.json` `name` that differs from its marketplace entry and folder, with no warning; how install resolves such a plugin is untested. No plugin in this repository's marketplace differs today (18 checked), and `lib/claude-marketplace.nix` in `phillipg-nix-repo-base` keys each `enabledPlugins` entry by the `plugin.json` name.                                | `validate` on a throwaway marketplace; `jq` over this repository's marketplace   |
+| #   | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Evidence                                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| F13 | `$.fs.stat` and `$.fs.read` read a linked worktree's `.git` file and then its `gitdir`'s `HEAD` and `commondir`, all outside the working directory, with no denial. A detached worktree's `HEAD` is a bare commit id. In a main checkout `.git` is a directory, and reading it fails with `EISDIR`.                                                                                                                                                                                                                                                                                                                                   | Headless spike: a throwaway repository with a branch worktree and a detached one                                |
+| F14 | `gh pr view <branch> -R <owner>/<repo> --json ...` makes one API call and runs no `git`: it exited 0 with `git` absent from `PATH`, while a bare `gh pr view` in the same state failed with "unable to find git executable in PATH".                                                                                                                                                                                                                                                                                                                                                                                                  | `gh` 2.103.3, a closed PR in a private scratch repository                                                       |
+| F15 | `$.store` re-reads its file on every call and replaces it by rename on every `set`. Three concurrent sessions writing 50 distinct keys each kept 150 of 150 keys in two runs; a same-key race ended in valid JSON holding the last writer's value; a session saw another session's write within about 100 ms (its polling interval). The file is `~/.claude/plugins/store/<plugin>_<source>-<hash>.json`.                                                                                                                                                                                                                             | Headless spike; a small sample, not a stress test                                                               |
+| F16 | `$.fs.write` overwrites a file in place (the inode is kept), and `$.fs` has no rename, move or delete.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Headless spike with a hard link; the types file                                                                 |
+| F17 | Claude Code keeps a session registry file, `~/.claude/sessions/<pid>.json`, for headless and interactive sessions alike, holding `sessionId`, `name`, `nameSource` and `nameSince`. With `-n <name>` the entry's `name` is that name and `nameSource` is `user`; without it the name is derived from the working directory and `nameSource` is `derived`. A name change rewrites the entry (`name`, `nameSource`, `formerNames`, `nameSince`), and a failed update logs "applied locally but the session registry record was not updated"; `nameSource` takes `derived`, `auto`, `user` or `collision`. A live `/rename` was not run. | Headless spike, four runs; the rename path read from the Claude Code 2.1.314 bundle; the format is undocumented |
+| F18 | `claude plugin validate` accepts a `plugin.json` `name` that differs from its marketplace entry and folder, with no warning; how install resolves such a plugin is untested. No plugin in this repository's marketplace differs today (18 checked), and `lib/claude-marketplace.nix` in `phillipg-nix-repo-base` keys each `enabledPlugins` entry by the `plugin.json` name.                                                                                                                                                                                                                                                          | `validate` on a throwaway marketplace; `jq` over this repository's marketplace                                  |
 
 ### Notes on accepted decisions
 
@@ -740,48 +741,44 @@ are worked.
   `SessionMode`; which site always draws is unverified and belongs to the live
   collapse check. The engine's own ellipsis is the fallback.
 
-### Open decisions and proposed amendments
+### Operator rulings (Phillip, 2026-11-06)
 
-**D3: the plugin name MUST be one name in three places.** The decomposition
-renames only the manifest to `status` and keeps the folder and the marketplace
-entry `claude-display`. By F18 the generated `enabledPlugins` key would then be
-`status@<marketplace>` for a plugin the marketplace lists as `claude-display`, a
-combination nothing here has shipped; the likely failure is a default-enabled
-plugin that silently never loads. Proposed: the manifest name, the marketplace
-entry and the folder MUST match. The operator chooses one of:
+**D3: the plugin is `pgd`, everywhere.** Ruling, verbatim: "D3, go with pgd (of
+pg display). it is short and won't conflict with anything from claude. rename
+everything everywhere." The defect it settles: the manifest name, the marketplace
+entry and the folder MUST be one name, because `lib/claude-marketplace.nix` in
+`phillipg-nix-repo-base` keys each `enabledPlugins` entry by the manifest name
+(F18), and a name starting `claude-` is reserved. The alert row reads `⚠ pgd:`.
+Every name this design or its packets gave the plugin, the module, the option
+namespace, the checks and the log directory is `pgd` (see "Packaging, scope and
+fallbacks").
 
-- `status` everywhere: the alert row reads `⚠ status:`, and every packet's paths
-  change, so the docket is reconciled before its first packet is worked;
-- Not available (superseded 2026-11-06 by the reconcile of the Display docket):
-  `claude plugin validate` refuses the name `claude-display` as reserved, so the
-  plugin is `status` everywhere (see "Packaging, scope and fallbacks"). The
-  struck option read: `claude-display` everywhere: the alert row reads `⚠ claude-display:`, which
-  costs every alert row 8 more columns (14 characters against `status`'s 6), and
-  only the alert-row packet changes.
+**D10: the session name comes from the session registry.** Ruling, verbatim:
+"D10, if this is a quick/fast check, then do it." The check (whether a rename
+rewrites the entry) was answered from the Claude Code 2.1.314 bundle (F17), so
+the route stands. The source is the session's own registry entry, found once at
+start by listing `~/.claude/sessions/` and matching `sessionId` against
+`$.session.id()`, then re-read after `turn.complete` at most once per 10
+seconds. The name is shown when `nameSource` is not `derived`; otherwise, and
+when the entry is missing or unreadable, the session id is shown. This drops the
+`ps` call, the question of how the mod finds its process id, and the recorder
+title-field spike. The registry is undocumented Claude Code state, so the
+findings guide MUST record it with the Claude Code version. Whether the recorder,
+which already ingests this file, should become the name source is a separate
+research item.
 
-**D10: read the session name from the session registry.** Proposed: the source
-is the session's own registry entry (F17), found once at start by listing
-`~/.claude/sessions/` and matching `sessionId` against `$.session.id()`, then
-re-read after `turn.complete` at most once per 10 seconds. The name is shown only
-when `nameSource` is `user`; otherwise the session id is shown. This drops the
-`ps` call, the unanswered question of how the mod finds its process id, and the
-recorder title-field spike. Still open: whether `/rename` rewrites the entry
-(one live check: rename a session, then read its entry). If it does not, the
-recorder stays as the rename path. The registry is undocumented Claude Code
-state, so the findings guide MUST record it with the Claude Code version, and a
-failed read MUST fall back to the session id.
-
-**D14: one `$.store` key per shared source, and no file fallback.** Proposed:
-shared entries go in `$.store` under one key per source (`<id>`, or
-`<id>:<key>` for a keyed source), never as one map under a single key: a get,
-merge and set of one map across sessions loses other sessions' entries, while
-per-key sets lost none (F15). Last writer wins per key, which a cache tolerates.
-The atomic-file fallback cannot be built with `$.fs` (F16), so it is dropped:
-when `$.store` fails, the session fetches for itself, unshared. The opt-in
-multi-process check MUST drive real sessions against `$.store` (several headless
-`claude -p` runs with a test mod), not plain processes against a file. Values
-stay small, because every `set` rewrites the whole store, which is capped at
-4 MiB.
+**D14: one `$.store` key per shared source, and no file fallback.** Ruling,
+verbatim: "D14, yes, use the store. sounds like it was designed for this."
+Shared entries go in `$.store` under one key per source (`shared:<id>`, or
+`shared:<id>:<key>` for a keyed source), never as one map under a single key: a
+get, merge and set of one map across sessions loses other sessions' entries,
+while per-key sets lost none (F15). Last writer wins per key, which a cache
+tolerates. The atomic-file fallback cannot be built with `$.fs` (F16), so it is
+dropped: when `$.store` fails, the session fetches for itself, unshared. The
+opt-in multi-process check MUST drive real sessions against `$.store` (several
+headless `claude -p` runs with a test mod), not plain processes against a file.
+Values stay small, because every `set` rewrites the whole store, which is capped
+at 4 MiB.
 
 ### Open items closed by this review
 
@@ -790,28 +787,28 @@ stay small, because every `set` rewrites the whole store, which is capped at
   write is: safe per key, visible within about 100 ms (F15).
 - The git-lock impact of `gh pr view`: none when branch and repository are
   passed (F14).
-- The recorder's title field: moot if D10's amendment is accepted.
+- The recorder's title field: not needed (D10).
+- Whether a rename can refresh the name on demand: the registry entry is
+  rewritten on a name change (F17); the button re-reads it after each turn.
 
 ## Open items to verify
 
-- Whether `$.fs` reads `.git/HEAD` and the `.git` worktree pointer file as expected.
-- The recorder field that holds the title text, and the cost of a query.
-- `reviewDecision` from `gh pr view` on a real PR, and its git-lock impact.
+Items the 2026-11-06 review closed are listed under "Open items closed by this
+review".
+
+- `reviewDecision` from `gh pr view` on a real PR (its git-lock impact is none,
+  F14).
 - Whether a contributed button press can run an action (data cannot carry a
   callback; a command name or event may be needed).
 - A model-run Bash call seeing a variable from `$.env.set`.
-- Whether the plugin store is safe under concurrent writers from many sessions,
-  and how fresh one session's write is for another.
 - Whether OTLP over `$.http.fetch` is allowed under the managed web policy, and
   what first-class mod telemetry would take.
-- Whether a rename can be detected by hooking the built-in `/rename` command,
-  which would let the name refresh on demand and not on a timer.
 - Whether the `PromptHint` or `SessionMode` sites accept a colored multi-row
-  tree (not needed for this design).
+  tree (not needed for this design), and which of them keeps drawing while the
+  band is collapsed (the alert row's width source).
 - The assume expiry source and whether the four variables suffice (see "Assume"),
-  the wrap-up command text, and the alert thresholds. The plugin name `status` is
-  accepted for now and MAY change later; bead links are deferred until a target
-  exists.
+  the wrap-up command text, and the alert thresholds. Bead links are deferred
+  until a target exists.
 
 ## What is left to the builder
 
