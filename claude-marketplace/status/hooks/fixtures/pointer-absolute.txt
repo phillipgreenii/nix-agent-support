@@ -1,1 +1,0 @@
-gitdir: /repos/main/.git/worktrees/wt1

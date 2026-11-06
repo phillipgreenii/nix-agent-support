@@ -1,50 +1,47 @@
 // Tests of the .git source: the pure parser against fixture files (a branch, a detached head, an
 // absolute and a relative worktree pointer) and the fetch, which reads only through host.fs and
 // never runs a process.
-import { readFileSync } from 'node:fs'
 import { expect, test } from 'claude-code/testing'
 import { fetchGitHead, parseGitHead, registerGitHeadHooks, startGitHead } from './gitHead'
 import { setOptions } from './options'
 import { initSources, readCached } from './source'
 import { fakeClock, stubHost } from './testkit'
 import { DEFAULT_OPTIONS } from './types'
-
-const fixture = (name: string): string =>
-  readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')
+import { HEAD_BRANCH, HEAD_DETACHED, POINTER_ABSOLUTE, POINTER_RELATIVE } from './fixtures/git'
 
 test('parseGitHead reads a branch', () => {
-  expect(parseGitHead(fixture('head-branch.txt'))).toEqual({ branch: 'feature/source-layer' })
+  expect(parseGitHead(HEAD_BRANCH)).toEqual({ branch: 'feature/source-layer' })
 })
 
 test('parseGitHead reads a detached head', () => {
-  expect(parseGitHead(fixture('head-detached.txt'))).toEqual({
+  expect(parseGitHead(HEAD_DETACHED)).toEqual({
     detached: '0123456789abcdef0123456789abcdef01234567',
   })
 })
 
 test('parseGitHead reads an absolute worktree pointer', () => {
-  expect(parseGitHead(fixture('head-branch.txt'), fixture('pointer-absolute.txt'), '/work/wt1')).toEqual({
+  expect(parseGitHead(HEAD_BRANCH, POINTER_ABSOLUTE, '/work/wt1')).toEqual({
     branch: 'feature/source-layer',
     worktree: '/repos/main/.git/worktrees/wt1',
   })
 })
 
 test('parseGitHead resolves a relative worktree pointer against the base directory', () => {
-  expect(parseGitHead(fixture('head-branch.txt'), fixture('pointer-relative.txt'), '/work/wt2')).toEqual({
+  expect(parseGitHead(HEAD_BRANCH, POINTER_RELATIVE, '/work/wt2')).toEqual({
     branch: 'feature/source-layer',
     worktree: '/work/main/.git/worktrees/wt2',
   })
 })
 
 test('fetchGitHead reads a plain checkout without a worktree value', async () => {
-  const s = stubHost({ '/work/repo/.git/HEAD': fixture('head-branch.txt') })
+  const s = stubHost({ '/work/repo/.git/HEAD': HEAD_BRANCH })
   expect(await fetchGitHead(s.host)).toEqual({ branch: 'feature/source-layer' })
 })
 
 test('fetchGitHead follows a .git pointer file to the worktree git directory', async () => {
   const s = stubHost({
-    '/work/repo/.git': fixture('pointer-absolute.txt'),
-    '/repos/main/.git/worktrees/wt1/HEAD': fixture('head-detached.txt'),
+    '/work/repo/.git': POINTER_ABSOLUTE,
+    '/repos/main/.git/worktrees/wt1/HEAD': HEAD_DETACHED,
   })
   expect(await fetchGitHead(s.host)).toEqual({
     detached: '0123456789abcdef0123456789abcdef01234567',
@@ -60,7 +57,7 @@ test('a missing .git is an undefined value, not a failure, and no source runs a 
 
 test('the gitHead source fetches through the facade only and never runs a process', async () => {
   const clock = fakeClock()
-  const s = stubHost({ '/work/repo/.git/HEAD': fixture('head-branch.txt') })
+  const s = stubHost({ '/work/repo/.git/HEAD': HEAD_BRANCH })
   setOptions(DEFAULT_OPTIONS)
   initSources(s.host, { now: clock.now, setTimer: clock.setTimer })
   startGitHead(s.host)
@@ -72,7 +69,7 @@ test('the gitHead source fetches through the facade only and never runs a proces
 
 test('gitHead is fetched at most once per 10 seconds, and again after turn.complete', async () => {
   const clock = fakeClock()
-  const s = stubHost({ '/work/repo/.git/HEAD': fixture('head-branch.txt') })
+  const s = stubHost({ '/work/repo/.git/HEAD': HEAD_BRANCH })
   setOptions(DEFAULT_OPTIONS)
   initSources(s.host, { now: clock.now, setTimer: clock.setTimer })
   const hooks: Record<string, (...a: unknown[]) => unknown> = {}

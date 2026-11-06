@@ -1,6 +1,6 @@
 // Shared test helpers of the source-layer tests (not a test file itself, so the check does not run
 // it). Choices: the fake clock is a sorted timer queue driven by advance(ms), which fires due
-// timers in order and lets promise continuations settle (a macrotask) after each one; the stub host
+// timers in order and lets promise continuations settle (a microtask flush) after each one; the stub host
 // has the facade's shape and records every call into `calls` as "path" strings, with a small
 // in-memory file system for fs.read (a missing path rejects, as the host does).
 export interface FakeClock {
@@ -10,7 +10,10 @@ export interface FakeClock {
   pending: () => number
 }
 
-export const settle = (): Promise<void> => new Promise(r => setImmediate(r))
+export async function settle(): Promise<void> {
+  // Microtask flush only: the engine's test runtime has no setImmediate or setTimeout.
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+}
 
 export function fakeClock(start = 1_000_000): FakeClock {
   let t = start
