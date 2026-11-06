@@ -5364,7 +5364,7 @@
                     touch $out
                   '';
 
-              # claude-display mod: runs EVERY *.test.ts under the mod directory with node, so a
+              # status mod (claude-marketplace/status): runs EVERY *.test.ts under the mod directory with node, so a
               # later packet adds a test without editing this check. Relative imports are
               # extensionless in the sources (the engine resolves them), so a copy of the hooks
               # directory gets the `.ts` suffix node needs. `*.multiprocess.test.ts` files are
@@ -5373,7 +5373,7 @@
                 let
                   src = lib.fileset.toSource {
                     root = ./.;
-                    fileset = ./claude-marketplace/claude-display;
+                    fileset = ./claude-marketplace/status;
                   };
                   # The subset of the engine's testing kit the display tests use.
                   shim = pkgs.writeText "claude-code-testing-shim.mjs" ''
@@ -5400,7 +5400,7 @@
                   }
                   ''
                     set -euo pipefail
-                    plugin=${src}/claude-marketplace/claude-display
+                    plugin=${src}/claude-marketplace/status
                     jq -e '.modules == ["./register.ts"]' "$plugin/hooks/hooks.json" >/dev/null
                     jq -e '.defaultEnabled == true' "$plugin/.claude-plugin/plugin.json" >/dev/null
                     for f in register.ts components.ts types.ts components.test.ts; do test -f "$plugin/hooks/$f"; done
@@ -17098,6 +17098,27 @@
                   mkdir -p "$HOME"
                   export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
                   cp -r ${src}/claude-marketplace/pg-claude-control plugin
+                  chmod -R u+w plugin
+                  claude plugin validate plugin | tee validate.log
+                  grep -q "Validation passed" validate.log
+                  touch $out
+                '';
+
+              # status mod validation: runs the real `claude plugin validate` on the mod, like the
+              # control mod's check above. A failed validation fails the check.
+              test-claude-display-plugin-validate =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/status;
+                  };
+                  claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+                in
+                pkgs.runCommand "test-claude-display-plugin-validate" { nativeBuildInputs = [ claude ]; } ''
+                  export HOME="$TMPDIR/home"
+                  mkdir -p "$HOME"
+                  export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                  cp -r ${src}/claude-marketplace/status plugin
                   chmod -R u+w plugin
                   claude plugin validate plugin | tee validate.log
                   grep -q "Validation passed" validate.log

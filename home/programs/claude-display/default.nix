@@ -5,7 +5,7 @@
 }:
 
 # claude-display module: the opt-in options of the display mod
-# (claude-marketplace/claude-display). The plugin itself is delivered by the
+# (claude-marketplace/status). The plugin itself is delivered by the
 # committed claude-marketplace/ tree (default-enabled); this module renders the
 # options as one JSON document in PG_CLAUDE_DISPLAY_OPTIONS (home.sessionVariables),
 # which the mod reads at session start. It installs no binary and no settings.

@@ -40,8 +40,8 @@
       "description": "Control mod: a per-process inbox for submitting, interrupting, running allowlisted slash commands and reading the prompt draft of a running Claude, plus the session end reason"
     },
     {
-      "name": "claude-display",
-      "source": "./claude-display",
+      "name": "status",
+      "source": "./status",
       "description": "Display mod: a session band, alerts and modals drawn from cached sources, with every component opt-in through the Home Manager module options"
     },
     {
