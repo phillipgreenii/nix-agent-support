@@ -1,0 +1,43 @@
+{
+  "query": "cost-by-signature",
+  "version": 3,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    {
+      "signature": "File not found: /srv/demo/app/main.go (line 42)",
+      "errors": 12,
+      "duration_ms_sum": 0,
+      "elapsed_ms_sum": 48000,
+      "elapsed_ms_mean": 4000,
+      "elapsed_ms_p50": 3500,
+      "elapsed_ms_max": 9000,
+      "idle_calls": 1,
+      "idle_ms_sum": 1200000
+    },
+    {
+      "signature": "cmd failed\nexit status 2\tdetail: bad flag --frobnicate in a very long trailing explanation",
+      "errors": 7,
+      "duration_ms_sum": 0,
+      "elapsed_ms_sum": 21000,
+      "elapsed_ms_mean": 3000,
+      "elapsed_ms_p50": 2800,
+      "elapsed_ms_max": 6000,
+      "idle_calls": 0,
+      "idle_ms_sum": 0
+    },
+    {
+      "signature": "unranked failure in /tmp/x9",
+      "errors": 1,
+      "duration_ms_sum": 0,
+      "elapsed_ms_sum": 500,
+      "elapsed_ms_mean": 500,
+      "elapsed_ms_p50": 500,
+      "elapsed_ms_max": 500,
+      "idle_calls": 0,
+      "idle_ms_sum": 0
+    }
+  ]
+}

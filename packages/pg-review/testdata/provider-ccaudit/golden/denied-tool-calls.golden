@@ -1,0 +1,56 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "lead:AskUserQuestion",
+    "defined_in": "",
+    "type": "lead",
+    "kind": "denied",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "denied": 1,
+      "denied_sessions": 1,
+      "denied_subagent": 0,
+      "denied_user_rejected": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T11:05:00Z",
+    "last_seen": "2026-01-02T11:05:00Z",
+    "query": "denied-tool-calls",
+    "samples": [
+      "session=sess-b path=/proj/b.jsonl seq=9"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "lead:rm",
+    "defined_in": "",
+    "type": "lead",
+    "kind": "denied",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "denied": 2,
+      "denied_permission_denied": 1,
+      "denied_sessions": 2,
+      "denied_subagent": 1,
+      "denied_user_rejected": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T10:00:00Z",
+    "last_seen": "2026-01-02T11:00:00.5Z",
+    "query": "denied-tool-calls",
+    "samples": [
+      "session=sess-a path=/proj/a.jsonl seq=21",
+      "session=sess-b path=/proj/b.jsonl seq=8"
+    ]
+  }
+]

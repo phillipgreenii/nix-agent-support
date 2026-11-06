@@ -1,0 +1,22 @@
+{
+  "query": "top-signatures",
+  "version": 2,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    {
+      "signature": "File not found: /srv/demo/app/main.go (line 42)",
+      "errors": 12,
+      "sessions": 4,
+      "subagent": 3
+    },
+    {
+      "signature": "cmd failed\nexit status 2\tdetail: bad flag --frobnicate in a very long trailing explanation",
+      "errors": 7,
+      "sessions": 2,
+      "subagent": 0
+    }
+  ]
+}

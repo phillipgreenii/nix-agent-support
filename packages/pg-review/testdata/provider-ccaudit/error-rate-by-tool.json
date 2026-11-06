@@ -1,0 +1,13 @@
+{
+  "query": "error-rate-by-tool",
+  "version": 2,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    { "tool_name": "Bash", "calls": 200, "errors": 10, "error_pct": 5 },
+    { "tool_name": "Read", "calls": 80, "errors": 1, "error_pct": 1.25 },
+    { "tool_name": null, "calls": 3, "errors": 0, "error_pct": 0 }
+  ]
+}

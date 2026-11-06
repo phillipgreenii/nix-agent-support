@@ -1,0 +1,78 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "session:008cf9e1",
+    "defined_in": "",
+    "type": "session",
+    "kind": "interruption",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "interruptions": 2,
+      "prev_tool_calls": 3,
+      "span_ms": 8000
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T12:00:00Z",
+    "last_seen": "2026-01-02T12:00:08Z",
+    "query": "interruptions",
+    "samples": [
+      "session=sess-a path=/proj/a.jsonl seq=50",
+      "session=sess-a path=/proj/a.jsonl seq=54"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "session:2c45366a",
+    "defined_in": "",
+    "type": "session",
+    "kind": "interruption",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "interruptions": 1,
+      "prev_tool_calls": 1,
+      "span_ms": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T12:30:00Z",
+    "last_seen": "2026-01-02T12:30:00Z",
+    "query": "interruptions",
+    "samples": [
+      "session=sess-a path=/proj/a.jsonl seq=90"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-003",
+    "subject_key": "session:9515751b",
+    "defined_in": "",
+    "type": "session",
+    "kind": "interruption",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "interruptions": 1,
+      "prev_tool_calls": 0,
+      "span_ms": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T12:00:03Z",
+    "last_seen": "2026-01-02T12:00:03Z",
+    "query": "interruptions",
+    "samples": [
+      "session=sess-b path=/proj/b.jsonl seq=5"
+    ]
+  }
+]

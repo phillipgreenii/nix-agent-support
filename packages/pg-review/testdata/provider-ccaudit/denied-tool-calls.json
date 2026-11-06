@@ -1,0 +1,43 @@
+{
+  "query": "denied-tool-calls",
+  "version": 2,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    {
+      "kind": "permission-denied",
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "tool_name": "Bash",
+      "lead_cmd": "rm",
+      "path": "/proj/a.jsonl",
+      "seq": 21,
+      "ts": "2026-01-02T10:00:00Z",
+      "signature": "denied"
+    },
+    {
+      "kind": "user-rejected",
+      "session_id": "sess-b",
+      "is_sidechain": 1,
+      "tool_name": "Bash",
+      "lead_cmd": "rm",
+      "path": "/proj/b.jsonl",
+      "seq": 8,
+      "ts": "2026-01-02T11:00:00.5Z",
+      "signature": "rejected"
+    },
+    {
+      "kind": "user-rejected",
+      "session_id": "sess-b",
+      "is_sidechain": 0,
+      "tool_name": "AskUserQuestion",
+      "lead_cmd": null,
+      "path": "/proj/b.jsonl",
+      "seq": 9,
+      "ts": "2026-01-02T11:05:00Z",
+      "signature": "rejected"
+    }
+  ]
+}

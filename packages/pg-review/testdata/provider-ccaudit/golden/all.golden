@@ -1,0 +1,340 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "lead:AskUserQuestion",
+    "defined_in": "",
+    "type": "lead",
+    "kind": "denied",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "denied": 1,
+      "denied_sessions": 1,
+      "denied_subagent": 0,
+      "denied_user_rejected": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T11:05:00Z",
+    "last_seen": "2026-01-02T11:05:00Z",
+    "query": "denied-tool-calls",
+    "samples": [
+      "session=sess-b path=/proj/b.jsonl seq=9"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "lead:rm",
+    "defined_in": "",
+    "type": "lead",
+    "kind": "denied",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "denied": 2,
+      "denied_permission_denied": 1,
+      "denied_sessions": 2,
+      "denied_subagent": 1,
+      "denied_user_rejected": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T10:00:00Z",
+    "last_seen": "2026-01-02T11:00:00.5Z",
+    "query": "denied-tool-calls",
+    "samples": [
+      "session=sess-a path=/proj/a.jsonl seq=21",
+      "session=sess-b path=/proj/b.jsonl seq=8"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-003",
+    "subject_key": "sig:File not found: <path> (line N):12a27a12",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "elapsed_ms_max": 9000,
+      "elapsed_ms_mean": 4000,
+      "elapsed_ms_p50": 3500,
+      "elapsed_ms_sum": 48000,
+      "errors": 12,
+      "idle_calls": 1,
+      "idle_ms_sum": 1200000,
+      "sessions": 4,
+      "subagent": 3
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "top-signatures",
+    "samples": [
+      "signature: File not found: /srv/demo/app/main.go (line 42)"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-004",
+    "subject_key": "sig:access to the demo directory is blocked:a83057d4",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "hook_refusal_sessions": 2,
+      "hook_refusals": 2
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T13:00:00Z",
+    "last_seen": "2026-01-02T14:05:00Z",
+    "query": "hook-refusals-in-body",
+    "samples": [
+      "signature: access to the demo directory is blocked",
+      "session=sess-a path=/proj/a.jsonl seq=60",
+      "session=sess-b path=/proj/b.jsonl seq=72"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-005",
+    "subject_key": "sig:cmd failed exit status N detail: bad fla:f8d0458b",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "elapsed_ms_max": 6000,
+      "elapsed_ms_mean": 3000,
+      "elapsed_ms_p50": 2800,
+      "elapsed_ms_sum": 21000,
+      "errors": 7,
+      "idle_calls": 0,
+      "idle_ms_sum": 0,
+      "sessions": 2,
+      "subagent": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "top-signatures",
+    "samples": [
+      "signature: cmd failed\nexit status 2\tdetail: bad flag --frobnicate in a very long trailing explanation"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-006",
+    "subject_key": "sig:refusing this commit on a protected bran:308328af",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "hook_refusal_sessions": 1,
+      "hook_refusals": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T14:00:00Z",
+    "last_seen": "2026-01-02T14:00:00Z",
+    "query": "hook-refusals-in-body",
+    "samples": [
+      "signature: refusing this commit on a protected branch\nDirectory: /srv/demo/work",
+      "session=sess-b path=/proj/b.jsonl seq=70"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-007",
+    "subject_key": "tool:Bash",
+    "defined_in": "",
+    "type": "tool",
+    "kind": "error-rate",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "calls": 200,
+      "error_pct": 5,
+      "errors": 10
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "error-rate-by-tool",
+    "samples": []
+  },
+  {
+    "schema_version": 1,
+    "id": "E-008",
+    "subject_key": "tool:Read",
+    "defined_in": "",
+    "type": "tool",
+    "kind": "error-rate",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "calls": 80,
+      "error_pct": 1.25,
+      "errors": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "error-rate-by-tool",
+    "samples": []
+  },
+  {
+    "schema_version": 1,
+    "id": "E-009",
+    "subject_key": "tool:unknown",
+    "defined_in": "",
+    "type": "tool",
+    "kind": "error-rate",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "calls": 3,
+      "error_pct": 0,
+      "errors": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "error-rate-by-tool",
+    "samples": []
+  },
+  {
+    "schema_version": 1,
+    "id": "E-010",
+    "subject_key": "session:008cf9e1",
+    "defined_in": "",
+    "type": "session",
+    "kind": "interruption",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "interruptions": 2,
+      "prev_tool_calls": 3,
+      "span_ms": 8000
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T12:00:00Z",
+    "last_seen": "2026-01-02T12:00:08Z",
+    "query": "interruptions",
+    "samples": [
+      "session=sess-a path=/proj/a.jsonl seq=50",
+      "session=sess-a path=/proj/a.jsonl seq=54"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-011",
+    "subject_key": "session:2c45366a",
+    "defined_in": "",
+    "type": "session",
+    "kind": "interruption",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "interruptions": 1,
+      "prev_tool_calls": 1,
+      "span_ms": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T12:30:00Z",
+    "last_seen": "2026-01-02T12:30:00Z",
+    "query": "interruptions",
+    "samples": [
+      "session=sess-a path=/proj/a.jsonl seq=90"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-012",
+    "subject_key": "session:9515751b",
+    "defined_in": "",
+    "type": "session",
+    "kind": "interruption",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "interruptions": 1,
+      "prev_tool_calls": 0,
+      "span_ms": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T12:00:03Z",
+    "last_seen": "2026-01-02T12:00:03Z",
+    "query": "interruptions",
+    "samples": [
+      "session=sess-b path=/proj/b.jsonl seq=5"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-013",
+    "subject_key": "sig:File not found: <path> (line N):12a27a12",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "retry",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "retry_chains": 2,
+      "retry_sessions": 2
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "retry-chains",
+    "samples": [
+      "signature: File not found: /srv/demo/app/main.go (line 42)",
+      "session=sess-a path=/proj/a.jsonl seq=10",
+      "session=sess-b path=/proj/b.jsonl seq=30"
+    ]
+  }
+]

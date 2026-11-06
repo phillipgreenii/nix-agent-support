@@ -1,0 +1,43 @@
+{
+  "query": "retry-chains",
+  "version": 2,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    {
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "tool_name": "Bash",
+      "path": "/proj/a.jsonl",
+      "failed_seq": 10,
+      "retry_seq": 12,
+      "seq_gap": 2,
+      "retry_is_error": 1,
+      "signature": "File not found: /srv/demo/app/main.go (line 42)"
+    },
+    {
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "tool_name": "Bash",
+      "path": "/proj/a.jsonl",
+      "failed_seq": 10,
+      "retry_seq": 14,
+      "seq_gap": 4,
+      "retry_is_error": 0,
+      "signature": "File not found: /srv/demo/app/main.go (line 42)"
+    },
+    {
+      "session_id": "sess-b",
+      "is_sidechain": 1,
+      "tool_name": "Bash",
+      "path": "/proj/b.jsonl",
+      "failed_seq": 30,
+      "retry_seq": 32,
+      "seq_gap": 2,
+      "retry_is_error": 0,
+      "signature": "File not found: /srv/demo/app/main.go (line 42)"
+    }
+  ]
+}

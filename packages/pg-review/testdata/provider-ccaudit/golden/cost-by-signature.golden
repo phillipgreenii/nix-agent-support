@@ -1,0 +1,86 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "sig:File not found: <path> (line N):12a27a12",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "elapsed_ms_max": 9000,
+      "elapsed_ms_mean": 4000,
+      "elapsed_ms_p50": 3500,
+      "elapsed_ms_sum": 48000,
+      "idle_calls": 1,
+      "idle_ms_sum": 1200000
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "cost-by-signature",
+    "samples": [
+      "signature: File not found: /srv/demo/app/main.go (line 42)"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "sig:cmd failed exit status N detail: bad fla:f8d0458b",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "elapsed_ms_max": 6000,
+      "elapsed_ms_mean": 3000,
+      "elapsed_ms_p50": 2800,
+      "elapsed_ms_sum": 21000,
+      "idle_calls": 0,
+      "idle_ms_sum": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "cost-by-signature",
+    "samples": [
+      "signature: cmd failed\nexit status 2\tdetail: bad flag --frobnicate in a very long trailing explanation"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-003",
+    "subject_key": "sig:unranked failure in <path>:528f1dfe",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "elapsed_ms_max": 500,
+      "elapsed_ms_mean": 500,
+      "elapsed_ms_p50": 500,
+      "elapsed_ms_sum": 500,
+      "idle_calls": 0,
+      "idle_ms_sum": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "cost-by-signature",
+    "samples": [
+      "signature: unranked failure in /tmp/x9"
+    ]
+  }
+]

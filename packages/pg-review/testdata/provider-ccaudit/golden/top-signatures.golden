@@ -1,0 +1,52 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "sig:File not found: <path> (line N):12a27a12",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "errors": 12,
+      "sessions": 4,
+      "subagent": 3
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "top-signatures",
+    "samples": [
+      "signature: File not found: /srv/demo/app/main.go (line 42)"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "sig:cmd failed exit status N detail: bad fla:f8d0458b",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "errors": 7,
+      "sessions": 2,
+      "subagent": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "top-signatures",
+    "samples": [
+      "signature: cmd failed\nexit status 2\tdetail: bad flag --frobnicate in a very long trailing explanation"
+    ]
+  }
+]

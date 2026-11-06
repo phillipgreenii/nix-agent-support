@@ -1,0 +1,62 @@
+{
+  "query": "interruptions",
+  "version": 2,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    {
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "path": "/proj/a.jsonl",
+      "seq": 50,
+      "ts": "2026-01-02T12:00:00Z",
+      "prev_tool_seq": 49,
+      "prev_ts": "2026-01-02T11:59:59Z",
+      "prev_tool_calls": 2,
+      "prev_tool_names": "Bash,Read",
+      "prev_lead_cmds": "make",
+      "marker": "[Request interrupted by user]"
+    },
+    {
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "path": "/proj/a.jsonl",
+      "seq": 54,
+      "ts": "2026-01-02T12:00:08Z",
+      "prev_tool_seq": 53,
+      "prev_ts": "2026-01-02T12:00:07Z",
+      "prev_tool_calls": 1,
+      "prev_tool_names": "Bash",
+      "prev_lead_cmds": "make",
+      "marker": "[Request interrupted by user]"
+    },
+    {
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "path": "/proj/a.jsonl",
+      "seq": 90,
+      "ts": "2026-01-02T12:30:00Z",
+      "prev_tool_seq": 89,
+      "prev_ts": "2026-01-02T12:29:50Z",
+      "prev_tool_calls": 1,
+      "prev_tool_names": "Edit",
+      "prev_lead_cmds": null,
+      "marker": "[Request interrupted by user for tool use]"
+    },
+    {
+      "session_id": "sess-b",
+      "is_sidechain": 0,
+      "path": "/proj/b.jsonl",
+      "seq": 5,
+      "ts": "2026-01-02T12:00:03Z",
+      "prev_tool_seq": 4,
+      "prev_ts": "2026-01-02T12:00:01Z",
+      "prev_tool_calls": 0,
+      "prev_tool_names": null,
+      "prev_lead_cmds": null,
+      "marker": "[Request interrupted by user]"
+    }
+  ]
+}

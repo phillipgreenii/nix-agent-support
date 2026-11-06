@@ -1,0 +1,46 @@
+{
+  "query": "hook-refusals-in-body",
+  "version": 2,
+  "since": "2026-01-02T00:00:00Z",
+  "until": "2026-01-03T00:00:00Z",
+  "args": [],
+  "columns": [],
+  "rows": [
+    {
+      "kind": "blocked",
+      "session_id": "sess-a",
+      "is_sidechain": 0,
+      "tool_name": "Bash",
+      "lead_cmd": "git",
+      "path": "/proj/a.jsonl",
+      "seq": 60,
+      "ts": "2026-01-02T13:00:00Z",
+      "opening": "access to the demo directory is blocked",
+      "signature": "access to the demo directory is blocked"
+    },
+    {
+      "kind": "refusing",
+      "session_id": "sess-b",
+      "is_sidechain": 1,
+      "tool_name": "Bash",
+      "lead_cmd": "git",
+      "path": "/proj/b.jsonl",
+      "seq": 70,
+      "ts": "2026-01-02T14:00:00Z",
+      "opening": "refusing this commit on a protected branch",
+      "signature": "refusing this commit on a protected branch\nDirectory: /srv/demo/work"
+    },
+    {
+      "kind": "blocked",
+      "session_id": "sess-b",
+      "is_sidechain": 1,
+      "tool_name": "Bash",
+      "lead_cmd": "git",
+      "path": "/proj/b.jsonl",
+      "seq": 72,
+      "ts": "2026-01-02T14:05:00Z",
+      "opening": "access to the demo directory is blocked",
+      "signature": "access to the demo directory is blocked"
+    }
+  ]
+}

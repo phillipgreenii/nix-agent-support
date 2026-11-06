@@ -1,0 +1,28 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "sig:File not found: <path> (line N):12a27a12",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "retry",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "retry_chains": 2,
+      "retry_sessions": 2
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "retry-chains",
+    "samples": [
+      "signature: File not found: /srv/demo/app/main.go (line 42)",
+      "session=sess-a path=/proj/a.jsonl seq=10",
+      "session=sess-b path=/proj/b.jsonl seq=30"
+    ]
+  }
+]

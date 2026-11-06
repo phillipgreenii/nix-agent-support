@@ -1,0 +1,71 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "tool:Bash",
+    "defined_in": "",
+    "type": "tool",
+    "kind": "error-rate",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "calls": 200,
+      "error_pct": 5,
+      "errors": 10
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "error-rate-by-tool",
+    "samples": []
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "tool:Read",
+    "defined_in": "",
+    "type": "tool",
+    "kind": "error-rate",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "calls": 80,
+      "error_pct": 1.25,
+      "errors": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "error-rate-by-tool",
+    "samples": []
+  },
+  {
+    "schema_version": 1,
+    "id": "E-003",
+    "subject_key": "tool:unknown",
+    "defined_in": "",
+    "type": "tool",
+    "kind": "error-rate",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "calls": 3,
+      "error_pct": 0,
+      "errors": 0
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T00:00:00Z",
+    "last_seen": "2026-01-03T00:00:00Z",
+    "query": "error-rate-by-tool",
+    "samples": []
+  }
+]

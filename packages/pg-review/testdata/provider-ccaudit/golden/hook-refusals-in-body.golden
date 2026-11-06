@@ -1,0 +1,53 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "sig:access to the demo directory is blocked:a83057d4",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "hook_refusal_sessions": 2,
+      "hook_refusals": 2
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T13:00:00Z",
+    "last_seen": "2026-01-02T14:05:00Z",
+    "query": "hook-refusals-in-body",
+    "samples": [
+      "signature: access to the demo directory is blocked",
+      "session=sess-a path=/proj/a.jsonl seq=60",
+      "session=sess-b path=/proj/b.jsonl seq=72"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "sig:refusing this commit on a protected bran:308328af",
+    "defined_in": "",
+    "type": "signature",
+    "kind": "error",
+    "scope": "demo",
+    "window": {
+      "from": "2026-01-02T00:00:00Z",
+      "to": "2026-01-03T00:00:00Z"
+    },
+    "metrics": {
+      "hook_refusal_sessions": 1,
+      "hook_refusals": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-01-02T14:00:00Z",
+    "last_seen": "2026-01-02T14:00:00Z",
+    "query": "hook-refusals-in-body",
+    "samples": [
+      "signature: refusing this commit on a protected branch\nDirectory: /srv/demo/work",
+      "session=sess-b path=/proj/b.jsonl seq=70"
+    ]
+  }
+]
