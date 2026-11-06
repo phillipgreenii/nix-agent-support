@@ -435,12 +435,12 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 // notifyDeletedSnapshots asks the parser to look at snapshot files that a sweep
 // found deleted, so their deletion records are written.
 func (d *Daemon) notifyDeletedSnapshots() {
-	files, err := d.st.AllFiles()
+	files, err := d.st.DeletedSnapshotFiles()
 	if err != nil {
 		return
 	}
 	for _, f := range files {
-		if f.Mode == "snapshot" && f.State == "deleted" && d.prs.HasSource(f.Source) {
+		if d.prs.HasSource(f.Source) {
 			d.prs.Notify(f.ID)
 		}
 	}

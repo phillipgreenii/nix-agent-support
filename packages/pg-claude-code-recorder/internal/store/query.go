@@ -92,6 +92,12 @@ func (s *Reader) AllFiles() ([]File, error) {
 	return s.files(`SELECT ` + fileCols + ` FROM files ORDER BY id`)
 }
 
+// DeletedSnapshotFiles returns only the snapshot-mode files whose state is
+// deleted, ordered by id. A sweep with nothing deleted reads no whole table.
+func (s *Reader) DeletedSnapshotFiles() ([]File, error) {
+	return s.files(`SELECT ` + fileCols + ` FROM files WHERE mode='snapshot' AND state='deleted' ORDER BY id`)
+}
+
 func (s *Reader) files(q string, args ...any) ([]File, error) {
 	rows, err := s.q.Query(q, args...)
 	if err != nil {
