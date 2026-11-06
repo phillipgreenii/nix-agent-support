@@ -130,3 +130,15 @@ func TestStripControlAndANSI(t *testing.T) {
 		t.Errorf("render did not strip the title: %q", out)
 	}
 }
+
+func TestRenumberRewritesHeaderAndEvidenceHint(t *testing.T) {
+	in := "Item 0    State: Pending    Pending: 0\n\n2. Where from\nRaw evidence: pg-review human show 0 --evidence\n"
+	got := Renumber(in, 7, "Deferred", 3)
+	want := "Item 7    State: Deferred    Pending: 3\n\n2. Where from\nRaw evidence: pg-review human show 7 --evidence\n"
+	if got != want {
+		t.Errorf("got %q", got)
+	}
+	if Renumber("no header", 7, "x", 1) != "no header" {
+		t.Error("text without a header changed")
+	}
+}

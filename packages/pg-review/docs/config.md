@@ -57,3 +57,8 @@ absolute executable path or on `PATH`); a scope with no prefix; duplicate ids wi
 table; a prompt file that does not exist; a profile with no model; an effort outside
 `low`, `medium`, `high`, `xhigh`, `max`; malformed TOML; and a `schema_version` other
 than 1.
+
+## `[tracker]`
+
+Where Adopted work beads are filed: `command`, `dir`, `default_label` and `[[tracker.repo]]`
+(`prefix`, `label`). See `outbox.md`.

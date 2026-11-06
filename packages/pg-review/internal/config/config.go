@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -38,6 +39,39 @@ type Scope struct {
 	Name     string
 	Prefixes []string
 	Layers   []string
+}
+
+// Tracker is the work-bead tracker an Adopted ruling files into.
+type Tracker struct {
+	// Command is the tracker CLI, default "bd".
+	Command string
+	// Dir is the tracker root passed to the CLI as -C. Empty means the
+	// CLI's own working directory.
+	Dir string
+	// DefaultLabel is the repo label used when no Repos entry matches.
+	DefaultLabel string
+	// Repos map the path of a finding's first target to the repo label.
+	Repos []TrackerRepo
+}
+
+// TrackerRepo maps targets under Prefix to a repo label.
+type TrackerRepo struct {
+	Prefix string
+	Label  string
+}
+
+// LabelFor derives the repo label of a finding from its targets: the first
+// target that starts with a configured prefix wins (entries tried in order),
+// else DefaultLabel. It returns "" when the label cannot be determined.
+func (t Tracker) LabelFor(targets []string) string {
+	for _, tg := range targets {
+		for _, r := range t.Repos {
+			if r.Prefix != "" && strings.HasPrefix(tg, r.Prefix) {
+				return r.Label
+			}
+		}
+	}
+	return t.DefaultLabel
 }
 
 // Env locates the XDG directories. Tests point it at temp directories.
@@ -83,6 +117,8 @@ type Effective struct {
 	Scopes        []Scope
 	Providers     []Provider
 	Lenses        []Lens
+	// Tracker says where Adopted work beads are filed (see docs/outbox.md).
+	Tracker Tracker
 
 	mergeProblems []Problem
 }
@@ -154,6 +190,19 @@ type rawFile struct {
 	Scope         []rawScope            `toml:"scope"`
 	Provider      []rawProvider         `toml:"provider"`
 	Lens          []rawLens             `toml:"lens"`
+	Tracker       rawTracker            `toml:"tracker"`
+}
+
+type rawTracker struct {
+	Command      *string          `toml:"command"`
+	Dir          *string          `toml:"dir"`
+	DefaultLabel *string          `toml:"default_label"`
+	Repo         []rawTrackerRepo `toml:"repo"`
+}
+
+type rawTrackerRepo struct {
+	Prefix string `toml:"prefix"`
+	Label  string `toml:"label"`
 }
 
 type rawLimits struct {
@@ -221,6 +270,7 @@ func Load(env Env, builtins fs.FS) (*Effective, error) {
 		Profiles:  builtin.Profiles(),
 		Providers: builtin.Providers(),
 		Lenses:    builtin.Lenses(),
+		Tracker:   Tracker{Command: "bd"},
 	}
 	e.Ccpool.NeutralDir = filepath.Join(env.StateHome, "pg-review", "analyst-cwd")
 
@@ -274,6 +324,17 @@ func (e *Effective) merge(raw rawFile) {
 	setStr(&e.Ccpool.PoolDir, raw.Ccpool.PoolDir)
 	setStr(&e.Ccpool.NeutralDir, raw.Ccpool.NeutralDir)
 	setSlice(&e.Ccpool.ReadTools, raw.Ccpool.ReadTools)
+
+	setStr(&e.Tracker.Command, raw.Tracker.Command)
+	setStr(&e.Tracker.Dir, raw.Tracker.Dir)
+	setStr(&e.Tracker.DefaultLabel, raw.Tracker.DefaultLabel)
+	for _, r := range raw.Tracker.Repo {
+		if r.Prefix == "" || r.Label == "" {
+			e.problem("tracker", r.Prefix, "a [[tracker.repo]] entry needs both prefix and label")
+			continue
+		}
+		e.Tracker.Repos = append(e.Tracker.Repos, TrackerRepo{Prefix: r.Prefix, Label: r.Label})
+	}
 
 	names := make([]string, 0, len(raw.Profile))
 	for n := range raw.Profile {

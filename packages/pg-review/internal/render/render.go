@@ -105,3 +105,17 @@ func Render(it Item) string {
 
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
+
+// Renumber rewrites a stored rendering (made with item number 0) for display:
+// the header line gets the real item number, state and pending count, and the
+// raw-evidence hint names the real number. The rest of the text is untouched,
+// so the stored write-up stays the single source of the sections.
+func Renumber(rendered string, number int, state string, pending int) string {
+	head, rest, ok := strings.Cut(rendered, "\n")
+	if !ok || !strings.HasPrefix(head, "Item ") {
+		return rendered
+	}
+	head = fmt.Sprintf("Item %d    State: %s    Pending: %d", number, Strip(state), pending)
+	rest = strings.ReplaceAll(rest, "pg-review human show 0 --evidence", fmt.Sprintf("pg-review human show %d --evidence", number))
+	return head + "\n" + rest
+}

@@ -74,10 +74,6 @@ func TestNotBuiltCommandsAreAbsent(t *testing.T) {
 
 func TestStubsPrintNotImplementedAndExitOne(t *testing.T) {
 	cases := [][]string{
-		{"human", "pending"},
-		{"human", "pending", "--decided"},
-		{"human", "show", "3", "--evidence"},
-		{"human", "rule", "3", "4", "adopted", "--note", "n", "--reconsider-when", "w", "--useful", "yes"},
 		{"agent", "q", "ccaudit", "some-query"},
 		{"job", "run", "lens", "--scope", "s", "--duration", "7d", "--at", "2026-01-08T00:00:00Z", "--profile", "p", "--analyst", "none", "--evidence-only", "--run-key", "k", "--schedule-id", "id"},
 		{"job", "run", "lens", "--scope", "s", "--from", "a", "--to", "b"},
