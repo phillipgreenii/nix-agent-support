@@ -3392,6 +3392,105 @@
                     touch $out
                   '';
 
+              # pg-review: the darwin alert-rule registration follows the observability flag and
+              # the home-manager enable flag, as the pg-keep-awake module does.
+              test-pg-review-darwin-module =
+                let
+                  evalDarwin =
+                    {
+                      obsEnable,
+                      users,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-review/default.nix
+                        {
+                          options = {
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            phillipgreenii.observability = {
+                              enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = false;
+                              };
+                              metricsTargets = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              logSources = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              dashboardProviders = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              alertRuleFiles = lib.mkOption {
+                                type = lib.types.listOf lib.types.path;
+                                default = [ ];
+                              };
+                            };
+                          };
+                          config = {
+                            phillipgreenii.observability.enable = obsEnable;
+                            home-manager.users = users;
+                          };
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  reviewUser = enable: {
+                    phillipgreenii.programs.pg-review.enable = enable;
+                  };
+                  alertsFile = ./packages/pg-review/grafana/alerting/alerts.yaml;
+                  enabled = evalDarwin {
+                    obsEnable = true;
+                    users.alice = reviewUser true;
+                  };
+                  reviewOff = evalDarwin {
+                    obsEnable = true;
+                    users.alice = reviewUser false;
+                  };
+                  noUsers = evalDarwin {
+                    obsEnable = true;
+                    users = { };
+                  };
+                  obsOff = evalDarwin {
+                    obsEnable = false;
+                    users.alice = reviewUser true;
+                  };
+                in
+                # present when the tool is enabled (and the stack is on) ...
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                # ... and absent otherwise
+                assert reviewOff.alertRuleFiles == [ ];
+                assert noUsers.alertRuleFiles == [ ];
+                assert obsOff.alertRuleFiles == [ ];
+                # nothing else is registered: the tool pushes OTel, has no jsonl log, no dashboard
+                assert enabled.metricsTargets == { };
+                assert enabled.logSources == { };
+                assert enabled.dashboardProviders == { };
+                pkgs.runCommand "test-pg-review-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.pg-connector-scm-git
+                    ];
+                  }
+                  ''
+                    # The registered file is well-formed, holds the three rules in one
+                    # "Host" folder, and pins no folderUid.
+                    yq -o=json '.' ${alertsFile} > alerts.json
+                    jq -e '.apiVersion == 1' alerts.json >/dev/null
+                    jq -e '[.groups[].folder] | unique == ["Host"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Host" >&2; exit 1; }
+                    jq -e '[.groups[].rules[]] | length == 3' alerts.json >/dev/null || { echo "FAIL: expected 3 rules" >&2; exit 1; }
+                    jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
+                    touch $out
+                  '';
+
               # darwin/modules/claude-code and darwin/modules/pg2-agent install their
               # per-user packages for system.primaryUser, not for a hardcoded login
               # (deep review 2026-10-24, finding C F-11). The two modules are evaluated
@@ -7297,6 +7396,28 @@
                     bash ${./packages/pg-keep-awake/check-alert-rules.sh} \
                       ${./packages/pg-keep-awake/grafana/alerting/alerts.yaml} \
                       ${./packages/pg-keep-awake/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
+              # pg-review: the alert rules. The script pins the Grafana-only fields (for,
+              # severity, noDataState) and the expressions, then wraps refId A of each rule as a
+              # Prometheus alert and runs the cases under grafana/alerting/rule-tests/ under
+              # `promtool test rules`.
+              test-pg-review-alert-rules =
+                pkgs.runCommand "test-pg-review-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pg-review/check-alert-rules.sh} \
+                      ${./packages/pg-review/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-review/grafana/alerting/rule-tests}
                     touch "$out"
                   '';
 

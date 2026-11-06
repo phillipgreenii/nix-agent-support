@@ -1,0 +1,147 @@
+# pg-review unified-alerting rules: three warnings (the review queue is too large, a lens has
+# stopped running on its schedule, a schedule keeps failing). Modelled on
+# packages/pg-keep-awake/grafana/alerting/alerts.yaml; the PromQL behaviour is run under
+# `promtool test rules` by packages/pg-review/check-alert-rules.sh against the cases in
+# rule-tests/. refId A is plain PromQL and refId C a single `gt` threshold stage, so every rule
+# can be wrapped as a Prometheus alert `expr: (<A>) > <threshold>`.
+#
+# The series are OTLP gauges computed from the ledger and pushed every 5 minutes (metrics.catalog).
+# OTLP gauges go stale when the pusher stops, so every expression reads max_over_time and ends in
+# `or vector(0)`: a missing series becomes 0, which no rule treats as firing. A schedule that has
+# never filed has no last-success series, so rule 2 cannot fire for it (the failing rule covers a
+# schedule that only ever fails). A manual run carries no schedule id, so it produces no
+# schedule-labelled series: it can neither mask a dead schedule nor clear its alert.
+#
+# Rule 2 compares, per schedule, the time since the schedule's last Filed window end with twice
+# that run's window length (windows tile their period, so no schedule knowledge is needed).
+# Both sides are aggregated to the labels lens, scope and schedule and matched on exactly those,
+# so a lens and scope with a daily and a weekly schedule is judged per schedule. The 1d lookback
+# keeps the last values alive across a pusher outage (the values only move forward).
+#
+# Router registration: a new alert uid must also be registered with the router's probe in the
+# deployment repository, or it never escalates to a bead; see docs/metrics.md.
+# The rule group's folder is created by alerting provisioning BY TITLE (never pin a folderUid).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-review-alerts
+    folder: Host
+    interval: 1m
+    rules:
+      - uid: pg-review-pending-too-large
+        title: pg-review pending items above the cap
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-review has more than 12 items awaiting a ruling for over an hour"
+          description: "The sum of pg_review_pending_items has been above 12 (the pending cap) for over an hour: reviews are filing faster than they are ruled on. Run `pg-review human pending` and rule on the items, or `pg-review job status` to see held lenses. The cap pauses filing, so this also means new findings are waiting."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum(max_over_time(pg_review_pending_items[10m])) or vector(0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [12]
+      - uid: pg-review-lens-not-running
+        title: pg-review lens not running on its schedule
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A pg-review lens has not filed for more than twice its window"
+          description: "For the lens, scope and schedule on this alert, time() minus the end of the schedule's latest Filed window is more than twice that window's length (pg_review_last_success_timestamp_seconds, pg_review_last_window_seconds). Run `pg-review job status` and `pg-review job show-run`, check the router and the maintain heartbeat, and run the lens by hand with `pg-review job run`. A manual run does not clear this alert."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "(time() - max by (lens, scope, schedule) (max_over_time(pg_review_last_success_timestamp_seconds[1d]))) - on (lens, scope, schedule) 2 * max by (lens, scope, schedule) (max_over_time(pg_review_last_window_seconds[1d])) or vector(0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-review-runs-failing
+        title: pg-review schedule failing repeatedly
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A pg-review schedule has failed 3 or more runs in a row"
+          description: "pg_review_consecutive_failed_runs is 3 or more for the schedule on this alert: its Failed runs since its last Filed run. A Filed run resets the count; a Skipped run neither adds nor resets it. Run `pg-review job status` and `pg-review job show-run <id>` for the failure reason."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (lens, scope, schedule) (max_over_time(pg_review_consecutive_failed_runs[10m])) or vector(0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]

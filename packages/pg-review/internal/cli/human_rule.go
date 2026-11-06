@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/metrics"
 )
 
 func init() { registerCommand(groupHuman, newHumanRuleCmd) }
@@ -89,6 +90,8 @@ since it last changed, else the command exits 6.
 					fmt.Fprintf(cmd.ErrOrStderr(), "work bead not filed yet: %v\n", err)
 				}
 			}
+			// Gauges follow every ruling; best effort, never changes the outcome.
+			metrics.Emit(ctx, l, l.Now())
 			lines := make([]string, 0, len(results))
 			for _, r := range results {
 				line := fmt.Sprintf("%d  %s  -> %s", r.Number, oneLine(r.Title, 160), r.State)

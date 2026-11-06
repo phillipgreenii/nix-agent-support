@@ -16,6 +16,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/metrics"
 )
 
 type ledgerTx = ledger.Tx
@@ -155,6 +156,13 @@ func Run(ctx context.Context, d *Deps, p Params) (Result, error) {
 			return Result{}, err
 		}
 	}
+	// The end of every run that wrote a run row emits the gauges, whatever
+	// the outcome; the push is best effort and bounded.
+	defer func() {
+		if s.Run.ID != 0 {
+			metrics.Emit(context.WithoutCancel(ctx), d.Ledger, d.Now())
+		}
+	}()
 	for _, st := range stages(d) {
 		if err := st.Run(ctx, s); err != nil {
 			return Result{Run: s.Run}, finishFailed(d, s, err)

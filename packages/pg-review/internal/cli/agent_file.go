@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/validate"
 )
@@ -61,6 +62,8 @@ func newAgentFileCmd() *cobra.Command {
 				if err := runner.FinishInteractive(cmd.Context(), l, runID, cfg.Env.CacheHome); err != nil {
 					return mapFileError(err)
 				}
+				// An interactive run ends here, not in the pipeline.
+				metrics.Emit(cmd.Context(), l, l.Now())
 			}
 			return printJSONOrText(cmd, res, fmt.Sprintf("filed %d, deduplicated %d, skipped %d, waiting %d",
 				res.Filed, res.Deduplicated, res.Skipped, res.Waiting))

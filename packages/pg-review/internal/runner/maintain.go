@@ -10,11 +10,16 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/metrics"
 )
 
-// MetricsRefreshHook is the metrics refresh step of maintain. It is a no-op
-// until the metrics work registers one.
-var MetricsRefreshHook func(ctx context.Context, d *Deps) error
+// MetricsRefreshHook is the metrics refresh step of maintain: it computes the
+// gauges from the ledger and pushes them, best effort (an unreachable endpoint
+// never fails the step). Tests may replace it.
+var MetricsRefreshHook = func(ctx context.Context, d *Deps) error {
+	metrics.Emit(ctx, d.Ledger, d.Now())
+	return nil
+}
 
 // MaintainOptions are the seams of Maintain.
 type MaintainOptions struct {

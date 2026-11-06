@@ -1,0 +1,92 @@
+# promtool unit tests for the pg-review-runs-failing alert. Run by check-alert-rules.sh, which
+# wraps refId A as `alert: <uid>` with `expr: (<A>) > 2` (three or more), `for: 30m` and the
+# labels. All series are synthetic. The series is a schedule's Failed runs since its last Filed
+# run; a Filed run resets it, a Skipped run neither adds nor resets, manual runs never touch it.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: three consecutive failures held for 30m fire, labelled per schedule
+    interval: 1m
+    input_series:
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "0x10 1x10 2x10 3x100"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-review-runs-failing
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: pg-review-runs-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+
+  - name: two failures do not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "2x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-runs-failing
+        exp_alerts: []
+
+  - name: only the failing schedule fires when two schedules share a lens and scope
+    interval: 1m
+    input_series:
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "4x200"
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="weekly"}
+        values: "0x200"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-review-runs-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+
+  - name: a Filed run that resets the count before the 30m is up never fires
+    interval: 1m
+    input_series:
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3x15 0x185"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-runs-failing
+        exp_alerts: []
+
+  - name: the alert clears after the count resets
+    interval: 1m
+    input_series:
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3x60 0x140"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: pg-review-runs-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+      - eval_time: 100m
+        alertname: pg-review-runs-failing
+        exp_alerts: []
+
+  - name: no series, a manual-only lens, does not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_runs{lens="lens-m",scope="scope-a",outcome="failed"}
+        values: "9x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-runs-failing
+        exp_alerts: []

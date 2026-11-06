@@ -1,0 +1,12 @@
+pg_review_runs gauge lens,scope,outcome
+pg_review_run_duration_seconds gauge lens,scope
+pg_review_findings_last_run gauge lens,scope
+pg_review_last_success_timestamp_seconds gauge lens,scope,schedule
+pg_review_last_window_seconds gauge lens,scope,schedule
+pg_review_consecutive_failed_runs gauge lens,scope,schedule
+pg_review_pending_items gauge lens,scope
+pg_review_oldest_pending_age_seconds gauge lens,scope
+pg_review_topics gauge lens,scope,state
+pg_review_decisions gauge lens,scope,ruling
+pg_review_subjects gauge lens,scope,type
+pg_review_outbox_failed gauge lens,scope

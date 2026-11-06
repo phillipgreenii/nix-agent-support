@@ -1,0 +1,68 @@
+# promtool unit tests for the pg-review-pending-too-large alert. Run by check-alert-rules.sh,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 12`, the rule's `for: 1h` and labels. All series are
+# synthetic. The gauges are pushed every 5 minutes; the 1m test interval is a simplification.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: above the cap for over an hour fires once, not before
+    interval: 1m
+    input_series:
+      - series: pg_review_pending_items{lens="lens-a",scope="scope-a"}
+        values: "13x200"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-review-pending-too-large
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: pg-review-pending-too-large
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: exactly at the cap does not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_pending_items{lens="lens-a",scope="scope-a"}
+        values: "12x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-pending-too-large
+        exp_alerts: []
+
+  - name: the cap is judged over all lenses and scopes together
+    interval: 1m
+    input_series:
+      - series: pg_review_pending_items{lens="lens-a",scope="scope-a"}
+        values: "7x200"
+      - series: pg_review_pending_items{lens="lens-b",scope="scope-a"}
+        values: "7x200"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-review-pending-too-large
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: falling back under the cap before the hour is up never fires
+    interval: 1m
+    input_series:
+      - series: pg_review_pending_items{lens="lens-a",scope="scope-a"}
+        values: "13x40 5x160"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-pending-too-large
+        exp_alerts: []
+
+  - name: no series at all does not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_runs{lens="lens-a",scope="scope-a",outcome="filed"}
+        values: "1x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-pending-too-large
+        exp_alerts: []

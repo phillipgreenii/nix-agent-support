@@ -1,0 +1,121 @@
+# promtool unit tests for the pg-review-lens-not-running alert. Run by check-alert-rules.sh,
+# which wraps refId A as `alert: <uid>` with `expr: (<A>) > 0`, `for: 30m` and the labels. All
+# series are synthetic. Gauge values are in seconds: the last-success series is the window end
+# of a schedule's latest Filed run (here a number of seconds since the test epoch), the
+# last-window series that run's window length. The alert fires when time() minus the last
+# success is more than twice the window: for a daily window (86400s) with last success at 3600s
+# that is after 3600 + 172800 = 176400s = 2940m, plus the 30m `for`.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a daily schedule that stops filing fires after twice its window, labelled per schedule
+    interval: 1m
+    input_series:
+      - series: pg_review_last_success_timestamp_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3600x3100"
+      - series: pg_review_last_window_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "86400x3100"
+    alert_rule_test:
+      - eval_time: 2900m
+        alertname: pg-review-lens-not-running
+        exp_alerts: []
+      - eval_time: 3050m
+        alertname: pg-review-lens-not-running
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+
+  - name: a schedule that keeps filing on time does not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_last_success_timestamp_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3600x1000 90000x2100"
+      - series: pg_review_last_window_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "86400x3100"
+    alert_rule_test:
+      - eval_time: 3050m
+        alertname: pg-review-lens-not-running
+        exp_alerts: []
+
+  - name: a daily and a weekly schedule of one lens and scope are judged separately, only the late one fires
+    interval: 1m
+    input_series:
+      - series: pg_review_last_success_timestamp_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3600x3100"
+      - series: pg_review_last_window_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "86400x3100"
+      - series: pg_review_last_success_timestamp_seconds{lens="lens-a",scope="scope-a",schedule="weekly"}
+        values: "3600x3100"
+      - series: pg_review_last_window_seconds{lens="lens-a",scope="scope-a",schedule="weekly"}
+        values: "604800x3100"
+    alert_rule_test:
+      - eval_time: 3050m
+        alertname: pg-review-lens-not-running
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+
+  - name: a schedule that never filed has no last-success series and does not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_consecutive_failed_runs{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "1x3100"
+    alert_rule_test:
+      - eval_time: 3050m
+        alertname: pg-review-lens-not-running
+        exp_alerts: []
+
+  - name: a manual-only lens produces no schedule series, so there is nothing to alert on
+    interval: 1m
+    input_series:
+      - series: pg_review_runs{lens="lens-m",scope="scope-a",outcome="filed"}
+        values: "4x3100"
+    alert_rule_test:
+      - eval_time: 3050m
+        alertname: pg-review-lens-not-running
+        exp_alerts: []
+
+  - name: a manual run does not clear the alert of a dead schedule
+    interval: 1m
+    input_series:
+      - series: pg_review_last_success_timestamp_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3600x3100"
+      - series: pg_review_last_window_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "86400x3100"
+      - series: pg_review_runs{lens="lens-a",scope="scope-a",outcome="filed"}
+        values: "1+1x3100"
+    alert_rule_test:
+      - eval_time: 3050m
+        alertname: pg-review-lens-not-running
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+
+  - name: the last values outlive a pusher outage, so a dead schedule still fires
+    interval: 1m
+    input_series:
+      - series: pg_review_last_success_timestamp_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "3600x2000 _x1100"
+      - series: pg_review_last_window_seconds{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "86400x2000 _x1100"
+    alert_rule_test:
+      - eval_time: 2999m
+        alertname: pg-review-lens-not-running
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
