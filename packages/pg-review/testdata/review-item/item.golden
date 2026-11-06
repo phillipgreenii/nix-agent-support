@@ -1,0 +1,56 @@
+Item 7    State: Pending    Pending: 3
+
+1. Title
+Should the quillsort tool accept its arguments in either order?
+
+2. Where from
+Scope: demo-scope
+Lens: agent-workflow
+Run date: 2026-02-08
+Raw evidence: pg-review human show 7 --evidence
+
+3. Category
+workflow (kind: wasted-retries)
+
+4. Situation
+In the week the tool was called 40 times and failed 10 times, a quarter of its calls: 6 failures in the first group [E-001.errors=6] and 4 in the second [E-002.errors=4], so 6 + 4 = 10 failures, matching the query total [Q-001#0.errors=10]. The week before, the baseline was 1 failure in 20 calls.
+
+5. History
+First seen on 2026-01-29. No earlier ruling exists; this is the first time seen.
+
+6. Problem
+Calls fail when the sort key comes before the file name, and each failure is retried by hand.
+
+7. Why it is a problem
+The tool parses its arguments by position and rejects a swapped pair with a vague message, so the caller cannot tell what to fix and tries the same call again.
+
+8. Impact
+10 failed calls, each followed by one retry of about 2 minutes, so about 20 minutes (10 retries x 2 minutes) of lost work in the week; the 2 minute figure is an estimate from the sample sessions.
+
+9. Options
+Option 1: Do nothing
+  Pros: No work is needed.
+  Cons: About 20 minutes a week keep being lost.
+  If ruled: Nothing changes and no work bead is filed.
+
+Option 2: Accept the arguments in either order
+  Pros: Removes the whole class of failure.
+  Cons: A small change to the tool settings is needed.
+  If ruled: If you adopt this, one work bead is filed in the workspace tracker for the settings repo.
+
+10. Recommendation
+Accept the arguments in either order
+It removes the cause for a small, one-time edit.
+
+11. What information is missing
+- Whether other scopes see the same failures.
+
+12. Glossary
+- baseline: The same measure over the week before the window, used for comparison.
+- quillsort: An invented sorting tool used in this example.
+- pg-review: The self-review command-line tool.
+- lens: The kind of analysis a review run performs.
+- bead: A tracked unit of work.
+
+13. Evidence ids
+E-001, E-002, Q-001

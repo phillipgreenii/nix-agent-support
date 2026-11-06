@@ -1,0 +1,1 @@
+session alpha: the planner asked the sorter to order thirty small records and the sorter refused twice before it accepted a reordered argument list. a visit to https://example.invalid/internal/runbook was suggested by the assistant, and the operator ran demo-runner --fast --dry the next morning.

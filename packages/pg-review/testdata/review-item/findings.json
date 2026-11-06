@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "lens": "agent-workflow",
+  "scope": "demo-scope",
+  "window": { "from": "2026-02-01T00:00:00Z", "to": "2026-02-08T00:00:00Z" },
+  "findings": [
+    {
+      "subject_key": "tool:quillsort",
+      "kind": "wasted-retries",
+      "title": "Should the quillsort tool accept its arguments in either order?",
+      "category": "workflow",
+      "situation": "In the week the tool was called 40 times and failed 10 times, a quarter of its calls: 6 failures in the first group [E-001.errors=6] and 4 in the second [E-002.errors=4], so 6 + 4 = 10 failures, matching the query total [Q-001#0.errors=10]. The week before, the baseline was 1 failure in 20 calls.",
+      "history": "First seen on 2026-01-29. No earlier ruling exists; this is the first time seen.",
+      "problem": "Calls fail when the sort key comes before the file name, and each failure is retried by hand.",
+      "why_problem": "The tool parses its arguments by position and rejects a swapped pair with a vague message, so the caller cannot tell what to fix and tries the same call again.",
+      "impact": "10 failed calls, each followed by one retry of about 2 minutes, so about 20 minutes (10 retries x 2 minutes) of lost work in the week; the 2 minute figure is an estimate from the sample sessions.",
+      "options": [
+        {
+          "name": "Do nothing",
+          "pros": "No work is needed.",
+          "cons": "About 20 minutes a week keep being lost.",
+          "if_ruled": "Nothing changes and no work bead is filed."
+        },
+        {
+          "name": "Accept the arguments in either order",
+          "pros": "Removes the whole class of failure.",
+          "cons": "A small change to the tool settings is needed.",
+          "if_ruled": "If you adopt this, one work bead is filed in the workspace tracker for the settings repo."
+        }
+      ],
+      "recommendation": {
+        "option": "Accept the arguments in either order",
+        "why": "It removes the cause for a small, one-time edit."
+      },
+      "glossary": [
+        {
+          "term": "baseline",
+          "meaning": "The same measure over the week before the window, used for comparison."
+        },
+        {
+          "term": "quillsort",
+          "meaning": "An invented sorting tool used in this example."
+        },
+        {
+          "term": "pg-review",
+          "meaning": "The self-review command-line tool."
+        },
+        {
+          "term": "lens",
+          "meaning": "The kind of analysis a review run performs."
+        },
+        { "term": "bead", "meaning": "A tracked unit of work." }
+      ],
+      "evidence": ["E-001", "E-002", "Q-001"],
+      "sums": [
+        {
+          "label": "failures across both groups",
+          "addends": [6, 4],
+          "total": 10
+        }
+      ],
+      "targets": ["settings/quillsort.json"],
+      "confirm_by": "The next review shows no failed quillsort calls caused by swapped arguments."
+    }
+  ],
+  "unverified": ["Whether other scopes see the same failures."],
+  "end": true
+}

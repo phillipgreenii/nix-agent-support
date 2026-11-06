@@ -1,0 +1,9 @@
+{
+  "Number": 7,
+  "Pending": 3,
+  "State": "Pending",
+  "Lens": "agent-workflow",
+  "Scope": "demo-scope",
+  "RunDate": "2026-02-08",
+  "Missing": ["Whether other scopes see the same failures."]
+}

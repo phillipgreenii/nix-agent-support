@@ -1,0 +1,11 @@
+# Plain-English allowlist: tokens the glossary check never asks to be defined.
+# One token per line, matched case-insensitively against a whole extracted token
+# (a vocabulary word, a backticked string, a state word). Lines starting with #
+# are comments.
+true
+false
+null
+none
+yes
+no
+ok

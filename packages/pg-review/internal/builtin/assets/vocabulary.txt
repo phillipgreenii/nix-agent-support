@@ -1,0 +1,22 @@
+# Maintained project vocabulary. One word per line; lines starting with # are
+# comments. A word on this list that appears in a finding must be defined in
+# that finding's glossary (or be on the plain-English allowlist). Matching is
+# case-insensitive on whole words.
+analyst
+broker
+ccpool
+ledger
+lens
+outbox
+provider
+staging
+idempotency
+reconsideration
+reaper
+heartbeat
+worktree
+hook
+allowlist
+denylist
+signature
+baseline
