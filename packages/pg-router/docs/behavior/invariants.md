@@ -140,6 +140,36 @@ flowchart TD
   offered to a busy handler. _(Why expiry is an absolute instant rather than a duration — and why that
   shape leaves no clock origin to choose — is recorded in
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-EVENT-1`.)_
+- **`INV-EVT-5`** <!-- uuid: d3f46c09-300f-4aa1-9e8f-75bac77c12ce --> — **Timer tick content.** A
+  `[[query]]` of type timer **MAY** declare **static metadata** (string keys to string values). A timer
+  with a **period** trigger **MUST** copy it unchanged into the metadata of every item it emits, and a
+  period timer with **no** metadata **MUST** emit exactly the item it emitted before the key existed.
+  The core **MUST** refuse a key it sets itself (`scheduled_for`, `on_missed`). A **calendar** tick
+  carries the declared metadata plus `scheduled_for` (the slot, RFC 3339) and `on_missed` (`"true"`
+  only on a catch-up tick).
+- **`INV-EVT-6`** <!-- uuid: 19fbd58c-0ca5-4171-8f7d-708d8e2abaa2 --> — **Calendar trigger.** A timer
+  query **MAY** use the **calendar trigger**: it fires at a **local time of day** on chosen weekdays
+  (every day by default). The zone is the zone of the router host, read once at process start, unless
+  the query names an IANA zone; a fixed offset **MUST** be refused. A configuration whose schedule
+  cannot be evaluated **MUST** fail `config check`, never at fire time. Each **slot** **MUST** yield
+  **at most one** tick, across restarts and clock changes. **Rule A (spring-forward):** a local time
+  that does not exist on a day **MUST** fire once, at the first instant after the gap. **Rule B
+  (fall-back):** a local time that occurs twice **MUST** fire once, at its first occurrence.
+- **`INV-EVT-7`** <!-- uuid: c9bf96a1-552d-40e5-9ea2-976009dfd6e1 --> — **Missed slots and expiry.** A
+  calendar trigger **MUST** declare `on_missed` (**no default**). A slot is **missed** only when the
+  router was **not running** at the slot time (the process started after it) or the **host was asleep**
+  at the slot time. Every other slot is **on time** and **MUST** fire when the router next evaluates
+  it, however late that evaluation is (load back-off or a slow query **MUST NOT** turn a slot into a
+  missed one). `run-now` **MUST** fire **exactly one** catch-up tick at once, however many slots were
+  missed; `next-slot` **MUST** skip them. A **first start** (no remembered slot) **MUST NOT** count
+  anything as missed. The core **MUST** remember, across restarts, the **last handled slot, its
+  outcome and the reason**. A calendar tick **MUST** expire at the **next slot** unless the query sets
+  `expires_in`; retry stops then (`INV-EVT-4`'s final attempt still applies). The event id is derived
+  from the query name and the slot, so two calendar queries that fire at the same slot never share an
+  id; it de-duplicates only while retained (`INV-EVT-3`); a slot whose record was lost **MAY** fire
+  again after expiry under `run-now`. _(The slot id, the expiry rule and the missed-slot ruling are
+  recorded in
+  `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-EVENT-6`.)_
 
 ## Interfaces
 
@@ -490,7 +520,9 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   concrete backend behind it **remain** a deployment binding via `INTF-MON` (`GOAL-MIN-1` still
   holds). The core is unaware of any concrete monitoring backend, and an **observer** reads the sink,
   never the core. A daemon emits continuously, and a **drain-and-exit run DOES emit a final snapshot**
-  before it exits.
+  before it exits. Inspection **MUST** also report, **per calendar query**: its schedule, its zone, the
+  last handled slot with its outcome and reason, and its next fire (`INV-EVT-6`, `INV-EVT-7`). **No
+  new metrics are added for this**, so the closed metric catalog is untouched.
 - **`INV-OBS-2`** <!-- uuid: 83a98350-7344-4e10-a911-8f1bcccb340c --> — **Per-participant inspection.**
   Beyond the aggregate metric catalog (`INV-OBS-1`), the core's inspection surface (`INTF-CLI`) **MUST**
   let `ACTOR-OP` see, for **each** configured event source and **each** configured event handler

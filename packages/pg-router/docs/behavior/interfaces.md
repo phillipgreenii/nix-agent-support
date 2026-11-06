@@ -244,8 +244,10 @@ trigger. The core gains nothing.
 
 **Pull mode.** The core invokes `query` on a **query trigger** — **periodic** (a tick, on that
 source's own configured period), **threshold** (queue-depth back-pressure), or **manual** (the
-smoke affordance only, `USECASE-VERIFY-PARTICIPANT`). The reply carries events inline, or defers
-and delivers them later on the callback (the `ingest-event` target).
+smoke affordance only, `USECASE-VERIFY-PARTICIPANT`). A timer query MAY also use the **calendar**
+trigger (`INV-EVT-6`, `INV-EVT-7`), which fires at a local time of day on chosen weekdays (see "Timer
+queries: metadata and the calendar trigger" under Configuration, below). The reply carries events
+inline, or defers and delivers them later on the callback (the `ingest-event` target).
 
 **Push mode.** The core never calls `query`; the source invokes the `ingest-event` callback as
 external facts arrive. No source, push or pull, registers into the self-report registry today — a
@@ -900,6 +902,14 @@ check` and adds **quick probes** of the system as it stands: the state directory
   not answer within a short timeout is reported as not answering, so a hung handler never hangs
   the report. Both only read and change nothing. (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
+  For each **calendar query** (`INV-EVT-6`) `config check` also prints its **resolved schedule** (the
+  weekdays, the time and the zone) and its **next fire**; a calendar configuration whose schedule
+  cannot be evaluated, or that names a fixed offset, fails the check.
+- **Calendar queries in `status`, and the query smoke test.** `status` shows **one line per calendar
+  query**: its schedule, its zone, the last handled slot with its outcome and reason, and its next fire
+  (`INV-OBS-1`, `INV-EVT-7`). The **query smoke test** (`run-query query:<name>`) prints the smoke tick
+  **including its metadata** (in the text and the machine-readable form), a line saying the smoke
+  tick's slot is **now**, and the **next three fire times**; it enqueues nothing and writes no state.
 - **Run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers for a
   single run — as an allow-list, a deny-list, or both — **without editing the configuration**
   (`STORY-OP-3`). The restriction scopes which participants that run activates and which a smoke test
@@ -1149,6 +1159,31 @@ switch, so what a role will run is readable without reading the adapter's own fi
 producer inherits the parent's environment, as it did before the key existed. A role's strict-env
 switch, where the role's adapter has one, is that adapter's own, under the same rules
 (`INV-ENV-2`). A `[[query]]` that omits `strict_base_env` runs its command exactly as it did before.
+
+**Timer queries: metadata and the calendar trigger.** A `[[query]]` of `type = "timer"` MAY carry
+**`metadata`**, a table of string keys to string values, at most 16 keys; it is copied unchanged into
+every item the timer emits, and `metadata = {}` equals absent (`INV-EVT-5`). `metadata` is supported
+only on timer queries, a value that is not a string is refused naming the key and the type found, and
+the keys `scheduled_for` and `on_missed` are reserved because the core sets them itself. A timer's
+`[query.trigger]` of `kind = "calendar"` (`INV-EVT-6`, `INV-EVT-7`) takes these keys:
+
+- **`at`** — required; 24-hour `HH:MM`, exactly two digits each (`03:30:00`, `24:00` and `9:5` are refused).
+- **`days`** — optional list of the lowercase three-letter weekdays `mon tue wed thu fri sat sun`;
+  absent means every day; an empty list, an unknown weekday or a repeated weekday is refused.
+- **`tz`** — optional IANA zone name; absent means the host zone read once at process start. A fixed
+  offset (`+02:00`), the empty string, `Local` and a path-like string are refused, because a fixed
+  offset cannot follow daylight saving.
+- **`on_missed`** — required, no default: `run-now` (one catch-up tick when the router was not running
+  or the host was asleep at the slot) or `next-slot` (wait for the following slot).
+- **`expires_in`** — optional duration greater than 0; absent means the tick expires at the next slot.
+
+The keys `every` and `at` (and `every` and `days`) are mutually exclusive: `every` belongs to
+`kind = "period"` and `at` to `kind = "calendar"`; `at`, `days`, `tz`, `on_missed` and `expires_in` are
+valid only for `kind = "calendar"`; a calendar trigger requires `type = "timer"`; an unknown `kind` is
+refused listing period, threshold, manual and calendar. Every mistake fails `config check` (one line
+per problem, each prefixed with the query's index and name) and the run refuses to start; none is
+discovered at fire time (`INV-EVT-6`, `INV-WORKFLOW-1`). A calendar tick carries the declared metadata
+plus `scheduled_for` and `on_missed` (`INV-EVT-5`).
 
 The **full configuration schema** is not yet pinned; it is tracked as an open question
 (`OQ-CONFIG`), with pg-router's existing TOML as prior art.

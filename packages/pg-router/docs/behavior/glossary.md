@@ -52,7 +52,15 @@ metrics backend, …) define their own terms in their own behavior sets.
   **narrowing predicate**), applied after the type match, and the core reads only that path. Which
   fields are matchable is the binding's to say, never the source's. A field or path a binding names
   that is absent on an event simply does not match (it is not an error).
-- **Query trigger** — what fires a pull event source's query, one of three kinds: **periodic** (a
+- **Calendar trigger** — a timer query's trigger that fires at a **local time of day** on chosen
+  weekdays (every day by default), in the host zone or a named IANA zone, once per **slot**
+  (`INV-EVT-6`, `INV-EVT-7`). It is a fourth kind beside the three of **Query trigger**, valid only
+  for a timer query.
+- **Slot** — the scheduled instant a calendar query fires at; the latest slot at or before a time `t`
+  is the previous one, and the next is the first slot strictly after it. A slot yields at most one tick
+  and names the tick's event id (`INV-EVT-6`, `INV-EVT-7`).
+- **Query trigger** — what fires a pull event source's query, one of three kinds (a timer query may
+  also use the **calendar trigger**, above): **periodic** (a
   tick, on the source's own configured period), **threshold** (queue-depth back-pressure — the
   depth of that source's own queued events crossing a bound), or **manual** (the smoke affordance
   only — `run-query` firing the query once, read-only, under a test-mode signal,

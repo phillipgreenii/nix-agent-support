@@ -82,6 +82,12 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   and **diagnose** a running system on demand, and see a role whose own configuration fails
   validation as **unavailable, with the reason**, instead of the whole daemon refusing to start. _(→
   `USECASE-VALIDATE-CONFIG`; `INV-ROLE-5`, `INV-WORKFLOW-1`.)_
+- **`STORY-OP-17`** <!-- uuid: 91fa236a-873c-4786-82ee-4f863e526dc5 --> — **run a job at a local time
+  and receive static parameters**: declare a timer query that fires at a time of day on chosen
+  weekdays and carries fixed key-value metadata, say what happens when the router was not running or
+  the host was asleep at that time, and see its schedule, last handled slot and next fire, so a weekly
+  job runs once per slot without a separate scheduler. _(→ `USECASE-VALIDATE-CONFIG`,
+  `USECASE-GATE-POOL`; `INV-EVT-5`, `INV-EVT-6`, `INV-EVT-7`, `INV-OBS-1`.)_
 
 **Observer (`ACTOR-OBS`)**
 
@@ -849,7 +855,11 @@ Extensions:
 **Intent:** judge the **whole** configuration valid or invalid **before running**, and report the
 result (`INV-WORKFLOW-1`). This checks the routing graph's flat wiring **only** — never
 workflow-completeness or sequencing.
-_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-ROLE-5`, `INV-WORKFLOW-1`.
+_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-EVT-6`, `INV-ROLE-5`, `INV-WORKFLOW-1`.
+
+**Calendar queries.** The check also rejects a **calendar trigger** whose schedule cannot be evaluated
+or that uses a fixed offset (`INV-EVT-6`), and prints each calendar query's **resolved schedule and
+next fire** (`INTF-CLI`). Such a mistake blocks startup and is never left to fire time.
 
 **This is one whole-configuration judgement, and deliberately not four per-interface checks.** Every
 finding below is a statement about a **pair** of declarations — a binding against the types some
@@ -1075,6 +1085,10 @@ confirmations still processed, queued events stay queued and **unblocked** parti
 timer emitter is never blocked. This differs from a **run-scoped selector** (`STORY-OP-3`) in
 **kind**, not degree: a selector is scoped to one run and never outlives it, while a gate is global,
 durable, and persists across runs and restarts until cleared or its lease lapses.
+
+**Calendar ticks during a pause.** The timer emitter is never blocked, so **calendar ticks keep being
+enqueued during a pause**; delivery waits, and the tick's expiry (the next slot, or `expires_in`,
+`INV-EVT-7`) decides whether it survives until resume.
 
 **Gates are independent, not a fixed set.** There is no list of named gates in the core; each TYPE is
 its own gate and any number may be active at once. A participant is halted if it blocks on **any**

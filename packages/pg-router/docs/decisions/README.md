@@ -63,6 +63,9 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-EVENT-5`](event.md) — a restart over a dispatch left running: the first dispatch pass comes
   before the first producer tick (built), and the adopting handler, not the queue, carries the
   dispatch's original start (decided, not yet built).
+- [`DEC-EVENT-6`](event.md) — a calendar tick's event id is `calendar:<query name>:<slot UTC>`, it
+  expires at the next slot (so a final attempt may still follow expiry), and a slot is missed only
+  when the router was not running or the host was asleep at the slot, never for lateness alone.
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
 - [`DEC-OBS-2`](observability.md) — per-participant history widens the existing activity ring; the

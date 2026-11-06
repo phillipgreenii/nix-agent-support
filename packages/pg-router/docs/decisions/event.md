@@ -429,3 +429,51 @@ queue wait is that bead's. The behavior-doc side of (b) is `INV-LIFE-3`'s restar
 stopping-state and `listener_in_flight` text of the interfaces doc. (a)'s intent is stated in the
 interfaces doc's `queue_wait` text; it was registered as a gap against `INTF-MON` in the behavior
 set's "Realization gaps" until the last slice (bead `pg2-m2x35`) removed that row.
+
+### `DEC-EVENT-6` — a calendar tick's id is its query name and slot, it expires at the next slot, and a slot is missed only when the router was not running or the host was asleep <!-- uuid: e42dcdc8-4027-43c0-b0d6-82c43e872adb -->
+
+**Decided** (planning session, 2026-11-05, with the missed-slot rule ruled by the operator, Phillip,
+2026-11-06; the operator MAY overrule any other point). The behavior-doc side is `INV-EVT-5`,
+`INV-EVT-6` and `INV-EVT-7`.
+
+**Slot.** A **slot** is the scheduled instant a calendar query fires at. For a time `t`, `Prev(t)` is
+the latest slot at or before `t` and `Next(after)` is the first slot strictly greater than `after`.
+The daylight-saving rules are `INV-EVT-6`'s rules A (a time that does not exist fires once, at the
+first instant after the gap) and B (a time that occurs twice fires once, at its first occurrence).
+
+**Slot id.** A calendar tick emits the event id `calendar:<query name>:<slot UTC RFC3339>`. The id
+uses the **query name, not the emitted type**, because de-duplication is global by event id
+(`INV-EVT-3`): two calendar queries that emit the same type at the same slot must not share an id. The
+item id and `scheduled_for` are the slot, and `at` is the slot, all RFC 3339 at second precision with
+the trigger zone's offset (only the event id is in UTC). `expiresAt` is `Next(slot)`, or the time of
+the firing plus `expires_in` when set.
+
+**Expiry from the next slot.** Without `expires_in` a tick expires at the following slot, so a slot's
+work is never retried into the next slot's window. Expiry bounds the retry window and also the
+de-duplication window (`INV-EVT-3`), so an id is de-duplicated only while retained.
+
+**The final-attempt consequence.** An event already expired at attempt time still gets **one** last
+attempt (`INV-EVT-4`). Expiry therefore bounds retries; it is **not** a hard "never runs after". A
+tick that sat behind a pause and is delivered after its expiry is still attempted once.
+
+**When several slots are due at one evaluation, only the latest is evaluated.** The earlier ones are
+passed over and logged, and never fire. Under `run-now` the single fire is the one catch-up tick
+(`INV-EVT-7`).
+
+**The missed-slot rule.** A slot is **missed** only when the router was **not running** at the slot
+time (the process started after it) or the **host was asleep** at the slot time. **Lateness alone
+never makes a slot missed**: load back-off or a slow query that delays an evaluation leaves the slot
+on time, and it fires when next evaluated. Operator ruling, Phillip, 2026-11-06, verbatim: "1 your
+recommendation", accepting the recommendation that a slot counts as missed only when the router was
+not running at the slot. **Host sleep is detected by a sampler independent of the produce loop**, so a
+sleeping host is not confused with a delayed loop. A first start (no remembered slot) counts nothing
+as missed.
+
+**Considered and rejected.**
+
+- **A lateness threshold** (a slot is missed when evaluated later than some grace). Rejected: it turns
+  a busy router into a missed slot, which is exactly what the ruling excludes.
+- **The emitted type in the id.** Rejected: two calendar queries emitting the same type at one slot
+  would collide and one tick would be silently dropped as a duplicate.
+- **A default for `on_missed`.** Rejected: the right answer depends on the job, and a silent default
+  would run or skip work the operator never chose.
