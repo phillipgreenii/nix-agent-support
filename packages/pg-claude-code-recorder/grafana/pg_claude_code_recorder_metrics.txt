@@ -161,5 +161,3 @@ pg_claude_code_recorder_step_seconds_total counter step
 pg_claude_code_recorder_step_calls_total counter step
 pg_claude_code_recorder_insert_table_seconds_total counter table
 pg_claude_code_recorder_parse_file_duration_seconds histogram -
-pg_claude_code_recorder_seen_rows gauge -
-pg_claude_code_recorder_seen_load_seconds gauge -
