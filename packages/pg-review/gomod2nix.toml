@@ -16,9 +16,29 @@ cachePackages = [
     version = 'v1.6.0'
     hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
 
+  [mod.'github.com/dustin/go-humanize']
+    version = 'v1.1.0'
+    hash = 'sha256-Qa7BSAXtgH7CB5STBiXTTOCgivWUiA65u3KxDOSZCkQ='
+
+  [mod.'github.com/google/uuid']
+    version = 'v1.6.0'
+    hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
+
   [mod.'github.com/inconshreveable/mousetrap']
     version = 'v1.1.0'
     hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
+
+  [mod.'github.com/mattn/go-isatty']
+    version = 'v0.0.24'
+    hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
+
+  [mod.'github.com/ncruces/go-strftime']
+    version = 'v1.1.0'
+    hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
+
+  [mod.'github.com/remyoudompheng/bigfft']
+    version = 'v0.0.0-20230129092748-24d4a6f8daec'
+    hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
 
   [mod.'github.com/santhosh-tekuri/jsonschema/v6']
     version = 'v6.0.3'
@@ -32,6 +52,26 @@ cachePackages = [
     version = 'v1.0.9'
     hash = 'sha256-YAjyYpq5BXCosVJtvYLWFG1t4gma2ylzc7ILLoj/hD8='
 
+  [mod.'golang.org/x/sys']
+    version = 'v0.49.0'
+    hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
+
   [mod.'golang.org/x/text']
     version = 'v0.43.0'
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
+
+  [mod.'modernc.org/libc']
+    version = 'v1.79.1'
+    hash = 'sha256-tTzZIGVxVRIGkbu9JhHUGZGs9NXE+0wISdoqI3xvsoE='
+
+  [mod.'modernc.org/mathutil']
+    version = 'v1.7.1'
+    hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
+
+  [mod.'modernc.org/memory']
+    version = 'v1.12.1'
+    hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
+
+  [mod.'modernc.org/sqlite']
+    version = 'v1.61.1'
+    hash = 'sha256-cmbPRIFECMBD0ZIc8FdjCLXRYT1TAHffxW1kVBPMo68='

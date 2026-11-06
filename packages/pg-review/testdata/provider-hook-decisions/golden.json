@@ -1,0 +1,116 @@
+[
+  {
+    "schema_version": 1,
+    "id": "E-001",
+    "subject_key": "Bash:curl",
+    "defined_in": "claude-extended-tool-approver",
+    "type": "tool-call",
+    "kind": "denied",
+    "scope": "synthetic-scope",
+    "window": {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-03-10T00:00:00Z"
+    },
+    "metrics": {
+      "count": 1,
+      "sessions": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-03-04T09:00:00Z",
+    "last_seen": "2026-03-04T09:00:00Z",
+    "query": "denied",
+    "samples": ["decision:5 session:s3"]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-002",
+    "subject_key": "Write",
+    "defined_in": "claude-extended-tool-approver",
+    "type": "tool-call",
+    "kind": "failed",
+    "scope": "synthetic-scope",
+    "window": {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-03-10T00:00:00Z"
+    },
+    "metrics": {
+      "count": 1,
+      "sessions": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-03-04T10:00:00Z",
+    "last_seen": "2026-03-04T10:00:00Z",
+    "query": "failed",
+    "samples": ["decision:6 session:s2"]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-003",
+    "subject_key": "Bash:curl",
+    "defined_in": "claude-extended-tool-approver",
+    "type": "tool-call",
+    "kind": "rejected",
+    "scope": "synthetic-scope",
+    "window": {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-03-10T00:00:00Z"
+    },
+    "metrics": {
+      "count": 1,
+      "sessions": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-03-03T11:00:00Z",
+    "last_seen": "2026-03-03T11:00:00Z",
+    "query": "rejected",
+    "samples": ["decision:4 session:s3"]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-004",
+    "subject_key": "Bash:git push",
+    "defined_in": "claude-extended-tool-approver",
+    "type": "tool-call",
+    "kind": "rejected",
+    "scope": "synthetic-scope",
+    "window": {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-03-10T00:00:00Z"
+    },
+    "metrics": {
+      "count": 3,
+      "sessions": 3
+    },
+    "baseline": [],
+    "first_seen": "2026-03-01T10:00:00Z",
+    "last_seen": "2026-03-05T12:00:00Z",
+    "query": "rejected",
+    "samples": [
+      "decision:1 session:s1",
+      "decision:2 session:s2",
+      "decision:8 session:s4"
+    ]
+  },
+  {
+    "schema_version": 1,
+    "id": "E-005",
+    "subject_key": "Bash:git status",
+    "defined_in": "claude-extended-tool-approver",
+    "type": "tool-call",
+    "kind": "rejected",
+    "scope": "synthetic-scope",
+    "window": {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-03-10T00:00:00Z"
+    },
+    "metrics": {
+      "count": 1,
+      "sessions": 1
+    },
+    "baseline": [],
+    "first_seen": "2026-03-03T10:00:00Z",
+    "last_seen": "2026-03-03T10:00:00Z",
+    "query": "rejected",
+    "samples": ["decision:3 session:s1"]
+  }
+]
