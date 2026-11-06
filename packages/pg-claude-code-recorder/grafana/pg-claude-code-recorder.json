@@ -1353,6 +1353,67 @@
           "legendFormat": "slices {{outcome}}"
         }
       ]
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "sweep walked vs skipped",
+      "description": "Files per second the watcher sweep walked, skipped as caught up and unchanged, and ingested (sweep_files_total by outcome), and the share the last sweep skipped (sweep_skipped_ratio, right axis semantics: 0 to 1). A sweep after a start with an empty seen table, or a forced sweep, skips nothing. no alert covers this panel yet",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 128,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "skipped ratio"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(pg_claude_code_recorder_sweep_files_total{outcome=~\"walked|skipped|ingested\"}[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{outcome}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_claude_code_recorder_sweep_skipped_ratio",
+          "range": true,
+          "legendFormat": "skipped ratio"
+        }
+      ]
     }
   ]
 }

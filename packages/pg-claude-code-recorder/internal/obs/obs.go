@@ -209,6 +209,9 @@ const (
 	MIngestResults          = "ingest_results_total"
 	MSweepFiles             = "sweep_files_total"
 	MSweepChanged           = "sweep_changed_total"
+	MSweepSkippedRatio      = "sweep_skipped_ratio"
+	MSweepLstatFallbacks    = "sweep_lstat_fallbacks_total"
+	MSweepVerifyForced      = "sweep_verify_forced_total"
 	MSeenRows               = "seen_rows"
 	MSeenLoadSeconds        = "seen_load_seconds"
 	MLagRebuild             = "lag_rebuild_total"
@@ -217,6 +220,7 @@ const (
 	SweepWalked             = "walked"
 	SweepUnchangedCandidate = "unchanged_candidate"
 	SweepSkipped            = "skipped"
+	SweepIngested           = "ingested"
 )
 
 // LagRebuildResults are the values of the result label of lag_rebuild_total.
@@ -234,7 +238,7 @@ var IngestResults = []string{
 const ResultError = "error"
 
 // SweepOutcomes are the values of the outcome label of sweep_files_total.
-var SweepOutcomes = []string{SweepWalked, SweepUnchangedCandidate, SweepSkipped}
+var SweepOutcomes = []string{SweepWalked, SweepUnchangedCandidate, SweepSkipped, SweepIngested}
 
 // SweepChangeReasons are the values of the reason label of sweep_changed_total:
 // why a walked file is not known to be unchanged. new: the path was not seen
@@ -492,6 +496,9 @@ func (o *Obs) RegisterStandard() {
 	for _, oc := range SweepOutcomes {
 		o.Reg.Add(MSweepFiles, map[string]string{"outcome": oc}, 0)
 	}
+	o.Reg.Add(MSweepLstatFallbacks, nil, 0)
+	o.Reg.Add(MSweepVerifyForced, nil, 0)
+	o.Reg.Set(MSweepSkippedRatio, nil, 0)
 	for _, r := range SweepChangeReasons {
 		o.Reg.Add(MSweepChanged, map[string]string{"reason": r}, 0)
 	}

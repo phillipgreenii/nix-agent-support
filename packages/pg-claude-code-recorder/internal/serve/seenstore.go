@@ -147,6 +147,7 @@ func (d *Daemon) loadSeen() {
 	d.obs.Reg.Set(obs.MSeenRows, nil, float64(len(rows)))
 	if len(rows) == 0 {
 		d.obs.Log.Info("seen empty: full verification sweep")
+		d.verifyFirst.Store(true)
 	}
 }
 

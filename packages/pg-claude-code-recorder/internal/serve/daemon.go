@@ -120,10 +120,17 @@ type Daemon struct {
 	// forcePending asks the next sweep to empty the skip caches first; the
 	// forced-sweep state below is guarded by forceMu.
 	forcePending atomic.Bool
-	forceMu      sync.Mutex
-	forceRunning bool
-	forceDone    int64
-	forceErr     string
+	// verifyFirst marks the first sweep after a start with an empty seen table
+	// as a full verification (it ingests everything).
+	verifyFirst atomic.Bool
+	// The running sweep's figures (sweep_done): walked and missing are set by
+	// onSweep, skipped and ingested count the sweep's events.
+	sweepActive, sweepVerify                               atomic.Bool
+	sweepWalked, sweepSkipped, sweepIngested, sweepMissing atomic.Int64
+	forceMu                                                sync.Mutex
+	forceRunning                                           bool
+	forceDone                                              int64
+	forceErr                                               string
 	// sweepPace caps the files the sweep and the catch-up ingest per second.
 	sweepPace *pacer
 
@@ -285,7 +292,7 @@ func Open(opt Options) (*Daemon, error) {
 		Sink:          d.sink,
 		OnSweep:       d.onSweep,
 		OnSweepWalked: d.onSweepWalked,
-		SweepTimer:    func(step func() error) error { return d.runLoop(obs.LoopWatcherSweep, step) },
+		SweepTimer:    d.timeSweep,
 		Checkpoint:    d.ckpt,
 		SweepInterval: cfg.SweepInterval,
 		Now:           opt.Clock.Now,
@@ -389,6 +396,10 @@ func (d *Daemon) sink(e watcher.Event) {
 		}
 		d.sweepPace.wait() // the sweep's ingests only; a live file's hint is never paced
 	}
+	if e.Sweep {
+		d.sweepIngested.Add(1)
+		d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepIngested}, 1)
+	}
 	res, err := d.ingestErr(e.Path)
 	d.noteCaughtUp(e, res, err)
 }
@@ -417,18 +428,24 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 		found[id] = true
 		walked[f.Path] = id
 	}
+	verify := d.verifyFirst.Swap(false)
 	if d.forcePending.CompareAndSwap(true, false) {
 		d.clearSkipCache()
+		verify = true
 	}
+	d.beginSweepStats(len(files), verify)
 	d.countSweepFiles(files)
 	d.seenDB.prune(files)
 	d.setSeenGauge()
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}
-	if _, err := d.cp.SweepMissingWalk(found, walked); err != nil {
+	st, err := d.cp.SweepMissingWalk(found, walked)
+	if err != nil {
 		d.obs.Log.Warn("sweep_missing_failed", "err", err.Error())
 	}
+	d.sweepMissing.Store(int64(st.Tombstoned))
+	d.obs.Reg.Add(obs.MSweepLstatFallbacks, nil, float64(st.LstatFallbacks))
 	d.notifyDeletedSnapshots()
 }
 

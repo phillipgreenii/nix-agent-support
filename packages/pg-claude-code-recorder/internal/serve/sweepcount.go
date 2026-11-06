@@ -2,6 +2,7 @@ package serve
 
 import (
 	"sync"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -141,6 +142,7 @@ func (d *Daemon) skipUnchanged(e watcher.Event) bool {
 	}
 	d.prs.Notify(file)
 	d.obs.Reg.Add(obs.MSweepFiles, map[string]string{"outcome": obs.SweepSkipped}, 1)
+	d.sweepSkipped.Add(1)
 	return true
 }
 
@@ -190,4 +192,44 @@ func (d *Daemon) clearSkipCache() {
 	d.seen.mu.Unlock()
 	d.seenDB.clear()
 	d.setSeenGauge()
+}
+
+// beginSweepStats starts the figures of the sweep that onSweep opens: the
+// walked count and whether the sweep is a full verification (a forced sweep,
+// or the first one after a start with an empty seen table).
+func (d *Daemon) beginSweepStats(walked int, verify bool) {
+	d.sweepWalked.Store(int64(walked))
+	d.sweepSkipped.Store(0)
+	d.sweepIngested.Store(0)
+	d.sweepMissing.Store(0)
+	d.sweepVerify.Store(verify)
+	d.sweepActive.Store(true)
+	if verify {
+		d.obs.Reg.Add(obs.MSweepVerifyForced, nil, 1)
+	}
+}
+
+// timeSweep runs one sweep pass as the watcher_sweep loop (which records
+// loop_duration_seconds) and, when the pass got as far as its walk callback,
+// sets sweep_skipped_ratio and logs one sweep_done line.
+func (d *Daemon) timeSweep(step func() error) error {
+	start := d.clock.Now()
+	d.sweepActive.Store(false)
+	err := d.runLoop(obs.LoopWatcherSweep, step)
+	if d.sweepActive.Swap(false) {
+		d.finishSweep(d.clock.Now().Sub(start))
+	}
+	return err
+}
+
+func (d *Daemon) finishSweep(dur time.Duration) {
+	walked, skipped := d.sweepWalked.Load(), d.sweepSkipped.Load()
+	ratio := 0.0
+	if walked > 0 {
+		ratio = float64(skipped) / float64(walked)
+	}
+	d.obs.Reg.Set(obs.MSweepSkippedRatio, nil, ratio)
+	d.obs.Log.Info("sweep_done", "walked", walked, "skipped", skipped,
+		"ingested", d.sweepIngested.Load(), "missing", d.sweepMissing.Load(),
+		"duration_ms", dur.Milliseconds(), "verify", d.sweepVerify.Load())
 }
