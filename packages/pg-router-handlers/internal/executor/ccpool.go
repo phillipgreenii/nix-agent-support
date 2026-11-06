@@ -477,18 +477,21 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// counted slot until idle_ttl — cap eviction no longer reclaims
 			// ready rows (ADR 0072's Decision item 2).
 			r.closeFailedDispatchSession(ctx, d.Item.ID)
-			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+			released := r.releaseAfterFailedSend(ctx, d.Item.ID)
 			// The session did nothing, so the worktree created for it is
 			// reclaimed too (pg2-w3usi); reclaimAbandonedWorktree skips it if
 			// the Close above did not actually stop the session.
 			r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
-			res = failureAction(report.Unclaimed, d.Item.ID)
+			if released {
+				res = failureAction(report.Unclaimed, d.Item.ID)
+			}
 			return res, fmt.Errorf("send %s: prompt not ingested: %w", r.deps.ExternalID, err)
 		}
 		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
 		if cc.OnDispatchFail == roles.DispatchUnclaim {
-			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
-			res = failureAction(report.Unclaimed, d.Item.ID)
+			if r.releaseAfterFailedSend(ctx, d.Item.ID) {
+				res = failureAction(report.Unclaimed, d.Item.ID)
+			}
 		}
 		return res, fmt.Errorf("send %s: %w", r.deps.ExternalID, err)
 	}
@@ -1903,6 +1906,22 @@ func (e *externallyClosed) Is(target error) bool {
 // human. It is a plain label and deliberately NOT the budget-stop: prefix, which
 // INV-CCH-11 owns.
 const unclaimedEndLabel = "drain-unclaimed-end"
+
+// releaseAfterFailedSend returns the bead to the open pool after a failed
+// nudge send and reports whether the release landed. The session may already
+// have claimed the bead under its own actor (a send can report "not ingested"
+// while the model is working), and bd refuses an unguarded release of another
+// actor's in_progress claim, so the release is guarded by the observed holder
+// (beads.UnclaimHeld). A refused or stale release is logged, never discarded:
+// the bead keeps its claim and the caller must not report it as unclaimed.
+func (r *ccpoolRun) releaseAfterFailedSend(ctx context.Context, beadID string) bool {
+	if err := beads.UnclaimHeld(ctx, r.deps.BD, beadID); err != nil {
+		slog.Error("release after a failed nudge send did not land; the bead keeps its claim",
+			"bead", beadID, "session", r.deps.ExternalID, "guard_stale", beads.IsGuardStale(err), "err", err)
+		return false
+	}
+	return true
+}
 
 // ErrUnclaimedEnd wraps the end of a close-or-release session that never claimed
 // its bead and left no mark that it gave the bead back. Like ErrExternallyClosed
