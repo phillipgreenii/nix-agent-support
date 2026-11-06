@@ -1,4 +1,4 @@
-import { displayEnabled } from './options'
+import { pgdEnabled } from './options'
 import { defineSource, noteEvent, refresh, setValue } from './source'
 import type { ModApi } from './types'
 
@@ -21,7 +21,7 @@ export function startModelEffort(_host: ModApi): void {
 export function registerModelEffortHooks(on: ModApi): void {
   on('config.set', async ($: ModApi, e: unknown, next: (e: unknown) => unknown) => {
     const r = await next(e)
-    if (displayEnabled()) {
+    if (pgdEnabled()) {
       noteEvent()
       try {
         setValue('model', await $.session.model())
@@ -38,7 +38,7 @@ export function registerModelEffortHooks(on: ModApi): void {
       e: { agentId?: string; effort?: string | number },
       next: (e: unknown) => AsyncGenerator<unknown, unknown>,
     ) {
-      if (displayEnabled()) {
+      if (pgdEnabled()) {
         noteEvent()
         if (e.agentId === undefined) {
           setValue('effort', e.effort === undefined ? undefined : String(e.effort))

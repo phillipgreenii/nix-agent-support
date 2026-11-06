@@ -4,14 +4,14 @@
   ...
 }:
 
-# claude-display module: the opt-in options of the display mod
-# (claude-marketplace/status). The plugin itself is delivered by the
+# pgd module: the opt-in options of the display mod
+# (claude-marketplace/pgd). The plugin itself is delivered by the
 # committed claude-marketplace/ tree (default-enabled); this module renders the
 # options as one JSON document in PG_CLAUDE_DISPLAY_OPTIONS (home.sessionVariables),
 # which the mod reads at session start. It installs no binary and no settings.
 # Defaults match today's shell line: every component on.
 let
-  cfg = config.phillipgreenii.programs.claude-display;
+  cfg = config.phillipgreenii.programs.pgd;
   component =
     description:
     lib.mkOption {
@@ -25,7 +25,7 @@ let
   };
 in
 {
-  options.phillipgreenii.programs.claude-display = {
+  options.phillipgreenii.programs.pgd = {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -40,7 +40,7 @@ in
       assume = component "Assume button, modal, expiry alert and source.";
       sessionMode = component "Session mode button, modal and stop action.";
       prStatus = component "PR status source and row.";
-      recorderName = component "Recorder name lookup (off shows the session id).";
+      sessionName = component "Session name (shown from Claude Code's session registry; off shows the session id).";
       links = component "Transcript link render hook.";
       modelEffort = component "Model and effort button and modal.";
       focus = component "Focus pane button, pane and contribution storage.";

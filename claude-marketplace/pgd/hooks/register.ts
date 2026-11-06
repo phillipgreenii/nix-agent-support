@@ -17,7 +17,7 @@ import { registerUsageHooks, startUsage } from './usage'
 //    Register type is imported from the engine, type-only.
 //  - Serialization: JSON, parsed by parseOptions; the options check inspects the JSON the module
 //    renders.
-//  - Manifest: name (status), description and version follow the control mod's plugin.json shape.
+//  - Manifest: name (pgd), description and version follow the control mod's plugin.json shape.
 //  - Registration shape (final, validated by `claude plugin validate`): the engine refuses a
 //    module that passes `$` itself as an argument, so registerComponents(options, host) takes a
 //    HOST FACADE instead of `$`. The facade is an object of closures built in the hook body below,

@@ -1,9 +1,9 @@
 // Tests of component registration, run by `claude plugin test` and by the nix check
-// test-claude-display-mod (which runs every *.test.ts under the mod directory under node, with a
+// test-pgd-mod (which runs every *.test.ts under the mod directory under node, with a
 // shim for the engine's testing kit).
 import { expect, test } from 'claude-code/testing'
 import { registerComponents } from './components'
-import { DEFAULT_OPTIONS, parseOptions, type DisplayOptions } from './types'
+import { DEFAULT_OPTIONS, parseOptions, type PgdOptions } from './types'
 
 // A stub host that records every call made through it, at any depth.
 function recorder(): { $: unknown; calls: string[] } {
@@ -19,11 +19,11 @@ function recorder(): { $: unknown; calls: string[] } {
   return { $: make('$'), calls }
 }
 
-const allOff = (o: DisplayOptions): DisplayOptions => ({
+const allOff = (o: PgdOptions): PgdOptions => ({
   ...o,
   components: Object.fromEntries(
     Object.keys(o.components).map(k => [k, false]),
-  ) as unknown as DisplayOptions['components'],
+  ) as unknown as PgdOptions['components'],
 })
 
 test('every component off registers nothing', () => {

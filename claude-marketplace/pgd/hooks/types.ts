@@ -7,18 +7,18 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ModApi = any
 
-export interface DisplayComponents {
+export interface PgdComponents {
   beads: boolean
   assume: boolean
   sessionMode: boolean
   prStatus: boolean
-  recorderName: boolean
+  sessionName: boolean
   links: boolean
   modelEffort: boolean
   focus: boolean
 }
 
-export interface DisplayLink {
+export interface PgdLink {
   name: string
   pattern: string
   url: string
@@ -30,22 +30,22 @@ export interface AlertThresholds {
   limit: number
 }
 
-export interface DisplayOptions {
+export interface PgdOptions {
   enable: boolean
-  components: DisplayComponents
-  links: DisplayLink[]
+  components: PgdComponents
+  links: PgdLink[]
   alerts: { thresholds: AlertThresholds }
 }
 
 // Defaults match today's shell line: every component on, no links, thresholds 60 / 80 / 80.
-export const DEFAULT_OPTIONS: DisplayOptions = {
+export const DEFAULT_OPTIONS: PgdOptions = {
   enable: true,
   components: {
     beads: true,
     assume: true,
     sessionMode: true,
     prStatus: true,
-    recorderName: true,
+    sessionName: true,
     links: true,
     modelEffort: true,
     focus: true,
@@ -56,7 +56,7 @@ export const DEFAULT_OPTIONS: DisplayOptions = {
 
 // Parse the rendered options (JSON). Missing or malformed input yields the defaults; a present
 // field overrides its default only when it has the right type.
-export function parseOptions(raw: string | undefined | null): DisplayOptions {
+export function parseOptions(raw: string | undefined | null): PgdOptions {
   const d = DEFAULT_OPTIONS
   let o: Record<string, unknown> = {}
   try {
@@ -69,7 +69,7 @@ export function parseOptions(raw: string | undefined | null): DisplayOptions {
     v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
   const comps = obj(o.components)
   const components = { ...d.components }
-  for (const k of Object.keys(components) as Array<keyof DisplayComponents>) {
+  for (const k of Object.keys(components) as Array<keyof PgdComponents>) {
     if (typeof comps[k] === 'boolean') components[k] = comps[k] as boolean
   }
   const th = obj(obj(o.alerts).thresholds)
@@ -79,11 +79,11 @@ export function parseOptions(raw: string | undefined | null): DisplayOptions {
   }
   const links = Array.isArray(o.links)
     ? (o.links as unknown[]).filter(
-        (l): l is DisplayLink =>
+        (l): l is PgdLink =>
           !!l &&
-          typeof (l as DisplayLink).name === 'string' &&
-          typeof (l as DisplayLink).pattern === 'string' &&
-          typeof (l as DisplayLink).url === 'string',
+          typeof (l as PgdLink).name === 'string' &&
+          typeof (l as PgdLink).pattern === 'string' &&
+          typeof (l as PgdLink).url === 'string',
       )
     : []
   return {

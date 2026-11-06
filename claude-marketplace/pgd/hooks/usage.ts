@@ -1,4 +1,4 @@
-import { displayEnabled } from './options'
+import { pgdEnabled } from './options'
 import { defineSource, noteEvent, setValue } from './source'
 import type { ModApi } from './types'
 
@@ -46,7 +46,7 @@ export function startUsage(_host: ModApi): void {
 
 export function registerUsageHooks(on: ModApi): void {
   on('session.measure', async ($: ModApi, e: unknown, next: (e: unknown) => unknown) => {
-    if (displayEnabled()) {
+    if (pgdEnabled()) {
       noteEvent()
       try {
         setValue('usage', mapUsage(await $.session.usage()))

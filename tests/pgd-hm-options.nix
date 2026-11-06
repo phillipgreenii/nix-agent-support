@@ -1,13 +1,13 @@
-# Eval-level test of home/programs/claude-display: the module is evaluated against stubbed
+# Eval-level test of home/programs/pgd: the module is evaluated against stubbed
 # home-manager options (home.sessionVariables) and the rendered plugin options are inspected.
-# Consumed by checks.<system>.test-claude-display-hm-options. All values are EXAMPLE values.
+# Consumed by checks.<system>.test-pgd-hm-options. All values are EXAMPLE values.
 { lib }:
 let
   evaluate =
     cfg:
     lib.evalModules {
       modules = [
-        ../home/programs/claude-display/default.nix
+        ../home/programs/pgd/default.nix
         (
           { lib, ... }:
           {
@@ -17,11 +17,11 @@ let
             };
           }
         )
-        { phillipgreenii.programs.claude-display = cfg; }
+        { phillipgreenii.programs.pgd = cfg; }
       ];
     };
 
-  opts = c: c.config.phillipgreenii.programs.claude-display;
+  opts = c: c.config.phillipgreenii.programs.pgd;
   rendered = c: builtins.fromJSON c.config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS;
 
   defaults = evaluate { };
@@ -43,7 +43,7 @@ let
     "assume"
     "sessionMode"
     "prStatus"
-    "recorderName"
+    "sessionName"
     "links"
     "modelEffort"
     "focus"

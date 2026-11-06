@@ -1,4 +1,4 @@
-import { displayEnabled } from './options'
+import { pgdEnabled } from './options'
 import { defineSource, noteEvent, refresh } from './source'
 import type { ModApi } from './types'
 
@@ -78,14 +78,14 @@ export function startGitHead(_host: ModApi): void {
 // Refetch triggers (they need no `$`: the fetch reads through the facade).
 export function registerGitHeadHooks(on: ModApi): void {
   on('turn.complete', (_$: unknown, e: unknown, next: (e: unknown) => unknown) => {
-    if (displayEnabled()) {
+    if (pgdEnabled()) {
       noteEvent()
       refresh('gitHead')
     }
     return next(e)
   })
   on('session.compact', (_$: unknown, e: unknown, next: (e: unknown) => unknown) => {
-    if (displayEnabled()) {
+    if (pgdEnabled()) {
       noteEvent()
       refresh('gitHead')
     }
