@@ -35,7 +35,6 @@ type Budget struct {
 	Cost       Limit
 	Time       time.Duration
 	Thresholds Thresholds
-	Prices     usage.PriceTable
 }
 
 // Evaluate returns the max fraction-of-budget across the set dimensions and the
@@ -46,7 +45,7 @@ func (b Budget) Evaluate(s usage.Snapshot, elapsed time.Duration) (float64, Leve
 		pct = max(pct, float64(s.Total())/float64(b.Tokens))
 	}
 	if !b.Cost.Unlimited() {
-		pct = max(pct, float64(usage.EstimateCents(s, b.Prices))/float64(b.Cost))
+		pct = max(pct, float64(s.CostCents)/float64(b.Cost))
 	}
 	if b.Time > 0 {
 		pct = max(pct, float64(elapsed)/float64(b.Time))
@@ -85,7 +84,7 @@ func (b Budget) Binding(s usage.Snapshot, elapsed time.Duration) Trip {
 		consider(LimitTokens, float64(s.Total()), float64(b.Tokens))
 	}
 	if !b.Cost.Unlimited() {
-		consider(LimitCost, float64(usage.EstimateCents(s, b.Prices))/100, float64(b.Cost)/100)
+		consider(LimitCost, float64(s.CostCents)/100, float64(b.Cost)/100)
 	}
 	if b.Time > 0 {
 		consider(LimitTime, elapsed.Seconds(), b.Time.Seconds())

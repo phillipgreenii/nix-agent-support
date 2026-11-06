@@ -88,7 +88,6 @@ func tokBudget(maxTok budget.Limit) budget.Budget {
 	return budget.Budget{
 		Tokens:     maxTok,
 		Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
-		Prices:     usage.DefaultPrices(),
 	}
 }
 

@@ -66,7 +66,7 @@ type Deps struct {
 	Cfg         config.Config
 	Now         func() time.Time                           // clock seam; nil ⇒ time.Now
 	Tick        func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
-	UsageReader usage.Reader                               // nil ⇒ usage.NewRecorderReader (the recorder's facts)
+	UsageReader usage.Reader                               // nil ⇒ usage.ReaderFor(CC) (ccpool consumption)
 	// FirstTurn reports whether the model has taken a turn in a transcript (the
 	// nudge gate); nil ⇒ the recorder's fact.
 	FirstTurn  func(transcriptPath string) bool
@@ -163,10 +163,10 @@ func (d Deps) reader() usage.Reader {
 	if d.UsageReader != nil {
 		return d.UsageReader
 	}
-	return recorderUsage
+	return usage.ReaderFor(d.CC)
 }
 
-// recorderUsage is the default fact source: the recorder, no fallback to files.
+// recorderUsage answers the first-turn nudge gate from the recorder.
 var recorderUsage = usage.NewRecorderReader(client.Options{})
 
 func (d Deps) firstTurn(path string) bool {

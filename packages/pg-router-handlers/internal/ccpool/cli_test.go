@@ -910,3 +910,26 @@ func TestCLI_EmitCapacityPoolsIsOneProcess(t *testing.T) {
 		t.Fatalf("argv = %q", got)
 	}
 }
+
+func TestConsumption_argvAndDecode(t *testing.T) {
+	cli, got, setOut := newSpy()
+	setOut([]byte(`{"model":"claude-opus-4-8","input_tokens":1,"output_tokens":2,"cache_creation_tokens":3,"cache_read_tokens":4,"estimated_cost_cents":250,"models":[]}`))
+	s, err := cli.Consumption(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"consumption", "sess-1", "--json"}}; !reflect.DeepEqual(*got, want) {
+		t.Errorf("argv = %v, want %v", *got, want)
+	}
+	if s.Model != "claude-opus-4-8" || s.InputTokens != 1 || s.OutputTokens != 2 || s.CacheCreationTokens != 3 || s.CacheReadTokens != 4 || s.CostCents != 250 {
+		t.Errorf("snapshot = %+v", s)
+	}
+}
+
+func TestConsumption_badJSONIsAnError(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`not json`))
+	if _, err := cli.Consumption(context.Background(), "s"); err == nil {
+		t.Error("want a decode error")
+	}
+}

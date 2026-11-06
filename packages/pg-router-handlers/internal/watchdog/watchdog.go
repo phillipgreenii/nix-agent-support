@@ -161,7 +161,7 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 	// session is in needs_input (so the suppression is logged once, not per poll).
 	heldForDialog := false
 	for {
-		snap, _ := w.Reader.Read(ctx, w.transcriptPath(ctx, sessionName))
+		snap, _ := w.Reader.Read(ctx, sessionName)
 		elapsed := w.now().Sub(start)
 		_, level := w.Budget.Evaluate(snap, elapsed)
 		if level == budget.Reminder && level > highest && w.sessionNeedsInput(ctx, sessionName) {

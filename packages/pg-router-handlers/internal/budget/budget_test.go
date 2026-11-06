@@ -11,7 +11,6 @@ func mk(tok, cost Limit, tm time.Duration) Budget {
 	return Budget{
 		Tokens: tok, Cost: cost, Time: tm,
 		Thresholds: Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
-		Prices:     usage.PriceTable{"_default": {OutputPerMTok: 75}},
 	}
 }
 
@@ -83,8 +82,8 @@ func TestBinding_namesTheLimitThatTripped(t *testing.T) {
 		}
 	})
 	t.Run("cost", func(t *testing.T) {
-		s := usage.Snapshot{OutputTokens: 4_000_000}
-		cents := usage.EstimateCents(s, mk(0, 0, 0).Prices)
+		cents := int64(30000)
+		s := usage.Snapshot{CostCents: cents}
 		b := mk(0, Limit(cents/2), time.Hour)
 		got := b.Binding(s, time.Minute)
 		if got.Limit != LimitCost || got.Used != float64(cents)/100 || got.Cap != float64(cents/2)/100 {
