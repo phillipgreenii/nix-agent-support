@@ -26,8 +26,13 @@
 //    when the cached value changed.
 //  - refresh(id): an immediate fetch for an active polled source, skipped while one is in flight
 //    or when the last attempt is younger than the current delay (the timer then covers it).
-//  - shared is accepted and stored but inert here.
+//  - shared: true shares one entry (shared:<id>) in the plugin's $.store; { key() } shares
+//    shared:<id>:<key()> and a source whose key() is undefined is neither fetched nor shared. Before
+//    a fetch the source reads its entry and, when it is younger than intervalMs (no idle
+//    multiplier), uses it and does not fetch; after a successful fetch it writes { value,
+//    fetchedAt }. A store call that throws makes that call unshared (see sharedStore.ts).
 import type { ModApi } from './types'
+import { createSharedStore, entryKey } from './sharedStore'
 
 export type Surface = 'band' | 'modal' | 'alert'
 
@@ -35,7 +40,7 @@ export interface SourceDef<T> {
   id: string
   intervalMs: number
   fetch?: (ctx: { host: ModApi }) => Promise<T | undefined>
-  shared?: boolean
+  shared?: boolean | { key(): string | undefined }
   feeds?: Surface[]
 }
 
@@ -115,9 +120,30 @@ async function runFetch(e: Entry): Promise<void> {
   e.inFlight = true
   e.lastAttemptAt = clock.now()
   try {
+    const shared = e.def.shared
+    let key: string | undefined
+    if (shared) {
+      const k = typeof shared === 'object' ? shared.key() : undefined
+      if (typeof shared === 'object' && k === undefined) {
+        e.failures = 0
+        return // no key yet: neither fetched nor shared
+      }
+      key = entryKey(e.def.id, k)
+    }
+    const sharedStore = key === undefined ? undefined : createSharedStore({ store: host?.store, now: clock.now })
+    if (sharedStore && key !== undefined) {
+      const hit = await sharedStore.read(key)
+      const age = hit ? clock.now() - hit.fetchedAt : -1
+      if (hit && age >= 0 && age < e.def.intervalMs) {
+        e.failures = 0
+        store(e, hit.value, hit.fetchedAt)
+        return
+      }
+    }
     const value = await e.def.fetch({ host })
     e.failures = 0
     store(e, value)
+    if (sharedStore && key !== undefined) await sharedStore.write(key, value)
   } catch {
     e.failures += 1
   } finally {
@@ -126,9 +152,9 @@ async function runFetch(e: Entry): Promise<void> {
   }
 }
 
-function store(e: Entry, value: unknown): void {
+function store(e: Entry, value: unknown, fetchedAt = clock.now()): void {
   const changed = !same(e.cache?.value, value)
-  e.cache = { value, fetchedAt: clock.now() }
+  e.cache = { value, fetchedAt }
   if (changed) requestInvalidate()
 }
 

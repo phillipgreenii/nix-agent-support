@@ -54,12 +54,17 @@ export interface StubHost {
   calls: string[]
   files: Map<string, string>
   state: { cwd: string; model: string }
+  // The in-memory plugin store behind host.store; set storeFail to make every call throw.
+  storeData: Map<string, unknown>
+  storeFail: { on: boolean }
 }
 
 export function stubHost(files: Record<string, string> = {}): StubHost {
   const calls: string[] = []
   const fileMap = new Map(Object.entries(files))
   const state = { cwd: '/work/repo', model: 'sonnet' }
+  const storeData = new Map<string, unknown>()
+  const storeFail = { on: false }
   const host = {
     process: {
       run: async (...a: unknown[]) => {
@@ -89,6 +94,18 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         calls.push('config.set')
       },
     },
+    store: {
+      get: async (k: string) => {
+        calls.push(`store.get ${k}`)
+        if (storeFail.on) throw new Error('store down')
+        return storeData.get(k)
+      },
+      set: async (k: string, v: unknown) => {
+        calls.push(`store.set ${k}`)
+        if (storeFail.on) throw new Error('store down')
+        storeData.set(k, v)
+      },
+    },
     ui: {
       invalidate: () => {
         calls.push('ui.invalidate')
@@ -105,5 +122,5 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       },
     },
   }
-  return { host, calls, files: fileMap, state }
+  return { host, calls, files: fileMap, state, storeData, storeFail }
 }

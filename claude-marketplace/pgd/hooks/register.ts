@@ -45,6 +45,7 @@ export const register: Register = on => {
       fs: { read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t) },
       http: { fetch: (url, init) => $.http.fetch(url, init) },
       config: { set: (k, v) => $.config.set(k, v) },
+      store: { get: k => $.store.get(k), set: (k, v) => $.store.set(k, v) },
       ui: { invalidate: () => $.ui.invalidate('ui.render') },
       session: { model: () => $.session.model(), cwd: () => $.session.cwd() },
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
