@@ -1,6 +1,7 @@
 import type { PgdOptions, ModApi } from './types'
 import { startDolt } from './dolt'
 import { registerPgdNoun } from './pgd-noun'
+import { registerModals } from './modals'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -29,4 +30,7 @@ export function registerComponents(options: PgdOptions, host: ModApi): void {
   // The pgd noun is registered whenever enable is true; its focus surface is gated by
   // components.focus inside the noun.
   registerPgdNoun(options, host)
+  // The band buttons' modals (Info, Context and usage) and their toggle commands: no flag of
+  // their own, governed by enable.
+  registerModals(options, host)
 }

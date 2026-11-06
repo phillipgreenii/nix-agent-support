@@ -62,6 +62,12 @@ export interface StubHost {
   // The method objects passed to engine.create (kept apart from `calls`: registering the noun is
   // not a fetch, process or file read).
   nouns: unknown[]
+  // Slash commands registered, panes opened and closed (kept apart from `calls`: none is a fetch,
+  // a process or a file read).
+  commands: Array<{ name: string; description: string }>
+  panes: Array<{ op: 'open' | 'close'; id: string; title?: string }>
+  // What session.version and session.repo answer.
+  facts: { version: string; repo: { root: string; remote: string | null; name: string | null } | null }
 }
 
 export function stubHost(files: Record<string, string> = {}): StubHost {
@@ -72,6 +78,12 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
   const storeData = new Map<string, unknown>()
   const storeFail = { on: false }
   const nouns: unknown[] = []
+  const commands: StubHost['commands'] = []
+  const panes: StubHost['panes'] = []
+  const facts: StubHost['facts'] = {
+    version: '2.1.314',
+    repo: { root: '/work/repo', remote: null, name: 'owner/repo' },
+  }
   const host = {
     process: {
       run: async (...a: unknown[]) => {
@@ -127,6 +139,18 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       invalidate: () => {
         calls.push('ui.invalidate')
       },
+      open: async (a: { id: string; title?: string }) => {
+        panes.push({ op: 'open', id: a.id, title: a.title })
+        return { isPlaced: true }
+      },
+      close: async (a: { id: string }) => {
+        panes.push({ op: 'close', id: a.id })
+      },
+    },
+    command: {
+      register: async (c: { name: string; description: string }) => {
+        commands.push(c)
+      },
     },
     session: {
       model: async () => {
@@ -138,7 +162,9 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         return state.cwd
       },
       id: async () => state.id,
+      version: async () => ({ version: facts.version }),
+      repo: async () => facts.repo,
     },
   }
-  return { host, calls, files: fileMap, state, storeData, storeFail, writes, nouns }
+  return { host, calls, files: fileMap, state, storeData, storeFail, writes, nouns, commands, panes, facts }
 }

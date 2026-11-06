@@ -3,6 +3,8 @@ import { readCached } from './source'
 import type { AlertThresholds, ModApi } from './types'
 import type { Usage } from './usage'
 import { timedDraw } from './metrics'
+import { isOpen, toggle } from './toggles'
+import { markBandDrawn } from './modal'
 
 // The phase 1 band: plain labels (no buttons yet) for the session id, model and effort, and the
 // context percent, the last coloured by level. renderBand is a plain data description, so a later
@@ -14,6 +16,33 @@ export interface BandRow {
   id: string
   label: string
   level?: Level
+  // The id of the modal (or toggle) a press on this label opens.
+  action?: string
+}
+
+// Buttons other components add after the three labels, sorted by order (mode 40, assume 50, focus
+// 60, wrap up 70). label returns undefined when the button is not drawn.
+export interface BandButton {
+  id: string
+  order: number
+  label: (v: BandValues) => string | undefined
+  action?: string
+}
+
+let buttons: BandButton[] = []
+
+export function registerBandButton(b: BandButton): void {
+  buttons = [...buttons.filter(x => x.id !== b.id), b].sort((x, y) => x.order - y.order)
+}
+
+export function clearBandButtons(): void {
+  buttons = []
+}
+
+// A press on a band button toggles its modal: the first press opens it, a second press on an open
+// modal closes it (the band toggle behaves the same way).
+export function pressButton(action: string): void {
+  toggle(action)
 }
 
 export interface BandValues {
@@ -33,13 +62,18 @@ export function contextLevel(percent: number, t: AlertThresholds): Level {
 // An item whose condition is false is not drawn: no placeholder, never a "no X" row.
 export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
   const labels: BandRow[] = []
-  if (v.sessionId) labels.push({ id: 'session', label: v.sessionId.slice(0, 8) })
+  if (v.sessionId) labels.push({ id: 'session', label: v.sessionId.slice(0, 8), action: 'info' })
   if (v.model) {
+    // no action here: the model and effort modal belongs to a later packet
     labels.push({ id: 'model', label: v.effort ? `${v.model} · ${v.effort}` : v.model })
   }
   const pct = v.usage?.contextPercent
   if (typeof pct === 'number') {
-    labels.push({ id: 'context', label: `ctx ${Math.round(pct)}%`, level: contextLevel(pct, t) })
+    labels.push({ id: 'context', label: `ctx ${Math.round(pct)}%`, level: contextLevel(pct, t), action: 'context' })
+  }
+  for (const b of buttons) {
+    const label = b.label(v)
+    if (label) labels.push({ id: b.id, label, ...(b.action ? { action: b.action } : {}) })
   }
   return labels
 }
@@ -70,6 +104,10 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
   const inner = await next(e)
   const options = getOptions()
   if (!options?.enable || e?.props?.hasSurvey) return inner
+  // The engine's own collapse cannot be observed; the plugin's toggle state is. A hidden band
+  // answers next(e) untouched and starts nothing.
+  if (!isOpen('band')) return inner
+  markBandDrawn()
   const model = readCached<string>('model')
   const rows = renderBand(
     {
@@ -82,18 +120,22 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
     options.alerts.thresholds,
   )
   if (rows.length === 0) return inner
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text, Button } = $.ui.resolve(e)
   const own = rows.map((row, i) =>
     Box({
       key: `pgd-band-${i}`,
       flexDirection: 'row',
-      children: row.map((l, j) =>
-        Text({
-          key: l.id,
-          children: j === 0 ? l.label : ` ${l.label}`,
-          ...(l.level && l.level !== 'normal' ? { color: l.level } : {}),
-        }),
-      ),
+      children: row.flatMap((l, j) => {
+        const text = l.level && l.level !== 'normal' ? { color: l.level } : {}
+        const item = l.action
+          ? Button({
+              key: l.id,
+              onPress: () => pressButton(l.action as string),
+              children: Text({ key: `${l.id}-text`, children: l.label, ...text }),
+            })
+          : Text({ key: l.id, children: l.label, ...text })
+        return j === 0 ? [item] : [Text({ key: `${l.id}-gap`, children: ' ' }), item]
+      }),
     }),
   )
   const children = inner === undefined || inner === null ? own : [inner, ...own]

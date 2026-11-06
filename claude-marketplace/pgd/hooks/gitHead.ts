@@ -1,6 +1,7 @@
 import { pgdEnabled } from './options'
 import { defineSource, noteEvent, refresh } from './source'
 import type { ModApi } from './types'
+import { recordCompaction } from './context-modal'
 
 // The branch and worktree source. The display never runs a git command: it reads <cwd>/.git
 // through host.fs.read. A .git file holds `gitdir: <path>` (a worktree; a relative path is
@@ -84,11 +85,15 @@ export function registerGitHeadHooks(on: ModApi): void {
     }
     return next(e)
   })
-  on('session.compact', (_$: unknown, e: unknown, next: (e: unknown) => unknown) => {
+  // The one session.compact hook (the engine refuses a second without a matcher): it also records
+  // the time of the compaction for the Context modal, once the compaction has run.
+  on('session.compact', async (_$: unknown, e: unknown, next: (e: unknown) => unknown) => {
+    const result = await next(e)
     if (pgdEnabled()) {
       noteEvent()
       refresh('gitHead')
+      recordCompaction()
     }
-    return next(e)
+    return result
   })
 }

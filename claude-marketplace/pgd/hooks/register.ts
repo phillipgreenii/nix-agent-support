@@ -1,3 +1,4 @@
+import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import { registerComponents } from './components'
 import { parseOptions, type ModApi } from './types'
@@ -11,6 +12,8 @@ import { registerBandHooks } from './band'
 import { registerAlertHooks } from './alerts'
 import { initLog } from './log'
 import { exportMetrics, initExporter } from './exporter'
+import { hydrateToggles, setToggleStore } from './toggles'
+import { registerModalEventHooks } from './modals'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):
@@ -41,6 +44,11 @@ import { exportMetrics, initExporter } from './exporter'
 //    source layer's setTimer is built from it).
 const EXPORT_EVERY_MS = 60_000
 
+// The toggle state (the band and each modal) is an atom, so it survives a hot reload: the module's
+// own variables start over on a reload, the atom stays. The shape tag declines a value an earlier
+// version stored in another form.
+const togglesAtom = atom({ plugin: 'pgd', key: 'toggles' } as const, {}, { shape: 'toggles-1' })
+
 // Export the metrics every 60 seconds, never awaited; a no-op without a configured endpoint.
 function startExportTimer(host: ModApi): void {
   const tick = (): void => {
@@ -56,6 +64,7 @@ export const register: Register = on => {
   registerGitHeadHooks(on)
   registerBandHooks(on)
   registerAlertHooks(on)
+  registerModalEventHooks(on)
   on('session.start', async ($, e, next) => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
     const host = {
@@ -64,11 +73,18 @@ export const register: Register = on => {
       http: { fetch: (url, init) => $.http.fetch(url, init) },
       config: { set: (k, v) => $.config.set(k, v) },
       store: { get: k => $.store.get(k), set: (k, v) => $.store.set(k, v) },
-      ui: { invalidate: () => $.ui.invalidate('ui.render') },
+      ui: {
+        invalidate: () => $.ui.invalidate('ui.render'),
+        open: (a: unknown) => $.ui.open(a),
+        close: (a: unknown) => $.ui.close(a),
+      },
+      command: { register: (spec: unknown) => $.command.register(spec) },
       session: {
         model: () => $.session.model(),
         cwd: () => $.session.cwd(),
         id: () => $.session.id(),
+        version: () => $.session.version(),
+        repo: () => $.session.repo(),
       },
       env: {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
@@ -78,6 +94,13 @@ export const register: Register = on => {
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
     }
     setOptions(options)
+    // Hydrate the toggles from the atom before anything draws, and persist every later change.
+    try {
+      hydrateToggles(await read($, togglesAtom))
+    } catch {
+      // a state read that fails leaves the defaults: the band shown, every modal closed
+    }
+    setToggleStore({ save: state => void Promise.resolve(update($, togglesAtom, () => state)).catch(() => undefined) })
     if (options.enable) {
       initLog(host)
       initExporter(host)

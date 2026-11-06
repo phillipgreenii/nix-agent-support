@@ -5522,6 +5522,13 @@
                       toHaveLength: (n) => assert.equal(a.length, n),
                       toContain: (x) => assert.ok(a.includes(x), "contain " + x),
                     });
+                    // The engine's atom API, in memory: the mod keeps its toggle state in an atom.
+                    const held = new Map();
+                    export const atom = (ref, initial) => ({ ref, initial });
+                    export const read = async ($, a) => (held.has(a.ref.key) ? held.get(a.ref.key) : a.initial);
+                    export const update = async ($, a, fn) => {
+                      held.set(a.ref.key, fn(await read($, a)));
+                    };
                   '';
                 in
                 pkgs.runCommand "test-pgd-mod"
@@ -5546,6 +5553,7 @@
                     fd -e ts . -x sd "from '(\.[^']*)'" "from '\$1.ts'" {}
                     fd -e ts . -x sd "\.ts\.ts'" ".ts'" {}
                     fd -e ts . -x sd "'claude-code/testing'" "'./shim.mjs'" {}
+                    fd -e ts . -x sd "'claude-code'" "'./shim.mjs'" {}
                     cp ${shim} shim.mjs
                     cp ${shim} hooks/shim.mjs
                     tests="$(fd -e ts --full-path '\.test\.ts$' . | grep -v '\.multiprocess\.test\.ts$' || true)"

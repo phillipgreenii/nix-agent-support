@@ -97,7 +97,10 @@ test('registerComponents registers the noun with put and remove when enable is t
 
 test('the noun is registered even when every component is off, and not when enable is false', () => {
   const created: unknown[] = []
-  const host = { engine: { create: (m: unknown) => void created.push(m) } }
+  const host = {
+    engine: { create: (m: unknown) => void created.push(m) },
+    command: { register: async () => undefined },
+  }
   const allOff = {
     ...DEFAULT_OPTIONS,
     components: Object.fromEntries(Object.keys(DEFAULT_OPTIONS.components).map(k => [k, false])),

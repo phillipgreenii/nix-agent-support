@@ -64,7 +64,7 @@ function stub$(calls: string[]) {
     ui: {
       resolve: () => {
         calls.push('ui.resolve')
-        return { Box: el('Box'), Text: el('Text') }
+        return { Box: el('Box'), Text: el('Text'), Button: el('Button') }
       },
     },
   }
@@ -93,10 +93,12 @@ test('the band draw reads cached values only and starts no fetch, process or fil
   expect(calls).toEqual(['session.id', 'ui.resolve'])
   // a redraw request from the setValue calls above is not a fetch, process or file read
   expect(sh.calls.slice(before).filter(c => c !== 'ui.invalidate')).toEqual([])
-  const texts = flat(tree).filter(n => n.type === 'Text')
-  expect(texts.map(t => t.children)).toEqual(['abcdef12', ' sonnet · high', ' ctx 85%'])
+  // the session id and context labels are buttons whose child is the coloured Text
+  const texts = flat(tree).filter(n => n.type === 'Text' && n.key !== undefined && !String(n.key).endsWith('-gap'))
+  expect(texts.map(t => t.children)).toEqual(['abcdef12', 'sonnet · high', 'ctx 85%'])
   expect(texts[2].color).toBe('red')
   expect(texts[0].color).toBe(undefined)
+  expect(flat(tree).filter(n => n.type === 'Button').map(b => b.key)).toEqual(['session', 'context'])
 })
 
 test('the hook awaits next(e) and nests its result so another plugin band row is kept', async () => {
@@ -116,7 +118,7 @@ test('the hook awaits next(e) and nests its result so another plugin band row is
   )
   expect(nextCalled).toBe(1)
   expect(flat(tree)).toContain(other)
-  expect(flat(tree).some(n => n.children === ' sonnet')).toBe(true)
+  expect(flat(tree).some(n => n.children === 'sonnet')).toBe(true)
 })
 
 test('with nothing to draw, or display disabled, the answer from next(e) is returned untouched', async () => {
