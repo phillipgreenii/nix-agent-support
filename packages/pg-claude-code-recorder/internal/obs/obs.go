@@ -4,6 +4,7 @@
 package obs
 
 import (
+	"context"
 	"log/slog"
 	"sort"
 	"strings"
@@ -573,6 +574,17 @@ func ClientLabel(name string, whitelist []string) string {
 
 // Event logs name at info level with attribute pairs and records it.
 func (o *Obs) Event(name string, kv ...string) {
+	o.event(slog.LevelInfo, name, kv...)
+}
+
+// EventDebug is Event at debug level: recorded for tests and counted by the
+// caller's metrics, but absent from the default info-level log. It is for
+// per-request lines whose volume would otherwise fill the log.
+func (o *Obs) EventDebug(name string, kv ...string) {
+	o.event(slog.LevelDebug, name, kv...)
+}
+
+func (o *Obs) event(level slog.Level, name string, kv ...string) {
 	attrs := map[string]string{}
 	args := []any{}
 	for i := 0; i+1 < len(kv); i += 2 {
@@ -584,7 +596,7 @@ func (o *Obs) Event(name string, kv ...string) {
 		o.events = append(o.events, Event{Name: name, Attrs: attrs})
 	}
 	o.mu.Unlock()
-	o.Log.Info(name, args...)
+	o.Log.Log(context.Background(), level, name, args...)
 }
 
 // Events returns a copy of the recorded events.

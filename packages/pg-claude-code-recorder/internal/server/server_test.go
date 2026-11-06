@@ -404,3 +404,30 @@ func hasEvent(o *obs.Obs, name string) bool {
 	}
 	return false
 }
+
+// A successful request is counted but not logged at info (it filled the
+// launchd log at hundreds of lines per second); a failed one still is.
+func TestOKRequestIsNotLoggedAtInfoButFailureIs(t *testing.T) {
+	var buf bytes.Buffer
+	o := obs.New(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	s := New(o, nil, func() any { return nil })
+	s.Register("query", KindQuery, func(context.Context, []byte) (any, *wire.Error) { return map[string]any{}, nil })
+	s.Register("bad", KindQuery, func(context.Context, []byte) (any, *wire.Error) {
+		return nil, wire.Errf(wire.ErrInternal, "boom")
+	})
+	for _, op := range []string{"query", "bad"} {
+		r := httptest.NewRequest("POST", "/v1/"+op, strings.NewReader(`{}`))
+		r.Header.Set(wire.ClientHeader, "swiftbar")
+		s.Handler().ServeHTTP(httptest.NewRecorder(), r)
+	}
+	out := buf.String()
+	if strings.Contains(out, `"outcome":"ok"`) {
+		t.Fatalf("ok request logged at info: %s", out)
+	}
+	if !strings.Contains(out, `"outcome":"internal"`) {
+		t.Fatalf("failed request not logged: %s", out)
+	}
+	if n := len(o.EventsNamed("request")); n != 2 {
+		t.Fatalf("%d request events recorded, want 2", n)
+	}
+}

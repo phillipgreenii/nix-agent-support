@@ -270,7 +270,13 @@ func (s *Server) warnIfSlow(name, client string, d time.Duration) {
 
 func (s *Server) finish(w http.ResponseWriter, op, client, outcome string, start time.Time, status int, v any) {
 	s.count(op, client, outcome)
-	s.obs.Event("request", "op", op, "client", client, "outcome", outcome, "ms", fmt.Sprint(s.now().Sub(start).Milliseconds()))
+	// A successful request is counted in requests_total; logging each at info
+	// filled the launchd log at ~430 lines/s. Failures stay at info.
+	logReq := s.obs.Event
+	if outcome == "ok" {
+		logReq = s.obs.EventDebug
+	}
+	logReq("request", "op", op, "client", client, "outcome", outcome, "ms", fmt.Sprint(s.now().Sub(start).Milliseconds()))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
