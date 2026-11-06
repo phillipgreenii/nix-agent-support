@@ -53,8 +53,13 @@ func TestDispatch_ingestUnknown_leavesSessionAndClaimIntact(t *testing.T) {
 	if len(cc.Closed) != 0 {
 		t.Errorf("the session must not be closed on an unknown ingestion; closed=%v", cc.Closed)
 	}
-	if dtest.HasUpdate(bd, "--status=open --assignee=") {
-		t.Errorf("the bead must stay claimed on an unknown ingestion; updates=%v", bd.Updates)
+	// Every release goes through beads.UnclaimHeld, whose update line starts
+	// "update <id> --status=open --assignee=" and carries the guard flags; match by
+	// substring so a guarded release is caught (an exact-line match is vacuous).
+	for _, u := range bd.Updates {
+		if strings.Contains(u, "--status=open") || strings.Contains(u, "--assignee=") {
+			t.Errorf("the bead must stay claimed on an unknown ingestion; update=%q", u)
+		}
 	}
 	if len(cc.Sent) != 1 {
 		t.Errorf("the nudge must be sent exactly once; sent=%v", cc.Sent)
