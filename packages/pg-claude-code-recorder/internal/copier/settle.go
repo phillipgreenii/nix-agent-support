@@ -26,7 +26,7 @@ func (c *Copier) ClonePolicy() ClonePolicy { return c.cfg.Clone }
 // NewGenerationLocked starts a new generation of f from byte 0 from the file at
 // path, keeping the old one (a reset entry follows). The caller holds WithLock.
 func (c *Copier) NewGenerationLocked(f store.File, path, reason string) error {
-	src, err := openNoFollow(path)
+	src, err := c.openNoFollow(path)
 	if err != nil {
 		return err
 	}

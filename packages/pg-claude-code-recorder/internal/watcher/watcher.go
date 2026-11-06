@@ -33,7 +33,9 @@ type Event struct {
 }
 
 // Config configures a Watcher. Sink is required and MUST NOT call back into
-// the Watcher (it runs under the watcher's lock, which serializes sink calls).
+// the Watcher. A sink call for a filesystem hint runs under the watcher's lock;
+// a sink call for a sweep event runs without it (sweeps are serialized with each
+// other), so a sink MUST be safe to call from both at once.
 type Config struct {
 	// Roots are the watched directories: the Claude directory and
 	// <controlStateDir>/ends, in one stream.
@@ -81,7 +83,8 @@ type Watcher struct {
 	cfg Config
 	b   backend
 
-	mu        sync.Mutex // serializes handle, sweep and sink calls
+	sweepMu   sync.Mutex // serializes whole sweeps (walk, OnSweep and sink calls)
+	mu        sync.Mutex // guards lastSweep, state and the hint path's sink calls
 	lastSweep time.Time
 	state     State
 
@@ -287,17 +290,39 @@ func (w *Watcher) handle(path string) {
 // success, records the sweep time. A missing root is skipped (the ends
 // directory may not exist yet).
 func (w *Watcher) sweep() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.sweepMu.Lock()
+	defer w.sweepMu.Unlock()
 	if w.cfg.SweepTimer != nil {
-		return w.cfg.SweepTimer(w.sweepLocked)
+		return w.cfg.SweepTimer(w.sweepPass)
 	}
-	return w.sweepLocked()
+	return w.sweepPass()
 }
 
-// sweepLocked is one sweep pass; the caller holds w.mu.
-func (w *Watcher) sweepLocked() error {
-	var files, walked []FileInfo
+// sweepPass is one sweep: the walk, then the callbacks. The walk and the
+// checkpoint state run under w.mu; OnSweepWalked, OnSweep and the sinks run with
+// it released, so a hint (Wake, an event) never waits for a slow sink.
+func (w *Watcher) sweepPass() error {
+	files, walked, err := w.walkLocked()
+	if err != nil {
+		return err
+	}
+	if w.cfg.OnSweepWalked != nil {
+		w.cfg.OnSweepWalked(walked)
+	}
+	if w.cfg.OnSweep != nil {
+		w.cfg.OnSweep(files)
+	}
+	for _, fi := range files {
+		w.cfg.Sink(Event{Path: fi.Path, Info: fi, Sweep: true})
+	}
+	return nil
+}
+
+// walkLocked walks the sweep roots and, on success, records the sweep time. It
+// takes w.mu itself.
+func (w *Watcher) walkLocked() (files, walked []FileInfo, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	dirs := w.cfg.SweepDirs
 	if len(dirs) == 0 && len(w.cfg.SweepFiles) == 0 {
 		dirs = w.cfg.Roots
@@ -308,7 +333,7 @@ func (w *Watcher) sweepLocked() error {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return err
+			return nil, nil, err
 		}
 		walked = append(walked, infos...)
 		for _, fi := range infos {
@@ -323,7 +348,7 @@ func (w *Watcher) sweepLocked() error {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return err
+			return nil, nil, err
 		}
 		if regular {
 			walked = append(walked, fi)
@@ -336,16 +361,7 @@ func (w *Watcher) sweepLocked() error {
 	w.lastSweep = now
 	w.state.LastSweep = now
 	w.saveLocked()
-	if w.cfg.OnSweepWalked != nil {
-		w.cfg.OnSweepWalked(walked)
-	}
-	if w.cfg.OnSweep != nil {
-		w.cfg.OnSweep(files)
-	}
-	for _, fi := range files {
-		w.cfg.Sink(Event{Path: fi.Path, Info: fi, Sweep: true})
-	}
-	return nil
+	return files, walked, nil
 }
 
 func (w *Watcher) saveLocked() {

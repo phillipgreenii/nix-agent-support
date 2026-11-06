@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -51,6 +50,8 @@ type Config struct {
 	Clone ClonePolicy
 	Obs   *obs.Obs
 	FS    fsx.FS // state-directory file system; the store's when nil
+	// SrcFS is the source-side lstat/open seam; the real file system when nil.
+	SrcFS SrcFS
 
 	// InferMissed counts the snapshot versions that can be inferred to have
 	// been missed between the previous stored content and the new one. The
@@ -69,6 +70,7 @@ type Copier struct {
 	cfg         Config
 	st          *store.Store
 	fs          fsx.FS
+	src         SrcFS
 	mu          sync.Mutex
 	cloneOK     bool
 	cloneReason string
@@ -83,6 +85,10 @@ type Copier struct {
 	// before it queues (a test seam that lets a test move the injected clock
 	// while the caller is queued).
 	onContended func()
+
+	// afterSweepBatch, when set, runs between two batches of SweepMissingWalk
+	// with the copier lock released (a test seam).
+	afterSweepBatch func(done int)
 
 	// onChange, when set, is told of every file whose persisted state a commit
 	// changed (see SetOnFileChange).
@@ -132,7 +138,10 @@ func New(cfg Config) (*Copier, error) {
 	if cfg.Chunk == 0 {
 		cfg.Chunk = defaultChunk
 	}
-	c := &Copier{cfg: cfg, st: cfg.Store, fs: cfg.FS}
+	c := &Copier{cfg: cfg, st: cfg.Store, fs: cfg.FS, src: cfg.SrcFS}
+	if c.src == nil {
+		c.src = osSrcFS{}
+	}
 	if c.fs == nil {
 		c.fs = cfg.Store.FS()
 	}
@@ -175,7 +184,7 @@ func (c *Copier) ingestLocked(path string) (Result, error) {
 	if d := c.cfg.Scope.Match(path); !d.Ingest {
 		return Result{Action: "skipped", Reason: d.Reason}, nil
 	}
-	fi, err := os.Lstat(path)
+	fi, err := c.lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return c.handleMissing(path)
 	}
@@ -203,10 +212,6 @@ func (c *Copier) ingestLocked(path string) (Result, error) {
 		return Result{Action: "new-generation", File: s.fid}, nil
 	}
 	return c.ingestAppend(path, fi, src)
-}
-
-func openNoFollow(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 }
 
 // ---- identity and path resolution ----
@@ -284,7 +289,7 @@ func (c *Copier) addPath(f store.File, path string) error {
 		if p == path {
 			continue
 		}
-		fi, err := os.Lstat(p)
+		fi, err := c.lstat(p)
 		if err != nil || !sameInode(fi, f) {
 			recs = append(recs, &store.Rec{T: store.TPathClose, At: now, File: f.ID, Path: p})
 		}
@@ -396,31 +401,122 @@ func (c *Copier) tombstone(f store.File, path string) error {
 	return nil
 }
 
-// SweepMissing finishes the missing-path rule after a full sweep of the Claude
-// directory. found holds the identity of every file the sweep saw. A known
-// path that no longer names its file is closed; a file left with no path whose
-// identity is not in found is deleted (a Tombstone).
+// sweepBatch is the number of files SweepMissing handles per hold of the copier
+// lock, so a live ingest waits for at most one batch.
+const sweepBatch = 256
+
+// SweepStats is what one SweepMissing pass did.
+type SweepStats struct {
+	// Present is the number of files the walk showed present (no lstat).
+	Present int
+	// LstatFallbacks is the number of files that were not shown present by the
+	// walk and so got the per-file lstat check.
+	LstatFallbacks int
+	// Tombstoned is the number of files recorded deleted; PathsClosed the number
+	// of files that had at least one path closed without being deleted.
+	Tombstoned, PathsClosed int
+}
+
+// SweepMissing is SweepMissingWalk with no path information from the walk: every
+// stored path is checked with an lstat.
 func (c *Copier) SweepMissing(found map[Identity]bool) error {
+	_, err := c.SweepMissingWalk(found, nil)
+	return err
+}
+
+// SweepMissingWalk finishes the missing-path rule after a full sweep of the
+// Claude directory. found holds the identity of every file the sweep saw and
+// walked maps every walked path to the identity the walk saw there. A stored
+// file whose current paths are all in walked with the stored identity is
+// present and costs no lstat. Any other file gets the lstat check for itself
+// only: a known path that no longer names its file is closed, and a file left
+// with no path whose identity is not in found is deleted (a Tombstone).
+//
+// The copier lock is held per batch of sweepBatch files, not for the whole
+// pass. A file the walk does not show present is re-read (its row and paths)
+// under the lock before anything is recorded, so a file ingested between
+// batches is judged on its current state, not on the snapshot taken first.
+func (c *Copier) SweepMissingWalk(found map[Identity]bool, walked map[string]Identity) (SweepStats, error) {
+	var st SweepStats
 	c.lock()
-	defer c.mu.Unlock()
 	files, err := c.st.AllFiles()
 	if err != nil {
-		return err
+		c.mu.Unlock()
+		return st, err
 	}
+	all, err := c.st.AllCurrentPaths()
+	c.mu.Unlock()
+	if err != nil {
+		return st, err
+	}
+	for start := 0; start < len(files); start += sweepBatch {
+		if start > 0 && c.afterSweepBatch != nil {
+			c.afterSweepBatch(start / sweepBatch)
+		}
+		if err := c.sweepBatchLocked(files[start:min(start+sweepBatch, len(files))], all, found, walked, &st); err != nil {
+			return st, err
+		}
+	}
+	return st, nil
+}
+
+// presentInWalk reports whether every path stored for f is in the walk with
+// f's stored identity (a file with no stored path has nothing to check).
+func presentInWalk(f store.File, paths []string, walked map[string]Identity) bool {
+	if walked == nil {
+		return false
+	}
+	want := Identity{Dev: f.Dev, Ino: f.Ino, Birth: f.Birth}
+	for _, p := range paths {
+		if id, ok := walked[p]; !ok || id != want {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Copier) sweepBatchLocked(files []store.File, all map[int64][]string, found map[Identity]bool, walked map[string]Identity, st *SweepStats) error {
+	c.lock()
+	defer c.mu.Unlock()
 	for _, f := range files {
 		if f.State == "deleted" {
 			continue
 		}
-		paths, err := c.st.CurrentPaths(f.ID)
+		paths := all[f.ID]
+		if len(paths) == 0 {
+			continue
+		}
+		if presentInWalk(f, paths, walked) {
+			st.Present++
+			continue
+		}
+		// Not shown present: re-read the row and its paths under the lock.
+		fresh, err := c.st.File(f.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		f = fresh
+		if f.State == "deleted" {
+			continue
+		}
+		paths, err = c.st.CurrentPaths(f.ID)
 		if err != nil {
 			return err
 		}
 		if len(paths) == 0 {
 			continue
 		}
+		if presentInWalk(f, paths, walked) {
+			st.Present++
+			continue
+		}
+		st.LstatFallbacks++
 		var gone []string
 		for _, p := range paths {
-			fi, err := os.Lstat(p)
+			fi, err := c.lstat(p)
 			if err != nil || (f.Mode != "link" && !sameInode(fi, f) && f.Mode != string(scope.Snapshot)) {
 				gone = append(gone, p)
 			}
@@ -432,6 +528,7 @@ func (c *Copier) SweepMissing(found map[Identity]bool) error {
 			if err := c.tombstone(f, gone[0]); err != nil {
 				return err
 			}
+			st.Tombstoned++
 			continue
 		}
 		now := c.now()
@@ -442,6 +539,7 @@ func (c *Copier) SweepMissing(found map[Identity]bool) error {
 		if err := c.commit(recs...); err != nil {
 			return err
 		}
+		st.PathsClosed++
 	}
 	return nil
 }
@@ -484,7 +582,7 @@ func (c *Copier) ingestSnapshot(path string, fi fs.FileInfo, source string) (Res
 	var data []byte
 	var seenID Identity
 	for attempt := 0; ; attempt++ {
-		fh, err := openNoFollow(path)
+		fh, err := c.openNoFollow(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			return c.handleMissing(path)
 		}
@@ -599,7 +697,7 @@ func (c *Copier) writeSnapshot(f store.File, version int, data []byte) error {
 // ---- append sources ----
 
 func (c *Copier) ingestAppend(path string, fi fs.FileInfo, source string) (Result, error) {
-	src, err := openNoFollow(path)
+	src, err := c.openNoFollow(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return c.handleMissing(path)
 	}
@@ -1242,7 +1340,7 @@ func (c *Copier) recoverLocked(retry *[]string) error {
 func (c *Copier) existingPath(f store.File) string {
 	ps, _ := c.st.CurrentPaths(f.ID)
 	for _, p := range ps {
-		if fi, err := os.Lstat(p); err == nil && sameInode(fi, f) {
+		if fi, err := c.lstat(p); err == nil && sameInode(fi, f) {
 			return p
 		}
 	}

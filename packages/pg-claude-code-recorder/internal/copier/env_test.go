@@ -64,6 +64,7 @@ type env struct {
 	before *invariants.DirSnapshot
 	cfgMod func(*Config)
 	log    *slog.Logger
+	drv    string // database/sql driver name for the store; the default when empty
 }
 
 var t0 = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
@@ -98,7 +99,7 @@ func (e *env) open() {
 	e.t.Helper()
 	e.rec = fsx.NewRecorder(nil)
 	e.obs = obs.New(e.log)
-	st, err := store.Open(e.state, store.Options{FS: e.rec, Obs: e.obs})
+	st, err := store.Open(e.state, store.Options{FS: e.rec, Obs: e.obs, DriverName: e.drv})
 	if err != nil {
 		e.t.Fatal(err)
 	}

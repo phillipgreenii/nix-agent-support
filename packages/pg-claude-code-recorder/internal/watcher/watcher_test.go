@@ -318,3 +318,79 @@ func TestSweepTimerWrapsTheWalkAndTheCallback(t *testing.T) {
 		t.Fatalf("timed=%d walk inside=%v OnSweep inside=%v", timed, filterIn, onSweepIn)
 	}
 }
+
+// A sweep calls OnSweep and the sinks without the watcher lock, so a hint
+// (Wake) during a blocked sweep sink returns promptly, and so does LastSweep.
+func TestWakeDuringBlockedSweepSinkReturnsPromptly(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "example-a.jsonl")
+	write(t, a, "x")
+	inSink := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var hints []string
+	var hmu sync.Mutex
+	w, err := New(Config{
+		Roots: []string{root}, SweepInterval: time.Hour, DisableEvents: true,
+		Sink: func(e Event) {
+			if e.Sweep {
+				once.Do(func() { close(inSink) })
+				<-release
+				return
+			}
+			hmu.Lock()
+			hints = append(hints, e.Path)
+			hmu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	swept := make(chan error, 1)
+	go func() { swept <- w.Rescan() }()
+	<-inSink
+	woke := make(chan struct{})
+	go func() { w.Wake(a); _ = w.LastSweep(); close(woke) }()
+	select {
+	case <-woke:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("Wake blocked behind a sweep sink")
+	}
+	close(release)
+	if err := <-swept; err != nil {
+		t.Fatal(err)
+	}
+	hmu.Lock()
+	defer hmu.Unlock()
+	if len(hints) != 1 {
+		t.Fatalf("hint events = %v", hints)
+	}
+}
+
+// OnSweep also runs without the watcher lock.
+func TestOnSweepRunsWithoutTheWatcherLock(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "example-a.jsonl"), "x")
+	var w *Watcher
+	ok := make(chan struct{})
+	var err error
+	w, err = New(Config{
+		Roots: []string{root}, SweepInterval: time.Hour, DisableEvents: true,
+		Sink: func(Event) {},
+		OnSweep: func([]FileInfo) {
+			go func() { _ = w.LastSweep(); close(ok) }()
+			select {
+			case <-ok:
+			case <-time.After(5 * time.Second):
+				t.Error("LastSweep blocked inside OnSweep")
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Rescan(); err != nil {
+		t.Fatal(err)
+	}
+}

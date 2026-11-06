@@ -47,7 +47,7 @@ func (c *Copier) stageFirstCopy(path string, conflict func(path string, id Ident
 	if holders, err := c.st.FilesByCurrentPath(path); err != nil || len(holders) > 0 {
 		return nil, nil
 	}
-	src, err := openNoFollow(path)
+	src, err := c.openNoFollow(path)
 	if err != nil {
 		return nil, nil
 	}
@@ -65,7 +65,7 @@ func (c *Copier) stageFirstCopy(path string, conflict func(path string, id Ident
 	if !ok {
 		return nil, nil
 	}
-	if fi, err := os.Lstat(path); err != nil {
+	if fi, err := c.lstat(path); err != nil {
 		return nil, nil
 	} else if lid, ok := identityOf(path, fi); ok && lid != id {
 		return nil, nil
@@ -224,7 +224,7 @@ func (c *Copier) stageForBatch(p string, conflict func(string, Identity) bool) s
 	if d := c.cfg.Scope.Match(p); !d.Ingest {
 		return stageOutcome{}
 	}
-	fi, err := os.Lstat(p)
+	fi, err := c.lstat(p)
 	if err != nil || !fi.Mode().IsRegular() {
 		return stageOutcome{}
 	}

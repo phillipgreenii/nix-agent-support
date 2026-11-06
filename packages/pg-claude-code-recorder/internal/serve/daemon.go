@@ -388,7 +388,8 @@ func (d *Daemon) sink(e watcher.Event) {
 	d.noteCaughtUp(e, res, err)
 }
 
-// onSweep runs under the watcher's lock before the sweep's events. It records
+// onSweep runs (serialized with other sweeps, but without the watcher's event
+// lock) before the sweep's events. It records
 // deletions (a missing path with no file of the same identity elsewhere), and
 // on the first sweep copies newest first with a throttle, so the most recent
 // Conversations are safe first and the laptop stays usable.
@@ -401,12 +402,15 @@ func (d *Daemon) onSweepWalked(files []watcher.FileInfo) { d.walkedIdent = files
 func (d *Daemon) onSweep(files []watcher.FileInfo) {
 	d.lastFullStatNS.Store(d.clock.Now().UnixNano())
 	found := make(map[copier.Identity]bool, len(files)+len(d.walkedIdent))
+	walked := make(map[string]copier.Identity, len(files)+len(d.walkedIdent))
 	for _, f := range append(append([]watcher.FileInfo(nil), d.walkedIdent...), files...) {
 		var birth int64
 		if !f.Birth.IsZero() {
 			birth = f.Birth.UnixNano()
 		}
-		found[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}] = true
+		id := copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: birth}
+		found[id] = true
+		walked[f.Path] = id
 	}
 	if d.forcePending.CompareAndSwap(true, false) {
 		d.clearSkipCache()
@@ -417,7 +421,7 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}
-	if err := d.cp.SweepMissing(found); err != nil {
+	if _, err := d.cp.SweepMissingWalk(found, walked); err != nil {
 		d.obs.Log.Warn("sweep_missing_failed", "err", err.Error())
 	}
 	d.notifyDeletedSnapshots()
