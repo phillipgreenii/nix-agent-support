@@ -731,7 +731,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 				f.ID, g.Gen, src.Name()+"@"+strconv.Itoa(src.Version()), p.cfg.Clock.Now().UnixNano(), next); err != nil {
 				return err
 			}
-			p.cfg.Obs.Event("parser_reset", "file", strconv.FormatInt(f.ID, 10), "gen", strconv.Itoa(g.Gen), "source", src.Name())
+			p.cfg.Obs.EventDebug("parser_reset", "file", strconv.FormatInt(f.ID, 10), "gen", strconv.Itoa(g.Gen), "source", src.Name())
 		}
 		off := start
 		for off < end {

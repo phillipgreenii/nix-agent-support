@@ -144,7 +144,7 @@ func (p *Parser) parseVersion(f store.File, src source.Source, caps source.Captu
 			if err := p.insertReset(tx, f, src, sn.Version); err != nil {
 				return err
 			}
-			p.cfg.Obs.Event("parser_reset", "file", strconv.FormatInt(f.ID, 10), "gen", strconv.Itoa(sn.Version), "source", src.Name())
+			p.cfg.Obs.EventDebug("parser_reset", "file", strconv.FormatInt(f.ID, 10), "gen", strconv.Itoa(sn.Version), "source", src.Name())
 		}
 		if perr != nil {
 			if err := p.bad(tx, f, g, 0, len(raw), perr.Error()); err != nil {

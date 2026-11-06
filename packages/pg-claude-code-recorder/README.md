@@ -296,6 +296,12 @@ state, log path) shows the same state on the command line.
   `stateDir`, so the profiler socket never shares a directory with the data store.
 - `logs.maxBytes` does not exist: the shared hourly rotator that `manageLogs` enables rotates
   the logs; the daemon does not rotate them itself.
+  Retention is unchanged: the per-service knobs are `manageLogs.thresholdBytes` (default 20 MiB) and
+  `manageLogs.archiveCount` (default 1) on the recorder `userAgents` entry in
+  `home/programs/pg-claude-code-recorder/default.nix` (the entry takes the defaults). At about 0.99 MB/h in
+  steady state the live file holds about a day plus one archive; Loki (168 h retention) is the incident source.
+  A parser-version re-parse is a burst, not steady state. Its per-file `parser_reset` event is therefore logged
+  at debug level, so it is absent from the default info-level log (tests and `EventsNamed` still see it).
 - Home Manager scope (this repo's `CLAUDE.md`, phase 7a): a terminal MUST NOT take the
   LaunchAgent without a personal revision that declares `launchdServices.userAgents`;
   `execPath` is unsupported in the HM scope; OTel settings are read null-safely from

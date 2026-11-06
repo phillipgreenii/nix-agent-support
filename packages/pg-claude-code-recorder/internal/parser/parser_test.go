@@ -1,8 +1,10 @@
 package parser_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -209,6 +211,25 @@ func TestReparseReplacesAtomicallyWithResetMarker(t *testing.T) {
 	}
 	if k.Obs.EventsNamed("parser_reset") == nil {
 		t.Fatal("no parser_reset event")
+	}
+}
+
+// parser_reset is a debug event: a parser-version re-parse emits one per file,
+// a burst that must not fill the info-level log, yet tests still see it.
+func TestParserResetIsDebugLevel(t *testing.T) {
+	k := testkit.New(t)
+	f := k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
+	k.Parse()
+	var buf bytes.Buffer
+	k.Obs.Log = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if err := k.Parser.ReparseGen(f, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(k.Obs.EventsNamed("parser_reset")) == 0 {
+		t.Fatal("parser_reset not recorded for EventsNamed")
+	}
+	if strings.Contains(buf.String(), "parser_reset") {
+		t.Fatalf("parser_reset reached the info-level log: %s", buf.String())
 	}
 }
 
