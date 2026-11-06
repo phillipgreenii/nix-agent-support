@@ -1,3 +1,5 @@
+//go:build integration
+
 package settle
 
 // The equivalence test of the event-driven settle loop. Two settlers run over
