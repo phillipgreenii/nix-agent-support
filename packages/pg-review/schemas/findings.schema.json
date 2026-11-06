@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.pg-review.invalid/findings.schema.json",
+  "title": "pg-review findings document (the analyst's final message)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "lens",
+    "scope",
+    "window",
+    "findings",
+    "unverified",
+    "end"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "lens": { "$ref": "#/$defs/text" },
+    "scope": { "$ref": "#/$defs/text" },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" }
+      }
+    },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "unverified": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+    "end": { "const": true }
+  },
+  "$defs": {
+    "text": { "type": "string", "maxLength": 1200 },
+    "texts": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject_key",
+        "kind",
+        "title",
+        "category",
+        "situation",
+        "history",
+        "problem",
+        "why_problem",
+        "impact",
+        "options",
+        "recommendation",
+        "glossary",
+        "evidence",
+        "sums",
+        "targets",
+        "confirm_by"
+      ],
+      "properties": {
+        "subject_key": { "$ref": "#/$defs/text" },
+        "kind": { "$ref": "#/$defs/text" },
+        "title": { "$ref": "#/$defs/text" },
+        "category": { "$ref": "#/$defs/text" },
+        "situation": { "$ref": "#/$defs/text" },
+        "history": { "$ref": "#/$defs/text" },
+        "problem": { "$ref": "#/$defs/text" },
+        "why_problem": { "$ref": "#/$defs/text" },
+        "impact": { "$ref": "#/$defs/text" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "pros", "cons", "if_ruled"],
+            "properties": {
+              "name": { "$ref": "#/$defs/text" },
+              "pros": { "$ref": "#/$defs/text" },
+              "cons": { "$ref": "#/$defs/text" },
+              "if_ruled": { "$ref": "#/$defs/text" }
+            }
+          }
+        },
+        "recommendation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["option", "why"],
+          "properties": {
+            "option": { "$ref": "#/$defs/text" },
+            "why": { "$ref": "#/$defs/text" }
+          }
+        },
+        "glossary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["term", "meaning"],
+            "properties": {
+              "term": { "$ref": "#/$defs/text" },
+              "meaning": { "$ref": "#/$defs/text" }
+            }
+          }
+        },
+        "evidence": { "$ref": "#/$defs/texts" },
+        "sums": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "addends", "total"],
+            "properties": {
+              "label": { "$ref": "#/$defs/text" },
+              "addends": { "type": "array", "items": { "type": "number" } },
+              "total": { "type": "number" }
+            }
+          }
+        },
+        "targets": { "$ref": "#/$defs/texts" },
+        "confirm_by": { "$ref": "#/$defs/text" }
+      }
+    }
+  }
+}

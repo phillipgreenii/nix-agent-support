@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.pg-review.invalid/evidence-row.schema.json",
+  "title": "pg-review evidence row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "subject_key",
+    "defined_in",
+    "type",
+    "kind",
+    "scope",
+    "window",
+    "metrics",
+    "baseline",
+    "first_seen",
+    "last_seen",
+    "query",
+    "samples"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^E-\\d{3,}$" },
+    "subject_key": { "type": "string", "minLength": 1 },
+    "defined_in": { "type": "string" },
+    "type": { "type": "string" },
+    "kind": { "type": "string" },
+    "scope": { "type": "string" },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "baseline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "metrics"],
+        "properties": {
+          "from": { "type": "string", "format": "date-time" },
+          "to": { "type": "string", "format": "date-time" },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          }
+        }
+      }
+    },
+    "first_seen": { "type": "string", "format": "date-time" },
+    "last_seen": { "type": "string", "format": "date-time" },
+    "query": { "type": "string" },
+    "samples": { "type": "array", "items": { "type": "string" } }
+  }
+}

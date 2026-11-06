@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.pg-review.invalid/evidence-rows.schema.json",
+  "title": "pg-review provider stdout: one JSON array of evidence rows",
+  "type": "array",
+  "items": { "$ref": "evidence-row.schema.json" }
+}

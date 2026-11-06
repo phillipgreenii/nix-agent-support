@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.pg-review.invalid/query-log-entry.schema.json",
+  "title": "pg-review query log entry (assigned by the broker, never by the analyst)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "provider",
+    "args",
+    "scope",
+    "rows",
+    "at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^Q-\\d{3,}$" },
+    "provider": { "type": "string", "minLength": 1 },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "scope": { "type": "string" },
+    "rows": { "type": "integer", "minimum": 0 },
+    "at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "Q-001",
+  "provider": "example-provider",
+  "args": ["example-query", "--limit", "5"],
+  "scope": "example-scope",
+  "rows": 4,
+  "at": "2026-01-08T00:05:00Z"
+}

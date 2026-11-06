@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "lens": "example-lens",
+  "scope": "example-scope",
+  "window": { "from": "2026-01-01T00:00:00Z", "to": "2026-01-08T00:00:00Z" },
+  "findings": [
+    {
+      "subject_key": "tool:example-tool",
+      "kind": "friction",
+      "title": "Example tool fails often",
+      "category": "reliability",
+      "situation": "The example tool was called 12 times and failed 3 times.",
+      "history": "First seen on 2025-12-30.",
+      "problem": "A quarter of calls fail.",
+      "why_problem": "Each failure costs a retry.",
+      "impact": "Three retries in the window.",
+      "options": [
+        {
+          "name": "Fix the argument",
+          "pros": "Removes the failures",
+          "cons": "Needs an edit",
+          "if_ruled": "A fix is filed"
+        },
+        {
+          "name": "Leave it",
+          "pros": "No work",
+          "cons": "Failures continue",
+          "if_ruled": "Nothing changes"
+        }
+      ],
+      "recommendation": {
+        "option": "Fix the argument",
+        "why": "It removes the cause."
+      },
+      "glossary": [
+        { "term": "friction", "meaning": "A repeated avoidable failure" }
+      ],
+      "evidence": ["E-001"],
+      "sums": [{ "label": "failed calls", "addends": [1, 2], "total": 3 }],
+      "targets": ["settings/example.json"],
+      "confirm_by": "The next review shows no failed example-tool calls."
+    }
+  ],
+  "unverified": ["Whether the failures also occur in other scopes."],
+  "end": true
+}
