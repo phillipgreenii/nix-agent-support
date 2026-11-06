@@ -366,7 +366,7 @@ func (failStage) Run(context.Context, *State) error { return errors.New("boom") 
 
 func TestStageErrorFailsRunAndCleansUp(t *testing.T) {
 	e := setup(t)
-	staging := filepath.Join(t.TempDir(), "stage")
+	staging := filepath.Join(evidenceRoot(e.d.Cfg.Env.CacheHome), "stage")
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +527,7 @@ func seedRunning(t *testing.T, e *env, pid int, started time.Time, staging strin
 func TestReaperUsesStoredStartTime(t *testing.T) {
 	e := setup(t)
 	started := t0.Add(-2 * time.Hour)
-	staging := filepath.Join(t.TempDir(), "stage")
+	staging := filepath.Join(evidenceRoot(e.d.Cfg.Env.CacheHome), "stage")
 	_ = os.MkdirAll(staging, 0o755)
 	var closed []string
 	e.d.CloseSession = func(_ context.Context, id string) error { closed = append(closed, id); return nil }
@@ -571,7 +571,7 @@ func TestReaperUsesStoredStartTime(t *testing.T) {
 
 func TestReaperAwaitingAnalystTTL(t *testing.T) {
 	e := setup(t)
-	staging := filepath.Join(t.TempDir(), "stage")
+	staging := filepath.Join(evidenceRoot(e.d.Cfg.Env.CacheHome), "stage")
 	_ = os.MkdirAll(staging, 0o755)
 	var r ledger.Run
 	if err := e.l.WithTx(bg, func(tx *ledger.Tx) error {
@@ -618,11 +618,102 @@ func TestReaperReleasesOrphanLockAndStartsRun(t *testing.T) {
 	}
 }
 
-func TestRemoveStagingRefusesShallowPaths(t *testing.T) {
-	for _, p := range []string{"/", "/tmp", "relative/dir", ""} {
-		if err := removeStaging(p); err == nil {
+func TestRemoveStagingRefusesRelativeAndRootlessPaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "evidence")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/", "/tmp", "relative/dir", "", root} {
+		if err := removeStaging(root, p); err == nil {
 			t.Errorf("accepted %q", p)
 		}
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Error("the root itself was deleted")
+	}
+}
+
+// A Running run whose staging path sits inside a repository must survive the
+// reap: the file is kept, the run still ends Failed, and the refusal is
+// recorded on the run.
+func TestReaperRefusesStagingOutsideEvidenceRoot(t *testing.T) {
+	e := setup(t)
+	repo := filepath.Join(t.TempDir(), "repo", "testdata", "review-item")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(repo, "raw.txt")
+	if err := os.WriteFile(file, []byte("checked in"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := seedRunning(t, e, 7010, t0.Add(-time.Hour), file)
+	got, err := Reap(bg, e.d)
+	if err != nil || len(got) != 1 || got[0].RunID != r.ID {
+		t.Fatalf("%v %v", got, err)
+	}
+	if b, err := os.ReadFile(file); err != nil || string(b) != "checked in" {
+		t.Fatalf("file outside the root was touched: %q %v", b, err)
+	}
+	cur, _ := e.l.GetRun(bg, r.ID)
+	if cur.State != ledger.RunFailed || !strings.Contains(cur.SkipReason, "outside the evidence root") {
+		t.Errorf("state %s reason %q", cur.State, cur.SkipReason)
+	}
+	if got[0].Reason != cur.SkipReason {
+		t.Errorf("reported %q, recorded %q", got[0].Reason, cur.SkipReason)
+	}
+}
+
+// A symlink inside the root that points out of it is refused and its target
+// survives.
+func TestReaperRefusesSymlinkEscapingEvidenceRoot(t *testing.T) {
+	e := setup(t)
+	root := evidenceRoot(e.d.Cfg.Env.CacheHome)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	keep := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(keep, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{link, filepath.Join(link, "keep.txt")} {
+		if err := removeStaging(root, p); err == nil || !strings.Contains(err.Error(), "outside the evidence root") {
+			t.Errorf("%s: err = %v", p, err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("symlink target deleted")
+	}
+	r := seedRunning(t, e, 7011, t0.Add(-time.Hour), link)
+	if _, err := Reap(bg, e.d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("symlink target deleted by the reaper")
+	}
+	if cur, _ := e.l.GetRun(bg, r.ID); cur.State != ledger.RunFailed {
+		t.Errorf("state %s", cur.State)
+	}
+}
+
+func TestRemoveStagingDeletesInsideRootAndToleratesMissing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "evidence")
+	dir := filepath.Join(root, "run-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaging(root, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("inside path kept")
+	}
+	if err := removeStaging(root, dir); err != nil {
+		t.Errorf("missing path: %v", err)
 	}
 }
 

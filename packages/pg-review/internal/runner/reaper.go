@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
@@ -46,7 +45,9 @@ func Reap(ctx context.Context, d *Deps) ([]Reaped, error) {
 			}
 			reason = "interactive TTL expired"
 		}
-		d.cleanupRun(ctx, r)
+		if err := d.cleanupRun(ctx, r); err != nil {
+			reason += "; " + err.Error()
+		}
 		if err := endRun(ctx, d, r.ID, ledger.RunFailed, reason); err != nil {
 			return out, err
 		}
@@ -71,14 +72,19 @@ func Reap(ctx context.Context, d *Deps) ([]Reaped, error) {
 	return out, nil
 }
 
-// cleanupRun closes the run's session and deletes its staging directory.
-func (d *Deps) cleanupRun(ctx context.Context, r ledger.Run) {
+// cleanupRun closes the run's session and deletes its staging directory. A
+// staging path that RemoveStaging refuses is left in place and returned as an
+// error for the caller to record.
+func (d *Deps) cleanupRun(ctx context.Context, r ledger.Run) error {
 	if r.SessionID != "" && d.CloseSession != nil {
 		_ = d.CloseSession(ctx, r.SessionID)
 	}
 	if r.StagingPath != "" {
-		_ = d.RemoveStaging(r.StagingPath)
+		if err := d.RemoveStaging(r.StagingPath); err != nil {
+			return fmt.Errorf("staging not removed: %w", err)
+		}
 	}
+	return nil
 }
 
 // endRun moves a run to a terminal state with a reason, and releases its lock
@@ -113,12 +119,36 @@ func releaseOwnLock(ctx context.Context, t *ledgerTx, r ledger.Run) error {
 	return t.ReleaseLock(ctx, r.Lens, r.Scope)
 }
 
-// removeStaging deletes a staging directory, refusing paths too shallow to be
-// a staging directory.
-func removeStaging(path string) error {
+// evidenceRoot is the only tree the reaper and the TTL sweep may delete from.
+func evidenceRoot(cacheHome string) string {
+	return filepath.Join(cacheHome, "pg-review", "evidence")
+}
+
+// removeStaging deletes a staging directory, refusing any path that is not
+// strictly inside root once symlinks are resolved. A path that does not exist
+// is already gone and is not an error.
+func removeStaging(root, path string) error {
 	p := filepath.Clean(path)
-	if !filepath.IsAbs(p) || len(strings.Split(strings.Trim(p, "/"), "/")) < 2 {
-		return fmt.Errorf("refusing to remove staging path %q", path)
+	if !filepath.IsAbs(p) {
+		return fmt.Errorf("refusing to remove staging path %q: not absolute", path)
 	}
-	return os.RemoveAll(p)
+	if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	rr, err := filepath.EvalSymlinks(root)
+	if errors.Is(err, os.ErrNotExist) {
+		// No evidence root yet, so nothing that exists can be inside it.
+		return fmt.Errorf("refusing to remove staging path %q: outside the evidence root %q", path, root)
+	}
+	if err != nil {
+		return fmt.Errorf("refusing to remove staging path %q: evidence root unusable: %w", path, err)
+	}
+	rp, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return fmt.Errorf("refusing to remove staging path %q: %w", path, err)
+	}
+	if !within(rr, rp) {
+		return fmt.Errorf("refusing to remove staging path %q: outside the evidence root %q", path, root)
+	}
+	return os.RemoveAll(rp)
 }

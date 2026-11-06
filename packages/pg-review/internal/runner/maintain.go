@@ -131,7 +131,7 @@ func sweepEvidence(ctx context.Context, d *Deps) (string, error) {
 	if ttl <= 0 {
 		return "disabled", nil
 	}
-	root := filepath.Join(d.Cfg.Env.CacheHome, "pg-review", "evidence")
+	root := evidenceRoot(d.Cfg.Env.CacheHome)
 	runs, err := d.Ledger.RunsInStates(ctx, ledger.RunFiled, ledger.RunSkipped, ledger.RunFailed)
 	if err != nil {
 		return "", err
@@ -158,7 +158,9 @@ func sweepEvidence(ctx context.Context, d *Deps) (string, error) {
 				ok = false
 				continue
 			}
-			if err := os.RemoveAll(p); err != nil {
+			// removeStaging re-checks after symlink resolution, so a link
+			// that escapes the root is refused and reported.
+			if err := removeStaging(root, p); err != nil {
 				ok = false
 				errs = append(errs, err.Error())
 			}

@@ -70,7 +70,7 @@ type Deps struct {
 	Proc   ProcInspector
 	// CloseSession defaults to CloseSessionHook.
 	CloseSession func(ctx context.Context, sessionID string) error
-	// RemoveStaging defaults to a guarded os.RemoveAll.
+	// RemoveStaging defaults to a removal that refuses any path outside the evidence root.
 	RemoveStaging func(path string) error
 	// Evidence, when set, runs between the gate and the analyst.
 	Evidence Stage
@@ -94,7 +94,8 @@ func (d *Deps) defaults() {
 		d.CloseSession = CloseSessionHook
 	}
 	if d.RemoveStaging == nil {
-		d.RemoveStaging = removeStaging
+		root := evidenceRoot(d.Cfg.Env.CacheHome)
+		d.RemoveStaging = func(path string) error { return removeStaging(root, path) }
 	}
 	if d.Stdout == nil {
 		d.Stdout = io.Discard
