@@ -35,6 +35,8 @@ export interface PgdOptions {
   components: PgdComponents
   links: PgdLink[]
   alerts: { thresholds: AlertThresholds }
+  // Metrics export: with no endpoint the exporter is a no-op.
+  metrics: { endpoint?: string }
 }
 
 // Defaults match today's shell line: every component on, no links, thresholds 60 / 80 / 80.
@@ -52,6 +54,7 @@ export const DEFAULT_OPTIONS: PgdOptions = {
   },
   links: [],
   alerts: { thresholds: { contextWarn: 60, contextAlert: 80, limit: 80 } },
+  metrics: {},
 }
 
 // Parse the rendered options (JSON). Missing or malformed input yields the defaults; a present
@@ -91,5 +94,6 @@ export function parseOptions(raw: string | undefined | null): PgdOptions {
     components,
     links,
     alerts: { thresholds },
+    metrics: typeof obj(o.metrics).endpoint === 'string' && obj(o.metrics).endpoint !== '' ? { endpoint: obj(o.metrics).endpoint as string } : {},
   }
 }

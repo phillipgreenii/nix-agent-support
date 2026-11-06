@@ -1,6 +1,6 @@
 import type { Register } from 'claude-code'
 import { registerComponents } from './components'
-import { parseOptions } from './types'
+import { parseOptions, type ModApi } from './types'
 import { setOptions } from './options'
 import { initSources } from './source'
 import { registerGitHeadHooks, startGitHead } from './gitHead'
@@ -8,6 +8,8 @@ import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { registerUsageHooks, startUsage } from './usage'
 import { registerBandHooks } from './band'
 import { registerAlertHooks } from './alerts'
+import { initLog } from './log'
+import { exportMetrics, initExporter } from './exporter'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):
@@ -36,6 +38,17 @@ import { registerAlertHooks } from './alerts'
 //    files (each takes `$` from its own callback, never as an argument) and read getOptions().
 //    The facade also holds ui.invalidate, session.model, session.cwd and clock.after (the
 //    source layer's setTimer is built from it).
+const EXPORT_EVERY_MS = 60_000
+
+// Export the metrics every 60 seconds, never awaited; a no-op without a configured endpoint.
+function startExportTimer(host: ModApi): void {
+  const tick = (): void => {
+    void exportMetrics()
+    host.clock.after(EXPORT_EVERY_MS, tick)
+  }
+  host.clock.after(EXPORT_EVERY_MS, tick)
+}
+
 export const register: Register = on => {
   registerUsageHooks(on)
   registerModelEffortHooks(on)
@@ -51,12 +64,23 @@ export const register: Register = on => {
       config: { set: (k, v) => $.config.set(k, v) },
       store: { get: k => $.store.get(k), set: (k, v) => $.store.set(k, v) },
       ui: { invalidate: () => $.ui.invalidate('ui.render') },
-      session: { model: () => $.session.model(), cwd: () => $.session.cwd() },
+      session: {
+        model: () => $.session.model(),
+        cwd: () => $.session.cwd(),
+        id: () => $.session.id(),
+      },
+      env: {
+        stateHome: () => $.env.get('XDG_STATE_HOME'),
+        home: () => $.env.get('HOME'),
+      },
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
     }
     setOptions(options)
     if (options.enable) {
+      initLog(host)
+      initExporter(host)
       initSources(host, { setTimer: (fn, ms) => host.clock.after(ms, fn) })
+      startExportTimer(host)
       startUsage(host)
       startModelEffort(host)
       startGitHead(host)

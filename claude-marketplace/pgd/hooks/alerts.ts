@@ -2,6 +2,7 @@ import { getOptions } from './options'
 import { readCached } from './source'
 import type { AlertThresholds, ModApi } from './types'
 import type { Usage } from './usage'
+import { timedDraw } from './metrics'
 
 // The alert row (the status line): one aggregated row listing only the alerts whose condition is
 // true, highest priority first. The engine prefixes the row with a warning glyph and the plugin
@@ -130,5 +131,7 @@ export function alertHook($: ModApi, e: ModApi, next: Next): unknown {
 }
 
 export function registerAlertHooks(on: ModApi): void {
-  on('ui.render', { component: 'PromptHint' }, alertHook)
+  on('ui.render', { component: 'PromptHint' }, ($, e, next) =>
+    getOptions()?.enable ? timedDraw('alert', () => alertHook($, e, next)) : alertHook($, e, next),
+  )
 }

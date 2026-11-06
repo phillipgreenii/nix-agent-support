@@ -22,6 +22,7 @@ let
   rendered = {
     inherit (cfg) enable components links;
     alerts = { inherit (cfg.alerts) thresholds; };
+    metrics = lib.optionalAttrs (cfg.metrics.endpoint != null) { inherit (cfg.metrics) endpoint; };
   };
 in
 {
@@ -67,6 +68,12 @@ in
       );
       default = [ ];
       description = "Transcript link rules. The shipped list is empty.";
+    };
+
+    metrics.endpoint = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Endpoint the metrics exporter posts to. Null leaves the exporter a no-op.";
     };
 
     alerts.thresholds = {

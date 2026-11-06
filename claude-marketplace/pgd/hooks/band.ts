@@ -2,6 +2,7 @@ import { getOptions } from './options'
 import { readCached } from './source'
 import type { AlertThresholds, ModApi } from './types'
 import type { Usage } from './usage'
+import { timedDraw } from './metrics'
 
 // The phase 1 band: plain labels (no buttons yet) for the session id, model and effort, and the
 // context percent, the last coloured by level. renderBand is a plain data description, so a later
@@ -100,5 +101,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
 }
 
 export function registerBandHooks(on: ModApi): void {
-  on('ui.render', { component: 'AbovePrompt' }, bandHook)
+  on('ui.render', { component: 'AbovePrompt' }, ($, e, next) =>
+    getOptions()?.enable ? timedDraw('band', () => bandHook($, e, next)) : bandHook($, e, next),
+  )
 }

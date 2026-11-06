@@ -33,6 +33,8 @@
 //    fetchedAt }. A store call that throws makes that call unshared (see sharedStore.ts).
 import type { ModApi } from './types'
 import { createSharedStore, entryKey } from './sharedStore'
+import { metricsNow, record } from './metrics'
+import { log } from './log'
 
 export type Surface = 'band' | 'modal' | 'alert'
 
@@ -119,6 +121,8 @@ async function runFetch(e: Entry): Promise<void> {
   if (e.inFlight || !e.def.fetch) return
   e.inFlight = true
   e.lastAttemptAt = clock.now()
+  const labels = { source: e.def.id }
+  let startedAt: number | undefined
   try {
     const shared = e.def.shared
     let key: string | undefined
@@ -136,20 +140,39 @@ async function runFetch(e: Entry): Promise<void> {
       const age = hit ? clock.now() - hit.fetchedAt : -1
       if (hit && age >= 0 && age < e.def.intervalMs) {
         e.failures = 0
+        record('pgd_cache_hits_total', 1, labels)
         store(e, hit.value, hit.fetchedAt)
         return
       }
     }
+    record('pgd_cache_misses_total', 1, labels)
+    startedAt = metricsNow()
+    record('pgd_fetch_total', 1, labels)
     const value = await e.def.fetch({ host })
+    record('pgd_fetch_duration_seconds', metricsNow() - startedAt, labels)
     e.failures = 0
     store(e, value)
     if (sharedStore && key !== undefined) await sharedStore.write(key, value)
-  } catch {
+  } catch (err) {
     e.failures += 1
+    const kind = errorKind(err)
+    if (startedAt !== undefined) record('pgd_fetch_duration_seconds', metricsNow() - startedAt, labels)
+    record('pgd_fetch_errors_total', 1, { ...labels, kind })
+    log('warn', e.def.id, 'fetch failed', kind)
   } finally {
     e.inFlight = false
     schedule(e)
   }
+}
+
+// The error kind label of pgd_fetch_errors_total: timeout, exit, parse or other.
+export function errorKind(err: unknown): 'timeout' | 'exit' | 'parse' | 'other' {
+  const o = (err ?? {}) as { name?: unknown; message?: unknown; code?: unknown; exitCode?: unknown }
+  const text = `${String(o.name ?? '')} ${String(o.message ?? '')} ${String(o.code ?? '')}`
+  if (/timeout|timed out|ETIMEDOUT/i.test(text)) return 'timeout'
+  if (err instanceof SyntaxError || /parse|JSON/i.test(text)) return 'parse'
+  if (typeof o.exitCode === 'number' || /exit/i.test(text)) return 'exit'
+  return 'other'
 }
 
 function store(e: Entry, value: unknown, fetchedAt = clock.now()): void {
@@ -179,7 +202,9 @@ export function defineSource<T>(def: SourceDef<T>): void {
 
 // The last cached value, or undefined (blank, missing and not-yet-fetched alike). Never fetches.
 export function readCached<T>(id: string): T | undefined {
-  return entries.get(id)?.cache?.value as T | undefined
+  const cache = entries.get(id)?.cache
+  record(cache ? 'pgd_cache_hits_total' : 'pgd_cache_misses_total', 1, { source: id })
+  return cache?.value as T | undefined
 }
 
 // Update an event-driven source. A source that was never started makes this a no-op.
@@ -190,10 +215,15 @@ export function setValue(id: string, value: unknown): void {
 
 // Coalesce any number of changes in one event turn into one host.ui.invalidate() call.
 export function requestInvalidate(): void {
-  if (invalidatePending || !host) return
+  if (!host) return
+  if (invalidatePending) {
+    record('pgd_invalidate_coalesced_total', 1)
+    return
+  }
   invalidatePending = true
   void Promise.resolve().then(() => {
     invalidatePending = false
+    record('pgd_invalidate_total', 1)
     host?.ui.invalidate()
   })
 }

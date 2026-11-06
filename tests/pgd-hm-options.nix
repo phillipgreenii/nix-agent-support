@@ -72,7 +72,13 @@ let
           contextAlert = 80;
           limit = 80;
         };
+        metrics = { };
       };
+    metricsEndpointDefaultsNull = (opts defaults).metrics.endpoint == null;
+    metricsEndpointRendered =
+      (rendered (evaluate {
+        metrics.endpoint = "http://127.0.0.1:4318";
+      })).metrics.endpoint == "http://127.0.0.1:4318";
     customRendered =
       let
         r = rendered custom;

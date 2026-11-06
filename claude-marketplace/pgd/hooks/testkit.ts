@@ -53,7 +53,9 @@ export interface StubHost {
   host: any
   calls: string[]
   files: Map<string, string>
-  state: { cwd: string; model: string }
+  state: { cwd: string; model: string; id: string; stateHome?: string }
+  // Every fs.write as { path, text }, in order.
+  writes: Array<{ path: string; text: string }>
   // The in-memory plugin store behind host.store; set storeFail to make every call throw.
   storeData: Map<string, unknown>
   storeFail: { on: boolean }
@@ -62,7 +64,8 @@ export interface StubHost {
 export function stubHost(files: Record<string, string> = {}): StubHost {
   const calls: string[] = []
   const fileMap = new Map(Object.entries(files))
-  const state = { cwd: '/work/repo', model: 'sonnet' }
+  const state: StubHost['state'] = { cwd: '/work/repo', model: 'sonnet', id: 'sess-1', stateHome: '/state' }
+  const writes: StubHost['writes'] = []
   const storeData = new Map<string, unknown>()
   const storeFail = { on: false }
   const host = {
@@ -80,8 +83,9 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         if (v === undefined) throw new Error(`ENOENT ${p}`)
         return v
       },
-      write: async () => {
+      write: async (path: string, text: string) => {
         calls.push('fs.write')
+        writes.push({ path, text })
       },
     },
     http: {
@@ -106,6 +110,10 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         storeData.set(k, v)
       },
     },
+    env: {
+      stateHome: async () => state.stateHome,
+      home: async () => '/home/u',
+    },
     ui: {
       invalidate: () => {
         calls.push('ui.invalidate')
@@ -120,7 +128,8 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         calls.push('session.cwd')
         return state.cwd
       },
+      id: async () => state.id,
     },
   }
-  return { host, calls, files: fileMap, state, storeData, storeFail }
+  return { host, calls, files: fileMap, state, storeData, storeFail, writes }
 }
