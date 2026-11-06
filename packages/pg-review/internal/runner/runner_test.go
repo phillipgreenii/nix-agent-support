@@ -731,3 +731,69 @@ func TestPSInspectorSeesOwnProcessNotAGoneOne(t *testing.T) {
 		t.Skip("ps cannot read the test process (sandboxed build)")
 	}
 }
+
+// tmpChild makes a real direct child of the literal staging root for the
+// test and removes it afterwards.
+func tmpChild(t *testing.T, pattern string) string {
+	t.Helper()
+	p, err := os.MkdirTemp(stagingRoot, pattern)
+	if err != nil {
+		t.Skipf("cannot create a directory under %s: %v", stagingRoot, err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(p) })
+	return p
+}
+
+func TestRemoveStagingDeletesRealTmpStagingDir(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "evidence")
+	dir := tmpChild(t, "pg-review-test-")
+	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaging(root, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("staging dir kept")
+	}
+	if err := removeStaging(root, dir); err != nil {
+		t.Errorf("missing path: %v", err)
+	}
+}
+
+func TestRemoveStagingRefusesTmpPathsThatAreNotStagingDirs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "evidence")
+	other := tmpChild(t, "other-name-test-")
+	staging := tmpChild(t, "pg-review-test-")
+	deeper := filepath.Join(staging, "deeper")
+	if err := os.Mkdir(deeper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	keep := filepath.Join(outside, "keep.txt")
+	if err := os.WriteFile(keep, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(stagingRoot, "pg-review-test-link-"+filepath.Base(outside))
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("cannot create a symlink under %s: %v", stagingRoot, err)
+	}
+	t.Cleanup(func() { _ = os.Remove(link) })
+
+	for name, p := range map[string]string{
+		"non-staging name":    other,
+		"deeper descendant":   deeper,
+		"symlink to outside":  link,
+		"through the symlink": filepath.Join(link, "keep.txt"),
+		"the staging root":    stagingRoot,
+	} {
+		if err := removeStaging(root, p); err == nil {
+			t.Errorf("%s: accepted %q", name, p)
+		}
+	}
+	for _, p := range []string{other, deeper, keep} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s was deleted", p)
+		}
+	}
+}

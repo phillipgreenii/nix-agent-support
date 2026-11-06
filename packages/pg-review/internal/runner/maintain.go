@@ -154,7 +154,9 @@ func sweepEvidence(ctx context.Context, d *Deps) (string, error) {
 			if p == "" {
 				continue
 			}
-			if !within(root, p) {
+			// removeStaging decides: inside the evidence root, or a real
+			// /tmp/pg-review-* directory. EvidenceDir has no /tmp option.
+			if p == r.EvidenceDir && !within(root, p) {
 				ok = false
 				continue
 			}

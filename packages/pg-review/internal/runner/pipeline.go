@@ -70,7 +70,8 @@ type Deps struct {
 	Proc   ProcInspector
 	// CloseSession defaults to CloseSessionHook.
 	CloseSession func(ctx context.Context, sessionID string) error
-	// RemoveStaging defaults to a removal that refuses any path outside the evidence root.
+	// RemoveStaging defaults to a removal that refuses any path outside the evidence root
+	// and the literal /tmp/pg-review-* staging directories.
 	RemoveStaging func(path string) error
 	// Evidence, when set, runs between the gate and the analyst.
 	Evidence Stage

@@ -124,21 +124,40 @@ func evidenceRoot(cacheHome string) string {
 	return filepath.Join(cacheHome, "pg-review", "evidence")
 }
 
-// removeStaging deletes a staging directory, refusing any path that is not
-// strictly inside root once symlinks are resolved. A path that does not exist
-// is already gone and is not an error.
+// isStagingDirName reports whether p is a direct child of the literal staging
+// root named like the directories makeStaging creates.
+func isStagingDirName(p string) bool {
+	if filepath.Dir(p) != stagingRoot {
+		return false
+	}
+	ok, _ := filepath.Match("pg-review-*", filepath.Base(p))
+	return ok
+}
+
+// removeStaging deletes a staging directory. It permits exactly two kinds of
+// path: strictly inside root (the evidence root) once symlinks are resolved,
+// or a direct child of the literal staging root (/tmp) named pg-review-* that
+// is a real directory, not a symlink. Anything else is refused. A path that
+// does not exist is already gone and is not an error.
 func removeStaging(root, path string) error {
 	p := filepath.Clean(path)
 	if !filepath.IsAbs(p) {
 		return fmt.Errorf("refusing to remove staging path %q: not absolute", path)
 	}
-	if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
+	fi, err := os.Lstat(p)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
+	}
+	if err == nil && isStagingDirName(p) {
+		if !fi.IsDir() {
+			return fmt.Errorf("refusing to remove staging path %q: not a directory (symlinks are refused)", path)
+		}
+		return os.RemoveAll(p)
 	}
 	rr, err := filepath.EvalSymlinks(root)
 	if errors.Is(err, os.ErrNotExist) {
 		// No evidence root yet, so nothing that exists can be inside it.
-		return fmt.Errorf("refusing to remove staging path %q: outside the evidence root %q", path, root)
+		return fmt.Errorf("refusing to remove staging path %q: outside the evidence root %q and not a direct %s/pg-review-* directory", path, root, stagingRoot)
 	}
 	if err != nil {
 		return fmt.Errorf("refusing to remove staging path %q: evidence root unusable: %w", path, err)
@@ -148,7 +167,7 @@ func removeStaging(root, path string) error {
 		return fmt.Errorf("refusing to remove staging path %q: %w", path, err)
 	}
 	if !within(rr, rp) {
-		return fmt.Errorf("refusing to remove staging path %q: outside the evidence root %q", path, root)
+		return fmt.Errorf("refusing to remove staging path %q: outside the evidence root %q and not a direct %s/pg-review-* directory", path, root, stagingRoot)
 	}
 	return os.RemoveAll(rp)
 }

@@ -109,7 +109,7 @@ func (e *evEnv) snapOnRemove(snaps *[]stagingSnap) {
 			}
 		}
 		*snaps = append(*snaps, s)
-		return removeStaging(p)
+		return removeStaging(evidenceRoot(e.d.Cfg.Env.CacheHome), p)
 	}
 }
 
