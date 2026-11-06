@@ -19,3 +19,5 @@ apiVersion: 1
 deleteRules:
   - orgId: 1
     uid: pg-ccrec-free-space
+  - orgId: 1
+    uid: pg-ccrec-removal-backlog
