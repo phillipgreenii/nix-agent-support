@@ -1,0 +1,6 @@
+{
+  "model": "alpha",
+  "theme": "dark",
+  "env": { "MODE": "one" },
+  "permissions": { "allow": ["Read"] }
+}
