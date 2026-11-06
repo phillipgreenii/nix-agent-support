@@ -200,3 +200,27 @@ func TestRun_DispatchesEachSubcommandToItsOwnHandler(t *testing.T) {
 		t.Errorf("remove-worktree on a non-worktree: exit %d, want 1", code)
 	}
 }
+
+// TestRun_NoSubcommandFallsThroughToUnknown runs every subcommand the switch
+// dispatches with a minimal invocation that stops in its own parser or usage
+// path, and asserts none of them reaches the unknown-subcommand fallback.
+func TestRun_NoSubcommandFallsThroughToUnknown(t *testing.T) {
+	invocations := [][]string{
+		{"pool-capacity"},
+		{"janitor"},
+		{"split"},
+		{"remove-worktree"},
+		{"origin"},
+		{"query", "stray"},
+		{"dispatch", "stray"},
+		{"postStartup", "stray"},
+		{"preShutdown", "stray"},
+		{"validate", "stray"},
+	}
+	for _, args := range invocations {
+		_, stderr := runCapturingStderr(t, args)
+		if strings.Contains(stderr, "unknown subcommand") {
+			t.Errorf("%v reached the unknown-subcommand fallback: %q", args, stderr)
+		}
+	}
+}
