@@ -59,6 +59,9 @@ export interface StubHost {
   // The in-memory plugin store behind host.store; set storeFail to make every call throw.
   storeData: Map<string, unknown>
   storeFail: { on: boolean }
+  // The method objects passed to engine.create (kept apart from `calls`: registering the noun is
+  // not a fetch, process or file read).
+  nouns: unknown[]
 }
 
 export function stubHost(files: Record<string, string> = {}): StubHost {
@@ -68,6 +71,7 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
   const writes: StubHost['writes'] = []
   const storeData = new Map<string, unknown>()
   const storeFail = { on: false }
+  const nouns: unknown[] = []
   const host = {
     process: {
       run: async (...a: unknown[]) => {
@@ -110,6 +114,11 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         storeData.set(k, v)
       },
     },
+    engine: {
+      create: (methods: unknown) => {
+        nouns.push(methods)
+      },
+    },
     env: {
       stateHome: async () => state.stateHome,
       home: async () => '/home/u',
@@ -131,5 +140,5 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       id: async () => state.id,
     },
   }
-  return { host, calls, files: fileMap, state, storeData, storeFail, writes }
+  return { host, calls, files: fileMap, state, storeData, storeFail, writes, nouns }
 }

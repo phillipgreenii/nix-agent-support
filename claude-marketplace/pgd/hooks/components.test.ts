@@ -26,10 +26,10 @@ const allOff = (o: PgdOptions): PgdOptions => ({
   ) as unknown as PgdOptions['components'],
 })
 
-test('every component off registers nothing', () => {
+test('every component off registers nothing but the pgd noun', () => {
   const { $, calls } = recorder()
   registerComponents(allOff(DEFAULT_OPTIONS), $)
-  expect(calls).toEqual([])
+  expect(calls).toEqual(['$.engine.create'])
 })
 
 test('enable false short-circuits registration even with every component on', () => {

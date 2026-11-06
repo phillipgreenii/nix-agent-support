@@ -5555,6 +5555,21 @@
                     touch $out
                   '';
 
+              # pgd types contract: compiles the documented example against types/pgd.d.ts.
+              test-pgd-types =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/pgd/types;
+                  };
+                in
+                pkgs.runCommand "test-pgd-types" { nativeBuildInputs = [ pkgs.typescript ]; } ''
+                  set -euo pipefail
+                  cd ${src}/claude-marketplace/pgd/types
+                  tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck false example.ts pgd.d.ts
+                  touch $out
+                '';
+
               # pg-claude-control (docket pg2-v77tsx, phase 8a): the control mod's core logic under
               # plain node against the real file system and the real listener script, outside the Go
               # unit gate. Same engine shim as test-claude-tool-tracker-mod; `claude plugin validate`

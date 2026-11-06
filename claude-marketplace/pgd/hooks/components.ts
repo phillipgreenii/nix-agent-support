@@ -1,5 +1,6 @@
 import type { PgdOptions, ModApi } from './types'
 import { startDolt } from './dolt'
+import { registerPgdNoun } from './pgd-noun'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -25,4 +26,7 @@ export function registerComponents(options: PgdOptions, host: ModApi): void {
   for (const c of COMPONENTS) {
     if (options.components[c.flag]) c.run(options, host)
   }
+  // The pgd noun is registered whenever enable is true; its focus surface is gated by
+  // components.focus inside the noun.
+  registerPgdNoun(options, host)
 }

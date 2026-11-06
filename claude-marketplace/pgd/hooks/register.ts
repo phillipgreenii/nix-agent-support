@@ -2,7 +2,8 @@ import type { Register } from 'claude-code'
 import { registerComponents } from './components'
 import { parseOptions, type ModApi } from './types'
 import { setOptions } from './options'
-import { initSources } from './source'
+import { initSources, requestInvalidate } from './source'
+import { initContributions } from './contributions'
 import { registerGitHeadHooks, startGitHead } from './gitHead'
 import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { registerUsageHooks, startUsage } from './usage'
@@ -73,6 +74,7 @@ export const register: Register = on => {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
         home: () => $.env.get('HOME'),
       },
+      engine: { create: (methods: unknown) => $.engine.create(methods) },
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
     }
     setOptions(options)
@@ -80,6 +82,7 @@ export const register: Register = on => {
       initLog(host)
       initExporter(host)
       initSources(host, { setTimer: (fn, ms) => host.clock.after(ms, fn) })
+      initContributions({ now: () => Date.now(), setTimer: (fn, ms) => host.clock.after(ms, fn), requestInvalidate })
       startExportTimer(host)
       startUsage(host)
       startModelEffort(host)

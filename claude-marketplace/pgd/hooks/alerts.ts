@@ -3,6 +3,7 @@ import { readCached } from './source'
 import type { AlertThresholds, ModApi } from './types'
 import type { Usage } from './usage'
 import { timedDraw } from './metrics'
+import { listContributions } from './contributions'
 
 // The alert row (the status line): one aggregated row listing only the alerts whose condition is
 // true, highest priority first. The engine prefixes the row with a warning glyph and the plugin
@@ -73,7 +74,16 @@ const SEPARATOR = ' · '
 export function fitAlerts(inputs: AlertInputs, width: number): string {
   const room = width - PREFIX_LENGTH
   let row = ''
-  for (const item of ALERT_ITEMS) {
+  // Each live alert contribution is one more item ranked by its priority (larger is higher);
+  // the sort is stable, so a built-in item wins a tie.
+  const contributed: AlertItem[] = listContributions('alert').map(c => ({
+    id: `contrib:${c.id}`,
+    priority: c.priority,
+    condition: () => true,
+    text: () => c.text,
+  }))
+  const items = [...ALERT_ITEMS, ...contributed].sort((a, b) => b.priority - a.priority)
+  for (const item of items) {
     if (!item.condition(inputs)) continue
     const text = item.text(inputs)
     const next = row === '' ? text : `${row}${SEPARATOR}${text}`
