@@ -199,8 +199,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261031153131-4d4b0696f49b'
-    hash = 'sha256-h5SfSB/VPuDdKyEMtAP/m1Up3ChvNC1jCz7/lN3fVUY='
+    version = 'v0.0.0-20261106055331-7198a38842bb'
+    hash = 'sha256-s6DTFVcL24AAUgvKzrwkRc3wfDH/EsiHumGlFzfkulg='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -211,8 +211,8 @@ cachePackages = [
     hash = 'sha256-nbRCTFiDCC2jKK7AHi79n7urYCMP5yDZnWtNVJrDi+k='
 
   [mod.'github.com/spf13/pflag']
-    version = 'v1.0.10'
-    hash = 'sha256-uDPnWjHpSrzXr17KEYEA1yAbizfcsfo5AyztY2tS6ZU='
+    version = 'v1.1.0'
+    hash = 'sha256-B7mjsUWaV/ltrpt8mGFyqeLQBpRd7Xcif019pAjWv+w='
 
   [mod.'go.opentelemetry.io/auto/sdk']
     version = 'v1.2.1'
@@ -271,11 +271,11 @@ cachePackages = [
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261026165753-2ffab32bce7e'
-    hash = 'sha256-sRRg7QCSi0XQZELYEcMA/ElQcFM+CcHeaVOCMgoWcqQ='
+    version = 'v0.0.0-20261104224025-d1e00e9f33ab'
+    hash = 'sha256-8VMRvaRr+LdlEOvJI23LyxXbBj3PsG1/uq0PMU/+4zo='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261026165753-2ffab32bce7e'
+    version = 'v0.0.0-20261104224025-d1e00e9f33ab'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -291,8 +291,8 @@ cachePackages = [
     hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
 
   [mod.'modernc.org/libc']
-    version = 'v1.79.1'
-    hash = 'sha256-tTzZIGVxVRIGkbu9JhHUGZGs9NXE+0wISdoqI3xvsoE='
+    version = 'v1.80.1'
+    hash = 'sha256-38Z2O6/kb7YAHVAxKfdLT/P+cJVngwpxmwWtfbO/ges='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
