@@ -71,7 +71,7 @@ export const register: Register = on => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
     const host = {
       process: { run: (argv, init) => $.process.run(argv, init) },
-      fs: { read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t) },
+      fs: { read: p => $.fs.read(p), list: p => $.fs.list(p), write: (p, t) => $.fs.write(p, t) },
       http: { fetch: (url, init) => $.http.fetch(url, init) },
       config: { set: (a: unknown) => $.config.set(a) },
       prompt: { fill: (a: unknown) => $.prompt.fill(a) },

@@ -106,6 +106,16 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         if (v === undefined) throw new Error(`ENOENT ${p}`)
         return v
       },
+      // The directory entries under a path, as the host answers ({ name, kind }); a directory with
+      // no file under it rejects, as a missing one does.
+      list: async (dir: string) => {
+        calls.push(`fs.list ${dir}`)
+        const out = [...fileMap.keys()]
+          .filter(k => k.startsWith(`${dir}/`) && !k.slice(dir.length + 1).includes('/'))
+          .map(k => ({ name: k.slice(dir.length + 1), kind: 'file' }))
+        if (out.length === 0) throw new Error(`ENOENT ${dir}`)
+        return out
+      },
       write: async (path: string, text: string) => {
         calls.push('fs.write')
         writes.push({ path, text })

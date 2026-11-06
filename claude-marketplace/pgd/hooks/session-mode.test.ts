@@ -19,7 +19,7 @@ import { fakeClock, settle, stubHost } from './testkit'
 const T = DEFAULT_OPTIONS.alerts.thresholds
 const only = (sessionMode: boolean): PgdOptions => ({
   ...DEFAULT_OPTIONS,
-  components: { ...DEFAULT_OPTIONS.components, beads: false, prStatus: false, sessionMode },
+  components: { ...DEFAULT_OPTIONS.components, beads: false, prStatus: false, sessionName: false, sessionMode },
 })
 
 type Answer = { exitCode: number; stdout?: string } | Error

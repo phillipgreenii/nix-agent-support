@@ -3,8 +3,7 @@ import type { ModalSpec, ModalItem } from './modal'
 import type { GitHead } from './gitHead'
 import type { ModApi } from './types'
 
-// The Info modal: one item per line. Rows: name (only when a name source exists: the session-name
-// component is a later packet, so today the row is omitted rather than repeating the session id),
+// The Info modal: one item per line. Rows: name (the registry name; the session id when no name exists),
 // session id, actor (the session id cut to 8 characters and an ellipsis, as the actor is the
 // session that claims work), version, repo, worktree, branch and, when the PR source has a value,
 // the PR with its review state coloured. A row whose value is missing is omitted: with the .git
@@ -61,7 +60,7 @@ export function reviewColor(state: string): string | undefined {
 export function infoSpec(): ModalSpec {
   const items: ModalItem[] = []
   const name = readCached<string>('sessionName')
-  if (name) items.push({ label: 'name', value: name })
+  if (name || facts.id) items.push({ label: 'name', value: name || (facts.id as string) })
   if (facts.id) {
     items.push({ label: 'session id', value: facts.id })
     items.push({ label: 'actor', value: actorOf(facts.id) })

@@ -52,6 +52,7 @@ test('the session id button opens the Info modal: one item per line', async () =
   expect(w.opened).toHaveLength(1)
   expect(w.opened[0].id).toBe('info')
   expect(rows(w.opened[0])).toEqual([
+    'name: sess-1',
     'session id: sess-1',
     'actor: sess-1',
     'version: 2.1.314',
@@ -60,7 +61,7 @@ test('the session id button opens the Info modal: one item per line', async () =
     'branch: feat',
     'PR: #412 (changes requested)',
   ])
-  expect(w.opened[0].items[6].color).toBe('red')
+  expect(w.opened[0].items[7].color).toBe('red')
   expect(w.opened[0].actions.map(a => a.id)).toEqual([CLOSE_ACTION])
 })
 
@@ -99,7 +100,8 @@ test('the Info modal omits branch and worktree when the .git reads fail, and the
   expect(got.some(r => r.startsWith('branch'))).toBe(false)
   expect(got.some(r => r.startsWith('worktree'))).toBe(false)
   expect(got.some(r => r.startsWith('PR'))).toBe(false)
-  expect(got.some(r => r.startsWith('name'))).toBe(false)
+  // with no name the name row repeats the session id
+  expect(got[0]).toBe('name: sess-1')
   // a detached head shows as a branch row
   setValue('gitHead', { detached: 'abcdef0123456789' })
   expect(rows(infoSpec()).includes('branch: detached at abcdef01')).toBe(true)

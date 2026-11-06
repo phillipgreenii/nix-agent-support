@@ -98,7 +98,7 @@ request. `$.session.repo()` gives root, remote and `internal`, plus a `name` tha
 run; no branch. `$.session.messages()` entries carry only role, text and tool uses.
 
 Consequence: context, limits, cost, model and effort need no external collector. Session name has no
-documented mod source.
+documented mod source (see F13 for the session registry).
 
 ## F10: streaming hooks and plugin-added nouns
 
@@ -117,7 +117,21 @@ Verified live (2026-11-05). The recorder (`pg-claude-code-recorder`) indexes tra
 `custom-title` records by session; its `query` command returned them with the session id and time.
 The field that holds the title text was not found: `customTitle` was rejected as an unknown field.
 
-Consequence: session name is optional and read through the recorder.
+Consequence: superseded by F13: session name is read from the session registry, not the recorder.
+
+## F13: the session registry
+
+Observed on Claude Code 2.1.314 (2026-11-06). Undocumented Claude Code state; it MAY change in any
+release, so this entry MUST be re-checked on an upgrade. Claude Code keeps one file per running
+session, `~/.claude/sessions/<pid>.json`, for headless and interactive sessions alike. Fields:
+`sessionId`, `name`, `nameSource` and `nameSince`; a name change rewrites the entry (`name`,
+`nameSource`, `formerNames`, `nameSince`). `nameSource` takes `derived` (the name comes from the
+working directory), `auto`, `user` (`-n <name>` or a rename) or `collision`. A live `/rename` was not
+run. `$.fs.list(dir)` answers the entries of a directory (`name`, `kind`, `size`, `mtimeMs`,
+`isLink`).
+
+Consequence: session name is read from the registry entry whose `sessionId` equals `$.session.id()`,
+shown when `nameSource` is not `derived`, with no recorder, no `ps` and no transcript read.
 
 ## F12: processes, files and invalidation
 
@@ -133,7 +147,6 @@ These are carried forward from the design and MUST stay here until a spike or a 
 them.
 
 - Whether `$.fs` reads `.git/HEAD` and the `.git` worktree pointer file as expected.
-- The recorder field that holds the title text, and the cost of a query.
 - `reviewDecision` from `gh pr view` on a real PR, and its git-lock impact.
 - Whether a contributed button press can run an action (data cannot carry a callback; a command name
   or event may be needed).

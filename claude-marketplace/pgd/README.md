@@ -52,7 +52,7 @@ Each of these is covered by a test in `hooks/modals.test.ts`, `hooks/modal.test.
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | What `pressButton` does         | It toggles: the first press opens the modal, a second press on the open modal closes it.                               |
 | Close action                    | Always added with id `close`; the framework closes the modal itself and `onAction` never receives it.                  |
-| Info name row without a source  | Omitted (no session name source exists yet); the session id has its own row.                                           |
+| Info name row without a name    | Shows the session id (the session id also has its own row).                                                            |
 | Band collapse button            | A `[-]` button after the labels (order 100, action `band`); a hidden band draws nothing, so use `/pgd-band`.           |
 | Toggle ids                      | `band`, `info`, `context`. The band is open and each modal closed by default.                                          |
 | Slash commands                  | `/pgd-band`, `/pgd-info`, `/pgd-context`, no arguments; each toggles and answers `<id> shown.` or `<id> hidden.`.      |
@@ -64,6 +64,27 @@ Each of these is covered by a test in `hooks/modals.test.ts`, `hooks/modal.test.
 | Open modal on invalidate        | Rebuilt on each draw from the live builder, so values stay current.                                                    |
 | Toggle persistence              | An engine atom (`pgd.toggles`), hydrated at `session.start`; it survives a hot reload.                                 |
 | Pane ids                        | `pgd-<modal id>`.                                                                                                      |
+
+## Session name (`components.sessionName`)
+
+The first band button shows the session name in place of the 8-character id prefix when a name
+exists, and the id prefix otherwise. The name is read from the session's own entry in Claude Code's
+session registry (`~/.claude/sessions/<pid>.json`) through the facade's `fs.list` and `fs.read`: the
+first fetch lists the directory and reads each `.json` entry until one has a `sessionId` equal to the
+session id, caches that path, and later fetches re-read only that path. The source is polled at most
+every 10 seconds while the band or Info modal is shown and is re-read after `turn.complete` (throttled
+to the same 10 seconds). The name is the entry's `name` when its `nameSource` is not `derived`. With
+the component off nothing is registered: no registry file is read and the id is shown. The transcript
+is never read and no process runs.
+
+### Choices the design left to the builder
+
+| Choice                           | Decision                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Malformed or partly written file | The value is undefined (the id is shown) and the cached path is kept, so the next read recovers when the write finishes.                   |
+| Failed read of the cached path   | The path is dropped and the directory is listed again in the same fetch; the same happens when the path now holds another session's entry. |
+| Missing directory or entry       | The value is undefined (the id is shown); it is not counted as a failure, so each poll lists the directory again until the entry appears.  |
+| Sample registry fixtures         | `hooks/fixtures/registry.ts`: user-named, derived, other-session, renamed and malformed entries, as exported strings.                      |
 
 ## PR status (`components.prStatus`)
 

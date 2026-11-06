@@ -15,7 +15,7 @@ import { fakeClock, settle, stubHost } from './testkit'
 const T = DEFAULT_OPTIONS.alerts.thresholds
 const only = (modelEffort: boolean): PgdOptions => ({
   ...DEFAULT_OPTIONS,
-  components: { ...DEFAULT_OPTIONS.components, beads: false, prStatus: false, sessionMode: false, modelEffort },
+  components: { ...DEFAULT_OPTIONS.components, beads: false, prStatus: false, sessionMode: false, sessionName: false, modelEffort },
 })
 
 async function world(options = only(true)) {

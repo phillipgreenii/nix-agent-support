@@ -60,6 +60,8 @@ export function registerDirectAction(action: string, run: () => void): void {
 
 export interface BandValues {
   sessionId: string
+  // The session name (registry entry), when one exists; the first button shows it in place of the id.
+  sessionName?: string
   usage?: Usage
   model?: string
   effort?: string
@@ -75,7 +77,7 @@ export function contextLevel(percent: number, t: AlertThresholds): Level {
 // An item whose condition is false is not drawn: no placeholder, never a "no X" row.
 export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
   const labels: BandRow[] = []
-  if (v.sessionId) labels.push({ id: 'session', label: v.sessionId.slice(0, 8), action: 'info' })
+  if (v.sessionId) labels.push({ id: 'session', label: v.sessionName || v.sessionId.slice(0, 8), action: 'info' })
   if (v.model) {
     // a button only while components.modelEffort is on (the band hook also leaves the model out when off)
     labels.push({
@@ -129,6 +131,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
   const rows = renderBand(
     {
       sessionId: String((await $.session.id()) ?? ''),
+      sessionName: readCached<string>('sessionName'),
       usage: readCached<Usage>('usage'),
       model: options.components.modelEffort ? model : undefined,
       effort: options.components.modelEffort ? readCached<string>('effort') : undefined,
