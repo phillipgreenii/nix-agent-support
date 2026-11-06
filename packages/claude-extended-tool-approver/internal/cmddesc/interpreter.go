@@ -647,6 +647,8 @@ var allowedLiteralSets = map[string]func(string) bool{
 	// path and no `..` segment. It is for operands handed on to a program whose
 	// own flags are unmodeled (nix fmt's formatter), where a PathModify role
 	// would misread a forwarded flag as a file name (pg2-33slg).
+	"pg-review-provider":  pgReviewProvider,
+	"pg-review-agent-arg": pgReviewToken,
 	"relative-project-path": func(tok string) bool {
 		if tok == "" || strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "/") || strings.HasPrefix(tok, "~") {
 			return false

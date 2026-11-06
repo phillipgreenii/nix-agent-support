@@ -1,0 +1,370 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-review",
+  "command": {
+    "name": "pg-review",
+    "provenance": "pg-review --help ('Self-review: find, rule on and track improvements to how agents work'), packages/pg-review built from this repo 2026-11-06",
+    "citations": {
+      "provenance": {
+        "source": "pg-review --help: \"Self-review: find, rule on and track improvements to how agents work\""
+      },
+      "stdin": {
+        "source": "pg-review --help: Usage: pg-review [flags] / pg-review [command] (no stdin option or operand is documented; classified never from this synopsis)"
+      },
+      "stdout": {
+        "source": "pg-review --help: Usage: pg-review [flags] / pg-review [command] (prints help text and exits; no explicit stdout wording beyond the usage synopsis)"
+      },
+      "unknownFlag": {
+        "source": "pg-review --help: full flag listing reviewed; no behavior is documented for an unrecognized flag, so this repo's fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-review --help: \"-h, --help   help for pg-review\""
+        }
+      },
+      "--output": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-review --help: \"--output string   output format: text or json (default: text for human and job, json for agent)\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-review --help: \"-v, --version         version for pg-review\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-review --help: \"-h, --help   help for pg-review\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-review --help: \"-v, --version         version for pg-review\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-review --help: Usage: pg-review [flags] / pg-review [command]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "agent": {
+        "name": "agent",
+        "provenance": "pg-review agent --help: 'Commands for the analyst agent: query evidence, file findings'",
+        "citations": {
+          "provenance": {
+            "source": "pg-review agent --help: \"Commands for the analyst agent: query evidence, file findings\""
+          },
+          "stdin": {
+            "source": "pg-review agent --help: Usage: pg-review agent [flags] / pg-review agent [command] (no stdin option or operand is documented; classified never from this synopsis)"
+          },
+          "stdout": {
+            "source": "pg-review agent --help: Usage: pg-review agent [flags] / pg-review agent [command] (prints help text and exits; no explicit stdout wording beyond the usage synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-review agent --help: full flag listing reviewed; no behavior is documented for an unrecognized flag, so this repo's fail-closed default (insufficient) applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-review agent --help: \"-h, --help   help for agent\""
+            }
+          },
+          "--output": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-review agent --help: \"--output string   output format: text or json (default: text for human and job, json for agent)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-review agent --help: \"-h, --help   help for agent\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-review agent --help: Usage: pg-review agent [flags] / pg-review agent [command]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "file": {
+            "name": "file",
+            "provenance": "pg-review agent file --help: 'Validate and file a findings document (- reads stdin)'",
+            "citations": {
+              "provenance": {
+                "source": "pg-review agent file --help: \"Validate and file a findings document (- reads stdin)\""
+              },
+              "stdin": {
+                "source": "pg-review agent file --help: \"Validate and file a findings document (- reads stdin)\"; stdin is read only by agent file, which stays unapproved"
+              },
+              "stdout": {
+                "source": "pg-review agent file --help: Usage: pg-review agent file <findings.json> [flags] (prints the filing result (counts of filed, deduplicated, skipped, waiting findings); classified content)"
+              },
+              "unknownFlag": {
+                "source": "pg-review agent file --help: full flag listing reviewed; no behavior is documented for an unrecognized flag, so this repo's fail-closed default (insufficient) applies"
+              }
+            },
+            "flags": {
+              "--dry-run": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent file --help: \"--dry-run      validate and report without filing\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent file --help: \"-h, --help   help for file\""
+                }
+              },
+              "--output": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent file --help: \"--output string   output format: text or json (default: text for human and job, json for agent)\""
+                }
+              },
+              "--run": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent file --help: \"--run string   run id (required for an interactive run; taken from agent context for a ccpool run)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent file --help: \"-h, --help   help for file\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pg-review agent file --help: Usage: pg-review agent file <findings.json> [flags]"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "q": {
+            "name": "q",
+            "provenance": "pg-review agent q --help: 'Run a read-only evidence query through the broker'",
+            "citations": {
+              "provenance": {
+                "source": "pg-review agent q --help: \"Run a read-only evidence query through the broker\""
+              },
+              "stdin": {
+                "source": "pg-review agent q --help: Usage: pg-review agent q <provider> <query-name> [--arg value ...] [--run <id>] [flags] (no stdin option or operand is documented; classified never from this synopsis)"
+              },
+              "stdout": {
+                "source": "pg-review agent q --help: Usage: pg-review agent q <provider> <query-name> [--arg value ...] [--run <id>] [flags] (prints a JSON array of rows (\"Runs one query ... and prints a JSON array of rows\"); classified content)"
+              },
+              "unknownFlag": {
+                "source": "pg-review agent q --help: full flag listing reviewed; no behavior is documented for an unrecognized flag, so this repo's fail-closed default (insufficient) applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent q --help: \"-h, --help   help for q\""
+                }
+              },
+              "--output": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent q --help: \"--output string   output format: text or json (default: text for human and job, json for agent)\""
+                }
+              },
+              "--run": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent q --help: \"--run string   run id (default: the PG_REVIEW_RUN environment variable)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-review agent q --help: \"-h, --help   help for q\""
+                }
+              }
+            },
+            "positionals": {
+              "leading": [
+                {
+                  "kind": "allowed-literal",
+                  "set": "pg-review-provider"
+                }
+              ],
+              "rest": {
+                "kind": "allowed-literal",
+                "set": "pg-review-agent-arg"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "minRest": 1,
+              "citation": {
+                "source": "pg-review agent q --help: Usage: pg-review agent q <provider> <query-name> [--arg value ...] [--run <id>] [flags]"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true,
+            "positionalsEndOptions": true
+          }
+        }
+      }
+    }
+  }
+}

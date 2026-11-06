@@ -217,5 +217,5 @@ var pgRouterSchema = CommandSchema{
 
 // pluginSupportToolSchemas lists the schemas this file adds to DefaultRegistry().
 func pluginSupportToolSchemas() []CommandSchema {
-	return []CommandSchema{handToHumanSchema, wtnewSchema, pgRouterSchema}
+	return []CommandSchema{handToHumanSchema, wtnewSchema, pgRouterSchema, pgReviewSchema}
 }

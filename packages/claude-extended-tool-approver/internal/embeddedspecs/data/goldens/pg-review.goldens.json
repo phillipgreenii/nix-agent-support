@@ -1,0 +1,41 @@
+{
+  "version": "v1",
+  "command": "pg-review",
+  "generatedAt": "2026-11-06",
+  "flags": {
+    "agent q <provider> <query-name>": {
+      "role": "allowed-literal",
+      "verdict": "approve",
+      "policyBasis": "the provider is the closed set [a-z0-9-]+ and every later operand a plain token (cmddesc allowedLiteralSets pg-review-provider and pg-review-agent-arg); the node's only effect is its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "agent q <provider> <query-name> <arg with a shell metacharacter>": {
+      "role": "allowed-literal",
+      "verdict": "not-approve",
+      "policyBasis": "an operand outside the closed literal set makes the interpretation insufficient, so no EffectPolicy judges it (fail-closed abstain)"
+    },
+    "--run": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--output": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "agent file <findings>": {
+      "role": "unmodeled",
+      "verdict": "not-approve",
+      "policyBasis": "an unmodeled positional makes the interpretation insufficient; agent file files into the ledger and the unattended analyst does not use it (fail-closed abstain)"
+    },
+    "agent context, human *, job *": {
+      "role": "unmodeled",
+      "verdict": "not-approve",
+      "policyBasis": "no spec entry: an unmodeled subcommand is insufficient (fail-closed abstain)"
+    }
+  },
+  "positionals": {
+    "verdict": "context-dependent",
+    "policyBasis": "see the flags table: the verdict follows the subcommand and the operand shape"
+  }
+}
