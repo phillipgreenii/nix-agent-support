@@ -169,3 +169,35 @@ until the next user input).
 - Glyph: no glyph; the label is the plain text `Wrap up`.
 - Command text: `/session-wrapup:wrap-up-session`, the plugin-qualified invocation of the
   `wrap-up-session` skill in the `session-wrapup` plugin.
+
+## Transcript links (`components.links`)
+
+A render hook on assistant-message text (`ui.render`, component `AssistantMessage`) rewrites
+matches of the configured link rules into markdown links. Rules come from the `links` option list
+(`name`, `pattern`, `url`); adding a link type is adding an entry. `pattern` is a regular
+expression and `url` a template where `{0}` is the match. Rules apply in list order. A rewrite
+changes only what is drawn (the hook hands the engine a copy of the draw event; nothing stored
+changes). Bead ids have no link target for now, so the shipped list is empty and holds no bead
+entry.
+
+### Choices the design left to the builder
+
+- Registration: the engine takes hooks at module load, before the options are known, so the render
+  hook is registered at load like the other event hooks and gated on every draw: with
+  `components.links` (or `enable`) false it hands the event on untouched and rewrites nothing.
+- Regular expression: JavaScript `RegExp` with flag `g` only (no `u`, `i` or `m`); a match of zero
+  length is skipped.
+- Nix type of a rule: a list of submodules with the string fields `name`, `pattern` and `url`; the
+  Home Manager module renders the list as-is into the `links` array of the options JSON.
+- Protected spans: fenced code blocks (CommonMark: a fence of three or more backticks or tildes,
+  indented at most three spaces, closed by a fence of the same character and at least the same
+  length, or by the end of the text), inline code spans (a backtick run closed by a run of equal
+  length) and any span an earlier rule rewrote. Each is replaced by one private-use character
+  (U+E000 to U+F8FF) during the pass, so a later rule cannot match inside it; text that already
+  holds such a character is left unrewritten.
+- Escaping: the link text escapes `\`, `[`, `]` and backtick; the match is percent-encoded
+  (`encodeURIComponent`) where `{0}` stands in the url.
+- Invalid rule: a pattern that is not a valid regular expression, or a url template with no `{0}`
+  or that is not a valid URL once `{0}` is filled, skips that rule only; a `warn` line naming the
+  rule is written to the log.
+- Default list: empty.

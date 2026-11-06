@@ -14,6 +14,7 @@ import { initLog } from './log'
 import { exportMetrics, initExporter } from './exporter'
 import { hydrateToggles, setToggleStore } from './toggles'
 import { registerModalEventHooks } from './modals'
+import { registerLinkHooks } from './links'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):

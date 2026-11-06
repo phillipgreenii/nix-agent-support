@@ -12,6 +12,7 @@ test('registering the mod registers the band and alert ui.render hooks and sessi
   const renders = seen.filter(s => s.name === 'ui.render').map(s => s.component)
   expect(renders).toContain('AbovePrompt')
   expect(renders).toContain('PromptHint')
+  expect(renders).toContain('AssistantMessage')
   expect(seen.map(s => s.name)).toContain('session.start')
 })
 
