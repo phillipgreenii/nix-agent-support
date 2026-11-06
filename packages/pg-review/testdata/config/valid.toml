@@ -1,0 +1,41 @@
+schema_version = 1
+
+[limits]
+items_max_per_run = 3
+items_max_pending = 12
+evidence_ttl_days = 14
+field_max_chars   = 1200
+
+[profile.health-check]
+backend     = "ccpool"
+model       = "model-small"
+effort      = "low"
+minutes     = 15
+queries_max = 10
+
+[ccpool]
+read_tools = ["Read", "Grep", "Glob"]
+
+[[scope]]
+name     = "workspace"
+prefixes = ["/work/root", "/work/root/.worktrees"]
+layers   = ["user", "rules"]
+
+[[provider]]
+name            = "ccaudit"
+command         = ["pg-review-provider-ccaudit"]
+schema_version  = 1
+timeout_seconds = 120
+scopes          = ["workspace"]
+[provider.queries]
+agent-workflow = ["error-rate-by-tool", "top-signatures"]
+
+[[lens]]
+id           = "agent-workflow"
+family       = "workflow"
+profile      = "deep-review"
+base_prompt  = "prompts/base.md"
+prompt       = "prompts/agent-workflow.md"
+providers    = ["ccaudit", "hook-decisions"]
+max_findings = 5
+kinds        = ["tool-ux", "wasted-retries"]
