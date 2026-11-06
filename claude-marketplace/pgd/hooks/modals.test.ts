@@ -175,8 +175,8 @@ test('the band and each modal toggle from a slash command', async () => {
 test('the band toggle button is drawn after the labels and presses toggle the band', async () => {
   await world({ contextPercent: 10, limits: [] })
   const got = renderBand({ sessionId: 'abcdef12', usage: { contextPercent: 10, limits: [] } }, 80, T)
-  expect(got[0].map(l => l.label)).toEqual(['abcdef12', 'ctx 10%', '[-]'])
-  expect(got[0][2].action).toBe('band')
+  expect(got[0].map(l => l.label)).toEqual(['abcdef12', 'ctx 10%', 'Wrap up', '[-]'])
+  expect(got[0][3].action).toBe('band')
   pressButton('band')
   expect(isOpen('band')).toBe(false)
 })

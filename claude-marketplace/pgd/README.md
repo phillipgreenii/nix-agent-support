@@ -156,3 +156,16 @@ Each of these is covered by a test in `hooks/model-modal.test.ts`.
 | Effort choice         | `host.prompt.fill({ text: "/effort <level>", mode: "replace" })`; nothing is submitted.                                                                  |
 | Closing               | Both Apply and an effort choice close the modal.                                                                                                         |
 | Facade                | `host.config.set` takes the engine's `{ key, value }` object; `host.prompt.fill` is one added closure over `$.prompt.fill`.                              |
+
+## Wrap up (always drawn)
+
+The Wrap up button is the last of the component buttons (order 70, after Focus; only the band toggle follows). It has no component flag: it is
+drawn whenever `enable` is true. Pressing it opens no modal; it pre-fills the prompt box with the
+wrap-up skill's slash command and never submits (a submit from a command does not start a turn
+until the next user input).
+
+### Choices the design left to the builder
+
+- Glyph: no glyph; the label is the plain text `Wrap up`.
+- Command text: `/session-wrapup:wrap-up-session`, the plugin-qualified invocation of the
+  `wrap-up-session` skill in the `session-wrapup` plugin.

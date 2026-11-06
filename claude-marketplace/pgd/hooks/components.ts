@@ -5,6 +5,7 @@ import { registerModals } from './modals'
 import { startPr } from './pr'
 import { startSessionMode } from './session-mode'
 import { startModelModal } from './model-modal'
+import { startWrapUp } from './wrap-up'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -41,4 +42,6 @@ export function registerComponents(options: PgdOptions, host: ModApi): void {
   // The band buttons' modals (Info, Context and usage) and their toggle commands: no flag of
   // their own, governed by enable.
   registerModals(options, host)
+  // The Wrap up button: no flag of its own, always drawn while enable is true.
+  startWrapUp(options, host)
 }

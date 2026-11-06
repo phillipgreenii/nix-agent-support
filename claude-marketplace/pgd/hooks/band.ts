@@ -37,12 +37,25 @@ export function registerBandButton(b: BandButton): void {
 
 export function clearBandButtons(): void {
   buttons = []
+  directActions.clear()
 }
 
 // A press on a band button toggles its modal: the first press opens it, a second press on an open
 // modal closes it (the band toggle behaves the same way).
 export function pressButton(action: string): void {
+  const direct = directActions.get(action)
+  if (direct) {
+    direct()
+    return
+  }
   toggle(action)
+}
+
+// An action that opens no modal: pressing it runs the handler instead of toggling a modal.
+const directActions = new Map<string, () => void>()
+
+export function registerDirectAction(action: string, run: () => void): void {
+  directActions.set(action, run)
 }
 
 export interface BandValues {
