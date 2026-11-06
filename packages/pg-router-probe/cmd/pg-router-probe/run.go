@@ -164,7 +164,7 @@ import (
 // the call deadline, the signals that would justify a beads daemon. Registered
 // the same way, with no escalation label.
 //
-// The twenty pg-ccrec-* rules of the recorder's alert file (packages/
+// The twenty-one pg-ccrec-* rules of the recorder's alert file (packages/
 // pg-claude-code-recorder/grafana/alerting/alerts.yaml, docket pg2-v77tsx phase 7c;
 // registered by darwin/modules/pg-claude-code-recorder while the daemon is deployed):
 // daemon-down, heartbeat-stale, copy-lag, parse-stuck, held-old,
