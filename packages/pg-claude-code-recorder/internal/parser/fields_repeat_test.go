@@ -2,7 +2,6 @@ package parser_test
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -11,9 +10,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
 )
 
-// wideSource yields one record with more fields rows than one multi-row
-// insert carries (500): 1,200 distinct names, then repeats of names whose
-// first row is in an earlier batch than the repeat.
+// wideSource yields one record with 1,200 distinct names, then repeats of
+// names whose first row is far earlier than the repeat (a wide record that an
+// insert strategy may split into batches).
 type wideSource struct{}
 
 func (wideSource) Name() string      { return "claude-transcript" }
@@ -28,8 +27,7 @@ func (wideSource) Parse(_ source.Captures, _ []byte) ([]source.Record, error) {
 	for i := 0; i < 1200; i++ {
 		fs = append(fs, source.Field{Name: fmt.Sprintf("f%d", i), Kind: source.KindInt, N: int64(i)})
 	}
-	// Row 1200.. repeat earlier names: f3 (batch 0, repeat in batch 2), f499
-	// (last row of batch 0, repeat in batch 2), f500 (first row of batch 1).
+	// Rows 1200.. repeat earlier names: f3 (twice), f499 and f500.
 	fs = append(
 		fs,
 		source.Field{Name: "f3", Kind: source.KindKeyword, S: "later"},
@@ -40,9 +38,9 @@ func (wideSource) Parse(_ source.Captures, _ []byte) ([]source.Record, error) {
 	return []source.Record{{Type: "wide", Item: source.ItemLine, Session: "example-session-1", Fields: fs}}, nil
 }
 
-// A record with more rows than one batch keeps one row per name, the last
-// value wins across batch boundaries, and names are interned in field order.
-func TestFieldsBatchAcrossBoundaryKeepsLastWinsAndOrder(t *testing.T) {
+// A wide record keeps one row per name, the last value wins however far apart
+// the repeats are, whole-row replacement, and names are interned in field order.
+func TestFieldsRepeatedNameKeepsLastWinsAndOrder(t *testing.T) {
 	k := testkit.New(t)
 	k.Parser = parser.New(parser.Config{Store: k.Store, Sources: []source.Source{wideSource{}}, ClaudeDir: testkit.ClaudeDir, Obs: obs.New(nil)})
 	k.Add("example-proj", "example-session-1.jsonl", "{}\n")
@@ -76,30 +74,5 @@ func TestFieldsBatchAcrossBoundaryKeepsLastWinsAndOrder(t *testing.T) {
 	}
 	if i != 1200 {
 		t.Fatalf("field_names %d, want 1200", i)
-	}
-}
-
-// One batch binds 500 rows x 5 = 2,500 values; the engine accepts at least
-// that and rejects a statement over its limit, so the batch size has room.
-func TestFieldsBatchUnderVariableLimit(t *testing.T) {
-	k := testkit.New(t)
-	db := k.Store.Read()
-	run := func(n int) error {
-		q := "SELECT 1 WHERE 0 IN (" + strings.TrimSuffix(strings.Repeat("?,", n), ",") + ")"
-		args := make([]any, n)
-		for i := range args {
-			args[i] = i
-		}
-		rows, err := db.Query(q, args...)
-		if err != nil {
-			return err
-		}
-		return rows.Close()
-	}
-	if err := run(500 * 5); err != nil {
-		t.Fatalf("one batch (2500 values) rejected: %v", err)
-	}
-	if err := run(32767); err == nil {
-		t.Skip("engine limit above 32766; batch size is still safe")
 	}
 }

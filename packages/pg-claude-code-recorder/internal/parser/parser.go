@@ -969,7 +969,6 @@ func ownTimestamp(r source.Record, tns int64) int {
 
 func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.Captures, g store.Generation, off int64, ln int, recs []source.Record) error {
 	unk := map[[2]string]int{}
-	fargs := make([]any, 0, fieldsBatchRows*fieldsCols)
 	nameID := func(name string) (int64, error) { return p.fieldNameID(tx, name) }
 	// Fields a source declares into an extension table, only where the table exists.
 	var routes map[string]extRoute
@@ -1064,20 +1063,12 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 				return err
 			}
 			// One row per (rec_id, name_id): a repeated name keeps the LAST value
-			// and replaces the whole row, so s, n and f never mix two values. The
-			// rows are queued in field order and written by flushFields.
-			fargs = append(fargs, id, nid, s, n, fv)
-			if len(fargs) == fieldsBatchRows*fieldsCols {
-				if err := tx.flushFields(fargs); err != nil {
-					return err
-				}
-				fargs = fargs[:0]
+			// and replaces the whole row, so s, n and f never mix two values.
+			if _, err := tx.ExecL(tblFields, `INSERT INTO fields(rec_id,name_id,s,n,f) VALUES(?,?,?,?,?)
+ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded.f`, id, nid, s, n, fv); err != nil {
+				return err
 			}
 		}
-		if err := tx.flushFields(fargs); err != nil {
-			return err
-		}
-		fargs = fargs[:0]
 		if err := insertExt(tx, id, extRows); err != nil {
 			return err
 		}
@@ -1373,7 +1364,6 @@ type pstx struct {
 	st   map[string]*sql.Stmt
 	sess *sessionBatch // session activity of this transaction, see flushSessions
 	acc  *stepAcc      // step timers of this transaction (nil: none)
-	fsql []string      // multi-row fields statements by row count, built on first use
 }
 
 // The insert tables of ExecL, matching store.Table* and obs.InsertTables.
@@ -1409,50 +1399,6 @@ func (p *pstx) exec(q string, args ...any) (sql.Result, error) {
 		p.st[q] = st
 	}
 	return st.Exec(args...)
-}
-
-// fieldsBatchRows is the most fields rows one INSERT carries and fieldsCols the
-// bound values per row. 500 rows bind 2,500 values, far under SQLite's
-// per-statement limit (32,766 for the 3.32+ engine modernc.org/sqlite embeds;
-// TestFieldsBatchUnderVariableLimit reads the engine's actual limit).
-const (
-	fieldsBatchRows = 500
-	fieldsCols      = 5
-)
-
-// fieldsInsertSQL is the multi-row upsert for n rows. SQLite applies the rows
-// of one statement in order, so a repeated (rec_id,name_id) updates the earlier
-// row: the last value wins and replaces the whole row, as with one statement
-// per row.
-func fieldsInsertSQL(n int) string {
-	var b strings.Builder
-	b.WriteString(`INSERT INTO fields(rec_id,name_id,s,n,f) VALUES `)
-	for i := 0; i < n; i++ {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(`(?,?,?,?,?)`)
-	}
-	b.WriteString(` ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded.f`)
-	return b.String()
-}
-
-// flushFields writes the queued fields rows (fieldsCols values each, in field
-// order) as one multi-row statement; it does nothing for an empty queue. The
-// statement counts once in the fields insert table.
-func (p *pstx) flushFields(args []any) error {
-	n := len(args) / fieldsCols
-	if n == 0 {
-		return nil
-	}
-	if p.fsql == nil {
-		p.fsql = make([]string, fieldsBatchRows+1)
-	}
-	if p.fsql[n] == "" {
-		p.fsql[n] = fieldsInsertSQL(n)
-	}
-	_, err := p.ExecL(tblFields, p.fsql[n], args...)
-	return err
 }
 
 // Close releases the prepared statements.

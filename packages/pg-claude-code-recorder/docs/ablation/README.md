@@ -93,10 +93,11 @@ change behavior when the build tag is absent.
 
 ## Studies
 
-| Date       | Question                                                                | Results                              |
-| ---------- | ----------------------------------------------------------------------- | ------------------------------------ |
-| 2026-11-05 | Where does the rebuild's SQLite insert time go?                         | `2026-11-05-insert-cost-results.md`  |
-| 2026-11-05 | Did the stage metrics and the four cost reductions shorten the rebuild? | `2026-11-05-reevaluation-results.md` |
+| Date       | Question                                                                | Results                                    |
+| ---------- | ----------------------------------------------------------------------- | ------------------------------------------ |
+| 2026-11-05 | Where does the rebuild's SQLite insert time go?                         | `2026-11-05-insert-cost-results.md`        |
+| 2026-11-05 | Did the stage metrics and the four cost reductions shorten the rebuild? | `2026-11-05-reevaluation-results.md`       |
+| 2026-11-05 | Why was the multi-row `fields` insert slower, and fix or revert it?     | `2026-11-05-multirow-fields-regression.md` |
 
 ## Pricing the step timers
 
