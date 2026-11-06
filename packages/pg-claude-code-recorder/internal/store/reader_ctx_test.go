@@ -79,8 +79,15 @@ func TestReadTxCtxCancelInterruptsTheRunningStatement(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("a read after the cancel failed: %v", err)
 	}
-	if st := s.PoolStats().Read; st.InUse != 0 {
-		t.Fatalf("%d read connections still in use after the cancel", st.InUse)
+	// database/sql rolls a cancelled transaction back on its own goroutine, so
+	// the connection returns to the pool just after ReadTxCtx returns: wait
+	// (bounded) for the release instead of asserting at that instant.
+	deadline := time.Now().Add(10 * time.Second)
+	for s.PoolStats().Read.InUse != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d read connections still in use after the cancel", s.PoolStats().Read.InUse)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
