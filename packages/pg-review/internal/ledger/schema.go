@@ -18,6 +18,10 @@ var migrations = []migration{
 		_, err := tx.exec(ctx, schemaV1)
 		return err
 	}},
+	{version: 2, up: func(ctx context.Context, tx *Tx) error {
+		_, err := tx.exec(ctx, schemaV2)
+		return err
+	}},
 }
 
 // SchemaVersion is the user_version of a database created by this release.
@@ -196,4 +200,18 @@ CREATE TABLE lens_resume (
   resumed_at TEXT NOT NULL
 );
 CREATE INDEX lens_resume_lens ON lens_resume(lens, seq);
+`
+
+// schemaV2 adds the topic event log: the automatic state changes (auto-defer,
+// reconsideration, promotion from Waiting) that are not operator rulings and
+// so have no decision row. The reconsideration backoff counts its rows.
+const schemaV2 = `
+CREATE TABLE topic_event (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic_id   TEXT NOT NULL REFERENCES topic(topic_id),
+  kind       TEXT NOT NULL CHECK (kind IN ('auto-deferred','reconsidered','promoted','waiting')),
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX topic_event_topic ON topic_event(topic_id, id);
 `

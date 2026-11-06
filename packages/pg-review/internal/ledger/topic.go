@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Topic states.
@@ -58,6 +59,8 @@ type Topic struct {
 	Revision         int
 	VersionSensitive bool
 	Seq              int64
+	// UpdatedAt is the time of the topic's last revision.
+	UpdatedAt time.Time
 }
 
 // NewTopic describes a topic to create.
@@ -118,15 +121,17 @@ func (l *Ledger) GetTopic(ctx context.Context, id string) (Topic, error) {
 	return scanTopic(l.db.QueryRowContext(ctx, topicSelect+` WHERE topic_id=?`, id))
 }
 
-const topicSelect = `SELECT topic_id,defined_in,subject_key,kind,lens,state,revision,version_sensitive,seq FROM topic`
+const topicSelect = `SELECT topic_id,defined_in,subject_key,kind,lens,state,revision,version_sensitive,seq,updated_at FROM topic`
 
 func scanTopic(r *sql.Row) (Topic, error) {
 	var tp Topic
 	var vs int
-	err := r.Scan(&tp.ID, &tp.DefinedIn, &tp.SubjectKey, &tp.Kind, &tp.Lens, &tp.State, &tp.Revision, &vs, &tp.Seq)
+	var upd string
+	err := r.Scan(&tp.ID, &tp.DefinedIn, &tp.SubjectKey, &tp.Kind, &tp.Lens, &tp.State, &tp.Revision, &vs, &tp.Seq, &upd)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Topic{}, ErrNotFound
 	}
+	tp.UpdatedAt = parseTime(upd)
 	tp.VersionSensitive = vs != 0
 	return tp, err
 }
@@ -410,4 +415,27 @@ func (l *Ledger) Rule(ctx context.Context, r Ruling) (Decision, error) {
 		TopicID: r.TopicID, Lens: lens, Ruling: r.Ruling,
 		Rationale: r.Rationale, ReconsiderWhen: r.ReconsiderWhen,
 	})
+}
+
+// TopicsForLens lists the topics of a lens in creation order (the known
+// topics `agent context` returns to the analyst).
+func (l *Ledger) TopicsForLens(ctx context.Context, lens string) ([]Topic, error) {
+	rows, err := l.db.QueryContext(ctx, topicSelect+` WHERE lens=? ORDER BY seq`, lens)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Topic
+	for rows.Next() {
+		var tp Topic
+		var vs int
+		var upd string
+		if err := rows.Scan(&tp.ID, &tp.DefinedIn, &tp.SubjectKey, &tp.Kind, &tp.Lens, &tp.State, &tp.Revision, &vs, &tp.Seq, &upd); err != nil {
+			return nil, err
+		}
+		tp.VersionSensitive = vs != 0
+		tp.UpdatedAt = parseTime(upd)
+		out = append(out, tp)
+	}
+	return out, rows.Err()
 }
