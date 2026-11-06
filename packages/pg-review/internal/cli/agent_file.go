@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/validate"
 )
 
@@ -55,6 +56,11 @@ func newAgentFileCmd() *cobra.Command {
 			res, err := ledger.FileFindings(cmd.Context(), l, cfg, runID, raw, dry)
 			if err != nil {
 				return mapFileError(err)
+			}
+			if !dry {
+				if err := runner.FinishInteractive(cmd.Context(), l, runID, nil); err != nil {
+					return mapFileError(err)
+				}
 			}
 			return printJSONOrText(cmd, res, fmt.Sprintf("filed %d, deduplicated %d, skipped %d, waiting %d",
 				res.Filed, res.Deduplicated, res.Skipped, res.Waiting))

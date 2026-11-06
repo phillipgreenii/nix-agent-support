@@ -119,15 +119,21 @@ func (EvidenceStage) Run(ctx context.Context, s *State) (err error) {
 		return err
 	}
 
-	res, err := prompt.Assemble(prompt.Params{
-		Lens: s.Lens, ConfigDir: d.Cfg.Env.Dir(), Builtins: d.Cfg.Builtins,
-		Scope: s.Scope.Name, Window: s.Window.FromText() + " to " + s.Window.ToText(),
-		StagingPath: staging, MaxFindings: d.Cfg.MaxFindings(s.Lens),
-	})
+	res, err := prompt.Assemble(promptParams(s, staging))
 	if err != nil {
 		return fmt.Errorf("assemble prompt: %w", err)
 	}
 	return updateRun(ctx, s, func(r *ledger.Run) { r.PromptHash = res.Hash })
+}
+
+// promptParams are the prompt inputs of a run.
+func promptParams(s *State, staging string) prompt.Params {
+	d := s.Deps
+	return prompt.Params{
+		Lens: s.Lens, ConfigDir: d.Cfg.Env.Dir(), Builtins: d.Cfg.Builtins,
+		Scope: s.Scope.Name, Window: s.Window.FromText() + " to " + s.Window.ToText(),
+		StagingPath: staging, MaxFindings: d.Cfg.MaxFindings(s.Lens),
+	}
 }
 
 // updateRun re-reads the run row, applies fn and stores it.

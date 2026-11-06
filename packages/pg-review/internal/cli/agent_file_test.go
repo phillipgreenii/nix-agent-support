@@ -206,3 +206,80 @@ func TestAgentContextPrintsTopicsAndPaths(t *testing.T) {
 		t.Errorf("%+v", c)
 	}
 }
+
+// interactiveRun seeds an AwaitingAnalyst interactive run holding its lock,
+// with a staging directory holding the synthetic raw text.
+func interactiveRun(t *testing.T) (id int64, l *ledger.Ledger, staging string) {
+	t.Helper()
+	_, l = hermetic(t)
+	raw, err := os.ReadFile(filepath.Join(goldenDir, "raw.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging = filepath.Join(t.TempDir(), "stage")
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "raw.txt"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	abs, _ := filepath.Abs(goldenDir)
+	err = l.WithTx(context.Background(), func(tx *ledger.Tx) error {
+		r, err := tx.InsertRun(context.Background(), ledger.Run{
+			Lens: "agent-workflow", Scope: "other-scope", State: ledger.RunAwaitingAnalyst, Analyst: "interactive",
+			EvidenceDir: abs, StagingPath: staging,
+		})
+		if err != nil {
+			return err
+		}
+		id = r.ID
+		return tx.AcquireLock(context.Background(), r.Lens, r.Scope, r.ID, 0, time.Time{})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id, l, staging
+}
+
+func TestAgentFileInteractiveRunFilesAndDeletesStaging(t *testing.T) {
+	id, l, staging := interactiveRun(t)
+	code, out, stderr := run(t, "agent", "file", findingsPath(), "--run", strconv.FormatInt(id, 10))
+	if code != exitcode.OK {
+		t.Fatalf("exit %d: %s %s", code, out, stderr)
+	}
+	r, err := l.GetRun(context.Background(), id)
+	if err != nil || r.State != ledger.RunFiled || r.StagingPath != "" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Error("staging kept")
+	}
+	if _, err := l.GetLock(context.Background(), "agent-workflow", "other-scope"); err == nil {
+		t.Error("lock kept")
+	}
+	// An identical repeat is idempotent.
+	if code, out, stderr := run(t, "agent", "file", findingsPath(), "--run", strconv.FormatInt(id, 10)); code != exitcode.OK {
+		t.Errorf("repeat: exit %d: %s %s", code, out, stderr)
+	}
+}
+
+func TestAgentFileInteractiveRunNeedsRunFlag(t *testing.T) {
+	interactiveRun(t)
+	code, _, stderr := run(t, "agent", "file", findingsPath())
+	if code != exitcode.Usage || !strings.Contains(stderr, "--run") {
+		t.Errorf("exit %d: %s", code, stderr)
+	}
+}
+
+func TestAgentFileDryRunKeepsInteractiveStaging(t *testing.T) {
+	id, l, staging := interactiveRun(t)
+	if code, out, stderr := run(t, "agent", "file", findingsPath(), "--dry-run", "--run", strconv.FormatInt(id, 10)); code != exitcode.OK {
+		t.Fatalf("exit %d: %s %s", code, out, stderr)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Error("staging deleted by a dry run")
+	}
+	if r, _ := l.GetRun(context.Background(), id); r.State != ledger.RunAwaitingAnalyst {
+		t.Errorf("state %s", r.State)
+	}
+}

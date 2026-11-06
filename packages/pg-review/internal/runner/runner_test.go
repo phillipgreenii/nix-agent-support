@@ -1,11 +1,13 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -409,19 +411,100 @@ func (failAnalyst) Analyse(context.Context, *State) error { return errors.New("b
 
 func TestInteractiveRunWaitsForAnalyst(t *testing.T) {
 	e := setup(t)
+	staging := filepath.Join(t.TempDir(), "stage")
+	e.d.Evidence = stageFunc(func(ctx context.Context, s *State) error {
+		if err := os.MkdirAll(staging, 0o700); err != nil {
+			return err
+		}
+		return updateRun(ctx, s, func(r *ledger.Run) { r.StagingPath = staging })
+	})
+	var out bytes.Buffer
+	e.d.Stdout = &out
 	res, err := e.run(Params{Analyst: "interactive"})
 	if err != nil || res.Run.State != ledger.RunAwaitingAnalyst {
 		t.Fatalf("%+v %v", res.Run, err)
 	}
-	if _, err := e.l.GetLock(bg, "agent-workflow", "demo"); !errors.Is(err, ledger.ErrNotFound) {
-		t.Error("lock held by a finished process")
+	if res.Run.PID != 0 {
+		t.Errorf("pid %d, want 0 (no pid check)", res.Run.PID)
 	}
-	// A later run's reaper leaves it alone before the TTL.
-	if _, err := e.run(Params{}); err != nil {
-		t.Fatal(err)
+	// The run keeps its lock and its staging directory.
+	k, err := e.l.GetLock(bg, "agent-workflow", "demo")
+	if err != nil || k.RunID != res.Run.ID || k.PID != 0 {
+		t.Errorf("lock %+v %v", k, err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Error("staging deleted")
+	}
+	// Output order: run id, prompt, staging, neutral directory.
+	neutral := e.d.Cfg.Ccpool.NeutralDir
+	o := out.String()
+	iID := strings.Index(o, "run "+strconv.FormatInt(res.Run.ID, 10)+" awaiting analyst")
+	iStage := strings.Index(o, "staging: "+staging+"\n")
+	iNeutral := strings.Index(o, "start the analyst session in: "+neutral+"\n")
+	if iID != 0 || iStage < 0 || iNeutral < iStage || !strings.Contains(o[iID:iStage], "agent file --run") {
+		t.Errorf("output:\n%s", o)
+	}
+	if !strings.HasSuffix(neutral, filepath.Join("pg-review", "analyst-cwd")) {
+		t.Errorf("neutral dir %q is not the built-in default", neutral)
+	}
+	if st, err := os.Stat(neutral); err != nil || st.Mode().Perm() != 0o700 {
+		t.Errorf("neutral dir: %v %v", st, err)
+	}
+	// A second run of the same lens and scope finds the lock busy.
+	if _, err := e.run(Params{}); !errors.Is(err, ledger.ErrLockBusy) {
+		t.Errorf("second run: %v", err)
 	}
 	if r, _ := e.l.GetRun(bg, res.Run.ID); r.State != ledger.RunAwaitingAnalyst {
 		t.Errorf("state %s", r.State)
+	}
+}
+
+func TestAnalystFlagOverridesProfileBackend(t *testing.T) {
+	e := setup(t)
+	e.d.Analysts = map[string]Analyst{"ccpool": failAnalyst{}}
+	// The profile's backend is ccpool; --analyst interactive wins.
+	res, err := e.run(Params{Analyst: "interactive"})
+	if err != nil || res.Run.Analyst != "interactive" || res.Run.State != ledger.RunAwaitingAnalyst {
+		t.Fatalf("%+v %v", res.Run, err)
+	}
+}
+
+func TestFinishInteractiveDeletesStagingAndReleasesLock(t *testing.T) {
+	e := setup(t)
+	staging := filepath.Join(t.TempDir(), "stage")
+	e.d.Evidence = stageFunc(func(ctx context.Context, s *State) error {
+		_ = os.MkdirAll(staging, 0o700)
+		return updateRun(ctx, s, func(r *ledger.Run) { r.StagingPath = staging })
+	})
+	res, err := e.run(Params{Analyst: "interactive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Not filed yet: nothing happens.
+	if err := FinishInteractive(bg, e.l, res.Run.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Fatal("staging deleted before filing")
+	}
+	if err := e.l.WithTx(bg, func(tx *ledger.Tx) error {
+		r, _ := tx.GetRun(bg, res.Run.ID)
+		r.State = ledger.RunFiled
+		return tx.UpdateRun(bg, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := FinishInteractive(bg, e.l, res.Run.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Error("staging kept")
+	}
+	if _, err := e.l.GetLock(bg, "agent-workflow", "demo"); !errors.Is(err, ledger.ErrNotFound) {
+		t.Error("lock kept")
+	}
+	if r, _ := e.l.GetRun(bg, res.Run.ID); r.StagingPath != "" {
+		t.Errorf("staging path %q", r.StagingPath)
 	}
 }
 

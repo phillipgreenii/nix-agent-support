@@ -99,6 +99,12 @@ func (d *Deps) defaults() {
 	if d.Stdout == nil {
 		d.Stdout = io.Discard
 	}
+	if _, ok := d.Analysts["interactive"]; !ok {
+		if d.Analysts == nil {
+			d.Analysts = map[string]Analyst{}
+		}
+		d.Analysts["interactive"] = InteractiveAnalyst{}
+	}
 }
 
 // State is what stages share.
@@ -231,10 +237,13 @@ func (lockStage) Name() string { return "lock" }
 
 func (lockStage) Run(ctx context.Context, s *State) error {
 	d := s.Deps
-	started, _ := d.Proc.StartTime(d.PID)
+	pid := d.PID
+	started, _ := d.Proc.StartTime(pid)
 	state := ledger.RunRunning
 	if s.Analyst == "interactive" {
-		state = ledger.RunAwaitingAnalyst
+		// No pid check for an awaiting run: the process exits, the run
+		// and its lock stay until filed or the TTL expires.
+		state, pid, started = ledger.RunAwaitingAnalyst, 0, time.Time{}
 	}
 	trigger := "manual"
 	if s.Params.RunKey != "" {
@@ -245,14 +254,14 @@ func (lockStage) Run(ctx context.Context, s *State) error {
 		WindowFrom: s.Window.FromText(), WindowTo: s.Window.ToText(),
 		RunKey: s.Params.RunKey, ScheduleID: s.Params.ScheduleID, Trigger: trigger,
 		State: state, Analyst: s.Analyst, Profile: s.Profile.Name, Model: s.Profile.Model,
-		PID: d.PID, StartedAt: started,
+		PID: pid, StartedAt: started,
 	}
 	return d.Ledger.WithTx(ctx, func(t *ledgerTx) error {
 		r, err := t.InsertRun(ctx, row)
 		if err != nil {
 			return err
 		}
-		if err := t.AcquireLock(ctx, r.Lens, r.Scope, r.ID, d.PID, started); err != nil {
+		if err := t.AcquireLock(ctx, r.Lens, r.Scope, r.ID, pid, started); err != nil {
 			return err
 		}
 		s.Run = r
@@ -274,8 +283,8 @@ func (analystStage) Run(ctx context.Context, s *State) error {
 }
 
 // finishStage ends the run: Filed (with zero items until later stages file
-// some), or, for an interactive run, left AwaitingAnalyst with its lock
-// released and the run id printed.
+// some), or, for an interactive run, left AwaitingAnalyst holding its lock
+// and staging.
 type finishStage struct{}
 
 func (finishStage) Name() string { return "finish" }
@@ -289,9 +298,8 @@ func (finishStage) Run(ctx context.Context, s *State) error {
 			return err
 		}
 		if r.State == ledger.RunAwaitingAnalyst {
-			fmt.Fprintf(d.Stdout, "run %d awaiting analyst: file with `pg-review agent file --run %d <findings.json>`\n", r.ID, r.ID)
-			s.Run = r
-			return releaseOwnLock(ctx, t, r)
+			s.Run = r // keeps the lock and staging until filed or expired
+			return nil
 		}
 		staging, r.StagingPath = r.StagingPath, ""
 		r.State = ledger.RunFiled
