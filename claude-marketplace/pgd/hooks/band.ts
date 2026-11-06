@@ -64,8 +64,12 @@ export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
   const labels: BandRow[] = []
   if (v.sessionId) labels.push({ id: 'session', label: v.sessionId.slice(0, 8), action: 'info' })
   if (v.model) {
-    // no action here: the model and effort modal belongs to a later packet
-    labels.push({ id: 'model', label: v.effort ? `${v.model} · ${v.effort}` : v.model })
+    // a button only while components.modelEffort is on (the band hook also leaves the model out when off)
+    labels.push({
+      id: 'model',
+      label: v.effort ? `${v.model} · ${v.effort}` : v.model,
+      ...(getOptions()?.components.modelEffort ? { action: 'model' } : {}),
+    })
   }
   const pct = v.usage?.contextPercent
   if (typeof pct === 'number') {

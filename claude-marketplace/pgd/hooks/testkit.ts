@@ -57,6 +57,10 @@ export interface StubHost {
   // Every fs.write as { path, text }, in order.
   writes: Array<{ path: string; text: string }>
   // The in-memory plugin store behind host.store; set storeFail to make every call throw.
+  // Arguments of every config.set, prompt.fill and prompt.submit, in order.
+  configSets: unknown[]
+  fills: unknown[]
+  submits: unknown[]
   storeData: Map<string, unknown>
   storeFail: { on: boolean }
   // The method objects passed to engine.create (kept apart from `calls`: registering the noun is
@@ -78,6 +82,9 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
   const storeData = new Map<string, unknown>()
   const storeFail = { on: false }
   const nouns: unknown[] = []
+  const configSets: unknown[] = []
+  const fills: unknown[] = []
+  const submits: unknown[] = []
   const commands: StubHost['commands'] = []
   const panes: StubHost['panes'] = []
   const facts: StubHost['facts'] = {
@@ -110,8 +117,19 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       },
     },
     config: {
-      set: async () => {
+      set: async (a: unknown) => {
         calls.push('config.set')
+        configSets.push(a)
+      },
+    },
+    prompt: {
+      fill: async (a: unknown) => {
+        calls.push('prompt.fill')
+        fills.push(a)
+      },
+      submit: async (a: unknown) => {
+        calls.push('prompt.submit')
+        submits.push(a)
       },
     },
     store: {
@@ -166,5 +184,5 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       repo: async () => facts.repo,
     },
   }
-  return { host, calls, files: fileMap, state, storeData, storeFail, writes, nouns, commands, panes, facts }
+  return { host, calls, files: fileMap, state, configSets, fills, submits, storeData, storeFail, writes, nouns, commands, panes, facts }
 }

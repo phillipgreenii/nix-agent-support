@@ -4,6 +4,7 @@ import { registerPgdNoun } from './pgd-noun'
 import { registerModals } from './modals'
 import { startPr } from './pr'
 import { startSessionMode } from './session-mode'
+import { startModelModal } from './model-modal'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -25,6 +26,7 @@ export const COMPONENTS: ReadonlyArray<{
   { flag: 'beads', run: startDolt },
   { flag: 'prStatus', run: startPr },
   { flag: 'sessionMode', run: startSessionMode },
+  { flag: 'modelEffort', run: startModelModal },
 ]
 
 // Register every component whose flag is true. The top-level `enable` short-circuits all of it.

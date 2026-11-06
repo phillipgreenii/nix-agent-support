@@ -71,7 +71,8 @@ export const register: Register = on => {
       process: { run: (argv, init) => $.process.run(argv, init) },
       fs: { read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t) },
       http: { fetch: (url, init) => $.http.fetch(url, init) },
-      config: { set: (k, v) => $.config.set(k, v) },
+      config: { set: (a: unknown) => $.config.set(a) },
+      prompt: { fill: (a: unknown) => $.prompt.fill(a) },
       store: { get: k => $.store.get(k), set: (k, v) => $.store.set(k, v) },
       ui: {
         invalidate: () => $.ui.invalidate('ui.render'),

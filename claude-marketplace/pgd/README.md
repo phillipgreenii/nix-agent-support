@@ -128,3 +128,31 @@ Each of these is covered by a test in `hooks/session-mode.test.ts` or `hooks/ses
 | Labels and action ids | Button label is the mode name; band row id and modal id `mode`; actions `stop` and `close`.                                                                                                                                |
 | Throwaway record      | The real-tool test sets `SESSION_MODE_STATE_DIR` to a temporary directory and creates the record with the real `session-mode start`.                                                                                       |
 | Nix check             | `test-pgd-mod` gains `pkgs.session-mode` on its inputs; `session-mode.realtool.test.ts` imports node modules, so `claude plugin test` reports it as "did not load" (as for `pr.realgh.test.ts`) and the nix check runs it. |
+
+## Model and effort (`components.modelEffort`)
+
+The `Model · effort` label on the band is a button (`model`) that opens the Model and effort modal.
+With `components.modelEffort` off there is no button (the label is not drawn at all, as before), no
+modal, no model change and no prompt fill.
+
+- The modal lists the model choices and the effort choices, one per line, the current one of each
+  marked. Apply switches the model directly through `config.set({ key: "model", value })`. An effort
+  choice pre-fills `/effort <level>` in the prompt box for the operator to send; it never submits.
+
+### Choices the design left to the builder
+
+Each of these is covered by a test in `hooks/model-modal.test.ts`.
+
+| Choice                | Decision                                                                                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model choices         | `sonnet`, `opus`, `haiku`, in that order.                                                                                                                |
+| Effort choices        | `low`, `medium`, `high`, `xhigh`, `max`, in that order.                                                                                                  |
+| Items                 | One per choice, labelled `model` or `effort`, value the choice; the current one carries `current: true`.                                                 |
+| Unknown current model | A current model that is not a choice is appended as one more `model` item marked current.                                                                |
+| Blank effort          | Before the first turn the effort group is one item labelled `effort` with an empty value and no current marker; the choices appear after the first turn. |
+| Action ids            | `apply-model:<id>` (label `Apply <id>`) and `effort:<level>` (label `Effort <level>`), then the framework's Close.                                       |
+| Apply value           | The model id string, passed to `host.config.set({ key: "model", value })`.                                                                               |
+| Model refresh         | After `config.set` the model source is read again with a forced `refresh('model')` (the `config.set` hook also updates it).                              |
+| Effort choice         | `host.prompt.fill({ text: "/effort <level>", mode: "replace" })`; nothing is submitted.                                                                  |
+| Closing               | Both Apply and an effort choice close the modal.                                                                                                         |
+| Facade                | `host.config.set` takes the engine's `{ key, value }` object; `host.prompt.fill` is one added closure over `$.prompt.fill`.                              |
