@@ -3,7 +3,7 @@ module github.com/phillipgreenii/claude-extended-tool-approver
 go 1.26.0
 
 require (
-	github.com/phillipgreenii/x v0.0.0-20261031153131-4d4b0696f49b
+	github.com/phillipgreenii/x v0.0.0-20261106055331-7198a38842bb
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.61.1
 	mvdan.cc/sh/v3 v3.14.1
@@ -16,9 +16,9 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/spf13/pflag v1.1.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	modernc.org/libc v1.79.1 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
