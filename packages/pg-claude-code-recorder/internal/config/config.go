@@ -39,6 +39,10 @@ type Config struct {
 	Clients         []string // client names accepted as a metric label
 
 	SweepInterval time.Duration
+	// Warnings are startup notes the loader cannot log itself (it has no
+	// logger): serve logs each one at WARN. Today: a sweep.interval below
+	// MinSweepInterval that was clamped.
+	Warnings []string
 	// StatusFresh is how long after a file's last offset change the status loop
 	// still takes its size with a Lstat (status.fresh).
 	StatusFresh   time.Duration
@@ -212,6 +216,12 @@ type file struct {
 // day-scale threshold; the removal gauges refresh on a 5 minute cadence of their
 // own, so a shorter tick would only repeat the cheap evaluation.
 const DefaultSettleTick = 5 * time.Minute
+
+// The accepted range of sweep.interval.
+const (
+	MinSweepInterval = time.Minute
+	MaxSweepInterval = 24 * time.Hour
+)
 
 // ParseDuration parses a Go duration string with an optional d (days) unit.
 func ParseDuration(s string) (time.Duration, error) {
@@ -446,6 +456,17 @@ func apply(c *Config, f file) error {
 		v, err := ParseDuration(d.src)
 		if err != nil {
 			return fmt.Errorf("%s: %w", d.key, err)
+		}
+		if d.key == "sweep.interval" {
+			switch {
+			case v > MaxSweepInterval:
+				return fmt.Errorf("sweep.interval: %s is over the %s maximum", v, MaxSweepInterval)
+			case v < MinSweepInterval:
+				// A smaller existing value is clamped for one release rather than
+				// failing startup.
+				c.Warnings = append(c.Warnings, fmt.Sprintf("sweep.interval %s is under the %s minimum; using %s", v, MinSweepInterval, MinSweepInterval))
+				v = MinSweepInterval
+			}
 		}
 		*d.dst = v
 	}

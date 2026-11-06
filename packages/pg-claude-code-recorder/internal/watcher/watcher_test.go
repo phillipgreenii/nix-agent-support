@@ -394,3 +394,22 @@ func TestOnSweepRunsWithoutTheWatcherLock(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The periodic sweep runs on the injected ticker, not on SweepInterval.
+func TestWatcherSweepsOnInjectedTicker(t *testing.T) {
+	root := t.TempDir()
+	tick := make(chan time.Time)
+	w, sink := newTestWatcher(t, Config{Roots: []string{root}, backend: &fakeBackend{}, SweepInterval: time.Hour, Ticker: tick})
+	if err := w.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	eventually(t, "the start sweep to finish", func() bool { return !w.LastSweep().IsZero() })
+	write(t, filepath.Join(root, "example-p.jsonl"), "x")
+	time.Sleep(50 * time.Millisecond)
+	if n := len(sink.paths()); n != 0 {
+		t.Fatalf("swept %d paths before the ticker fired", n)
+	}
+	tick <- time.Now()
+	eventually(t, "the injected tick to sweep", func() bool { return len(sink.paths()) > 0 })
+}

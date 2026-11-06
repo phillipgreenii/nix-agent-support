@@ -169,3 +169,31 @@ func TestRetiredVerifyEveryKeyIsRejected(t *testing.T) {
 		}
 	}
 }
+
+// A sweep.interval below the minimum is clamped with a warning; one above the
+// maximum is rejected by a message that names the key.
+func TestSweepIntervalBounds(t *testing.T) {
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, env(map[string]string{"HOME": "/h"}))
+	}
+	c, err := load("[sweep]\ninterval = \"10s\"\n")
+	if err != nil || c.SweepInterval != time.Minute || len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "sweep.interval") {
+		t.Fatalf("10s: %v %v %v", c.SweepInterval, c.Warnings, err)
+	}
+	if _, err := load("[sweep]\ninterval = \"48h\"\n"); err == nil || !strings.Contains(err.Error(), "sweep.interval") {
+		t.Fatalf("48h: %v", err)
+	}
+	for _, ok := range []string{"1m", "24h"} {
+		c, err := load("[sweep]\ninterval = \"" + ok + "\"\n")
+		if err != nil || len(c.Warnings) != 0 {
+			t.Fatalf("%s: %v %v", ok, c.Warnings, err)
+		}
+	}
+	if c := Defaults(env(map[string]string{"HOME": "/h"})); len(c.Warnings) != 0 {
+		t.Fatalf("defaults warn: %v", c.Warnings)
+	}
+}

@@ -51,6 +51,9 @@ func (a *app) serve(args []string) int {
 		logw = f
 	}
 	log := serve.NewLogger(logw)
+	for _, w := range cfg.Warnings {
+		log.Warn("config_warning", "msg", w)
+	}
 	stopPprof := startPprof(pprofOn, a.getenv, logLines{log})
 	defer stopPprof()
 	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, MetricsAddr: metricsAddr, Rebuild: rebuild})

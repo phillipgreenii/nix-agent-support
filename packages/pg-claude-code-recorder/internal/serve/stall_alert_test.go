@@ -99,3 +99,16 @@ func TestStallBoundsEqualLoopStalledAlertLiterals(t *testing.T) {
 		t.Errorf("the alert in-flight bound is %d s, the code bound %v", secs, obs.InFlightStallBound)
 	}
 }
+
+// The heartbeat alert's literal 2700 is 3 x the default sweep.interval, so its
+// text must say to raise it with sweep.interval.
+func TestHeartbeatAlertMentionsSweepInterval(t *testing.T) {
+	data, err := os.ReadFile(alertsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "2700 seconds (3 times the default sweep.interval of 15m)") ||
+		!strings.Contains(string(data), "raise it with sweep.interval") {
+		t.Fatal("heartbeat-stale alert text no longer ties the 2700 literal to sweep.interval")
+	}
+}

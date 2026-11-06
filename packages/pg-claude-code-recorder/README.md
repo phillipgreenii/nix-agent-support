@@ -714,6 +714,12 @@ Grafana has no inhibition, so each guard is in the expression: `daemon-down` add
 of 0 means doctor has not run yet (the daemon first runs it one `doctor.interval` after start): that is not stale, and the removal
 readiness checklist treats it as not ready.
 
+`sweep.interval` is accepted from 1 minute to 24 hours: a smaller value is clamped to 1 minute with a
+startup WARN (`config_warning`) for one release instead of failing startup, and a larger one is
+rejected. The `heartbeat-stale` and `loop-stalled` (`watcher_sweep`) alerts use the literal 2700 s,
+which is 3 times the 15 minute default; it is coupled to the default, so when you change
+`sweep.interval`, change both the setting and those literals in `grafana/alerting/alerts.yaml`.
+
 Signals added by the second review: `conversation_end_total{registry_present,exit_observed,clear_entry,exit_entry}` (evidence classes,
 each `true` or `false`; never a label such as crashed), `registry_stale_at_discovery_total` and the log event `startup_stale_registries{n}`;
 `quarantine_files`, `quarantine_bytes`, `quarantine_oldest_age_seconds`, `removal_quarantine_mismatch_total` and the events

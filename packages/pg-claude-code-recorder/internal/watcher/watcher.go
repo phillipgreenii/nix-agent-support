@@ -71,6 +71,9 @@ type Config struct {
 	MaxReplayGap  time.Duration // default 10m
 	Now           func() time.Time
 	Logger        *slog.Logger
+	// Ticker is a test seam for the periodic sweep: when set, the loop sweeps on
+	// each value received from it instead of a real SweepInterval ticker.
+	Ticker <-chan time.Time
 	// DisableEvents leaves the watcher sweep-only (no FSEvents or inotify
 	// stream); the serve unit tests drive it with Wake and Rescan.
 	DisableEvents bool
@@ -213,8 +216,12 @@ func (w *Watcher) hint(h Hint) {
 
 func (w *Watcher) loop(ctx context.Context, sweepFirst bool) {
 	defer close(w.done)
-	tick := time.NewTicker(w.cfg.SweepInterval)
-	defer tick.Stop()
+	tickC := w.cfg.Ticker
+	if tickC == nil {
+		tick := time.NewTicker(w.cfg.SweepInterval)
+		defer tick.Stop()
+		tickC = tick.C
+	}
 	if sweepFirst {
 		w.sweepLogged()
 	}
@@ -222,7 +229,7 @@ func (w *Watcher) loop(ctx context.Context, sweepFirst bool) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-tickC:
 			w.sweepLogged()
 		case <-w.notify:
 			w.drain()
