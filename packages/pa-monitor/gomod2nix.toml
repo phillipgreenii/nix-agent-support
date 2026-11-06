@@ -30,6 +30,8 @@ cachePackages = [
   'github.com/muesli/termenv',
   'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/claude-transcript',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
@@ -277,8 +279,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261031153131-4d4b0696f49b'
-    hash = 'sha256-h5SfSB/VPuDdKyEMtAP/m1Up3ChvNC1jCz7/lN3fVUY='
+    version = 'v0.0.0-20261106055331-7198a38842bb'
+    hash = 'sha256-s6DTFVcL24AAUgvKzrwkRc3wfDH/EsiHumGlFzfkulg='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -289,8 +291,8 @@ cachePackages = [
     hash = 'sha256-rDcdNYH6ZD8KouyyiZCUEy8JrjOQoAkxHBhugrfHjFo='
 
   [mod.'github.com/xo/terminfo']
-    version = 'v1.3.0'
-    hash = 'sha256-pBQq9ERdY99za4EYTc0y3oZ6hVVBZIF6UJOtUEDVMRQ='
+    version = 'v1.3.1'
+    hash = 'sha256-i530CbIIoE/c0L+iL/sc41sfpxdVVqIXYu1Y5/z5vCU='
 
   [mod.'go.opentelemetry.io/auto/sdk']
     version = 'v1.2.1'
@@ -353,11 +355,11 @@ cachePackages = [
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261026165753-2ffab32bce7e'
-    hash = 'sha256-sRRg7QCSi0XQZELYEcMA/ElQcFM+CcHeaVOCMgoWcqQ='
+    version = 'v0.0.0-20261104224025-d1e00e9f33ab'
+    hash = 'sha256-8VMRvaRr+LdlEOvJI23LyxXbBj3PsG1/uq0PMU/+4zo='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261026165753-2ffab32bce7e'
+    version = 'v0.0.0-20261104224025-d1e00e9f33ab'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -369,8 +371,8 @@ cachePackages = [
     hash = 'sha256-MKd0AdkWEe2A79mGPzOY5I76nMqTsGJKQNPJOKyOwkQ='
 
   [mod.'modernc.org/libc']
-    version = 'v1.79.1'
-    hash = 'sha256-tTzZIGVxVRIGkbu9JhHUGZGs9NXE+0wISdoqI3xvsoE='
+    version = 'v1.80.1'
+    hash = 'sha256-38Z2O6/kb7YAHVAxKfdLT/P+cJVngwpxmwWtfbO/ges='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
