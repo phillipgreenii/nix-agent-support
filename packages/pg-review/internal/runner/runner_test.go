@@ -471,7 +471,7 @@ func TestAnalystFlagOverridesProfileBackend(t *testing.T) {
 
 func TestFinishInteractiveDeletesStagingAndReleasesLock(t *testing.T) {
 	e := setup(t)
-	staging := filepath.Join(t.TempDir(), "stage")
+	staging := filepath.Join(evidenceRoot(e.d.Cfg.Env.CacheHome), "stage")
 	e.d.Evidence = stageFunc(func(ctx context.Context, s *State) error {
 		_ = os.MkdirAll(staging, 0o700)
 		return updateRun(ctx, s, func(r *ledger.Run) { r.StagingPath = staging })
@@ -481,7 +481,7 @@ func TestFinishInteractiveDeletesStagingAndReleasesLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Not filed yet: nothing happens.
-	if err := FinishInteractive(bg, e.l, res.Run.ID, nil); err != nil {
+	if err := FinishInteractive(bg, e.l, res.Run.ID, e.d.Cfg.Env.CacheHome); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(staging); err != nil {
@@ -494,7 +494,7 @@ func TestFinishInteractiveDeletesStagingAndReleasesLock(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := FinishInteractive(bg, e.l, res.Run.ID, nil); err != nil {
+	if err := FinishInteractive(bg, e.l, res.Run.ID, e.d.Cfg.Env.CacheHome); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(staging); !os.IsNotExist(err) {
@@ -795,5 +795,64 @@ func TestRemoveStagingRefusesTmpPathsThatAreNotStagingDirs(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("%s was deleted", p)
 		}
+	}
+}
+
+// The default remover (pipeline, reaper, sweep and FinishInteractive all use
+// it) must delete a real /tmp/pg-review-* staging dir and the evidence tree,
+// and refuse anything else, whatever path wired it.
+func TestDefaultRemoveStagingPermitsOnlyTheTwoPlaces(t *testing.T) {
+	cache := t.TempDir()
+	rm := defaultRemoveStaging(cache)
+	tmpStage := tmpChild(t, "pg-review-test-")
+	inEvidence := filepath.Join(evidenceRoot(cache), "run-1")
+	if err := os.MkdirAll(inEvidence, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{tmpStage, inEvidence} {
+		if err := rm(p); err != nil {
+			t.Errorf("refused permitted %q: %v", p, err)
+		}
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%q kept", p)
+		}
+	}
+	other := tmpChild(t, "other-name-test-")
+	outside := t.TempDir()
+	for _, p := range []string{other, outside, cache, stagingRoot} {
+		if err := rm(p); err == nil {
+			t.Errorf("accepted %q", p)
+		}
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%q was deleted", p)
+		}
+	}
+}
+
+// Deps.fill and FinishInteractive wire the guarded default: an interactive
+// run whose staging is outside both places is not deleted.
+func TestFinishInteractiveRefusesStagingOutsidePermittedPlaces(t *testing.T) {
+	e := setup(t)
+	staging := filepath.Join(t.TempDir(), "stage")
+	e.d.Evidence = stageFunc(func(ctx context.Context, s *State) error {
+		_ = os.MkdirAll(staging, 0o700)
+		return updateRun(ctx, s, func(r *ledger.Run) { r.StagingPath = staging })
+	})
+	res, err := e.run(Params{Analyst: "interactive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.l.WithTx(bg, func(tx *ledger.Tx) error {
+		r, _ := tx.GetRun(bg, res.Run.ID)
+		r.State = ledger.RunFiled
+		return tx.UpdateRun(bg, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := FinishInteractive(bg, e.l, res.Run.ID, e.d.Cfg.Env.CacheHome); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Error("staging outside the permitted places was deleted")
 	}
 }

@@ -95,8 +95,7 @@ func (d *Deps) defaults() {
 		d.CloseSession = CloseSessionHook
 	}
 	if d.RemoveStaging == nil {
-		root := evidenceRoot(d.Cfg.Env.CacheHome)
-		d.RemoveStaging = func(path string) error { return removeStaging(root, path) }
+		d.RemoveStaging = defaultRemoveStaging(d.Cfg.Env.CacheHome)
 	}
 	if d.Stdout == nil {
 		d.Stdout = io.Discard

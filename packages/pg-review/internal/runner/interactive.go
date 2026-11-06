@@ -54,10 +54,8 @@ func ensurePrivateDir(dir string) error {
 // FinishInteractive completes an interactive run that `agent file` just
 // filed: the staging directory is deleted and cleared from the row and the
 // run's lock is released. It does nothing for any other run.
-func FinishInteractive(ctx context.Context, l *ledger.Ledger, runID int64, rm func(string) error) error {
-	if rm == nil {
-		rm = removeStaging
-	}
+func FinishInteractive(ctx context.Context, l *ledger.Ledger, runID int64, cacheHome string) error {
+	rm := defaultRemoveStaging(cacheHome)
 	var staging string
 	err := l.WithTx(ctx, func(t *ledgerTx) error {
 		r, err := t.GetRun(ctx, runID)
@@ -78,5 +76,3 @@ func FinishInteractive(ctx context.Context, l *ledger.Ledger, runID int64, rm fu
 	}
 	return err
 }
-
-var removeStaging0 = removeStaging

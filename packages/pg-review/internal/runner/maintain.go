@@ -132,6 +132,7 @@ func sweepEvidence(ctx context.Context, d *Deps) (string, error) {
 		return "disabled", nil
 	}
 	root := evidenceRoot(d.Cfg.Env.CacheHome)
+	rm := defaultRemoveStaging(d.Cfg.Env.CacheHome)
 	runs, err := d.Ledger.RunsInStates(ctx, ledger.RunFiled, ledger.RunSkipped, ledger.RunFailed)
 	if err != nil {
 		return "", err
@@ -154,15 +155,15 @@ func sweepEvidence(ctx context.Context, d *Deps) (string, error) {
 			if p == "" {
 				continue
 			}
-			// removeStaging decides: inside the evidence root, or a real
+			// the default remover decides: inside the evidence root, or a real
 			// /tmp/pg-review-* directory. EvidenceDir has no /tmp option.
 			if p == r.EvidenceDir && !within(root, p) {
 				ok = false
 				continue
 			}
-			// removeStaging re-checks after symlink resolution, so a link
+			// it re-checks after symlink resolution, so a link
 			// that escapes the root is refused and reported.
-			if err := removeStaging(root, p); err != nil {
+			if err := rm(p); err != nil {
 				ok = false
 				errs = append(errs, err.Error())
 			}

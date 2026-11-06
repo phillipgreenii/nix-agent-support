@@ -134,6 +134,18 @@ func isStagingDirName(p string) bool {
 	return ok
 }
 
+// defaultRemoveStaging is the ONLY way to obtain a staging remover: every
+// default or fallback RemoveStaging (the pipeline, the reaper, the TTL sweep,
+// FinishInteractive) MUST come from here, so no caller can wire the bare
+// removeStaging. The remover it returns is bound to the evidence root under
+// cacheHome and permits only that tree and direct /tmp/pg-review-* directories.
+// Staging lives at the literal /tmp/pg-review-* (not $TMPDIR) because the
+// analyst sandbox cannot read $TMPDIR; evidence lives under the cache home.
+func defaultRemoveStaging(cacheHome string) func(string) error {
+	root := evidenceRoot(cacheHome)
+	return func(path string) error { return removeStaging(root, path) }
+}
+
 // removeStaging deletes a staging directory. It permits exactly two kinds of
 // path: strictly inside root (the evidence root) once symlinks are resolved,
 // or a direct child of the literal staging root (/tmp) named pg-review-* that

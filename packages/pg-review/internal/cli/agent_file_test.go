@@ -216,10 +216,13 @@ func interactiveRun(t *testing.T) (id int64, l *ledger.Ledger, staging string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	staging = filepath.Join(t.TempDir(), "stage")
-	if err := os.MkdirAll(staging, 0o700); err != nil {
-		t.Fatal(err)
+	// Real staging lives at a literal /tmp/pg-review-* directory; the guarded
+	// default remover refuses anything else.
+	staging, err = os.MkdirTemp("/tmp", "pg-review-test-")
+	if err != nil {
+		t.Skipf("cannot create a staging dir under /tmp: %v", err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(staging) })
 	if err := os.WriteFile(filepath.Join(staging, "raw.txt"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}

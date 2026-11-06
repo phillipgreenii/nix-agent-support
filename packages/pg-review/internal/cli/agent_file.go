@@ -58,7 +58,7 @@ func newAgentFileCmd() *cobra.Command {
 				return mapFileError(err)
 			}
 			if !dry {
-				if err := runner.FinishInteractive(cmd.Context(), l, runID, nil); err != nil {
+				if err := runner.FinishInteractive(cmd.Context(), l, runID, cfg.Env.CacheHome); err != nil {
 					return mapFileError(err)
 				}
 			}
