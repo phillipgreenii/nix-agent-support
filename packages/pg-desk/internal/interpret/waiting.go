@@ -158,8 +158,17 @@ func decideTeam(pr prShow, ci ciRollupResult, appr Approvals, matchReasons []str
 	if blockingChangesRequested(appr) {
 		return WaitingOnAuthor, ReasonChangesRequested
 	}
-	// The PR is approvable. A review of the operator's own that a push made
-	// stale is a re-review the operator owes, whatever else stands.
+	// A review thread the operator took part in that the author has not
+	// answered is the author's debt, whatever else stands: there is nothing new
+	// to re-review until the author answers (operator ruling 2026-11-06). It
+	// precedes the stale-review, review-requested, acting-reviewer, bot and
+	// approved rows and is not gated on SelfReviewStale.
+	if appr.SelfUnansweredThread {
+		return WaitingOnAuthor, ReasonUnansweredThread
+	}
+	// The PR is approvable and the operator has no unanswered thread of their
+	// own. A review of the operator's own that a push made stale is a
+	// re-review the operator owes, whatever else stands.
 	if appr.SelfReviewStale {
 		return WaitingOnMe, ReasonStaleReview
 	}
@@ -194,7 +203,7 @@ func blockingChangesRequested(appr Approvals) bool {
 
 // teamApprovedDecision decides an approved, unblocked team PR the operator is
 // not asked to review, by GitHub's merge state (see the behavior doc, team
-// predicate 8).
+// predicate 9).
 func teamApprovedDecision(pr prShow, ci ciRollupResult) (WaitingOn, string) {
 	switch pr.MergeStateStatus {
 	case "BLOCKED":

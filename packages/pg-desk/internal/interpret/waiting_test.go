@@ -42,6 +42,15 @@ func TestDecideWaitingOn_Table(t *testing.T) {
 			WaitingOnMe, ReasonStaleReview, PanelTeamAwaitingMe,
 		},
 		{
+			"a stale review with an unanswered operator thread waits on the author",
+			OwnershipTeam,
+			team(func(p *prShow) {
+				p.Reviews = []prReview{rev("me", "COMMENTED", oidp("h1"))}
+				p.Comments = []prComment{{ID: "c1", Author: "me", ThreadID: "c1", ReviewThreadID: "t1"}}
+			}),
+			WaitingOnAuthor, ReasonUnansweredThread, PanelTeamAwaitingOwner,
+		},
+		{
 			"the operator's own stale CHANGES_REQUESTED routes to the operator",
 			OwnershipTeam,
 			team(func(p *prShow) { p.Reviews = []prReview{rev("me", "CHANGES_REQUESTED", oidp("h1"))} }),

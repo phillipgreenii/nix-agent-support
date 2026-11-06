@@ -225,6 +225,15 @@ type Approvals struct {
 	// approval, no bot). Informational: it no longer silences a stale
 	// review of the operator's (waiting.go, stale-review).
 	HumanApprovalStanding bool `json:"human_approval_standing,omitempty"`
+	// SelfUnansweredThread is true iff the operator took part in an unresolved,
+	// non-outdated review thread that holds no comment by the PR author (see
+	// selfHasUnansweredThread). It excludes comments of PENDING (unsent)
+	// reviews; an author comment anywhere in the thread counts as an answer
+	// (comments carry no timestamps); an unknown operator or PR author reads
+	// false. It routes a team PR to the author ahead of stale-review. Omitted
+	// from the stored JSON when false, so a row written before this field
+	// existed reads false until it is interpreted again.
+	SelfUnansweredThread bool `json:"self_unanswered_thread,omitempty"`
 	// SelfReviewInProgress is true iff the operator has a submitted COMMENTED
 	// review on this PR and no APPROVED review of their own standing (operator
 	// ruling 2026-10-12, bead pg2-tgq8o; a PENDING draft stopped counting by

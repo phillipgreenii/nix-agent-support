@@ -184,6 +184,7 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 		BotVerdict:            botVerdict,
 		SelfReviewStale:       selfStale,
 		HumanApprovalStanding: teammateStanding,
+		SelfUnansweredThread:  selfHasUnansweredThread(pr, self),
 
 		OtherChangesRequested:     otherChangesRequested,
 		SelfChangesRequestedStale: selfChangesRequestedStale(pr, self, latestDecision),
@@ -543,6 +544,77 @@ func hasUnansweredReviewThread(pr prShow) bool {
 	}
 	for _, t := range threads {
 		if t.open && t.byOther && !t.byAuthor {
+			return true
+		}
+	}
+	return false
+}
+
+// selfHasUnansweredThread reports whether the operator (self) took part in a
+// review thread the PR author has not answered: the thread is unresolved and
+// not outdated, holds at least one SENT comment by self, and holds no comment
+// by the PR author. "Took part in" is deliberate: the operator's reply inside
+// a teammate's unanswered thread counts too, since the author owes a reply
+// there as well; comments carry no timestamps, so "the operator started it"
+// cannot be told.
+//
+// Threads are grouped as in hasUnansweredReviewThread: by ReviewThreadID, or,
+// for a payload that predates it, each inline comment (ThreadID != "") stands
+// alone. Top-level comments (no ThreadID) are never threads.
+//
+// PENDING comments are excluded: the viewer's own PENDING review and its
+// inline comments appear in the stored review set, but an unsent draft routes
+// nothing (operator ruling 2026-11-02), so every review in state PENDING
+// (case-insensitive) is skipped and only submitted reviews' comments and the
+// PR's top-level comment list are walked.
+//
+// Limitation, carried over from hasUnansweredReviewThread: comments carry no
+// timestamps, so "answered" is order-blind: an author comment anywhere in the
+// thread counts as an answer, even if the operator wrote again afterwards.
+//
+// Unknown is not asserted: an empty self or an empty PR author yields false.
+func selfHasUnansweredThread(pr prShow, self string) bool {
+	if self == "" || pr.Author == "" {
+		return false
+	}
+	type thread struct {
+		open, bySelf, byAuthor bool
+	}
+	threads := map[string]*thread{}
+	add := func(comments []prComment) {
+		for _, c := range comments {
+			if c.ThreadID == "" {
+				continue
+			}
+			key := c.ReviewThreadID
+			if key == "" {
+				key = c.ThreadID
+			}
+			t := threads[key]
+			if t == nil {
+				t = &thread{}
+				threads[key] = t
+			}
+			if !c.Resolved && !c.ThreadOutdated {
+				t.open = true
+			}
+			if c.Author == self {
+				t.bySelf = true
+			}
+			if c.Author == pr.Author {
+				t.byAuthor = true
+			}
+		}
+	}
+	add(pr.Comments)
+	for _, r := range pr.Reviews {
+		if strings.EqualFold(r.State, "PENDING") {
+			continue
+		}
+		add(r.Comments)
+	}
+	for _, t := range threads {
+		if t.open && t.bySelf && !t.byAuthor {
 			return true
 		}
 	}

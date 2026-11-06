@@ -193,7 +193,8 @@ and MUST NOT use an LLM for any step below.
   as satisfied. The operator's own review is the exception: the stored approvals record whether it
   has gone stale behind a push (`self_review_stale`), derived from the commit each review was
   submitted against, and a stale one routes a team PR to the operator (`stale-review`, "Waiting-on:
-  the single decision", below). The stored `human_approval_standing` records whether a teammate's
+  the single decision", below) unless the operator has an unanswered review thread of their own,
+  which keeps the PR with the author (`unanswered-thread`). The stored `human_approval_standing` records whether a teammate's
   approval of the current head stands; it no longer decides anything.
 
   **Known scope gap:** pg-desk gathers no required-approver count or CODEOWNERS data. The team side
@@ -262,26 +263,43 @@ PR's one cause.
 | 1   | `ci-failing`        | CI fails, judged with the reviewer-side softenings (cancelled runs, no CI data, review-exempt checks)                                                                                                                                                                                                                                               | `author`     |
 | 2   | `conflict`          | a merge conflict, the PR's own or a stacked-parent conflict                                                                                                                                                                                                                                                                                         | `author`     |
 | 3   | `changes-requested` | a non-bot reviewer other than the operator carries `CHANGES_REQUESTED`, or the operator's own `CHANGES_REQUESTED` is fresh (made against the current head)                                                                                                                                                                                          | `author`     |
-| 4   | `stale-review`      | any review of the operator's own has gone stale behind a push, including a stale `CHANGES_REQUESTED`, and the PR passed rows 1 to 3 (it is approvable)                                                                                                                                                                                              | `me`         |
-| 5   | `review-requested`  | a live review request on the operator                                                                                                                                                                                                                                                                                                               | `me`         |
-| 6   | `acting-reviewer`   | a submitted comment-only review of the operator's own, and no approval of their own stands                                                                                                                                                                                                                                                          | `me`         |
-| 7   | `bot-disapproved`   | the bot verdict is disapproved                                                                                                                                                                                                                                                                                                                      | `author`     |
-| 8   | `approved-*`        | a human approval exists; the merge-state rule above picks the code: `approved-merge-blocked` (`others`), `approved-ci-unsettled` (`author`: BLOCKED while CI is in flight, unknown or failing), `approved-awaiting-requested` (`others`: merge state unknown and a request is outstanding), `approved-ready-to-merge` (`author`: every other state) | per code     |
-| 9   | `unanswered-thread` | an unanswered review thread                                                                                                                                                                                                                                                                                                                         | `author`     |
-| 10  | `awaiting-review`   | none of the above                                                                                                                                                                                                                                                                                                                                   | `others`     |
+| 4   | `unanswered-thread` | an unresolved, non-outdated review thread the operator took part in (at least one sent comment of theirs) holds no comment by the PR author; pending, unsent comments do not count, and it is not gated on the operator's review being stale                                                                                                        | `author`     |
+| 5   | `stale-review`      | any review of the operator's own has gone stale behind a push, including a stale `CHANGES_REQUESTED`, the PR passed rows 1 to 3 (it is approvable) and row 4 did not match                                                                                                                                                                          | `me`         |
+| 6   | `review-requested`  | a live review request on the operator                                                                                                                                                                                                                                                                                                               | `me`         |
+| 7   | `acting-reviewer`   | a submitted comment-only review of the operator's own, and no approval of their own stands                                                                                                                                                                                                                                                          | `me`         |
+| 8   | `bot-disapproved`   | the bot verdict is disapproved                                                                                                                                                                                                                                                                                                                      | `author`     |
+| 9   | `approved-*`        | a human approval exists; the merge-state rule above picks the code: `approved-merge-blocked` (`others`), `approved-ci-unsettled` (`author`: BLOCKED while CI is in flight, unknown or failing), `approved-awaiting-requested` (`others`: merge state unknown and a request is outstanding), `approved-ready-to-merge` (`author`: every other state) | per code     |
+| 10  | `unanswered-thread` | an unanswered review thread of another reviewer (the operator's own is caught earlier, by row 4)                                                                                                                                                                                                                                                    | `author`     |
+| 11  | `awaiting-review`   | none of the above                                                                                                                                                                                                                                                                                                                                   | `others`     |
 
 Rules the table encodes:
 
 - **Stale review (rulings 2026-11-02 and 2026-11-03).** If the operator submitted a review and a
   later push made it stale, the PR is waiting on the operator, provided the PR is approvable:
-  not hard-blocked (rows 1 to 3). A teammate's approval of the current head does NOT silence
+  not hard-blocked (rows 1 to 3), and the operator has no unanswered thread of their own
+  (row 4). A teammate's approval of the current head does NOT silence
   it; the earlier carve-out in `pr.review-stale-after-push` is dropped. Unknown is not stale
   (INV-ATTNEVAL-6): a review whose commit was not reported never raises `stale-review`.
 - **The operator's own `CHANGES_REQUESTED`.** A fresh one stays with the author (row 3). A stale
-  one is not a hard blocker; it routes to the operator as `stale-review` (row 4), once rows 1
-  and 2 pass. Another reviewer's `CHANGES_REQUESTED` still blocks.
-- **A bot disapproval** never overrides rows 4 to 6, as today for a live request.
-- **A pending, unsent review** routes nothing (unchanged, ruling 2026-11-02).
+  one is not a hard blocker; it routes to the operator as `stale-review` (row 5), once rows 1,
+  2 and 4 pass. Another reviewer's `CHANGES_REQUESTED` still blocks.
+- **A bot disapproval** never overrides rows 4 to 7, as today for a live request. Side effect:
+  with an operator thread open and a bot disapproval, the owner is the author either way, so
+  only the reason code changes (`unanswered-thread` instead of `bot-disapproved`).
+- **A pending, unsent review** routes nothing (unchanged, ruling 2026-11-02). Its comments never
+  make row 4 match.
+- **The operator's unanswered thread (ruling 2026-11-06, Phillip: "i would not have considered
+  this awaiting on me because my comments/questions haven't been addressed. i think this would
+  still be awaiting on the owner.").** A review thread that is unresolved, not outdated, holds at
+  least one sent comment by the operator and no comment by the PR author routes the PR to the
+  author (row 4), whatever else stands: a stale review, a live request, a comment-only review of
+  the operator's or a teammate approval does not make it the operator's. "Took part in" is
+  deliberate: the operator's reply inside a teammate's unanswered thread counts too, because the
+  author owes a reply there as well; comments carry no timestamps, so "the operator started it"
+  cannot be told. Likewise "answered" is order-blind: an author comment anywhere in the thread
+  counts. An author reply, a resolved thread or an outdated thread clears it, and the PR falls
+  through to `stale-review`. An unknown operator or PR author never asserts it. Another
+  reviewer's unanswered thread keeps row 10. Own PRs are unchanged.
 
 **Downstream.**
 
