@@ -79,6 +79,9 @@ constants, so behavior is unchanged.
   total, and MUST be removed when the run ends.
 - Run each variant at least 3 times and report the median and the best. Differences under about 5%
   are not resolved on a loaded machine, and a study MUST say the load average it ran under.
+- A profile frame's seconds are not wall seconds on this host: check a frame's claim against the step timers and the
+  process's user and system CPU (`/usr/bin/time -l`) before ranking a cost by it, and prefer instructions retired
+  when load is uneven (see the temp_store study).
 - A long run SHOULD go through `bgrun` with `nice -n 10`, and wait with `bgwait`, so it does not
   saturate the host.
 - Comparing two studies is valid only when they use the same corpus list, the same variants and a
@@ -93,11 +96,12 @@ change behavior when the build tag is absent.
 
 ## Studies
 
-| Date       | Question                                                                | Results                                    |
-| ---------- | ----------------------------------------------------------------------- | ------------------------------------------ |
-| 2026-11-05 | Where does the rebuild's SQLite insert time go?                         | `2026-11-05-insert-cost-results.md`        |
-| 2026-11-05 | Did the stage metrics and the four cost reductions shorten the rebuild? | `2026-11-05-reevaluation-results.md`       |
-| 2026-11-05 | Why was the multi-row `fields` insert slower, and fix or revert it?     | `2026-11-05-multirow-fields-regression.md` |
+| Date       | Question                                                                 | Results                                    |
+| ---------- | ------------------------------------------------------------------------ | ------------------------------------------ |
+| 2026-11-05 | Where does the rebuild's SQLite insert time go?                          | `2026-11-05-insert-cost-results.md`        |
+| 2026-11-05 | Did the stage metrics and the four cost reductions shorten the rebuild?  | `2026-11-05-reevaluation-results.md`       |
+| 2026-11-05 | Why was the multi-row `fields` insert slower, and fix or revert it?      | `2026-11-05-multirow-fields-regression.md` |
+| 2026-11-05 | Why did `temp_store=MEMORY` remove the sub-journal samples but not wall? | `2026-11-05-temp-store-study.md`           |
 
 ## Pricing the step timers
 

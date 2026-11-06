@@ -83,8 +83,12 @@ func (s *Store) beginRebuild() error {
 		`INSERT INTO fts_tri(fts_tri,rank) VALUES('automerge',0)`,
 		`PRAGMA synchronous=OFF`,
 		// The per-file SAVEPOINT keeps its sub-journal in the temp store; in
-		// memory it costs a fraction of a temp-file write and still rolls
-		// back. buildIndexesLocked resets it before the index sorts.
+		// memory it still rolls back. Measured effect is small: about 0.7
+		// percent fewer instructions and 10 to 20 percent less system CPU,
+		// with no wall-time gain resolved (docs/ablation/
+		// 2026-11-05-temp-store-study.md); the profile frame it removes
+		// overstates the cost. buildIndexesLocked resets it before the index
+		// sorts.
 		`PRAGMA temp_store=MEMORY`,
 	}
 	for _, q := range s.withoutTrigram(qs) {
