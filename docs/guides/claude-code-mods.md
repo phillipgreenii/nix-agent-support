@@ -155,3 +155,16 @@ them.
 Entries from the spikes (the OTLP route and the recorder title field) and from later phases are
 appended below, newest last. Each entry names the Claude Code version it was observed on and the
 date.
+
+### OTLP over http fetch
+
+- result: allowed. A headless run (`claude --plugin-dir <throwaway mod dir> -p "..."`) with a throwaway
+  mod whose `session.start` hook called `$.http.fetch` (POST, `content-type: application/json`, a
+  minimal OTLP/HTTP JSON body with one gauge) to a loopback-only listener at
+  `http://127.0.0.1:<port>/v1/metrics`. The listener received the POST with a parseable JSON body and
+  the fetch returned status 200. No policy error was raised.
+- version: 2.1.314
+- date: 2026-11-06
+- consequence: the exporter's `exportMetrics()` MAY post OTLP over `$.http.fetch` to the configured
+  `metrics.endpoint`; no emitter command is needed. Only loopback was tested; a non-loopback endpoint
+  is still subject to the organization's web policy.
