@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -347,7 +348,8 @@ func TestSweepSkipsUnchangedSnapshotFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("result one\n")
+	pad := strings.Repeat("x", int(snapshotSkipMin)) // above the snapshot skip floor
+	write("result one\n" + pad)
 	e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
 	d := e.open(t)
 	sweep := func() {
@@ -364,7 +366,7 @@ func TestSweepSkipsUnchangedSnapshotFiles(t *testing.T) {
 		t.Fatalf("a sweep over unchanged files ingested %v of them, want 0 (snapshot and append alike)", got)
 	}
 	// A real change (new size) is not skipped.
-	write("result one and more\n")
+	write("result one and more\n" + pad)
 	snapBefore := ingestCount(d, "snapshot")
 	sweep()
 	if got := ingestCount(d, "snapshot") - snapBefore; got != 1 {

@@ -189,7 +189,7 @@ func TestSeenTableSurvivesARestartAfterTheDeviceNumberChanged(t *testing.T) {
 	}
 	for _, n := range []string{"one.txt", "two.txt"} {
 		p := filepath.Join(dir, n)
-		if err := os.WriteFile(p, []byte("result "+n+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(p, []byte("result "+n+"\n"+strings.Repeat("x", int(snapshotSkipMin))), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Chtimes(p, old, old); err != nil {

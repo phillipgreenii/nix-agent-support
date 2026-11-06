@@ -58,6 +58,9 @@ type Options struct {
 	// StoreDriver is the database/sql driver name of the store (tests register a
 	// counting wrapper); empty means the SQLite driver.
 	StoreDriver string
+	// SrcFS is the copier's source-side file system seam (tests count opens);
+	// the real file system when nil.
+	SrcFS copier.SrcFS
 }
 
 // Daemon is the composed recorder.
@@ -206,7 +209,7 @@ func Open(opt Options) (*Daemon, error) {
 	d.seenDB = newSeenStore(st, opt.Clock, func(err error) { o.Log.Warn("seen_write_failed", "err", err.Error()) })
 	d.loadSeen()
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
-	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o})
+	d.cp, err = copier.New(copier.Config{Store: st, Scope: d.scope, Clock: opt.Clock, Obs: o, SrcFS: opt.SrcFS})
 	if err != nil {
 		_ = st.Close()
 		return nil, err

@@ -5,6 +5,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 )
 
@@ -116,6 +117,19 @@ type caughtUp struct {
 	file int64
 }
 
+// snapshotSkipMin is the size above which a snapshot file may be skipped by a
+// sweep. Snapshot files of this size or smaller (the registry and session-mode
+// JSON files) are re-read on every sweep: they are cheap to read, and a rewrite
+// that keeps size and mtime is found within one sweep instead of a forced one.
+const snapshotSkipMin int64 = 64 << 10
+
+// skipExempt reports whether a sweep must not skip the path: a snapshot-mode
+// file of snapshotSkipMin bytes or fewer.
+func (d *Daemon) skipExempt(path string, size int64) bool {
+	_, mode := d.scope.Classify(path)
+	return mode == scope.Snapshot && size <= snapshotSkipMin
+}
+
 // skipUnchanged reports whether a sweep event needs no ingest: the path was
 // ingested to "unchanged" and the walk reports the same size, mtime and inode.
 // A skipped file still tells the parser about itself, so a parse that failed
@@ -138,7 +152,7 @@ func (d *Daemon) caughtMatches(path string, fi watcher.FileInfo) (int64, bool) {
 	d.seen.mu.Lock()
 	c, ok := d.seen.caught[path]
 	d.seen.mu.Unlock()
-	if !ok || c.seen != seenOf(fi) {
+	if !ok || c.seen != seenOf(fi) || d.skipExempt(path, fi.Size) {
 		return 0, false
 	}
 	return c.file, true
@@ -149,13 +163,13 @@ func (d *Daemon) caughtMatches(path string, fi watcher.FileInfo) (int64, bool) {
 // snapshot whose content hash matches its latest version) is cached; anything
 // else (a copy that may be partial, an error) is ingested again next sweep.
 // Snapshot files (tool results, subagent metadata, registry files) are about
-// half of what a sweep walks, so leaving them out would keep every one of them
-// read and hashed on every sweep. The sweep walk only reports regular files, so
+// half of what a sweep walks, so they are cached too, except those of
+// snapshotSkipMin bytes or fewer, which are re-read on every sweep. The sweep walk only reports regular files, so
 // a link never reaches here.
 func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	d.seen.mu.Lock()
 	defer d.seen.mu.Unlock()
-	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 {
+	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 || d.skipExempt(e.Path, e.Info.Size) {
 		delete(d.seen.caught, e.Path)
 		d.seenDB.forget(e.Path)
 		return
