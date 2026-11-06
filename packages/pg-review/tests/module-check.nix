@@ -114,6 +114,9 @@ let
   cases = {
     "sample has no failed assertions" = failedAssertions sample == [ ];
     "no-scope config has no failed assertions" = failedAssertions noScope == [ ];
+    "no schedule: only review-maintain is declared, still one role" =
+      map (r: r.name) noScope.config.phillipgreenii.programs.pg-review.routerConfig.role
+      == [ "review-maintain" ];
     "a weekly schedule without a day is rejected" = lib.length (failedAssertions badWeekly) == 1;
 
     "disabled renders no config file" = disabled.config.xdg.configFile == { };
@@ -223,6 +226,7 @@ pkgs.runCommand "pg-review-module"
     ' config.json >/dev/null || { echo "unexpected rendered config.toml:" >&2; cat config.json >&2; exit 1; }
 
     # negative control: the same command rejects a broken file (not vacuous)
+    rm -f "$cfgHome/pg-review/config.toml"
     printf '[[scope]]\nname = "s"\n' > "$cfgHome/pg-review/config.toml"
     rc=0
     pg-review job doctor --config-only > bad.txt 2>&1 || rc=$?
@@ -241,7 +245,7 @@ pkgs.runCommand "pg-review-module"
       and (.query[] | select(.name == "agent-workflow-workspace-daily") | .metadata == {schedule_id: "agent-workflow-workspace-daily", lens: "agent-workflow", scope: "workspace", window: "24h"} and .trigger.kind == "calendar" and .trigger.on_missed == "next-slot")
       and ([.role[].binds[]] - [.query[].emits[]] == [])
     ' router.json >/dev/null || { echo "unexpected router stanzas:" >&2; cat router.json >&2; exit 1; }
-    grep -q '{{index .Item.Metadata "schedule_id"}}' ${sampleOpts.routerConfigFile} \
+    grep -qF '{{index .Item.Metadata \"schedule_id\"}}' ${sampleOpts.routerConfigFile} \
       || { echo "FAIL: argv template for schedule_id missing" >&2; cat ${sampleOpts.routerConfigFile} >&2; exit 1; }
 
     touch $out

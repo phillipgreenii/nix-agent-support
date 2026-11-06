@@ -111,8 +111,10 @@ let
   # Gates and retry keys are set explicitly (no defaults assumed).
   # `review-run` blocks on every gate (a paused router or low disk holds it);
   # `review-maintain` is non-blocking on the low-disk gate.
-  roles = [
-    {
+  # `review-run` binds an event only schedules emit; with no schedule it is
+  # omitted (the router rejects a role that binds an event no query emits).
+  roles =
+    lib.optional (cfg.schedules != { }) {
       name = "review-run";
       enabled = true;
       binds = [ "review.run" ];
@@ -129,19 +131,20 @@ let
         ''{{index .Item.Metadata "window"}}''
       ];
     }
-    {
-      name = "review-maintain";
-      enabled = true;
-      binds = [ "review.maintain" ];
-      inherit handler;
-      non_blocking_gates = [ "LOW_DISK_USAGE" ];
-      max_dispatch_retries = 0;
-      config.command.argv = [
-        adapter
-        "maintain"
-      ];
-    }
-  ];
+    ++ [
+      {
+        name = "review-maintain";
+        enabled = true;
+        binds = [ "review.maintain" ];
+        inherit handler;
+        non_blocking_gates = [ "LOW_DISK_USAGE" ];
+        max_dispatch_retries = 0;
+        config.command.argv = [
+          adapter
+          "maintain"
+        ];
+      }
+    ];
 
   queries = lib.mapAttrsToList scheduleQuery cfg.schedules ++ [ maintainQuery ];
 
