@@ -281,6 +281,10 @@ type ProduceReport struct {
 	Blocked      map[string]string
 	Halted       map[string]string
 	LogRejected  map[string]int
+	// Calendar carries, per calendar-triggered source evaluated this pass, what
+	// the slot evaluation decided (see CalendarReport). It exposes the counts
+	// and events a caller logs; this package does not log them.
+	Calendar map[string]CalendarReport
 }
 
 // FailureInfo is one source's pull-source failure-backoff state at the end
@@ -324,6 +328,7 @@ func newProduceReport() ProduceReport {
 		Blocked:      make(map[string]string),
 		Halted:       make(map[string]string),
 		LogRejected:  make(map[string]int),
+		Calendar:     make(map[string]CalendarReport),
 	}
 }
 
@@ -345,9 +350,27 @@ func newProduceReport() ProduceReport {
 //     leaves Every at zero); a config-declared query's Every is already
 //     resolved to cfg.PollInterval by the config registry's buildTrigger, so a
 //     per-source Every > 0 always wins over this fallback when both are set.
+//
+// The remaining fields serve calendar-triggered sources (see calendar.go);
+// all are optional and a zero Cadence behaves as a first start for them:
+//
+//   - Slots is the per-query slot record, mutated in place by produce and
+//     persisted through Save after every change.
+//   - FailedSlots remembers, in memory, a slot whose enqueue failed so a later
+//     pass retries it.
+//   - ProcessStart and Asleep decide whether a slot was missed (the router was
+//     not running, or the host asleep, at the slot).
+//   - Now overrides the clock ProduceWithCadence uses (nil means time.Now).
 type Cadence struct {
 	LastTick     map[string]time.Time
 	PollInterval time.Duration
+
+	Slots        map[string]SlotRecord
+	FailedSlots  map[string]time.Time
+	ProcessStart time.Time
+	Asleep       func(time.Time) bool
+	Save         func(map[string]SlotRecord) error
+	Now          func() time.Time
 }
 
 // Produce fires the query set against the queue for one tick: it runs every
@@ -383,7 +406,11 @@ func ProduceWithCadence(ctx context.Context, env query.Env, sources query.Source
 	for _, opt := range opts {
 		opt(&po)
 	}
-	return produce(ctx, env, sources, q, declared, cad, realSleep, time.Now, po.obs, po.activityObs)
+	clock := time.Now
+	if cad.Now != nil {
+		clock = cad.Now
+	}
+	return produce(ctx, env, sources, q, declared, cad, realSleep, clock, po.obs, po.activityObs)
 }
 
 // sleepFunc waits for d, honoring ctx cancellation — the seam produce's
@@ -441,6 +468,12 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	rpt := newProduceReport()
 	fired := make([]bool, len(sources))
 	nowT := now()
+	if cad.Slots == nil {
+		cad.Slots = make(map[string]SlotRecord)
+	}
+	if cad.FailedSlots == nil {
+		cad.FailedSlots = make(map[string]time.Time)
+	}
 	// gateBlocked is the Gate Registry's emitter check (internal/eventqueue/
 	// gate.go): a source an active gate blocks is NOT polled this pass. The timer
 	// emitter is exempt from every gate ("you can't stop time moving forward");
@@ -479,6 +512,15 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if _, isThreshold := query.Threshold(t); isThreshold {
 			continue
 		}
+		if ct, isCal := query.Calendar(t); isCal {
+			// A calendar timer is evaluated against its slots, not a period.
+			// Gates and the log-halt never block a timer, so no check here.
+			if err := calendarPass(ctx, env, s, ct, q, declared, sleep, obs, activityObs, &rpt, now, nowT, cad); err != nil {
+				return rpt, err
+			}
+			fired[i] = true
+			continue
+		}
 		if !cadenceDue(nowT, s.Name, t, cad) {
 			continue
 		}
@@ -488,7 +530,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 			}
 			continue
 		}
-		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
+		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now, nil); err != nil {
 			return rpt, err
 		}
 		fired[i] = true
@@ -520,7 +562,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 					}
 					continue
 				}
-				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
+				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now, nil); err != nil {
 					return rpt, err
 				}
 				fired[i] = true
@@ -578,7 +620,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // REJECTED — counted in rpt.Rejected[s.Name], never enqueued — rather than
 // entering the durable queue only to wait, unconsumed, until it expires. A
 // rejection is per-event and does not abort the source's other events.
-func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, activityObs SourceActivityObserver, rpt *ProduceReport, now func() time.Time) error {
+func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, activityObs SourceActivityObserver, rpt *ProduceReport, now func() time.Time, slot *query.Slot) error {
 	rpt.LastTick[s.Name] = now()
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
@@ -596,7 +638,11 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			obs.OnSourceAttemptStart(s.Name)
 		}
 		attemptStart := now()
-		evts, err = s.Query.Run(ctx, env)
+		if sr, ok := s.Query.(query.SlotRunner); ok && slot != nil {
+			evts, err = sr.RunSlot(ctx, env, *slot)
+		} else {
+			evts, err = s.Query.Run(ctx, env)
+		}
 		elapsed := now().Sub(attemptStart)
 		// A failed attempt while the daemon's own context is cancelled is the
 		// router stopping its own producer tick (restart/shutdown), not the

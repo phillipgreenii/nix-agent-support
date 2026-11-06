@@ -19,6 +19,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
+	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
@@ -333,6 +334,15 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// Persist each source's last success under the state dir so a restart
 		// continues the age instead of re-seeding it (bead pg2-yagdb2).
 		metricsOpts = append(metricsOpts, metrics.WithSourceStateFile(filepath.Join(cfg.LogDir, metrics.SourceStateFileName)))
+		// Calendar slot state lives beside it, so each calendar slot yields at
+		// most one tick across restarts. The sleep sampler runs in its own
+		// goroutine, independent of the producer loop, for the missed-slot rule.
+		// run-until-idle sets neither: with no state dir it behaves as a first
+		// start and nothing calendar-triggered fires.
+		o.CalendarStatePath = filepath.Join(cfg.LogDir, calstate.FileName)
+		o.ProcessStart = time.Now()
+		o.Sampler = calstate.NewSampler(cfg.PollInterval, calstate.RealSource())
+		go o.Sampler.Run(ctx)
 	}
 	// pg_router_busy{kind,name} (bead pg2-8ij5o): a source is busy while a fetch of
 	// it is in flight, read from the same activityObs the status reply's sources[]

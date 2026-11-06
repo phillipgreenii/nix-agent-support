@@ -42,6 +42,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
@@ -176,6 +177,62 @@ type Orchestrator struct {
 	// o.Registry/o.resourceLimitObs, never o.lastTick — see
 	// TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer.
 	lastTick map[string]time.Time
+
+	// CalendarStatePath is the file (calstate.FileName under the log dir) that
+	// remembers each calendar query's last handled slot across restarts. Empty
+	// means no state is read or written: the Orchestrator behaves as a first
+	// start (nothing fires for a calendar query until its next slot).
+	CalendarStatePath string
+	// Sampler detects host sleep for the missed-slot rule; nil means the host is
+	// never considered asleep. cmd/pg-router runs it in its own goroutine.
+	Sampler *calstate.Sampler
+	// ProcessStart is when this router process started: a slot earlier than it
+	// was missed (the router was not running). Zero disables that check.
+	ProcessStart time.Time
+
+	calSlots  map[string]discover.SlotRecord
+	calFailed map[string]time.Time
+	calInit   bool
+	// calNow is the producer-pass clock for tests (nil means time.Now); it is
+	// separate from now because existing tests drive now with a manual clock.
+	calNow func() time.Time
+}
+
+// initCalendar loads the slot state once, at the first producer pass: a
+// truncated or unparsable file counts as no state (warned), and entries for
+// queries that are no longer configured as calendar queries (removed, renamed,
+// disabled or selector-excluded) are pruned with a log line. The clamp of a
+// remembered slot in the future is applied by the pass itself (at start and at
+// runtime alike).
+func (o *Orchestrator) initCalendar() {
+	if o.calInit {
+		return
+	}
+	o.calInit = true
+	o.calSlots = make(map[string]discover.SlotRecord)
+	o.calFailed = make(map[string]time.Time)
+	if o.CalendarStatePath == "" {
+		return
+	}
+	recs, err := calstate.Read(o.CalendarStatePath)
+	if err != nil {
+		slog.Warn("calendar state unusable; treating as no state", "err", err)
+	}
+	configured := map[string]bool{}
+	for _, s := range o.Cfg.Queries {
+		if query.IsCalendar(s.Query.Trigger()) {
+			configured[s.Name] = true
+		}
+	}
+	if removed := calstate.Prune(recs, configured); len(removed) > 0 {
+		slog.Info("calendar state pruned for queries no longer configured", "queries", removed)
+		if err := calstate.Write(o.CalendarStatePath, recs); err != nil {
+			slog.Warn("calendar state write failed", "err", err)
+		}
+	}
+	for k, v := range recs {
+		o.calSlots[k] = v
+	}
 }
 
 func (o *Orchestrator) commander() query.Commander {
@@ -218,8 +275,31 @@ func (o *Orchestrator) queryEnv() query.Env {
 // NEXT tick's cadence decision sees it — a source cad gated OFF this pass
 // keeps its prior lastTick entry untouched.
 func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) (discover.ProduceReport, error) {
-	rpt, err := discover.ProduceWithCadence(ctx, o.queryEnv(), o.Cfg.Queries, q, o.Bindings,
-		discover.Cadence{LastTick: o.lastTick, PollInterval: o.Cfg.PollInterval},
+	o.initCalendar()
+	cad := discover.Cadence{
+		LastTick: o.lastTick, PollInterval: o.Cfg.PollInterval,
+		Slots: o.calSlots, FailedSlots: o.calFailed, ProcessStart: o.ProcessStart, Now: o.calNow,
+	}
+	if o.CalendarStatePath != "" {
+		path := o.CalendarStatePath
+		cad.Save = func(m map[string]discover.SlotRecord) error { return calstate.Write(path, m) }
+	}
+	if o.Sampler != nil {
+		// A fresh reading first, so a wake the sampler's own ticker has not yet
+		// seen is already a recorded span when the slot is judged.
+		o.Sampler.Sample()
+		cad.Asleep = o.Sampler.AsleepAt
+		var oldest time.Time
+		for _, r := range o.calSlots {
+			if oldest.IsZero() || r.LastSlot.Before(oldest) {
+				oldest = r.LastSlot
+			}
+		}
+		if !oldest.IsZero() {
+			o.Sampler.Drop(oldest)
+		}
+	}
+	rpt, err := discover.ProduceWithCadence(ctx, o.queryEnv(), o.Cfg.Queries, q, o.Bindings, cad,
 		discover.WithSourceFailureObserver(o.SourceFailureObserver),
 		discover.WithSourceActivityObserver(o.SourceActivityObserver))
 	for name, t := range rpt.LastTick {
