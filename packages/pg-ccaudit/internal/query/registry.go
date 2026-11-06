@@ -1374,6 +1374,32 @@ WHERE (a.text LIKE 'Correction:%'
 ORDER BY a.path, a.seq`,
 		},
 		{
+			Name:    "skill-calls",
+			Version: 1,
+			Scoped:  true,
+			Doc:     "How often each skill was invoked through the Skill tool.",
+			Notes: "One row per skill: skill is the Skill tool call's input field `skill` " +
+				"(tool_calls.input_json), calls is how many Skill tool calls named it, " +
+				"sessions is how many distinct sessions made at least one, first_ts and " +
+				"last_ts bound those calls. A Skill call whose input has no skill name is " +
+				"counted under the empty name rather than dropped. Windowed on the call's " +
+				"own event timestamp (--since inclusive, --until exclusive); accepts " +
+				"--cwd-prefix / --exclude-cwd-prefix with the session first-cwd semantics.",
+			Window: true,
+			SQL: `
+SELECT COALESCE(json_extract(c.input_json, '$.skill'), '') AS skill,
+       COUNT(*)                                            AS calls,
+       COUNT(DISTINCT e.session_id)                        AS sessions,
+       MIN(e.ts)                                           AS first_ts,
+       MAX(e.ts)                                           AS last_ts
+FROM tool_calls c
+JOIN events e ON e.path = c.path AND e.seq = c.seq
+WHERE c.tool_name = 'Skill'
+  AND ` + scoped("e") + `
+GROUP BY skill
+ORDER BY calls DESC, skill`,
+		},
+		{
 			Name:    "coverage",
 			Version: 1,
 			Doc:     "Indexed coverage of the corpus — the proof behind every other number.",

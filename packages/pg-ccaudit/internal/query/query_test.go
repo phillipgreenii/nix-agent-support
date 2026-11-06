@@ -425,6 +425,8 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		"first-seen":        1,
 		"last-seen":         1,
 		"coverage":          1,
+		// The Skill-tool call census: which skills are used, scoped like the lens queries.
+		"skill-calls": 1,
 		// pg2-oisvb: the mistake census. Tier 1's eight structural detectors plus the
 		// per-signature runaway discount the ranked report applies to every finding.
 		"concentration-by-signature": 1,

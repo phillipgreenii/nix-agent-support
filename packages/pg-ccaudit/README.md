@@ -153,7 +153,7 @@ version and the window, so a pasted result is self-describing.
 
 ### Session scope: `--cwd-prefix` / `--exclude-cwd-prefix`
 
-Seven queries (`error-rate-by-tool`, `top-signatures`, `cost-by-signature`,
+Seven lens queries (`error-rate-by-tool`, `top-signatures`, `cost-by-signature`,
 `retry-chains`, `denied-tool-calls`, `interruptions`, `hook-refusals-in-body`)
 also take a repeatable `--cwd-prefix DIR` and a repeatable
 `--exclude-cwd-prefix DIR`. Passing either flag to any other query is a usage
@@ -179,6 +179,17 @@ with a synthetic transcript). Whether Claude Code itself writes the worktree pat
 rather than the main checkout is not something this repository can prove; check it
 by hand against your own index with one query and `--cwd-prefix`, confirming the
 row count is at most the unfiltered count.
+
+### `skill-calls`: which skills are used
+
+`pg-ccaudit query skill-calls [--since T] [--until T] [--cwd-prefix DIR ...] [--exclude-cwd-prefix DIR ...]`
+counts Skill tool calls, one row per skill. It is the eighth query that takes the
+scope flags, with the semantics above. The skill name is the `skill` field of the
+Skill tool call's input (`tool_calls.input_json`, where `tool_name = 'Skill'`);
+a call with no skill name is counted under the empty name. Columns: `skill`,
+`calls` (Skill tool calls naming it), `sessions` (distinct sessions that made at
+least one), `first_ts`, `last_ts`. Rows are ordered by `calls` descending, then
+name. The window applies to the call's own event timestamp.
 
 ### Two things worth knowing before you quote a number
 

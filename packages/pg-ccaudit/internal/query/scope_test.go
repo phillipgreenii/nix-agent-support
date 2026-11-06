@@ -16,7 +16,7 @@ import (
 	"github.com/phillipgreenii/pg-ccaudit/internal/store"
 )
 
-// The seven queries the review lenses use, the only ones that accept the scope flags.
+// The seven queries the review lenses use, plus skill-calls: the only ones that accept the scope flags.
 var scopedQueryNames = []string{
 	"error-rate-by-tool", "top-signatures", "cost-by-signature", "retry-chains",
 	"denied-tool-calls", "interruptions", "hook-refusals-in-body",
@@ -200,6 +200,7 @@ func TestScopeFlagsRejectedOutsideTheSevenQueries(t *testing.T) {
 		for _, s := range scopedQueryNames {
 			want = want || s == n.Name
 		}
+		want = want || n.Name == "skill-calls"
 		if n.Scoped != want {
 			t.Errorf("query %s Scoped = %v, want %v", n.Name, n.Scoped, want)
 		}
