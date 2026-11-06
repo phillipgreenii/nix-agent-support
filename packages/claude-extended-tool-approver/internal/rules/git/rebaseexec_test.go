@@ -4,10 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // `git rebase --exec <cmd>` / `-x <cmd>` run a shell command after each rebased
@@ -28,40 +29,26 @@ var rebaseExecSpellings = [][]string{
 	{"-ix", "%M"},   // cluster with -i (needs a sequence editor)
 }
 
-func runGit(t *testing.T, dir string, env []string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	// Drop every inherited GIT_* variable: under a commit hook GIT_DIR / GIT_INDEX_FILE
-	// point at the OUTER repository and would redirect this fixture into it.
-	var base []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "GIT_") {
-			base = append(base, kv)
-		}
-	}
-	cmd.Env = append(base,
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-		"GIT_SEQUENCE_EDITOR=:", "GIT_EDITOR=:")
-	cmd.Env = append(cmd.Env, env...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
-
 func TestGit_RebaseExec_RealGitRunsTheCommand(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
 	for _, sp := range rebaseExecSpellings {
 		t.Run(sp[0], func(t *testing.T) {
-			dir := t.TempDir()
-			marker := filepath.Join(dir, "marker")
-			runGit(t, dir, nil, "init", "-q", "-b", "main")
-			runGit(t, dir, nil, "commit", "-q", "--allow-empty", "-m", "one")
-			runGit(t, dir, nil, "commit", "-q", "--allow-empty", "-m", "two")
+			// Hermetic x/gittest fixture; the sequence editor is a no-op so the
+			// -i cluster spelling does not wait on an interactive editor.
+			repo := gittest.New(t, gitfixture.RepoOptions{})
+			for _, kv := range [][]string{{"sequence.editor", ":"}, {"core.editor", ":"}} {
+				if out, err := repo.Client.Run(t.Context(), "config", kv[0], kv[1]); err != nil {
+					t.Fatalf("git config %s: %v\n%s", kv[0], err, out)
+				}
+			}
+			for _, msg := range []string{"one", "two"} {
+				if _, err := repo.Commit(t.Context(), msg, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			marker := filepath.Join(t.TempDir(), "marker")
 			cmdStr := "touch " + marker
 			args := []string{"rebase"}
 			for _, a := range sp {
@@ -78,7 +65,9 @@ func TestGit_RebaseExec_RealGitRunsTheCommand(t *testing.T) {
 				args = append(args, a)
 			}
 			args = append(args, "HEAD~1")
-			runGit(t, dir, nil, args...)
+			if out, err := repo.Client.Run(t.Context(), args...); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
 			if _, err := os.Stat(marker); err != nil {
 				t.Fatalf("git %v did not run the exec command: %v", args, err)
 			}
