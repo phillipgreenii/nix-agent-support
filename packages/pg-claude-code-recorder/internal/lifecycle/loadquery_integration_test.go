@@ -4,13 +4,9 @@ package lifecycle
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 )
-
-// scanRF matches a plan row that scans records (r) or fields (f).
-var scanRF = regexp.MustCompile(`^SCAN (r|f|records|fields)\b`)
 
 // planOf runs EXPLAIN QUERY PLAN on the fixture's database and returns the
 // detail column of every plan row.

@@ -54,8 +54,6 @@ const (
 	cCount
 )
 
-var oCatName = [cCount]string{"quietCross", "quietOld", "heldOffset", "heldBehind", "heldTail", "heldUnparsed", "heldTorn", "heldRestore", "settledReal", "settledDirect", "live", "removedOld", "removeCross", "quietRecent"}
-
 // oLayout is the number of Conversations of each category: 200 in all, or a
 // third of that for the seeded scripts.
 func oLayout(small bool) [cCount]int {
