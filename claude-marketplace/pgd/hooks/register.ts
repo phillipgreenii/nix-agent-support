@@ -40,6 +40,7 @@ export const register: Register = on => {
   registerUsageHooks(on)
   registerModelEffortHooks(on)
   registerGitHeadHooks(on)
+  registerBandHooks(on)
   registerAlertHooks(on)
   on('session.start', async ($, e, next) => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
