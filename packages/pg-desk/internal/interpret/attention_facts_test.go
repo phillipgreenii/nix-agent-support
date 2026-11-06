@@ -23,17 +23,17 @@ func TestDerivePRAttentionFacts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !f.Open || f.Draft || f.CIState != "failure" || f.CIReviewState != "failure" || f.Conflict || f.UnresolvedThread {
+		if !f.Open || f.Draft || f.CIState != "failure" {
 			t.Errorf("facts = %+v", f)
 		}
 	})
-	t.Run("review_exempt_checks softens the review state but never the display state", func(t *testing.T) {
+	t.Run("review_exempt_checks never softens the display state", func(t *testing.T) {
 		f, err := DerivePRAttentionFacts(facts(open, failedRun), &config.Config{ReviewExemptChecks: []string{"lint"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if f.CIState != "failure" || f.CIReviewState != "success" {
-			t.Errorf("CIState=%s CIReviewState=%s, want failure/success", f.CIState, f.CIReviewState)
+		if f.CIState != "failure" {
+			t.Errorf("CIState=%s, want failure (never softened by review_exempt_checks)", f.CIState)
 		}
 	})
 	t.Run("check_interpreters exclusions apply to both", func(t *testing.T) {
@@ -46,19 +46,9 @@ func TestDerivePRAttentionFacts(t *testing.T) {
 			t.Errorf("CIState = %s, want none after the exclusion", f.CIState)
 		}
 	})
-	t.Run("conflict, thread and draft", func(t *testing.T) {
-		show := `{"state":"open","draft":true,"merge_state_status":"DIRTY","comments":[{"id":"c","thread_id":"t","resolved":false}]}`
-		f, err := DerivePRAttentionFacts(facts(show, ""), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !f.Draft || !f.Conflict || !f.UnresolvedThread || f.CIState != "none" {
-			t.Errorf("facts = %+v", f)
-		}
-	})
-	t.Run("a resolved thread is not unresolved", func(t *testing.T) {
-		f, err := DerivePRAttentionFacts(facts(`{"state":"open","comments":[{"id":"c","thread_id":"t","resolved":true}]}`, ""), nil)
-		if err != nil || f.UnresolvedThread {
+	t.Run("draft", func(t *testing.T) {
+		f, err := DerivePRAttentionFacts(facts(`{"state":"open","draft":true}`, ""), nil)
+		if err != nil || !f.Draft || f.CIState != "none" {
 			t.Errorf("facts = %+v err=%v", f, err)
 		}
 	})

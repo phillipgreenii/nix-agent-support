@@ -9,14 +9,14 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 )
 
-// PRAttentionFacts is the narrow set of facts the attention evaluator's own-PR
-// rules need that the stored interpretation row does not carry: whether the
-// PR is open and non-draft, whether it has a merge conflict or an unresolved
-// review thread, and the CI rollup. They are derived by the SAME helpers
-// Interpret uses (computeCIRollup, hasConflict, hasUnresolvedThread), so the
-// attention feed, the dashboard panels and `pg-desk links` cannot disagree
-// about what is failing or conflicting (docs/behavior/pg-desk/attention.md,
-// "The evaluator").
+// PRAttentionFacts is the narrow set of facts the attention evaluator's
+// pr.own-ci-failing rule needs that the stored interpretation row does not
+// carry: whether the PR is open and non-draft, and the raw CI rollup. They are
+// derived by the SAME helper Interpret uses (computeCIRollup), so the attention
+// feed, the dashboard panels and `pg-desk links` cannot disagree about what is
+// failing. Who owes the next step is NOT here: it is the stored waiting-on
+// decision (docs/behavior/pg-desk/interpret.md, "Waiting-on: the single
+// decision").
 type PRAttentionFacts struct {
 	Open  bool
 	Draft bool
@@ -24,11 +24,6 @@ type PRAttentionFacts struct {
 	// or failure) after the check_interpreters exclusions. It is NEVER softened
 	// by review_exempt_checks: that softening only decides the panels.
 	CIState string
-	// CIReviewState is the rollup state the owner-side panel decisions
-	// consult (CIState with the review_exempt_checks softening applied).
-	CIReviewState    string
-	Conflict         bool
-	UnresolvedThread bool
 }
 
 // DerivePRAttentionFacts decodes a stored entity's facts JSON (a gather.Facts
@@ -55,11 +50,8 @@ func DerivePRAttentionFacts(factsJSON string, cfg *config.Config) (PRAttentionFa
 	}
 	ci := computeCIRollup(facts.CI, interps, pr.HeadSHA, exempt, pr.ChecksRollup)
 	return PRAttentionFacts{
-		Open:             pr.State == "open",
-		Draft:            pr.Draft,
-		CIState:          ci.State,
-		CIReviewState:    ci.ReviewState(),
-		Conflict:         pr.hasConflict(),
-		UnresolvedThread: hasUnresolvedThread(pr.allComments()),
+		Open:    pr.State == "open",
+		Draft:   pr.Draft,
+		CIState: ci.State,
 	}, nil
 }

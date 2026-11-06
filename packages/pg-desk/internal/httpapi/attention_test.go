@@ -36,7 +36,7 @@ func seedAttentionPR(t *testing.T, s *store.Store, id string) {
 	}
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: attentionRepo, EntityType: "pr", EntityID: id, Ownership: "team", Panel: PanelTeamAwaitingMe,
-		Approvals: "{}", MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]",
+		Approvals: `{"waiting_on":"me","reason":"review-requested"}`, MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]",
 		AsOf: "2026-10-06T11:00:00Z",
 	})
 }

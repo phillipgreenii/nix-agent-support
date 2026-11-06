@@ -48,9 +48,22 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 		if p.panel == "none" {
 			continue
 		}
+		// The stored waiting-on decision a row of that panel carries.
+		approvals := "{}"
+		switch p.panel {
+		case interpret.PanelTeamAwaitingMe:
+			approvals = `{"waiting_on":"me","reason":"review-requested"}`
+		case interpret.PanelMineAwaitingMe:
+			approvals = `{"waiting_on":"me","reason":"ci-failing"}`
+			if strings.Contains(p.facts, "CONFLICTING") {
+				// Raw CI fails (review_exempt_checks softens it for the
+				// decision), so the one cause is the conflict.
+				approvals = `{"waiting_on":"me","reason":"conflict"}`
+			}
+		}
 		if err := st.UpsertInterpretation(store.Interpretation{
 			Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Ownership: p.ownership, Panel: p.panel,
-			Approvals: "{}", MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
+			Approvals: approvals, MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -293,7 +306,7 @@ func TestAttentionExplain(t *testing.T) {
 	}
 
 	d = run("pr:acme/api#2")
-	if d.Listed || !d.Held || len(d.Candidates) != 0 || len(d.NotRaised) != 7 {
+	if d.Listed || !d.Held || len(d.Candidates) != 0 || len(d.NotRaised) != 6 {
 		t.Errorf("an unlisted entity must say which rules did not apply: %+v", d)
 	}
 	for _, n := range d.NotRaised {

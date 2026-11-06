@@ -73,9 +73,17 @@ func fixtureStore(t *testing.T, prs ...fixturePR) string {
 		if err := st.UpsertEntity(store.Entity{Repo: fixtureRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
+		// The stored waiting-on decision a row of that panel carries.
+		approvals := "{}"
+		switch p.panel {
+		case interpret.PanelTeamAwaitingMe:
+			approvals = `{"waiting_on":"me","reason":"review-requested"}`
+		case interpret.PanelMineAwaitingMe:
+			approvals = `{"waiting_on":"me","reason":"ci-failing"}`
+		}
 		if err := st.UpsertInterpretation(store.Interpretation{
 			Repo: fixtureRepo, EntityType: "pr", EntityID: p.id(), Ownership: p.ownership, Panel: p.panel,
-			Approvals: "{}", MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
+			Approvals: approvals, MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
 		}); err != nil {
 			t.Fatal(err)
 		}

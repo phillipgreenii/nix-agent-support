@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,14 @@ type prSpec struct {
 	thread   bool   // an unresolved review thread
 	ci       string // "" (none), "failure", "pending", "success"
 	noFacts  bool
+	// noDecision stores a row from before the waiting-on decision was stored.
+	noDecision bool
+
+	// waitingOn and reason, when set, are the stored waiting-on decision; when
+	// empty, fixtureDecision derives them from the panel and the flags above,
+	// the way a stored row of that panel would carry them.
+	waitingOn interpret.WaitingOn
+	reason    string
 
 	// branch and base are the PR's head and base branches (the stack source
 	// of the dependency data reads them); empty omits the field.
@@ -82,8 +91,50 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
+// fixtureDecision is the stored (waiting-on, reason) a fixture row carries: the
+// explicit spec fields, else a pair consistent with its panel and flags.
+func fixtureDecision(p prSpec) (interpret.WaitingOn, string) {
+	if p.waitingOn != "" {
+		return p.waitingOn, p.reason
+	}
+	switch p.panel {
+	case interpret.PanelTeamAwaitingMe:
+		if p.approvals.SelfReviewInProgress && !slices.Contains(p.match, interpret.MatchReasonReviewRequested) {
+			return interpret.WaitingOnMe, interpret.ReasonActingReviewer
+		}
+		return interpret.WaitingOnMe, interpret.ReasonReviewRequested
+	case interpret.PanelTeamAwaitingOwner:
+		return interpret.WaitingOnAuthor, interpret.ReasonUnansweredThread
+	case interpret.PanelTeamAwaitingTeam:
+		return interpret.WaitingOnOthers, interpret.ReasonAwaitingReview
+	case interpret.PanelMineAwaitingTeam:
+		return interpret.WaitingOnOthers, interpret.ReasonAwaitingReview
+	case interpret.PanelMineAwaitingMe:
+		switch {
+		case p.ci != "success" && p.ci != "pending":
+			return interpret.WaitingOnMe, interpret.ReasonCIFailing
+		case p.approvals.BotVerdict == interpret.BotVerdictDisapproved:
+			return interpret.WaitingOnMe, interpret.ReasonBotDisapproved
+		case p.approvals.HumanChangesRequested:
+			return interpret.WaitingOnMe, interpret.ReasonChangesRequested
+		case p.conflict:
+			return interpret.WaitingOnMe, interpret.ReasonConflict
+		case p.thread:
+			return interpret.WaitingOnMe, interpret.ReasonOpenThread
+		case p.approvals.HumanApproved:
+			return interpret.WaitingOnMe, interpret.ReasonApprovedReady
+		}
+		return interpret.WaitingOnMe, interpret.ReasonOwnDraft
+	}
+	return interpret.WaitingOnNone, ""
+}
+
 func put(t *testing.T, st *store.Store, p prSpec) {
 	t.Helper()
+	p.approvals.WaitingOn, p.approvals.Reason = "", ""
+	if w, r := fixtureDecision(p); !p.noDecision {
+		p.approvals.WaitingOn, p.approvals.Reason = string(w), r
+	}
 	if !p.noFacts {
 		if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: p.id(), Facts: p.facts(), AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
@@ -151,8 +202,8 @@ func TestReviewRequestedRule(t *testing.T) {
 		t.Error("a degraded interpretation must not raise (INV-ATTNEVAL-6)")
 	}
 	why := res.Traces[Ref("pr", pid(2))].NotRaised[KindReviewRequested]
-	if !strings.Contains(why, "team_awaiting_me") {
-		t.Errorf("explain reason for a non-applicable rule = %q, want it to name the panel", why)
+	if !strings.Contains(why, "waiting on others") {
+		t.Errorf("explain reason for a non-applicable rule = %q, want it to name who the PR waits on", why)
 	}
 }
 
@@ -268,7 +319,11 @@ func TestOwnNeedsActionRule(t *testing.T) {
 		{"CI failure alone is not this rule's", mine(func(p *prSpec) { p.ci = "failure" }), "", ""},
 		{"a none rollup alone is not this rule's", mine(func(p *prSpec) { p.ci = "" }), "", ""},
 		{"approved but CI failing is CI-only", mine(func(p *prSpec) { p.approvals.HumanApproved = true; p.ci = "failure" }), "", ""},
-		{"CI failure plus a conflict raises for the conflict", mine(func(p *prSpec) { p.ci = "failure"; p.conflict = true }), SeverityMedium, "merge conflict"},
+		{"CI failure plus a conflict is one cause, the CI one, which is not this rule's", mine(func(p *prSpec) { p.ci = "failure"; p.conflict = true }), "", ""},
+		{"a conflict whose CI failure review_exempt_checks softens raises for the conflict", mine(func(p *prSpec) {
+			p.ci = "failure"
+			p.waitingOn, p.reason = interpret.WaitingOnMe, interpret.ReasonConflict
+		}), SeverityMedium, "merge conflict"},
 		{"not in the panel", mine(func(p *prSpec) { p.panel = interpret.PanelMineAwaitingTeam; p.conflict = true }), "", ""},
 		{"team PR", mine(func(p *prSpec) { p.ownership = "team"; p.conflict = true }), "", ""},
 		{"degraded interpretation", mine(func(p *prSpec) { p.degraded = true; p.conflict = true }), "", ""},
@@ -302,7 +357,12 @@ func TestOwnNeedsActionRule(t *testing.T) {
 
 func TestOneItemPerEntityAndPrimaryReason(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	put(t, st, prSpec{number: 1, ownership: "mine", panel: interpret.PanelMineAwaitingMe, ci: "failure", conflict: true})
+	// The raw CI failure is exempt-softened for the panels, so the decision's
+	// one cause is the conflict while pr.own-ci-failing still sees the failure.
+	put(t, st, prSpec{
+		number: 1, ownership: "mine", panel: interpret.PanelMineAwaitingMe, ci: "failure", conflict: true,
+		waitingOn: interpret.WaitingOnMe, reason: interpret.ReasonConflict,
+	})
 
 	res := evaluate(t, st, baseConfig())
 	if len(res.Items) != 1 {
@@ -352,7 +412,7 @@ func TestSuppressionChainOrderAndReasons(t *testing.T) {
 			}
 		}
 	}
-	own := prSpec{number: 1, ownership: "mine", panel: interpret.PanelMineAwaitingMe, ci: "failure", conflict: true}
+	own := prSpec{number: 1, ownership: "mine", panel: interpret.PanelMineAwaitingMe, ci: "failure", conflict: true, waitingOn: interpret.WaitingOnMe, reason: interpret.ReasonConflict}
 	team := prSpec{number: 2, ownership: "team", panel: interpret.PanelTeamAwaitingMe}
 
 	cases := []struct {

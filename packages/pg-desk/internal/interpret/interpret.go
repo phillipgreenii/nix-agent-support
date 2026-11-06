@@ -24,11 +24,11 @@
 //     point-in-time read with no history, so approvals/bot-verdict here are
 //     computed from the CURRENT pr_show read only. Since bead pg2-w7zai.2
 //     schema.PRReview carries the commit each review was submitted against,
-//     so the one staleness question the attention feed needs (did a push land
-//     after my review, with no standing teammate approval) IS answered, from
-//     the current read alone: Approvals.SelfReviewStale and
-//     Approvals.HumanApprovalStanding (review_staleness.go). The panels and
-//     the HumanApproved/SelfApproved counts still carry no staleness axis.
+//     so the one staleness question that matters (did a push land after my
+//     review) IS answered, from the current read alone: Approvals.SelfReviewStale
+//     and Approvals.HumanApprovalStanding (review_staleness.go). The waiting-on
+//     decision (waiting.go) routes a stale review of the operator's to them; the
+//     HumanApproved/SelfApproved counts still carry no staleness axis.
 //   - No agent registry, and no account-type field: this packet's pinned
 //     Config fields (Contract section) include approver_allowlist but not
 //     the full Agents/AgentConfig list agentregistry.Registry classifies
@@ -222,8 +222,8 @@ type Approvals struct {
 	SelfReviewStale bool `json:"self_review_stale,omitempty"`
 	// HumanApprovalStanding is true iff a human other than the operator has an
 	// APPROVED review made against the current head (no later-withdrawn
-	// approval, no bot). A standing teammate approval takes a stale review of
-	// the operator's off their plate (pr.review-stale-after-push).
+	// approval, no bot). Informational: it no longer silences a stale
+	// review of the operator's (waiting.go, stale-review).
 	HumanApprovalStanding bool `json:"human_approval_standing,omitempty"`
 	// SelfReviewInProgress is true iff the operator has a submitted COMMENTED
 	// review on this PR and no APPROVED review of their own standing (operator
@@ -236,6 +236,22 @@ type Approvals struct {
 	// from the stored JSON when false, so a row written before this field
 	// existed reads false.
 	SelfReviewInProgress bool `json:"self_review_in_progress,omitempty"`
+	// OtherChangesRequested is true iff a non-bot reviewer other than the
+	// operator carries a CHANGES_REQUESTED review. SelfChangesRequestedStale is
+	// true iff the operator's own standing CHANGES_REQUESTED was made against an
+	// older head (a reported commit that is not the current head; unknown is
+	// not stale). Together with HumanChangesRequested they let the waiting-on
+	// decision exempt the operator's own stale change request from the hard
+	// blocker. Omitted when false.
+	OtherChangesRequested     bool `json:"other_changes_requested,omitempty"`
+	SelfChangesRequestedStale bool `json:"self_changes_requested_stale,omitempty"`
+	// WaitingOn and Reason are the stored result of the single waiting-on
+	// decision (waiting.go): who owes the next step (me, author, others, none)
+	// and the one reason code naming why. The panel and the attention rules are
+	// derived from this pair and never recompute it. Empty on a row written
+	// before the decision was stored, until the entity is interpreted again.
+	WaitingOn string `json:"waiting_on,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // Interpretation is this package's own return type: the same set of concepts
@@ -343,7 +359,9 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	approvals := computeApprovals(pr, selfLogin, approverAllowlist, buildVerdictClassifier(verdictGenerations))
 	approvals.WaitingOnMe = computeWaitingOnMe(facts.Deps)
 	matchReasons := computeMatchReasons(pr, teamMembers, watchLabels, selfLogin)
-	panel := classifyPanel(ownership, pr, ci, approvals, matchReasons)
+	waitingOn, reason := decideWaitingOn(ownership, pr, ci, approvals, matchReasons)
+	approvals.WaitingOn, approvals.Reason = string(waitingOn), reason
+	panel := PanelFor(ownership, waitingOn)
 	readyToPromote := computeReadyToPromote(ownership, pr, ci, approvals)
 
 	return Interpretation{

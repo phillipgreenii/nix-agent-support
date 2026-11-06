@@ -2,7 +2,6 @@ package attention
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"sync"
 
@@ -74,74 +73,19 @@ const (
 	KindReviewRequested = "pr.review-requested"
 	KindOwnCIFailing    = "pr.own-ci-failing"
 	KindOwnNeedsAction  = "pr.own-needs-action"
-	// KindReviewStaleAfterPush is the "re-review after my approval" leg of the
-	// retired connector item (bead pg2-w7zai.2).
-	KindReviewStaleAfterPush = "pr.review-stale-after-push"
 )
 
 func init() {
 	Register(reviewRequested{})
 	Register(ownCIFailing{})
 	Register(ownNeedsAction{})
-	Register(reviewStaleAfterPush{})
 }
 
-// reviewStaleAfterPush raises for a team PR the operator has already reviewed
-// when new commits landed after that review and nobody else's approval of the
-// current head stands: the operator's review no longer covers what is on the
-// branch. It restores the second reason of the retired connector `pr` item
-// ("re-review after my approval"), with the same two dampeners: a merge
-// conflict takes the PR off the operator's plate, and so does a standing
-// teammate approval. A teammate approval counts only if it is a human's and
-// was made against the current head (interpret.Approvals.HumanApprovalStanding),
-// so a bot approval does not clear it; that is the one deliberate departure
-// from the retired item, which let any author's approval clear it.
-//
-// It reads the stored interpretation, so it is exactly as fresh as the last
-// hydration of the entity. The staleness answer is unknown, and the rule stays
-// quiet, for facts stored before the connector reported each review's commit.
-//
-// A PR where the operator is ALSO a requested reviewer raises
-// pr.review-requested too; the evaluator collapses both into one item.
-type reviewStaleAfterPush struct{}
-
-func (reviewStaleAfterPush) Kind() string              { return KindReviewStaleAfterPush }
-func (reviewStaleAfterPush) DefaultSeverity() Severity { return SeverityMedium }
-
-func (r reviewStaleAfterPush) Raise(v *View, p RuleSettings) ([]Candidate, string) {
-	if v.Type != "pr" {
-		return nil, "not a pr"
-	}
-	if v.Degraded {
-		return nil, "interpretation degraded"
-	}
-	if v.OwnPR() {
-		return nil, "an own pr"
-	}
-	if !v.Approvals.SelfReviewStale {
-		return nil, "no stale review of mine"
-	}
-	f, ok := v.PRFacts()
-	if !ok {
-		return nil, "stored facts unavailable"
-	}
-	switch {
-	case !f.Open:
-		return nil, "pr is not open"
-	case f.Draft:
-		return nil, "pr is a draft"
-	case f.Conflict:
-		return nil, "pr has a merge conflict"
-	case v.Approvals.HumanApprovalStanding:
-		return nil, "a teammate's approval of the current head stands"
-	}
-	return []Candidate{v.candidate(r.Kind(), p.Severity, "new commits since my review")}, ""
-}
-
-// reviewRequested raises for a team PR in panel team_awaiting_me: a live
-// review request on the operator, or a review of the operator's in progress
-// (Approvals.SelfReviewInProgress, operator ruling 2026-10-12), not
-// hard-blocked. The summary says which.
+// reviewRequested raises for a team PR the operator owes the next step on
+// (stored waiting-on is me): a live review request, a review of the operator's
+// in progress (the acting reviewer), or a review of the operator's own that a
+// push made stale. It reads the stored waiting-on and reason code and
+// recomputes nothing; the summary is a variant chosen by the reason code.
 type reviewRequested struct{}
 
 func (reviewRequested) Kind() string              { return KindReviewRequested }
@@ -154,12 +98,18 @@ func (r reviewRequested) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 	if v.Degraded {
 		return nil, "interpretation degraded"
 	}
-	if v.Panel != interpret.PanelTeamAwaitingMe {
-		return nil, "pr is not in panel team_awaiting_me"
+	if v.OwnPR() {
+		return nil, "an own pr"
+	}
+	if v.WaitingOn() != interpret.WaitingOnMe {
+		return nil, "pr is waiting on " + v.waitingOnName()
 	}
 	summary := "review requested of me"
-	if !slices.Contains(v.MatchReasons, interpret.MatchReasonReviewRequested) && v.Approvals.SelfReviewInProgress {
+	switch v.Reason() {
+	case interpret.ReasonActingReviewer:
 		summary = "my review is in progress"
+	case interpret.ReasonStaleReview:
+		summary = "new commits since my review"
 	}
 	return []Candidate{v.candidate(r.Kind(), p.Severity, summary)}, ""
 }
@@ -200,10 +150,10 @@ func (r ownCIFailing) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 	return []Candidate{c}, ""
 }
 
-// ownNeedsAction raises for an own, open PR in panel mine_awaiting_me for a
-// cause other than CI. It MUST NOT raise when CI, or a none rollup, is the
-// only cause (pr.own-ci-failing owns CI, so one cause is never reported
-// twice).
+// ownNeedsAction raises for an own, open PR the operator owes the next step on
+// (stored waiting-on is me) for a reason other than CI or the PR being an
+// unfinished draft. pr.own-ci-failing owns CI, so one cause is never reported
+// twice. It reads the stored waiting-on and reason code and recomputes nothing.
 type ownNeedsAction struct{}
 
 func (ownNeedsAction) Kind() string              { return KindOwnNeedsAction }
@@ -219,49 +169,39 @@ func (r ownNeedsAction) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 	if !v.OwnPR() {
 		return nil, "not an own pr"
 	}
-	if v.Panel != interpret.PanelMineAwaitingMe {
-		return nil, "pr is not in panel mine_awaiting_me"
+	if v.WaitingOn() != interpret.WaitingOnMe {
+		return nil, "pr is waiting on " + v.waitingOnName()
 	}
-	f, ok := v.PRFacts()
-	if !ok {
-		return nil, "stored facts unavailable"
-	}
-	if !f.Open {
-		return nil, "pr is not open"
-	}
-	var causes []string
-	if v.Approvals.HumanChangesRequested {
-		causes = append(causes, "changes requested")
-	}
-	if v.Approvals.BotVerdict == interpret.BotVerdictDisapproved {
-		causes = append(causes, "bot disapproval")
-	}
-	if f.Conflict {
-		causes = append(causes, causeConflict)
-	}
-	if f.UnresolvedThread {
-		causes = append(causes, "unresolved review thread")
-	}
+	reason := v.Reason()
+	var cause string
 	severity := p.Severity
-	if len(causes) == 0 {
+	switch reason {
+	case interpret.ReasonCIFailing:
+		return nil, "the only cause is CI"
+	case interpret.ReasonOwnDraft:
+		return nil, "an own draft is not an item"
+	case interpret.ReasonBotDisapproved:
+		cause = "bot disapproval"
+	case interpret.ReasonChangesRequested:
+		cause = "changes requested"
+	case interpret.ReasonConflict:
+		cause = causeConflict
+	case interpret.ReasonOpenThread:
+		cause = "unresolved review thread"
+	case interpret.ReasonApprovedReady:
 		// Approved and ready to land: the panel's remaining reason once
-		// nothing blocks the PR. A CI-blocked PR (failure, or a none rollup)
-		// is NOT ready, and its only cause is CI, which is not this rule's.
-		if f.CIReviewState != "success" && f.CIReviewState != "pending" {
-			return nil, "the only cause is CI"
-		}
-		if !v.Approvals.HumanApproved {
-			return nil, "no cause other than CI"
-		}
-		causes = append(causes, "approved and ready to land")
+		// nothing blocks the PR.
+		cause = "approved and ready to land"
 		if !p.SeverityConfigured {
 			severity = SeverityLow
 		}
+	default:
+		return nil, "no own-PR action for reason " + reason
 	}
-	c := v.candidate(r.Kind(), severity, "my PR needs action: "+joinReasons(causes))
-	// A merge conflict is the entity itself being broken; review feedback
-	// and readiness to land are not. Only a conflict-only candidate is
-	// self-broken, so a changes-requested PR is never held back by a stack.
-	c.SelfBroken = len(causes) == 1 && causes[0] == causeConflict
+	c := v.candidate(r.Kind(), severity, "my PR needs action: "+cause)
+	// A merge conflict is the entity itself being broken; review feedback and
+	// readiness to land are not, so a changes-requested PR is never held back
+	// by a stack.
+	c.SelfBroken = reason == interpret.ReasonConflict
 	return []Candidate{c}, ""
 }

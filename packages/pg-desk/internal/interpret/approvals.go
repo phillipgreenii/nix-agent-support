@@ -83,7 +83,7 @@ const (
 // against. It does NOT change HumanApproved, HumanApprovers, SelfApproved or
 // the panel: those still mean "a currently APPROVED review exists," so a
 // review is not invalidated by a LATER COMMIT for panel placement — only the
-// pr.review-stale-after-push attention rule reads the new fields. This
+// waiting-on decision (waiting.go) reads the operator's SelfReviewStale. This
 // function DOES collapse pr.Reviews to each author's latest decisive verdict
 // (see latestDecision inside computeApprovals), which fixes the OTHER
 // staleness axis — a review superseded by a LATER REVIEW FROM THE SAME
@@ -122,6 +122,7 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 	approvers := map[string]struct{}{}
 	selfApproved := false
 	humanChangesRequested := false
+	otherChangesRequested := false
 	disapproved := false
 	approvedByAllowlisted := false
 	for author, state := range latestDecision {
@@ -143,6 +144,9 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 				disapproved = true
 			} else if !isNonHuman {
 				humanChangesRequested = true
+				if self == "" || author != self {
+					otherChangesRequested = true
+				}
 			}
 		}
 	}
@@ -180,7 +184,34 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 		BotVerdict:            botVerdict,
 		SelfReviewStale:       selfStale,
 		HumanApprovalStanding: teammateStanding,
+
+		OtherChangesRequested:     otherChangesRequested,
+		SelfChangesRequestedStale: selfChangesRequestedStale(pr, self, latestDecision),
 	}
+}
+
+// selfChangesRequestedStale reports whether the operator's standing
+// CHANGES_REQUESTED review was made against an older head: the operator's
+// latest decisive verdict is CHANGES_REQUESTED, the head is known, and every
+// such review reports a commit other than the head (an empty commit_oid is
+// GitHub's null commit, which cannot match). An unreported commit or an
+// unknown head is unknown, and unknown is not stale: the change request stays a
+// hard blocker.
+func selfChangesRequestedStale(pr prShow, self string, latest map[string]string) bool {
+	if self == "" || pr.HeadSHA == "" || latest[self] != "CHANGES_REQUESTED" {
+		return false
+	}
+	seen := false
+	for _, r := range pr.Reviews {
+		if r.Author != self || r.State != "CHANGES_REQUESTED" {
+			continue
+		}
+		if r.CommitOID == nil || *r.CommitOID == pr.HeadSHA {
+			return false
+		}
+		seen = true
+	}
+	return seen
 }
 
 // latestDecisions collapses reviews to each author's most recent decisive
@@ -432,191 +463,16 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 }
 
 // --- panel placement -----------------------------------------------------
-// Adapted from the retired PR tool's internal/snapshot's mine_panels.go/panels.go
-// (ClassifyMine/ActNow), minus the clauses that need data Facts cannot
-// carry: WIPReadyForPromotion (WIP is a packet-8 read-time join) and any
-// staleness-dependent clause. See interpret.go's package doc for the full
-// list of documented deviations.
 
-// classifyPanel places one entity into exactly one of the five named
-// panels, or PanelNone when it is not currently in flight at all (not
-// open, a draft/reasonless team PR).
-//
-// Operator ruling, 2026-09-25 (superseding the earlier act-now/blocked
-// taxonomy this function carried through Phase 9-13): "Act Now" conflated
-// "nothing is stopping you from looking at this" with "this needs YOUR
-// action," which was misleading — a team PR already carrying two human
-// approvals and a bot approval showed as Act Now solely because it matched
-// a watch label, with nothing left for the operator to actually do.
-//
-//   - Mine: blocked (ci failing or absent -- pending CI is NOT blocked,
-//     operator ruling 2026-10-01 -- bot disapproved, a real human
-//     CHANGES_REQUESTED, or a merge conflict) resolves to mine_awaiting_me
-//     FIRST. CI is judged by ReviewState (review-exempt softening only).
-//     Once not blocked: any unresolved review-thread comment ->
-//     mine_awaiting_me (no author qualifier — any open thread is on me).
-//     Otherwise, already having a human approval -> mine_awaiting_me
-//     (nothing left to do but merge). Otherwise, an own draft ->
-//     mine_awaiting_me (operator ruling 2026-10-09: nobody else will flip
-//     it out of draft, so it is never waiting on the team). Otherwise ->
-//     mine_awaiting_team.
-//   - Team, in this order (operator rulings 2026-09-25, 2026-10-02 bead
-//     pg2-4ajtt, and 2026-10-05):
-//     1. HARD-blocked (CI failing, a real human CHANGES_REQUESTED, or a merge
-//     conflict) -> team_awaiting_owner, even if I'm a requested reviewer:
-//     fixing those is the PR owner's job. CI is judged by ReviewerState,
-//     which also sets aside a harmless cancelled run and reads "no CI
-//     data" as pending (neither is a verdict about the code).
-//     2. I'm a requested reviewer (MatchReasonReviewRequested) or the acting
-//     reviewer (Approvals.SelfReviewInProgress: a submitted COMMENTED
-//     review of mine with no standing approval of mine; operator ruling
-//     2026-10-12, pg2-tgq8o -- another human's approval does not end it; a
-//     PENDING draft does not count, ruling 2026-11-02) ->
-//     team_awaiting_me, whether or not I already approved (GitHub drops a
-//     reviewer from review_requests once they submit any review, so
-//     requested && SelfApproved is the RE-REQUEST case -- a live
-//     re-request wins over the prior approval, pg2-4ajtt). This also wins
-//     over a bot disapproval: the review bot's own footer says it does NOT
-//     satisfy CODEOWNERS and human review is still required, so its
-//     verdict is advice to a human reviewer, not a gate.
-//     3. Bot disapproved (and I'm not requested) -> team_awaiting_owner.
-//     4. A human approval exists -> teamApprovedPanel (owner or team,
-//     decided by GitHub's merge state; a BLOCKED PR whose CI rollup is a
-//     failure is the owner's, see teamApprovedPanel).
-//     5. An unresolved, non-outdated review thread the PR author has not
-//     answered (hasUnansweredReviewThread) -> team_awaiting_owner: a reviewer
-//     already looked and the author owes a response (operator ruling
-//     2026-10-12 (Phillip), bead pg2-407y2).
-//     6. Otherwise -> team_awaiting_team. This is reached only when nothing is
-//     known to be owed by the owner: the team is the default only for "nobody
-//     has reviewed yet".
-//
-// No staleness axis (package doc): "approved" here means "a currently
-// APPROVED review exists," not "a non-stale one". The stored approvals do
-// carry the per-commit staleness answer now (Approvals.SelfReviewStale), but
-// the panels deliberately do not consult it: only the
-// pr.review-stale-after-push attention rule does.
+// classifyPanel places one entity into exactly one of the five named panels,
+// or PanelNone when it is not currently in flight at all. It is a lookup over
+// (ownership, waiting-on): the single decision lives in decideWaitingOn
+// (waiting.go), and every predicate (and its operator rulings) is stated there
+// and in docs/behavior/pg-desk/interpret.md, "Panel placement" and
+// "Waiting-on: the single decision".
 func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, matchReasons []string) string {
-	if pr.State != "open" {
-		return PanelNone
-	}
-
-	conflict := pr.hasConflict()
-	botBlocked := appr.BotVerdict == BotVerdictDisapproved
-
-	if own.ActsAsMine() {
-		// CI blocks on failure (and on "none" -- no countable run at all --
-		// which the 2026-10-01 ruling left as it was for own PRs). A "pending"
-		// rollup does NOT block. ReviewState (not State) is consulted so a
-		// failure caused solely by review-exempt jobs (config
-		// review_exempt_checks) does not block either.
-		reviewCI := ci.ReviewState()
-		blocked := reviewCI != "success" && reviewCI != "pending" ||
-			botBlocked ||
-			appr.HumanChangesRequested ||
-			conflict
-		switch {
-		case blocked:
-			return PanelMineAwaitingMe
-		case hasUnresolvedThread(pr.allComments()):
-			return PanelMineAwaitingMe
-		case appr.HumanApproved:
-			return PanelMineAwaitingMe
-		case pr.Draft:
-			// Operator ruling 2026-10-09: nobody else will flip a draft out of
-			// draft, so an own draft is never "awaiting team".
-			return PanelMineAwaitingMe
-		default:
-			return PanelMineAwaitingTeam
-		}
-	}
-
-	// Team: admitted only when non-draft and carrying at least one live
-	// match reason (unchanged from the prior taxonomy).
-	if pr.Draft || len(matchReasons) == 0 {
-		return PanelNone
-	}
-
-	// Hard blockers: things only the PR owner can fix. The bot verdict is NOT
-	// one (see the doc comment). ReviewerState, not ReviewState: a harmless
-	// cancelled run and "no CI data" do not make a PR unreviewable. A human's
-	// own CHANGES_REQUESTED also lands here even if the author re-requested
-	// review (pre-existing behavior, pinned by a test). A conflict on an open
-	// PR this one is stacked on counts too: the stack cannot land (pg2-7ew2bj).
-	reviewerCI := ci.ReviewerState()
-	if reviewerCI != "success" && reviewerCI != "pending" ||
-		appr.HumanChangesRequested ||
-		conflict ||
-		pr.hasStackParentConflict() {
-		return PanelTeamAwaitingOwner
-	}
-
-	_, requested := toSet(matchReasons)[MatchReasonReviewRequested]
-	if requested || appr.SelfReviewInProgress {
-		// A live review request wins over a prior self-approval: GitHub
-		// clears the request on any submitted review, so requested &&
-		// SelfApproved means the author re-requested (pg2-4ajtt). It also wins
-		// over a bot disapproval (operator ruling 2026-10-05). An operator with
-		// a review in progress is the acting reviewer and is treated the same
-		// way (operator ruling 2026-10-12, pg2-tgq8o); SelfReviewInProgress is
-		// never true alongside a standing own approval.
-		return PanelTeamAwaitingMe
-	}
-	if botBlocked {
-		return PanelTeamAwaitingOwner
-	}
-	if appr.HumanApproved {
-		return teamApprovedPanel(pr, ci)
-	}
-	if hasUnansweredReviewThread(pr) {
-		return PanelTeamAwaitingOwner
-	}
-	return PanelTeamAwaitingTeam
-}
-
-// teamApprovedPanel places an approved, unblocked, not-requested-of-me team PR.
-// "At least one approval" is not "ready": the stored approvals carry no
-// required-approver count, so GitHub's own merge state is the readiness
-// signal (operator ruling 2026-10-05):
-//
-//   - BLOCKED -> team_awaiting_team: GitHub says merge requirements are still
-//     unmet, normally outstanding required reviews. EXCEPT while CI runs are
-//     still in flight: BLOCKED is then plausibly just the pending required
-//     check, and an approved PR waiting on CI stays with the owner (the
-//     2026-10-01 pending ruling); an "unknown" CI state (checks exist but none
-//     were counted) is treated the same way (operator ruling 2026-10-27, bead
-//     pg2-kwxcb). ALSO EXCEPT when the raw CI rollup State is
-//     "failure": the hard-blocker check already set aside every failure the
-//     reviewer-side softenings forgive (review-exempt jobs, a cancelled run),
-//     so a BLOCKED PR carrying one is plausibly blocked by that very failing
-//     required check, which is the owner's to fix, not by outstanding reviews
-//     (operator ruling 2026-10-12 (Phillip), bead pg2-407y2; PR 120050). BLOCKED
-//     with no failure and nothing in flight stays team_awaiting_team.
-//   - UNKNOWN or absent (GitHub computes it lazily; the stored snapshot can
-//     also lag, since merge state is not a change signal) -> fall back to the
-//     weaker proxy "any review request is still outstanding" -> team, else
-//     owner.
-//   - Anything else (CLEAN, HAS_HOOKS, UNSTABLE, BEHIND; DIRTY is already
-//     handled as a conflict and DRAFT never reaches here) -> team_awaiting_owner:
-//     nothing is left but the owner merging or updating the branch.
-//
-// Known gaps: BLOCKED can also come from required conversation resolution,
-// which is the author's job; it is not distinguished here.
-func teamApprovedPanel(pr prShow, ci ciRollupResult) string {
-	switch pr.MergeStateStatus {
-	case "BLOCKED":
-		if ci.RunsInFlight() || ci.State == "unknown" || ci.State == "failure" {
-			return PanelTeamAwaitingOwner
-		}
-		return PanelTeamAwaitingTeam
-	case "", "UNKNOWN":
-		if len(pr.ReviewRequests) > 0 {
-			return PanelTeamAwaitingTeam
-		}
-		return PanelTeamAwaitingOwner
-	default:
-		return PanelTeamAwaitingOwner
-	}
+	w, _ := decideWaitingOn(own, pr, ci, appr, matchReasons)
+	return PanelFor(own, w)
 }
 
 // hasUnresolvedThread reports whether any review-thread comment is still

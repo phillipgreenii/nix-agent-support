@@ -188,15 +188,13 @@ and MUST NOT use an LLM for any step below.
     softening, never the cancelled-run or no-CI-data softening, never the merge-state rule, and a
     bot disapproval still blocks.
 
-  **Known data gap:** the panels carry no staleness axis, so "approved" here means "a currently
-  `APPROVED` review exists," not "a non-stale one" — a self- or team-approval from before the PR's
-  latest push still reads as satisfied. The stored approvals DO record, separately, whether the
-  operator's own review has gone stale behind a push (`self_review_stale`) and whether a human
-  teammate's approval of the current head stands (`human_approval_standing`), derived from the
-  commit each review was submitted against; only the `pr.review-stale-after-push` attention rule
-  (see [`attention.md`](attention.md)) reads them, and they never move a PR between panels.
-  (Proposed change: "Waiting-on: the single decision", below, makes a stale review of the
-  operator's own route the PR to the operator.)
+  **Known data gap:** "approved" in the predicates above means "a currently `APPROVED` review
+  exists," not "a non-stale one": a teammate's approval from before the PR's latest push still reads
+  as satisfied. The operator's own review is the exception: the stored approvals record whether it
+  has gone stale behind a push (`self_review_stale`), derived from the commit each review was
+  submitted against, and a stale one routes a team PR to the operator (`stale-review`, "Waiting-on:
+  the single decision", below). The stored `human_approval_standing` records whether a teammate's
+  approval of the current head stands; it no longer decides anything.
 
   **Known scope gap:** pg-desk gathers no required-approver count or CODEOWNERS data. The team side
   works around that with GitHub's own merge state (above); the own-PR side has no such signal, so
@@ -212,13 +210,13 @@ and MUST NOT use an LLM for any step below.
   outstanding reviews (the failing-CI cause is distinguished, rule 4 above). Whether GitHub reports `BLOCKED` or `BEHIND` when a branch is both behind and
   unreviewed is not verified; both are best-effort.
 
-### Waiting-on: the single decision (PROPOSED, pending operator approval)
+### Waiting-on: the single decision
 
-Operator rulings (Phillip, 2026-11-02 and 2026-11-03): classification decides ownership once;
+Approved by the operator (Phillip, 2026-11-05, "approve it"). Operator rulings (Phillip, 2026-11-02 and 2026-11-03): classification decides ownership once;
 a second, single decision names who owes the next step; the panels and the attention items are
 downstream of those two and MUST NOT recompute either. This section states that decision. The
-"Panel placement" text above remains the definition of each predicate until implementation
-restates it as reason codes; where the two disagree, this section wins once approved.
+"Panel placement" text above gives the rulings behind each predicate; this section is the one
+decision, and where the two disagree, this section wins.
 
 **The decision.** Interpret MUST compute, for every open PR, a pair `(waiting_on, reason)`
 exactly once, from `ownership` and the stored facts. `waiting_on` is one of:
@@ -230,7 +228,9 @@ exactly once, from `ownership` and the stored facts. `waiting_on` is one of:
 - `none`: no one owes a step pg-desk tracks (not open, a draft team PR, or a team PR with no
   match reason).
 
-Interpret MUST store both fields on the interpretation row (an additive change). Evaluation
+Interpret MUST store both fields on the interpretation row (an additive change: they ride in the
+stored approvals document as `waiting_on` and `reason`, and a row stored before them carries
+neither until the entity is interpreted again). Evaluation
 stops at the first predicate that matches, in the order below, so one reason code names the
 PR's one cause.
 
@@ -257,18 +257,18 @@ PR's one cause.
 **Predicate order, team PR.** A PR that is not open, a draft, or has no match reason yields
 `none` before any row below.
 
-| #   | Reason code         | Matches when                                                                                                                                               | `waiting_on` |
-| --- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| 1   | `ci-failing`        | CI fails, judged with the reviewer-side softenings (cancelled runs, no CI data, review-exempt checks)                                                      | `author`     |
-| 2   | `conflict`          | a merge conflict, the PR's own or a stacked-parent conflict                                                                                                | `author`     |
-| 3   | `changes-requested` | a non-bot reviewer other than the operator carries `CHANGES_REQUESTED`, or the operator's own `CHANGES_REQUESTED` is fresh (made against the current head) | `author`     |
-| 4   | `stale-review`      | any review of the operator's own has gone stale behind a push, including a stale `CHANGES_REQUESTED`, and the PR passed rows 1 to 3 (it is approvable)     | `me`         |
-| 5   | `review-requested`  | a live review request on the operator                                                                                                                      | `me`         |
-| 6   | `acting-reviewer`   | a submitted comment-only review of the operator's own, and no approval of their own stands                                                                 | `me`         |
-| 7   | `bot-disapproved`   | the bot verdict is disapproved                                                                                                                             | `author`     |
-| 8   | `approved-*`        | a human approval exists; the merge-state rule above picks the code and the owner (`approved-merge-blocked` is `others`; the rest are `author`)             | per code     |
-| 9   | `unanswered-thread` | an unanswered review thread                                                                                                                                | `author`     |
-| 10  | `awaiting-review`   | none of the above                                                                                                                                          | `others`     |
+| #   | Reason code         | Matches when                                                                                                                                                                                                                                                                                                                                        | `waiting_on` |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | `ci-failing`        | CI fails, judged with the reviewer-side softenings (cancelled runs, no CI data, review-exempt checks)                                                                                                                                                                                                                                               | `author`     |
+| 2   | `conflict`          | a merge conflict, the PR's own or a stacked-parent conflict                                                                                                                                                                                                                                                                                         | `author`     |
+| 3   | `changes-requested` | a non-bot reviewer other than the operator carries `CHANGES_REQUESTED`, or the operator's own `CHANGES_REQUESTED` is fresh (made against the current head)                                                                                                                                                                                          | `author`     |
+| 4   | `stale-review`      | any review of the operator's own has gone stale behind a push, including a stale `CHANGES_REQUESTED`, and the PR passed rows 1 to 3 (it is approvable)                                                                                                                                                                                              | `me`         |
+| 5   | `review-requested`  | a live review request on the operator                                                                                                                                                                                                                                                                                                               | `me`         |
+| 6   | `acting-reviewer`   | a submitted comment-only review of the operator's own, and no approval of their own stands                                                                                                                                                                                                                                                          | `me`         |
+| 7   | `bot-disapproved`   | the bot verdict is disapproved                                                                                                                                                                                                                                                                                                                      | `author`     |
+| 8   | `approved-*`        | a human approval exists; the merge-state rule above picks the code: `approved-merge-blocked` (`others`), `approved-ci-unsettled` (`author`: BLOCKED while CI is in flight, unknown or failing), `approved-awaiting-requested` (`others`: merge state unknown and a request is outstanding), `approved-ready-to-merge` (`author`: every other state) | per code     |
+| 9   | `unanswered-thread` | an unanswered review thread                                                                                                                                                                                                                                                                                                                         | `author`     |
+| 10  | `awaiting-review`   | none of the above                                                                                                                                                                                                                                                                                                                                   | `others`     |
 
 Rules the table encodes:
 

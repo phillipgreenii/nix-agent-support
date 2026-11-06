@@ -55,6 +55,21 @@ func (v *View) Ref() string { return Ref(v.Type, v.ID) }
 // OwnPR reports whether the PR is the operator's own (mine or co-owned).
 func (v *View) OwnPR() bool { return interpret.Ownership(v.Ownership).ActsAsMine() }
 
+// WaitingOn is the stored result of the single waiting-on decision (who owes
+// the next step); empty for a row stored before the decision was stored, which
+// no PR rule raises on until the entity is interpreted again.
+func (v *View) WaitingOn() interpret.WaitingOn { return interpret.WaitingOn(v.Approvals.WaitingOn) }
+
+// Reason is the stored reason code of the waiting-on decision.
+func (v *View) Reason() string { return v.Approvals.Reason }
+
+func (v *View) waitingOnName() string {
+	if v.Approvals.WaitingOn == "" {
+		return "nobody recorded (not yet interpreted)"
+	}
+	return v.Approvals.WaitingOn
+}
+
 // PRFacts returns the facts derived from the stored entity facts, computed at
 // most once. ok is false when the entity has no stored facts or they do not
 // decode; a rule then raises nothing.
