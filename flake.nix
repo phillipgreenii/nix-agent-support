@@ -6565,6 +6565,10 @@
                 gomod2nixToml = ./packages/pg-review/gomod2nix.toml;
               };
 
+              # pg-review HM module: renders config.toml (validated by the real
+              # `pg-review job doctor --config-only`) and the router stanzas.
+              pg-review-module = import ./packages/pg-review/tests/module-check.nix { inherit lib pkgs; };
+
               # pg-review-router-adapter - whole-module Go test gate (unit tier). Pattern A, flat src.
               pg-review-router-adapter-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-review-router-adapter-go-tests";

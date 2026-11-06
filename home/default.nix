@@ -38,6 +38,7 @@
     ./programs/pg-rescue
     ./programs/pg-task-focus
     ./programs/pg-keep-awake
+    ./programs/pg-review
     ./programs/pg-claude-code-recorder
     ./programs/pg-claude-control
     ./programs/claude-display
