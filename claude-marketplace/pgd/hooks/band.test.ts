@@ -96,7 +96,7 @@ test('the band draw reads cached values only and starts no fetch, process or fil
   const texts = flat(tree).filter(n => n.type === 'Text')
   expect(texts.map(t => t.children)).toEqual(['abcdef12', ' sonnet · high', ' ctx 85%'])
   expect(texts[2].color).toBe('red')
-  expect(texts[0].color).toBeUndefined()
+  expect(texts[0].color).toBe(undefined)
 })
 
 test('the hook awaits next(e) and nests its result so another plugin band row is kept', async () => {
