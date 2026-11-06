@@ -177,3 +177,31 @@ func TestBootCore_exportsSourceLivenessGaugesAndFeedsThem(t *testing.T) {
 		t.Errorf("healthy age = %v s is not below broken age = %v s: a successful pass must reset the age", age["healthy"], age["broken"])
 	}
 }
+
+// A calendar source's interval is its largest slot gap, so a daily or weekly
+// source is not alerted on against the 10 s poll interval standing in for none.
+// Tokyo has no DST, so any 14-day window gives exactly 1 day or 7 days.
+func TestPullSourceIntervals_CalendarSourceUsesLargestSlotGap(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cal := func(days ...time.Weekday) query.Source {
+		return query.Source{Name: "cal", Query: periodSourceQuery{Meta: query.Meta{Trig: query.CalendarTrigger{
+			At: query.ClockTime{Hour: 3, Minute: 30}, Days: days, Loc: tokyo, OnMissed: "next-slot",
+		}}}}
+	}
+	for _, tc := range []struct {
+		name string
+		src  query.Source
+		want time.Duration
+	}{
+		{"daily", cal(), 24 * time.Hour},
+		{"weekly", cal(time.Sunday), 7 * 24 * time.Hour},
+	} {
+		got := pullSourceIntervals(config.Config{PollInterval: 10 * time.Second, Queries: query.SourceSet{tc.src}})
+		if got["cal"] != tc.want {
+			t.Errorf("%s: pullSourceIntervals = %v, want cal=%v", tc.name, got, tc.want)
+		}
+	}
+}

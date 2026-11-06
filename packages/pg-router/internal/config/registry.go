@@ -608,17 +608,29 @@ func rawQueryKeys(body string) [][]string {
 	return out
 }
 
+// calendarNow is the clock the calendar expected-interval scan starts from: the
+// 14-day window of slots is measured from it, and tests replace it so the result
+// is deterministic. The zone used is the trigger's own.
+var calendarNow = time.Now
+
 // ExpectedIntervalMsFor returns, in milliseconds, src's expected tick
 // cadence: an explicit `expected_interval` config override (overrides,
 // keyed by src.Name) always wins; otherwise a `kind: "period"` query's own
-// resolved trigger interval; otherwise 0 (unknown — threshold/manual
-// triggers, or a period query with neither).
+// resolved trigger interval; otherwise, for a calendar query, the largest gap
+// between consecutive slots over the next 14 days (a daily source 86400 s, a
+// weekly one 604800 s, so the persistent-failure alert is not tripped by the
+// 10 s poll interval standing in for a missing interval);
+// otherwise 0 (unknown: threshold/manual triggers, or a period query with
+// neither).
 func ExpectedIntervalMsFor(src query.Source, overrides map[string]int64) int64 {
 	if ms, ok := overrides[src.Name]; ok {
 		return ms
 	}
 	if pt, ok := src.Query.Trigger().(query.PeriodTrigger); ok && pt.Every > 0 {
 		return pt.Every.Milliseconds()
+	}
+	if ct, ok := query.Calendar(src.Query.Trigger()); ok {
+		return ct.MaxGap(calendarNow()).Milliseconds()
 	}
 	return 0
 }
@@ -749,7 +761,7 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if !ok {
 		return nil, fmt.Errorf("unknown query type %q", qt.Type)
 	}
-	trig, err := buildTrigger(qt.Trigger, c.PollInterval)
+	trig, err := buildTrigger(qt.Trigger, c.PollInterval, qt.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -837,7 +849,19 @@ func buildFailureBackoff(base query.FailureBackoff, t *failureBackoffTOML) (quer
 // (Q1). An absent table (or kind "" / "period") is PeriodTrigger — a period
 // query with no explicit `every` inherits the pool PollInterval, reproducing
 // today's once-per-pass pull.
-func buildTrigger(t *triggerTOML, pollInterval time.Duration) (query.Trigger, error) {
+func buildTrigger(t *triggerTOML, pollInterval time.Duration, queryType string) (query.Trigger, error) {
+	if t != nil && t.Every != nil {
+		var errs []error
+		if t.At != "" {
+			errs = append(errs, fmt.Errorf("trigger: \"every\" and \"at\" are mutually exclusive (\"every\" belongs to kind = \"period\", \"at\" to kind = \"calendar\")"))
+		}
+		if t.Days != nil {
+			errs = append(errs, fmt.Errorf("trigger: \"every\" and \"days\" are mutually exclusive (\"every\" belongs to kind = \"period\", \"days\" to kind = \"calendar\")"))
+		}
+		if len(errs) > 0 {
+			return nil, errors.Join(errs...)
+		}
+	}
 	if t == nil || t.Kind == "" || t.Kind == "period" {
 		every := pollInterval
 		if t != nil && t.Every != nil {
@@ -856,8 +880,10 @@ func buildTrigger(t *triggerTOML, pollInterval time.Duration) (query.Trigger, er
 		return query.ThresholdTrigger{Binds: t.Binds, Count: t.Count}, nil
 	case "manual":
 		return query.ManualTrigger{}, nil
+	case "calendar":
+		return buildCalendarTrigger(t, queryType)
 	default:
-		return nil, fmt.Errorf("unknown trigger kind %q (known: period, threshold, manual)", t.Kind)
+		return nil, fmt.Errorf("unknown trigger kind %q (known: period, threshold, manual, calendar)", t.Kind)
 	}
 }
 

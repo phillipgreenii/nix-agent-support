@@ -19,6 +19,7 @@ const (
 	kindPeriod triggerKind = iota
 	kindThreshold
 	kindManual
+	kindCalendar
 )
 
 // PeriodTrigger fires on each period tick — reproducing today's once-per-pass

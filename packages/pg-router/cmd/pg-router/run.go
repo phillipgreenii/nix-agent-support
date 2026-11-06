@@ -541,7 +541,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 // type). A source with no period — a manual or threshold trigger with no
 // explicit expected_interval — has no cadence to alert against and is omitted.
 // A period trigger whose own Every is zero fires on cfg.PollInterval (the same
-// fallback discover's cadence uses), so that is its interval.
+// fallback discover's cadence uses), so that is its interval. A calendar
+// trigger's interval is the largest gap between its consecutive slots over the
+// next 14 days (config.ExpectedIntervalMsFor), never the poll interval: that
+// would fire the alert 30 minutes after start for a daily source.
 func pullSourceIntervals(cfg config.Config) map[string]time.Duration {
 	out := make(map[string]time.Duration, len(cfg.Queries))
 	for _, src := range cfg.Queries {

@@ -898,3 +898,29 @@ func TestRestartResetsTheClock(t *testing.T) {
 		t.Errorf("re-alerted at %s, before threshold + for after the restart (%s)", at, earliest)
 	}
 }
+
+// A daily calendar source reports expected_interval 86400 s (the largest gap
+// between its slots), not the 10 s poll interval that ExpectedIntervalMsFor's
+// zero used to be replaced by. With 86400 s the threshold is 3 x 86400 s, so a
+// source whose last success was 3 h ago does not fire; with the poll interval
+// the same source fired 30 minutes after start (the negative control).
+func TestPersistentFailureDailyCalendarSourceDoesNotFire(t *testing.T) {
+	start := time.Date(2026, 6, 1, 3, 30, 0, 0, time.UTC)
+	run := func(period time.Duration) srcRun {
+		return srcRun{
+			scenario: "daily-calendar", source: "daily", period: period,
+			start: start, end: start.Add(3 * time.Hour),
+			ticks: []srcTick{{at: start, kind: tickSuccess}},
+		}
+	}
+	daily := run(24 * time.Hour)
+	if got := daily.age(daily.end); got != 3*time.Hour {
+		t.Fatalf("age = %v, want 3h", got)
+	}
+	if daily.everAlerting() {
+		t.Error("a daily source with expected interval 86400 s and success age 3 h must not fire")
+	}
+	if !run(10 * time.Second).everAlerting() {
+		t.Error("negative control: the same source with the 10 s poll interval substituted must fire (the trap this packet fixes)")
+	}
+}

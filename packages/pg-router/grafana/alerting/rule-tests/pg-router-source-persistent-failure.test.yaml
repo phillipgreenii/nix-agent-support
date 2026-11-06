@@ -1,0 +1,50 @@
+# promtool unit tests for the pg-router-source-persistent-failure alert, added with the calendar
+# trigger. Run by the flake check test-pg-router-alert-rules (check-alert-rules.sh), which wraps
+# the rule's refId A as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 5m` and labels.
+#
+# What this proves: a daily calendar source reports pg_router_source_expected_interval_seconds
+# 86400 (the largest gap between its slots), so a success age of 3 h is below the threshold
+# clamp_min(3 * 86400, 1800) and the alert does NOT fire. The second case is the negative
+# control: the same age against the 10 s poll interval that a calendar source used to be given
+# trips the 30 minute floor and fires, which is the trap the interval fix removes.
+#
+# Time model: scraped every 30s; 3 h = 10800 s of success age, held constant.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a daily source with expected interval 86400 s and success age 3 h does not fire
+    interval: 30s
+    input_series:
+      - series: pg_router_source_last_success_age_seconds{source="daily-scan",job="pg-router"}
+        values: "10800x240"
+      - series: pg_router_source_expected_interval_seconds{source="daily-scan",job="pg-router"}
+        values: "86400x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_source_persistent_failure)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-router-source-persistent-failure
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-source-persistent-failure
+        exp_alerts: []
+
+  - name: the same source with the 10 s poll interval substituted fires (negative control)
+    interval: 30s
+    input_series:
+      - series: pg_router_source_last_success_age_seconds{source="daily-scan",job="pg-router"}
+        values: "10800x240"
+      - series: pg_router_source_expected_interval_seconds{source="daily-scan",job="pg-router"}
+        values: "10x240"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-source-persistent-failure
+        exp_alerts:
+          - exp_labels:
+              source: daily-scan
+              severity: warning
