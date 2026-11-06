@@ -2304,6 +2304,27 @@
                     touch $out
                   '';
 
+              # Mod findings guide names the Claude Code version the findings were observed on.
+              # Carries its own negative fixture (a copy of the guide without the literal).
+              test-claude-code-mods-guide =
+                let
+                  guideSrc = lib.fileset.toSource {
+                    root = ./docs/guides;
+                    fileset = ./docs/guides/claude-code-mods.md;
+                  };
+                in
+                pkgs.runCommand "test-claude-code-mods-guide" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+                  set -eu
+                  guide=${guideSrc}/claude-code-mods.md
+                  grep -qF '2.1.314' "$guide" || { echo "FAIL: guide does not name 2.1.314" >&2; exit 1; }
+                  grep -v -F '2.1.314' "$guide" > "$TMPDIR/guide-without-version.md"
+                  if grep -qF '2.1.314' "$TMPDIR/guide-without-version.md"; then
+                    echo "negative fixture still names the version" >&2; exit 1
+                  fi
+                  cmp -s "$guide" "$TMPDIR/guide-without-version.md" && { echo "negative fixture is a no-op" >&2; exit 1; }
+                  touch $out
+                '';
+
               # J-1 envelope guard for the pb plugin's skills and commands (pg2-dyztr): a lint
               # that no runnable jq filter indexes `.data` without the shape-agnostic prelude,
               # plus the documented bd commands, extracted from the markdown and run against the

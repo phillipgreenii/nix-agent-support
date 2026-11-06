@@ -1,0 +1,6 @@
+{
+  "name": "mod-findings",
+  "description": "Claude skill: findings guide for writing Claude Code mods (status line, band, panes, env, session data), so a later agent does not repeat the spike.",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
