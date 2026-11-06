@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -148,5 +149,54 @@ func TestHelp_ListsExactlyItsOwnSubcommands(t *testing.T) {
 		if !known[m[1]] {
 			t.Errorf("helpText lists %q, which is not a subcommand of this binary", m[1])
 		}
+	}
+}
+
+// runCapturingStderr runs run(args) with os.Stderr redirected to a pipe and
+// returns the exit code and everything written to stderr.
+func runCapturingStderr(t *testing.T, args []string) (int, string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	code := run(args)
+	os.Stderr = old
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stderr pipe writer: %v", err)
+	}
+	return code, <-done
+}
+
+// TestRun_DispatchesEachSubcommandToItsOwnHandler distinguishes a dispatched
+// subcommand from the unknown-subcommand fallback: both exit 2, so the exit
+// code alone cannot tell them apart. The stderr message does.
+func TestRun_DispatchesEachSubcommandToItsOwnHandler(t *testing.T) {
+	code, stderr := runCapturingStderr(t, []string{"bogus"})
+	if code != conformance.ExitUsage || !strings.Contains(stderr, "unknown subcommand") {
+		t.Fatalf("bogus: exit %d, stderr %q; want exit %d and an unknown-subcommand message", code, stderr, conformance.ExitUsage)
+	}
+	code, stderr = runCapturingStderr(t, []string{"remove-worktree"})
+	if code != conformance.ExitUsage {
+		t.Errorf("remove-worktree with no path: exit %d, want %d", code, conformance.ExitUsage)
+	}
+	if strings.Contains(stderr, "unknown subcommand") {
+		t.Errorf("remove-worktree fell through to the unknown-subcommand branch: %q", stderr)
+	}
+	if !strings.Contains(stderr, "remove-worktree: exactly one argument is required") {
+		t.Errorf("remove-worktree did not reach its own handler: stderr %q", stderr)
+	}
+	// With a path that is not a worktree the handler runs and refuses (exit 1),
+	// which the unknown-subcommand branch (exit 2) can never produce.
+	code, _ = runCapturingStderr(t, []string{"remove-worktree", t.TempDir()})
+	if code != 1 {
+		t.Errorf("remove-worktree on a non-worktree: exit %d, want 1", code)
 	}
 }
