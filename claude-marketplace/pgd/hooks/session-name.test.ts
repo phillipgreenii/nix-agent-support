@@ -20,11 +20,27 @@ test('a user-named entry supplies its name', async () => {
   expect(await fetchSessionName(s.host)).toBe('drain-bead')
 })
 
-test('a derived entry shows no name, so the id is shown', async () => {
+test('a derived entry supplies its name too', async () => {
   resetSessionName()
   const s = stubHost({ [`${DIR}/4242.json`]: ENTRY_DERIVED })
+  expect(await fetchSessionName(s.host)).toBe('repo')
+})
+
+test('every nameSource supplies the name, whatever its value', async () => {
+  for (const nameSource of ['user', 'derived', 'auto', 'collision', 'some-future-source']) {
+    resetSessionName()
+    const entry = JSON.stringify({ pid: 4242, sessionId: 'sess-1', name: `n-${nameSource}`, nameSource })
+    expect(await fetchSessionName(stubHost({ [`${DIR}/4242.json`]: entry }).host)).toBe(`n-${nameSource}`)
+  }
+})
+
+test('the id is shown until the entry is written, then the name replaces it', async () => {
+  resetSessionName()
+  const s = stubHost()
   expect(await fetchSessionName(s.host)).toBe(undefined)
   expect(bandLabels({ sessionId: 'sess-1-long-id', sessionName: undefined }, DEFAULT_OPTIONS.alerts.thresholds)[0].label).toBe('sess-1-l')
+  s.files.set(`${DIR}/4242.json`, ENTRY_DERIVED)
+  expect(await fetchSessionName(s.host)).toBe('repo')
 })
 
 test('a missing registry, a missing entry and a malformed entry all give the id', async () => {

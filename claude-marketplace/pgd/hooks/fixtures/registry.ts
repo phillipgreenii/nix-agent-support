@@ -11,7 +11,7 @@ export const ENTRY_USER = JSON.stringify({
   nameSince: 1762400000000,
 })
 
-// An entry whose name was derived from the working directory: no name is shown.
+// An entry whose name was derived from the working directory: the name is still shown.
 export const ENTRY_DERIVED = JSON.stringify({
   pid: 4242,
   sessionId: 'sess-1',

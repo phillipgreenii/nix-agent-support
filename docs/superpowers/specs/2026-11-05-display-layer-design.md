@@ -59,7 +59,7 @@ Verified live on Claude Code 2.1.314 unless marked "docs".
 | F7  | `$.env.set` on fixed string-literal names is visible to later child processes and to `!` shell commands; a headless run set and unset both a made-up name and `AWS_PROFILE` with no denial, and an interactive `!` command saw a made-up name; `AWS_PROFILE` was not tried interactively. A model-run Bash call was not directly confirmed.                                                                                                                                                                                                                                                                                                                                       | An assume action can set a fixed list of variables.                                                                                                                                          |
 | F8  | A render hook can rewrite assistant-message markdown so ids become links; a click opened them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Transcript links are feasible.                                                                                                                                                               |
 | F9  | `$.session.usage()` gives context window at start and, after the first model response, tokens and percent; it gives rate limits and cost; only the five-hour limit was seen live, the seven-day kind and "a whole-point move" are docs-only, and the list was empty in one session. A `session.measure` event fires at start and after each turn and names what changed (verified for context, rate limits and cost). Effort is readable from the `turn.step` event after the first model request. `$.session.repo()` gives root, remote and `internal`, plus a `name` that was null in every run; no branch. `$.session.messages()` entries carry only role, text and tool uses. | Context, limits, cost, model and effort need no external collector. Session name has no documented mod source.                                                                               |
-| F10 | A hook on a streaming event (`turn.step`) MUST be an async generator delegating with `yield* next(e)`. A method on a plugin-added noun takes exactly one object argument and returns a Promise (verified live); that only plain data crosses plugin boundaries is from the docs, and a callback across the boundary was not tried. A hook that throws is skipped alone; a failed hot reload keeps the previous version loaded.                                                                                                                                                                                                                                                    | The `display` noun is data in, Promise out, one object per call. Contributions are data, not callbacks.                                                                                      |
+| F10 | A hook on a streaming event (`turn.step`) MUST be an async generator delegating with `yield* next(e)`. A method on a plugin-added noun takes exactly one object argument and returns a Promise (verified live); that only plain data crosses plugin boundaries is from the docs, and a callback across the boundary was not tried. A hook that throws is skipped alone; a failed hot reload keeps the previous version loaded.                                                                                                                                                                                                                                                    | The `pgd` noun is data in, Promise out, one object per call. Contributions are data, not callbacks.                                                                                          |
 | F11 | The recorder (`pg-claude-code-recorder`) indexes transcript `custom-title` records by session; its `query` command returned them with the session id and time (observed live, 2026-11-05). The field that holds the title text was not found: `customTitle` was rejected as an unknown field.                                                                                                                                                                                                                                                                                                                                                                                     | Session name is optional and read through the recorder.                                                                                                                                      |
 | F12 | `$.process.run` runs a command without a shell. `$.fs` reads files (docs). `$.ui.invalidate` redraws, capped at 10 per second (docs).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | File reads and the recorder CLI are the data paths; invalidation is cheap but MUST still be coalesced.                                                                                       |
 
@@ -77,7 +77,7 @@ Verified live on Claude Code 2.1.314 unless marked "docs".
 ## Architecture
 
 The Display plugin is a Mediator over three kinds of collaborator. Engine events
-reach it as an Observer subscription; the `display` noun is a Registry of
+reach it as an Observer subscription; the `pgd` noun is a Registry of
 contributions; each data source is an Adapter behind a Cache-Aside entry; link
 rules are a list of Strategies; and each button is a Command with one action.
 
@@ -259,14 +259,14 @@ and its modal never disagree.
 
 ## Contribution API
 
-Display adds one noun, `display`, in `engine.create`, with a types contract.
+Display adds one noun, `pgd`, in `engine.create`, with a types contract.
 Per F10, every method takes one object and returns a Promise, and only data
 crosses the boundary.
 
-| Method           | Argument                                          | Effect                                                                                                                                                    |
-| ---------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `display.put`    | `{ id, surface, priority, text, color?, ttlMs? }` | Adds or replaces a contribution. `surface` is `alert` (a short string in the status line) or `focus` (an item in the Focus pane, with an optional `url`). |
-| `display.remove` | `{ id }`                                          | Removes it.                                                                                                                                               |
+| Method       | Argument                                          | Effect                                                                                                                                                    |
+| ------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pgd.put`    | `{ id, surface, priority, text, color?, ttlMs? }` | Adds or replaces a contribution. `surface` is `alert` (a short string in the status line) or `focus` (an item in the Focus pane, with an optional `url`). |
+| `pgd.remove` | `{ id }`                                          | Removes it.                                                                                                                                               |
 
 A contribution with `ttlMs` expires on its own; a contribution that stops
 refreshing disappears. Contributors push when their state changes; Display never
@@ -274,7 +274,7 @@ calls back into a contributor. How a contributed action (a button press) runs
 is open (see "Open items").
 
 The ZR plugin in the sibling repo depends on the Display plugin and calls
-`display.put`, replacing its part scripts.
+`pgd.put`, replacing its part scripts.
 
 ## Data sources and throttling
 
@@ -379,7 +379,7 @@ sequenceDiagram
 
 1. Display ships and runs alongside the shell line (both draw; mod alerts appear
    above the shell rows).
-2. The ZR parts move to `display.put` in the sibling repo, on its own schedule.
+2. The ZR parts move to `pgd.put` in the sibling repo, on its own schedule.
 3. Once the ZR plugin has adopted the contract, the shell line is retired by
    setting the `statusLine` option to `{ type = "command"; command = ""; }`
    (verified to load and draw no shell row, F2) and, after that, removing the
@@ -403,7 +403,7 @@ module path `home/programs/pgd/`, the log directory `$XDG_STATE_HOME/pgd/` and t
 check names `test-pgd-*`. A name starting `claude-` cannot be used:
 `claude plugin validate` (Claude Code 2.1.314) refuses it as reserved. The
 skeleton first shipped as `status` (the plugin) and `claude-display` (the module);
-the rename to `pgd` is its own packet. The `display` noun and the `display_*`
+the rename to `pgd` is its own packet. The `pgd` noun and the `pgd_*`
 metric names keep their names unless the operator rules otherwise.
 
 Host access and the registration shape. `claude plugin validate` (Claude Code
@@ -443,11 +443,11 @@ warning "gating hook without .catch".
 Scope calls (the builder MAY rely on these):
 
 - Display renders what bundles push and what its own sources read. It does not
-  fetch beads, Jira or threads itself. The `display` noun (its `alert` and
+  fetch beads, Jira or threads itself. The `pgd` noun (its `alert` and
   `focus` surfaces and its types contract) ships in phase 2, so phase 3 (ZR
   adoption) and phase 4 (the Focus pane) both build on it. The Focus pane ships
   in phase 4 with an empty state; the beads bundle's own push is a follow-on.
-- Contributed buttons are out of scope: the `display` noun carries data only
+- Contributed buttons are out of scope: the `pgd` noun carries data only
   (`alert` and `focus` surfaces) and has no action field. Adding one is a
   follow-on once a mechanism is found.
 - The `session-mode` tool already has the commands the mode button needs:
@@ -457,7 +457,7 @@ Scope calls (the builder MAY rely on these):
   `env` from `$.session.id()`. No change to the tool is needed.
 - The findings guide's doc lives in this repo's `docs/guides/`, and its skill
   ships through the agent-support plugin set, both in phase 1.
-- The ZR migration is out of scope. This work publishes the `display` noun's
+- The ZR migration is out of scope. This work publishes the `pgd` noun's
   types contract and one documented example; the sibling repo adopts it later.
   Phase 3 is therefore gated on that adoption: its in-repo parts (the switch to
   the empty `statusLine` command and the removal of the part scripts) wait for it.
@@ -527,8 +527,8 @@ a capability that is not yet available.
 | Phase | Content                                                                                                                                                                                                                                                                                                                                                                                                                                     | Depends on                                                                             |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | 1     | Display only, matching today's shell line: the band shows plain labels (session id, model and effort, context) and the status row shows alerts (limits, context, dolt). No buttons and no contribution path. The shell line keeps running beside it. Includes the source layer, cache, throttling, the opt-in switches (defaults match today's shell line: all on), counters with a no-op exporter, the OTLP spike, and the findings guide. | none                                                                                   |
-| 2     | Buttons with modals and panes for what the shell line already shows: Info (version, repo, worktree, branch, PR), Context and usage, Session mode (with stop). The labels from phase 1 become buttons. Ships the `display` noun (`alert` and `focus` surfaces) and its types contract, and the "wrapping up" alert.                                                                                                                          | phase 1                                                                                |
-| 3     | Retire the shell implementation: after the ZR plugin has adopted the `display` contract (sibling repo, the operator's schedule), set `statusLine` to the empty command and remove the part scripts. The settings delete filter is optional cleanup.                                                                                                                                                                                         | phase 2; ZR adoption (sibling repo)                                                    |
+| 2     | Buttons with modals and panes for what the shell line already shows: Info (version, repo, worktree, branch, PR), Context and usage, Session mode (with stop). The labels from phase 1 become buttons. Ships the `pgd` noun (`alert` and `focus` surfaces) and its types contract, and the "wrapping up" alert.                                                                                                                              | phase 1                                                                                |
+| 3     | Retire the shell implementation: after the ZR plugin has adopted the `pgd` contract (sibling repo, the operator's schedule), set `statusLine` to the empty command and remove the part scripts. The settings delete filter is optional cleanup.                                                                                                                                                                                             | phase 2; ZR adoption (sibling repo)                                                    |
 | 4     | New capabilities, each independent of phase 3: the model and effort modal, Wrap up, Assume, transcript links, session name (the session registry entry), and the Focus pane.                                                                                                                                                                                                                                                                | phase 2; Assume needs the open assume items; Focus items from pg-desk wait for pg-desk |
 
 Phases 3 and 4 both follow phase 2 and MAY proceed in either order or together.
@@ -568,11 +568,11 @@ rule on.
 
 Names (proposed, so a builder does not invent them):
 
-- Metrics, each labeled by `source` where it applies: `display_fetch_total`,
-  `display_fetch_errors_total{kind}`, `display_fetch_duration_seconds`,
-  `display_cache_hits_total`, `display_cache_misses_total`,
-  `display_draw_total{surface}`, `display_draw_duration_seconds{surface}`,
-  `display_invalidate_total`, `display_invalidate_coalesced_total`.
+- Metrics, each labeled by `source` where it applies: `pgd_fetch_total`,
+  `pgd_fetch_errors_total{kind}`, `pgd_fetch_duration_seconds`,
+  `pgd_cache_hits_total`, `pgd_cache_misses_total`,
+  `pgd_draw_total{surface}`, `pgd_draw_duration_seconds{surface}`,
+  `pgd_invalidate_total`, `pgd_invalidate_coalesced_total`.
 - Logs: one JSON line per event (time, level, source, message, error kind) to
   `$XDG_STATE_HOME/pgd/<session-id>.log`, rotated by size (the
   builder picks the cap) and never read on a draw.
@@ -600,7 +600,7 @@ The switches are options in the Home Manager module (rendered into the plugin's
 options), each defaulting to the operator's choice. Proposed option names under
 `phillipgreenii.programs.pgd`: `enable`, `components.beads`,
 `components.assume`, `components.sessionMode`, `components.prStatus`,
-`components.recorderName`, `components.links`, `components.modelEffort`,
+`components.sessionName`, `components.links`, `components.modelEffort`,
 `components.focus`, plus `links` (the link list) and `alerts.thresholds`. Display reads them in
 `register`, so a disabled component never loads. A bundle that is turned off
 (beads, ccpool) MUST stop pushing, and Display MUST drop what it already holds
@@ -657,7 +657,7 @@ nix checks under `tests/` (the `pg-claude-control` module's check is the pattern
 | Phase | Tests the builder MUST provide                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1     | Cache: TTL hit and miss, one fetch in flight, backoff on failure; a draw starts no fetch, process or file read; redraw only on a changed value, with coalesced invalidates; alert fitting and priority drop by width, and no "no X" row; context color thresholds; effort blank until the first turn; each opt-in switch off registers no button, command, hook, timer or `$.env.set`; the `.git` parser against fixture files (branch, detached head, worktree pointer file); an assertion that no `git` command is run; the no-op exporter never blocks; `claude plugin validate` passes; a nix check that renders the module options; a check that the findings guide names the Claude Code version |
-| 2     | One test per button opening its modal and the one-item-per-line content of each; `session-mode show` and `set-status stopping` run against the real tool in a throwaway directory with the session id passed in `env`; the mode button hidden when no mode is active; every row of the Fallbacks table; `display.put` and `display.remove` with `ttlMs` expiry; the types contract compiles against the documented example                                                                                                                                                                                                                                                                             |
+| 2     | One test per button opening its modal and the one-item-per-line content of each; `session-mode show` and `set-status stopping` run against the real tool in a throwaway directory with the session id passed in `env`; the mode button hidden when no mode is active; every row of the Fallbacks table; `pgd.put` and `pgd.remove` with `ttlMs` expiry; the types contract compiles against the documented example                                                                                                                                                                                                                                                                                     |
 | 3     | A nix eval check that the `statusLine` option set to the empty command renders and that other settings keys are untouched; the part scripts are gone with no dangling references (a repository search is a test)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 4     | Link rules: several entries, list order, no bead entry, no rewrite inside code; the registry-entry reader against sample registry files; model switch through `config.set`; the effort and wrap-up pre-fills; the assume Apply setting exactly the four names and the expiry alert; an empty Focus pane                                                                                                                                                                                                                                                                                                                                                                                                |
 
@@ -683,7 +683,7 @@ the real wrap-up; cross-plugin tab behavior; and the layout at 80 columns.
 | D5  | Each button opens its own modal pane                                             | accepted              |
 | D6  | Session mode modal has a stop action                                             | accepted              |
 | D7  | Context button colored by level                                                  | accepted              |
-| D8  | Contributions are pushed data through the `display` noun                         | accepted              |
+| D8  | Contributions are pushed data through the `pgd` noun                             | accepted              |
 | D9  | No `git` command; read `.git` files; `gh` cached for PR state                    | accepted              |
 | D10 | Session name optional: the session registry entry, id fallback                   | accepted (ruling)     |
 | D11 | Link types are a regex plus URL template list                                    | accepted              |
@@ -695,7 +695,7 @@ the real wrap-up; cross-plugin tab behavior; and the layout at 80 columns.
 | D17 | Every component is opt-in and registers nothing when off                         | accepted              |
 | D18 | A mod findings guide, with the Claude Code version, is a phase 1 deliverable     | accepted              |
 | D19 | The shell line is retired by the empty `statusLine` command, after ZR adoption   | accepted              |
-| D20 | The `display` noun ships in phase 2; phases 3 and 4 follow phase 2 independently | accepted              |
+| D20 | The `pgd` noun ships in phase 2; phases 3 and 4 follow phase 2 independently     | accepted              |
 | D21 | The mode button reads `session-mode show`; no change to that tool                | accepted              |
 
 ## Review (2026-11-06)
@@ -753,19 +753,42 @@ Every name this design or its packets gave the plugin, the module, the option
 namespace, the checks and the log directory is `pgd` (see "Packaging, scope and
 fallbacks").
 
+**D3 follow-up: the noun, the metrics and the session-name option.** Asked
+whether the noun and its metric names also take the new name, the ruling,
+verbatim: "1) yes, i said rename it everywhere." Asked whether the option named
+for the recorder becomes the session-name option: "2) yes, it should have never
+been recorder name." So the noun is `pgd` (`pgd.put`, `pgd.remove`,
+`types/pgd.d.ts`), the metrics are `pgd_*`, and the option is
+`components.sessionName`. Display stays as the prose name of the layer.
+
 **D10: the session name comes from the session registry.** Ruling, verbatim:
 "D10, if this is a quick/fast check, then do it." The check (whether a rename
 rewrites the entry) was answered from the Claude Code 2.1.314 bundle (F17), so
 the route stands. The source is the session's own registry entry, found once at
 start by listing `~/.claude/sessions/` and matching `sessionId` against
 `$.session.id()`, then re-read after `turn.complete` at most once per 10
-seconds. The name is shown when `nameSource` is not `derived`; otherwise, and
-when the entry is missing or unreadable, the session id is shown. This drops the
+seconds. The entry's `name` is shown whatever its `nameSource` (`user`, `auto`,
+`derived` or `collision`; follow-up ruling below); the session id is shown only
+until a name can be read, and the Info modal keeps the full session id as its
+own row. This drops the
 `ps` call, the question of how the mod finds its process id, and the recorder
 title-field spike. The registry is undocumented Claude Code state, so the
 findings guide MUST record it with the Claude Code version. Whether the recorder,
 which already ingests this file, should become the name source is a separate
 research item.
+
+**D10 follow-up: always show the name.** The bundle shows every entry carries a
+name: `derived` comes from the working directory, `auto` is generated for a
+background job, `user` comes from `-n` or `/rename`, and `collision` is a
+requested name altered because another session held it. Ruling, verbatim: "if
+there is always a name, then we will always show the name then. info can still
+show the uuid. with that said, we should still code it so that if a name can't
+be detected, though it sounds like that isn't possible, then we will used id. ie
+maybe the pid.json wasn't been written yet, or omsething else causes a miss to
+happen, we can use ID until the name cna be loaded." So the source supplies the
+entry's `name` for any `nameSource`; an entry not written yet, a missing,
+malformed or other-session entry, or an unreadable registry gives the session id
+until a later read finds the name.
 
 **D14: one `$.store` key per shared source, and no file fallback.** Ruling,
 verbatim: "D14, yes, use the store. sounds like it was designed for this."

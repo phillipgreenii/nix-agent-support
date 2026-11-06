@@ -73,9 +73,10 @@ session registry (`~/.claude/sessions/<pid>.json`) through the facade's `fs.list
 first fetch lists the directory and reads each `.json` entry until one has a `sessionId` equal to the
 session id, caches that path, and later fetches re-read only that path. The source is polled at most
 every 10 seconds while the band or Info modal is shown and is re-read after `turn.complete` (throttled
-to the same 10 seconds). The name is the entry's `name` when its `nameSource` is not `derived`. With
-the component off nothing is registered: no registry file is read and the id is shown. The transcript
-is never read and no process runs.
+to the same 10 seconds). The name is the entry's `name`, whatever its `nameSource` (`user`, `auto`,
+`derived` or `collision`); the id prefix is shown only until a name can be read, and the Info modal
+keeps the full session id as its own row. With the component off nothing is registered: no registry
+file is read and the id is shown. The transcript is never read and no process runs.
 
 ### Choices the design left to the builder
 

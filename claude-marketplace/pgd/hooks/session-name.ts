@@ -6,9 +6,10 @@ import type { ModApi, PgdOptions } from './types'
 // ~/.claude/sessions/<pid>.json holding sessionId, name, nameSource and nameSince. The first fetch
 // lists that directory through the facade and reads each .json entry until one has a sessionId
 // equal to the session id; the matched path is cached, and later fetches re-read only that path.
-// The name is shown when nameSource is not `derived`; otherwise (a derived name, a missing,
-// malformed or other-session entry, an unreadable registry) the value is undefined and the band
-// shows the session id. The transcript is never read and no process is run.
+// The entry's name is shown whatever its nameSource (`user`, `auto`, `derived`, `collision`). Until
+// a name can be read (an entry not written yet, a missing, malformed or other-session entry, an
+// unreadable registry) the value is undefined and the band shows the session id; the next read that
+// finds the name replaces it. The transcript is never read and no process is run.
 //
 // Choices the design leaves to the builder (documented in the README and covered by tests):
 //  - A malformed or partially written entry yields undefined (the id fallback) and keeps the cached
@@ -33,10 +34,8 @@ export function parseEntry(text: string): Entry | undefined {
   }
 }
 
-// The name an entry supplies: a non-empty string name whose nameSource is a string other than
-// `derived`.
+// The name an entry supplies: its non-empty string name, whatever its nameSource.
 export function nameOf(entry: Entry): string | undefined {
-  if (typeof entry.nameSource !== 'string' || entry.nameSource === 'derived') return undefined
   return typeof entry.name === 'string' && entry.name.trim() !== '' ? entry.name : undefined
 }
 
