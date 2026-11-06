@@ -79,4 +79,11 @@ func TestEndFilesAreParsedJoinedCountedAndRemovedAfterADay(t *testing.T) {
 	if v, _ := reg.Counter(obs.MEndFiles, map[string]string{"outcome": "removed"}); v != 2 {
 		t.Fatalf("removed %v", v)
 	}
+	d.Tracker().Poll()
+	if v, _ := reg.Counter(obs.MEndFiles, map[string]string{"outcome": "removed"}); v != 2 {
+		t.Fatalf("removed counted again: %v", v)
+	}
+	if v, _ := reg.Counter(obs.MFallbackFound, map[string]string{"kind": "ends"}); v != 0 {
+		t.Fatalf("the event path missed an end file: %v", v)
+	}
 }

@@ -83,6 +83,7 @@ const (
 	MControlRequests   = "control_requests_total"
 	MStaleFifosRemoved = "stale_fifos_removed_total"
 	MRequestsJSONReads = "requests_json_reads_total"
+	MFallbackFound     = "tracker_fallback_found_total"
 	EvStartupStale     = "startup_stale_registries"
 	EvProcessExit      = "process_exit"
 )
@@ -352,10 +353,12 @@ var SkipReasons = []string{ReasonQuarantineUnavl, "holder_found", "write_after_r
 // ControlVerbs, ControlOutcomes, InboxStates and EndFileOutcomes are the bounded
 // label values of the control metrics; anything else is bucketed as "other".
 var (
-	ControlVerbs     = []string{"submit", "interrupt", "run", "read", "ping"}
-	ControlOutcomes  = []string{"ok", "rejected", "duplicate", "refused"}
-	InboxStates      = []string{"present", "gone", "never_loaded"}
-	EndFileOutcomes  = []string{"ingested", "removed", "invalid"}
+	ControlVerbs    = []string{"submit", "interrupt", "run", "read", "ping"}
+	ControlOutcomes = []string{"ok", "rejected", "duplicate", "refused"}
+	InboxStates     = []string{"present", "gone", "never_loaded"}
+	EndFileOutcomes = []string{"ingested", "removed", "invalid"}
+	// FallbackKinds label tracker_fallback_found_total: what a slow fallback scan found that the event path had missed.
+	FallbackKinds    = []string{"ends", "fifos"}
 	boolLabelStrings = []string{"false", "true"}
 )
 
@@ -438,6 +441,9 @@ func (o *Obs) RegisterStandard() {
 				}
 			}
 		}
+	}
+	for _, k := range FallbackKinds {
+		o.Reg.Add(MFallbackFound, map[string]string{"kind": k}, 0)
 	}
 	for _, out := range EndFileOutcomes {
 		o.Reg.Add(MEndFiles, map[string]string{"outcome": out}, 0)

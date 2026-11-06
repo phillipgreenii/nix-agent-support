@@ -36,6 +36,7 @@ var helpTexts = map[string]string{
 	MEndFiles:                 "End-reason source files handled, by outcome.",
 	MControlRequests:          "Control requests, by verb and outcome.",
 	MStaleFifosRemoved:        "Stale control FIFOs removed.",
+	MFallbackFound:            "Items a slow fallback scan found that the event path had missed, by kind (ends, fifos).",
 	MRequestsJSONReads:        "Reads of the control mod request window, by path (tail: incremental read from the cursor; full: whole-file read).",
 	MConversationsByStage:     "Conversations by lifecycle stage as of the last settle tick.",
 	MHeldConversations:        "Conversations held back from settling, by reason.",

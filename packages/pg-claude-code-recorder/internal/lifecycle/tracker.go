@@ -58,6 +58,9 @@ type TrackerConfig struct {
 	// FS is the file system requests.jsonl is read through (default the real
 	// one); tests pass a counting wrapper.
 	FS fsx.FS
+	// EndsSweepEvery is how often the slow fallback scan of the ends directory
+	// runs, driven by Poll and the injected Clock (0: only at start-up).
+	EndsSweepEvery time.Duration
 }
 
 type tracked struct {
@@ -98,9 +101,12 @@ type Tracker struct {
 	closed       bool
 	wg           sync.WaitGroup
 
-	endSeen map[string]bool
-	reqSeen map[string]bool
-	reqCur  reqCursor
+	// endDue maps each known end file to when its removal is next looked at.
+	// endSweepAt is when the slow fallback scan last ran.
+	endDue     map[string]time.Time
+	endSweepAt time.Time
+	reqSeen    map[string]bool
+	reqCur     reqCursor
 }
 
 // NewTracker returns a Tracker.
@@ -111,7 +117,7 @@ func NewTracker(cfg TrackerConfig) *Tracker {
 	if cfg.Obs == nil {
 		cfg.Obs = obs.New(nil)
 	}
-	return &Tracker{cfg: cfg, procs: map[pkey]*tracked{}, endSeen: map[string]bool{}, reqSeen: map[string]bool{}}
+	return &Tracker{cfg: cfg, procs: map[pkey]*tracked{}, endDue: map[string]time.Time{}, reqSeen: map[string]bool{}}
 }
 
 type regFile struct {
@@ -372,6 +378,12 @@ func (t *Tracker) Startup() {
 		t.attach(tr)
 	}
 	t.sweepFifos()
+	if t.cfg.ControlDir != "" {
+		t.mu.Lock()
+		t.endSweepAt = t.cfg.Clock.Now()
+		t.mu.Unlock()
+		t.sweepEnds(false)
+	}
 }
 
 // StartupDone logs how many registry files named a dead pid at first discovery
@@ -441,13 +453,32 @@ func (t *Tracker) refreshInbox(live []*tracked) {
 	t.cfg.Obs.Reg.Set(obs.MNoInbox, nil, without)
 }
 
-// Poll does the control state directory's periodic work: it counts and removes
-// end files, counts the mod's requests and removes stale FIFOs.
+// Poll does the control state directory's periodic work: it removes end files
+// that are due (a store query only when one is), runs the slow end-file fallback
+// scan when it is time, counts the mod's requests and removes stale FIFOs.
 func (t *Tracker) Poll() {
 	if t.cfg.ControlDir == "" {
 		return
 	}
-	t.sweepEnds()
+	t.mu.Lock()
+	closed := t.closed
+	t.mu.Unlock()
+	if closed {
+		return
+	}
+	if every := t.cfg.EndsSweepEvery; every > 0 {
+		now := t.cfg.Clock.Now()
+		t.mu.Lock()
+		run := now.Sub(t.endSweepAt) >= every
+		if run {
+			t.endSweepAt = now
+		}
+		t.mu.Unlock()
+		if run {
+			t.sweepEnds(true)
+		}
+	}
+	t.removeDueEnds()
 	t.readRequests()
 	t.sweepFifos()
 }
@@ -502,48 +533,121 @@ func (t *Tracker) sweepFifos() {
 	}
 }
 
-// sweepEnds validates each end file once (end_reason_source_files_total) and
-// removes one after it has been ingested and a day has passed (the recorder's
-// second write into the control state directory).
-func (t *Tracker) sweepEnds() {
+// endRetry is how long a due end file waits before it is looked at again when
+// its records are not there yet.
+const endRetry = 5 * time.Minute
+
+// ObserveEnd is the event path for a control end file the recorder just
+// ingested: the file is read and validated once (end_reason_source_files_total)
+// and scheduled for removal EndFileMaxAge later. A path already known is
+// ignored, so a re-ingest of the same file counts nothing.
+func (t *Tracker) ObserveEnd(path string) {
+	t.noteEnd(path, false)
+}
+
+// noteEnd registers an end file the first time it is seen and validates it. It
+// reports whether the file was new.
+func (t *Tracker) noteEnd(path string, fallback bool) bool {
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return false
+	}
+	if _, ok := t.endDue[path]; ok {
+		t.mu.Unlock()
+		return false
+	}
+	t.endDue[path] = t.cfg.Clock.Now().Add(EndFileMaxAge)
+	t.mu.Unlock()
+	reg := t.cfg.Obs.Reg
+	if fallback {
+		reg.Add(obs.MFallbackFound, map[string]string{"kind": "ends"}, 1)
+	}
+	b, err := os.ReadFile(path)
+	var end claudecontrolend.End
+	if err != nil || json.Unmarshal(b, &end) != nil || !end.Valid() {
+		reg.Add(obs.MEndFiles, map[string]string{"outcome": "invalid"}, 1)
+		return true
+	}
+	reg.Add(obs.MEndFiles, map[string]string{"outcome": "ingested"}, 1)
+	return true
+}
+
+// sweepEnds is the slow fallback: one ReadDir of the ends directory that
+// registers every end file the event path has not seen. found says whether a
+// file found here counts as a miss of the event path (it does not at start-up,
+// when the ingest of the files already on disk may still be ahead).
+func (t *Tracker) sweepEnds(found bool) {
+	if t.cfg.ControlDir == "" {
+		return
+	}
 	dir := filepath.Join(t.cfg.ControlDir, "ends")
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	reg := t.cfg.Obs.Reg
 	for _, e := range ents {
 		name := e.Name()
 		if e.IsDir() || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		p := filepath.Join(dir, name)
-		if !t.endSeen[p] {
-			t.endSeen[p] = true
-			b, err := os.ReadFile(p)
-			var end claudecontrolend.End
-			if err != nil || json.Unmarshal(b, &end) != nil || !end.Valid() {
-				reg.Add(obs.MEndFiles, map[string]string{"outcome": "invalid"}, 1)
-				continue
-			}
-			reg.Add(obs.MEndFiles, map[string]string{"outcome": "ingested"}, 1)
+		t.noteEnd(filepath.Join(dir, name), found)
+	}
+}
+
+// removeDueEnds looks at the end files whose removal time has come; no store
+// query runs while none is due. A file is removed once its records exist.
+func (t *Tracker) removeDueEnds() {
+	now := t.cfg.Clock.Now()
+	t.mu.Lock()
+	var due []string
+	for p, at := range t.endDue {
+		if !now.Before(at) {
+			due = append(due, p)
 		}
-		files, err := t.cfg.Store.FilesByCurrentPath(p)
-		if err != nil || len(files) == 0 {
-			continue
+	}
+	t.mu.Unlock()
+	for _, p := range due {
+		t.removeEnd(p, now)
+	}
+}
+
+func (t *Tracker) removeEnd(p string, now time.Time) {
+	retry := func() {
+		t.mu.Lock()
+		if _, ok := t.endDue[p]; ok {
+			t.endDue[p] = now.Add(endRetry)
 		}
-		snap, err := t.cfg.Store.LatestSnapshot(files[0].ID)
-		if err != nil || t.cfg.Clock.Now().Sub(time.Unix(0, snap.SeenNS)) < EndFileMaxAge {
-			continue
-		}
-		var n int
-		if err := t.cfg.Store.Read().QueryRow(`SELECT COUNT(*) FROM records WHERE file_id=?`, files[0].ID).Scan(&n); err != nil || n == 0 {
-			continue // not parsed yet (or invalid): keep it
-		}
-		if err := os.Remove(p); err == nil {
-			reg.Add(obs.MEndFiles, map[string]string{"outcome": "removed"}, 1)
-			delete(t.endSeen, p)
-		}
+		t.mu.Unlock()
+	}
+	if _, err := os.Lstat(p); err != nil {
+		t.mu.Lock()
+		delete(t.endDue, p) // gone already (removed by someone else)
+		t.mu.Unlock()
+		return
+	}
+	files, err := t.cfg.Store.FilesByCurrentPath(p)
+	if err != nil || len(files) == 0 {
+		retry()
+		return
+	}
+	snap, err := t.cfg.Store.LatestSnapshot(files[0].ID)
+	if err != nil || now.Sub(time.Unix(0, snap.SeenNS)) < EndFileMaxAge {
+		retry()
+		return
+	}
+	var n int
+	if err := t.cfg.Store.Read().QueryRow(`SELECT COUNT(*) FROM records WHERE file_id=?`, files[0].ID).Scan(&n); err != nil || n == 0 {
+		retry() // not parsed yet (or invalid): keep it
+		return
+	}
+	if err := os.Remove(p); err == nil {
+		t.cfg.Obs.Reg.Add(obs.MEndFiles, map[string]string{"outcome": "removed"}, 1)
+		t.mu.Lock()
+		delete(t.endDue, p)
+		t.mu.Unlock()
+	} else {
+		retry()
 	}
 }
 

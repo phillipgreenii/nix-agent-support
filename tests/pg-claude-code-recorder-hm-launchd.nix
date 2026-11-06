@@ -167,6 +167,10 @@ let
       min_wake = "10s";
     };
   } osWithObs;
+  onEndsSweep = case darwin {
+    daemon.enable = true;
+    ends.sweep_every = "30m";
+  } osWithObs;
   onRollingDoctor = case darwin {
     daemon.enable = true;
     doctor = {
@@ -339,6 +343,8 @@ let
       && d.settle.tick == "5m"
       && d.settle.reconcile == "1h"
       && d.settle.min_wake == "5s";
+    endsSweepDefault = d.ends.sweep_every == "10m";
+    endsSweepRendered = (data onEndsSweep).ends.sweep_every == "30m";
     doctorDefaults =
       d.doctor.bytes_per_slice == 268435456
       && d.doctor.slice_every == "1m"

@@ -120,3 +120,26 @@ func TestRemovalDueKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestEndsSweepEveryKey(t *testing.T) {
+	e := env(map[string]string{"HOME": "/h"})
+	if d := Defaults(e); d.EndsSweepEvery != 10*time.Minute {
+		t.Fatalf("default %v", d.EndsSweepEvery)
+	}
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "c.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, e)
+	}
+	if c, err := load("[ends]\nsweep_every = \"30m\"\n"); err != nil || c.EndsSweepEvery != 30*time.Minute {
+		t.Fatalf("%v %v", err, c.EndsSweepEvery)
+	}
+	if _, err := load("[ends]\nsweep_every = \"1s\"\n"); err != nil {
+		t.Fatalf("floor rejected: %v", err)
+	}
+	if _, err := load("[ends]\nsweep_every = \"999ms\"\n"); err == nil || !strings.Contains(err.Error(), "ends.sweep_every") {
+		t.Fatalf("err %v", err)
+	}
+}

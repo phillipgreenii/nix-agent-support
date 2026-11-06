@@ -83,6 +83,7 @@ let
       reconcile = cfg.settle.reconcile;
       min_wake = cfg.settle.min_wake;
     };
+    ends.sweep_every = cfg.ends.sweep_every;
     doctor = {
       bytes_per_slice = cfg.doctor.bytes_per_slice;
       slice_every = cfg.doctor.slice_every;
@@ -251,6 +252,15 @@ in
       min_wake = durationOption "5s" ''
         Shortest time between two event wakes in `event` mode (at least 1s).
         Rendered as `settle.min_wake`.
+      '';
+    };
+
+    ends = {
+      sweep_every = durationOption "10m" ''
+        Interval of the slow fallback scan of the control ends directory (at
+        least 1s). End files are normally handled when they are ingested; the
+        scan recovers one the event path missed. Rendered as
+        `ends.sweep_every`.
       '';
     };
 

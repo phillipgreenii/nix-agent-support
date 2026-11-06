@@ -108,6 +108,10 @@ type Config struct {
 	SettleTick      time.Duration
 	SettleReconcile time.Duration
 	SettleMinWake   time.Duration
+	// EndsSweepEvery is ends.sweep_every: how often the slow fallback scan of the
+	// control ends directory runs (default 10 m, at least 1 s); end files are
+	// normally handled from the ingest event.
+	EndsSweepEvery time.Duration
 	// HeldRecheck is held.recheck: how often a held Conversation is checked
 	// again (default 1 h).
 	HeldRecheck time.Duration
@@ -188,6 +192,9 @@ type file struct {
 		AlertAfter string `toml:"alertAfter"`
 		Recheck    string `toml:"recheck"`
 	} `toml:"held"`
+	Ends struct {
+		SweepEvery string `toml:"sweep_every"`
+	} `toml:"ends"`
 	Settle struct {
 		After     string `toml:"after"`
 		Mode      string `toml:"mode"`
@@ -301,6 +308,7 @@ func Defaults(getenv func(string) string) Config {
 		SettleMode:          "scan",
 		SettleTick:          DefaultSettleTick,
 		SettleReconcile:     time.Hour,
+		EndsSweepEvery:      10 * time.Minute,
 		SettleMinWake:       5 * time.Second,
 		HeldRecheck:         time.Hour,
 		HeldMaxAge:          3 * 24 * time.Hour,
@@ -430,6 +438,7 @@ func apply(c *Config, f file) error {
 		{"held.maxAge", f.Held.MaxAge, &c.HeldMaxAge},
 		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},
 		{"held.recheck", f.Held.Recheck, &c.HeldRecheck},
+		{"ends.sweep_every", f.Ends.SweepEvery, &c.EndsSweepEvery},
 		{"settle.after", f.Settle.After, &c.SettleAfter},
 		{"settle.tick", f.Settle.Tick, &c.SettleTick},
 		{"settle.reconcile", f.Settle.Reconcile, &c.SettleReconcile},
@@ -487,6 +496,9 @@ func apply(c *Config, f file) error {
 	}
 	if c.SettleReconcile < time.Minute {
 		return fmt.Errorf("settle.reconcile: %s is under the 1m minimum", c.SettleReconcile)
+	}
+	if c.EndsSweepEvery < time.Second {
+		return fmt.Errorf("ends.sweep_every: %s is under the 1s minimum", c.EndsSweepEvery)
 	}
 	if c.SettleMinWake < time.Second {
 		return fmt.Errorf("settle.min_wake: %s is under the 1s minimum", c.SettleMinWake)
