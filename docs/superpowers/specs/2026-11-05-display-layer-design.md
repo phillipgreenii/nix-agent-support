@@ -405,6 +405,40 @@ the Home Manager option namespace `phillipgreenii.programs.claude-display`, the
 log directory `$XDG_STATE_HOME/claude-display/`, the module path
 `home/programs/claude-display/` and the check names `test-claude-display-*`.
 
+Host access and the registration shape. `claude plugin validate` (Claude Code
+2.1.314) refuses a module that passes `$` itself as an argument ("$ itself is
+passed as an argument (bound, passed, spread, returned or read); $ is always
+spelled $.noun.event(...) at the call site") and a generic forwarder such as
+`env.get: k => $.env.get(k)` ("$.env.get takes a literal name as its first
+argument"). So the mod's one hooks module, `claude-marketplace/status/hooks/register.ts`,
+builds a host facade inside its `session.start` hook: an object of closures, one
+purpose-named member per `$` call the mod needs (`process.run`, `fs.read`,
+`fs.write`, `http.fetch`, `config.set` today; `ui.invalidate`, `session.usage`,
+`session.model`, `session.cwd` and the like when a source needs them), each member
+spelled as a `$.noun.method(...)` call site. The facade, never `$`, is what the
+mod's code receives: `registerComponents(options, host)`, `initSources(host, ...)`,
+every source starter and every source's `fetch` (`fetch: ({ host }) => ...`); a
+test passes a stub host that records its calls. A component that needs another
+`$` member adds one closure to the facade in `register.ts`. Event hooks
+(`session.measure`, `turn.step`, `turn.complete`, `session.compact`, `config.set`)
+take `$` from their own callback and write results with `setValue`; they MAY live
+in a module other than `register.ts` that receives `on` as an argument, and a
+timer or async path outside a callback reaches `$` only through the facade.
+Checked 2026-11-06 with `claude plugin validate` on throwaway copies of the mod:
+(1) a facade with `ui.invalidate` and `session.usage`/`model`/`cwd`/`id` closures
+built in `session.start`, plus `session.measure`, `session.compact` and
+`turn.complete` hooks registered by a second file through `on` passed as an
+argument and calling `$.session.usage()` and `$.ui.invalidate()` directly,
+passes (calls listed as `$.session.cwd, $.session.id, $.session.model,
+$.session.usage, $.ui.invalidate`); (2) `$` passed to an arrow function in
+another file is refused ("$ is passed to "poke", a name bound to a function
+expression, outside the hook's own file"); (3) `$` passed to a function
+declaration in another file passes ("$.ui.invalidate (via poke)"), which the
+design does not rely on; (4) a second entry in `hooks.json` `modules` is refused
+("hooks.json `modules` names one hooks module per plugin; a second entry is
+refused"); (5) a `session.compact` hook without a `.catch` draws only the
+warning "gating hook without .catch".
+
 Scope calls (the builder MAY rely on these):
 
 - Display renders what bundles push and what its own sources read. It does not
