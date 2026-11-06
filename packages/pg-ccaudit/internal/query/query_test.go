@@ -404,12 +404,14 @@ func TestDefaultWindowIncludesRowsWithNoTimestamp(t *testing.T) {
 // Changing a query's SQL without bumping its version silently invalidates every
 // earlier result it will be compared against, so the version is asserted here.
 func TestRegistryVersionsArePinned(t *testing.T) {
+	// Seven lens queries are at +1 (cost-by-signature 2 -> 3): each gained the
+	// optional --cwd-prefix / --exclude-cwd-prefix session-scope filter.
 	want := map[string]int{
-		"error-rate-by-tool":    1,
-		"top-signatures":        1,
+		"error-rate-by-tool":    2,
+		"top-signatures":        2,
 		"bash-by-lead-cmd":      1,
 		"session-concentration": 1,
-		"retry-chains":          1,
+		"retry-chains":          2,
 		// pg2-z38lk item 4: the +1 line adjacency broke on intervening `system`
 		// (harness-injected) lines, which happen far more often in a main-loop
 		// transcript than a sidechain one; v2 skips over them.
@@ -418,7 +420,7 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		// pg2-z38lk items 5 and 6: idle/human-wait time flagged out of
 		// elapsed_ms_sum/mean (idle_calls/idle_ms_sum added), plus p50/max beside
 		// the existing sum/mean.
-		"cost-by-signature": 2,
+		"cost-by-signature": 3,
 		"hook-rejections":   1,
 		"first-seen":        1,
 		"last-seen":         1,
@@ -428,8 +430,8 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		"concentration-by-signature": 1,
 		"human-turns":                1,
 		"typed-turn-candidates":      1,
-		"interruptions":              1,
-		"denied-tool-calls":          1,
+		"interruptions":              2,
+		"denied-tool-calls":          2,
 		"undo-signatures":            1,
 		"file-churn":                 1,
 		"escaping-retries":           1,
@@ -438,7 +440,7 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		// BODY. It is an ADDITION, not a replacement — hook-rejections stays at v1 with
 		// its SQL untouched, because it is the durable reading if the structured payload
 		// ever arrives.
-		"hook-refusals-in-body": 1,
+		"hook-refusals-in-body": 2,
 		// pg2-hyn34: the fabricated-absolute-root class top-signatures cannot isolate
 		// because T-6 collapses every path to 'PATH' by design. Reads input_json
 		// directly, alongside the normalizer, rather than weakening it.

@@ -11,6 +11,12 @@ import (
 	"github.com/phillipgreenii/pg-ccaudit/internal/store"
 )
 
+// prefixFlag is a repeatable string flag.
+type prefixFlag []string
+
+func (p *prefixFlag) String() string     { return strings.Join(*p, ",") }
+func (p *prefixFlag) Set(v string) error { *p = append(*p, v); return nil }
+
 func cmdQuery(ctx context.Context, args []string, stdout, stderr *os.File) error {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -20,6 +26,9 @@ func cmdQuery(ctx context.Context, args []string, stdout, stderr *os.File) error
 	since := fs.String("since", "", "include events with ts >= this ISO-8601 prefix (e.g. 2026-07-22)")
 	until := fs.String("until", "", "include events with ts < this ISO-8601 prefix (exclusive)")
 	format := fs.String("format", "table", "output format: table, tsv or json")
+	var cwdPrefixes, excludeCwdPrefixes prefixFlag
+	fs.Var(&cwdPrefixes, "cwd-prefix", "keep only sessions whose FIRST recorded cwd is under this absolute path prefix (repeatable, OR); seven lens queries only")
+	fs.Var(&excludeCwdPrefixes, "exclude-cwd-prefix", "drop sessions whose FIRST recorded cwd is under this absolute path prefix (repeatable); seven lens queries only")
 	noStaleness := fs.Bool("no-staleness", false, "suppress the staleness note on stderr")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `pg-ccaudit query <name> [args…] — run a named, versioned canned query
@@ -52,6 +61,19 @@ QUERIES
 		return err
 	}
 
+	if !q.Scoped && (len(cwdPrefixes) > 0 || len(excludeCwdPrefixes) > 0) {
+		fmt.Fprintf(stderr, "pg-ccaudit: query %s does not support --cwd-prefix / --exclude-cwd-prefix\n", q.Name)
+		return errUsage
+	}
+	if _, err := query.NormalizeCwdPrefixes("--cwd-prefix", cwdPrefixes); err != nil {
+		fmt.Fprintf(stderr, "pg-ccaudit: %v\n", err)
+		return errUsage
+	}
+	if _, err := query.NormalizeCwdPrefixes("--exclude-cwd-prefix", excludeCwdPrefixes); err != nil {
+		fmt.Fprintf(stderr, "pg-ccaudit: %v\n", err)
+		return errUsage
+	}
+
 	resolvedDB, err := resolveDB(*dbPath)
 	if err != nil {
 		return err
@@ -72,6 +94,9 @@ QUERIES
 		Since:  *since,
 		Until:  *until,
 		Format: f,
+
+		CwdPrefixes:        cwdPrefixes,
+		ExcludeCwdPrefixes: excludeCwdPrefixes,
 	}
 	res, err := query.Run(ctx, db, req)
 	if err != nil {

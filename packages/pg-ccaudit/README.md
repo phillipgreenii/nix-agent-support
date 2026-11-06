@@ -151,6 +151,35 @@ Every query takes `--since` / `--until` (ISO-8601 prefixes, `--until` exclusive)
 `--format table|tsv|json`. Every rendering is stamped with the query name, its
 version and the window, so a pasted result is self-describing.
 
+### Session scope: `--cwd-prefix` / `--exclude-cwd-prefix`
+
+Seven queries (`error-rate-by-tool`, `top-signatures`, `cost-by-signature`,
+`retry-chains`, `denied-tool-calls`, `interruptions`, `hook-refusals-in-body`)
+also take a repeatable `--cwd-prefix DIR` and a repeatable
+`--exclude-cwd-prefix DIR`. Passing either flag to any other query is a usage
+error (exit 2), as is an empty or relative prefix. With neither flag the result
+is unchanged. Each of the seven queries' versions was bumped by one when the
+filter was added (`cost-by-signature` went 2 to 3), and the version, as ever, is
+printed with the result.
+
+- A session is in scope when the cwd of its FIRST event (lowest `seq`, earliest
+  `ts` breaking a tie, then file path) is under any `--cwd-prefix` (several
+  prefixes are an OR). Later events that wander out of the prefix do not matter.
+- A session whose first recorded cwd is NULL (and an event with no session id)
+  is never matched by `--cwd-prefix`; `--exclude-cwd-prefix` does not drop it.
+- Matching is by whole path component and case-sensitive: `/a/b` matches `/a/b`
+  and `/a/b/c`, not `/a/bc`. A trailing slash on a prefix is ignored.
+- Only `events.cwd` is used; `files.project_dir` is empty on the recorder feed
+  path and lossy elsewhere.
+
+Worktree sessions (finding, 2026-11-06): the index stores `events.cwd` exactly as
+the transcript line carries it, so a session whose lines record the worktree path
+is attributed to that path and a prefix containing it matches (a test proves this
+with a synthetic transcript). Whether Claude Code itself writes the worktree path
+rather than the main checkout is not something this repository can prove; check it
+by hand against your own index with one query and `--cwd-prefix`, confirming the
+row count is at most the unfiltered count.
+
 ### Two things worth knowing before you quote a number
 
 **`cost-by-signature` reports two cost columns, and the obvious one is not the

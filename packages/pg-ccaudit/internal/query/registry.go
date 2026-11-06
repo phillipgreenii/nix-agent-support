@@ -40,6 +40,10 @@ type Query struct {
 	SQL    string
 	// Window marks a query whose SQL references :since and :until.
 	Window bool
+	// Scoped marks a query whose SQL uses scoped() and so references
+	// :cwd_prefixes and :exclude_cwd_prefixes (JSON arrays of path prefixes).
+	// Only these queries accept --cwd-prefix / --exclude-cwd-prefix.
+	Scoped bool
 }
 
 // windowClause is spelled so the DEFAULT (empty) window includes rows whose ts
@@ -50,6 +54,41 @@ type Query struct {
 const windowClause = `(:since = '' OR %[1]s.ts >= :since) AND (:until = '' OR %[1]s.ts < :until)`
 
 func win(alias string) string { return fmt.Sprintf(windowClause, alias) }
+
+// firstCwdSessions is one row per session_id with the working directory of the
+// session's FIRST event: lowest seq, earliest ts breaking a tie, then path so
+// the choice is deterministic. The first event is taken whether or not its cwd
+// is NULL, so a session whose first recorded cwd is NULL has a NULL cwd here and
+// matches no prefix. events.project_dir is deliberately not used (empty on the
+// recorder feed path, lossy elsewhere). Events with no session_id belong to no
+// session and are never in scope when a prefix filter is active.
+const firstCwdSessions = `(
+  SELECT s.session_id AS session_id, s.cwd AS cwd
+  FROM (SELECT session_id, cwd,
+               ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq, ts, path) AS rn
+        FROM events WHERE session_id IS NOT NULL) s
+  WHERE s.rn = 1)`
+
+// Matching is by whole path components ('/a/b' matches '/a/b' and '/a/b/c',
+// never '/a/bc'); the prefixes are normalised (absolute, no trailing slash)
+// before binding, and the match is case-sensitive.
+//
+// scopeClause restricts rows to sessions whose first cwd is under any
+// :cwd_prefixes entry and not under any :exclude_cwd_prefixes entry. With both
+// arrays empty it is vacuously true, so an unfiltered run is unchanged. The
+// qualifying-session sets are uncorrelated subqueries, so each is computed once
+// per statement rather than once per row.
+const scopeClause = `(:cwd_prefixes = '[]' OR %[1]s.session_id IN (
+    SELECT fs.session_id FROM ` + firstCwdSessions + ` fs WHERE ` + `EXISTS (SELECT 1 FROM json_each(:cwd_prefixes) p
+          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/')))
+  AND (:exclude_cwd_prefixes = '[]' OR %[1]s.session_id IS NULL OR %[1]s.session_id NOT IN (
+    SELECT fs.session_id FROM ` + firstCwdSessions + ` fs WHERE ` + `EXISTS (SELECT 1 FROM json_each(:exclude_cwd_prefixes) p
+          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/')))`
+
+// scoped is win plus the session-scope filter, for the queries marked Scoped.
+func scoped(alias string) string {
+	return win(alias) + "\n  AND " + fmt.Sprintf(scopeClause, alias)
+}
 
 // prevToolAgg is one row per assistant LINE that issued tool calls, not per call.
 //
@@ -161,7 +200,8 @@ var registry = func() map[string]Query {
 	qs := []Query{
 		{
 			Name:    "error-rate-by-tool",
-			Version: 1,
+			Version: 2,
+			Scoped:  true,
 			Doc:     "Per-tool error counts WITH denominators, in one query.",
 			Notes: "The denominator is every tool CALL, including calls whose result was never " +
 				"recorded (LEFT JOIN) — an abandoned call still cost something. errors counts " +
@@ -175,13 +215,14 @@ SELECT c.tool_name                                                             A
 FROM tool_calls c
 JOIN events e ON e.path = c.path AND e.seq = c.seq
 LEFT JOIN tool_results r ON r.tool_use_id = c.tool_use_id
-WHERE ` + win("e") + `
+WHERE ` + scoped("e") + `
 GROUP BY c.tool_name
 ORDER BY errors DESC, calls DESC, tool_name`,
 		},
 		{
 			Name:    "top-signatures",
-			Version: 1,
+			Version: 2,
+			Scoped:  true,
 			Doc:     "Ranked normalized error signatures.",
 			Notes: "signature is normalized AT INGEST (T-6), so grouping is stable across runs; " +
 				"recomputing it at query time would regroup history whenever the normalizer changed.",
@@ -194,7 +235,7 @@ SELECT r.signature                                                        AS sig
        SUM(CASE WHEN COALESCE(e.is_sidechain, 0) = 1 THEN 1 ELSE 0 END)   AS subagent
 FROM tool_results r
 JOIN events e ON e.path = r.path AND e.seq = r.seq
-WHERE r.is_error = 1 AND ` + win("e") + `
+WHERE r.is_error = 1 AND ` + scoped("e") + `
 GROUP BY r.signature
 ORDER BY errors DESC, signature
 LIMIT :limit`,
@@ -368,7 +409,8 @@ SELECT (SELECT COUNT(*) FROM hits)                                        AS tot
 		},
 		{
 			Name:    "retry-chains",
-			Version: 1,
+			Version: 2,
+			Scoped:  true,
 			Doc:     "A failed call followed by the same tool being re-called within N line ordinals.",
 			Notes: "N defaults to 6. A retry cycle is at minimum [tool_use] -> [tool_result] -> " +
 				"[tool_use] (3 lines), and Claude writes one line per content block, so a batch of " +
@@ -398,7 +440,7 @@ JOIN tool_calls nc ON nc.path = fc.path AND nc.tool_name = fc.tool_name
                   AND nc.seq > fc.seq AND nc.seq <= fc.seq + :n
 JOIN events ne ON ne.path = nc.path AND ne.seq = nc.seq
 LEFT JOIN tool_results nr ON nr.tool_use_id = nc.tool_use_id
-WHERE ne.session_id IS fe.session_id AND ` + win("fe") + `
+WHERE ne.session_id IS fe.session_id AND ` + scoped("fe") + `
 ORDER BY fc.path, fc.seq, nc.seq`,
 		},
 		{
@@ -466,7 +508,8 @@ ORDER BY total DESC, signature`,
 		},
 		{
 			Name:    "cost-by-signature",
-			Version: 2,
+			Version: 3,
+			Scoped:  true,
 			Doc:     "Measured cost per error signature, with idle/human-wait time flagged out and the spread (p50/max) beside the sum.",
 			Notes: "READ THIS BEFORE QUOTING A NUMBER. Two cost columns are reported because the " +
 				"corpus does NOT carry a per-tool-call duration. Claude Code writes a top-level " +
@@ -511,7 +554,7 @@ WITH per_call AS (
   JOIN events re ON re.path = r.path AND re.seq = r.seq
   JOIN tool_calls c ON c.tool_use_id = r.tool_use_id
   JOIN events ce ON ce.path = c.path AND ce.seq = c.seq
-  WHERE r.is_error = 1 AND ` + win("re") + `
+  WHERE r.is_error = 1 AND ` + scoped("re") + `
 ),
 active AS (
   SELECT signature, elapsed_ms,
@@ -746,7 +789,8 @@ ORDER BY t.path, t.seq`,
 		},
 		{
 			Name:    "interruptions",
-			Version: 1,
+			Version: 2,
+			Scoped:  true,
 			Doc:     "Interruption sentinels, with the tool call the person cut short.",
 			Notes: "`interrupted` is set AT INGEST by prefix-matching Claude Code's sentinel, which " +
 				"covers both observed forms ('[Request interrupted by user]' and '… for tool use'). " +
@@ -764,7 +808,7 @@ marks AS (
            WHERE c.path = e.path AND c.seq < e.seq) AS prev_seq
   FROM user_text u
   JOIN events e ON e.path = u.path AND e.seq = u.seq
-  WHERE u.interrupted = 1 AND ` + win("e") + `
+  WHERE u.interrupted = 1 AND ` + scoped("e") + `
 )
 SELECT m.session_id                  AS session_id,
        m.is_sidechain                AS is_sidechain,
@@ -785,7 +829,8 @@ ORDER BY m.path, m.seq`,
 		},
 		{
 			Name:    "denied-tool-calls",
-			Version: 1,
+			Version: 2,
+			Scoped:  true,
 			Doc:     "Tool calls a PERSON or the permission layer refused, split by who refused.",
 			Notes: "The agent attempted something it was not allowed to do, which is a mistake whose " +
 				"detection needs no semantics. `kind` decides the Tier 3 route and the routes differ: " +
@@ -824,12 +869,13 @@ WHERE r.is_error = 1
   AND (r.content LIKE 'The user doesn''t want to proceed%'
     OR r.content LIKE 'Permission for this tool use was denied%'
     OR r.content LIKE 'Permission for this action was denied%')
-  AND ` + win("e") + `
+  AND ` + scoped("e") + `
 ORDER BY r.path, r.seq`,
 		},
 		{
 			Name:    "hook-refusals-in-body",
-			Version: 1,
+			Version: 2,
+			Scoped:  true,
 			Doc:     "Hook- and guard-authored refusals recovered from the tool_result BODY, which is where they actually land.",
 			Params:  []Param{{Name: "head", Doc: "how many characters of the body's opening the marker must appear in", Default: "200", Numeric: true}},
 			Notes: "THE SIBLING OF `hook-rejections`, NOT ITS REPLACEMENT. That query reads the " +
@@ -979,7 +1025,7 @@ SELECT f.kind                        AS kind,
 FROM refusals f
 JOIN events e ON e.path = f.path AND e.seq = f.seq
 LEFT JOIN tool_calls c ON c.tool_use_id = f.tool_use_id
-WHERE f.kind <> '' AND ` + win("e") + `
+WHERE f.kind <> '' AND ` + scoped("e") + `
 ORDER BY f.path, f.seq`,
 		},
 		{

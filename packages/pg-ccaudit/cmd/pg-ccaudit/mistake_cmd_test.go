@@ -132,8 +132,8 @@ func TestCandidatesIsReadOnlyAndReportsProvenance(t *testing.T) {
 	}
 	for _, want := range []string{
 		"typed-turn-candidates    v1 rows=3",
-		"interruptions            v1 rows=1",
-		"denied-tool-calls        v1 rows=2",
+		"interruptions            v2 rows=1",
+		"denied-tool-calls        v2 rows=2",
 		"undo-signatures          v1 rows=4",
 		"file-churn               v1 rows=1",
 		"escaping-retries         v1 rows=1",

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -328,5 +329,42 @@ func TestIngestWithRecorderDownSkipsCleanly(t *testing.T) {
 	}
 	if _, statErr := os.Stat(dbPath); statErr == nil {
 		t.Error("a skipped cycle created a database")
+	}
+}
+
+// --cwd-prefix and --exclude-cwd-prefix reach the query, narrow its result, are
+// stamped into the rendering, and are usage errors (exit 2) when misused.
+func TestQueryCwdPrefixFlags(t *testing.T) {
+	root, dbPath := corpus(t)
+	if _, _, err := captureRun(t, "ingest", "--socket", root, "--db", dbPath); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	// The fixture session records no cwd at all, so its first cwd is NULL: it is
+	// never matched by --cwd-prefix and is never excluded by --exclude-cwd-prefix.
+	out, _, err := captureRun(t, "query", "--db", dbPath, "--no-staleness", "--cwd-prefix", "/work/repo", "top-signatures")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if strings.Contains(out, "Blocked: sleep N") {
+		t.Errorf("--cwd-prefix matched a session with a NULL first cwd:\n%s", out)
+	}
+	if !strings.Contains(out, "cwd-prefix=/work/repo") {
+		t.Errorf("rendering omits the scope:\n%s", out)
+	}
+	out, _, err = captureRun(t, "query", "--db", dbPath, "--no-staleness", "--exclude-cwd-prefix", "/work/repo", "top-signatures")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !strings.Contains(out, "Blocked: sleep N") || !strings.Contains(out, "exclude-cwd-prefix=/work/repo") {
+		t.Errorf("--exclude-cwd-prefix dropped a NULL-cwd session or omitted the scope:\n%s", out)
+	}
+	for _, args := range [][]string{
+		{"query", "--db", dbPath, "--cwd-prefix", "/work/repo", "first-seen"},
+		{"query", "--db", dbPath, "--cwd-prefix", "relative", "top-signatures"},
+		{"query", "--db", dbPath, "--exclude-cwd-prefix", "", "top-signatures"},
+	} {
+		if _, _, err := captureRun(t, args...); !errors.Is(err, errUsage) {
+			t.Errorf("%v: err = %v, want a usage error", args, err)
+		}
 	}
 }

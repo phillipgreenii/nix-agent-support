@@ -37,6 +37,29 @@ type Request struct {
 	Since  string
 	Until  string
 	Format Format
+	// CwdPrefixes keeps only sessions whose first recorded working directory is
+	// under one of these prefixes (OR). ExcludeCwdPrefixes drops sessions whose
+	// first cwd is under any of these. Both are accepted only by Scoped queries
+	// and must be normalised with NormalizeCwdPrefixes.
+	CwdPrefixes        []string
+	ExcludeCwdPrefixes []string
+}
+
+// NormalizeCwdPrefixes validates scope prefixes: each must be absolute; a
+// trailing slash is ignored. An empty or relative prefix is an error.
+func NormalizeCwdPrefixes(flagName string, in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		if !strings.HasPrefix(p, "/") {
+			return nil, fmt.Errorf("%s %q: prefix must be an absolute path", flagName, p)
+		}
+		n := strings.TrimRight(p, "/")
+		if n == "" {
+			return nil, fmt.Errorf("%s %q: prefix must name a directory below the root", flagName, p)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // Result is a rendered result set.
@@ -51,7 +74,10 @@ func (r Request) Bind() ([]any, error) {
 		return nil, fmt.Errorf("query %s takes at most %d argument(s), got %d (usage: %s)",
 			r.Query.Name, len(r.Query.Params), len(r.Args), r.Query.Usage())
 	}
-	out := make([]any, 0, len(r.Query.Params)+2)
+	if !r.Query.Scoped && (len(r.CwdPrefixes) > 0 || len(r.ExcludeCwdPrefixes) > 0) {
+		return nil, fmt.Errorf("query %s does not support --cwd-prefix / --exclude-cwd-prefix", r.Query.Name)
+	}
+	out := make([]any, 0, len(r.Query.Params)+4)
 	for i, p := range r.Query.Params {
 		v := p.Default
 		if i < len(r.Args) && r.Args[i] != "" {
@@ -70,7 +96,31 @@ func (r Request) Bind() ([]any, error) {
 	if r.Query.Window {
 		out = append(out, sql.Named("since", r.Since), sql.Named("until", r.Until))
 	}
+	if r.Query.Scoped {
+		in, err := prefixJSON("--cwd-prefix", r.CwdPrefixes)
+		if err != nil {
+			return nil, err
+		}
+		ex, err := prefixJSON("--exclude-cwd-prefix", r.ExcludeCwdPrefixes)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sql.Named("cwd_prefixes", in), sql.Named("exclude_cwd_prefixes", ex))
+	}
 	return out, nil
+}
+
+// prefixJSON normalises prefixes and encodes them as the JSON array the SQL binds.
+func prefixJSON(flagName string, prefixes []string) (string, error) {
+	n, err := NormalizeCwdPrefixes(flagName, prefixes)
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(n)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // Run executes a canned query against a read-only handle.
@@ -170,6 +220,12 @@ func renderJSON(w io.Writer, req Request, res *Result) error {
 		"columns": res.Columns,
 		"rows":    rows,
 	}
+	if len(req.CwdPrefixes) > 0 {
+		payload["cwd_prefixes"] = req.CwdPrefixes
+	}
+	if len(req.ExcludeCwdPrefixes) > 0 {
+		payload["exclude_cwd_prefixes"] = req.ExcludeCwdPrefixes
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -180,6 +236,12 @@ func header(req Request) string {
 	fmt.Fprintf(&sb, "pg-ccaudit query %s v%d", req.Query.Name, req.Query.Version)
 	if len(req.Args) > 0 {
 		fmt.Fprintf(&sb, " args=%s", strings.Join(req.Args, ","))
+	}
+	for _, p := range req.CwdPrefixes {
+		fmt.Fprintf(&sb, " cwd-prefix=%s", p)
+	}
+	for _, p := range req.ExcludeCwdPrefixes {
+		fmt.Fprintf(&sb, " exclude-cwd-prefix=%s", p)
 	}
 	sb.WriteString(" window=")
 	if req.Since == "" && req.Until == "" {
