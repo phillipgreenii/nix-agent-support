@@ -375,13 +375,10 @@ func TestGit_Chdir_WorktreeVerbGrants(t *testing.T) {
 		{"config write", "git -C " + wt + " config user.name x", hookio.Reject},
 		{"gc", "git -C " + wt + " gc", hookio.NoOpinion},
 		{"prune", "git -C " + wt + " prune", hookio.NoOpinion},
-		// FLAGGED: approved today although a denied-form candidate. The force-push
-		// reject message explicitly steers to --force-with-lease, so this one is
-		// probably intended; filter-branch rewrites history and is not.
-		// Recommended rule change (operator decision): make filter-branch
-		// abstain/reject like reset --hard.
-		{"force-with-lease push (approved today, likely intended)", "git -C " + wt + " push --force-with-lease origin x", hookio.Approve},
-		{"filter-branch (approved today, FLAGGED)", "git -C " + wt + " filter-branch", hookio.Approve},
+		// force-with-lease is approved on purpose: the force-push reject message
+		// steers agents to it. filter-branch rewrites history and abstains.
+		{"force-with-lease push (approved, intended)", "git -C " + wt + " push --force-with-lease origin x", hookio.Approve},
+		{"filter-branch", "git -C " + wt + " filter-branch", hookio.NoOpinion},
 		// Positive controls that must stay approved.
 		{"checkout detach FETCH_HEAD", "git -C " + wt + " checkout --detach FETCH_HEAD", hookio.Approve},
 		{"add -A", "git -C " + wt + " add -A", hookio.Approve},
