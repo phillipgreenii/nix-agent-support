@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -221,6 +222,10 @@ type queryTOML struct {
 	// environment (default off). A pointer so a timer query that sets it can be
 	// told apart from one that does not.
 	StrictBaseEnv *bool `toml:"strict_base_env"`
+	// Metadata is a timer query's static metadata, copied unchanged into every
+	// tick's item. Decoded as any so a non-string value is reported by our own
+	// error, not the TOML decoder's.
+	Metadata map[string]any `toml:"metadata"`
 }
 
 // triggerTOML is a query's firing strategy (Q1). kind selects the concrete
@@ -230,6 +235,138 @@ type triggerTOML struct {
 	Every *duration `toml:"every"` // period
 	Count int       `toml:"count"` // threshold
 	Binds []string  `toml:"binds"` // threshold: the upstream types to count
+
+	// Calendar-trigger keys (consumed by the calendar kind).
+	At        string    `toml:"at"`
+	Days      []string  `toml:"days"`
+	TZ        *string   `toml:"tz"`
+	OnMissed  string    `toml:"on_missed"`
+	ExpiresIn *duration `toml:"expires_in"`
+}
+
+// calendarOnlyTriggerKeys are the trigger keys valid only for kind = "calendar".
+var calendarOnlyTriggerKeys = []string{"at", "days", "tz", "on_missed", "expires_in"}
+
+// reservedMetadataKeys are the keys the core sets itself on a timer tick.
+var reservedMetadataKeys = []string{"scheduled_for", "on_missed"}
+
+// maxTimerMetadataKeys bounds a timer query's static metadata.
+const maxTimerMetadataKeys = 16
+
+// knownTriggerKeys lists every key triggerTOML consumes, from its toml tags.
+func knownTriggerKeys() []string {
+	t := reflect.TypeOf(triggerTOML{})
+	keys := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		if tag := strings.Split(t.Field(i).Tag.Get("toml"), ",")[0]; tag != "" && tag != "-" {
+			keys = append(keys, tag)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// rawTriggerKeys returns, per [[query]] in file order, the keys of its trigger
+// table (nil when it has none), like rawQueryKeys but one level down. Used to
+// reject a misspelled key inside [query.trigger] and to see which calendar-only
+// keys were written.
+func rawTriggerKeys(body string) [][]string {
+	var raw struct {
+		Queries []map[string]any `toml:"query"`
+	}
+	if _, err := toml.Decode(body, &raw); err != nil {
+		return nil
+	}
+	out := make([][]string, len(raw.Queries))
+	for i, m := range raw.Queries {
+		tm, ok := m["trigger"].(map[string]any)
+		if !ok {
+			continue
+		}
+		for k := range tm {
+			out[i] = append(out[i], k)
+		}
+		sort.Strings(out[i])
+	}
+	return out
+}
+
+// checkTriggerKeys rejects unknown keys in a query's trigger table and a
+// calendar-only key on a trigger whose kind is not calendar. When every is also
+// set, the calendar packet's mutual-exclusion message covers it instead.
+func checkTriggerKeys(keys []string, t *triggerTOML) error {
+	known := map[string]bool{}
+	for _, k := range knownTriggerKeys() {
+		known[k] = true
+	}
+	var unknown, calendar []string
+	for _, k := range keys {
+		switch {
+		case !known[k]:
+			unknown = append(unknown, k)
+		case slices.Contains(calendarOnlyTriggerKeys, k):
+			calendar = append(calendar, k)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("trigger: unknown key(s) %s (a misspelled key is never silently ignored; known keys: %s)", strings.Join(unknown, ", "), strings.Join(knownTriggerKeys(), ", "))
+	}
+	if len(calendar) > 0 && (t == nil || (t.Kind != "calendar" && t.Every == nil)) {
+		return fmt.Errorf("trigger: \"at\", \"days\", \"tz\", \"on_missed\" and \"expires_in\" are only valid for kind = \"calendar\" (found: %s)", strings.Join(calendar, ", "))
+	}
+	return nil
+}
+
+// tomlTypeName names a decoded TOML value's type for a metadata error.
+func tomlTypeName(v any) string {
+	switch v.(type) {
+	case int64:
+		return "integer"
+	case float64:
+		return "float"
+	case bool:
+		return "bool"
+	case []any, []map[string]any:
+		return "array"
+	case map[string]any:
+		return "table"
+	case time.Time:
+		return "datetime"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+// buildTimerMetadata validates a query's static metadata and returns it as
+// strings. An empty or absent map is nil (metadata = {} equals absent).
+func buildTimerMetadata(qt queryTOML) (map[string]string, error) {
+	if len(qt.Metadata) == 0 {
+		return nil, nil
+	}
+	if qt.Type != "timer" {
+		return nil, fmt.Errorf("metadata is only supported on type = \"timer\" queries; this query is type %q", qt.Type)
+	}
+	keys := make([]string, 0, len(qt.Metadata))
+	for k := range qt.Metadata {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		if slices.Contains(reservedMetadataKeys, k) {
+			return nil, fmt.Errorf("metadata key %q is reserved (reserved: %s)", k, strings.Join(reservedMetadataKeys, ", "))
+		}
+		sv, ok := qt.Metadata[k].(string)
+		if !ok {
+			return nil, fmt.Errorf("metadata.%s must be a string, got %s", k, tomlTypeName(qt.Metadata[k]))
+		}
+		out[k] = sv
+	}
+	if len(keys) > maxTimerMetadataKeys {
+		return nil, fmt.Errorf("metadata has %d keys; at most %d are allowed", len(keys), maxTimerMetadataKeys)
+	}
+	return out, nil
 }
 
 // monitorTOML is one top-level [[monitor]] entry (pg2-nhvdo, INTF-MON): the
@@ -359,7 +496,7 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	// Build the producer set from [[query]] (design M3). A config with [[role]]
 	// but no [[query]] leaves c.Queries empty; Validate then flags every role's
 	// Binds as an orphan consumer (a clear, aggregated diagnostic).
-	queries, overrides, qerrs := r.buildQueries(md, shape.Queries, rawQueryKeys(string(body)), *c)
+	queries, overrides, qerrs := r.buildQueries(md, shape.Queries, rawQueryKeys(string(body)), rawTriggerKeys(string(body)), *c)
 	errs = append(errs, qerrs...)
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
@@ -373,7 +510,7 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 // installing its emits + trigger, and collects each query's own explicit
 // expected_interval override (this task) into a name-keyed map. Duplicate
 // query names are rejected.
-func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]string, c Config) (query.SourceSet, map[string]int64, []error) {
+func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys, rawTrigKeys [][]string, c Config) (query.SourceSet, map[string]int64, []error) {
 	var out query.SourceSet
 	overrides := map[string]int64{}
 	var errs []error
@@ -391,6 +528,12 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]s
 		if i < len(rawKeys) {
 			if unknown := unknownQueryKeys(rawKeys[i]); len(unknown) > 0 {
 				errs = append(errs, fmt.Errorf("query[%d] %q: unknown key(s) %s (a misspelled key is never silently ignored; known keys: %s)", i, qt.Name, strings.Join(unknown, ", "), strings.Join(knownQueryKeys(), ", ")))
+				continue
+			}
+		}
+		if i < len(rawTrigKeys) && len(rawTrigKeys[i]) > 0 {
+			if err := checkTriggerKeys(rawTrigKeys[i], qt.Trigger); err != nil {
+				errs = append(errs, fmt.Errorf("query[%d] %q: %w", i, qt.Name, err))
 				continue
 			}
 		}
@@ -617,9 +760,17 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if qt.Type != "command" && qt.StrictBaseEnv != nil {
 		return nil, fmt.Errorf("strict_base_env applies only to a command query; a %q query has no command to run", qt.Type)
 	}
+	tmeta, err := buildTimerMetadata(qt)
+	if err != nil {
+		return nil, err
+	}
 	q, err := r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig, FB: fb}, md, prim)
 	if err != nil {
 		return nil, err
+	}
+	if tq, ok := q.(query.TimerQuery); ok {
+		tq.Metadata = tmeta
+		return tq, nil
 	}
 	if cq, ok := q.(query.CommandQuery); ok {
 		cq.StrictBaseEnv = qt.StrictBaseEnv != nil && *qt.StrictBaseEnv

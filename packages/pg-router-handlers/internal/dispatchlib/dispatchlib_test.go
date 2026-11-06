@@ -1,6 +1,7 @@
 package dispatchlib
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
@@ -8,6 +9,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
+	"github.com/phillipgreenii/pg-router-handlers/internal/prompt"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 )
 
@@ -141,5 +143,23 @@ func TestBareEntityItem_leavesOtherItemsUnchanged(t *testing.T) {
 				t.Errorf("ID = %q, want %q unchanged", got.ID, in.ID)
 			}
 		})
+	}
+}
+
+// A timer query's static metadata arrives in the dispatch payload as a JSON
+// object; a command role template reads it with {{index .Item.Metadata "lens"}}.
+func TestItemFromPayload_timerMetadataRendersInACommandRoleTemplate(t *testing.T) {
+	var payload map[string]any
+	raw := `{"id":"2026-11-06T00:00:00Z","type":"timer","title":"timer tick","metadata":{"lens":"security"}}`
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := prompt.Parse("t", `{{index .Item.Metadata "lens"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := prompt.Render(tmpl, prompt.Context{Item: ItemFromPayload(payload)})
+	if err != nil || got != "security" {
+		t.Errorf("render = (%q, %v), want security", got, err)
 	}
 }

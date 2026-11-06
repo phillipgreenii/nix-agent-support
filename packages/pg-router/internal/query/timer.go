@@ -23,6 +23,10 @@ import (
 // away at its final attempt (INV-EVT-4).
 type TimerQuery struct {
 	Meta `toml:"-"`
+	// Metadata is static, operator-declared string metadata copied unchanged
+	// into every tick's item. Nil/empty leaves the item exactly as it was before
+	// the key existed.
+	Metadata map[string]string `toml:"-"`
 }
 
 // Validate has nothing to check beyond the [[query]]-level `emits`, which the
@@ -43,10 +47,18 @@ func (q TimerQuery) Run(_ context.Context, _ Env) ([]event.Event, error) {
 		return nil, fmt.Errorf("timer query: no emit type declared")
 	}
 	now := time.Now().UTC()
+	it := item.Item{ID: now.Format(time.RFC3339), Type: "timer", Title: "timer tick"}
+	if len(q.Metadata) > 0 {
+		// A fresh map per tick, never aliased to the query's own.
+		it.Metadata = make(map[string]any, len(q.Metadata))
+		for k, v := range q.Metadata {
+			it.Metadata[k] = v
+		}
+	}
 	return []event.Event{{
 		ID:        fmt.Sprintf("timer:%s:%d", typ, now.UnixNano()),
 		Type:      typ,
-		Item:      item.Item{ID: now.Format(time.RFC3339), Type: "timer", Title: "timer tick"},
+		Item:      it,
 		EmittedAt: now,
 	}}, nil
 }
