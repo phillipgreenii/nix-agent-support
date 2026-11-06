@@ -6,6 +6,7 @@ import { initSources } from './source'
 import { registerGitHeadHooks, startGitHead } from './gitHead'
 import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { registerUsageHooks, startUsage } from './usage'
+import { registerBandHooks } from './band'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):
