@@ -13,7 +13,7 @@ import { hydrateToggles, isOpen, resetToggles, setOpen } from './toggles'
 import { registerToggleCommands, TOGGLE_COMMANDS } from './toggleCommands'
 import { DEFAULT_OPTIONS } from './types'
 import type { Usage } from './usage'
-import { settle, stubHost } from './testkit'
+import { fakeClock, settle, stubHost } from './testkit'
 
 const T = DEFAULT_OPTIONS.alerts.thresholds
 
@@ -24,7 +24,7 @@ async function world(usage?: Usage) {
   clearBandButtons()
   resetSessionFacts()
   const sh = stubHost()
-  initSources(sh.host)
+  initSources(sh.host, fakeClock())
   setOptions(DEFAULT_OPTIONS)
   defineSource<Usage>({ id: 'usage', intervalMs: 0 })
   defineSource<{ branch?: string; detached?: string; worktree?: string }>({ id: 'gitHead', intervalMs: 0 })
