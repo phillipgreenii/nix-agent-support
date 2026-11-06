@@ -415,6 +415,11 @@
           pg-review = final.callPackage ./packages/pg-review {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-review-router-adapter: Pattern A (ADR 0008), stdlib-only; runs the
+          # `pg-review` CLI from PATH as a child, no compile-time dependency on it.
+          pg-review-router-adapter = final.callPackage ./packages/pg-review-router-adapter {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-claude-code-recorder (docket pg2-v77tsx, phase 1a): Pattern A (ADR 0008)
           # scaffold; one darwin-only cgo file, Linux builds with CGO_ENABLED=0.
           pg-claude-code-recorder = final.callPackage ./packages/pg-claude-code-recorder {
@@ -1916,6 +1921,7 @@
                 "pg-task-focus"
                 "pg-keep-awake"
                 "pg-review"
+                "pg-review-router-adapter"
                 "pg-probe"
                 "pg-claude-code-recorder"
                 "pg-claude-control"
@@ -6557,6 +6563,13 @@
                 pname = "pg-review-go-tests";
                 src = lib.cleanSource ./packages/pg-review; # matches default.nix
                 gomod2nixToml = ./packages/pg-review/gomod2nix.toml;
+              };
+
+              # pg-review-router-adapter - whole-module Go test gate (unit tier). Pattern A, flat src.
+              pg-review-router-adapter-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-review-router-adapter-go-tests";
+                src = lib.cleanSource ./packages/pg-review-router-adapter; # matches default.nix
+                gomod2nixToml = ./packages/pg-review-router-adapter/gomod2nix.toml;
               };
 
               # pg-claude-code-recorder (docket pg2-v77tsx, phase 1a) - whole-module Go
@@ -18592,6 +18605,7 @@
               pg-task-focus
               pg-keep-awake
               pg-review
+              pg-review-router-adapter
               pg-probe
               pg-claude-code-recorder
               pg-claude-control
