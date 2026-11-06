@@ -347,31 +347,96 @@ func (r *Reader) Mark(ctx context.Context) (string, error) {
 	return ans.AsOf, nil
 }
 
+// ErrFeedUnanswered is what WaitMessage reports when the window passed and the
+// recorder's feed was not answering at the end of it (busy, unavailable or a
+// read deadline on every page since the last good one, or never a good page).
+// A window with no record proves "not ingested" only while the recorder was
+// answering the feed: a feed that kept failing would look the same, so the
+// caller must treat this as "unknown", never as "not ingested".
+var ErrFeedUnanswered = errors.New("the recorder feed did not answer within the window")
+
+// feedRetryPause is the gap before asking the feed again after a retryable
+// failure (busy, unavailable, query timeout).
+const feedRetryPause = 500 * time.Millisecond
+
+// feedGrace is how long past the window the last feed request may run.
+const feedGrace = 2 * time.Second
+
 // WaitMessage waits on the change feed, until window elapses, for a real user or
 // assistant message of the session written after mark. It returns (false, nil)
-// when none appeared.
+// only when the window passed with no such record AND the feed's last answer was
+// a successful page: the recorder answered that nothing matched. When retryable
+// failures (busy, unavailable, query timeout) were still the latest outcome at
+// the end of the window, or no page ever succeeded, it returns an error matching
+// ErrFeedUnanswered (the iterator would have retried them silently, so the
+// window's end would have read as a definitive "no record").
 func (r *Reader) WaitMessage(ctx context.Context, transcriptPath, mark string, window time.Duration) (bool, error) {
 	c, err := r.conn(ctx)
 	if err != nil {
 		return false, err
 	}
-	wctx, cancel := context.WithTimeout(ctx, window)
-	defer cancel()
-	it := c.Feed(wctx, mainSession(SessionID(transcriptPath), isMessage()), mark, client.FeedOptions{Project: []string{"type"}})
-	for {
-		en, err := it.Next(wctx)
+	deadline := time.Now().Add(window)
+	filter := mainSession(SessionID(transcriptPath), isMessage())
+	cursor := mark
+	answered := false // the latest completed page succeeded
+	var lastErr error
+	for time.Now().Before(deadline) {
+		wait := time.Until(deadline)
+		waitMS := int(wait / time.Millisecond)
+		if waitMS < 1 {
+			waitMS = 1
+		}
+		if waitMS > 30000 {
+			waitMS = 30000
+		}
+		// The request outlives the window by a grace, so the last long poll
+		// completes (an empty page: the recorder answered that nothing matched)
+		// instead of being cut by the deadline, which would leave no answer.
+		rctx, cancel := context.WithTimeout(ctx, wait+feedGrace)
+		ans, err := c.FeedPage(rctx, filter, cursor, []string{"type"}, 0, waitMS)
+		cancel()
 		if err != nil {
-			if wctx.Err() != nil && ctx.Err() == nil {
-				return false, nil
+			if ctx.Err() != nil {
+				return false, ctx.Err()
 			}
 			if werr := wrapErr(err); errors.Is(werr, ErrDaemonOffline) {
 				r.reset()
 				return false, werr
 			}
-			return false, err
+			if !client.Retryable(err) && rctx.Err() == nil {
+				return false, err
+			}
+			answered, lastErr = false, err
+			pause := feedRetryPause
+			if left := time.Until(deadline); left < pause {
+				pause = left
+			}
+			if pause > 0 {
+				select {
+				case <-ctx.Done():
+					return false, ctx.Err()
+				case <-time.After(pause):
+				}
+			}
+			continue
 		}
-		if en.Kind == "record" {
-			return true, nil
+		answered, lastErr = true, nil
+		for _, en := range ans.Entries {
+			if en.Kind == "record" {
+				return true, nil
+			}
+		}
+		if ans.More && len(ans.Entries) > 0 {
+			cursor = ans.Entries[len(ans.Entries)-1].Seq
+		} else {
+			cursor = ans.NextCursor
 		}
 	}
+	if !answered {
+		if lastErr != nil {
+			return false, fmt.Errorf("%w: %v", ErrFeedUnanswered, lastErr)
+		}
+		return false, ErrFeedUnanswered
+	}
+	return false, nil
 }
