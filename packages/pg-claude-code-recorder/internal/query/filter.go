@@ -70,6 +70,29 @@ type builder struct {
 	idWalk bool
 }
 
+// pinsSession reports whether the filter, on every path that matches, holds an
+// equality or membership test on the session (a leaf, or an all with such a
+// leaf). A row query orders by r.id and stops at its limit, so without
+// statistics the planner prefers records_type or records_source_type, which
+// deliver rows in id order with no sort, over the session index, and then walks
+// every row of the type to find the few of one session (a session with no match
+// walks the table). The caller turns on idWalk so those low-selectivity columns
+// cannot use an index and the session index serves the lookup.
+func pinsSession(f *Filter) bool {
+	if f == nil {
+		return false
+	}
+	if f.Field == "session" || f.Field == "session_id" {
+		return f.Eq != nil || len(f.In) > 0
+	}
+	for i := range f.All {
+		if pinsSession(&f.All[i]) {
+			return true
+		}
+	}
+	return false
+}
+
 // sessionIDExpr reads a record's natural session id through its session_ref;
 // sessionRefOf is the reverse, from an id placeholder to the session_ref it names.
 const (
