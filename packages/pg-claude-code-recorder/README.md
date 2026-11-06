@@ -416,7 +416,7 @@ Six more sources are compiled in: `claude-subagent-meta` (`subagents/agent-*.met
 `tool_use_id`), `claude-tool-result-body` (`tool-results/*`, linked to its `tool_result` by
 `tool_use_id` for `toolu_*` names and by the saved-to path otherwise), `session-registry`
 (`sessions/<pid>.json`, one record per version keyed by `registry_key` = pid, `procStart` and content
-hash, plus a `registry_deleted` record when the file vanishes), `claude-status` (append),
+hash, plus a `registry_deleted` record when the file vanishes; the indexed fields include `job_id`), `claude-status` (append),
 `session-mode` and `session-compaction`. A snapshot source writes one record per stored version
 (generation = version); the default query shows the newest version, `old_generations` all of them.
 `query` follows `parent`, `result`, `call`, `body`, `subagents`, `status`, `mode`, `registry` and

@@ -1,0 +1,24 @@
+{
+  "pid": 73291,
+  "sessionId": "d503eec4-6b2c-4372-a989-bb1d28e84e80",
+  "cwd": "/work/example",
+  "startedAt": 1793807817432,
+  "procStart": "Wed Nov  4 15:56:56 2026",
+  "version": "2.1.314",
+  "peerProtocol": 1,
+  "peerFeatures": [
+    "notify_idle",
+    "reply_across_default_dirs",
+    "artifact_yield"
+  ],
+  "kind": "bg",
+  "entrypoint": "cli",
+  "pidDomain": "darwin",
+  "asksForConvertedSkills": false,
+  "name": "conversation-timestamp-check",
+  "nameSince": 1793807818020,
+  "status": "idle",
+  "updatedAt": 1793993674849,
+  "statusUpdatedAt": 1793993674849,
+  "nameSource": "auto"
+}

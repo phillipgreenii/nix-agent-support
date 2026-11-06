@@ -206,3 +206,27 @@ func (k *Kit) AddToolResultBody(project, session, name, content string) int64 {
 	}
 	return id
 }
+
+// AddRegistry creates a session-registry file (a snapshot source) for pid
+// holding content, at sessions/<pid>.json.
+func (k *Kit) AddRegistry(pid, content string) int64 {
+	k.T.Helper()
+	id := k.Store.NewFileID()
+	at := k.now()
+	if err := k.Store.Commit(
+		&store.Rec{T: store.TFile, At: at, File: id, Source: "session-registry", Mode: "snapshot", Dev: 1, Ino: uint64(id)},
+		&store.Rec{T: store.TPath, At: at, File: id, Path: filepath.Join(ClaudeDir, "sessions", pid+".json")},
+	); err != nil {
+		k.T.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(k.Store.SnapshotPath(id, 1)), 0o700); err != nil {
+		k.T.Fatal(err)
+	}
+	if err := os.WriteFile(k.Store.SnapshotPath(id, 1), []byte(content), 0o600); err != nil {
+		k.T.Fatal(err)
+	}
+	if err := k.Store.Commit(&store.Rec{T: store.TSnap, At: k.now(), File: id, Version: 1, Hash: 1, Size: int64(len(content))}); err != nil {
+		k.T.Fatal(err)
+	}
+	return id
+}

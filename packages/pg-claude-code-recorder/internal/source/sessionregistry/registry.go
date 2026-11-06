@@ -18,7 +18,7 @@ import (
 const Name = "session-registry"
 
 // ParserVersion is stamped on every record.
-const ParserVersion = 2
+const ParserVersion = 3
 
 // Entry is one registry file.
 type Entry struct {
@@ -32,6 +32,7 @@ type Entry struct {
 	Entrypoint      string          `json:"entrypoint"      ingest:"keyword" store:"record:entrypoint_id"`
 	PidDomain       string          `json:"pidDomain"       ingest:"keyword"`
 	Name            string          `json:"name"            ingest:"keyword"`
+	JobID           string          `json:"jobId"           ingest:"keyword"`
 	NameSource      string          `json:"nameSource"      ingest:"keyword"`
 	NameSince       *float64        `json:"nameSince"       ingest:"time"`
 	Status          string          `json:"status"          ingest:"keyword"`
