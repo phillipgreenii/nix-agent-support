@@ -5,16 +5,18 @@ import { isOpen, onToggle, setOpen, syncOpen } from './toggles'
 // the ui.render hook below. The framework never uses holdToasts. A Close action is always added
 // (id CLOSE_ACTION) and is handled here: it closes the modal and onAction never sees it; every
 // other action id is passed to onAction.
+export interface ModalAction {
+  id: string
+  label: string
+}
+
 export interface ModalItem {
   label: string
   value: string
   color?: string
   current?: boolean
-}
-
-export interface ModalAction {
-  id: string
-  label: string
+  // A button drawn after the value of this row (the Focus pane's per-row open).
+  action?: ModalAction
 }
 
 export interface ModalSpec {
@@ -220,6 +222,12 @@ export function drawModal(ui: any, id: string): unknown {
           children: [
             Text({ key: 'label', dimColor: true, children: `${it.label.padEnd(width)}  ` }),
             Text({ key: 'value', ...(it.color ? { color: it.color } : {}), children: `${it.current ? '* ' : ''}${it.value}` }),
+            ...(it.action
+              ? [
+                  Text({ key: 'row-gap', children: ' ' }),
+                  Button({ key: 'row-action', label: it.action.label, onPress: () => pressAction(id, (it.action as ModalAction).id) }),
+                ]
+              : []),
           ],
         }),
       ),

@@ -6,6 +6,7 @@ import { startPr } from './pr'
 import { startSessionMode } from './session-mode'
 import { startModelModal } from './model-modal'
 import { startWrapUp } from './wrap-up'
+import { startFocusPane } from './focus-pane'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -28,6 +29,7 @@ export const COMPONENTS: ReadonlyArray<{
   { flag: 'prStatus', run: startPr },
   { flag: 'sessionMode', run: startSessionMode },
   { flag: 'modelEffort', run: startModelModal },
+  { flag: 'focus', run: startFocusPane },
 ]
 
 // Register every component whose flag is true. The top-level `enable` short-circuits all of it.

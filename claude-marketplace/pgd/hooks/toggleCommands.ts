@@ -24,3 +24,15 @@ export function registerToggleCommands(on: ModApi): void {
     })
   }
 }
+
+// The Focus pane's toggle command, /pgd-focus. Kept apart from TOGGLE_COMMANDS because its
+// command spec is registered only while components.focus is on (by focus-pane.ts); the run hook
+// is registered at load and answers that the pane is disabled when the flag is off.
+export function registerFocusToggleCommand(on: ModApi): void {
+  on('command.run', { command: 'pgd-focus' }, () => {
+    const o = getOptions()
+    if (!o?.enable || !o.components.focus) return { text: 'pgd focus is disabled.' }
+    toggle('focus')
+    return { text: `focus ${isOpen('focus') ? 'shown' : 'hidden'}.` }
+  })
+}

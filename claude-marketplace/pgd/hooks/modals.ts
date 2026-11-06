@@ -3,7 +3,7 @@ import { registerBandButton } from './band'
 import { registerModalBuilder, setPaneApi, registerModalHooks, applyBandState } from './modal'
 import { infoSpec, loadSessionFacts } from './info-modal'
 import { contextSpec, startLastCompaction } from './context-modal'
-import { registerToggleCommands, registerToggleCommandSpecs } from './toggleCommands'
+import { registerFocusToggleCommand, registerToggleCommands, registerToggleCommandSpecs } from './toggleCommands'
 
 // The modal component: governed by the top-level enable only (the opt-in table lists no flag for
 // the Info and Context modals). Touches the host facade only through closures; at registration it
@@ -27,4 +27,5 @@ export function registerModals(_options: PgdOptions, host: ModApi): void {
 export function registerModalEventHooks(on: ModApi): void {
   registerModalHooks(on)
   registerToggleCommands(on)
+  registerFocusToggleCommand(on)
 }

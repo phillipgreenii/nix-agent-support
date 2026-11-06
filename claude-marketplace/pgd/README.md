@@ -201,3 +201,28 @@ entry.
   or that is not a valid URL once `{0}` is filled, skips that rule only; a `warn` line naming the
   rule is written to the log.
 - Default list: empty.
+
+## Focus pane (`components.focus`)
+
+The Focus button (band order 60, action `focus`) toggles a pane listing the contributions pushed to
+the focus surface, one row per item: `kind  id  title  [ open ]`. Rows are read from the contribution
+store (`listContributions('focus')`), ordered by priority (larger first) and then by time added
+(earlier first). The pane never appears in the band. With `components.focus` off there is no
+button, pane, `/pgd-focus` command or contribution storage (a focus `put` stores nothing).
+
+### Choices the design left to the builder
+
+Each is covered by a test in `hooks/focus-pane.test.ts`.
+
+| Choice               | Decision                                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Band button label    | The plain text `Focus`, no glyph; always drawn while the component is on.                                                                                                 |
+| Pane id and label    | Toggle id `focus`, host pane `pgd-focus`, title `Focus`; a separate pane from every modal, so it can be open beside one. Slash command `/pgd-focus` toggles it.           |
+| Host pane API        | The modal pane framework (`openModal`, `registerModalBuilder`): one item per row (label is the kind), rebuilt on every draw; an item may carry a per-row `action` button. |
+| Reading the rows     | `focusRows()` (rows) and `focusSpec()` (the pane spec) in `hooks/focus-pane.ts`.                                                                                          |
+| Kind and id of a row | The contribution id `kind:rest` gives kind `kind` and id `rest` (split at the first colon, both parts non-empty); any other id gives kind `item` and the whole id.        |
+| Title of a row       | The first non-empty line of the contribution text, trimmed; a text with none falls back to the row id.                                                                    |
+| Row layout           | Kind padded to the widest kind, two spaces, `id  title`, then a `[ open ]` button only when the item has a url.                                                           |
+| Open action id       | `open:<contribution id>`. It runs from the button press, never from a draw, and re-reads the item so a removed item opens nothing.                                        |
+| What open does       | Runs `open <url>` (macOS), then `xdg-open <url>` if that fails, through `host.process.run`; only `http` and `https` urls are opened.                                      |
+| Empty state          | One row with an empty kind and the text `Nothing tracked for this session.`                                                                                               |

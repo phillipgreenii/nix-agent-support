@@ -66,6 +66,7 @@ export const register: Register = on => {
   registerBandHooks(on)
   registerAlertHooks(on)
   registerModalEventHooks(on)
+  registerLinkHooks(on)
   on('session.start', async ($, e, next) => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
     const host = {
