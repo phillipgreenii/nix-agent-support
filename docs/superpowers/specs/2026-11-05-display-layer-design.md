@@ -1,7 +1,8 @@
 # Display layer design: a mod-based session display
 
-Status: draft for operator review. Each decision in "Decisions" is marked
-`proposed` or `open`; the operator marks each `accepted` or `open`.
+Status: reviewed 2026-11-06 (see "Review"). Eighteen decisions are `accepted`;
+D3, D10 and D14 are `open`, each with a proposed amendment awaiting the
+operator.
 Date: 2026-11-05. Claude Code version the findings come from: 2.1.314.
 
 ## Intent
@@ -628,27 +629,119 @@ the real wrap-up; cross-plugin tab behavior; and the layout at 80 columns.
 
 | #   | Decision                                                                           | Status                |
 | --- | ---------------------------------------------------------------------------------- | --------------------- |
-| D1  | One Display plugin owns the band and the alert line (approach A)                   | proposed              |
-| D2  | No `statusLine` collector; sources are mod APIs and file reads (F9, F12)           | proposed              |
-| D3  | Alerts are one fitted status row, plugin named `status` (accepted for now)         | proposed              |
-| D4  | Band order: name or id, model and effort, context, mode, assume, Focus, Wrap up    | proposed              |
-| D5  | Each button opens its own modal pane                                               | proposed              |
-| D6  | Session mode modal has a stop action                                               | proposed              |
-| D7  | Context button colored by level                                                    | proposed              |
-| D8  | Contributions are pushed data through the `display` noun                           | proposed              |
-| D9  | No `git` command; read `.git` files; `gh` cached for PR state                      | proposed              |
-| D10 | Session name optional: launch argument once, recorder for renames, id fallback     | proposed              |
-| D11 | Link types are a regex plus URL template list                                      | proposed              |
-| D12 | Effort and wrap-up buttons pre-fill the prompt; model applies directly             | proposed              |
-| D13 | Pulling is separate from drawing; a draw reads cache only                          | proposed              |
-| D14 | Shared sources go through the plugin store; one fetch per interval across sessions | proposed              |
-| D15 | Four phases; shell line retired in phase 3; new capabilities in phase 4            | proposed              |
-| D16 | Metrics, errors and logs ship in phase 1 through one no-op-by-default exporter     | proposed (route open) |
-| D17 | Every component is opt-in and registers nothing when off                           | proposed              |
-| D18 | A mod findings guide, with the Claude Code version, is a phase 1 deliverable       | proposed              |
-| D19 | The shell line is retired by the empty `statusLine` command, after ZR adoption     | proposed              |
-| D20 | The `display` noun ships in phase 2; phases 3 and 4 follow phase 2 independently   | proposed              |
-| D21 | The mode button reads `session-mode show`; no change to that tool                  | proposed              |
+| D1  | One Display plugin owns the band and the alert line (approach A)                   | accepted              |
+| D2  | No `statusLine` collector; sources are mod APIs and file reads (F9, F12)           | accepted              |
+| D3  | Alerts are one fitted status row, plugin named `status` (accepted for now)         | open (see Review)     |
+| D4  | Band order: name or id, model and effort, context, mode, assume, Focus, Wrap up    | accepted              |
+| D5  | Each button opens its own modal pane                                               | accepted              |
+| D6  | Session mode modal has a stop action                                               | accepted              |
+| D7  | Context button colored by level                                                    | accepted              |
+| D8  | Contributions are pushed data through the `display` noun                           | accepted              |
+| D9  | No `git` command; read `.git` files; `gh` cached for PR state                      | accepted              |
+| D10 | Session name optional: launch argument once, recorder for renames, id fallback     | open (see Review)     |
+| D11 | Link types are a regex plus URL template list                                      | accepted              |
+| D12 | Effort and wrap-up buttons pre-fill the prompt; model applies directly             | accepted              |
+| D13 | Pulling is separate from drawing; a draw reads cache only                          | accepted              |
+| D14 | Shared sources go through the plugin store; one fetch per interval across sessions | open (see Review)     |
+| D15 | Four phases; shell line retired in phase 3; new capabilities in phase 4            | accepted              |
+| D16 | Metrics, errors and logs ship in phase 1 through one no-op-by-default exporter     | accepted (route open) |
+| D17 | Every component is opt-in and registers nothing when off                           | accepted              |
+| D18 | A mod findings guide, with the Claude Code version, is a phase 1 deliverable       | accepted              |
+| D19 | The shell line is retired by the empty `statusLine` command, after ZR adoption     | accepted              |
+| D20 | The `display` noun ships in phase 2; phases 3 and 4 follow phase 2 independently   | accepted              |
+| D21 | The mode button reads `session-mode show`; no change to that tool                  | accepted              |
+
+## Review (2026-11-06)
+
+An agent review, delegated by the operator, checked each decision against the
+mod API types shipped with Claude Code 2.1.314, the sources of the tools the
+design calls, and three spikes run that day. Eighteen decisions are accepted as
+written. D3, D10 and D14 stay open: each has a defect in how it would be built
+and a proposed amendment that needs the operator's yes. Work packets written
+against D3, D10 or D14 MUST be reconciled with the operator's answer before they
+are worked.
+
+### New findings
+
+| #   | Finding                                                                                                                                                                                                                                                                                                                                                                                                     | Evidence                                                                         |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| F13 | `$.fs.stat` and `$.fs.read` read a linked worktree's `.git` file and then its `gitdir`'s `HEAD` and `commondir`, all outside the working directory, with no denial. A detached worktree's `HEAD` is a bare commit id. In a main checkout `.git` is a directory, and reading it fails with `EISDIR`.                                                                                                         | Headless spike: a throwaway repository with a branch worktree and a detached one |
+| F14 | `gh pr view <branch> -R <owner>/<repo> --json ...` makes one API call and runs no `git`: it exited 0 with `git` absent from `PATH`, while a bare `gh pr view` in the same state failed with "unable to find git executable in PATH".                                                                                                                                                                        | `gh` 2.103.3, a closed PR in a private scratch repository                        |
+| F15 | `$.store` re-reads its file on every call and replaces it by rename on every `set`. Three concurrent sessions writing 50 distinct keys each kept 150 of 150 keys in two runs; a same-key race ended in valid JSON holding the last writer's value; a session saw another session's write within about 100 ms (its polling interval). The file is `~/.claude/plugins/store/<plugin>_<source>-<hash>.json`.   | Headless spike; a small sample, not a stress test                                |
+| F16 | `$.fs.write` overwrites a file in place (the inode is kept), and `$.fs` has no rename, move or delete.                                                                                                                                                                                                                                                                                                      | Headless spike with a hard link; the types file                                  |
+| F17 | Claude Code keeps a session registry file, `~/.claude/sessions/<pid>.json`, for headless and interactive sessions alike, holding `sessionId`, `name`, `nameSource` and `nameSince`. With `-n <name>` the entry's `name` is that name and `nameSource` is `user`; without it the name is derived from the working directory and `nameSource` is `derived`. Whether `/rename` rewrites the entry is untested. | Headless spike, four runs; the format is undocumented                            |
+| F18 | `claude plugin validate` accepts a `plugin.json` `name` that differs from its marketplace entry and folder, with no warning; how install resolves such a plugin is untested. No plugin in this repository's marketplace differs today (18 checked), and `lib/claude-marketplace.nix` in `phillipg-nix-repo-base` keys each `enabledPlugins` entry by the `plugin.json` name.                                | `validate` on a throwaway marketplace; `jq` over this repository's marketplace   |
+
+### Notes on accepted decisions
+
+- D9: F13 settles the open item on reading `.git` through `$.fs`. F14 corrects
+  "Git lock avoidance": with the branch and repository passed explicitly,
+  `gh pr view` runs no `git` and cannot contend for a git lock. The PR source
+  MUST keep passing both, and its tests MUST assert that the argument vector
+  carries `-R` and the branch. The live check of the `gh` lock impact is then
+  moot.
+- D16: accepted with the route still open; the phase 1 OTLP spike decides it.
+- D21: `session-mode` resolves the session from `CLAUDE_SESSION_ID` first and
+  `CLAUDE_CODE_SESSION_ID` second. Sessions export only the second today, so
+  passing `CLAUDE_CODE_SESSION_ID` is enough.
+- D4 and D7: the band order and the thresholds are preferences, accepted as
+  proposed; changing them later is cheap.
+- Alert fitting (D3's row, whatever the name): `$.ui.status` takes no width, and
+  a `ui.render` hook learns the width from `e.viewport.columns`. The band hook is
+  not a reliable source while the engine has collapsed the band (F4), so Display
+  SHOULD also read the width from a pass-through hook (one returning `next(e)`
+  unchanged) on a site that keeps drawing then, such as `PromptHint` or
+  `SessionMode`; which site always draws is unverified and belongs to the live
+  collapse check. The engine's own ellipsis is the fallback.
+
+### Open decisions and proposed amendments
+
+**D3: the plugin name MUST be one name in three places.** The decomposition
+renames only the manifest to `status` and keeps the folder and the marketplace
+entry `claude-display`. By F18 the generated `enabledPlugins` key would then be
+`status@<marketplace>` for a plugin the marketplace lists as `claude-display`, a
+combination nothing here has shipped; the likely failure is a default-enabled
+plugin that silently never loads. Proposed: the manifest name, the marketplace
+entry and the folder MUST match. The operator chooses one of:
+
+- `status` everywhere: the alert row reads `⚠ status:`, and every packet's paths
+  change, so the docket is reconciled before its first packet is worked;
+- `claude-display` everywhere: the alert row reads `⚠ claude-display:`, which
+  costs every alert row 8 more columns (14 characters against `status`'s 6), and
+  only the alert-row packet changes.
+
+**D10: read the session name from the session registry.** Proposed: the source
+is the session's own registry entry (F17), found once at start by listing
+`~/.claude/sessions/` and matching `sessionId` against `$.session.id()`, then
+re-read after `turn.complete` at most once per 10 seconds. The name is shown only
+when `nameSource` is `user`; otherwise the session id is shown. This drops the
+`ps` call, the unanswered question of how the mod finds its process id, and the
+recorder title-field spike. Still open: whether `/rename` rewrites the entry
+(one live check: rename a session, then read its entry). If it does not, the
+recorder stays as the rename path. The registry is undocumented Claude Code
+state, so the findings guide MUST record it with the Claude Code version, and a
+failed read MUST fall back to the session id.
+
+**D14: one `$.store` key per shared source, and no file fallback.** Proposed:
+shared entries go in `$.store` under one key per source (`<id>`, or
+`<id>:<key>` for a keyed source), never as one map under a single key: a get,
+merge and set of one map across sessions loses other sessions' entries, while
+per-key sets lost none (F15). Last writer wins per key, which a cache tolerates.
+The atomic-file fallback cannot be built with `$.fs` (F16), so it is dropped:
+when `$.store` fails, the session fetches for itself, unshared. The opt-in
+multi-process check MUST drive real sessions against `$.store` (several headless
+`claude -p` runs with a test mod), not plain processes against a file. Values
+stay small, because every `set` rewrites the whole store, which is capped at
+4 MiB.
+
+### Open items closed by this review
+
+- `$.fs` reads `.git/HEAD` and the worktree pointer file: yes (F13).
+- The plugin store under concurrent writers, and how fresh another session's
+  write is: safe per key, visible within about 100 ms (F15).
+- The git-lock impact of `gh pr view`: none when branch and repository are
+  passed (F14).
+- The recorder's title field: moot if D10's amendment is accepted.
 
 ## Open items to verify
 
