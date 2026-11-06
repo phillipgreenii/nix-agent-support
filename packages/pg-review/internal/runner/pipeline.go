@@ -61,15 +61,6 @@ type Analyst interface {
 	Analyse(ctx context.Context, s *State) error
 }
 
-// NoneAnalyst gathers nothing and files nothing.
-type NoneAnalyst struct{}
-
-// Name implements Analyst.
-func (NoneAnalyst) Name() string { return "none" }
-
-// Analyse implements Analyst.
-func (NoneAnalyst) Analyse(context.Context, *State) error { return nil }
-
 // Deps are the injectable seams of a run.
 type Deps struct {
 	Ledger *ledger.Ledger
@@ -291,7 +282,8 @@ func (finishStage) Name() string { return "finish" }
 
 func (finishStage) Run(ctx context.Context, s *State) error {
 	d := s.Deps
-	return d.Ledger.WithTx(ctx, func(t *ledgerTx) error {
+	var staging string
+	err := d.Ledger.WithTx(ctx, func(t *ledgerTx) error {
 		r, err := t.GetRun(ctx, s.Run.ID)
 		if err != nil {
 			return err
@@ -301,6 +293,7 @@ func (finishStage) Run(ctx context.Context, s *State) error {
 			s.Run = r
 			return releaseOwnLock(ctx, t, r)
 		}
+		staging, r.StagingPath = r.StagingPath, ""
 		r.State = ledger.RunFiled
 		r.EndedAt = d.Now().UTC()
 		r.ElapsedMinutes = r.EndedAt.Sub(r.CreatedAt).Minutes()
@@ -310,4 +303,8 @@ func (finishStage) Run(ctx context.Context, s *State) error {
 		s.Run = r
 		return releaseOwnLock(ctx, t, r)
 	})
+	if err == nil && staging != "" {
+		_ = d.RemoveStaging(staging)
+	}
+	return err
 }

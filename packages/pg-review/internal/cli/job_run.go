@@ -48,7 +48,7 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 		return ExitErrorf(exitcode.Ledger, "%v", err)
 	}
 	defer l.Close()
-	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout()}
+	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout(), Evidence: runner.EvidenceStage{}}
 	if runnerHook != nil {
 		runnerHook(d)
 	}
@@ -60,6 +60,7 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 	var ue *runner.UsageError
 	var sk *runner.SkippedError
 	var af *runner.AlreadyFiledError
+	var pe *runner.ProviderError
 	switch {
 	case err == nil:
 		fmt.Fprintf(cmd.OutOrStdout(), "run %d %s\n", res.Run.ID, res.Run.State)
@@ -70,6 +71,8 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 		return ExitErrorf(exitcode.Skipped, "%v", af)
 	case errors.As(err, &sk):
 		return ExitErrorf(exitcode.Skipped, "run %d skipped: %s", sk.RunID, sk.Reason)
+	case errors.As(err, &pe):
+		return ExitErrorf(exitcode.Provider, "%v", pe)
 	case errors.Is(err, ledger.ErrLockBusy):
 		return ExitErrorf(exitcode.Busy, "another run holds the lock for lens %s and scope %s", o.Lens, o.Scope)
 	}
