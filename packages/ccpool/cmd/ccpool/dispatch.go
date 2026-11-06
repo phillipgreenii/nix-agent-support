@@ -33,6 +33,7 @@ var subcommands = []subcommandInfo{
 	{"cancel", "interrupt a session's current turn; it stays alive and idle", runCancel},
 	{"capacity", "report pool occupancy and free slots", runCapacity},
 	{"close", "close a session (stop it; --purge also removes its stored data)", runClose},
+	{"consumption", "print a session's token consumption and estimated cost", runConsumption},
 	{"emit-gauge", "emit one generic OTLP gauge point (name, labels, value as arguments)", runEmitGauge},
 	{"doctor", "print each session's pool context and cached store state", runDoctor},
 	{"hook", "internal: report a turn event from the agent's own hooks", runHook},

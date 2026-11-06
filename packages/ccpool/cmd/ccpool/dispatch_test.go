@@ -16,7 +16,7 @@ import (
 // loudly here rather than silently shipping a help listing that doesn't
 // match reality.
 var wantSubcommandNames = []string{
-	"attach", "attend", "cancel", "capacity", "close", "doctor", "emit-gauge", "hook", "list",
+	"attach", "attend", "cancel", "capacity", "close", "consumption", "doctor", "emit-gauge", "hook", "list",
 	"meta", "new", "reap", "reap-all", "reply", "result", "state", "tail",
 	"trust", "version",
 }

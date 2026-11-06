@@ -179,10 +179,12 @@ obligations, and ownership of a session's working directory.
 ## Budget observation (`INV-METER-*`)
 
 - **`INV-METER-1`** <!-- uuid: 94cd77f1-9ff3-4cda-a65d-53ace679e48d --> — ccpool owns the
-  **consumption meter**: a caller SHOULD be able to read a session's own resource consumption
-  from ccpool. Policy over that reading — ceilings, wind-down, stopping — is the caller's, out of
-  this set's extent. Until the meter is realized as a declared reading (`## Realization gaps`), the
-  transcript anchor is the only carrier, and it is not itself a consumption reading. This
+  **consumption meter**: a caller MUST be able to read a session's own resource consumption
+  from ccpool, on demand (never pushed, as `INV-STATE-1`): the model, the four token totals (input,
+  output, cache creation, cache read) and an **estimated** cost in integer USD cents at API list
+  prices, priced per model and summed. A session with no transcript yet reads zeros, not an error.
+  Policy over that reading — ceilings, wind-down, stopping — is the caller's, out of this set's
+  extent: ccpool carries no cap, flag or stop for it. This
   per-session reading is distinct from the co-resident monitor's own **account-level** usage
   surface (`packages/pa-monitor/docs/behavior · INTF-STATE`, declared, not yet consumable
   either) — neither substitutes for the other.

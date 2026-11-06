@@ -10,12 +10,12 @@ these interfaces.
 The four interfaces are described on **two axes** — the **kind** of party on the far side, and
 whether that party is an **essential or optional** participant in what ccpool exists to do:
 
-| Interface          | Boundary                                     | Counterparty (kind)                       | Participation           | Initiator |
-| ------------------ | -------------------------------------------- | ----------------------------------------- | ----------------------- | --------- |
-| `INTF-CALLER`      | dispatch, status, capacity, cancel, metadata | `ACTOR-CCP-CALLER` (actor)                | essential, driving port | caller    |
-| `INTF-AGENTSIGNAL` | the agent's own turn signals in              | the agent binary (owner)                  | essential               | agent     |
-| `INTF-DENY`        | a question denial out to the agent           | `ACTOR-CCP-AGENT` (actor)                 | essential               | ccpool    |
-| `INTF-NOTIFY`      | a notifying event out                        | notification sink (implementer, optional) | optional                | ccpool    |
+| Interface          | Boundary                                                  | Counterparty (kind)                       | Participation           | Initiator |
+| ------------------ | --------------------------------------------------------- | ----------------------------------------- | ----------------------- | --------- |
+| `INTF-CALLER`      | dispatch, status, consumption, capacity, cancel, metadata | `ACTOR-CCP-CALLER` (actor)                | essential, driving port | caller    |
+| `INTF-AGENTSIGNAL` | the agent's own turn signals in                           | the agent binary (owner)                  | essential               | agent     |
+| `INTF-DENY`        | a question denial out to the agent                        | `ACTOR-CCP-AGENT` (actor)                 | essential               | ccpool    |
+| `INTF-NOTIFY`      | a notifying event out                                     | notification sink (implementer, optional) | optional                | ccpool    |
 
 capacity reports free slots under ADR 0072's definition so a caller can decline to dispatch
 instead of launching into a full pool, and reports none while the account's usage window is at its
@@ -48,6 +48,9 @@ flowchart LR
   afterward, distinct from closing it.
 - **In/Out, metadata** — the caller sets and reads its own opaque key/value tags on a session;
   ccpool stores and returns them uninterpreted.
+- **In/Out, consumption** — the caller reads a session's consumption on demand: model, token
+  totals and an estimated cost in integer USD cents (`INV-METER-1`); ccpool never pushes it and
+  applies no cap. `ccpool consumption <external_id> --json`; an unknown session exits 8.
 - **Out (ccpool → caller), usage-limit refusal** — a dispatch, or a launch of a new session, while
   the account's usage window is at its limit is refused with its own outcome naming the window and
   its reset; the capacity read then reports no free slot plus the limit (`INV-POOL-4`).
