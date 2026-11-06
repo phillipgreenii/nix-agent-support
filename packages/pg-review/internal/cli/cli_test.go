@@ -74,7 +74,6 @@ func TestNotBuiltCommandsAreAbsent(t *testing.T) {
 
 func TestStubsPrintNotImplementedAndExitOne(t *testing.T) {
 	cases := [][]string{
-		{"agent", "q", "ccaudit", "some-query"},
 		{"job", "doctor"},
 	}
 	for _, c := range cases {
