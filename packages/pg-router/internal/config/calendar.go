@@ -85,6 +85,7 @@ func buildCalendarTrigger(t *triggerTOML, queryType string) (query.Trigger, erro
 			add("tz %q is not an IANA time zone name such as \"America/Los_Angeles\" (a fixed UTC offset is not accepted because it cannot follow daylight saving)", *t.TZ)
 		}
 		ct.Loc = loc
+		ct.TZSet = true
 	}
 
 	switch {

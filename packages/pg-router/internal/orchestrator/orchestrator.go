@@ -216,7 +216,7 @@ func (o *Orchestrator) initCalendar() {
 	}
 	recs, err := calstate.Read(o.CalendarStatePath)
 	if err != nil {
-		slog.Warn("calendar state unusable; treating as no state", "err", err)
+		slog.Warn("calendar state unreadable; treating as no state", "err", err)
 	}
 	configured := map[string]bool{}
 	for _, s := range o.Cfg.Queries {

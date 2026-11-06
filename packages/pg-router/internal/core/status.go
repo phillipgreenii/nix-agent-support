@@ -83,6 +83,31 @@ type SourceReport struct {
 	// again, the opposite of LastTick's own "keep the last real answer"
 	// goal.
 	Failure *FailureInfo
+	// Calendar is the schedule and last-slot view of a calendar-triggered
+	// source, nil for every other source.
+	Calendar *CalendarInfo
+}
+
+// CalendarInfo is one calendar-triggered source's status view: the resolved
+// schedule, the next fire and the last handled slot as the state file remembers
+// it. Times are preformatted in the trigger's zone at minute precision.
+type CalendarInfo struct {
+	// Schedule is the phrase "calendar 03:30 sun America/Los_Angeles".
+	Schedule string
+	// OnMissed is the configured policy, run-now or next-slot.
+	OnMissed string
+	// Next is the next slot after the status snapshot.
+	Next string
+	// Last is nil until a slot has been handled (no state entry yet).
+	Last *CalendarLast
+}
+
+// CalendarLast is the state file's record of the last handled slot, with the
+// outcome and reason exactly as stored (fired, catch_up, skipped).
+type CalendarLast struct {
+	Slot    string
+	Outcome string
+	Reason  string
 }
 
 // FailureInfo is one source's pull-source failure-backoff state at the end

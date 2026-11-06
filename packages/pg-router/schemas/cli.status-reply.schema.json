@@ -279,6 +279,40 @@
           "lastTick": { "type": "string" },
           "inFlight": { "type": "boolean" },
           "busy": { "type": "boolean" },
+          "calendar": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schedule", "onMissed", "next"],
+            "description": "Present only for a calendar-triggered source: the resolved schedule, the policy, the next fire and the last handled slot from the state file.",
+            "properties": {
+              "schedule": {
+                "type": "string",
+                "description": "For example: calendar 03:30 sun America/Los_Angeles."
+              },
+              "onMissed": { "enum": ["run-now", "next-slot"] },
+              "next": {
+                "type": "string",
+                "description": "The next slot, RFC 3339 in the trigger zone, minute precision."
+              },
+              "last": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["slot", "outcome"],
+                "description": "Absent until a slot has been handled.",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "description": "The last handled slot, RFC 3339 in the trigger zone, minute precision."
+                  },
+                  "outcome": { "enum": ["fired", "catch_up", "skipped"] },
+                  "reason": {
+                    "type": "string",
+                    "description": "Why, as stored: router not running, host asleep, enqueue failed, first start, or late by <d>."
+                  }
+                }
+              }
+            }
+          },
           "failure": {
             "oneOf": [
               { "enum": [null] },

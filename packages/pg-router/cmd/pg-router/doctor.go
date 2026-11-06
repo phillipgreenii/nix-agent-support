@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
+	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
@@ -29,6 +32,7 @@ var doctorValidateTimeout = 5 * time.Second
 const (
 	verdictOK   = "ok"
 	verdictFail = "FAIL"
+	verdictWarn = "warn"
 	verdictInfo = "info"
 )
 
@@ -86,6 +90,9 @@ func doctor(stdout io.Writer, socket, token string) int {
 	}
 
 	doctorStateDir(rep, config.LogDir())
+	if cfgErr == nil {
+		doctorCalendar(rep, cfg, config.LogDir(), time.Now())
+	}
 
 	st, ok := doctorSocket(rep, socket, token)
 	if ok {
@@ -125,6 +132,44 @@ func doctorStateDir(rep *doctorReport, dir string) {
 		return
 	}
 	rep.line(verdictOK, "state dir", "%s is writable", dir)
+}
+
+// doctorCalendar reports on calendar-triggered queries: ONE warn line when the
+// calendar state file is corrupt or cannot be written, and one warn line per
+// calendar query that sets no tz while the host zone is UTC (its fire times then
+// follow UTC, not the operator's wall clock). Nothing is printed for a config
+// without calendar queries. A warn never fails the run: the router treats an
+// unusable state file as no state.
+func doctorCalendar(rep *doctorReport, cfg config.Config, logDir string, now time.Time) {
+	var names []string
+	for _, s := range cfg.Queries {
+		ct, ok := query.Calendar(s.Query.Trigger())
+		if !ok {
+			continue
+		}
+		names = append(names, s.Name)
+		if !ct.TZSet {
+			if zone, off := now.In(ct.Loc).Zone(); off == 0 && zone == "UTC" {
+				rep.line(verdictWarn, "calendar tz", "%s sets no tz and the host zone is UTC, so it fires on UTC time; set tz to an IANA zone name", textsafe.Sanitize(s.Name))
+			}
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	path := filepath.Join(logDir, calstate.FileName)
+	if _, err := calstate.Read(path); err != nil {
+		rep.line(verdictWarn, "calendar state", "%s is unreadable and is treated as no state (the next pass overwrites it): %v", path, err)
+		return
+	}
+	f, err := os.CreateTemp(logDir, ".calendar-state-doctor-*")
+	if err != nil {
+		rep.line(verdictWarn, "calendar state", "%s cannot be written, so a restart would forget the last slot: %v", path, err)
+		return
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
 }
 
 // doctorStatus is the part of the status reply doctor reads.

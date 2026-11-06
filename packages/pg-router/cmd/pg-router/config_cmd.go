@@ -55,13 +55,20 @@ func runConfig(mode string, asJSON bool) int {
 // command, a missing handler command and a bad role config show in one run.
 // Exit 1 on any problem; with none it prints one line, "config ok", and exits 0.
 func configCheck(stdout, stderr io.Writer) int {
-	if _, err := config.Load(); err != nil {
+	cfg, err := config.Load()
+	if err != nil {
 		for _, line := range errorLines(err) {
 			_, _ = fmt.Fprintln(stderr, line)
 		}
 		return exitGeneric
 	}
 	_, _ = fmt.Fprintln(stdout, "config ok")
+	now := time.Now()
+	for _, s := range cfg.Queries {
+		if ct, ok := query.Calendar(s.Query.Trigger()); ok {
+			_, _ = fmt.Fprintf(stdout, "%s: %s on_missed=%s next fire %s\n", s.Name, ct.Describe(), ct.OnMissed, ct.FormatSlot(ct.Next(now)))
+		}
+	}
 	return exitOK
 }
 

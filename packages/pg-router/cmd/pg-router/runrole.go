@@ -6,7 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/config"
@@ -249,12 +251,13 @@ func runRunQuerySource(ctx context.Context, cfg config.Config, name string, asJS
 	}
 	matches := make([]runQueryMatch, 0, len(evts))
 	for _, e := range evts {
-		matches = append(matches, runQueryMatch{ID: e.Item.ID, Type: e.Item.Type, Title: e.Item.Title})
+		matches = append(matches, runQueryMatch{ID: e.Item.ID, Type: e.Item.Type, Title: e.Item.Title, Metadata: e.Item.Metadata})
 	}
+	sched := calendarSmokeFor(src, time.Now())
 	if asJSON {
-		renderRunQueryJSON(os.Stdout, src.Name, matches)
+		renderRunQueryJSON(os.Stdout, src.Name, matches, sched)
 	} else {
-		renderRunQueryText(os.Stdout, src.Name, matches)
+		renderRunQueryText(os.Stdout, src.Name, matches, sched)
 	}
 	return exitOK
 }
@@ -285,6 +288,46 @@ type runQueryMatch struct {
 	ID    string `json:"id"`
 	Type  string `json:"type"`
 	Title string `json:"title"`
+	// Metadata is the item's metadata (a timer query's declared metadata plus
+	// scheduled_for); absent when the item carries none.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// calendarSmoke is the schedule part of a calendar query's smoke report: the
+// smoke tick's slot is the moment of the run, and the next three real fire
+// times follow. Nothing is enqueued and no state is written.
+type calendarSmoke struct {
+	Schedule  string   `json:"schedule"`
+	SmokeSlot string   `json:"smokeSlot"`
+	Next      []string `json:"next"`
+}
+
+// calendarSmokeFor returns the schedule report for a calendar-triggered src, nil
+// for any other source.
+func calendarSmokeFor(src query.Source, now time.Time) *calendarSmoke {
+	ct, ok := query.Calendar(src.Query.Trigger())
+	if !ok {
+		return nil
+	}
+	cs := &calendarSmoke{Schedule: ct.Describe(), SmokeSlot: "now"}
+	for _, t := range ct.NextN(now, 3) {
+		cs.Next = append(cs.Next, ct.FormatSlot(t))
+	}
+	return cs
+}
+
+// metadataText renders metadata as sorted key=value pairs.
+func metadataText(md map[string]any) string {
+	keys := make([]string, 0, len(md))
+	for k := range md {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%v", k, md[k])
+	}
+	return strings.Join(parts, " ")
 }
 
 // runQueryReport is `run-query --json`'s report. Per Task 0.4's wire decision
@@ -294,21 +337,29 @@ type runQueryMatch struct {
 // 1.5c); there is no per-report "how many sources" count any more — run-query
 // smokes exactly one, always.
 type runQueryReport struct {
-	Query   string          `json:"query"`
-	Total   int             `json:"total"`
-	Matches []runQueryMatch `json:"matches"`
+	Query    string          `json:"query"`
+	Total    int             `json:"total"`
+	Matches  []runQueryMatch `json:"matches"`
+	Calendar *calendarSmoke  `json:"calendar,omitempty"`
 }
 
 // renderRunQueryText writes run-query's default text form: one tab-separated
 // line per match, then a "# N event(s) from source Q" summary.
-func renderRunQueryText(w io.Writer, source string, matches []runQueryMatch) {
+func renderRunQueryText(w io.Writer, source string, matches []runQueryMatch, cal *calendarSmoke) {
 	for _, m := range matches {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID, m.Type, m.Title)
+		if len(m.Metadata) > 0 {
+			fmt.Fprintf(w, "  metadata: %s\n", metadataText(m.Metadata))
+		}
 	}
 	fmt.Fprintf(w, "# %d event(s) from source %s\n", len(matches), source)
+	if cal != nil {
+		fmt.Fprintf(w, "# %s: the smoke tick's slot is now (nothing enqueued, no state written)\n", cal.Schedule)
+		fmt.Fprintf(w, "# next fire times: %s\n", strings.Join(cal.Next, ", "))
+	}
 }
 
 // renderRunQueryJSON writes run-query's --json form: one JSON object.
-func renderRunQueryJSON(w io.Writer, source string, matches []runQueryMatch) {
-	writeJSON(w, runQueryReport{Query: source, Total: len(matches), Matches: matches})
+func renderRunQueryJSON(w io.Writer, source string, matches []runQueryMatch, cal *calendarSmoke) {
+	writeJSON(w, runQueryReport{Query: source, Total: len(matches), Matches: matches, Calendar: cal})
 }

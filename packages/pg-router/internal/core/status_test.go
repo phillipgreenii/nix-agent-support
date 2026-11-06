@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"reflect"
 	"sync"
 	"testing"
@@ -741,5 +742,55 @@ func TestStatusBusy_ListsTheBusyRowsSorted(t *testing.T) {
 	want := map[string]any{"roles": []string{"alpha", "zeta"}, "sources": []string{}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("statusBusy = %#v, want %#v", got, want)
+	}
+}
+
+// A calendar source's status row carries the schedule, policy, next fire and the
+// last handled slot, and the reply still validates against its own schema; a
+// source with no calendar trigger has no calendar key.
+func TestStatusSources_Calendar(t *testing.T) {
+	svc := &Service{q: newQueue(t), bindings: testBindings(), reg: NewRegistry(nil)}
+	svc.PublishTick(TickSnapshot{
+		Sources: []SourceReport{
+			{Name: "plain", Type: "pull"},
+			{Name: "weekly-scan", Type: "pull", Calendar: &CalendarInfo{
+				Schedule: "calendar 03:30 sun America/Los_Angeles", OnMissed: "next-slot", Next: "2026-11-08T03:30-08:00",
+				Last: &CalendarLast{Slot: "2026-11-01T03:30-08:00", Outcome: "skipped", Reason: "router not running"},
+			}},
+			{Name: "fresh", Type: "pull", Calendar: &CalendarInfo{Schedule: "calendar 02:00 daily UTC", OnMissed: "run-now", Next: "2026-11-02T02:00Z"}},
+		},
+	})
+	reply := svc.composeStatusReply(0)
+	rows := reply["sources"].([]map[string]any)
+	by := map[string]map[string]any{}
+	for _, r := range rows {
+		by[r["name"].(string)] = r
+	}
+	if _, ok := by["plain"]["calendar"]; ok {
+		t.Fatal("a non-calendar source must carry no calendar key")
+	}
+	cal := by["weekly-scan"]["calendar"].(map[string]any)
+	last := cal["last"].(map[string]any)
+	if cal["schedule"] != "calendar 03:30 sun America/Los_Angeles" || cal["onMissed"] != "next-slot" || cal["next"] != "2026-11-08T03:30-08:00" ||
+		last["slot"] != "2026-11-01T03:30-08:00" || last["outcome"] != "skipped" || last["reason"] != "router not running" {
+		t.Fatalf("calendar row = %v", cal)
+	}
+	if _, ok := by["fresh"]["calendar"].(map[string]any)["last"]; ok {
+		t.Fatal("no state entry yet: last must be absent")
+	}
+	check := func() error {
+		b, err := json.Marshal(reply)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return conformance.CheckBytes(StatusReplySchema, b)
+	}
+	if err := check(); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	// A wrong outcome is rejected by the schema.
+	cal["last"].(map[string]any)["outcome"] = "bogus"
+	if err := check(); err == nil {
+		t.Fatal("schema accepted an unknown calendar outcome")
 	}
 }

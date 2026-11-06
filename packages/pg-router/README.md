@@ -215,6 +215,82 @@ behavior docs name its keys, so adding a key to a role never changes pg-router.
 > committed there. `pg-router run-until-idle` warns at pre-flight if
 > `.pg-router/config.toml` is git-tracked.
 
+### Scheduling with a calendar trigger
+
+A `type = "timer"` query fires on a period by default. Give it `kind = "calendar"` to fire at a
+wall-clock time of day, optionally on named weekdays, in a named zone. The query's own `metadata`
+table (string values only, at most 16 keys) rides on every tick, so a role bound to the event can
+tell which schedule fired:
+
+```toml
+[[query]]
+name = "weekly-scan"
+type = "timer"
+emits = ["scan.due"]
+metadata = { schedule_id = "weekly-scan", lens = "security", scope = "repo", window = "7d" }
+[query.trigger]
+kind = "calendar"
+at = "03:30"                 # required, 24-hour HH:MM
+days = ["sun"]               # optional: mon tue wed thu fri sat sun; omit for every day
+tz = "America/Los_Angeles"   # optional IANA name; default: the host zone at process start
+on_missed = "run-now"        # required: "run-now" | "next-slot"
+expires_in = "6h"            # optional, > 0; default: until the next slot
+```
+
+A command role reads the metadata through the handler's argv templates, for example
+`{{index .Item.Metadata "lens"}}` (a tick also carries `scheduled_for`, the slot in the trigger zone,
+and `on_missed = "true"` on a catch-up tick only):
+
+```toml
+[[role]]
+name = "scan"
+binds = ["scan.due"]
+handler = "/abs/path/to/pg-router-handler-command"
+[role.config.command]
+argv = ["/usr/local/bin/scan", "--lens", "{{index .Item.Metadata \"lens\"}}"]
+```
+
+Rules:
+
+- **Daylight saving.** A wall time that does not exist (spring forward) fires at the transition
+  instant, the first instant after the gap, and the log says `calendar slot moved by DST gap`. A wall
+  time that occurs twice (fall back) fires at its first occurrence, once.
+- **Expiry caveat.** The tick expires at the next slot (or `expires_in` after it fires). Expiry bounds
+  retries; it is not a hard "never runs after": an event already expired at attempt time still gets
+  one last attempt. The event id is derived from the query name and the slot, so one slot is one event
+  while it is retained.
+- **Why `on_missed` exists (laptop sleep).** A host that sleeps through a slot, or a router that was
+  not running at the slot, did not fire it. `run-now` fires ONE catch-up tick (marked
+  `on_missed = "true"`, however many slots were passed over; the log counts them in
+  `calendar slots superseded`). `next-slot` skips it and waits for the following slot. A slot counts
+  as missed only when the router was not running, or the host asleep, at the slot: a pass that is
+  merely late (load back-off, a slow query) still fires on time, and the state file records
+  `late by <d>`. The first start of a calendar query fires nothing.
+- **Edits are not detected.** The remembered slot is an instant, so editing `at` or `tz` is not
+  noticed: under `run-now` a just-passed new slot can look missed and fire once.
+- **Host-zone default.** Without `tz` the schedule follows the host zone at process start, so the same
+  config fires at different instants on different hosts. Set `tz`. `pg-router doctor` warns when `tz`
+  is unset and the host zone is UTC.
+- **Mistakes fail early.** `pg-router config check` rejects a bad calendar trigger (one line per
+  problem) and `run` refuses to start; nothing fails at fire time.
+
+Seeing it:
+
+- `pg-router status` prints one line per calendar query under SOURCES, for example
+  `weekly-scan  calendar 03:30 sun America/Los_Angeles  last: 2026-11-01T03:30-08:00 fired | next: 2026-11-08T03:30-08:00 | on_missed=run-now`,
+  or `... last: 2026-11-01T03:30-08:00 SKIPPED (on_missed=next-slot, router not running) | next: ...`
+  (the stored outcomes `fired`, `catch_up` and `skipped` render as `fired`, `catch-up` and `SKIPPED`;
+  the reason is shown as stored). `status --json` carries the same data in `sources[].calendar`.
+- `pg-router config check` prints each calendar query's resolved schedule and next fire.
+- `pg-router run-query query:<name>` prints the smoke tick with its metadata, says its slot is now,
+  and lists the next three fire times; it enqueues nothing and writes no state.
+- State lives in `calendar-state.json` under the log directory. `doctor` gives one `warn` line when it
+  is corrupt or cannot be written (a corrupt file is treated as no state).
+- Logs: Info `calendar tick fired`, `calendar slot skipped`, `calendar slot moved by DST gap`,
+  `calendar tick late by more than one poll interval`; Warn `calendar slots superseded`,
+  `calendar slot skipped` (reason `enqueue failed`), `calendar clock clamp`,
+  `calendar state write failed`, `calendar state unreadable`.
+
 ### Re-running a transiently failed dispatch
 
 A failed dispatch is normally accepted and never re-run (`INV-FAIL-1`: post-accept failures are the

@@ -1599,6 +1599,17 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 				"nextEligible": sr.Failure.NextEligible.UTC().Format(time.RFC3339Nano),
 			}
 		}
+		if c := sr.Calendar; c != nil {
+			cal := map[string]any{"schedule": c.Schedule, "onMissed": c.OnMissed, "next": c.Next}
+			if c.Last != nil {
+				last := map[string]any{"slot": c.Last.Slot, "outcome": c.Last.Outcome}
+				if c.Last.Reason != "" {
+					last["reason"] = c.Last.Reason
+				}
+				cal["last"] = last
+			}
+			row["calendar"] = cal
+		}
 		out = append(out, row)
 	}
 	for _, name := range excludedSources {

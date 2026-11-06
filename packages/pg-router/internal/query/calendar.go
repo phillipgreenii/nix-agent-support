@@ -1,7 +1,9 @@
 package query
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -21,6 +23,9 @@ type CalendarTrigger struct {
 	Loc       *time.Location
 	OnMissed  string
 	ExpiresIn time.Duration
+	// TZSet is true when the configuration named a zone (tz); false means Loc is
+	// the host zone at process start (doctor warns about a UTC host then).
+	TZSet bool
 }
 
 // ClockTime is a 24-hour wall-clock time of day.
@@ -164,4 +169,57 @@ func (c CalendarTrigger) MaxGap(now time.Time) time.Duration {
 		prev = next
 	}
 	return maxGap
+}
+
+// slotLayout is the minute-precision RFC 3339 form operators read in status and
+// config check output (for example 2026-11-01T03:30-08:00).
+const slotLayout = "2006-01-02T15:04Z07:00"
+
+// FormatSlot renders t in the trigger's zone at minute precision.
+func (c CalendarTrigger) FormatSlot(t time.Time) string {
+	return t.In(c.loc()).Format(slotLayout)
+}
+
+// ZoneName is the zone's name, or "host zone" when the trigger uses the host
+// zone (whose Go name is the unhelpful "Local").
+func (c CalendarTrigger) ZoneName() string {
+	if n := c.loc().String(); n != "Local" {
+		return n
+	}
+	return "host zone"
+}
+
+// Describe is the resolved schedule as one operator-readable phrase, for example
+// "calendar 03:30 sun America/Los_Angeles" or "calendar 02:00 daily UTC".
+func (c CalendarTrigger) Describe() string {
+	days := "daily"
+	if len(c.Days) > 0 {
+		names := make([]string, len(c.Days))
+		for i, d := range c.Days {
+			names[i] = strings.ToLower(d.String()[:3])
+		}
+		days = strings.Join(names, ",")
+	}
+	return fmt.Sprintf("calendar %02d:%02d %s %s", c.At.Hour, c.At.Minute, days, c.ZoneName())
+}
+
+// NextN returns the next n slots strictly after t, ascending.
+func (c CalendarTrigger) NextN(t time.Time, n int) []time.Time {
+	var out []time.Time
+	for len(out) < n {
+		t = c.Next(t)
+		if t.IsZero() {
+			break
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// MovedByDST reports whether slot, resolved by Next or Prev, sits at a wall time
+// other than the configured one: the configured time falls in a spring-forward
+// gap and the slot moved to the transition instant.
+func (c CalendarTrigger) MovedByDST(slot time.Time) bool {
+	l := slot.In(c.loc())
+	return l.Hour() != c.At.Hour || l.Minute() != c.At.Minute
 }

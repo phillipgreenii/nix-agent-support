@@ -596,3 +596,9 @@ no grace period: invoking either name now gets the binary's ordinary unknown-sub
 error (exit `2`, `docs/adr/0042-coarse-exit-code-convention-busy-is-not-2.md`), exactly as any
 other unrecognized subcommand would. No migration path is offered for either — this is a
 deliberate omission, not an oversight.
+
+## Scheduling: calendar trigger for timer queries
+
+A `type = "timer"` query can now fire at a wall-clock time (`[query.trigger] kind = "calendar"`) and
+carry a static `metadata` table onto its ticks. Existing `period` timers are unchanged, and nothing
+needs migrating. See the README section "Scheduling with a calendar trigger".

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -291,9 +292,59 @@ type sourceView struct {
 	Mode     string       `json:"mode"`
 	LastTick string       `json:"lastTick"`
 	Failure  *failureView `json:"failure"`
+	// Calendar is set only for a calendar-triggered source.
+	Calendar *calendarView `json:"calendar"`
 	// InFlight and Busy are both true while a fetch of the source is in flight.
 	InFlight bool `json:"inFlight"`
 	Busy     bool `json:"busy"`
+}
+
+// calendarView is sources[].calendar's shape.
+type calendarView struct {
+	Schedule string `json:"schedule"`
+	OnMissed string `json:"onMissed"`
+	Next     string `json:"next"`
+	Last     *struct {
+		Slot    string `json:"slot"`
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason"`
+	} `json:"last"`
+}
+
+// line renders the one operator line of a calendar query, for example
+//
+//	weekly-scan  calendar 03:30 sun America/Los_Angeles  last: 2026-11-01T03:30-08:00 fired | next: 2026-11-08T03:30-08:00 | on_missed=run-now
+//	weekly-scan  calendar 03:30 sun America/Los_Angeles  last: 2026-11-01T03:30-08:00 SKIPPED (on_missed=next-slot, router not running) | next: ...
+//
+// The stored outcome fired renders as fired (with its reason, for example late
+// by 5s), catch_up as catch-up, skipped as SKIPPED; the reason is shown as stored.
+func (c calendarView) line(name string) string {
+	last := "no slot handled yet"
+	suffix := " | on_missed=" + c.OnMissed
+	if l := c.Last; l != nil {
+		switch l.Outcome {
+		case calstate.OutcomeSkipped:
+			// The policy moves inside the parentheses, next to the reason.
+			detail := "on_missed=" + c.OnMissed
+			if l.Reason != "" {
+				detail += ", " + l.Reason
+			}
+			last = fmt.Sprintf("%s SKIPPED (%s)", l.Slot, detail)
+			suffix = ""
+		case calstate.OutcomeCatchUp:
+			last = withReason(l.Slot+" catch-up", l.Reason)
+		default:
+			last = withReason(l.Slot+" "+l.Outcome, l.Reason)
+		}
+	}
+	return fmt.Sprintf("%s  %s  last: %s | next: %s%s", name, c.Schedule, last, c.Next, suffix)
+}
+
+func withReason(s, reason string) string {
+	if reason == "" {
+		return s
+	}
+	return s + " (" + reason + ")"
 }
 
 // activityRenderLimit is the human-form "ACTIVITY (last 10)" cap (Task 3.8
@@ -416,6 +467,9 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 			}
 			fmt.Fprintf(w, "  %s: type=%s enabled=%t excluded=%t mode=%s lastTick=%s failure=%s\n",
 				dash(s.Name), dash(s.Type), s.Enabled, s.Excluded, dash(s.Mode), dash(s.LastTick), failure)
+			if s.Calendar != nil {
+				fmt.Fprintf(w, "    %s\n", textsafe.Sanitize(s.Calendar.line(s.Name)))
+			}
 		}
 	})
 

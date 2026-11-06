@@ -76,7 +76,7 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 			return
 		}
 		if err := cad.Save(cad.Slots); err != nil {
-			slog.Warn("calendar state write failed", "query", name, "err", err)
+			slog.Warn("calendar state write failed", "source", name, "err", err)
 		}
 	}
 	rec, has := cad.Slots[name]
@@ -90,6 +90,7 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 	if rec.LastSlot.After(nowT) {
 		// The clock jumped and was corrected: the stored slot is in the future.
 		cr.Clamped, cr.ClampedFrom = true, rec.LastSlot
+		slog.Warn("calendar clock clamp: remembered slot is in the future; using the current slot", "source", name, "stored", rec.LastSlot, "slot", p, "now", nowT)
 		rec = SlotRecord{LastSlot: p, Outcome: rec.Outcome, Reason: rec.Reason, DecidedAt: nowT}
 		cad.Slots[name] = rec
 		delete(cad.FailedSlots, name)
@@ -101,13 +102,16 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 		cad.Slots[name] = rec
 		delete(cad.FailedSlots, name)
 		cr.FailedSlotSkipped = fs
-		slog.Warn("calendar slot skipped: enqueue failed", "query", name, "slot", fs)
+		slog.Warn("calendar slot skipped", "source", name, "slot", fs, "reason", calstate.ReasonEnqueueFailed, "policy", ct.OnMissed)
 		save()
 	}
 	if !p.After(rec.LastSlot) {
 		return nil
 	}
 	cr.Due = true
+	if ct.MovedByDST(p) {
+		slog.Info("calendar slot moved by DST gap", "source", name, "slot", p, "configured", fmt.Sprintf("%02d:%02d", ct.At.Hour, ct.At.Minute), "zone", ct.ZoneName())
+	}
 	// Slots between the remembered one and P are passed over, never fired.
 	for sl, n := ct.Next(rec.LastSlot), 0; !sl.IsZero() && sl.Before(p) && n < maxSupersededScan; sl, n = ct.Next(sl), n+1 {
 		if cr.Superseded == 0 {
@@ -115,6 +119,9 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 		}
 		cr.Superseded++
 		cr.LastSuperseded = sl
+	}
+	if cr.Superseded > 0 {
+		slog.Warn("calendar slots superseded: several slots were due, only the latest was evaluated", "source", name, "count", cr.Superseded, "first", cr.FirstSuperseded, "last", cr.LastSuperseded, "slot", p)
 	}
 	reason := ""
 	switch {
@@ -129,6 +136,7 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 		// liveness is not hurt.
 		cad.Slots[name] = SlotRecord{LastSlot: p, Outcome: calstate.OutcomeSkipped, Reason: reason, DecidedAt: nowT}
 		cr.Outcome = calstate.OutcomeSkipped
+		slog.Info("calendar slot skipped", "source", name, "slot", p, "reason", reason, "policy", ct.OnMissed)
 		rpt.LastTick[name] = nowT
 		if obs != nil {
 			obs.OnSourceSucceeded(name)
@@ -156,6 +164,15 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 	}
 	cad.Slots[name] = out
 	cr.Fired, cr.Outcome = true, out.Outcome
+	policy := ct.OnMissed
+	if cr.Missed {
+		slog.Info("calendar tick fired", "source", name, "slot", p, "reason", reason, "policy", policy)
+	} else {
+		slog.Info("calendar tick fired", "source", name, "slot", p, "reason", "on time", "policy", policy)
+		if cr.Late > cad.PollInterval {
+			slog.Info("calendar tick late by more than one poll interval", "source", name, "slot", p, "late_by", cr.Late.Round(time.Second))
+		}
+	}
 	save()
 	return nil
 }

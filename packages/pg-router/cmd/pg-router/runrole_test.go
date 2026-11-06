@@ -320,7 +320,7 @@ func TestRenderRunQueryJSON(t *testing.T) {
 		{ID: "zr-2", Type: "review-pr", Title: "Review PR #2"},
 	}
 	var b bytes.Buffer
-	renderRunQueryJSON(&b, "feedback-ready", matches)
+	renderRunQueryJSON(&b, "feedback-ready", matches, nil)
 
 	var got runQueryReport
 	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
@@ -329,7 +329,7 @@ func TestRenderRunQueryJSON(t *testing.T) {
 	if got.Query != "feedback-ready" || got.Total != 2 {
 		t.Errorf("report = %+v, want query=feedback-ready total=2", got)
 	}
-	if len(got.Matches) != 2 || got.Matches[0] != matches[0] || got.Matches[1] != matches[1] {
+	if len(got.Matches) != 2 || got.Matches[0].ID != matches[0].ID || got.Matches[1].ID != matches[1].ID {
 		t.Errorf("matches = %+v, want %+v", got.Matches, matches)
 	}
 	if bytes.Contains(b.Bytes(), []byte("schemaVersion")) {
@@ -340,7 +340,7 @@ func TestRenderRunQueryJSON(t *testing.T) {
 func TestRenderRunQueryText(t *testing.T) {
 	matches := []runQueryMatch{{ID: "zr-1", Type: "review-pr", Title: "Review PR #1"}}
 	var b bytes.Buffer
-	renderRunQueryText(&b, "feedback-ready", matches)
+	renderRunQueryText(&b, "feedback-ready", matches, nil)
 	out := b.String()
 	if !strings.Contains(out, "zr-1\treview-pr\tReview PR #1") {
 		t.Errorf("output missing the tab-separated match line; got:\n%s", out)
@@ -355,7 +355,7 @@ func TestRenderRunQueryText(t *testing.T) {
 // naive consumer would have to special-case.
 func TestRenderRunQueryJSON_emptyMatchesIsAnEmptyArray(t *testing.T) {
 	var b bytes.Buffer
-	renderRunQueryJSON(&b, "feedback-ready", []runQueryMatch{})
+	renderRunQueryJSON(&b, "feedback-ready", []runQueryMatch{}, nil)
 	if !strings.Contains(b.String(), `"matches":[]`) {
 		t.Errorf(`output = %s, want "matches":[]`, b.String())
 	}

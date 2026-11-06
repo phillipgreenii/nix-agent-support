@@ -1279,6 +1279,38 @@ func sourceReportsFor(sources query.SourceSet, rpt discover.ProduceReport, lastT
 	return out
 }
 
+// attachCalendar fills SourceReport.Calendar for every calendar-triggered
+// source in sources: the resolved schedule and next fire from the trigger, the
+// last handled slot from the state file (through calstate.Read; an unreadable
+// file reads as no state, doctor is where it is reported). reports is
+// index-aligned with sources, as sourceReportsFor builds it.
+func attachCalendar(reports []core.SourceReport, sources query.SourceSet, statePath string, now time.Time) {
+	var recs map[string]calstate.Record
+	read := false
+	for i, s := range sources {
+		ct, ok := query.Calendar(s.Query.Trigger())
+		if !ok || i >= len(reports) {
+			continue
+		}
+		if !read {
+			read = true
+			if statePath != "" {
+				recs, _ = calstate.Read(statePath)
+			}
+		}
+		info := &core.CalendarInfo{Schedule: ct.Describe(), OnMissed: ct.OnMissed, Next: ct.FormatSlot(ct.Next(now))}
+		if rec, has := recs[s.Name]; has {
+			info.Last = &core.CalendarLast{Slot: ct.FormatSlot(rec.LastSlot), Outcome: rec.Outcome, Reason: rec.Reason}
+		}
+		reports[i].Calendar = info
+	}
+}
+
+// calendarStatePath is where the calendar state file lives for cfg.
+func calendarStatePath(cfg config.Config) string {
+	return filepath.Join(cfg.LogDir, calstate.FileName)
+}
+
 // resolvedConfigFor builds the small resolved-config snapshot
 // core.TickSnapshot.Config carries this pass (Task 3.5 Contract; the field
 // list itself is this task's own choice — see core.ResolvedConfig's doc).
@@ -1446,8 +1478,10 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 	}
 	q.Expire()
 	now := time.Now()
+	sourceReports := sourceReportsFor(cfg.Queries, rpt, o.LastTick())
+	attachCalendar(sourceReports, cfg.Queries, calendarStatePath(cfg), now)
 	svc.PublishTick(core.TickSnapshot{
-		Sources:    sourceReportsFor(cfg.Queries, rpt, o.LastTick()),
+		Sources:    sourceReports,
 		Config:     resolvedConfigFor(cfg, core.RunModeLongRunning),
 		RunMode:    core.RunModeLongRunning,
 		Version:    version,
@@ -1592,8 +1626,10 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 		q.Kick()
 		q.Expire()
 		now := time.Now()
+		sourceReports := sourceReportsFor(pr.cfg.Queries, rpt, pr.o.LastTick())
+		attachCalendar(sourceReports, pr.cfg.Queries, "", now)
 		svc.PublishTick(core.TickSnapshot{
-			Sources:    sourceReportsFor(pr.cfg.Queries, rpt, pr.o.LastTick()),
+			Sources:    sourceReports,
 			Config:     resolvedConfigFor(pr.cfg, core.RunModeDrainAndExit),
 			RunMode:    core.RunModeDrainAndExit,
 			Version:    version,
