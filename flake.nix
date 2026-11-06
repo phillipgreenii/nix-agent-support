@@ -5364,6 +5364,61 @@
                     touch $out
                   '';
 
+              # claude-display mod: runs EVERY *.test.ts under the mod directory with node, so a
+              # later packet adds a test without editing this check. Relative imports are
+              # extensionless in the sources (the engine resolves them), so a copy of the hooks
+              # directory gets the `.ts` suffix node needs. `*.multiprocess.test.ts` files are
+              # excluded (their own opt-in check).
+              test-claude-display-mod =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace/claude-display;
+                  };
+                  # The subset of the engine's testing kit the display tests use.
+                  shim = pkgs.writeText "claude-code-testing-shim.mjs" ''
+                    import assert from "node:assert/strict";
+                    import { test as nodeTest } from "node:test";
+                    export const test = (name, fn) => nodeTest(name, () => fn());
+                    export const expect = (a) => ({
+                      toBe: (b) => assert.ok(Object.is(a, b), "toBe"),
+                      toEqual: (b) => assert.deepEqual(a, b),
+                      toHaveLength: (n) => assert.equal(a.length, n),
+                      toContain: (x) => assert.ok(a.includes(x), "contain " + x),
+                    });
+                  '';
+                in
+                pkgs.runCommand "test-claude-display-mod"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.nodejs
+                      pkgs.jq
+                      pkgs.fd
+                      pkgs.sd
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    set -euo pipefail
+                    plugin=${src}/claude-marketplace/claude-display
+                    jq -e '.modules == ["./register.ts"]' "$plugin/hooks/hooks.json" >/dev/null
+                    jq -e '.defaultEnabled == true' "$plugin/.claude-plugin/plugin.json" >/dev/null
+                    for f in register.ts components.ts types.ts components.test.ts; do test -f "$plugin/hooks/$f"; done
+                    cp -r "$plugin" work
+                    chmod -R u+w work
+                    cd work
+                    fd -e ts . -x sd "from '(\.[^']*)'" "from '\$1.ts'" {}
+                    fd -e ts . -x sd "\.ts\.ts'" ".ts'" {}
+                    fd -e ts . -x sd "'claude-code/testing'" "'./shim.mjs'" {}
+                    cp ${shim} shim.mjs
+                    cp ${shim} hooks/shim.mjs
+                    tests="$(fd -e ts --full-path '\.test\.ts$' . | grep -v '\.multiprocess\.test\.ts$' || true)"
+                    [ -n "$tests" ] || { echo "FAIL: no tests found" >&2; exit 1; }
+                    export HOME="$TMPDIR" TMPDIR="$TMPDIR"
+                    node --experimental-strip-types --test --test-timeout=120000 $tests
+                    touch $out
+                  '';
+
               # pg-claude-control (docket pg2-v77tsx, phase 8a): the control mod's core logic under
               # plain node against the real file system and the real listener script, outside the Go
               # unit gate. Same engine shim as test-claude-tool-tracker-mod; `claude plugin validate`
@@ -17013,6 +17068,19 @@
                     [ ${lib.escapeShellArg r.live.runAllow} = exit,clear ]
                     touch $out
                   '';
+
+              # claude-display HM module: the eval cases live in tests/claude-display-hm-options.nix.
+              test-claude-display-hm-options =
+                let
+                  r = import ./tests/claude-display-hm-options.nix { inherit lib; };
+                in
+                pkgs.runCommand "test-claude-display-hm-options" { } ''
+                  ${lib.optionalString (r.failures != [ ]) ''
+                    echo "claude-display module eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                    exit 1
+                  ''}
+                  touch $out
+                '';
 
               # pg-claude-control plugin validation (docket pg2-v77tsx, phase 8c): runs the real
               # `claude plugin validate` on the control mod, outside the Go unit gate. A failed
