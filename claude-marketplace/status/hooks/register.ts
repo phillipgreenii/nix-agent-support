@@ -1,6 +1,11 @@
 import type { Register } from 'claude-code'
 import { registerComponents } from './components'
 import { parseOptions } from './types'
+import { setOptions } from './options'
+import { initSources } from './source'
+import { registerGitHeadHooks, startGitHead } from './gitHead'
+import { registerModelEffortHooks, startModelEffort } from './modelEffort'
+import { registerUsageHooks, startUsage } from './usage'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):
@@ -23,15 +28,35 @@ import { parseOptions } from './types'
 //    `$.env.get`/`$.env.set` to take a LITERAL variable name, so the facade has no generic env
 //    member: a component that needs a variable adds a purpose-named closure that spells the
 //    literal name (as the options read below does).
+//  - Source layer: the sources (source.ts) start inside session.start, only when enable is true,
+//    after setOptions and initSources and before registerComponents. The event hooks that feed
+//    them are registered at registration time by the register*Hooks(on) functions of the source
+//    files (each takes `$` from its own callback, never as an argument) and read getOptions().
+//    The facade also holds ui.invalidate, session.model, session.cwd and clock.after (the
+//    source layer's setTimer is built from it).
 export const register: Register = on => {
+  registerUsageHooks(on)
+  registerModelEffortHooks(on)
+  registerGitHeadHooks(on)
   on('session.start', async ($, e, next) => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
-    registerComponents(options, {
+    const host = {
       process: { run: (argv, init) => $.process.run(argv, init) },
       fs: { read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t) },
       http: { fetch: (url, init) => $.http.fetch(url, init) },
       config: { set: (k, v) => $.config.set(k, v) },
-    })
+      ui: { invalidate: () => $.ui.invalidate('ui.render') },
+      session: { model: () => $.session.model(), cwd: () => $.session.cwd() },
+      clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
+    }
+    setOptions(options)
+    if (options.enable) {
+      initSources(host, { setTimer: (fn, ms) => host.clock.after(ms, fn) })
+      startUsage(host)
+      startModelEffort(host)
+      startGitHead(host)
+    }
+    registerComponents(options, host)
     return next(e)
   })
 }
