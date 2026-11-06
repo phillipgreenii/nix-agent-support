@@ -420,6 +420,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			continue
 		}
+		// Read-only recorder and pa-monitor queries (see readonly_queries.go).
+		if issue, isQuery := readOnlyQueryIssue(basename, pc.Args, pc.ArgLiveExpansion); isQuery {
+			if issue != "" {
+				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
+			}
+			continue
+		}
 		if browsingCmds[basename] {
 			if basename == "fd" {
 				if flag, dangerous := fdExecFlag(pc.Args); dangerous {
