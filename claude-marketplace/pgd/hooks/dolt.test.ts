@@ -10,7 +10,7 @@ import { DEFAULT_OPTIONS, type PgdOptions } from './types'
 
 const withBeads = (beads: boolean): PgdOptions => ({
   ...DEFAULT_OPTIONS,
-  components: { ...DEFAULT_OPTIONS.components, beads },
+  components: { ...DEFAULT_OPTIONS.components, beads, sessionMode: false },
 })
 
 function boot(options: PgdOptions, exitCode = 0) {

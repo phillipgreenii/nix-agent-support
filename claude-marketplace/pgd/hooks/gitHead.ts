@@ -2,6 +2,7 @@ import { pgdEnabled } from './options'
 import { defineSource, noteEvent, refresh } from './source'
 import type { ModApi } from './types'
 import { recordCompaction } from './context-modal'
+import { onSessionModeTurnComplete } from './session-mode'
 
 // The branch and worktree source. The display never runs a git command: it reads <cwd>/.git
 // through host.fs.read. A .git file holds `gitdir: <path>` (a worktree; a relative path is
@@ -82,6 +83,7 @@ export function registerGitHeadHooks(on: ModApi): void {
     if (pgdEnabled()) {
       noteEvent()
       refresh('gitHead')
+      onSessionModeTurnComplete()
     }
     return next(e)
   })

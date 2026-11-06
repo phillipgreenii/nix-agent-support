@@ -3,6 +3,7 @@ import { readCached } from './source'
 import type { AlertThresholds, ModApi } from './types'
 import type { Usage } from './usage'
 import { timedDraw } from './metrics'
+import { isWrapUp } from './session-mode'
 import { listContributions } from './contributions'
 
 // The alert row (the status line): one aggregated row listing only the alerts whose condition is
@@ -38,6 +39,12 @@ function nearCap(v: AlertInputs): Array<{ kind: string; usedPercent: number }> {
 const LIMIT_NAME: Record<string, string> = { five_hour: '5h', seven_day: '7d' }
 
 export const ALERT_ITEMS: AlertItem[] = [
+  {
+    id: 'wrapping-up',
+    priority: 100,
+    condition: v => isWrapUp(v.mode),
+    text: () => 'wrapping up',
+  },
   {
     id: 'dolt',
     priority: 80,
@@ -115,6 +122,7 @@ export function alertRow(): string {
   const inputs: AlertInputs = {
     usage: readCached<Usage>('usage'),
     dolt: options.components.beads ? readCached<boolean>('dolt') : undefined,
+    mode: options.components.sessionMode ? readCached('sessionMode') : undefined,
     thresholds: options.alerts.thresholds,
     now: Date.now(),
   }

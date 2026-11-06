@@ -10,8 +10,8 @@ import { DEFAULT_OPTIONS, type PgdOptions } from './types'
 export const HEAD = (b: string): string => `ref: refs/heads/${b}\n`
 export const withPr = (prStatus: boolean): PgdOptions => ({
   ...DEFAULT_OPTIONS,
-  // beads off: the dolt probe is another process.run user
-  components: { ...DEFAULT_OPTIONS.components, beads: false, prStatus },
+  // beads and sessionMode off: the dolt probe and the session-mode read are other process.run users
+  components: { ...DEFAULT_OPTIONS.components, beads: false, sessionMode: false, prStatus },
 })
 
 export type Run = (argv: string[], init: unknown) => Promise<unknown>

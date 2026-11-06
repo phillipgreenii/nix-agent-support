@@ -96,3 +96,35 @@ Each of these is covered by a test in `hooks/pr.test.ts` or `hooks/pr.realgh.tes
 | Second session in tests      | A second boot on the same stub store, reading the entry the first session wrote.                                                                                                                                                            |
 | What "nothing else" compares | The cached `gitHead` and `model` values before and after the failure.                                                                                                                                                                       |
 | `claude plugin test` and gh  | `pr.realgh.test.ts` imports node modules, which the engine's loader refuses (as for the multi-process suite); `test-pgd-mod` runs it under node with `pkgs.gh` on its inputs, and a gh missing from `PATH` is itself a tested failure path. |
+
+## Session mode (`components.sessionMode`)
+
+The mode button, the Session mode modal and the "wrapping up" alert come from the `sessionMode`
+source: `session-mode show`, run through the facade's `process.run` with `CLAUDE_CODE_SESSION_ID`
+(from `session.id()`) in the run's env. `session-mode` is expected on `PATH` from the existing
+session-mode module; the tool is used as it is. With `components.sessionMode` off there is no
+button, modal, stop action, source, timer or alert.
+
+- The button (`mode`, band order 40) shows the mode name, with ` (stopping)` while it is stopping,
+  and is drawn only while a mode is active. A press opens the modal; a second press closes it.
+- The modal lists `mode`, `state` and `detail` (omitted when empty), one per line, with the actions
+  Stop (runs `session-mode set-status stopping`, then reads the source again) and Close.
+- The alert `wrapping up` (priority 100, the highest) shows while a wrap-up mode is active.
+
+### Choices the design left to the builder
+
+Each of these is covered by a test in `hooks/session-mode.test.ts` or `hooks/session-mode.realtool.test.ts`.
+
+| Choice                | Decision                                                                                                                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Refresh               | Event-driven, no timer: read at start, on `turn.complete` (through the existing `turn.complete` hook in `gitHead.ts`) and after a stop action.                                                                             |
+| Interval              | At most one read per 10 seconds on `turn.complete`; a read that begins less than 10 seconds after the previous one is skipped.                                                                                             |
+| Refresh after a stop  | The stop action bypasses the throttle once, so the label and alert follow the stop at once.                                                                                                                                |
+| Parsing               | `session-mode show` prints one JSON record; `kind` becomes `mode`, `state` and `detail` are kept. A record without `kind` or `state` is a parse failure.                                                                   |
+| No record             | Exit 2 (also as a rejection carrying exit code 2) is the value undefined, not a failure: no button, no backoff.                                                                                                            |
+| Failed read           | Any other non-zero exit, rejection, timeout, absent tool or unparseable output leaves the value undefined, so the button is not drawn.                                                                                     |
+| Active                | A record whose state is not `finished`; a finished mode draws no button, modal or alert.                                                                                                                                   |
+| Wrapping up           | The mode `wrap-up-session` while active.                                                                                                                                                                                   |
+| Labels and action ids | Button label is the mode name; band row id and modal id `mode`; actions `stop` and `close`.                                                                                                                                |
+| Throwaway record      | The real-tool test sets `SESSION_MODE_STATE_DIR` to a temporary directory and creates the record with the real `session-mode start`.                                                                                       |
+| Nix check             | `test-pgd-mod` gains `pkgs.session-mode` on its inputs; `session-mode.realtool.test.ts` imports node modules, so `claude plugin test` reports it as "did not load" (as for `pr.realgh.test.ts`) and the nix check runs it. |

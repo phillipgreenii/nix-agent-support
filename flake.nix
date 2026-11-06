@@ -5541,6 +5541,8 @@
                       pkgs.coreutils
                       # the real gh binary, for pr.realgh.test.ts (hermetic: no token, no network)
                       pkgs.gh
+                      # the real session-mode binary, for session-mode.test.ts
+                      pkgs.session-mode
                     ];
                   }
                   ''
