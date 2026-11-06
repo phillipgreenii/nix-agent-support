@@ -75,12 +75,9 @@ func TestNotBuiltCommandsAreAbsent(t *testing.T) {
 func TestStubsPrintNotImplementedAndExitOne(t *testing.T) {
 	cases := [][]string{
 		{"agent", "q", "ccaudit", "some-query"},
-		{"job", "run", "lens", "--scope", "s", "--duration", "7d", "--at", "2026-01-08T00:00:00Z", "--profile", "p", "--analyst", "none", "--evidence-only", "--run-key", "k", "--schedule-id", "id"},
-		{"job", "run", "lens", "--scope", "s", "--from", "a", "--to", "b"},
 		{"job", "maintain"},
 		{"job", "doctor"},
 		{"job", "status", "--json"},
-		{"job", "show-run", "r1"},
 		{"job", "resume", "lens"},
 	}
 	for _, c := range cases {
@@ -99,7 +96,6 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 		{"human", "show"},
 		{"human", "rule", "3"},
 		{"agent", "file"},
-		{"job", "run", "lens"}, // --scope is required
 		{"job", "pending"},
 		{"--output", "yaml", "agent", "context"},
 	}

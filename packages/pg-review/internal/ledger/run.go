@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -195,4 +196,41 @@ func (l *Ledger) Heartbeat(ctx context.Context) (time.Time, error) {
 		return time.Time{}, ErrNotFound
 	}
 	return parseTime(v), err
+}
+
+// RunsInStates lists the runs whose state is one of states, oldest first (the
+// reaper's view).
+func (l *Ledger) RunsInStates(ctx context.Context, states ...string) ([]Run, error) {
+	if len(states) == 0 {
+		return nil, nil
+	}
+	q := `SELECT ` + runCols + ` FROM run WHERE state IN (?` + strings.Repeat(",?", len(states)-1) + `) ORDER BY id`
+	args := make([]any, len(states))
+	for i, s := range states {
+		args[i] = s
+	}
+	rows, err := l.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// LockRunID returns the run id holding the (lens, scope) lock, or ErrNotFound.
+func (t *Tx) LockRunID(ctx context.Context, lens, scope string) (int64, error) {
+	var id int64
+	err := t.queryRow(ctx, `SELECT run_id FROM run_lock WHERE lens=? AND scope=?`, lens, scope).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return id, err
 }

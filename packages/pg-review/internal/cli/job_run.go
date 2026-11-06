@@ -1,7 +1,15 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/spf13/cobra"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
 )
 
 func init() { registerCommand(groupJob, newJobRunCmd) }
@@ -22,8 +30,51 @@ type RunOptions struct {
 	ScheduleID   string
 }
 
-// runJob is the seam the run-lifecycle code replaces.
-var runJob = func(*cobra.Command, *RunOptions) error { return notImplemented() }
+// runJob executes the run lifecycle; later work extends runner.Deps through
+// runnerHook (evidence stage, analyst backends).
+var runJob = defaultRunJob
+
+// runnerHook lets later packets add stages and analysts to the deps of a run.
+var runnerHook func(*runner.Deps)
+
+func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
+	ctx := cmd.Context()
+	cfg, err := config.Load(config.EnvFromOS(), assetsFS())
+	if err != nil {
+		return err
+	}
+	l, err := ledger.Open(ctx)
+	if err != nil {
+		return ExitErrorf(exitcode.Ledger, "%v", err)
+	}
+	defer l.Close()
+	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout()}
+	if runnerHook != nil {
+		runnerHook(d)
+	}
+	res, err := runner.Run(ctx, d, runner.Params{
+		Lens: o.Lens, Scope: o.Scope, From: o.From, To: o.To, Duration: o.Duration, At: o.At,
+		Profile: o.Profile, Analyst: o.Analyst, EvidenceOnly: o.EvidenceOnly,
+		RunKey: o.RunKey, ScheduleID: o.ScheduleID,
+	})
+	var ue *runner.UsageError
+	var sk *runner.SkippedError
+	var af *runner.AlreadyFiledError
+	switch {
+	case err == nil:
+		fmt.Fprintf(cmd.OutOrStdout(), "run %d %s\n", res.Run.ID, res.Run.State)
+		return nil
+	case errors.As(err, &ue):
+		return usageErrorf("%s", ue.Msg)
+	case errors.As(err, &af):
+		return ExitErrorf(exitcode.Skipped, "%v", af)
+	case errors.As(err, &sk):
+		return ExitErrorf(exitcode.Skipped, "run %d skipped: %s", sk.RunID, sk.Reason)
+	case errors.Is(err, ledger.ErrLockBusy):
+		return ExitErrorf(exitcode.Busy, "another run holds the lock for lens %s and scope %s", o.Lens, o.Scope)
+	}
+	return mapFileError(err)
+}
 
 func newJobRunCmd() *cobra.Command {
 	opts := &RunOptions{}
@@ -48,7 +99,7 @@ func newJobRunCmd() *cobra.Command {
 	f.StringVar(&opts.Profile, "profile", "", "analyst profile")
 	f.StringVar(&opts.Analyst, "analyst", "", "analyst backend: ccpool, interactive or none (overrides the profile)")
 	f.BoolVar(&opts.EvidenceOnly, "evidence-only", false, "collect evidence only; no analyst")
-	f.StringVar(&opts.RunKey, "run-key", "", "run key <lens>/<scope>/<window>/<window end> (set by the router adapter)")
-	f.StringVar(&opts.ScheduleID, "schedule-id", "", "schedule id (set by the router adapter)")
+	f.StringVar(&opts.RunKey, "run-key", "", "idempotency key, stored verbatim (opaque label supplied by the caller)")
+	f.StringVar(&opts.ScheduleID, "schedule-id", "", "schedule id (opaque label supplied by the caller)")
 	return cmd
 }
