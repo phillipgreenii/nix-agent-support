@@ -41,7 +41,7 @@ test('the button is drawn with every component off, before the band toggle', () 
 
 test('no button when enable is false', () => {
   world({ ...off, enable: false })
-  expect(row()).toBeUndefined()
+  expect(row()).toBe(undefined)
 })
 
 test('pressing pre-fills the slash command, never submits, and opens no modal', async () => {
