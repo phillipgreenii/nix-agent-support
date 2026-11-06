@@ -9,10 +9,8 @@ import type { ModApi } from './types'
 // session that claims work), version, repo, worktree, branch and, when the PR source has a value,
 // the PR with its review state coloured. A row whose value is missing is omitted: with the .git
 // reads failing there are no branch and worktree rows, and with no PR value there is no PR row.
-export interface PrValue {
-  number: number
-  reviewState: string
-}
+export type { PrValue } from './pr'
+import type { PrValue } from './pr'
 
 interface SessionFacts {
   id?: string
@@ -77,7 +75,8 @@ export function infoSpec(): ModalSpec {
   const pr = readCached<PrValue>('pr')
   if (pr) {
     const color = reviewColor(pr.reviewState)
-    items.push({ label: 'PR', value: `#${pr.number} (${pr.reviewState.toLowerCase().replace(/_/g, ' ')})`, ...(color ? { color } : {}) })
+    const state = pr.reviewState.toLowerCase().replace(/_/g, ' ')
+    items.push({ label: 'PR', value: state ? `#${pr.number} (${state})` : `#${pr.number}`, ...(color ? { color } : {}) })
   }
   return { id: 'info', title: 'Info', items, actions: [] }
 }

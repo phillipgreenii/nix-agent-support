@@ -5539,6 +5539,8 @@
                       pkgs.fd
                       pkgs.sd
                       pkgs.coreutils
+                      # the real gh binary, for pr.realgh.test.ts (hermetic: no token, no network)
+                      pkgs.gh
                     ];
                   }
                   ''

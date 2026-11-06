@@ -59,6 +59,8 @@ interface Entry {
   def: SourceDef<unknown>
   cache?: { value: unknown; fetchedAt: number }
   inFlight: boolean
+  rerun?: boolean
+  forced?: boolean
   failures: number
   lastAttemptAt?: number
   timer?: { cancel(): void }
@@ -78,6 +80,7 @@ let entries = new Map<string, Entry>()
 let visible: Record<Surface, boolean> = { band: true, modal: false, alert: true }
 let lastEventAt = 0
 let invalidatePending = false
+let listeners = new Map<string, Array<() => void>>()
 
 const same = (a: unknown, b: unknown): boolean =>
   (JSON.stringify(a) ?? 'undefined') === (JSON.stringify(b) ?? 'undefined')
@@ -104,12 +107,12 @@ function schedule(e: Entry): void {
   e.timer = undefined
   if (!host || !active(e)) return
   const wait =
-    e.lastAttemptAt === undefined ? 0 : Math.max(0, e.lastAttemptAt + delayOf(e) - clock.now())
+    e.lastAttemptAt === undefined || e.forced ? 0 : Math.max(0, e.lastAttemptAt + delayOf(e) - clock.now())
   e.timer = clock.setTimer(() => {
     e.timer = undefined
     if (e.inFlight) return // the fetch's completion re-arms the timer
     if (!active(e)) return
-    if (e.lastAttemptAt !== undefined && clock.now() < e.lastAttemptAt + delayOf(e)) {
+    if (!e.forced && e.lastAttemptAt !== undefined && clock.now() < e.lastAttemptAt + delayOf(e)) {
       schedule(e)
       return
     }
@@ -120,6 +123,7 @@ function schedule(e: Entry): void {
 async function runFetch(e: Entry): Promise<void> {
   if (e.inFlight || !e.def.fetch) return
   e.inFlight = true
+  e.forced = false
   e.lastAttemptAt = clock.now()
   const labels = { source: e.def.id }
   let startedAt: number | undefined
@@ -161,7 +165,10 @@ async function runFetch(e: Entry): Promise<void> {
     log('warn', e.def.id, 'fetch failed', kind)
   } finally {
     e.inFlight = false
-    schedule(e)
+    if (e.rerun) {
+      e.rerun = false
+      void runFetch(e)
+    } else schedule(e)
   }
 }
 
@@ -178,7 +185,10 @@ export function errorKind(err: unknown): 'timeout' | 'exit' | 'parse' | 'other' 
 function store(e: Entry, value: unknown, fetchedAt = clock.now()): void {
   const changed = !same(e.cache?.value, value)
   e.cache = { value, fetchedAt }
-  if (changed) requestInvalidate()
+  if (changed) {
+    requestInvalidate()
+    for (const fn of listeners.get(e.def.id) ?? []) fn()
+  }
 }
 
 // Reset the registry, keep the host facade and the clock. Called once from inside the
@@ -186,6 +196,7 @@ function store(e: Entry, value: unknown, fetchedAt = clock.now()): void {
 export function initSources(h: ModApi, c?: Partial<Clock>): void {
   for (const e of entries.values()) e.timer?.cancel()
   entries = new Map()
+  listeners = new Map()
   host = h
   clock = { ...defaultClock, ...c }
   visible = { band: true, modal: false, alert: true }
@@ -228,12 +239,28 @@ export function requestInvalidate(): void {
   })
 }
 
-export function refresh(id: string): void {
+// Run fn whenever the cached value of a source changes (by JSON equality). Cleared by initSources.
+export function onChange(id: string, fn: () => void): void {
+  listeners.set(id, [...(listeners.get(id) ?? []), fn])
+}
+
+// An immediate fetch subject to the throttle. With { force: true } the throttle and the failure
+// backoff are bypassed once (a polled source that is not active remembers the request and fetches as soon as a surface that feeds it is shown); a forced refresh that arrives
+// while a fetch is in flight runs once more when that fetch ends, so the newest request wins.
+export function refresh(id: string, opts?: { force?: boolean }): void {
   const e = entries.get(id)
-  if (!e || e.inFlight || !e.def.fetch) return
+  if (!e || !e.def.fetch) return
+  if (e.inFlight) {
+    if (opts?.force && (e.def.intervalMs <= 0 || active(e))) e.rerun = true
+    return
+  }
   if (e.def.intervalMs > 0) {
-    if (!active(e)) return
-    if (e.lastAttemptAt !== undefined && clock.now() < e.lastAttemptAt + delayOf(e)) return
+    if (!active(e)) {
+      // Not shown now: remember the request, so the fetch runs as soon as a surface shows it.
+      if (opts?.force) e.forced = true
+      return
+    }
+    if (!opts?.force && e.lastAttemptAt !== undefined && clock.now() < e.lastAttemptAt + delayOf(e)) return
   }
   void runFetch(e)
 }

@@ -64,3 +64,35 @@ Each of these is covered by a test in `hooks/modals.test.ts`, `hooks/modal.test.
 | Open modal on invalidate        | Rebuilt on each draw from the live builder, so values stay current.                                                    |
 | Toggle persistence              | An engine atom (`pgd.toggles`), hydrated at `session.start`; it survives a hot reload.                                 |
 | Pane ids                        | `pgd-<modal id>`.                                                                                                      |
+
+## PR status (`components.prStatus`)
+
+The Info modal's PR row comes from the `pr` source: the PR number and review state of the current
+branch, from `gh pr view <branch> -R <owner>/<repo> --json number,reviewDecision`, run through the
+facade's `process.run`. With the repo and the branch both passed, gh runs no git and cannot contend
+for a git lock (a bare `gh pr view` needs git); the display itself never runs a git command. `gh` is
+expected on `PATH`, installed by the existing module that provides it. With `components.prStatus`
+off there is no gh source, no timer and no PR row.
+
+- Interval and sharing: at most one fetch every five minutes (and only while the Info modal is
+  shown), shared across sessions through the store under `shared:pr:<owner/name>#<branch>`, so a
+  session that finds the entry fresh does not fetch and two branches of one repo never read each
+  other's entry.
+
+### Choices the design left to the builder
+
+Each of these is covered by a test in `hooks/pr.test.ts` or `hooks/pr.realgh.test.ts`.
+
+| Choice                       | Decision                                                                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch change                | The cached value is cleared at once and one forced refresh bypasses the throttle and the backoff, once per new key.                                                                                                                         |
+| Change while the modal shut  | The request is remembered and the fetch runs as soon as the modal is next shown.                                                                                                                                                            |
+| Branch or repo absent        | No key, so no fetch, no shared entry and no PR row (detached head, no `.git`, or `session.repo()` giving no `owner/name`).                                                                                                                  |
+| Repo                         | `session.repo()` is read once at start and memoized; its `name` when it is `owner/repo`, else parsed from the remote URL.                                                                                                                   |
+| Empty `reviewDecision`       | The value is kept with an empty state; the row shows the number alone, uncoloured.                                                                                                                                                          |
+| Colours                      | `APPROVED` green, `CHANGES_REQUESTED` red, `REVIEW_REQUIRED` yellow; any other state uncoloured.                                                                                                                                            |
+| A failed gh call             | Non-zero exit, rejection, timeout, gh absent, unparseable output or no PR for the branch: value undefined, row omitted, backoff.                                                                                                            |
+| Backoff curve                | The source layer's: the interval doubled per failure, capped at ten minutes.                                                                                                                                                                |
+| Second session in tests      | A second boot on the same stub store, reading the entry the first session wrote.                                                                                                                                                            |
+| What "nothing else" compares | The cached `gitHead` and `model` values before and after the failure.                                                                                                                                                                       |
+| `claude plugin test` and gh  | `pr.realgh.test.ts` imports node modules, which the engine's loader refuses (as for the multi-process suite); `test-pgd-mod` runs it under node with `pkgs.gh` on its inputs, and a gh missing from `PATH` is itself a tested failure path. |

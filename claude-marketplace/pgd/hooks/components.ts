@@ -2,6 +2,7 @@ import type { PgdOptions, ModApi } from './types'
 import { startDolt } from './dolt'
 import { registerPgdNoun } from './pgd-noun'
 import { registerModals } from './modals'
+import { startPr } from './pr'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -19,7 +20,10 @@ export type Component = (options: PgdOptions, host: ModApi) => void
 export const COMPONENTS: ReadonlyArray<{
   flag: keyof PgdOptions['components']
   run: Component
-}> = [{ flag: 'beads', run: startDolt }]
+}> = [
+  { flag: 'beads', run: startDolt },
+  { flag: 'prStatus', run: startPr },
+]
 
 // Register every component whose flag is true. The top-level `enable` short-circuits all of it.
 export function registerComponents(options: PgdOptions, host: ModApi): void {
