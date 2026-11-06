@@ -7,6 +7,7 @@ import { registerGitHeadHooks, startGitHead } from './gitHead'
 import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { registerUsageHooks, startUsage } from './usage'
 import { registerBandHooks } from './band'
+import { registerAlertHooks } from './alerts'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):
@@ -39,6 +40,7 @@ export const register: Register = on => {
   registerUsageHooks(on)
   registerModelEffortHooks(on)
   registerGitHeadHooks(on)
+  registerAlertHooks(on)
   on('session.start', async ($, e, next) => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
     const host = {
