@@ -172,7 +172,8 @@ Rules:
 ### Alerts (status line)
 
 One aggregated row, prefixed by the engine `⚠ <plugin name>:`. The plugin that
-owns it SHOULD be named so the prefix reads well (proposed name: `status`).
+owns it SHOULD be named so the prefix reads well; the plugin is named `status`
+(D3), in its manifest, its marketplace entry and its directory.
 The row lists only items whose condition is true, highest priority first, and
 MUST drop the lowest-priority items itself when the width runs out instead of
 letting the engine cut text mid-word.
@@ -392,6 +393,17 @@ Packaging. Display is a new mod under the committed `claude-marketplace/` tree,
 default-enabled like the existing control and tracker mods, with a Home Manager
 module that installs the binaries and settings it needs (the `pg-claude-control`
 module is the precedent). The nix wiring and a parity check come with it.
+
+Plugin name and directory (D3). The mod directory is `claude-marketplace/status`,
+and the manifest name and the marketplace entry name are both `status`, so the
+three agree as the marketplace parity check requires. The name `claude-display`
+cannot be used: `claude plugin validate` (Claude Code 2.1.314) refuses any plugin
+name starting `claude-` as reserved, and `claude plugin validate` accepts
+`status` (checked on a copy of the skeleton's mod directory renamed to `status`).
+What stays `claude-display` (decomposition and design choices, not plugin names):
+the Home Manager option namespace `phillipgreenii.programs.claude-display`, the
+log directory `$XDG_STATE_HOME/claude-display/`, the module path
+`home/programs/claude-display/` and the check names `test-claude-display-*`.
 
 Scope calls (the builder MAY rely on these):
 
@@ -706,7 +718,10 @@ entry and the folder MUST match. The operator chooses one of:
 
 - `status` everywhere: the alert row reads `⚠ status:`, and every packet's paths
   change, so the docket is reconciled before its first packet is worked;
-- `claude-display` everywhere: the alert row reads `⚠ claude-display:`, which
+- Not available (superseded 2026-11-06 by the reconcile of the Display docket):
+  `claude plugin validate` refuses the name `claude-display` as reserved, so the
+  plugin is `status` everywhere (see "Packaging, scope and fallbacks"). The
+  struck option read: `claude-display` everywhere: the alert row reads `⚠ claude-display:`, which
   costs every alert row 8 more columns (14 characters against `status`'s 6), and
   only the alert-row packet changes.
 
