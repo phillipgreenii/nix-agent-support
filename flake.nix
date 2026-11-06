@@ -921,6 +921,12 @@
           entry = "${
             pkgs.writeShellApplication {
               name = "run-unit-tests-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gnused
+              ];
               text = ''
                 # Inside the nix sandbox that builds checks.pre-commit the
                 # hermetic checks.* tier already covers everything -- skip
@@ -941,7 +947,11 @@
                 # copy; a caller (or the workspace .envrc) MAY override it.
                 export GFH_LIB="''${GFH_LIB:-${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash}"
 
-                exec pg-test-runner --labels unit --files "$@"
+                # Ambient-repo guard (core.worktree incident class): the tests run
+                # with every inherited GIT_* variable removed, and the run FAILS if
+                # it changed the ambient repo's shared .git/config. Regression
+                # guard: tests/run-unit-tests-guard.bats.
+                exec bash ${./scripts/run-unit-tests-guard.sh} pg-test-runner --labels unit --files "$@"
               '';
             }
           }/bin/run-unit-tests-hook";
@@ -1403,7 +1413,7 @@
                   exit 0
                 fi
 
-                exec bash ${./scripts/run-tmp-sweep-bats.sh} "$@"
+                exec bash ${./scripts/run-unit-tests-guard.sh} bash ${./scripts/run-tmp-sweep-bats.sh} "$@"
               '';
             }
           }/bin/pg-disk-reclaimer-tmp-sweep-test-hook";
@@ -1447,7 +1457,7 @@
                 fi
 
                 root="$(git rev-parse --show-toplevel)"
-                exec bash ${./scripts/run-tmp-sweep-bats.sh} --root "$root" \
+                exec bash ${./scripts/run-unit-tests-guard.sh} bash ${./scripts/run-tmp-sweep-bats.sh} --root "$root" \
                   --suite "$root/packages/pg-disk-reclaimer/pg-disk-reclaimer/tests/test-pg-disk-reclaimer-confirm-pty.bats"
               '';
             }

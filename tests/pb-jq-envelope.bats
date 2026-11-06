@@ -35,7 +35,7 @@ setup_file() {
   FIX="$(mktemp -d "${TMPDIR:-/tmp}/pbjq.XXXXXX")"
   export FIX
   mkdir -p "$FIX/home" "$FIX/ws"
-  git -C "$FIX/ws" init -q
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$FIX/ws" init -q
   cd "$FIX/ws" || return 1
   bdenv bd init -p tst --non-interactive --quiet >/dev/null 2>&1
   bdenv bd create "curated packet" --id tst-cur --type task --description "needle in the body" \
