@@ -229,12 +229,16 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   copier and parser commit adjusts the lag state, so a refresh reads no whole table. `lag_rebuild_total{result}`
   (`match` or `drift`) counts the periodic reconcile against a full rebuild, and a `lag_drift` warning is logged when
   the maintained state differed from the rebuilt one (lag bytes and unknown kinds; lag seconds is not compared).
-- Parse lag seconds (`parse_lag_seconds`, `parse_lag_s` in `status --json`) is how long parse has been behind copy:
-  one in-memory value per generation, the time copy first got ahead of parse. It is set when the copy offset advances
-  past the parse offset while they were equal and cleared when parse catches up; a further copy or a partial parse
-  does not move it. The figure is the oldest such value over generations, and `status` health reads it (behind at 60
-  s or more). It is not read from the commits table, so a restart cannot recover it: at start every generation with
+- Parse lag seconds (`parse_lag_seconds`, `parse_lag_s` in `status --json`) is how long parse has been behind copy
+  WITHOUT ADVANCING: one in-memory value per generation, the later of the time copy first got ahead of parse and the
+  time parse last advanced its offset while still behind. A partial parse that moves the parse offset sets it to that
+  time, catching up clears it, and a further copy while behind does not move it. So a hot file that parse keeps
+  advancing on but never fully catches stays small; it is neither the age since copy got ahead nor the age of the
+  oldest unparsed byte. The figure is the oldest such value over generations, and `status` health reads it (behind at
+  60 s or more). It is not read from the commits table, so a restart cannot recover it: at start every generation with
   parse behind copy is seeded to "now", which understates the lag once after a restart and is correct from then on.
+  Copy lag seconds is a separate figure with its own origin (the original's change time against the copy time) and is
+  never derived from this one.
   It is not part of the doctor comparison, since a journal replay cannot know parse progress.
 
 ### pprof and the profiling harness

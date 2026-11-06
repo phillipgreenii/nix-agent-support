@@ -51,6 +51,7 @@ var helpTexts = map[string]string{
 	MLoopLastTimestamp:        "Unix time the last pass of the loop finished.",
 	MLoopInFlight:             "Seconds the oldest running pass of the loop has been in flight, 0 when idle.",
 	MIngestResults:            "Ingest calls by result (the copier action, or error); also the count of copier_ingest passes.",
+	"parse_lag_seconds":       "How long parse has been behind copy without advancing, in seconds: the later of when copy got ahead and when parse last made progress while behind; 0 when caught up.",
 	MLagRebuild:               "Lag reconcile runs (maintained parse-lag figures against a whole-table rebuild), by result (match, drift).",
 	MSweepFiles:               "Files per sweep by outcome: walked (seen by the directory walk), ingested (files the sweep ingested because they were new, changed, exempt or not caught up), unchanged_candidate (size, mtime and inode match the last observation and the stored size; a sweep skips such a file once its last ingest left it caught up; only a forced sweep, run by the sweep --force command, ingests every file again) and skipped (files the sweep did not ingest because they were caught up and unchanged).",
 	MSeenRows:                 "Rows in the seen table: the paths whose last observation is persisted, so a restart can skip them.",

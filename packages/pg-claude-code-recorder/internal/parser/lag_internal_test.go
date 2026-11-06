@@ -28,10 +28,11 @@ func secs(l *lagState, now time.Time) float64 {
 	return s
 }
 
-// Copy ahead of parse for N seconds reports N; after parse catches up it
-// reports 0; a second copy while still behind does NOT reset the origin (a
-// "latest copy time" design gets this wrong, so resetting on every copy fails
-// here); a partial parse does not move the origin either.
+// Copy ahead of parse for N seconds with no parse progress reports N; after
+// parse catches up it reports 0; a second copy while still behind does NOT
+// reset the origin (a "latest copy time" design gets this wrong, so resetting
+// on every copy fails here); a partial parse DOES move it to that time (parse
+// lag is how long parse has been behind without advancing).
 func TestLagSecondsRunFromWhenCopyFirstGotAheadOfParse(t *testing.T) {
 	l := lagTestState()
 	const s = int64(1_000_000_000)
@@ -44,8 +45,8 @@ func TestLagSecondsRunFromWhenCopyFirstGotAheadOfParse(t *testing.T) {
 		t.Fatalf("after a second copy lag = %v s, want 7 (the origin must not reset)", got)
 	}
 	l.hook(1, 1, 20, 10, at(106*s)) // partial parse, still behind
-	if got := secs(l, at(110*s)); got != 10 {
-		t.Fatalf("after a partial parse lag = %v s, want 10 (the origin must not move)", got)
+	if got := secs(l, at(110*s)); got != 4 {
+		t.Fatalf("after a partial parse lag = %v s, want 4 (the origin moves to the parse progress at t=106)", got)
 	}
 	l.hook(1, 1, 20, 20, at(111*s)) // parse catches up
 	if got := secs(l, at(120*s)); got != 0 {
@@ -196,5 +197,32 @@ func TestLagConcurrentOffsetUpdatesRace(t *testing.T) {
 	}
 	if b, s, p := l.Gauges(at(1)); b != 0 || s != 0 || p != 1 {
 		t.Fatalf("end state = %d, %v, %v", b, s, p)
+	}
+}
+
+// Parse advances every few seconds on a hot file but never catches copy: the
+// figure stays small and never reaches the 60 s the status verdict calls
+// behind. Never refreshing the origin on parse progress (the old rule) makes
+// the figure grow to the whole run and fails this test.
+func TestLagSecondsStaySmallWhileParseAdvancesButNeverCatchesUp(t *testing.T) {
+	l := lagTestState()
+	const s = int64(1_000_000_000)
+	const behindAfter = 60.0
+	copyOff, parseOff := int64(1000), int64(0)
+	l.hook(1, 1, copyOff, parseOff, at(0))
+	for tick := int64(5); tick <= 600; tick += 5 { // ten minutes
+		copyOff += 100
+		l.hook(1, 1, copyOff, parseOff, at(tick*s-2*s)) // copy keeps growing
+		parseOff += 50
+		l.hook(1, 1, copyOff, parseOff, at(tick*s)) // parse advances, still behind
+		if got := secs(l, at(tick*s+1*s)); got != 1 {
+			t.Fatalf("t=%d: lag = %v s, want 1 (parse progressed 1 s ago)", tick, got)
+		}
+		if got := secs(l, at(tick*s+3*s)); got >= behindAfter {
+			t.Fatalf("t=%d: lag = %v s reached the behind threshold while parse advances", tick, got)
+		}
+	}
+	if b, _, _ := l.Gauges(at(601 * s)); b == 0 {
+		t.Fatal("fixture error: parse caught up")
 	}
 }

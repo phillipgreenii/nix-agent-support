@@ -83,7 +83,7 @@ func addNoParser(t *testing.T, k *testkit.Kit, at int64, size int64) int64 {
 	return id
 }
 
-func TestLagPartialParseKeepsTheOrigin(t *testing.T) {
+func TestLagPartialParseMovesTheOriginToTheParseProgress(t *testing.T) {
 	k := newLagKit(t)
 	l := startLag(t, k)
 	a := k.Add("example-proj", "example-session-1.jsonl", fmt.Sprintf(lagLine, 1, 1))
@@ -96,9 +96,14 @@ func TestLagPartialParseKeepsTheOrigin(t *testing.T) {
 	if len(gs) != 1 || gs[0].ParseOffset >= gs[0].CopyOffset || gs[0].UnparsedSince.IsZero() {
 		t.Fatalf("generation snapshot after a partial parse: %+v", gs)
 	}
-	_, secs, _ := l.Gauges(lagNow)
-	if want := float64(lagNow.UnixNano()-gs[0].UnparsedSince.UnixNano()) / 1e9; secs != want {
-		t.Fatalf("lag seconds %v is not measured from the unparsed-since origin (%v)", secs, want)
+	// The origin is the parse progress (stamped by the store at the parse
+	// commit, wall time), not the fixture's first copy at the earlier lagNow.
+	if !gs[0].UnparsedSince.After(lagNow) {
+		t.Fatalf("origin %v was not moved by the partial parse (first copy was before %v)", gs[0].UnparsedSince, lagNow)
+	}
+	_, secs, _ := l.Gauges(gs[0].UnparsedSince.Add(7 * time.Second))
+	if secs != 7 {
+		t.Fatalf("lag seconds %v, want 7 from the parse-progress origin", secs)
 	}
 }
 

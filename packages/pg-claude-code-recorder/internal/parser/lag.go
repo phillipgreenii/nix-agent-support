@@ -18,13 +18,16 @@ import (
 //     lag; a deleted file is not special here;
 //   - a source without a parser (HasSource false) is left out of the sums, the
 //     maximum and the oldest-unparsed value;
-//   - the lag-seconds origin is one in-memory value per generation, the time
-//     copy first got ahead of parse (set when the copy offset advances past the
-//     parse offset while they were equal, cleared when parse catches up). A
-//     partial parse does not move it, and a second copy while still behind does
-//     not reset it. It is NOT in the commits table: at start every generation
-//     with parse behind copy is seeded to "now", so the lag is understated once
-//     after a restart and correct from then on;
+//   - the lag-seconds origin is one in-memory value per generation: how long
+//     parse has been behind WITHOUT ADVANCING (operator ruling, 2026-11-05). It
+//     is the later of the time copy first got ahead of parse and the time parse
+//     last advanced its offset while still behind. A partial parse that moves
+//     the parse offset sets it to that time; catching up clears it; a second
+//     copy while still behind does not move it. It is NOT the age since copy
+//     first got ahead and NOT the age of the oldest unparsed byte. It is not in
+//     the commits table: at start every generation with parse behind copy is
+//     seeded to "now", so the lag is understated once after a restart and
+//     correct from then on;
 //   - the oldest-unparsed value is the minimum of that origin over generations,
 //     kept in a lazily pruned heap: an entry is valid only while its
 //     generation's origin still equals it.
@@ -58,7 +61,7 @@ type lagKey struct {
 
 type lagGen struct {
 	copy, parse int64
-	since       int64 // unix ns copy first got ahead of parse; 0 when parse has caught up
+	since       int64 // unix ns parse was last known to advance while behind (or copy first got ahead); 0 when parse has caught up
 	counted     bool
 	lastLag     int64 // the lag last pushed on the max heap
 	lastSince   int64 // the origin last pushed on the old heap (0: none)
@@ -76,9 +79,10 @@ type GenLag struct {
 	Gen         int
 	CopyOffset  int64
 	ParseOffset int64
-	// UnparsedSince is the time copy first got ahead of parse (the start-up
-	// time for a generation already behind at start); the zero time when
-	// parse has caught up.
+	// UnparsedSince is the origin of the parse lag: the later of the time copy
+	// first got ahead of parse and the time parse last advanced while behind
+	// (the start-up time for a generation already behind at start); the zero
+	// time when parse has caught up.
 	UnparsedSince time.Time
 }
 
@@ -193,6 +197,7 @@ func (l *lagState) applyLocked(e lagEvent) {
 		l.gens[k] = lg
 	}
 	wasBehind := lg.copy > lg.parse
+	parseAdvanced := false
 	if e.copy > lg.copy {
 		if lg.counted {
 			l.sumCopy += e.copy - lg.copy
@@ -204,11 +209,12 @@ func (l *lagState) applyLocked(e lagEvent) {
 			l.sumPars += e.parse - lg.parse
 		}
 		lg.parse = e.parse
+		parseAdvanced = true
 	}
 	switch {
 	case lg.copy <= lg.parse:
 		lg.since = 0
-	case !wasBehind:
+	case !wasBehind || parseAdvanced:
 		lg.since = e.at
 		if lg.since <= 0 {
 			lg.since = l.now().UnixNano()
@@ -259,8 +265,8 @@ func (l *lagState) compact() {
 }
 
 // Gauges returns the figures UpdateGauges computes: the largest per-generation
-// lag in bytes, the age in seconds of the oldest unparsed-since origin (the time
-// copy got ahead of parse, per lagging generation), and
+// lag in bytes, the age in seconds of the oldest lag origin (per lagging
+// generation, the time parse last advanced while behind or copy got ahead), and
 // parsed/copied bytes (1 when nothing was copied).
 func (l *lagState) Gauges(now time.Time) (lagBytes int64, lagSecs, progress float64) {
 	l.mu.Lock()

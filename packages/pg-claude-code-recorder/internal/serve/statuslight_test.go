@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store/countdriver"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -195,5 +196,32 @@ func TestStatusRefreshSeesALaggingFileAndItClears(t *testing.T) {
 	}
 	if got := d.loadStatusSnap().cov; got.CopyLagBytesMax != 0 || got.CopyLagSecondsMax != 0 {
 		t.Fatalf("after catching up: %+v", got.CoverageSummary)
+	}
+}
+
+// Copy and parse lag are separate figures with separate clocks: a file the
+// copier has caught up on but parse has not reports copy lag 0 and a positive
+// parse lag in the lazy pass, so the copy lag is not derived from the parse
+// lag origin.
+func TestStatusLazyCopyCaughtUpParseBehindReportsZeroCopyLag(t *testing.T) {
+	e := newEnv(t, false)
+	e.transcript("a.jsonl", "line\n", time.Now().Add(-time.Hour))
+	d := e.open(t)
+	defer func() { _ = d.Close() }()
+	if err := d.Watcher().Rescan(); err != nil { // copy only: parse stays behind
+		t.Fatal(err)
+	}
+	d.cfg.StatusFresh = time.Nanosecond
+	time.Sleep(2 * time.Millisecond)
+	d.clock = clock.NewFake(time.Now().Add(90 * time.Second))
+	lazy, err := d.computeCoverageMode("summary", false, statLazy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lazy.ParseLagBytesMax == 0 || lazy.ParseLagSecondsMax < 89 {
+		t.Fatalf("parse lag not reported: %+v", lazy.CoverageSummary)
+	}
+	if lazy.CopyLagBytesMax != 0 || lazy.CopyLagSecondsMax != 0 {
+		t.Fatalf("copy is caught up but copy lag is %d bytes, %v s: %+v", lazy.CopyLagBytesMax, lazy.CopyLagSecondsMax, lazy.CoverageSummary)
 	}
 }

@@ -267,8 +267,10 @@ func (d *Daemon) fileCoverage(f store.File, p string, copyOff, parseOff int64, n
 // lazyFileCoverage is fileCoverage for the status loop: from the recorded size
 // and the maintained offsets, with a Lstat (stat true) only when the recorded
 // size differs from the copy offset or the file's offsets changed within
-// status.fresh. Without one, the copy lag seconds come from the commit time the
-// maintained state holds, not from the file's mtime.
+// status.fresh. Without one the recorded size equals the copy offset, so copy
+// is caught up and the copy lag is 0 bytes and 0 seconds; copy lag has its own
+// origin (the original's mtime, read only on the stat path) and is never
+// derived from the parse-lag origin.
 func (d *Daemon) lazyFileCoverage(f store.File, p string, gl parser.GenLag, fresh bool, now time.Time) (fc wire.FileCoverage, stat bool) {
 	appendMode := f.Mode == "append" && f.CurGen > 0
 	if fresh || (appendMode && f.LastSize != gl.CopyOffset) {
@@ -280,10 +282,9 @@ func (d *Daemon) lazyFileCoverage(f store.File, p string, gl parser.GenLag, fres
 	if appendMode {
 		fc.CopyOffset, fc.ParseOffset = gl.CopyOffset, gl.ParseOffset
 		if lag := fc.Size - fc.CopyOffset; lag > 0 {
+			// Not reached today (a differing size takes the stat path above);
+			// the figure is bytes only, with no seconds origin without a stat.
 			fc.CopyLagBytes = lag
-			if !gl.UnparsedSince.IsZero() {
-				fc.CopyLagS = max(0, now.Sub(gl.UnparsedSince).Seconds())
-			}
 		}
 	} else {
 		fc.CopyOffset = fc.Size
