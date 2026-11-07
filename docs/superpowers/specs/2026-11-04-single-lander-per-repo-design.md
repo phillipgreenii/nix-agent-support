@@ -1,7 +1,13 @@
 # Single lander per repo: land-request beads, a script-first lander and a land-resolver — design
 
-- **Status**: Draft for operator review (revision of 2026-11-06). Nothing is implemented. Do not decompose until the
-  operator approves.
+- **Status**: Caller-side reference only (2026-11-07). The landing tool itself is now specified in
+  `docs/superpowers/specs/2026-11-07-pg-git-lander-design.md`, which SUPERSEDES this document wherever they overlap:
+  `integrate-branch-land`, `pg-land-lander`'s landing steps, the landing and run locks, the mechanical conflict tier,
+  the land-resolver role, the pre-land check rules and the significance rule (sections 7 to 11). Operator rulings of
+  2026-11-06 and 2026-11-07 also moved the pre-land checks off the lander by default and made landing independent of
+  pg-router. The rest (the land-request bead, the worker handoff, workforest sets, post-deploy gates) is kept only to
+  shape and verify the tool's usage and will be revised against the tool before any of it is decomposed. Nothing is
+  implemented.
 - **Date**: 2026-11-04; revised 2026-11-06 after a fourth review, the operator's rulings on it, and two rounds of
   independent review of the revision.
 - **Builds on**: `claude-marketplace/pb/skills/drain-one/references/land.md` (today's per-worker LAND step);
