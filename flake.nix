@@ -7379,11 +7379,13 @@
 
               # pg-checkout-pool: hermetic unit suite over the slot state machine,
               # flock liveness (including a killed helper process), atomic record
-              # writes and the status command; temp dirs and a fake clock, no git.
+              # writes and the status command; temp dirs and a fake clock; the provisioner tests use real git.
               pg-checkout-pool-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-checkout-pool-go-tests";
                 src = lib.cleanSource ./packages/pg-checkout-pool; # matches default.nix
                 gomod2nixToml = ./packages/pg-checkout-pool/gomod2nix.toml;
+                # The provision tests drive real git in temp dirs.
+                testDeps = [ pkgs.git ];
               };
 
               # pg-router-heartbeat: unit suite over the pure sleep-aware decision, the
