@@ -2,7 +2,7 @@
 
 // Integration tests for the ceta hook/CLI binary (bead tc-fqu7 fallout).
 //
-// EVERY test in this file EXECS THE COMPILED BINARY — via runHook, runCLI, or a
+// EVERY test in this file EXECS THE COMPILED BINARY — via runHook, runBinaryCLI, or a
 // direct exec.Command(cliBinary) — and most of them drive a real SQLite ask log
 // through it. They are correctness gates, not unit tests, and they are split out
 // behind the `integration` build tag so the DEFAULT `go test ./...` (which is
@@ -606,7 +606,7 @@ func TestIntegration_SessionEnd_ReturnsEmpty(t *testing.T) {
 
 // --- CLI help + completion tests ---
 
-func runCLI(t *testing.T, args ...string) (string, string, error) {
+func runBinaryCLI(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := exec.Command(testBinary(t), args...)
 	cmd.Env = os.Environ()
@@ -618,7 +618,7 @@ func runCLI(t *testing.T, args ...string) (string, string, error) {
 }
 
 func TestCLI_RootHelp_ListsAllSubcommands(t *testing.T) {
-	stdout, _, err := runCLI(t, "--help")
+	stdout, _, err := runBinaryCLI(t, "--help")
 	if err != nil {
 		t.Fatalf("--help failed: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestCLI_SubcommandHelp_ShowsFlags(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.sub, func(t *testing.T) {
-			stdout, _, err := runCLI(t, tc.sub, "--help")
+			stdout, _, err := runBinaryCLI(t, tc.sub, "--help")
 			if err != nil {
 				t.Fatalf("%s --help failed: %v", tc.sub, err)
 			}
@@ -700,7 +700,7 @@ func TestCLI_Evaluate_JSON_ApprovalSourceAndFilter(t *testing.T) {
 	}
 
 	// Full JSON: both rows, each carrying approval_source + the four raw fields.
-	stdout, stderr, err := runCLI(t, "evaluate", "--format=json")
+	stdout, stderr, err := runBinaryCLI(t, "evaluate", "--format=json")
 	if err != nil {
 		t.Fatalf("evaluate --format=json: %v\nstderr: %s", err, stderr)
 	}
@@ -733,7 +733,7 @@ func TestCLI_Evaluate_JSON_ApprovalSourceAndFilter(t *testing.T) {
 	}
 
 	// --approval-source=auto restricts the evaluation to the auto bucket only.
-	stdout, stderr, err = runCLI(t, "evaluate", "--format=json", "--approval-source=auto")
+	stdout, stderr, err = runBinaryCLI(t, "evaluate", "--format=json", "--approval-source=auto")
 	if err != nil {
 		t.Fatalf("evaluate --approval-source=auto: %v\nstderr: %s", err, stderr)
 	}
@@ -747,7 +747,7 @@ func TestCLI_Evaluate_JSON_ApprovalSourceAndFilter(t *testing.T) {
 }
 
 func TestCLI_CompletionBash_EmitsScript(t *testing.T) {
-	stdout, _, err := runCLI(t, "completion", "bash")
+	stdout, _, err := runBinaryCLI(t, "completion", "bash")
 	if err != nil {
 		t.Fatalf("completion bash failed: %v", err)
 	}
@@ -757,7 +757,7 @@ func TestCLI_CompletionBash_EmitsScript(t *testing.T) {
 }
 
 func TestCLI_CompletionZsh_EmitsScript(t *testing.T) {
-	stdout, _, err := runCLI(t, "completion", "zsh")
+	stdout, _, err := runBinaryCLI(t, "completion", "zsh")
 	if err != nil {
 		t.Fatalf("completion zsh failed: %v", err)
 	}

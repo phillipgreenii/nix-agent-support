@@ -67,7 +67,7 @@ func TestArchive_DryRun_WritesNothing(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	stdout, stderr, err := runCLI(t, "archive", "--db", dbPath, "--before", "2026-06-01T00:00:00Z", "--dry-run")
+	stdout, stderr, err := runBinaryCLI(t, "archive", "--db", dbPath, "--before", "2026-06-01T00:00:00Z", "--dry-run")
 	if err != nil {
 		t.Fatalf("archive --dry-run: %v\nstderr: %s", err, stderr)
 	}
@@ -111,7 +111,7 @@ func TestArchive_WithoutYes_RefusesToRun(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	_, stderr, err := runCLI(t, "archive", "--db", dbPath, "--before", "2026-06-01T00:00:00Z", "--fixtures-out", fixturesOut)
+	_, stderr, err := runBinaryCLI(t, "archive", "--db", dbPath, "--before", "2026-06-01T00:00:00Z", "--fixtures-out", fixturesOut)
 	if err == nil {
 		t.Fatal("archive without --yes and without --dry-run: want a non-zero exit, got success")
 	}
@@ -144,7 +144,7 @@ func TestArchive_RealRun_SamplesDeletesAndVacuums(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	stdout, stderr, err := runCLI(t, "archive",
+	stdout, stderr, err := runBinaryCLI(t, "archive",
 		"--db", dbPath,
 		"--before", "2026-06-01T00:00:00Z",
 		"--fixtures-out", fixturesOut,
@@ -223,7 +223,7 @@ func TestArchive_NoCandidates_SkipsEverything(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	stdout, stderr, err := runCLI(t, "archive",
+	stdout, stderr, err := runBinaryCLI(t, "archive",
 		"--db", dbPath,
 		"--before", "2026-01-01T00:00:00Z",
 		"--fixtures-out", fixturesOut,
