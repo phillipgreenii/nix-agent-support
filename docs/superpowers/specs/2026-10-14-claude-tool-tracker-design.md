@@ -398,8 +398,8 @@ because calls still in flight in a live session (five calls of one session, CETA
     hold well over a thousand such `asklog open` / `asklog` stderr lines. This is a real CETA
     logging loss (75 of 83794 calls, about 0.09 percent), not an exclusion candidate; fixing it means
     reducing the ask log's open and write latency or contention, which is a separate decision
-    (follow-up bead). Section 10 check 1's 25 first-day calls (18 from subagents) match the
-    same two causes.
+    (follow-up bead). Section 10 check 1 found 25 such calls on the first day (18 from
+    subagents); they were not re-examined here.
 - Verdict differs, 5: CETA `deny` against the tracker's `ask`. Open question: the tracker's engine
   verdict reads `ask` where CETA's own row says `deny` (the same call is delivered as a refusal
   elsewhere); not explained.
