@@ -1,6 +1,6 @@
 // Tests of the phase 1 band: the pure layout, the level colours, and the render hook.
 import { expect, test } from 'claude-code/testing'
-import { bandHook, contextLevel, renderBand } from './band'
+import { bandHook, clearBandButtons, contextLevel, drawnWidth, ENGINE_RESERVE, registerBandButton, renderBand } from './band'
 import { setOptions } from './options'
 import { defineSource, initSources, setValue } from './source'
 import { DEFAULT_OPTIONS, parseOptions } from './types'
@@ -46,10 +46,50 @@ test('an item whose condition is false is not drawn and nothing reads "no X"', (
 
 test('labels wrap when the next would pass the width; a wide label gets its own row', () => {
   const v = { sessionId: 'abcdef12', model: 'sonnet', effort: 'high', usage: usage(5) }
+  // drawn widths: session button 12, model text 13, ctx button 9; the engine control reserves 4
   expect(labels(renderBand(v, 80, T))).toEqual([['abcdef12', 'sonnet · high', 'ctx 5%']])
-  expect(labels(renderBand(v, 22, T))).toEqual([['abcdef12', 'sonnet · high'], ['ctx 5%']])
+  expect(labels(renderBand(v, 30, T))).toEqual([['abcdef12', 'sonnet · high'], ['ctx 5%']])
   expect(labels(renderBand(v, 10, T))).toEqual([['abcdef12'], ['sonnet · high'], ['ctx 5%']])
 })
+
+// The bead's band: session name, model, Focus, Wrap up and the [-] button, as the real components
+// register them (real labels, real button chrome).
+describe_band_widths()
+function describe_band_widths() {
+  const NAMES = {
+    default: 'verify-live-a2',
+    long: 'vl-a-much-longer-session-name-for-wrapping',
+  }
+  const cases: [string, keyof typeof NAMES, number][] = [
+    ['52 columns, default name', 'default', 52],
+    ['56 columns, default name', 'default', 56],
+    ['80 columns, long name', 'long', 80],
+    ['80 columns, default name', 'default', 80],
+    ['200 columns, default name', 'default', 200],
+  ]
+  for (const [title, name, width] of cases) {
+    test(`band at ${title}: labels whole, every row clear of the engine control`, () => {
+      clearBandButtons()
+      registerBandButton({ id: 'focus', order: 60, label: () => 'Focus', action: 'focus' })
+      registerBandButton({ id: 'wrapup', order: 70, label: () => 'Wrap up', action: 'wrapup' })
+      registerBandButton({ id: 'band-toggle', order: 100, label: () => '[-]', action: 'band' })
+      const v = { sessionId: 'abcdef1234', sessionName: NAMES[name], model: 'claude-sonnet-5-5' }
+      const rows = renderBand(v, width, T)
+      const expected = ['session', 'model', 'focus', 'wrapup', 'band-toggle']
+      // nothing dropped or split: every label appears once, whole, in order
+      expect(rows.flat().map(l => l.id)).toEqual(expected)
+      expect(rows.flat().find(l => l.id === 'wrapup')?.label).toBe('Wrap up')
+      for (const row of rows) {
+        const drawn = row.reduce((n, l, i) => n + drawnWidth(l) + (i ? 1 : 0), 0)
+        // a row shares its width with the engine control unless one label alone is wider
+        if (row.length > 1) expect(drawn + ENGINE_RESERVE).toBeLessThanOrEqual(width)
+      }
+      if (width === 200) expect(rows.length).toBe(1)
+      if (width === 52) expect(rows.length).toBeGreaterThan(1)
+      clearBandButtons()
+    })
+  }
+}
 
 // A stub $ whose ui.resolve yields plain-data constructors and which records every call.
 function stub$(calls: string[]) {

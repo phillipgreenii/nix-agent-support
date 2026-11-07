@@ -97,19 +97,33 @@ export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
   return labels
 }
 
-// Labels run left to right, one space apart, and wrap onto a new row when the next label would
-// pass the width; a label wider than the width gets a row of its own.
+// A button draws its label inside "[ " and " ]": four extra columns the label text does not carry.
+export const BUTTON_CHROME = 4
+// The engine's own [-] control sits at the right edge, drawn over the row: one gap plus three
+// columns. Every row keeps that much free so the control never covers a label.
+export const ENGINE_RESERVE = 4
+
+// The columns a label occupies once drawn.
+export function drawnWidth(l: BandRow): number {
+  return l.label.length + (l.action ? BUTTON_CHROME : 0)
+}
+
+// Labels run left to right, one space apart, and wrap onto a new row (whole, never cut) when the
+// next label would pass the width minus the engine control's reserve; a label wider than that gets
+// a row of its own.
 export function renderBand(v: BandValues, width: number, t: AlertThresholds): BandRow[][] {
+  const avail = width - ENGINE_RESERVE
   const rows: BandRow[][] = []
   let used = 0
   for (const l of bandLabels(v, t)) {
+    const w = drawnWidth(l)
     const cur = rows[rows.length - 1]
-    if (cur && used + 1 + l.label.length <= width) {
+    if (cur && used + 1 + w <= avail) {
       cur.push(l)
-      used += 1 + l.label.length
+      used += 1 + w
     } else {
       rows.push([l])
-      used = l.label.length
+      used = w
     }
   }
   return rows
@@ -145,6 +159,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
     Box({
       key: `pgd-band-${i}`,
       flexDirection: 'row',
+      flexShrink: 0,
       children: row.flatMap((l, j) => {
         const text = l.level && l.level !== 'normal' ? { color: l.level } : {}
         const item = l.action
