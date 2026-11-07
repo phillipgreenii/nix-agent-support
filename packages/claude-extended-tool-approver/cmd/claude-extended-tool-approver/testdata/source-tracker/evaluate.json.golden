@@ -52,7 +52,7 @@
     "tool_name": "Bash",
     "tool_summary": "curl example.invalid",
     "command_class": "curl example.invalid",
-    "hook_decision": "ask",
+    "hook_decision": "deny",
     "replay_result": "abstain",
     "replay_module": "",
     "replay_reason": "",

@@ -26,7 +26,7 @@
     "tool_name": "Bash",
     "tool_input_json": "{\"command\":\"curl example.invalid\"}",
     "tool_summary": "curl example.invalid",
-    "hook_decision": "ask",
+    "hook_decision": "deny",
     "hook_reason": "network",
     "outcome": "rejected",
     "excluded": 0,

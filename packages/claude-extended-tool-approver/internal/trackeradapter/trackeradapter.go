@@ -41,10 +41,12 @@
 //	tool_calls.tool_input         -> DecisionRow.ToolInputJSON ("" when NULL),
 //	                                 and, through asklog.ToolSummary, ToolSummary
 //	tool_calls.engine_verdict     -> Row.EngineVerdict (approve|ask|reject|abstain)
+//	tool_calls.delivered_verdict  -> Row.DeliveredVerdict (same words as engine)
 //	                                 and DecisionRow.HookDecision in CETA's
 //	                                 ask-log words (approve=allow, reject=deny,
-//	                                 ask, abstain); nil when CETA wrote no verdict
-//	tool_calls.delivered_verdict  -> Row.DeliveredVerdict (same words as engine)
+//	                                 ask, abstain), because the ask log records
+//	                                 the delivered verdict; the engine's when no
+//	                                 delivered one; nil when CETA wrote no verdict
 //	tool_calls.sandbox_enabled    -> DecisionRow.SandboxEnabled
 //	tool_calls.permission_mode    -> DecisionRow.PermissionMode
 //	tool_calls.agent_type         -> DecisionRow.AgentType
@@ -305,7 +307,15 @@ func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.T
 		if !startTs.Valid {
 			r.StartMs = firstTs.Int64
 		}
-		if engine.Valid {
+		// CETA's ask log records the DELIVERED verdict (what the hook printed,
+		// after an unattended session turned an ask into a reject), so that is
+		// the one the hook decision must carry; the engine's stays in
+		// EngineVerdict.
+		switch {
+		case delivered.Valid:
+			s := hookDecisionWord(delivered.String)
+			r.HookDecision = &s
+		case engine.Valid:
 			s := hookDecisionWord(engine.String)
 			r.HookDecision = &s
 		}

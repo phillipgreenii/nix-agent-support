@@ -34,10 +34,12 @@
 // are compared for equality.
 //
 // Verdict. CETA's hook_decision (allow, deny, ask, abstain) against the
-// tracker's engine verdict (ceta.verdict "verdict": approve, reject, ask,
-// abstain) after mapping approve to allow and reject to deny. A call with no
-// ceta.verdict in the tracker has no verdict and differs from any CETA verdict.
-// The delivered verdict is not compared: the ask log records the engine's.
+// tracker's DELIVERED verdict (ceta.verdict "delivered": approve, reject, ask,
+// abstain) after mapping approve to allow and reject to deny. The ask log
+// records the delivered verdict, so an ask that an unattended session turned
+// into a reject is deny on both sides (the engine's ask stays in the tracker).
+// A call with no ceta.verdict in the tracker has no verdict and differs from
+// any CETA verdict.
 //
 // Carried fields. permission_mode and agent_type compare as present-or-absent
 // plus value; sandbox_enabled as NULL, 0 or 1; is_error only when both sides

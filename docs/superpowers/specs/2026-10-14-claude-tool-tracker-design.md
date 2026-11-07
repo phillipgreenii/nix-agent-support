@@ -400,11 +400,27 @@ because calls still in flight in a live session (five calls of one session, CETA
     reducing the ask log's open and write latency or contention, which is a separate decision
     (follow-up bead). Section 10 check 1 found 25 such calls on the first day (18 from
     subagents); they were not re-examined here.
-- Verdict differs, 5: CETA `deny` against the tracker's `ask`. Open question: the tracker's engine
-  verdict reads `ask` where CETA's own row says `deny` (the same call is delivered as a refusal
-  elsewhere); not explained.
-- Permission mode differs, 2: CETA `dontAsk`, tracker no value. Open question: the mod and hook
-  events carry no permission mode for these two calls.
+- Verdict differs, 5: CETA `deny` against the tracker's `ask`. Explained, and fixed in the
+  comparison (investigated 2026-11-07). All five calls (sessions 0382aae1 twice, bcd05b7b, f2d42add,
+  f840a60d) are asks that an unattended session turned into a refusal: the tracker's
+  `ceta.verdict` shows engine `ask`, delivered `reject`, `converted_ask` set, and the refusal text
+  "unattended session never asks". CETA's ask log records the delivered verdict (`result` of the
+  hook, after the conversion), so it says `deny`; the tracker adapter took the engine's `ask` for
+  the comparison. This was a defect in the adapter and in this section's rule, not a recording
+  disagreement: the comparison now takes the tracker's delivered verdict, and these five agree
+  (the engine's `ask` stays visible in the tracker as `engine_verdict`).
+- Permission mode differs, 2: CETA `dontAsk`, tracker no value. Explained (investigated
+  2026-11-07), expected. The tracker's permission mode comes only from its command hook
+  (`tracker.pre_tool`, else `tracker.post_tool`); the mod's `call_start` carries none. For the two
+  calls (sessions 09887392 and 5dc4e853, 2026-10-30) the tracker has `call_start` and `call_end`
+  but no `pre_tool` and no `post_tool`. For 09887392 the transcript shows the `PreToolUse` hook
+  cancelled by the 5 second hook timeout after 23.6 s ("hook_cancelled", `timedOut` true): the host
+  stalled, CETA's own `ceta.verdict` landed 20 s after the call began, and the tracker's hook was
+  cancelled before it wrote. The other call (5dc4e853, a subagent call refused with "No tools
+  needed for summary") has the same signature, CETA's verdict 8.4 s after the call began, over the
+  same 5 second limit, but its subagent transcript is not on this machine, so the timeout is the
+  likely cause there, not a confirmed one. No code change: a hook the host cancels cannot record,
+  and two calls in 80195 is the cost of the 5 second limit.
 - Outcome differs, 1769 (CETA, tracker): 984 `unresolved`, `failed`; 668 `rejected`, `failed`;
   61 `pending`, `failed`; 22 `unresolved`, `approved`; 17 `denied`, `failed`; 6 `pending`,
   `unresolved`; 4 `pending`, `approved`; 4 `approved`, `pending`; 2 `approved`, `unresolved` (the

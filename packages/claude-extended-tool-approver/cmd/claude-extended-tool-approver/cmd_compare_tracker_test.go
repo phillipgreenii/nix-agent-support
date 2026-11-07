@@ -38,7 +38,7 @@ func ctSeed(t *testing.T, mutate ...string) {
 		VALUES
 		 (1,'sess-a','/x','Bash','tu-a1','h1','{}','allow','approved',NULL,'default',1,0,'` + ctCreated + `'),
 		 (2,'sess-a','/x','Bash','tu-a2','h2','{}','ask','failed','tool_failure: boom','default',0,1,'` + ctCreated + `'),
-		 (3,'sess-b','/x','Bash','tu-b1','h3','{}','ask','rejected',NULL,'dontAsk',1,NULL,'` + ctCreated + `'),
+		 (3,'sess-b','/x','Bash','tu-b1','h3','{}','deny','rejected',NULL,'dontAsk',1,NULL,'` + ctCreated + `'),
 		 (4,'sess-b','/x','Write','tu-b2','h4','{}',NULL,'approved',NULL,'default',NULL,NULL,'` + ctCreated + `')`)
 	if err != nil {
 		t.Fatalf("seed: %v", err)

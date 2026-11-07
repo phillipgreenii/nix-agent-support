@@ -59,9 +59,10 @@ compared in CETA's vocabulary (approved, denied, rejected, failed, pending,
 unresolved); the tracker's settlement maps as: result error -> failed; refused
 and settled by CETA -> rejected; refused otherwise -> denied; approved ->
 approved; pending -> pending; anything else -> unresolved. Verdicts compare
-CETA's hook_decision (allow, deny, ask, abstain) with the tracker's engine
-verdict (approve -> allow, reject -> deny); the delivered verdict is not
-compared. is_error compares only when both sides know it. A denial reason is
+CETA's hook_decision (allow, deny, ask, abstain) with the tracker's
+delivered verdict (approve -> allow, reject -> deny), because the ask log
+records the delivered one (an ask an unattended session turned into a reject
+is deny on both sides). is_error compares only when both sides know it. A denial reason is
 compared by presence. Several rows for one key are listed as duplicates and
 the latest row of each side is compared.
 

@@ -127,8 +127,8 @@ func TestRows_MapsEveryColumnToTheEvaluationRow(t *testing.T) {
 		b1.SettledBy != "ceta" || b1.Settlement != "refused" || b1.Outcome != asklog.OutcomeRejected {
 		t.Errorf("b1: %+v", b1)
 	}
-	if b1.HookDecision == nil || *b1.HookDecision != "ask" {
-		t.Errorf("b1 hook decision (the engine's, not the delivered): %v", b1.HookDecision)
+	if b1.HookDecision == nil || *b1.HookDecision != "deny" {
+		t.Errorf("b1 hook decision (the delivered verdict, which is what the ask log records): %v", b1.HookDecision)
 	}
 
 	// no CETA event at all: no hook decision.
