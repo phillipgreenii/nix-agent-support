@@ -1,6 +1,5 @@
 import type { PgdOptions, ModApi } from './types'
 import { startDolt } from './dolt'
-import { registerPgdNoun } from './pgd-noun'
 import { registerModals } from './modals'
 import { startPr } from './pr'
 import { startSessionMode } from './session-mode'
@@ -40,9 +39,6 @@ export function registerComponents(options: PgdOptions, host: ModApi): void {
   for (const c of COMPONENTS) {
     if (options.components[c.flag]) c.run(options, host)
   }
-  // The pgd noun is registered whenever enable is true; its focus surface is gated by
-  // components.focus inside the noun.
-  registerPgdNoun(options, host)
   // The band buttons' modals (Info, Context and usage) and their toggle commands: no flag of
   // their own, governed by enable.
   registerModals(options, host)

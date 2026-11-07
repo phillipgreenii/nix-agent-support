@@ -1,7 +1,8 @@
 // The pgd noun: data in, Promise out, one object per call. It has no callback argument and no
 // action field. put and remove write the contribution store; validation names the bad field.
 import { putContribution, removeContribution } from './contributions'
-import type { PgdOptions, ModApi } from './types'
+import { getOptions } from './options'
+import type { PgdOptions } from './types'
 import type { PutArgs, RemoveArgs } from '../types/pgd'
 
 const bad = (field: string, why: string): Error => new Error(`pgd.put: invalid ${field}: ${why}`)
@@ -27,26 +28,37 @@ export function validatePut(a: unknown): PutArgs {
   return out
 }
 
-// The noun's methods. With components.focus off a focus contribution resolves undefined and
-// stores nothing.
-export function pgdMethods(options: PgdOptions): {
+// The noun's methods. `options` is read at each call (the noun is built in engine.create, before
+// session.start parses the options): until the options are set, or with enable false, a call
+// resolves undefined and stores nothing. With components.focus off a focus contribution likewise
+// resolves undefined and stores nothing.
+export function pgdMethods(options: PgdOptions | (() => PgdOptions | undefined)): {
   put: (a: PutArgs) => Promise<void>
   remove: (a: RemoveArgs) => Promise<void>
 } {
+  const current = (): PgdOptions | undefined => (typeof options === 'function' ? options() : options)
   return {
     put: async a => {
       const args = validatePut(a)
-      if (args.surface === 'focus' && !options.components.focus) return
+      const o = current()
+      if (!o || !o.enable) return
+      if (args.surface === 'focus' && !o.components.focus) return
       putContribution(args)
     },
     remove: async a => {
+      if (!current()?.enable) return
       const id = (a as { id?: unknown } | undefined)?.id
       if (typeof id === 'string') removeContribution(id)
     },
   }
 }
 
-// Registered whenever enable is true (not behind a component flag).
-export function registerPgdNoun(options: PgdOptions, host: ModApi): void {
-  host.engine.create(pgdMethods(options))
+// Adds the pgd noun to `$` in engine.create (post-order: the steps beneath build `$`, this plugin
+// adds its noun). A plugin cannot add a noun any other way; there is no $.engine.create.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function registerPgdNoun(on: any): void {
+  on('engine.create', async (_$: unknown, e: unknown, next: (e: unknown) => Promise<object>) => {
+    const built = await next(e)
+    return { ...built, pgd: pgdMethods(getOptions) }
+  })
 }

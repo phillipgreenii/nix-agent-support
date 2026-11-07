@@ -63,9 +63,6 @@ export interface StubHost {
   submits: unknown[]
   storeData: Map<string, unknown>
   storeFail: { on: boolean }
-  // The method objects passed to engine.create (kept apart from `calls`: registering the noun is
-  // not a fetch, process or file read).
-  nouns: unknown[]
   // Slash commands registered, panes opened and closed (kept apart from `calls`: none is a fetch,
   // a process or a file read).
   commands: Array<{ name: string; description: string }>
@@ -81,7 +78,6 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
   const writes: StubHost['writes'] = []
   const storeData = new Map<string, unknown>()
   const storeFail = { on: false }
-  const nouns: unknown[] = []
   const configSets: unknown[] = []
   const fills: unknown[] = []
   const submits: unknown[] = []
@@ -154,11 +150,6 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         storeData.set(k, v)
       },
     },
-    engine: {
-      create: (methods: unknown) => {
-        nouns.push(methods)
-      },
-    },
     env: {
       stateHome: async () => state.stateHome,
       home: async () => '/home/u',
@@ -194,5 +185,5 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       repo: async () => facts.repo,
     },
   }
-  return { host, calls, files: fileMap, state, configSets, fills, submits, storeData, storeFail, writes, nouns, commands, panes, facts }
+  return { host, calls, files: fileMap, state, configSets, fills, submits, storeData, storeFail, writes, commands, panes, facts }
 }

@@ -26,11 +26,11 @@ const allOff = (o: PgdOptions): PgdOptions => ({
   ) as unknown as PgdOptions['components'],
 })
 
-test('every component off registers nothing but the pgd noun', () => {
+test('every component off registers nothing but the toggle commands', () => {
   const { $, calls } = recorder()
   registerComponents(allOff(DEFAULT_OPTIONS), $)
   // the toggle slash commands are registered whenever enable is true
-  expect(calls).toEqual(['$.engine.create', '$.command.register', '$.command.register', '$.command.register'])
+  expect(calls).toEqual(['$.command.register', '$.command.register', '$.command.register'])
 })
 
 test('enable false short-circuits registration even with every component on', () => {

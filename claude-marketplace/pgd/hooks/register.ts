@@ -15,6 +15,7 @@ import { exportMetrics, initExporter } from './exporter'
 import { hydrateToggles, setToggleStore } from './toggles'
 import { registerModalEventHooks } from './modals'
 import { registerLinkHooks } from './links'
+import { registerPgdNoun } from './pgd-noun'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
 // pg-claude-control precedent):
@@ -67,6 +68,8 @@ export const register: Register = on => {
   registerAlertHooks(on)
   registerModalEventHooks(on)
   registerLinkHooks(on)
+  // The pgd noun: a plugin adds a noun to `$` only through an engine.create hook.
+  registerPgdNoun(on)
   on('session.start', async ($, e, next) => {
     const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
     const host = {
@@ -93,7 +96,6 @@ export const register: Register = on => {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
         home: () => $.env.get('HOME'),
       },
-      engine: { create: (methods: unknown) => $.engine.create(methods) },
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
     }
     setOptions(options)

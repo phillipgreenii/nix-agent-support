@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 import { registerComponents } from './components'
 import { initContributions, listContributions } from './contributions'
-import { pgdMethods } from './pgd-noun'
+import { pgdMethods, registerPgdNoun } from './pgd-noun'
 import { fakeClock, stubHost } from './testkit'
 import { DEFAULT_OPTIONS, type PgdOptions } from './types'
 
@@ -86,27 +86,31 @@ test('the noun has no action field: an action property is not stored', async () 
   expect(Object.keys(listContributions('alert')[0]).sort()).toEqual(['id', 'priority', 'surface', 'text'])
 })
 
-test('registerComponents registers the noun with put and remove when enable is true', () => {
-  const s = stubHost()
-  const created = s.nouns
-  registerComponents(DEFAULT_OPTIONS, s.host)
-  expect(created).toHaveLength(1)
-  expect(Object.keys(created[0] as object).sort()).toEqual(['put', 'remove'])
-  expect(s.calls).toEqual([])
+test('registerPgdNoun adds the noun in engine.create, post-order, with put and remove', async () => {
+  const seen: Array<{ name: string; fn: (...a: unknown[]) => Promise<Record<string, unknown>> }> = []
+  registerPgdNoun((name: string, fn: never) => void seen.push({ name, fn }))
+  expect(seen.map(s => s.name)).toEqual(['engine.create'])
+  const built = await seen[0].fn({}, {}, async () => ({ other: 1 }))
+  expect(built.other).toBe(1)
+  expect(Object.keys(built.pgd as object).sort()).toEqual(['put', 'remove'])
 })
 
-test('the noun is registered even when every component is off, and not when enable is false', () => {
-  const created: unknown[] = []
-  const host = {
-    engine: { create: (m: unknown) => void created.push(m) },
-    command: { register: async () => undefined },
-  }
-  const allOff = {
-    ...DEFAULT_OPTIONS,
-    components: Object.fromEntries(Object.keys(DEFAULT_OPTIONS.components).map(k => [k, false])),
-  } as unknown as PgdOptions
-  registerComponents(allOff, host)
-  expect(created).toHaveLength(1)
-  registerComponents({ ...DEFAULT_OPTIONS, enable: false }, host)
-  expect(created).toHaveLength(1)
+test('the noun is inert until enabled, and with enable false', async () => {
+  fresh()
+  const on = { current: undefined as PgdOptions | undefined }
+  const n = pgdMethods(() => on.current)
+  await n.put({ id: 'a', surface: 'alert', priority: 1, text: 'x' })
+  expect(listContributions('alert')).toEqual([])
+  on.current = { ...DEFAULT_OPTIONS, enable: false }
+  await n.put({ id: 'a', surface: 'alert', priority: 1, text: 'x' })
+  expect(listContributions('alert')).toEqual([])
+  on.current = DEFAULT_OPTIONS
+  await n.put({ id: 'a', surface: 'alert', priority: 1, text: 'x' })
+  expect(listContributions('alert')).toHaveLength(1)
+})
+
+test('registerComponents no longer touches the engine', () => {
+  const s = stubHost()
+  registerComponents(DEFAULT_OPTIONS, s.host)
+  expect(s.calls).toEqual([])
 })

@@ -5578,7 +5578,16 @@
                 pkgs.runCommand "test-pgd-types" { nativeBuildInputs = [ pkgs.typescript ]; } ''
                   set -euo pipefail
                   cd ${src}/claude-marketplace/pgd/types
-                  tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck false example.ts pgd.d.ts
+                  # index.d.ts augments the engine's 'claude-code' module, which the check does not
+                  # have: a stub declares the two interfaces and the Shaped type it merges into.
+                  cat > "$TMPDIR/claude-code-stub.d.ts" <<'STUB'
+                  declare module 'claude-code' {
+                    export type Shaped<T> = T
+                    export interface PluginState {}
+                    export interface EngineInterface {}
+                  }
+                  STUB
+                  tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck false example.ts pgd.d.ts "$TMPDIR/claude-code-stub.d.ts"
                   touch $out
                 '';
 
