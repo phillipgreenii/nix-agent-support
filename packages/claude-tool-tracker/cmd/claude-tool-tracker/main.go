@@ -25,7 +25,7 @@ const hookDeadline = 2 * time.Second
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: claude-tool-tracker append|hook|ingest|--version")
+		fmt.Fprintln(os.Stderr, "usage: claude-tool-tracker append|hook|ingest|timing|--version")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -39,6 +39,8 @@ func main() {
 		os.Exit(0)
 	case "append":
 		os.Exit(runAppend(os.Args[2:], os.Stdin, os.Stderr))
+	case "timing":
+		os.Exit(runTiming(os.Args[2:], os.Stdout, os.Stderr))
 	case "ingest":
 		os.Exit(runIngest(os.Args[2:], os.Stdout, os.Stderr))
 	case "--version", "version":

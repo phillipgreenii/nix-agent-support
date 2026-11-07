@@ -107,6 +107,63 @@ directory above.
   when lines were skipped (they are reported, not fatal); `1` for an unreadable directory, file or
   database; `2` for a usage error. Run it repeatedly; two runs at once wait for each other.
 
+## Timing
+
+```
+claude-tool-tracker timing [--db PATH] [--format table|json] [--include-failed] [--top N]
+```
+
+Ranks tools and commands by the time their calls spent running, two ways: by total time and by a
+single run's time (p90, with the median beside it). It reads the database through the published
+views only (`tool_calls`, `annotations`), opened read-only. Defaults: `--db` as for `ingest`,
+`--format table`, `--top 20` (rows per ranking in table output; `0` is all; json always has all).
+
+- **Run time** is Claude Code's `duration_ms` (`tracker.post_tool`), which covers the tool's run only
+  and excludes permission-prompt, classifier and hook time (design live check 3, measured). A call
+  without it falls back to `running_ts` to `call_end_ts`; a call with neither is left out and counted
+  (`no_usable_time`). Subagent calls are included.
+- **Groups**: tool, for Bash the `ceta.command_class` annotation's `class` (fallback: the first word of
+  the command), and repo (`(none)` when the call's cwd is no repo). `go test` in two repos is two
+  groups.
+- **Per group**: `runs`, `total_ms`, `median_ms` (mean of the two middle values for an even count),
+  `p90_ms` (nearest rank: the value at rank ceil(0.9 x runs) of the ascending times), `max_ms`.
+  Rankings: by total descending, and by p90 descending (ties: total, then name).
+- **Excluded and counted**: calls that errored (`failed_timing` 1) or were interrupted (`result`), by
+  default; `--include-failed` counts them. A refused call never ran and is always excluded
+  (`refused`). The counts print on the first table line and in json `excluded`.
+
+json shape:
+
+```json
+{
+  "calls": 12,
+  "used": 9,
+  "excluded": {
+    "failed": 1,
+    "interrupted": 1,
+    "refused": 0,
+    "no_usable_time": 1
+  },
+  "by_total": [
+    {
+      "tool": "Bash",
+      "class": "go test",
+      "repo": "alpha",
+      "runs": 7,
+      "total_ms": 2610,
+      "median_ms": 300,
+      "p90_ms": 1000,
+      "max_ms": 1000
+    }
+  ],
+  "by_p90": []
+}
+```
+
+`class` is omitted for non-Bash tools. Fixture events for the tests: built by `timingFixture` in
+`cmd/claude-tool-tracker/timing_test.go` (appended with the real binary into a temporary state
+directory, then ingested; no checked-in database); math tests in `internal/timing/timing_test.go`.
+
 ## Layout
 
 | Path                       | Holds                                                        |
@@ -115,6 +172,7 @@ directory above.
 | `internal/events/`         | envelope, validation, file naming, modes, shortening, append |
 | `internal/ingest/`         | event files to database rows, skipped-line counts            |
 | `internal/store/`          | SQLite schema, migrations, published views                   |
+| `internal/timing/`         | timing math and the two rankings                             |
 | `internal/repo/`           | working directory to repo name (worktree-aware)              |
 | `internal/hook/`           | hook JSON to tracker events                                  |
 | `testdata/`                | real-shaped hook input fixtures                              |
