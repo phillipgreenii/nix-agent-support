@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -78,6 +79,13 @@ func evictable(r store.Session) bool {
 // dead_needs_input_ttl) so it stops being counted as awaiting a human forever
 // (ADR 0086). It is opt-in per call: Reap without that option never closes a
 // dead row.
+//
+// A failure on one row (resumability check, dead-row reap, stale needs_input
+// close, revalidated close) is recorded and that row skipped, so one bad row
+// cannot stop the rest of the pool from being reaped. Reap returns the
+// recorded failures joined (errors.Join) once the sweep ends, so the caller's
+// exit status still reports them. A context cancellation is NOT a per-row
+// failure: it aborts the sweep at once and is returned as is.
 func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Duration, opts ...ReapOption) error {
 	var o reapOptions
 	for _, opt := range opts {
@@ -88,6 +96,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		return err
 	}
 	now := s.now()
+	var rowErrs []error
 
 	// Emit runs the lock-free SessionEnd hook (or a kept-row Pass 0) ended since
 	// the last sweep, BEFORE Pass 0 can delete a session row and lose them.
@@ -108,7 +117,11 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		// finalize or delete is re-read under the per-external_id lock.
 		kind, cur, err := s.reapDeadRow(ctx, r.ExternalID, now, o.closedRowRetention)
 		if err != nil {
-			return err
+			if cerr := ctx.Err(); cerr != nil {
+				return err
+			}
+			rowErrs = append(rowErrs, fmt.Errorf("reap dead row %s: %w", r.ExternalID, err))
+			continue
 		}
 		switch kind {
 		case deadLive:
@@ -123,7 +136,10 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// row refreshed, so the metrics below describe the post-close registry.
 	deadKept, err = s.closeStaleDeadNeedsInput(ctx, deadKept, now, o.deadNeedsInputTTL)
 	if err != nil {
-		return err
+		if cerr := ctx.Err(); cerr != nil {
+			return err
+		}
+		rowErrs = append(rowErrs, err)
 	}
 	recordSessionStates(sessionStateCounts(live, deadKept), s.poolMetricAttrs())
 	recordSessionRecords(sessionRecordCounts(live, deadKept), s.poolMetricAttrs())
@@ -187,13 +203,16 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		// The reason was chosen from the unlocked snapshot above, so the row is
 		// re-read and re-judged under the per-session lock before it is closed.
 		if err := s.closeRevalidated(ctx, r.ExternalID, reason, now, idleTTL); err != nil {
-			return err
+			if cerr := ctx.Err(); cerr != nil {
+				return err
+			}
+			rowErrs = append(rowErrs, fmt.Errorf("close %s (%s): %w", r.ExternalID, reason, err))
 		}
 	}
 	// Last step, after every row decision above: collect orphaned lock files.
 	// Best effort and never fatal (see gcLocks).
 	s.gcLocks(ctx)
-	return nil
+	return errors.Join(rowErrs...)
 }
 
 // reasonIdleTTL and reasonCapEviction are the close reasons (store.CloseReasons)
@@ -351,7 +370,10 @@ func awaitingHumanDead(r store.Session) bool {
 // non-purge: the row, the transcript and the worktree are untouched (the
 // session stays resumable with `ccpool attach`), only close_reason/closed_at
 // and the run end are written. Returns deadKept with each closed row replaced
-// by its fresh copy. ttl <= 0 is a no-op.
+// by its fresh copy. ttl <= 0 is a no-op. A row whose close fails keeps its
+// snapshot copy, is skipped, and its error is recorded; the rest are still
+// processed and the failures are returned joined. A cancelled ctx stops the
+// loop at once.
 //
 // Idempotent: a closed row has closed_at >= last_activity_at, so the next sweep
 // skips it (closedSinceActivity).
@@ -361,6 +383,7 @@ func (s *Service) closeStaleDeadNeedsInput(ctx context.Context, deadKept []store
 	}
 	out := make([]store.Session, len(deadKept))
 	copy(out, deadKept)
+	var rowErrs []error
 	for i, r := range out {
 		if !staleDeadNeedsInput(r, now, ttl) {
 			continue
@@ -394,11 +417,15 @@ func (s *Service) closeStaleDeadNeedsInput(ctx context.Context, deadKept []store
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			if cerr := ctx.Err(); cerr != nil {
+				return out, err
+			}
+			rowErrs = append(rowErrs, fmt.Errorf("close stale dead needs_input %s: %w", r.ExternalID, err))
+			continue
 		}
 		out[i] = fresh
 	}
-	return out, nil
+	return out, errors.Join(rowErrs...)
 }
 
 // reasonDeadNeedsInputTTL is the close reason (store.CloseReasons) for the
