@@ -640,6 +640,9 @@ var allowedLiteralSets = map[string]func(string) bool{
 	"local-flake-installable": func(tok string) bool {
 		return tok == "." || strings.HasPrefix(tok, ".#")
 	},
+	// "pg-review-provider" and "pg-review-agent-arg": see registry_pg_review.go.
+	"pg-review-provider":  pgReviewProvider,
+	"pg-review-agent-arg": pgReviewToken,
 	// "relative-project-path": a plain relative file operand that stays inside
 	// the working directory by construction -- no leading `-` (an option the
 	// callee may forward to a program this schema cannot see: `nix fmt --
@@ -647,8 +650,6 @@ var allowedLiteralSets = map[string]func(string) bool{
 	// path and no `..` segment. It is for operands handed on to a program whose
 	// own flags are unmodeled (nix fmt's formatter), where a PathModify role
 	// would misread a forwarded flag as a file name (pg2-33slg).
-	"pg-review-provider":  pgReviewProvider,
-	"pg-review-agent-arg": pgReviewToken,
 	"relative-project-path": func(tok string) bool {
 		if tok == "" || strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "/") || strings.HasPrefix(tok, "~") {
 			return false
