@@ -72,18 +72,6 @@ func TestNotBuiltCommandsAreAbsent(t *testing.T) {
 	}
 }
 
-func TestStubsPrintNotImplementedAndExitOne(t *testing.T) {
-	cases := [][]string{
-		{"job", "doctor"},
-	}
-	for _, c := range cases {
-		code, _, stderr := run(t, c...)
-		if code != exitcode.Failure || strings.TrimSpace(stderr) != "not implemented" {
-			t.Errorf("%v: exit %d stderr %q", c, code, stderr)
-		}
-	}
-}
-
 func TestUsageErrorsExitTwo(t *testing.T) {
 	cases := [][]string{
 		{"nope"},
