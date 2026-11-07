@@ -417,6 +417,20 @@ hash, plus a `registry_deleted` record when the file vanishes), `claude-status` 
 (generation = version); the default query shows the newest version, `old_generations` all of them.
 `query` follows `parent`, `result`, `call`, `body`, `subagents`, `status`, `mode`, `registry` and
 `compaction`.
+
+**Rename history of a session.** The registry file holds only the current `name`, but every version of it
+is kept, so a rename is a later version with a different `name`. The default query (and
+`pg-claude-code-recorder processes --session ID`, which shows the newest version) therefore shows only the
+latest name; add `old_generations` to list every version, oldest first:
+
+```text
+echo '{"where":{"all":[{"field":"source","eq":"session-registry"},{"field":"session","eq":"<session id>"}]},"old_generations":true,"select":["time","name","name_source","name_since","status"],"order":[{"by":"time"}]}' | pg-claude-code-recorder query
+```
+
+One row is one stored version, so consecutive rows with the same `name` are status changes, not renames;
+a rename is a row whose `name` (and usually `name_since`) differs from the row before it. This query is
+pinned by `TestRegistryRenameHistoryQuery` in `internal/serve/sources_test.go`.
+
 A tool-results body links back to the `tool_result` that names it through stored fields only: the
 transcript parser stores the saved-to path a `tool_result` preview names as `saved_to`, and the link
 matches it to the body's `rel_path`. No full-text index is read.

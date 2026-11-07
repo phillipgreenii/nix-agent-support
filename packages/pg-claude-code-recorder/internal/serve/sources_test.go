@@ -154,6 +154,30 @@ func TestRegistryVersionsAndADeletionRecord(t *testing.T) {
 	}
 }
 
+// The README's worked rename-history query: every stored registry version of one session,
+// oldest first, so a rename shows as a version whose name differs from the one before it.
+func TestRegistryRenameHistoryQuery(t *testing.T) {
+	e := newEnv(t, false)
+	e.write(t, "sessions/111.json", registryV1)
+	d := e.open(t)
+	defer func() { _ = d.Close() }()
+	e.settle(t)
+	renamed := strings.Replace(registryV2, `"name":"example-1"`, `"name":"example-renamed","nameSource":"user","nameSince":1793388699000`, 1)
+	e.write(t, "sessions/111.json", renamed)
+	e.settle(t)
+	all := e.query(t, `{"where":{"all":[{"field":"source","eq":"session-registry"},{"field":"session","eq":"0f8fad5b-d9cb-469f-a165-70867728950e"}]},"old_generations":true,"select":["time","name","name_source","name_since","status"],"order":[{"by":"time"}]}`)
+	if len(all.Rows) != 2 || all.Rows[0][1] != "example-1" || all.Rows[1][1] != "example-renamed" || all.Rows[1][2] != "user" || all.Rows[0][4] != "busy" || all.Rows[1][4] != "idle" {
+		t.Fatalf("rename history: %s", rowsJSON(all))
+	}
+	if all.Rows[1][3] == nil {
+		t.Fatalf("name_since missing: %s", rowsJSON(all))
+	}
+	cur := e.query(t, `{"where":{"all":[{"field":"source","eq":"session-registry"},{"field":"session","eq":"0f8fad5b-d9cb-469f-a165-70867728950e"}]},"select":["name"]}`)
+	if len(cur.Rows) != 1 || cur.Rows[0][0] != "example-renamed" {
+		t.Fatalf("default shows newest only: %s", rowsJSON(cur))
+	}
+}
+
 func TestLinksFollowAcrossSources(t *testing.T) {
 	e := newEnv(t, false)
 	e.write(t, "projects/example-proj/0f8fad5b-d9cb-469f-a165-70867728950e.jsonl", transcript)
