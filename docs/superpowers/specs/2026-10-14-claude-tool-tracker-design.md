@@ -313,6 +313,52 @@ reads both CETA's database and, through the adapter, the tracker's) joins the tw
 CETA's `PreToolUse` has no matcher, so it sees every tool call; every CETA row should have a tracker
 record.
 
+Comparison result (2026-11-07, this laptop). Window: 2026-10-30T00:11:20.695Z (the earliest event,
+`event_span` scope `all`) to 2026-11-07T07:23:27.421Z (just after the latest event, exclusive end);
+`compare-tracker --since 2026-10-30T00:11:20.695Z --until 2026-11-07T07:23:27.421Z`, exit code 2
+(differences found). Counts: CETA 83794 calls, tracker 80405, matched 80195; only CETA 3599; only the
+tracker 210; verdict differs 5; outcome differs 1769; permission mode differs 2; `agent_type`,
+`sandbox_enabled`, is-error and denial-reason presence differ 0; duplicate keys 0; CETA rows with no
+`tool_use_id` 9; sessions with CETA rows but no tracker event file 115 (the 9 unkeyed rows form the
+empty session id); ingest skipped lines 0. A second and a third run over the same window gave the
+same counts, except that the first run showed 1768 outcome differences and the later two 1769,
+because calls still in flight in a live session (five calls of one session, CETA `pending` then
+`unresolved` or `approved`) settled between runs; the second and third runs are identical.
+
+- Only CETA, 3599. 2764 rows sit in 112 sessions whose first CETA row precedes the first tracker
+  session of 2026-10-30T01:25Z to 05:00Z ramp-up: the tracker's hooks load at session start, so
+  sessions begun before the apply never wrote a tracker file. Explained. 785 rows are not
+  explained: sessions 0f3990be (472 rows) and 8d9c4dd8 (312 rows) began on 2026-10-30 after the
+  apply, and one single-row session on 2026-11-05, and none has a tracker file. A further 50 rows
+  sit in sessions that do have a tracker file (46 in session 16b760bf during two bursts on
+  2026-10-30, 4 on 2026-11-03 to 2026-11-06). Open question: why those sessions and bursts have no
+  tracker events. The 9 unkeyed rows are CETA rows with no `tool_use_id` (nothing to join on).
+- Only the tracker, 210 (64 Bash, 50 Monitor, 46 Edit, 18 Write, 10 `EnterWorktree`; 19 in one
+  session). CETA wrote no row for them. Section 10 check 1 already found 25 such calls on the first
+  day, 18 of them subagent calls. Open question: which hook path skips CETA for these calls.
+- Verdict differs, 5: CETA `deny` against the tracker's `ask`. Open question: the tracker's engine
+  verdict reads `ask` where CETA's own row says `deny` (the same call is delivered as a refusal
+  elsewhere); not explained.
+- Permission mode differs, 2: CETA `dontAsk`, tracker no value. Open question: the mod and hook
+  events carry no permission mode for these two calls.
+- Outcome differs, 1769 (CETA, tracker): 984 `unresolved`, `failed`; 668 `rejected`, `failed`;
+  61 `pending`, `failed`; 22 `unresolved`, `approved`; 17 `denied`, `failed`; 6 `pending`,
+  `unresolved`; 4 `pending`, `approved`; 4 `approved`, `pending`; 2 `approved`, `unresolved` (the
+  counts of the second run; the first run moved five calls among the `pending`, `unresolved` and
+  `approved` rows). Explained in part by a sample of 300 per group: the 668 `rejected` calls (and 17
+  `denied`) are calls CETA refused through a hook error ("PreToolUse:Bash hook error: ..."); the
+  tracker records them as tool errors and compare-tracker maps result `error` to `failed` before
+  it considers a CETA refusal, so these are one defect or one mapping choice, not two verdicts that
+  disagree. Of the `unresolved` calls, the sample shows `dontAsk` mode refusals ("Permission to use
+  Bash has been denied because Claude Code is running ...", `settled_by` `mode`) and summary calls
+  ("No tools needed for summary"): CETA never sees a post-tool event for them, the tracker does.
+  Open question: whether the tracker should report CETA hook-error refusals as `rejected` (section 6) and whether the 22 `unresolved`, `approved` and the 4 `approved`, `pending` calls are timing
+  only.
+
+Result for the operator: the two recorders agree on 80195 matched calls for every carried field
+except the groups above; the counts do not show a defect that blocks the cut-over by themselves,
+but the open questions above are unexplained and are not accepted here (section 8.4).
+
 ### 8.3 Rollout: this laptop first, cut-over per machine
 
 DECIDED (Phillip, 2026-10-29): approved, with the cut-over gated on the tracker recording. CETA runs on more
@@ -374,6 +420,13 @@ Each is done in the chunk named, and its result is written back into this docume
    unasked call (chunk 2).
 4. `dontAsk` and `bypassPermissions` rows of section 6 (chunk 2).
 5. No corrupt or interleaved lines over the shadow days (chunk 4, from ingest's skipped counts).
+   Result: 2026-11-07, passes. `claude-tool-tracker ingest` over the real events directory (2647
+   files, 6765 new lines on this run; 548470 events stored in all, 0 duplicates) reports
+   `skipped_invalid_json=0` and `skipped_missing_field=0` in total, and no `ingest_skips` row has
+   `skipped_total` above 0 (compare-tracker reads the same zero for the window). The events span
+   2026-10-30T00:11:20Z to 2026-11-07T07:23:27Z (the `event_span` view, `all` scope), more than
+   seven calendar days. 1144 events carry no `tool_use_id` and belong to no call; that is counted
+   by ingest, not skipped.
 
 Results of live checks 1 to 4 (measured 2026-10-30 on the first shadow-mode laptop, by
 `claude-tool-tracker ingest` over its real events directory and queries of the published views,
