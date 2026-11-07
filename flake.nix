@@ -373,6 +373,11 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-checkout-pool: Pattern A, stdlib-only slot store (per-slot flock,
+          # atomic lease records, slot state machine) plus a status command.
+          pg-checkout-pool = final.callPackage ./packages/pg-checkout-pool {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-router-heartbeat: Pattern A, stdlib-only out-of-stack dead-man's switch.
           pg-router-heartbeat = final.callPackage ./packages/pg-router-heartbeat {
             inherit (goBuilders) mkGoApp;
@@ -1925,6 +1930,7 @@
                 "pg-decider"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
+                "pg-checkout-pool"
                 "pg-router-heartbeat"
                 "ccpool-probe"
                 "pg-rescue"
@@ -7369,6 +7375,15 @@
                 pname = "pg-router-disk-watchdog-go-tests";
                 src = lib.cleanSource ./packages/pg-router-disk-watchdog; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
+              };
+
+              # pg-checkout-pool: hermetic unit suite over the slot state machine,
+              # flock liveness (including a killed helper process), atomic record
+              # writes and the status command; temp dirs and a fake clock, no git.
+              pg-checkout-pool-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-checkout-pool-go-tests";
+                src = lib.cleanSource ./packages/pg-checkout-pool; # matches default.nix
+                gomod2nixToml = ./packages/pg-checkout-pool/gomod2nix.toml;
               };
 
               # pg-router-heartbeat: unit suite over the pure sleep-aware decision, the
@@ -18892,6 +18907,7 @@
               pg-decider
               pg-router-probe
               pg-router-disk-watchdog
+              pg-checkout-pool
               pg-router-heartbeat
               beads-exporter
               beads-exporter-contract
