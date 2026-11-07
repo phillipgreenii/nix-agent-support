@@ -40,13 +40,14 @@ in
 
     pprof.enable = lib.mkOption {
       type = lib.types.bool;
-      default = false;
+      default = true;
       description = ''
         Expose Go's runtime profiler (`net/http/pprof`) for the exporter on a
         mode-0600 unix socket at `$XDG_STATE_HOME/pg-checkout-pool-exporter/pprof.sock`
         (the module writes the resolved absolute path into the launchd agent's
-        `PG_CHECKOUT_POOL_PPROF_ADDR`). Off by default: when `false` the
-        variable is absent and the exporter opens no profiling listener. No
+        `PG_CHECKOUT_POOL_PPROF_ADDR`). On by default (the Go daemon guide requires it): when `false` the
+        variable is absent and the exporter opens no profiling listener. The
+        endpoint is a unix socket only, so no
         port is allocated, so the port ledger is not involved. Capture recipe:
         `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
       '';

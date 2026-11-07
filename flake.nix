@@ -8417,9 +8417,9 @@
                   };
                   obsOff = evalModule false { enable = true; };
                   moduleOff = evalModule true { };
-                  pprofOn = evalModule true {
+                  pprofOff = evalModule true {
                     enable = true;
-                    pprof.enable = true;
+                    pprof.enable = false;
                   };
 
                   inertOk =
@@ -8456,14 +8456,17 @@
                     format = "raw";
                   };
                 assert lib.all (a: a.assertion) enabled.assertions;
-                # pprof is opt-in: off by default (no variable), on writes the
-                # 0600 unix socket path under the state dir.
-                assert !(ua.serviceConfig ? EnvironmentVariables);
+                # pprof is on by default (the Go daemon guide): the 0600 unix socket
+                # path under the state dir; pprof.enable = false leaves no variable.
                 assert
-                  pprofOn.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter.serviceConfig.EnvironmentVariables
-                  == {
+                  ua.serviceConfig.EnvironmentVariables == {
                     PG_CHECKOUT_POOL_PPROF_ADDR = "/Users/tester/.local/state/pg-checkout-pool-exporter/pprof.sock";
                   };
+                assert
+                  !(
+                    pprofOff.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter.serviceConfig
+                      ? EnvironmentVariables
+                  );
                 pkgs.runCommand "test-pg-checkout-pool-exporter-darwin-module-ok" { } ''
                   touch "$out"
                 '';

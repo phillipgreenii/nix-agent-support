@@ -45,7 +45,7 @@
 
 `pg-checkout-pool serve --addr {{127.0.0.1:9148}}`
 
-- Also expose Go's pprof endpoint while serving (off unless the variable is set; an absolute unix-socket path or a loopback `host:port`):
+- Also expose Go's pprof endpoint while serving (the binary opens it only when the variable is set, and the launchd exporter module sets it by default (`pprof.enable`); an absolute unix-socket path or a loopback `host:port`):
 
 `PG_CHECKOUT_POOL_PPROF_ADDR={{/path/to/pprof.sock}} pg-checkout-pool serve`
 
