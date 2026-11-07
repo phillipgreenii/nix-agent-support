@@ -344,17 +344,29 @@ because calls still in flight in a live session (five calls of one session, CETA
   restarted; no repo change can close it, and no new such sessions can appear once those processes
   end. The one-row session `a161b5c3` (2026-11-05) has no event file and no transcript on this
   laptop (only an empty session-environment directory from 2026-11-05T05:30Z); its row exists in
-  CETA's own database only, and it is not separately explained. A one-row session `s`
+  CETA's own database only. Re-checked 2026-11-07: the row is `echo TRACKER_PROBE` run in
+  `/private/tmp/pgtt-spike.<random>/work`, a throwaway spike project (its transcript path names that
+  directory, which is gone); it is a probe of the tracker's own spike work, not a user session, and
+  needs no repo change. A one-row session `s`
   with tool use id `t` (2026-11-06) in the event directory is a test fixture of another tool
   writing into the real event directory, not a Claude session; it is noted for the owners of that
   tool. Of the 50 rows in sessions that have a tracker file, 46 are the 16b760bf group above
-  (the file belongs to the later resume). Of the other 4, one is a call
-  in the subagent `acf11f0b7aa87c6ca` of session cd63f2a6 (2026-11-06T10:02:46Z: CETA approved it,
-  the tracker has no `call_start`, `pre_tool` or `check` for it, and a call from the same subagent
-  three seconds later was recorded); for sessions 499f0a23 and 62683f59 the event files hold a
-  tracker start for every CETA verdict, so their rows were in flight when the comparison ran and
-  later joined. The single subagent call is not explained;
-  its cause would need a captured hook trace. The 9 unkeyed rows are CETA rows with no `tool_use_id` and an empty session id (nothing to join
+  (the file belongs to the later resume). The other 4 (one in cd63f2a6, two in 499f0a23, one in
+  62683f59) were re-examined 2026-11-07 from the event files and transcripts and are one pattern,
+  not the in-flight and subagent-call descriptions first written here: each is a call whose tracker
+  command hooks ran and were recorded (`pre_tool`, `check`, `post_tool`; `call_end` for three) but
+  for which the tracker has no `call_start`. The mod's `call_start` is missing, and ingest does not
+  count a call without one, so the call is "only CETA". The cd63f2a6 call is a main-session Bash
+  call at 2026-11-06T10:02:49Z (no agent id; its transcript shows both hooks succeeding), not a
+  subagent call. The call first described as a subagent call at 10:02:46Z is a different one
+  (`acf11f0b7aa87c6ca`, tool use `toolu_01DPtoRzQEHrLXGL9HoqW8u2`): the event file holds only its
+  `ceta.verdict`, the ask log has no row for it, the tracker has no event of any kind for it, and the
+  subagent's transcript ends at 10:02:32Z without it, so the subagent was most likely stopped as
+  the call began. Why the mod emitted no `call_start` for these 4 (and 4 more calls in the event files since 2026-11-03
+  that have a `call_end` or hook events but no `call_start`), and what happened to the 10:02:46Z
+  call, cannot be settled from the files: a captured mod and hook trace around such a call is
+  needed (the mod's debug log, plus a `PreToolUse` hook stderr capture, for a subagent stop and a
+  call racing it). The 9 unkeyed rows are CETA rows with no `tool_use_id` and an empty session id (nothing to join
   on): they are hand-fed hook invocations, not Claude calls. All 9 were written within two seconds
   at 2026-10-30T01:48:57Z to 01:48:58Z, each with outcome `pending` and no session, and their
   commands (four refused `curl` forms, one plain loopback `curl`, two `cat` / `ls` of
@@ -479,10 +491,28 @@ because calls still in flight in a live session (five calls of one session, CETA
   - `pending`/`approved`, 3: not timing. The call ran (tracker `call_end` `ok`) and CETA never saw the
     post event; two of the sessions later ended (6 and 5 minutes after the call) yet CETA never swept them; the
     third (`d503eec4`) is still running, in the ask log failure window noted above. CETA recording loss.
-  - `approved`/`unresolved`, 2: not timing, not explained further. CETA recorded `approved` at the
-    moment of the tracker's `session_end` (08:28:39Z and 17:11:46Z), and the tracker has no
-    `call_end` for the call, so the tracker lost the `call_end` at session close (or CETA's
-    PostToolUse ran after the mod stopped); a captured hook trace would be needed.
+  - `approved`/`unresolved`, 2: not timing. Re-examined 2026-11-07: the two times (08:28:39Z and
+    17:11:46Z) are the tracker's own `post_tool` times, not a `session_end` (the sessions' ends are
+    hours away), so CETA's `approved` is its normal post-tool write. Both calls are subagent Bash
+    calls (sessions 9f3823c6 and 499f0a23) with `call_start`, `pre_tool`, `check` and `post_tool`
+    recorded and no `call_end`; the tracker leaves them `unresolved`. The mod emitted no `call_end`
+    (in 499f0a23 the following two calls also lack a `call_start`, 5 to 7 s later, as the
+    subagent finished: the same missing-mod-event symptom as above). Cause in the mod not settled;
+    a captured mod trace is needed.
+
+Later-window comparison (2026-11-07, this laptop). Window since 2026-11-03T00:00Z, after the old
+terminals restarted, to 2026-11-07T07:23:27.421Z, run on copies of both databases (installed
+binary, which still has the old outcome mapping and verdict rule): CETA 56508 calls, tracker 56645,
+matched 56503, only CETA 5, only the tracker 142, verdict differs 3, outcome differs 1118, unkeyed
+CETA rows 0, duplicates 0, ingest skipped lines 0, sessions with CETA rows but no tracker file 1
+(`a161b5c3`, the spike probe above). The 5 only-CETA rows are the 4 missing-`call_start` calls and
+the spike probe, all explained above; no row is left from a session that predates the install. The
+3 verdict differences are the unattended-session `deny` against `ask` (already fixed in the
+comparison), and the outcome groups are those of the first run (444 `rejected`/`failed` fixed by the
+mapping change; 596 `unresolved`/`failed`, 33 `pending`/`failed`, 17 `unresolved`/`approved`, 13
+`denied`/`failed`, 6 `pending`/`unresolved`, 5 `approved`/`pending` in flight, 2 `pending`/`approved`,
+2 `approved`/`unresolved`). Open: the mod's missing `call_start` / `call_end` events and the
+10:02:46Z subagent call, each needing the captured trace named above.
 
 Result for the operator: the two recorders agree on 80195 matched calls for every carried field
 except the groups above; the counts do not show a defect that blocks the cut-over by themselves,
