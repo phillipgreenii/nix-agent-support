@@ -34,6 +34,13 @@ func hookDecisionString(d hookio.Decision) string {
 }
 
 func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.RuleResult) error {
+	return recordPreToolDecisionAt(s, input, result, nowISO())
+}
+
+// recordPreToolDecisionAt is RecordPreToolDecision with the row's timestamp
+// supplied by the caller, so a spooled record replayed later keeps the time
+// the verdict was actually rendered.
+func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.RuleResult, now string) error {
 	hookDec := hookDecisionString(result.Decision)
 	outcome := OutcomePending
 	var resolvedAt *string
@@ -43,7 +50,6 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 		// distinct from a decline judgement (OutcomeDenied) and from a call that
 		// was never resolved at all (OutcomeUnresolved).
 		outcome = OutcomeRejected
-		now := nowISO()
 		resolvedAt = &now
 	}
 
@@ -67,7 +73,7 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 			inputHash(input.ToolInput), string(input.ToolInput),
 			ToolSummary(input.ToolName, input.ToolInput),
 			hookDec, result.Reason,
-			outcome, nowISO(), resolvedAt,
+			outcome, now, resolvedAt,
 			s.sandboxEnabledArg(),
 			nilIfEmpty(input.PermissionMode), nilIfEmpty(input.PromptID),
 			nilIfEmpty(input.TranscriptPath),
@@ -116,7 +122,7 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 		inputHash(input.ToolInput), string(input.ToolInput),
 		ToolSummary(input.ToolName, input.ToolInput),
 		hookDec, result.Reason,
-		outcome, nowISO(), resolvedAt,
+		outcome, now, resolvedAt,
 		s.sandboxEnabledArg(),
 		nilIfEmpty(input.PermissionMode), nilIfEmpty(input.PromptID),
 		nilIfEmpty(input.TranscriptPath),

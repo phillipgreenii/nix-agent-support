@@ -112,6 +112,14 @@ sequenceDiagram
    README's "Decision Database" section for the full outcome-provenance table; this document is
    about how the _decision_ is reached, not how it is later graded.
 
+   **The log write never costs the verdict.** The PreToolUse hook has a 5 s timeout, so the ask-log
+   open is bounded (1.5 s; a slow open falls back to the storeless engine) and the write after the
+   verdict is bounded (1.5 s). A decision whose write is too slow, locked or failed is appended to
+   `asks-spool.jsonl` beside the database and replayed (original timestamp, de-duplicated on
+   session and tool use id) by the next hook that gets through; the stderr line `asklog row spooled`
+   and the spool's line count are the miss counter. Trade-off: a slow-database row lands late, not
+   never; the trace of a spooled row is kept, and only a failed spool append can still lose a row.
+
 ### The verdict vocabulary
 
 A rule module's return value is not one flat "verdict" — three outcomes are distinguished on

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
@@ -201,12 +202,18 @@ func handlePreToolUse(input *hookio.HookInput) {
 	// shell-ownership store. If it fails to open, fall back to a storeless engine
 	// (killshell then fails secure → Ask).
 	sandboxOn := sandboxdetect.Detect(projectDirForDetect(input))
+	dbPath := asklog.DefaultDBPath()
 	var store *asklog.Store
-	if s, err := asklog.NewStore(asklog.DefaultDBPath()); err == nil {
+	openCause := ""
+	// The open is bounded: a slow or locked database must cost the verdict at
+	// most askLogOpenBudget (a storeless engine is the existing fallback), never
+	// the whole hook timeout. The decision is then spooled, not dropped.
+	if s, err := asklog.OpenWithin(dbPath, askLogOpenBudget); err == nil {
 		store = s
 		defer func() { _ = store.Close() }()
 		store.SetSandboxEnabled(sandboxOn)
 	} else {
+		openCause = "open: " + err.Error()
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
 	}
 
@@ -277,23 +284,57 @@ func handlePreToolUse(input *hookio.HookInput) {
 	// change the verdict nor block the call.
 	recordToolEvents(input, engineVerdict, result, sandboxOn)
 
+	logPreToolDecision(store, dbPath, openCause, input, result, sandboxOn)
+}
+
+// Time budgets for the ask-log, chosen so the worst case (open budget + engine
+// + write budget) stays well inside the 5 s hook timeout. Variables so tests
+// can shrink them.
+var (
+	askLogOpenBudget  = 1500 * time.Millisecond
+	askLogWriteBudget = 1500 * time.Millisecond
+	askLogDrainMax    = 20
+)
+
+// logPreToolDecision persists the verdict AFTER it has been written to stdout.
+// It never changes the verdict and never takes longer than askLogWriteBudget:
+// when the store is absent, the write fails, or the write is too slow, the
+// decision is appended to the spool beside the database (asklog.AppendToSpool)
+// and replayed by a later hook, so a slow database delays a row, not loses it.
+func logPreToolDecision(store *asklog.Store, dbPath, openCause string, input *hookio.HookInput, result hookio.RuleResult, sandboxOn bool) {
+	cause := openCause
 	if store != nil {
-		if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
-			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
+		err := asklog.RunWithin(askLogWriteBudget, func() error {
+			if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
+				return err
+			}
+			// FLUSH the per-rule GENUINE-failure window (ADR 0043). The engine counted
+			// into metrics.DefaultRuleErrors while deciding; this is the only point where
+			// those counts can outlive the process (one process per tool call). A failure
+			// to persist it is reported only; it is not part of the verdict row.
+			if err := asklog.RecordRuleErrors(store, input, metrics.DefaultRuleErrors.Snapshot()); err != nil {
+				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog rule_errors: %v\n", err)
+			}
+			// This hook got through, so replay what earlier slow hooks spooled.
+			if _, err := store.DrainSpool(dbPath, askLogDrainMax); err != nil {
+				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog spool drain: %v\n", err)
+			}
+			return nil
+		})
+		if err == nil {
+			return
 		}
-		// FLUSH the per-rule GENUINE-failure window (ADR 0043). The engine counted
-		// into metrics.DefaultRuleErrors while deciding; this is the only point where
-		// those counts can outlive the process, and the hook is one process per tool
-		// call, so without this flush "a systematically-failing resolver is
-		// detectable" would be false no matter how carefully the counter was kept.
-		//
-		// AFTER the decision has been made and the output has already been written to
-		// stdout, so a failure to persist an observability row can neither change the
-		// verdict nor be mistaken for one.
-		if err := asklog.RecordRuleErrors(store, input, metrics.DefaultRuleErrors.Snapshot()); err != nil {
-			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog rule_errors: %v\n", err)
-		}
+		cause = "write: " + err.Error()
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
 	}
+	if cause == "" {
+		cause = "no store"
+	}
+	if err := asklog.AppendToSpool(dbPath, input, result, &sandboxOn, cause); err != nil {
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog spool FAILED, row lost: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog row spooled (%s); %d waiting\n", cause, asklog.SpoolLen(dbPath))
 }
 
 func handlePermissionRequest(input *hookio.HookInput) {
