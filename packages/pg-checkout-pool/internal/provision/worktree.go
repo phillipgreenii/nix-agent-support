@@ -157,7 +157,10 @@ func (w *Worktree) lockPresent(ctx context.Context, dir string) error {
 	if err != nil {
 		return err
 	}
-	common := filepath.Join(w.repo, ".git")
+	common, err := w.git(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
 	for _, lock := range []string{
 		filepath.Join(gd, "index.lock"), filepath.Join(gd, "HEAD.lock"),
 		filepath.Join(common, "index.lock"), filepath.Join(common, "shallow.lock"),
