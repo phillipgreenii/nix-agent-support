@@ -1,6 +1,6 @@
 // Tests of the phase 1 band: the pure layout, the level colours, and the render hook.
 import { expect, test } from 'claude-code/testing'
-import { bandHook, contextLevel, drawnWidth, ENGINE_RESERVE, registerBandButton, renderBand } from './band'
+import { bandHook, clearBandButtons, contextLevel, drawnWidth, ENGINE_RESERVE, registerBandButton, renderBand } from './band'
 import { setOptions } from './options'
 import { defineSource, initSources, setValue } from './source'
 import { DEFAULT_OPTIONS, parseOptions } from './types'
@@ -85,6 +85,7 @@ function describe_band_widths() {
       }
       if (width === 200) expect(rows.length).toBe(1)
       if (width === 52) expect(rows.length > 1).toBe(true)
+      clearBandButtons()
     })
   }
 }
