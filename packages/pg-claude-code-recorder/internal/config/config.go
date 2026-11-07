@@ -296,7 +296,7 @@ func Defaults(getenv func(string) string) Config {
 		MinFreeBytes:        20 << 30,
 		WaitMax:             60 * time.Second,
 		WaitMaxWaiter:       256,
-		QueryTimeout:        30 * time.Second,
+		QueryTimeout:        25 * time.Second,
 		ReadCacheMiB:        64,
 		ReadMmapMiB:         512,
 		FeedRetention:       14 * 24 * time.Hour,

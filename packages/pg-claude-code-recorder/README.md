@@ -458,12 +458,18 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   a waiter wakes on a parse commit and answers only when a committed record matches its filter.
   `serve` closes waiting connections on shutdown, so a client reconnects with the same cursor.
 - **Read deadline**: every read (a socket query and every read-pool statement) runs under the deadline
-  `query.timeout` (default 30s), so no reader pins the WAL snapshot longer; a read transaction is never
+  `query.timeout` (default 25s, below the client's 30s request timeout), so no reader pins the WAL snapshot longer; a read transaction is never
   held while a waiter waits (it reads, releases, waits, then reads again). A read that hits the
   deadline answers `query_timeout` (504, exit 6, `client.ErrQueryTimeout`, retryable) and counts in
   `query_timeouts_total{op}`; it also logs one `query_timeout` with `request_id`, `query_kind`, `args` (the key
   arguments, credential-named keys omitted), `wait_ms` (elapsed time not spent running in SQLite: the wait for a
   read slot plus the handler's own work) and `exec_ms` (time statements and transactions ran).
+  A 25s default turns some answers that used to arrive after 25 to 30s into `query_timeout`.
+- **Request deadline header**: the Go client sends `X-Recorder-Deadline-Ms`, its own HTTP timeout minus 1s, on every
+  request. The daemon clamps it to at least 1s and never above `query.timeout`, and applies it as the request deadline
+  when it is shorter than `query.timeout`; a missing, malformed or not-shorter value is ignored. A request cancelled
+  because the client went away, or because the header deadline passed, counts in `request_cancelled_total{op,reason}`
+  and logs `request_cancelled`; a request that ran into the deadline still answers `query_timeout`.
 - **Read connection memory and batching**: read connections use a larger SQLite page cache and a bounded memory map, because every fresh connection
   to a file of tens of gigabytes starts cold: `query.readCacheMiB` (default 64) is the per-connection
   `cache_size` ceiling and `query.readMmapMiB` (default 512, 0 disables) the per-connection `mmap_size`
@@ -570,8 +576,8 @@ over the parsed records: every registry version and its deletion time (`session-
   surface and workspace ids, tmux socket plus pane id, otherwise `TERM_PROGRAM`.
 - **Control inbox**: `process.list` carries `control_inbox` (`<pid>.fifo` present); gauges
   `control_inbox_state{state=present|gone|never_loaded}` and `processes_without_control_inbox`. The
-  recorder removes `<pid>.fifo` when its Process exits and sweeps at startup for FIFOs whose pid is not a
-  live Process with a matching start time (its first write into the control state directory), and removes an
+  recorder removes `<pid>.fifo` when its Process exits and sweeps at startup, and then every `fifo.sweep_every`
+  (default 10m), for FIFOs whose pid is not a live Process with a matching start time (its first write into the control state directory), and removes an
   end file once it has been ingested and a day has passed (its second). It also reads
   `<controlStateDir>/requests.jsonl` (a read beyond the `ends/` root): `control_requests_total{verb,outcome}`
   counts each line once (keyed by ts, id and verb; polled every `process.livenessInterval`, default 5s;
@@ -910,6 +916,23 @@ at removal time and refuses one modified recently, whatever the gauge says.
 2. `rg slow_request` in the recorder log: each line over 10 s names the `op`, the `client` and `ms`, at most one per op
    per interval, so a burst shows as the first line plus the counter.
 3. Compare with `lock waits` (a request waiting on the store write lock or the copier lock) and `wal size`.
+
+### Requests time out
+
+The default `query.timeout` is 25s, so a read that used to answer after 25 to 30s now answers `query_timeout`.
+
+1. Open `request duration p99 by op`: the op whose p99 nears 25s is the one timing out. `query_timeouts_total{op}`
+   counts the deadline answers.
+2. Read `request_cancelled_total{op,reason}`: `client_gone` means the caller gave up first (its own HTTP timeout minus 1s
+   arrives in `X-Recorder-Deadline-Ms`), `deadline` means the request header deadline passed. Neither counts in
+   `query_timeouts_total`.
+3. Then check the status loops (`loop duration p99 by loop`, `loop in flight`, `tracker_poll` in particular) and
+   `lock waits`, as in "Which loop is slow".
+
+The tracker no longer lists processes or sweeps FIFOs and the ends directory on its 5s poll: ends are handled when
+they are ingested, a FIFO when its Process exits, and a slow fallback scan runs at start and every `ends.sweep_every`
+and `fifo.sweep_every` (default 10m each, at least 1s; module options `ends.sweep_every` and `fifo.sweep_every`). A
+find by a fallback scan means the event path missed one.
 
 ### Registry lock cost per ingest
 

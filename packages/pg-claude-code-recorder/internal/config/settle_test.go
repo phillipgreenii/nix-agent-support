@@ -49,9 +49,9 @@ func TestRemovalAndDoctorKeys(t *testing.T) {
 	}
 }
 
-func TestQueryTimeoutDefaultsTo30sAndIsConfigurable(t *testing.T) {
+func TestQueryTimeoutDefaultsTo25sAndIsConfigurable(t *testing.T) {
 	d := Defaults(env(map[string]string{"HOME": "/h"}))
-	if d.QueryTimeout != 30*time.Second {
+	if d.QueryTimeout != 25*time.Second {
 		t.Fatalf("default %v", d.QueryTimeout)
 	}
 	p := filepath.Join(t.TempDir(), "c.toml")

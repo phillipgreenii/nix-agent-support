@@ -13,8 +13,11 @@ import (
 )
 
 // DefaultReadTimeout is the deadline every read-pool statement and read
-// transaction runs under unless Options.ReadTimeout says otherwise.
-const DefaultReadTimeout = 30 * time.Second
+// transaction runs under unless Options.ReadTimeout says otherwise. It
+// matches the daemon's query.timeout default and sits below the client's 30 s
+// request timeout, so the daemon answers query_timeout before the client gives
+// up on the connection.
+const DefaultReadTimeout = 25 * time.Second
 
 // Read-pool connection recycling. A pool lifetime alone cannot unpin a WAL
 // (database/sql never closes a connection in use); the deadline does that.

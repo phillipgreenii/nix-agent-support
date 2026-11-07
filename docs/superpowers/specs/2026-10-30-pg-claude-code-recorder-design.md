@@ -826,7 +826,11 @@ are derived, so deleting them and re-parsing every copy reproduces the same reco
 
 **Writes.** One serialized write connection serves the copier, parser, settler and API. The feed
 sequence is assigned inside the write transaction. Waiters hold no read transaction, so long polls
-cannot pin the WAL; the recorder checkpoints on an interval. On darwin SQLite's `synchronous=FULL` issues a plain `fsync`, which does not flush the drive's cache, so the commits for "settled", "removal pending" and "removed" run with `PRAGMA fullfsync=ON` (`F_FULLFSYNC`), and the archive, the clone and their containing directories are flushed with `F_FULLFSYNC` before anything is deleted. The 9,000 to 12,000 commits per second measured in the spike used plain `fsync`; the cost with `F_FULLFSYNC` has not been measured.
+cannot pin the WAL; the recorder checkpoints on an interval. Every read runs under the request deadline: `query.timeout`
+(default 25 s, below the Go client's 30 s request timeout, so some 25 to 30 s answers become `query_timeout`), or a
+shorter one the client asks for in `X-Recorder-Deadline-Ms` (its HTTP timeout minus 1 s, clamped to at least 1 s and
+never above `query.timeout`). A request cancelled by the client or by that header deadline is counted as
+`request_cancelled_total{op,reason}` and logged as `request_cancelled`, not as a timeout. On darwin SQLite's `synchronous=FULL` issues a plain `fsync`, which does not flush the drive's cache, so the commits for "settled", "removal pending" and "removed" run with `PRAGMA fullfsync=ON` (`F_FULLFSYNC`), and the archive, the clone and their containing directories are flushed with `F_FULLFSYNC` before anything is deleted. The 9,000 to 12,000 commits per second measured in the spike used plain `fsync`; the cost with `F_FULLFSYNC` has not been measured.
 
 Full file contents MUST NOT be stored in the database (operator 2026-10-28: "i don't think we
 should have full file contents in the db"). Word search uses one FTS5 index, contentless with
@@ -1558,7 +1562,7 @@ throwaway Claude):
 - When the Claude dies, even by SIGKILL, the listener notices within 3 seconds (measured), removes its FIFO and
   exits, leaving no process. A stale FIFO remains only if the listener itself is killed with the
   Claude, or after a machine crash; the recorder removes `<pid>.fifo` when it sees the Process exit
-  and sweeps at startup for FIFOs whose pid is not a live Process with a matching start time. A new Claude that reuses a pid deletes and recreates the file.
+  and sweeps at startup, then every `fifo.sweep_every` (default 10 minutes; never on the 5 s tracker poll), for FIFOs whose pid is not a live Process with a matching start time. A new Claude that reuses a pid deletes and recreates the file.
 
 The spike's mod differs from this design in four ways that the build MUST close: its restart counter never resets (the counter MUST count consecutive failures, resetting once a listener has run for 60 s); it has no `id` de-duplication, no `run` allowlist and no reply path; the command MUST retry `ENOENT` for up to 3 seconds before it reports exit code 4, because a healing listener recreates the FIFO within that time while a Claude that never had the mod has none; and a slow writer that stalls mid-line for over a second loses the line's head to `read -t` (requests are written in one `write`, so this does not occur in use).
 

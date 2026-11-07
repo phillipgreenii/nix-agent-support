@@ -189,6 +189,11 @@ let
     settings.doctor.interval = "6h";
   } osWithObs;
 
+  onQueryTimeout = case darwin {
+    daemon.enable = true;
+    query.timeout = "10s";
+  } osWithObs;
+
   onMaxConn = case darwin {
     daemon.enable = true;
     query.maxConnections = 0;
@@ -398,6 +403,8 @@ let
     valueChangeChangesRenderedConfig = toString (rendered onOtherSettle) != toString (rendered on);
     maxConnectionsDefaultRendered =
       (opts on).query.maxConnections == 8 && (data on).query.max_connections == 8;
+    queryTimeoutDefaultRendered = (opts on).query.timeout == "25s" && (data on).query.timeout == "25s";
+    queryTimeoutOverrideRendered = (data onQueryTimeout).query.timeout == "10s";
     maxConnectionsOverrideRendered =
       (data onSettings).query.max_connections == 8 && (data onMaxConn).query.max_connections == 0;
     settingsMerge =

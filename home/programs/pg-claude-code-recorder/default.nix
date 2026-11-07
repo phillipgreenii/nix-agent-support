@@ -98,6 +98,7 @@ let
       maxWaiters = cfg.wait.maxWaiters;
     };
     query.max_connections = cfg.query.maxConnections;
+    query.timeout = cfg.query.timeout;
     held = {
       recheck = cfg.held.recheck;
       alertAfter = cfg.held.alertAfter;
@@ -358,6 +359,14 @@ in
         description = "Waiter limit.";
       };
     };
+
+    query.timeout = durationOption "25s" ''
+      Deadline of every read (config key `query.timeout`). It is kept below the
+      client's 30s request timeout, so a slow read answers `query_timeout`
+      instead of timing out in the client; a read that took 25 to 30s under the
+      old default now answers `query_timeout`. A client may ask for a shorter
+      deadline per request, never a longer one.
+    '';
 
     query.maxConnections = lib.mkOption {
       type = lib.types.addCheck lib.types.int (n: n == 0 || n >= 2);
