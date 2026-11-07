@@ -1,12 +1,14 @@
 # pg-checkout-pool unified-alerting rules. Metric names come from `pg-checkout-pool metrics`
 # (packages/pg-checkout-pool/internal/metrics); the series is delivered by whatever runs that
-# command on a schedule (a textfile collector), which is the deployment's job.
+# command; the series is delivered by `pg-checkout-pool serve` (the phillipgreenii.services.
+# pg-checkout-pool-exporter darwin module), which Prometheus scrapes as job="pg-checkout-pool".
 #
 #   pg-checkout-pool-leaked-slots      a lease nobody holds and nobody reaped, for 10m
 #   pg-checkout-pool-quarantined       a slot quarantined, for 1h
 #   pg-checkout-pool-exhausted-waiting every slot busy while lease commands wait, for 15m
 #   pg-checkout-pool-reset-slow        reset p95 above 30 s over 30m, for 15m
 #   pg-checkout-pool-daemon-orphans    more fsmonitor daemons than slots plus one, for 15m
+#   pg-checkout-pool-exporter-down     the exporter's scrape fails or is missing, for 5m
 #
 # The 30 s reset threshold is derived from docs/superpowers/specs/2026-11-07-monorepo-checkout-
 # pool-measurements.md: a reset of the real monorepo checkout took about 9 s (6.5 to 14.0 s
@@ -16,8 +18,11 @@
 #
 # refId A is plain PromQL and refId C a single threshold stage (gt 0, or gt 30 for the reset
 # p95), so check-alert-rules.sh can wrap A with C's evaluator and run `promtool test rules`
-# over rule-tests/<uid>.test.yaml. Every rule has noDataState OK: a pool that is not in use
-# exports nothing wrong, and the exporter being absent is for the launchd health rules.
+# over rule-tests/<uid>.test.yaml. Every rule but exporter-down has noDataState OK: a pool that
+# is not in use exports nothing wrong. The exporter-down rule is the exporter's working signal
+# (nix-support-apps ADR 0041, option a): it is the only rule that fires when the exporter dies,
+# so it alone has noDataState Alerting (a missing up series is the failure it reports), and it
+# is gated on nothing else.
 #
 # Each uid is also in registeredRuleUIDs of packages/pg-router-probe/cmd/pg-router-probe/run.go
 # (a firing instance reaches the escalation flow), and a deployment that passes its own
@@ -236,3 +241,42 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+      - uid: pg-checkout-pool-exporter-down
+        title: Checkout pool exporter is down
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The pg-checkout-pool exporter has not answered a scrape for over 5 minutes"
+          description: 'up{job="pg-checkout-pool"} has been 0, or has gone missing, for over 5 minutes: the exporter (pg-checkout-pool serve, launchd agent com.phillipg.pg-checkout-pool-exporter) is down or its listener is not on the scraped port, so the other pg-checkout-pool rules are blind (they treat no data as OK). Read the launchd log under ~/.local/state/pg-checkout-pool-exporter/ and restart the agent.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'min(up{job="pg-checkout-pool"})'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]

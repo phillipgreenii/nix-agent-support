@@ -8354,6 +8354,108 @@
                     touch "$out"
                   '';
 
+              # pg-checkout-pool-exporter: the darwin module evaluates standalone and renders
+              # the launchd agent (loopback serve on the ledger port, optional --root), the
+              # scrape target, and nothing at all while off or while observability is off.
+              test-pg-checkout-pool-exporter-darwin-module =
+                let
+                  evalModule =
+                    obsEnable: poolCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-checkout-pool-exporter/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.anything;
+                                default = [ ];
+                              };
+                              phillipgreenii = {
+                                system.launchdServices.userAgents = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.attrs;
+                                  default = { };
+                                };
+                                observability = {
+                                  enable = lib.mkOption {
+                                    type = lib.types.bool;
+                                    default = false;
+                                  };
+                                  metricsTargets = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.attrs;
+                                    default = { };
+                                  };
+                                  logSources = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.attrs;
+                                    default = { };
+                                  };
+                                  alertRuleFiles = lib.mkOption {
+                                    type = lib.types.listOf lib.types.path;
+                                    default = [ ];
+                                  };
+                                };
+                              };
+                              system.primaryUser = lib.mkOption {
+                                type = lib.types.nullOr lib.types.str;
+                                default = "tester";
+                              };
+                            };
+                            config.phillipgreenii.observability.enable = obsEnable;
+                          }
+                        )
+                        { phillipgreenii.services.pg-checkout-pool-exporter = poolCfg; }
+                      ];
+                    }).config;
+
+                  enabled = evalModule true { enable = true; };
+                  rooted = evalModule true {
+                    enable = true;
+                    poolRoot = "/srv/pool";
+                    port = 9999;
+                  };
+                  obsOff = evalModule false { enable = true; };
+                  moduleOff = evalModule true { };
+
+                  inertOk =
+                    c:
+                    c.phillipgreenii.system.launchdServices.userAgents == { }
+                    && c.phillipgreenii.observability.metricsTargets == { }
+                    && c.phillipgreenii.observability.logSources == { };
+
+                  ua = enabled.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter;
+                  uaRooted = rooted.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter;
+                  hasInfixNoCtx =
+                    needle: hay:
+                    lib.hasInfix (builtins.unsafeDiscardStringContext needle) (builtins.unsafeDiscardStringContext hay);
+                in
+                assert inertOk obsOff;
+                assert inertOk moduleOff;
+                assert ua.label == "com.phillipg.pg-checkout-pool-exporter";
+                assert ua.keepAlive == true;
+                assert ua.runAtLoad;
+                assert ua.serviceConfig.ProcessType == "Background";
+                assert enabled.phillipgreenii.observability.metricsTargets.pg-checkout-pool.port == 9148;
+                assert enabled.phillipgreenii.observability.metricsTargets.pg-checkout-pool.scrapeInterval == "60s";
+                assert hasInfixNoCtx "pg-checkout-pool serve" ua.script;
+                assert lib.hasInfix "--addr 127.0.0.1:9148" ua.script;
+                # An empty poolRoot lets the command pick its default: no --root.
+                assert !(lib.hasInfix "--root" ua.script);
+                assert lib.hasInfix "export XDG_STATE_HOME=/Users/tester/.local/state" ua.script;
+                assert lib.hasInfix "--addr 127.0.0.1:9999" uaRooted.script;
+                assert lib.hasInfix "--root /srv/pool" uaRooted.script;
+                assert rooted.phillipgreenii.observability.metricsTargets.pg-checkout-pool.port == 9999;
+                assert
+                  enabled.phillipgreenii.observability.logSources.pg-checkout-pool-exporter == {
+                    path = "/Users/tester/.local/state/pg-checkout-pool-exporter/launchd-*.log";
+                    format = "raw";
+                  };
+                assert lib.all (a: a.assertion) enabled.assertions;
+                pkgs.runCommand "test-pg-checkout-pool-exporter-darwin-module-ok" { } ''
+                  touch "$out"
+                '';
+
               # ccpool-probe (docket pg2-93e5s, packet 2) — fixture-driven
               # unit/integration suite (needs-input/zombie-drift checks,
               # fingerprinting, "nothing new" dedup, snapshot robustness,

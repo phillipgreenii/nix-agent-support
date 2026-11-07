@@ -26,13 +26,16 @@ dashboard="$2"
 tests_dir="$3"
 run_go="$4"
 
-# uid, for, threshold, dashboard panel id: one row per rule, in the file's order.
+# uid, for, threshold, dashboard panel id, evaluator, noDataState: one row per rule, in the
+# file's order. An empty panel id means the rule links no dashboard panel (the exporter-down
+# rule, the exporter's working signal, which alerts on missing data).
 rows='[
-  ["pg-checkout-pool-leaked-slots", "10m", 0, "2"],
-  ["pg-checkout-pool-quarantined", "1h", 0, "3"],
-  ["pg-checkout-pool-exhausted-waiting", "15m", 0, "4"],
-  ["pg-checkout-pool-reset-slow", "15m", 30, "5"],
-  ["pg-checkout-pool-daemon-orphans", "15m", 0, "8"]
+  ["pg-checkout-pool-leaked-slots", "10m", 0, "2", "gt", "OK"],
+  ["pg-checkout-pool-quarantined", "1h", 0, "3", "gt", "OK"],
+  ["pg-checkout-pool-exhausted-waiting", "15m", 0, "4", "gt", "OK"],
+  ["pg-checkout-pool-reset-slow", "15m", 30, "5", "gt", "OK"],
+  ["pg-checkout-pool-daemon-orphans", "15m", 0, "8", "gt", "OK"],
+  ["pg-checkout-pool-exporter-down", "5m", 1, "", "lt", "Alerting"]
 ]'
 rule_uids="$(printf '%s' "$rows" | jq -c '[.[][0]]')"
 
@@ -62,29 +65,34 @@ assert "rule uids must be exactly the tested set, in order" \
   '[.groups[].rules[].uid] == $uids' --argjson uids "$rule_uids"
 
 dash_uid="$(jq -r '.uid' "$dashboard")"
-while IFS=$'\t' read -r uid for_ thr panel; do
+while IFS=$'\t' read -r uid for_ thr op nodata panel; do
   assert "$uid: uid at most 40 characters" '.groups[].rules[] | select(.uid == $u) | (.uid | length) <= 40' --arg u "$uid"
-  assert "$uid: condition C over A, B, C; for $for_; noDataState OK; execErrState Error; severity warning" \
+  assert "$uid: condition C over A, B, C; for $for_; noDataState $nodata; execErrState Error; severity warning" \
     '.groups[].rules[] | select(.uid == $u)
      | .condition == "C" and (.data | map(.refId) == ["A", "B", "C"]) and .for == $f
-       and .noDataState == "OK" and .execErrState == "Error" and .labels == { severity: "warning" }
+       and .noDataState == $nd and .execErrState == "Error" and .labels == { severity: "warning" }
        and ((.title // "") != "") and ((.annotations.summary // "") != "") and ((.annotations.description // "") != "")' \
-    --arg u "$uid" --arg f "$for_"
-  assert "$uid: refId C is a single gt $thr threshold stage over B" \
+    --arg u "$uid" --arg f "$for_" --arg nd "$nodata"
+  assert "$uid: refId C is a single $op $thr threshold stage over B" \
     '.groups[].rules[] | select(.uid == $u) | (.data[] | select(.refId == "C") | .model)
      | .type == "threshold" and .expression == "B"
-       and .conditions == [{ evaluator: { type: "gt", params: [$t] } }]' \
-    --arg u "$uid" --argjson t "$thr"
+       and .conditions == [{ evaluator: { type: $op, params: [$t] } }]' \
+    --arg u "$uid" --argjson t "$thr" --arg op "$op"
   assert "$uid: refId A is an instant query on the prometheus datasource" \
     '.groups[].rules[] | select(.uid == $u) | (.data[] | select(.refId == "A"))
-     | .datasourceUid == "prometheus" and .model.instant == true and (.model.expr | test("pg_checkout_pool_"))' --arg u "$uid"
+     | .datasourceUid == "prometheus" and .model.instant == true and (.model.expr | test("pg_checkout_pool_|^min\\(up\\{job=\"pg-checkout-pool\"\\}\\)$"))' --arg u "$uid"
+  if [ -z "$panel" ]; then
+    assert "$uid: must link no dashboard panel" \
+      '.groups[].rules[] | select(.uid == $u) | (.annotations | has("__dashboardUid__") or has("__panelId__")) | not' --arg u "$uid"
+    continue
+  fi
   assert "$uid: annotations link the pool dashboard panel $panel" \
     '.groups[].rules[] | select(.uid == $u) | .annotations.__dashboardUid__ == $d and .annotations.__panelId__ == $p' \
     --arg u "$uid" --arg d "$dash_uid" --arg p "$panel"
   jq -e --arg pid "$panel" \
     '[.. | objects | select(has("gridPos")) | select((.id | tostring) == $pid)] | length == 1' \
     "$dashboard" >/dev/null || fail "$uid: __panelId__ $panel does not exist in the dashboard JSON exactly once"
-done < <(printf '%s' "$rows" | jq -r '.[] | [.[0], .[1], (.[2] | tostring), .[3]] | @tsv')
+done < <(printf '%s' "$rows" | jq -r '.[] | [.[0], .[1], (.[2] | tostring), .[4], .[5], .[3]] | @tsv')
 
 # --- part 2: registration with the router probe ----------------------------------------
 

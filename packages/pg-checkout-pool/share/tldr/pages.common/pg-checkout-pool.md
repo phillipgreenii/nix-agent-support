@@ -35,11 +35,15 @@
 
 `pg-checkout-pool status`
 
-- Print the Prometheus metrics (slot gauges plus reset, wait, failure and rescue counters), or write them atomically for a textfile collector:
+- Print the Prometheus metrics (slot gauges plus reset, wait, failure and rescue counters), or write them atomically to a file:
 
 `pg-checkout-pool metrics`
 
 `pg-checkout-pool metrics --out {{/path/to/pg_checkout_pool.prom}}`
+
+- Serve the same exposition on a loopback `/metrics` port, rendered on each scrape (the launchd exporter runs this):
+
+`pg-checkout-pool serve --addr {{127.0.0.1:9148}}`
 
 - Grow a cold pool to a number of slots, one slot at a time with a pause between creations (refused below the free-space floor):
 

@@ -52,6 +52,7 @@ commands:
   reap     [--dry-run] [--grace DUR] [--keep PATH]...
   status   [--json]
   metrics  [--out FILE]
+  serve    [--addr 127.0.0.1:9148]   loopback /metrics, rendered on each scrape
   version
 
 every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status and metrics.
@@ -76,6 +77,8 @@ func (a *app) run(args []string) int {
 		return status(args[1:], stdout, stderr, clock)
 	case "metrics":
 		return a.metrics(args[1:])
+	case "serve":
+		return a.serve(args[1:], nil)
 	case "lease":
 		return a.lease(args[1:])
 	case "renew":

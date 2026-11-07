@@ -396,6 +396,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-checkout-pool-exhausted-waiting",
 		"pg-checkout-pool-reset-slow",
 		"pg-checkout-pool-daemon-orphans",
+		"pg-checkout-pool-exporter-down",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)
@@ -1088,7 +1089,7 @@ const checkoutPoolRuleFile = "../../../pg-checkout-pool/grafana/alerting/alerts.
 
 // The pg-checkout-pool-* entries of registeredRuleUIDs equal the uids of the pool's rule file, in
 // the file's order. The file lives in a sibling module, so a build that carries only this module
-// (the nix go-tests sandbox) cannot see it and the test then checks the list's own pinned five;
+// (the nix go-tests sandbox) cannot see it and the test then checks the list's own pinned six;
 // the pool's alert-rules flake check compares the real file with this list.
 func TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile(t *testing.T) {
 	var registered []string
@@ -1097,8 +1098,8 @@ func TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile(t *testing.T) {
 			registered = append(registered, uid)
 		}
 	}
-	if len(registered) != 5 {
-		t.Fatalf("registered pg-checkout-pool uids = %d, want 5: %v", len(registered), registered)
+	if len(registered) != 6 {
+		t.Fatalf("registered pg-checkout-pool uids = %d, want 6: %v", len(registered), registered)
 	}
 	for _, uid := range registered {
 		if len(uid) > 40 {

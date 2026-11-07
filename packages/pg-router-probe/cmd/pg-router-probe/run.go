@@ -242,6 +242,7 @@ var registeredRuleUIDs = []string{
 	"pg-checkout-pool-exhausted-waiting",
 	"pg-checkout-pool-reset-slow",
 	"pg-checkout-pool-daemon-orphans",
+	"pg-checkout-pool-exporter-down",
 }
 
 // defaultGroupRuleUIDs are the rules that fire once per label value (repo,

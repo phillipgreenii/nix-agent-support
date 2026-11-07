@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/phillipgreenii/pg-checkout-pool/internal/metrics"
 	"github.com/phillipgreenii/pg-checkout-pool/internal/pool"
@@ -48,23 +47,33 @@ func (a *app) collectGauges(root string, sts []pool.SlotStatus) metrics.Gauges {
 	return g
 }
 
+// renderExposition renders the Prometheus text exposition for the pool at root.
+// The metrics command and the serve handler share it, so a scrape and a
+// `metrics` run print the same series.
+func (a *app) renderExposition(root string) (string, error) {
+	sts, err := pool.NewStore(root, a.clock).Status()
+	if err != nil {
+		return "", err
+	}
+	j, err := metrics.Load(root)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "pg-checkout-pool: metrics: %v\n", err)
+	}
+	return metrics.Render(a.collectGauges(root, sts), j), nil
+}
+
 // metrics prints the Prometheus text exposition, or with --out writes it
-// atomically to FILE (a node_exporter textfile collector reads it).
+// atomically to FILE.
 func (a *app) metrics(args []string) int {
 	fs, root := a.newFlags("metrics")
 	out := fs.String("out", "", "write the exposition to this file atomically instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
-	sts, err := pool.NewStore(*root, a.clock).Status()
+	text, err := a.renderExposition(*root)
 	if err != nil {
 		return a.fail(err)
 	}
-	j, err := metrics.Load(*root)
-	if err != nil {
-		fmt.Fprintf(a.stderr, "pg-checkout-pool: metrics: %v\n", err)
-	}
-	text := metrics.Render(a.collectGauges(*root, sts), j)
 	if *out == "" {
 		fmt.Fprint(a.stdout, text)
 		return 0
@@ -92,5 +101,3 @@ func (a *app) metrics(args []string) int {
 	}
 	return 0
 }
-
-var _ = time.Second
