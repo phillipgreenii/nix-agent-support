@@ -164,6 +164,7 @@ check() {
       def expr($n): [rule($n) | .data[] | select(.refId == "A") | .model.expr] | first;
       (expr("daemon-down") | endswith("+ on() (max(pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1) or vector(0))") and contains("or vector(0)) + on()") and (contains("unless") | not))
       and ([rule("daemon-down") | .annotations.description | test("scrape interval is 30s")] | first)
+      and (. as $root | ["daemon-down", "doctor-mismatch"] | all(. as $n | $root | rule($n) | .annotations.logql | test("^\\{service_name=\"pg-claude-code-recorder\"\\}")))
       and (expr("heartbeat-stale") | contains($up) and contains("or vector(0)"))
       and (expr("doctor-mismatch") | contains($up) and contains("or vector(0)"))
       and (expr("control-inbox-gone") | contains("state=\"gone\"") and (contains("never_loaded") | not))
@@ -171,7 +172,7 @@ check() {
       and (expr("loop-stalled") | contains("{loop=\"watcher_sweep\"} > 0)) > 2700 or") and contains("loop=~\"tracker_tick|tracker_poll\"} > 0)) > 120 or") and contains("{loop=\"status_refresh\"} > 0)) > 60 or") and contains("loop_in_flight_seconds > 600)") and (contains("parser_drain") | not))
       and (expr("request-slow") | contains("> 50)") and contains("{le=\"10\"}"))
       and (expr("schema-rebuild-required") | contains("service_name=\"pg-claude-code-recorder\"") and contains("event=\"schema_rebuild_required\""))' >/dev/null; then
-    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket; schema-rebuild-required service_name and event)"
+    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; daemon-down and doctor-mismatch logql annotation on the recorder log stream; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket; schema-rebuild-required service_name and event)"
   fi
   # S8
   local ruids
@@ -249,6 +250,8 @@ mutant RULE-S6 "an uncatalogued metric" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-copy-lag") | .data[0].model.expr) = "max(pg_claude_code_recorder_not_a_metric)"'
 mutant RULE-S7 "daemon-down without the SYSTEM_PAUSE guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"})"'
+mutant RULE-S7 "daemon-down without its logql annotation" \
+  'del(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .annotations.logql)'
 mutant RULE-S7 "heartbeat-stale without the up guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-heartbeat-stale") | .data[0].model.expr) = "(time() - max(pg_claude_code_recorder_last_sweep_timestamp_seconds))"'
 mutant RULE-S7 "daemon-down back on the empty-under-pause unless form" \

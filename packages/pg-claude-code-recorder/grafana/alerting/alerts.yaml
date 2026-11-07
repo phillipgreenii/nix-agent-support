@@ -54,6 +54,7 @@ groups:
         annotations:
           summary: "pg-claude-code-recorder has not been scraped for over 2 minutes"
           description: "Prometheus has had no successful scrape of the recorder (up of job pg-claude-code-recorder is 0, or the series is gone) for over 2 minutes; the scrape interval is 30s, so about 4 scrapes in a row have failed. The recorder is not copying, so Claude Code files changed meanwhile are caught up on restart (no loss while remove.enable is false). Run pg-claude-code-recorder status, then read the launch agent log (launchd-stderr.log in the agent log directory). Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          logql: '{service_name="pg-claude-code-recorder"}'
         data:
           - refId: A
             relativeTimeRange:
@@ -405,6 +406,7 @@ groups:
         annotations:
           summary: "pg-claude-code-recorder doctor reports a mismatch, or its last run is over 2 days old"
           description: "doctor_mismatch_files is above 0 (a copy differs from its Claude file), or doctor_last_run_timestamp (the end of the last COMPLETED rolling cycle, not of a slice) is non-zero and older than 172800 seconds (2 days: doctor.interval plus one cycle with the default 24h interval, so the rolling doctor is not finishing cycles). A cycle that is mid-way never moves the timestamp, but doctor_mismatch_files is updated after every slice, so a find still pages within minutes. A last run of 0 means doctor has not completed a cycle yet since the state directory was created (the daemon first runs one doctor.interval after start), which the removal readiness checklist treats as not ready. Both are visible as gauges, never as a log line. A stale doctor also blocks the removal readiness checklist. Run pg-claude-code-recorder doctor (exit 9 on a mismatch; it writes doctor.json)."
+          logql: '{service_name="pg-claude-code-recorder"}'
         data:
           - refId: A
             relativeTimeRange:

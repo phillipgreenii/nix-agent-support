@@ -461,6 +461,7 @@ groups:
         annotations:
           summary: "pg-router queue for type {{ $labels.type }} has a backlog but nothing is processing it"
           description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch running in it (pg_router_listener_in_flight on 6 consecutive scrapes; a declined attempt is in flight for a second or two and does not count) and completed none, and the role's pg_router_listener_pending was above 0 on every scrape of the window (a depth made only of settled, retained events is not a backlog), and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep, which needs 10 minutes of fresh scrapes before the condition can hold. A daemon restart is covered only by the 10 minute window: the new daemon holds no offer until its first dispatch pass re-offers a session the restart left running, so check whether the daemon restarted shortly before this fired."
+          logql: '{service_name="pg-router"}'
         data:
           - refId: A
             relativeTimeRange:
@@ -1457,6 +1458,7 @@ groups:
         annotations:
           summary: "ccpool pool {{ $labels.pool }} is full but no session is active; {{ $labels.role }} dispatches are declined at-capacity"
           description: "Every slot of ccpool pool {{ $labels.pool }} is held (ccpool_pool_capacity counted >= max_sessions, so free is 0) while no counted session is starting, ready or working, and {{ $labels.role }} dispatches were declined at-capacity in the last 15 minutes: the slots are held by idle or errored counted sessions, so the lane is stalled at capacity. Inspect with `ccpool --pool ~/.local/state/{{ $labels.pool }} list --json`. For a pool with more than one slot this fires only when NO slot is active."
+          logql: '{service_name="pg-router"}'
         data:
           - refId: A
             relativeTimeRange:
@@ -1691,6 +1693,7 @@ groups:
         annotations:
           summary: "pg-router role {{ $labels.role }} has made no progress for over 30 minutes and its last offers keep failing"
           description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 30 minutes (1800 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_unsuccessful_since_progress is 5 or more, and the role had a failing offer in the last hour (pg_router_failures_total, class declined or handler-error, rose, not counting the neutral reasons origin-unavailable and skipped-*, which are no fault and do not keep this alert alive). Progress is an accepted offer with no handler error, or with a budget-stop, usage-limit or triager error (the role did run); the unsuccessful count is handler errors and exit-9 declines of kind fault (a ccpool session that failed before it was ready, launch-failed). Check `pg-router status` for the role, the handler's error text in events.jsonl, and `ccpool list`. A role with nothing to do never fires this."
+          logql: '{service_name="pg-router"}'
         data:
           - refId: A
             relativeTimeRange:
