@@ -252,7 +252,7 @@ func Open(opt Options) (*Daemon, error) {
 	d.eng = &lifecycle.Engine{St: st, ControlDir: cfg.ControlStateDir, Now: opt.Clock.Now}
 	d.tr = lifecycle.NewTracker(lifecycle.TrackerConfig{
 		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
-		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow, EndsSweepEvery: cfg.EndsSweepEvery,
+		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow, EndsSweepEvery: cfg.EndsSweepEvery, FifoSweepEvery: cfg.FifoSweepEvery,
 		OnChange: func() { d.sett.LiveChanged() },
 	})
 	d.sett = settle.New(settle.Config{

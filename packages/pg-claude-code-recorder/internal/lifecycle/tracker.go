@@ -61,6 +61,10 @@ type TrackerConfig struct {
 	// EndsSweepEvery is how often the slow fallback scan of the ends directory
 	// runs, driven by Poll and the injected Clock (0: only at start-up).
 	EndsSweepEvery time.Duration
+	// FifoSweepEvery is how often the full FIFO sweep runs after the start-up
+	// one, driven by Poll and the injected Clock (0: only at start-up). A
+	// Process's own FIFO is removed when it exits; the sweep recovers the rest.
+	FifoSweepEvery time.Duration
 }
 
 type tracked struct {
@@ -105,8 +109,10 @@ type Tracker struct {
 	// endSweepAt is when the slow fallback scan last ran.
 	endDue     map[string]time.Time
 	endSweepAt time.Time
-	reqSeen    map[string]bool
-	reqCur     reqCursor
+	// fifoSweepAt is when the full FIFO sweep last ran.
+	fifoSweepAt time.Time
+	reqSeen     map[string]bool
+	reqCur      reqCursor
 }
 
 // NewTracker returns a Tracker.
@@ -377,8 +383,11 @@ func (t *Tracker) Startup() {
 		t.mu.Unlock()
 		t.attach(tr)
 	}
-	t.sweepFifos()
 	if t.cfg.ControlDir != "" {
+		t.mu.Lock()
+		t.fifoSweepAt = t.cfg.Clock.Now()
+		t.mu.Unlock()
+		t.sweepFifos(false)
 		t.mu.Lock()
 		t.endSweepAt = t.cfg.Clock.Now()
 		t.mu.Unlock()
@@ -455,7 +464,7 @@ func (t *Tracker) refreshInbox(live []*tracked) {
 
 // Poll does the control state directory's periodic work: it removes end files
 // that are due (a store query only when one is), runs the slow end-file fallback
-// scan when it is time, counts the mod's requests and removes stale FIFOs.
+// scan and the full FIFO sweep when it is time, and counts the mod's requests.
 func (t *Tracker) Poll() {
 	if t.cfg.ControlDir == "" {
 		return
@@ -478,24 +487,42 @@ func (t *Tracker) Poll() {
 			t.sweepEnds(true)
 		}
 	}
+	if every := t.cfg.FifoSweepEvery; every > 0 {
+		now := t.cfg.Clock.Now()
+		t.mu.Lock()
+		run := now.Sub(t.fifoSweepAt) >= every
+		if run {
+			t.fifoSweepAt = now
+		}
+		t.mu.Unlock()
+		if run {
+			t.sweepFifos(true)
+		}
+	}
 	t.removeDueEnds()
 	t.readRequests()
-	t.sweepFifos()
 }
 
-func (t *Tracker) removeFifo(pid int64) {
+// removeFifo removes the FIFO of pid and reports whether one was there.
+func (t *Tracker) removeFifo(pid int64) bool {
 	if t.cfg.ControlDir == "" {
-		return
+		return false
 	}
 	p := filepath.Join(t.cfg.ControlDir, "inbox", strconv.FormatInt(pid, 10)+".fifo")
 	if err := os.Remove(p); err == nil {
 		t.cfg.Obs.Reg.Add(obs.MStaleFifosRemoved, nil, 1)
+		return true
 	}
+	return false
 }
 
 // sweepFifos removes the FIFOs whose pid is not a live Process with a matching
-// start time (the recorder's first write into the control state directory).
-func (t *Tracker) sweepFifos() {
+// start time (the recorder's first write into the control state directory). It
+// runs at start-up and every FifoSweepEvery, not on each poll. found says
+// whether a removal here counts as a miss of the exit path (it does not at
+// start-up, where a FIFO left by a Process that died while the recorder was down
+// is expected).
+func (t *Tracker) sweepFifos(found bool) {
 	if t.cfg.ControlDir == "" {
 		return
 	}
@@ -527,8 +554,8 @@ func (t *Tracker) sweepFifos() {
 			_, serr := t.cfg.Sys.StartTime(int(pid))
 			stale = errors.Is(serr, proc.ErrGone)
 		}
-		if stale {
-			t.removeFifo(pid)
+		if stale && t.removeFifo(pid) && found {
+			t.cfg.Obs.Reg.Add(obs.MFallbackFound, map[string]string{"kind": "fifos"}, 1)
 		}
 	}
 }

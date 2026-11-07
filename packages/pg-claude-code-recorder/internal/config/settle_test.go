@@ -143,3 +143,23 @@ func TestEndsSweepEveryKey(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestFifoSweepEveryKey(t *testing.T) {
+	e := env(map[string]string{"HOME": "/h"})
+	if d := Defaults(e); d.FifoSweepEvery != 10*time.Minute {
+		t.Fatalf("default %v", d.FifoSweepEvery)
+	}
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "c.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, e)
+	}
+	if c, err := load("[fifo]\nsweep_every = \"30m\"\n"); err != nil || c.FifoSweepEvery != 30*time.Minute {
+		t.Fatalf("%v %v", err, c.FifoSweepEvery)
+	}
+	if _, err := load("[fifo]\nsweep_every = \"999ms\"\n"); err == nil || !strings.Contains(err.Error(), "fifo.sweep_every") {
+		t.Fatalf("err %v", err)
+	}
+}

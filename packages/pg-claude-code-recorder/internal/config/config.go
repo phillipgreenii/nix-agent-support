@@ -112,6 +112,10 @@ type Config struct {
 	// control ends directory runs (default 10 m, at least 1 s); end files are
 	// normally handled from the ingest event.
 	EndsSweepEvery time.Duration
+	// FifoSweepEvery is fifo.sweep_every: how often the full sweep of stale
+	// control inbox FIFOs runs after the start-up one (default 10 m, at least
+	// 1 s); a FIFO is normally removed when its Process exits.
+	FifoSweepEvery time.Duration
 	// HeldRecheck is held.recheck: how often a held Conversation is checked
 	// again (default 1 h).
 	HeldRecheck time.Duration
@@ -195,6 +199,9 @@ type file struct {
 	Ends struct {
 		SweepEvery string `toml:"sweep_every"`
 	} `toml:"ends"`
+	Fifo struct {
+		SweepEvery string `toml:"sweep_every"`
+	} `toml:"fifo"`
 	Settle struct {
 		After     string `toml:"after"`
 		Mode      string `toml:"mode"`
@@ -309,6 +316,7 @@ func Defaults(getenv func(string) string) Config {
 		SettleTick:          DefaultSettleTick,
 		SettleReconcile:     time.Hour,
 		EndsSweepEvery:      10 * time.Minute,
+		FifoSweepEvery:      10 * time.Minute,
 		SettleMinWake:       5 * time.Second,
 		HeldRecheck:         time.Hour,
 		HeldMaxAge:          3 * 24 * time.Hour,
@@ -439,6 +447,7 @@ func apply(c *Config, f file) error {
 		{"held.alertAfter", f.Held.AlertAfter, &c.HeldMaxAge},
 		{"held.recheck", f.Held.Recheck, &c.HeldRecheck},
 		{"ends.sweep_every", f.Ends.SweepEvery, &c.EndsSweepEvery},
+		{"fifo.sweep_every", f.Fifo.SweepEvery, &c.FifoSweepEvery},
 		{"settle.after", f.Settle.After, &c.SettleAfter},
 		{"settle.tick", f.Settle.Tick, &c.SettleTick},
 		{"settle.reconcile", f.Settle.Reconcile, &c.SettleReconcile},
@@ -499,6 +508,9 @@ func apply(c *Config, f file) error {
 	}
 	if c.EndsSweepEvery < time.Second {
 		return fmt.Errorf("ends.sweep_every: %s is under the 1s minimum", c.EndsSweepEvery)
+	}
+	if c.FifoSweepEvery < time.Second {
+		return fmt.Errorf("fifo.sweep_every: %s is under the 1s minimum", c.FifoSweepEvery)
 	}
 	if c.SettleMinWake < time.Second {
 		return fmt.Errorf("settle.min_wake: %s is under the 1s minimum", c.SettleMinWake)

@@ -84,6 +84,7 @@ let
       min_wake = cfg.settle.min_wake;
     };
     ends.sweep_every = cfg.ends.sweep_every;
+    fifo.sweep_every = cfg.fifo.sweep_every;
     doctor = {
       bytes_per_slice = cfg.doctor.bytes_per_slice;
       slice_every = cfg.doctor.slice_every;
@@ -261,6 +262,15 @@ in
         least 1s). End files are normally handled when they are ingested; the
         scan recovers one the event path missed. Rendered as
         `ends.sweep_every`.
+      '';
+    };
+
+    fifo = {
+      sweep_every = durationOption "10m" ''
+        Interval of the full sweep of stale control inbox FIFOs (at least 1s).
+        A FIFO is normally removed when its Process exits; the sweep recovers
+        one left by a Process that died unobserved. It also runs once at
+        start-up. Rendered as `fifo.sweep_every`.
       '';
     };
 

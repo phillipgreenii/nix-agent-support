@@ -171,6 +171,10 @@ let
     daemon.enable = true;
     ends.sweep_every = "30m";
   } osWithObs;
+  onFifoSweep = case darwin {
+    daemon.enable = true;
+    fifo.sweep_every = "30m";
+  } osWithObs;
   onRollingDoctor = case darwin {
     daemon.enable = true;
     doctor = {
@@ -345,6 +349,8 @@ let
       && d.settle.min_wake == "5s";
     endsSweepDefault = d.ends.sweep_every == "10m";
     endsSweepRendered = (data onEndsSweep).ends.sweep_every == "30m";
+    fifoSweepDefault = d.fifo.sweep_every == "10m";
+    fifoSweepRendered = (data onFifoSweep).fifo.sweep_every == "30m";
     doctorDefaults =
       d.doctor.bytes_per_slice == 268435456
       && d.doctor.slice_every == "1m"
