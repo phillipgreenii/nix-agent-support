@@ -1,0 +1,185 @@
+{
+  "end": true,
+  "findings": [
+    {
+      "category": "workflow",
+      "confirm_by": "The next inventory reports no missing target for the file.",
+      "evidence": ["E-001"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists. A second reading of the same snapshot reached the same conclusion.",
+      "impact": "1 broken line costs a reader time on each visit.",
+      "kind": "stale-reference",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "None beyond a small edit.",
+          "if_ruled": "If you adopt this, one work bead is filed for the configuration repository.",
+          "name": "Delete the line",
+          "pros": "Removes the dead end."
+        }
+      ],
+      "problem": "An instruction names a script that no longer exists.",
+      "recommendation": {
+        "option": "Delete the line",
+        "why": "Deleting beats adding a replacement."
+      },
+      "situation": "The check found 1 missing target [E-001.missing_targets=1]: the notes file points at a script that the inventory shows is absent.",
+      "subject_key": "file:docs/notes.md",
+      "sums": [],
+      "targets": ["docs/notes.md"],
+      "title": "Is this still worth a change? Should the dead script reference in the notes file be deleted?",
+      "why_problem": "A reader following the line hits a dead end."
+    },
+    {
+      "category": "workflow",
+      "confirm_by": "The next inventory reports no conflicting pair for the file.",
+      "evidence": ["E-002"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists. A second reading of the same snapshot reached the same conclusion.",
+      "impact": "1 conflict leaves behaviour unpredictable.",
+      "kind": "conflict",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "A choice has to be made.",
+          "if_ruled": "If you adopt this, one work bead is filed for the configuration repository.",
+          "name": "Keep one rule and delete the other",
+          "pros": "Removes the conflict."
+        }
+      ],
+      "problem": "Two instructions give opposite directions for the same situation.",
+      "recommendation": {
+        "option": "Keep one rule and delete the other",
+        "why": "One clear rule beats two competing ones."
+      },
+      "situation": "The check found 1 conflicting pair [E-002.conflicting_pairs=1] between this file and another instruction file.",
+      "subject_key": "file:docs/rules-a.md",
+      "sums": [],
+      "targets": ["docs/rules-a.md"],
+      "title": "Is this still worth a change? Which of two conflicting rules should stay?",
+      "why_problem": "The assistant must guess which one wins."
+    },
+    {
+      "category": "workflow",
+      "confirm_by": "The next inventory reports no duplicated lines for the file.",
+      "evidence": ["E-003"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists. A second reading of the same snapshot reached the same conclusion.",
+      "impact": "3 lines are maintained twice.",
+      "kind": "duplicate",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "A small edit is needed.",
+          "if_ruled": "If you adopt this, one work bead is filed for the configuration repository.",
+          "name": "Keep the lines in one file and delete the copy",
+          "pros": "Removes the drift risk."
+        }
+      ],
+      "problem": "The same instruction is stated in two places.",
+      "recommendation": {
+        "option": "Keep the lines in one file and delete the copy",
+        "why": "Consolidating removes lines instead of adding any."
+      },
+      "situation": "The check found 3 duplicated lines [E-003.duplicate_lines=3] that also appear in another instruction file.",
+      "subject_key": "file:docs/style-a.md",
+      "sums": [],
+      "targets": ["docs/style-a.md"],
+      "title": "Is this still worth a change? Should the repeated lines of the style file be kept in one place?",
+      "why_problem": "The two copies drift apart over time."
+    },
+    {
+      "category": "workflow",
+      "confirm_by": "The next inventory no longer lists the skill.",
+      "evidence": ["E-004"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists. A second reading of the same snapshot reached the same conclusion.",
+      "impact": "60 idle days with no use.",
+      "kind": "unused",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "It must be rewritten if needed later.",
+          "if_ruled": "If you adopt this, one work bead is filed for the configuration repository.",
+          "name": "Delete the skill",
+          "pros": "Frees context."
+        }
+      ],
+      "problem": "A configured skill that nothing uses still costs context.",
+      "recommendation": {
+        "option": "Delete the skill",
+        "why": "Nothing used it for 60 days."
+      },
+      "situation": "The skill was used 0 times [E-004.uses=0] and has been idle for 60 days [E-004.days_idle=60].",
+      "subject_key": "skill:old-helper",
+      "sums": [],
+      "targets": ["skills/old-helper.md"],
+      "title": "Is this still worth a change? Should the idle helper skill be removed?",
+      "why_problem": "Its description is loaded every session."
+    }
+  ],
+  "lens": "config-health",
+  "schema_version": 1,
+  "scope": "demo-scope",
+  "unverified": ["Whether other scopes see the same pattern."],
+  "window": {
+    "from": "2030-03-01T00:00:00Z",
+    "to": "2030-03-08T00:00:00Z"
+  }
+}

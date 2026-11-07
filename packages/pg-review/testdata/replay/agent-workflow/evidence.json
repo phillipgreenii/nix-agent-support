@@ -1,0 +1,253 @@
+[
+  {
+    "baseline": [],
+    "defined_in": "settings/alpha.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-001",
+    "kind": "repeat-refusal",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 4,
+      "refusals": 22,
+      "sessions": 6
+    },
+    "query": "synthetic-query",
+    "samples": ["S-101", "S-102"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:alpha-clean",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/beta.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-002",
+    "kind": "misclassified-error",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 3,
+      "errors": 14,
+      "sessions": 5
+    },
+    "query": "synthetic-query",
+    "samples": ["S-103"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:beta-lint",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/gamma.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-003",
+    "kind": "wasted-retries",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 5,
+      "minutes": 45,
+      "retries": 31,
+      "sessions": 7
+    },
+    "query": "synthetic-query",
+    "samples": ["S-104"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:gamma-fetch",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/delta.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-004",
+    "kind": "cost-hotspot",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 6,
+      "sessions": 9,
+      "tokens": 120000
+    },
+    "query": "synthetic-query",
+    "samples": ["S-105"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:delta-build",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/epsilon.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-005",
+    "kind": "tool-ux",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 3,
+      "sessions": 4,
+      "stumbles": 11
+    },
+    "query": "synthetic-query",
+    "samples": ["S-106"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:epsilon-edit",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/zeta.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-006",
+    "kind": "wasted-retries",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 1,
+      "retries": 9,
+      "sessions": 1
+    },
+    "query": "synthetic-query",
+    "samples": ["S-107"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:zeta-once",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/eta.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-007",
+    "kind": "tool-ux",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {},
+    "query": "synthetic-query",
+    "samples": ["S-108"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:eta-slow",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/theta.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-008",
+    "kind": "repeat-refusal",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 1,
+      "refusals": 5,
+      "sessions": 2
+    },
+    "query": "synthetic-query",
+    "samples": ["S-109"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:theta-pair",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/iota.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-009",
+    "kind": "cost-hotspot",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 1,
+      "sessions": 1,
+      "tokens": 90000
+    },
+    "query": "synthetic-query",
+    "samples": ["S-110"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:iota-quick",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/kappa.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-010",
+    "kind": "misclassified-error",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 1,
+      "errors": 3,
+      "sessions": 2
+    },
+    "query": "synthetic-query",
+    "samples": ["S-111"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:kappa-note",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "settings/lambda.json",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-011",
+    "kind": "wasted-retries",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days": 1,
+      "minutes": 6,
+      "retries": 4,
+      "sessions": 1
+    },
+    "query": "synthetic-query",
+    "samples": ["S-112"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "tool:lambda-rare",
+    "type": "signature",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  }
+]

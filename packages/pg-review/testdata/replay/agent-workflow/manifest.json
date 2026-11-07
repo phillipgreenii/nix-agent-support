@@ -1,0 +1,19 @@
+{
+  "decoys": [
+    "tool:zeta-once",
+    "tool:eta-slow",
+    "tool:theta-pair",
+    "tool:iota-quick",
+    "tool:kappa-note",
+    "tool:lambda-rare"
+  ],
+  "known": [
+    "tool:alpha-clean",
+    "tool:beta-lint",
+    "tool:gamma-fetch",
+    "tool:delta-build",
+    "tool:epsilon-edit"
+  ],
+  "lens": "agent-workflow",
+  "scope": "demo-scope"
+}

@@ -1,0 +1,19 @@
+{
+  "decoys": [
+    "file:docs/ok-a.md",
+    "file:docs/ok-b.md",
+    "file:docs/ok-c.md",
+    "skill:busy-helper",
+    "file:docs/small.md",
+    "file:docs/ok-d.md"
+  ],
+  "known": [
+    "file:docs/notes.md",
+    "file:docs/rules-a.md",
+    "file:docs/style-a.md",
+    "skill:old-helper",
+    "file:docs/big.md"
+  ],
+  "lens": "config-health",
+  "scope": "demo-scope"
+}

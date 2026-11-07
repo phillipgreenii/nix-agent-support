@@ -1,0 +1,235 @@
+[
+  {
+    "baseline": [],
+    "defined_in": "docs/notes.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-001",
+    "kind": "stale-reference",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "missing_targets": 1
+    },
+    "query": "synthetic-query",
+    "samples": ["S-201"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/notes.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/rules-a.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-002",
+    "kind": "conflict",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "conflicting_pairs": 1
+    },
+    "query": "synthetic-query",
+    "samples": ["S-202"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/rules-a.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/style-a.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-003",
+    "kind": "duplicate",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "duplicate_lines": 3
+    },
+    "query": "synthetic-query",
+    "samples": ["S-203"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/style-a.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "skills/old-helper.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-004",
+    "kind": "unused",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days_idle": 60,
+      "uses": 0
+    },
+    "query": "synthetic-query",
+    "samples": ["S-204"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "skill:old-helper",
+    "type": "skill",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/big.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-005",
+    "kind": "oversize",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "lines": 2400
+    },
+    "query": "synthetic-query",
+    "samples": ["S-205"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/big.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/ok-a.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-006",
+    "kind": "stale-reference",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "missing_targets": 0
+    },
+    "query": "synthetic-query",
+    "samples": ["S-206"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/ok-a.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/ok-b.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-007",
+    "kind": "conflict",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "conflicting_pairs": 0
+    },
+    "query": "synthetic-query",
+    "samples": ["S-207"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/ok-b.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/ok-c.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-008",
+    "kind": "duplicate",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "duplicate_lines": 0
+    },
+    "query": "synthetic-query",
+    "samples": ["S-208"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/ok-c.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "skills/busy-helper.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-009",
+    "kind": "unused",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "days_idle": 0,
+      "uses": 14
+    },
+    "query": "synthetic-query",
+    "samples": ["S-209"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "skill:busy-helper",
+    "type": "skill",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/small.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-010",
+    "kind": "oversize",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "lines": 40
+    },
+    "query": "synthetic-query",
+    "samples": ["S-210"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/small.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  },
+  {
+    "baseline": [],
+    "defined_in": "docs/ok-d.md",
+    "first_seen": "2030-03-01T08:00:00Z",
+    "id": "E-011",
+    "kind": "stale-reference",
+    "last_seen": "2030-03-07T17:30:00Z",
+    "metrics": {
+      "missing_targets": 0
+    },
+    "query": "synthetic-query",
+    "samples": ["S-211"],
+    "schema_version": 1,
+    "scope": "demo-scope",
+    "subject_key": "file:docs/ok-d.md",
+    "type": "file",
+    "window": {
+      "from": "2030-03-01T00:00:00Z",
+      "to": "2030-03-08T00:00:00Z"
+    }
+  }
+]

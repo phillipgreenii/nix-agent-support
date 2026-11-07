@@ -1,0 +1,185 @@
+{
+  "end": true,
+  "findings": [
+    {
+      "category": "workflow",
+      "confirm_by": "The next review shows 0 refusals for this signature.",
+      "evidence": ["E-001"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists for this signature.",
+      "impact": "22 refusals in a week, each followed by retries that waste time.",
+      "kind": "repeat-refusal",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "One settings edit is needed.",
+          "if_ruled": "If you adopt this, one work bead is filed for the settings repository.",
+          "name": "Allow the safe variant and delete the stale deny pattern",
+          "pros": "Removes the refusals and one rule."
+        }
+      ],
+      "problem": "A deny rule refuses a cleanup call that is safe in practice, and each refusal is followed by several retried variants.",
+      "recommendation": {
+        "option": "Allow the safe variant and delete the stale deny pattern",
+        "why": "It removes the cause and deletes a rule rather than adding one."
+      },
+      "situation": "The cleanup call of tool-alpha was refused by a deny rule on 22 occasions [E-001.refusals=22], in 6 sessions [E-001.sessions=6] over 4 days [E-001.days=4].",
+      "subject_key": "tool:alpha-clean",
+      "sums": [],
+      "targets": ["settings/alpha.json"],
+      "title": "Should the safe variant of tool-alpha cleanup be allowed?",
+      "why_problem": "The rule matches the call by name only, so it cannot tell the safe variant from the dangerous one."
+    },
+    {
+      "category": "workflow",
+      "confirm_by": "The next review shows no misclassified lint results.",
+      "evidence": ["E-002"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "This is the first time the pattern is seen.",
+      "impact": "14 calls were misread as failures in the window.",
+      "kind": "misclassified-error",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "A wrapper edit is needed.",
+          "if_ruled": "If you adopt this, one work bead is filed for the wrapper.",
+          "name": "Map the lint exit code to success",
+          "pros": "Stops the false errors."
+        }
+      ],
+      "problem": "A normal lint result is reported as a failed call, so the assistant treats it as a fault and investigates.",
+      "recommendation": {
+        "option": "Map the lint exit code to success",
+        "why": "The change is small and removes a repeated misreading."
+      },
+      "situation": "Calls of tool-beta lint were reported as errors 14 times [E-002.errors=14] in 5 sessions [E-002.sessions=5] on 3 days [E-002.days=3], although the exit code is the tool's normal way to report findings.",
+      "subject_key": "tool:beta-lint",
+      "sums": [],
+      "targets": ["settings/beta.json"],
+      "title": "Should the expected exit code of tool-beta lint be treated as success?",
+      "why_problem": "The wrapper maps every nonzero exit code to an error."
+    },
+    {
+      "category": "workflow",
+      "confirm_by": "The next review shows fewer than 5 retries for this signature.",
+      "evidence": ["E-003"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists.",
+      "impact": "45 minutes lost in the window.",
+      "kind": "wasted-retries",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "Adds a small piece of configuration.",
+          "if_ruled": "If you adopt this, one work bead is filed for the settings repository.",
+          "name": "Add a retry with a delay to the fetch step",
+          "pros": "Saves the retries."
+        }
+      ],
+      "problem": "A transient failure is retried by hand, one call at a time, until it works.",
+      "recommendation": {
+        "option": "Add a retry with a delay to the fetch step",
+        "why": "It turns 31 manual retries into none; nothing needs to be removed because the manual loop disappears."
+      },
+      "situation": "Fetch calls were retried 31 times [E-003.retries=31] in 7 sessions [E-003.sessions=7] on 5 days [E-003.days=5], costing 45 minutes [E-003.minutes=45].",
+      "subject_key": "tool:gamma-fetch",
+      "sums": [],
+      "targets": ["settings/gamma.json"],
+      "title": "Should tool-gamma fetch stop retrying by hand?",
+      "why_problem": "The tool has no built-in retry and gives no hint that waiting would help."
+    },
+    {
+      "category": "workflow",
+      "confirm_by": "The next review shows the token total for this call shape fell.",
+      "evidence": ["E-004"],
+      "glossary": [
+        {
+          "meaning": "A tracked unit of work.",
+          "term": "bead"
+        },
+        {
+          "meaning": "A call shape of a tool, used to group similar calls.",
+          "term": "signature"
+        }
+      ],
+      "history": "No earlier ruling exists.",
+      "impact": "120000 tokens in the window for one call shape.",
+      "kind": "cost-hotspot",
+      "options": [
+        {
+          "cons": "The cost described above keeps recurring.",
+          "if_ruled": "Nothing changes and no work bead is filed.",
+          "name": "Do nothing",
+          "pros": "No work is needed."
+        },
+        {
+          "cons": "One small settings change is needed.",
+          "if_ruled": "If you adopt this, one work bead is filed for the settings repository.",
+          "name": "Limit the build output to failures",
+          "pros": "Cuts most of the cost."
+        }
+      ],
+      "problem": "The build output is read in full each time, which dominates token cost.",
+      "recommendation": {
+        "option": "Limit the build output to failures",
+        "why": "It targets the largest single cost."
+      },
+      "situation": "One build call shape used 120000 tokens [E-004.tokens=120000] in 9 sessions [E-004.sessions=9] on 6 days [E-004.days=6].",
+      "subject_key": "tool:delta-build",
+      "sums": [],
+      "targets": ["settings/delta.json"],
+      "title": "Should the build call of tool-delta be made cheaper?",
+      "why_problem": "The call has no way to limit its output to the failing part."
+    }
+  ],
+  "lens": "agent-workflow",
+  "schema_version": 1,
+  "scope": "demo-scope",
+  "unverified": ["Whether other scopes see the same pattern."],
+  "window": {
+    "from": "2030-03-01T00:00:00Z",
+    "to": "2030-03-08T00:00:00Z"
+  }
+}
