@@ -65,6 +65,10 @@ func TestConfiguredTimeout_Parsing(t *testing.T) {
 		{name: "timeouts is not an object", op: OpList, cfg: rawCfg(`{"timeouts":"60s"}`), wantErr: "timeouts"},
 		{name: "timeouts is an array", op: OpShow, cfg: rawCfg(`{"timeouts":[1]}`), wantErr: "timeouts"},
 
+		{name: "list_history configured", op: OpListHistory, cfg: timeoutsCfg(`"list_history":"180s"`), want: 180 * time.Second, wantSet: true},
+		{name: "list_history ignores timeouts.list", op: OpListHistory, cfg: timeoutsCfg(`"list":"90s"`)},
+		{name: "list_history above maximum names the key", op: OpListHistory, cfg: timeoutsCfg(`"list_history":"400s"`), wantErr: "timeouts.list_history"},
+
 		// A bad entry for one op never leaks into another.
 		{name: "bad list entry, show asked", op: OpShow, cfg: timeoutsCfg(`"list":"bad","show":"20s"`), want: 20 * time.Second, wantSet: true},
 		{name: "bad show entry, list asked", op: OpList, cfg: timeoutsCfg(`"show":"bad","list":"70s"`), want: 70 * time.Second, wantSet: true},
@@ -447,5 +451,23 @@ func TestServeLoop_ConfiguredListDeadlineIsEnforced(t *testing.T) {
 	errObj, _ := resp["error"].(map[string]any)
 	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 100ms") {
 		t.Errorf("deadline error %q does not name the configured limit 100ms", msg)
+	}
+}
+
+// TestListHistoryBudget pins list_history's own default (120s, umbrella 125s)
+// and that timeouts.list_history overrides both sides.
+func TestListHistoryBudget(t *testing.T) {
+	if got := backendTimeoutFor(OpListHistory, nil); got != 120*time.Second {
+		t.Errorf("default backend budget %v, want 120s", got)
+	}
+	if got := execTimeoutFor(OpListHistory, nil); got != 125*time.Second {
+		t.Errorf("default umbrella budget %v, want 125s", got)
+	}
+	cf := timeoutsCfg(`"list_history":"180s"`)
+	if got := backendTimeoutFor(OpListHistory, cf); got != 180*time.Second {
+		t.Errorf("configured backend budget %v, want 180s", got)
+	}
+	if got := execTimeoutFor(OpListHistory, cf); got != 185*time.Second {
+		t.Errorf("configured umbrella budget %v, want 185s", got)
 	}
 }

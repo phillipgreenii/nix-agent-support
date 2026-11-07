@@ -166,7 +166,7 @@ single `show` lookup but not the full `list` prompt, which measured runs needed 
 for, so a deployment that polls with `list` sets a higher value. A negative value or one above 30
 is rejected as `invalid_argument` rather than clamped, so a typo cannot lift the cap on a runaway
 run. A `claude` run is slower than the shared per-op defaults; raise this backend's deadline with
-the `timeouts.list` / `timeouts.show` keys of the same config block (described under the
+the `timeouts.list` / `timeouts.show` / `timeouts.list_history` keys of the same config block (described under the
 per-backend deadline override).
 
 Decision record: the `list` poll's per-call work (bead `pg2-lacaev`). A deployed `thread-me`
@@ -475,7 +475,7 @@ heartbeat's `elapsed_ms` is a lower bound on how long it ran.
 
 Per-backend deadline override (bead `pg2-apllc`). A backend whose `list` or `show` cannot fit its op's
 default budget (`list` 40s, `show` 30s; `list_activity` has its own 60s) can raise it for that one op in
-its own config block, as a Go duration string at the exact key `timeouts.list` or `timeouts.show`:
+its own config block, as a Go duration string at the exact key `timeouts.list`, `timeouts.show` or `timeouts.list_history` (the alert capability's history op, default 120s):
 
 ```yaml
 backends:

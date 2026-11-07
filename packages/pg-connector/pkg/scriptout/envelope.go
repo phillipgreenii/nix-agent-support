@@ -71,7 +71,7 @@ const (
 // on this wire-envelope side: pkg/scriptout is capability-agnostic (see this
 // file's package doc comment) and MUST NOT validate Config's contents, with
 // ONE exception: the "timeouts" member (limits.go's TimeoutsConfigKey), whose
-// timeouts.list and timeouts.show entries override that op's call deadline on
+// timeouts.list, timeouts.show and timeouts.list_history entries override that op's call deadline on
 // both sides of the exec (bead pg2-apllc). Every other member is interpreted
 // only by a capability's own dispatch table (or, for a value common to every
 // capability like "queries", pkg/schema's own ResolveQuery). Omitted (omitempty) for a backend with no registered config block, so

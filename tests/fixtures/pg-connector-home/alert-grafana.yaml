@@ -10,6 +10,8 @@ backends:
         - '{severity=~"critical|warning"}'
       everything: "{}"
       quiet-hours: '{severity="critical"}'
+    timeouts:
+      list_history: 180s
 connector:
   alert:
     - pg-connector-alert-grafana

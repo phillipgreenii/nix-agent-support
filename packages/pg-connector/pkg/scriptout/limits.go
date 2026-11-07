@@ -172,6 +172,33 @@ var (
 	listActivityExecTimeout    = ListActivityExecTimeout
 )
 
+// OpListHistory is the wire name of the alert capability's history op. The
+// 30s DefaultBackendTimeout that failed lat-survey ("deadline exceeded after
+// 30.001s (limit 30s) in op=list_history") is this file's backendTimeoutFor
+// default: list_history had no budget of its own and no configurable key, so
+// the only governing key is timeouts.list_history (timeouts.list does NOT
+// apply to it). pg-connector-alert-grafana fans out one Grafana
+// /api/v1/rules/history request per rule inside this one op, so its duration
+// grows with the rule count and the host's load.
+const OpListHistory = "list_history"
+
+// ListHistoryBackendTimeout is the per-call budget of "list_history". 120s:
+// an interactive-adjacent survey, not a polled source, so it is sized for the
+// loaded-host tail (a 180s override was observed to complete) rather than for
+// latency; well inside MaxConfiguredTimeout.
+const ListHistoryBackendTimeout = 120 * time.Second
+
+// ListHistoryExecTimeout is the umbrella's exec deadline for "list_history":
+// the backend's budget plus BackendDeadlineMargin.
+const ListHistoryExecTimeout = ListHistoryBackendTimeout + BackendDeadlineMargin
+
+// listHistoryBackendTimeout and listHistoryExecTimeout are the swappable
+// counterparts, like the list and list_activity ones.
+var (
+	listHistoryBackendTimeout = ListHistoryBackendTimeout
+	listHistoryExecTimeout    = ListHistoryExecTimeout
+)
+
 // OpShow is the wire name of the single-item read op. Like OpList it is named
 // here because this file is where per-op call budgets are chosen: "show" is the
 // one other op whose budget a backend's config may override (timeouts.show).
@@ -207,12 +234,12 @@ const (
 var minConfiguredTimeout = MinConfiguredTimeout
 
 // configurableTimeoutOp reports whether op's budget may be overridden by the
-// backend's config. Only list and show are: every other op (list_activity, the
+// backend's config. Only list, show and list_history are: every other op (list_activity, the
 // writes, capabilities, ...) keeps the budget its handlers are sized against,
 // and ignores a timeouts block entirely, so one bad entry cannot break an op it
 // does not govern.
 func configurableTimeoutOp(op string) bool {
-	return op == OpList || op == OpShow
+	return op == OpList || op == OpShow || op == OpListHistory
 }
 
 // configuredTimeout is the ONE parser of timeouts.<op> in a backend's config
@@ -299,6 +326,8 @@ func backendTimeoutFor(op string, cfg json.RawMessage) time.Duration {
 		return listBackendTimeout
 	case OpListActivity:
 		return listActivityBackendTimeout
+	case OpListHistory:
+		return listHistoryBackendTimeout
 	}
 	return backendTimeout
 }
@@ -319,6 +348,8 @@ func execTimeoutFor(op string, cfg json.RawMessage) time.Duration {
 		return listExecTimeout
 	case OpListActivity:
 		return listActivityExecTimeout
+	case OpListHistory:
+		return listHistoryExecTimeout
 	}
 	return execTimeout
 }

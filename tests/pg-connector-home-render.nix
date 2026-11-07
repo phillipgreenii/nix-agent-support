@@ -113,6 +113,7 @@ let
     attention.perBackend."pg-connector-alert-grafana".attentionQuery = "attention";
     alertBackends."pg-connector-alert-grafana" = {
       base_url = "https://grafana.example.localhost";
+      timeouts.list_history = "180s";
       queries = {
         everything = "{}";
         attention = [ ''{severity=~"critical|warning"}'' ];

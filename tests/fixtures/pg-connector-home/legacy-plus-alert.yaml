@@ -12,6 +12,8 @@ backends:
         - '{severity=~"critical|warning"}'
       everything: "{}"
       quiet-hours: '{severity="critical"}'
+    timeouts:
+      list_history: 180s
   pg-connector-pr-github:
     example_key: example-value
 configSchemaVersion: 2

@@ -433,8 +433,12 @@ let
   # than render empty" convention above. No query names are built in.
   alertBackendExtra =
     entry:
-    (removeAttrs entry [ "queries" ])
-    // lib.optionalAttrs (entry.queries != { }) { inherit (entry) queries; };
+    (removeAttrs entry [
+      "queries"
+      "timeouts"
+    ])
+    // lib.optionalAttrs (entry.queries != { }) { inherit (entry) queries; }
+    // lib.optionalAttrs (entry.timeouts != { }) { inherit (entry) timeouts; };
 
   # renderedBackends folds attention.perBackend's own per-backend entries
   # into cfg.backends' existing opaque per-backend blocks (bead pg2-7wqkr):
@@ -457,6 +461,7 @@ let
           // alertBackendExtra (
             cfg.alertBackends.${name} or {
               queries = { };
+              timeouts = { };
             }
           )
           // attentionBackendExtra (
@@ -756,6 +761,21 @@ in
               query string means is backend-native (e.g. an Alertmanager
               matcher set for Grafana). The module ships NO built-in names.
               Empty (the default) omits `queries` from the rendered block.
+            '';
+          };
+          options.timeouts = lib.mkOption {
+            type = lib.types.attrsOf lib.types.str;
+            default = { };
+            example = {
+              list_history = "180s";
+            };
+            description = ''
+              Per-op call deadline overrides for this alerts backend, op name
+              to Go duration string (1s to 300s), rendered as the backend's
+              `timeouts` block. `list_history` is the key that governs the
+              history op (default 120s); `list` and `show` are the other
+              configurable ops. Empty (the default) omits `timeouts` from the
+              rendered block.
             '';
           };
         }
