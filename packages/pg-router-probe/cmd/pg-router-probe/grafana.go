@@ -50,6 +50,10 @@ type grafanaAlert struct {
 	// body's Remediation: section, never Labels or the fingerprint.
 	AnnotationSummary     string
 	AnnotationDescription string
+	// Annotations are the rule's annotations verbatim minus Grafana's
+	// internal "__" keys; DashboardURL is the link to its dashboard/rule.
+	Annotations  map[string]string
+	DashboardURL string
 }
 
 // grafanaAlertEvidence renders one alert's raw evidence block for the bd
@@ -99,10 +103,11 @@ func renderGrafanaValues(raw string) string {
 // v2 `/api/v2/alerts` response array decodes into — only the fields this
 // probe reads.
 type grafanaAlertInstance struct {
-	Labels      map[string]string `json:"labels"`
-	Annotations map[string]string `json:"annotations"`
-	StartsAt    string            `json:"startsAt"`
-	Status      struct {
+	Labels       map[string]string `json:"labels"`
+	Annotations  map[string]string `json:"annotations"`
+	StartsAt     string            `json:"startsAt"`
+	GeneratorURL string            `json:"generatorURL"`
+	Status       struct {
 		State string `json:"state"`
 	} `json:"status"`
 }
@@ -184,6 +189,8 @@ func (c *grafanaClient) firingAlerts(ctx context.Context, ruleUIDs []string) ([]
 
 			AnnotationSummary:     strings.TrimSpace(inst.Annotations["summary"]),
 			AnnotationDescription: strings.TrimSpace(inst.Annotations["description"]),
+			Annotations:           publicAnnotations(inst.Annotations),
+			DashboardURL:          dashboardURL(c.baseURL, ruleUID, inst.GeneratorURL, inst.Annotations),
 		})
 	}
 	return alerts, nil

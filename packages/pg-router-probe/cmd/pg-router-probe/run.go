@@ -254,10 +254,14 @@ func defaultSnapshotPath() string {
 type runOptions struct {
 	// degradedThreshold is how many consecutive runs a sub-check must
 	// degrade before the run exits 4; values below 1 act as 1.
-	degradedThreshold  int
-	grafanaURL         string
-	grafanaToken       string
-	grafanaTimeout     time.Duration
+	degradedThreshold int
+	grafanaURL        string
+	grafanaToken      string
+	grafanaTimeout    time.Duration
+	// lokiURL is the Loki base URL log lines are read from ("" disables);
+	// the Grafana token is sent as its bearer token.
+	lokiURL            string
+	lokiTimeout        time.Duration
 	pgConnectorTimeout time.Duration
 	ruleUIDs           []string
 	// groupRuleUIDs lists rule uids whose label sets share one bead
@@ -312,6 +316,10 @@ type runDeps struct {
 	updateMetadata func(ctx context.Context, id string, metadata map[string]string, warn func(string)) error
 	comment        func(ctx context.Context, id, body string, warn func(string)) error
 	fetchBacklog   func(ctx context.Context, opts runOptions) (int, error)
+	// fetchLogs returns the newest lines for a LogQL query (Loki). nil, or
+	// an empty --loki-url, disables log fetching; a failure never blocks
+	// filing the bead.
+	fetchLogs func(ctx context.Context, opts runOptions, query string) ([]string, error)
 }
 
 // defaultRunDeps wires the real implementations; backend is the pg-connector
@@ -339,6 +347,12 @@ func defaultRunDeps(backend string) runDeps {
 			return commentIssue(ctx, backend, id, body, warn)
 		},
 		fetchBacklog: fetchBacklogFromStatus,
+		fetchLogs: func(ctx context.Context, opts runOptions, query string) ([]string, error) {
+			c := &lokiClient{baseURL: opts.lokiURL, token: opts.grafanaToken, httpClient: &http.Client{Timeout: opts.lokiTimeout}}
+			lctx, cancel := context.WithTimeout(ctx, opts.lokiTimeout)
+			defer cancel()
+			return c.recentLines(lctx, query, recentLogLines, time.Now())
+		},
 	}
 }
 
@@ -367,6 +381,7 @@ func newRunCmd() *cobra.Command {
 	opts := runOptions{
 		degradedThreshold:  defaultDegradedThreshold,
 		grafanaTimeout:     10 * time.Second,
+		lokiTimeout:        10 * time.Second,
 		pgConnectorTimeout: 30 * time.Second,
 		ruleUIDs:           append([]string{}, registeredRuleUIDs...),
 		groupRuleUIDs:      append([]string{}, defaultGroupRuleUIDs...),
@@ -395,6 +410,8 @@ never closes beads; close one once its alert clears after remediation.`,
 	cmd.Flags().StringVar(&opts.grafanaToken, "grafana-token", os.Getenv("PG_ROUTER_PROBE_GRAFANA_TOKEN"), "Grafana bearer token (default from PG_ROUTER_PROBE_GRAFANA_TOKEN)")
 	cmd.Flags().IntVar(&opts.degradedThreshold, "degraded-threshold", opts.degradedThreshold, "consecutive runs a sub-check must degrade (after one retry of a timed-out call) before the run exits 4; an earlier failure is only logged to stderr")
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
+	cmd.Flags().StringVar(&opts.lokiURL, "loki-url", "", "Loki base URL for the bead body's recent-log lines (query from the rule's \"logql\" annotation); unset omits them")
+	cmd.Flags().DurationVar(&opts.lokiTimeout, "loki-timeout", opts.lokiTimeout, "explicit timeout for the Loki HTTP call")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the registered rule UIDs")
 	cmd.Flags().StringSliceVar(&opts.groupRuleUIDs, "group-rule-uid", opts.groupRuleUIDs, "Grafana rule UID whose label sets share ONE bead, each label set an episode comment (repeatable); other rules file one bead per label set. Pass an empty value to disable grouping")
@@ -712,6 +729,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				if c := newestClosedMatch(f, loadClosed()); c != nil {
 					predecessor = c.ID
 				}
+				f.Context = gatherContext(ctx, opts, deps, f, existing)
 				body := renderBody(f, now, skippedNote, predecessor)
 				createCtx, cancel := withPgTimeout()
 				created, err := deps.createIssue(createCtx, escalationTitle(f), escalationLabels(f), trackedMetadata(f), body, warn)
@@ -758,6 +776,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 					}
 				}
 			case actionUpdate:
+				f.Context = gatherContext(ctx, opts, deps, f, existing)
 				body := renderBody(f, now, skippedNote, "")
 				updateCtx, cancel := withPgTimeout()
 				err := deps.updateMetadata(updateCtx, match.ID, trackedMetadata(f), warn)
@@ -849,4 +868,17 @@ func escalationLabels(f finding) []string {
 // is what design specifies; the title is this packet's own choice).
 func escalationTitle(f finding) string {
 	return fmt.Sprintf("pg-router-probe: %s", f.Summary)
+}
+
+// gatherContext builds the body's alert context for f, fetching logs through
+// deps.fetchLogs only when --loki-url is set.
+func gatherContext(ctx context.Context, opts runOptions, deps runDeps, f finding, existing []connectorIssue) alertContext {
+	if f.Kind != kindGrafanaAlert {
+		return alertContext{}
+	}
+	var fetch func(context.Context, string) ([]string, error)
+	if opts.lokiURL != "" && deps.fetchLogs != nil {
+		fetch = func(c context.Context, q string) ([]string, error) { return deps.fetchLogs(c, opts, q) }
+	}
+	return buildAlertContext(ctx, f, existing, fetch)
 }

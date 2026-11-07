@@ -224,6 +224,9 @@ func trackedMetadata(f finding) map[string]string {
 	m[metaState] = f.State
 	if f.Kind == kindGrafanaAlert {
 		m[metaEpisodeCount] = "1"
+		if f.RuleUID != "" {
+			m[metaRuleUID] = f.RuleUID
+		}
 	}
 	return m
 }

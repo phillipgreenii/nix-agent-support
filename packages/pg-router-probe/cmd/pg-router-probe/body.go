@@ -45,6 +45,7 @@ func renderBody(f finding, firstSeen time.Time, skippedNote, predecessorID strin
 	if f.Escalation == escalationHuman {
 		body += remediationSection(f)
 	}
+	body += renderAlertContext(f)
 	if predecessorID != "" {
 		body += "\nPredecessor: " + predecessorID + " (closed; this alert fired again)\n"
 	}

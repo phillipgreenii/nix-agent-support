@@ -82,6 +82,11 @@ type finding struct {
 	Escalation       string
 	AlertSummary     string
 	AlertDescription string
+	// Annotations/DashboardURL/Context are kindGrafanaAlert only and feed
+	// the body's Context: section; none is part of the fingerprint.
+	Annotations  map[string]string
+	DashboardURL string
+	Context      alertContext
 }
 
 // checkGrafanaAlerts builds one finding per currently-firing alert already
@@ -113,6 +118,8 @@ func checkGrafanaAlerts(alerts []grafanaAlert) []finding {
 			Escalation:       a.Labels[escalationLabelKey],
 			AlertSummary:     a.AnnotationSummary,
 			AlertDescription: a.AnnotationDescription,
+			Annotations:      a.Annotations,
+			DashboardURL:     a.DashboardURL,
 		})
 	}
 	return findings
