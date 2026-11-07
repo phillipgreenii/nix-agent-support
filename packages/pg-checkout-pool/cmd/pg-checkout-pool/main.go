@@ -47,6 +47,8 @@ commands:
            [--ttl 30m] [--wait 2m] [--max-slots 6] [--min-free-bytes N] [--keep PATH]...
   renew    --lease ID [--ttl 30m]
   release  --lease ID [--disposition reset|keep|quarantine] [--keep PATH]...
+  prewarm  --repo DIR --ref REF --count N [--delay 30s] [--max-slots 6] [--min-free-bytes N]
+  revalidate --repo DIR
   reap     [--dry-run] [--grace DUR] [--keep PATH]...
   status   [--json]
   metrics  [--out FILE]
@@ -82,6 +84,10 @@ func (a *app) run(args []string) int {
 		return a.release(args[1:])
 	case "reap":
 		return a.reap(args[1:])
+	case "prewarm":
+		return a.prewarm(args[1:])
+	case "revalidate":
+		return a.revalidate(args[1:])
 	}
 	fmt.Fprintf(stderr, "pg-checkout-pool: unknown command %q\n", args[0])
 	return 2

@@ -36,3 +36,11 @@
 `pg-checkout-pool metrics`
 
 `pg-checkout-pool metrics --out {{/path/to/pg_checkout_pool.prom}}`
+
+- Grow a cold pool to a number of slots, one slot at a time with a pause between creations (refused below the free-space floor):
+
+`pg-checkout-pool prewarm --repo {{/path/to/clone}} --ref {{origin/main}} --count {{4}} --delay {{30s}}`
+
+- After an apply, check every idle slot and quarantine any that is no longer a healthy checkout:
+
+`pg-checkout-pool revalidate --repo {{/path/to/clone}}`
