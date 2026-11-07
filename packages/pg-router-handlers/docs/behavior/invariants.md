@@ -588,6 +588,13 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     later pass (an entry is retried once its creation stamp, the number in its name, is older than
     the sweep grace window), and a record whose worktree is in the trash is purged as for any
     removed worktree. A trash entry is never a candidate for the leaked-worktree sweep.
+    All deletes in the process also draw from ONE shared budget: at most 60,000 unlink or rmdir
+    events per minute in total (so concurrent removals spread out instead of adding up), and at
+    most 8 drains pending at once. A drain that finds the queue full leaves its tree untouched in
+    the trash for the sweep, so a full queue costs latency and never loses a removal, including
+    across a restart (the queue is memory only; the trash is on disk). The two numbers are tunable
+    with `PG_ROUTER_WORKTREE_REMOVAL_EVENTS_PER_MINUTE` (0 disables the rate budget) and
+    `PG_ROUTER_WORKTREE_REMOVAL_MAX_PENDING`.
 
 - **`INV-CCH-21`** — a role with worktree isolation MAY be configured to pre-fetch. When it is,
   the handler MUST, after the per-bead worktree exists and BEFORE the session is launched (so no

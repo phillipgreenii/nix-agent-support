@@ -52,6 +52,9 @@ type Removal struct {
 	// Sleep waits d or returns ctx's error; tests inject a recorder so no test
 	// sleeps on the wall clock (default: a timer).
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Limiter is the process-wide removal budget and pending-drain bound shared
+	// by every Removal that holds the same pointer (nil: no shared budget).
+	Limiter *Limiter
 	// StopFsmonitor stops the worktree's git fsmonitor daemon, best effort
 	// (default: `git -C <path> fsmonitor--daemon stop`).
 	StopFsmonitor func(ctx context.Context, path string)
@@ -118,6 +121,12 @@ type DrainStats struct {
 // Budget runs out, leaving the rest for a later pass; any other failure is
 // returned after the walk finished the entries it could.
 func (r Removal) DrainTree(ctx context.Context, root string) (DrainStats, error) {
+	release, ok := r.Limiter.Admit()
+	if !ok {
+		slog.Warn("worktree: removal queue full; the tree stays in the trash for the janitor sweep", "root", root, "pending", r.Limiter.Pending())
+		return DrainStats{}, nil
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, r.budget())
 	defer cancel()
 	d := &drainer{r: r, ctx: ctx, batch: r.batchSize(), pause: r.pause()}
@@ -148,6 +157,15 @@ func (d *drainer) op() bool {
 	if d.stopped || d.ctx.Err() != nil {
 		d.stopped = true
 		return false
+	}
+	if d.ops%d.batch == 0 {
+		// Start of a chunk of batch events: book it against the shared budget.
+		if w := d.r.Limiter.Reserve(d.batch); w > 0 {
+			if err := d.r.sleep(d.ctx, w); err != nil {
+				d.stopped = true
+				return false
+			}
+		}
 	}
 	d.ops++
 	if d.ops%d.batch == 0 {

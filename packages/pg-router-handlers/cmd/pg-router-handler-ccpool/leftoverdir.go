@@ -266,7 +266,7 @@ func reclaimLeftoverDir(ctx context.Context, role roles.Role, deps executor.Deps
 // pacedRemoval is the rate-limit every bulk delete here uses (a worktree or
 // leftover tree is tens of thousands of files, and each unlink is a filesystem
 // event for every listener). Tests substitute a recording Sleep.
-var pacedRemoval = pacedRemover{worktree.Removal{}}
+var pacedRemoval = pacedRemover{worktree.Removal{Limiter: worktree.SharedLimiter}}
 
 // pacedRemover adds the error-only drain the leftover reclaim wants.
 type pacedRemover struct{ worktree.Removal }

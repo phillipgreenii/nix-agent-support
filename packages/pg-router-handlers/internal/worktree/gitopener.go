@@ -21,7 +21,7 @@ import (
 //
 // Shared by every adapter binary of this module; moved verbatim out of
 // cmd/pg-router-handler-ccpool's gitWorktreeOpener.
-var GitOpener Opener = ThrottledOpener(Removal{})
+var GitOpener Opener = ThrottledOpener(Removal{Limiter: SharedLimiter})
 
 // PlainGitOpener is gitclient.New without the paced removal.
 var PlainGitOpener Opener = func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
