@@ -157,21 +157,29 @@ and ignores the kill switch: it only reads refs and the verdict store.
    `inputs = override` in its own file, `<sha>.check-override.json`, so it never replaces the locked
    verdict: pn exit 0 is `green`, exit 10 is `red`, and any other exit (a signal, 1, 2, 126, 127) did
    not run to a result, so NO override verdict is stored and the run still exits 0. The pair classifies
-   the red:
+   the red, with two cases the evidence cannot support as skew read otherwise:
 
-   | Locked | Override | Class          | Meaning                                                                                  |
-   | ------ | -------- | -------------- | ---------------------------------------------------------------------------------------- |
-   | red    | green    | `skew`         | The locked inputs are behind a sibling: a relock is owed (`pn workspace push`). No push. |
-   | red    | red      | `defect`       | Red with the siblings' local tips too: a real defect of this tip.                        |
-   | red    | none     | `unclassified` | The override check did not run to a result.                                              |
+   | Locked                                                                        | Override | Class          | Meaning                                                                                                                                                                                |
+   | ----------------------------------------------------------------------------- | -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | red at evaluation                                                             | green    | `skew`         | The locked inputs are behind a sibling: a relock is owed (`pn workspace push`). No push.                                                                                               |
+   | red, every overridden input resolves to the locked revision                   | green    | `defect`       | Only the URL scheme changed, so the locked inputs are not behind: a real defect of this tip (reason stored).                                                                           |
+   | red                                                                           | red      | `defect`       | Red with the siblings' local tips too: a real defect of this tip.                                                                                                                      |
+   | red at build (`failed to build attribute` / `Cannot build` in the locked log) | not run  | `unclassified` | A build or test failure: the evaluation-only override check cannot classify it, so it is not run. Reason: `build/test failure; the evaluation-only override check cannot classify it`. |
+   | red                                                                           | none     | `unclassified` | The override check did not run to a result.                                                                                                                                            |
+
+   The class the verify role computed (and, when it differs from what the override result alone would
+   give, `classReason`) is stored in the override verdict as `class`; the status text, the withheld text
+   and the gauge read it, falling back to the result alone for a verdict without one. "Identical
+   revisions" is read from the `Updated input` blocks of the override log: it holds when there is at
+   least one and every replacement carries the same revision as the locked input it replaces.
 
    The class is the first words of the evidence on the `red` bead (`LOCK SKEW: ...`, `DEFECT: ...`,
    `unclassified: ...`), of the `push withheld: the check verdict for <sha> is red (<class>)` text, and
    the gauge `pg_repo_runner_check_latest_red_class`. The override verdict MUST NOT open the push gate
    (ADR 0108 decision 3(a), gate (b) below): `rr_verdict_green` reads only `<sha>.check.json` with
    `inputs = locked`. The check is evaluation-only (`--no-build`), so it classifies a failure that is
-   visible at evaluation; a locked red that is a build or test failure reads `defect` or
-   `unclassified` only if the override evaluation also fails. It reads the siblings' working
+   visible at evaluation; a locked red that is a build or test failure is read `unclassified` with a
+   reason (the override check is skipped), never `skew`. It reads the siblings' working
    trees, as `pn workspace flake-check` does. The `build` verdict of the workspace build role also
    has `inputs = override` but `kind = build`; the two are told apart by `kind`.
 

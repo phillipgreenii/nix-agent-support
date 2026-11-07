@@ -148,6 +148,7 @@ make_nix_shim() {
 echo "\$*" >>"$TEST_DIR/nix.argv"
 [[ -z \${SHIM_SLEEP:-} ]] || sleep "\$SHIM_SLEEP"
 echo "shim output line"
+[[ -z \${SHIM_TEXT:-} ]] || printf '%b\\n' "\$SHIM_TEXT"
 if [[ \${SHIM_MODE:-exit} == kill ]]; then
   kill -KILL \$\$
 fi
@@ -165,6 +166,7 @@ make_pn_shim() {
 #!/usr/bin/env bash
 echo "\$PN_WORKSPACE_ROOT :: \$*" >>"$TEST_DIR/pn.argv"
 echo "pn shim output line"
+[[ -z \${PN_SHIM_TEXT:-} ]] || printf '%b\\n' "\$PN_SHIM_TEXT"
 if [[ \${PN_SHIM_MODE:-exit} == kill ]]; then
   kill -KILL \$\$
 fi
@@ -421,6 +423,52 @@ hold_lease() {
   [ "$(jq -r .exit "$(override_file nix-alpha "$ALPHA_SHA")")" = 10 ]
   lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
   [ "$output" = defect ]
+}
+
+# the two evidence texts a real run writes
+BUILD_FAIL_TEXT="error: failed to build attribute 'checks.aarch64-darwin.x-go-tests', build of 'a.drv^*' failed: Cannot build 'a.drv'."
+SAME_REV_TEXT="• Updated input 'sib':\n    'github:o/sib/$(printf 'a%.0s' {1..40})?narHash=sha256-xyz' (2026-11-05)\n  → 'git+file:///ws/sib?ref=refs/heads/main&rev=$(printf 'a%.0s' {1..40})' (2026-11-05)"
+DIFF_REV_TEXT="• Updated input 'sib':\n    'github:o/sib/$(printf 'a%.0s' {1..40})?narHash=sha256-xyz' (2026-11-05)\n  → 'git+file:///ws/sib?ref=refs/heads/main&rev=$(printf 'b%.0s' {1..40})' (2026-11-06)"
+
+@test "a locked red that is a build-stage failure is unclassified, not skew, and no relock is claimed" {
+  SHIM_EXIT=1 SHIM_TEXT="$BUILD_FAIL_TEXT" PN_SHIM_EXIT=0 verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
+  # the evaluation-only override check is not run and stores nothing
+  [ "$(pn_runs)" -eq 0 ]
+  [ ! -e "$(override_file nix-alpha "$ALPHA_SHA")" ]
+  lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
+  [ "$output" = unclassified ]
+  grep -q 'build/test failure; the evaluation-only override check cannot classify it' "$STATE/run.log"
+  run "${RUNNER[@]}" status
+  ! grep -qi 'relock is owed\|LOCK SKEW' "$STATE/run.log"
+}
+
+@test "locked red where every overridden input resolves to the locked revision is not skew" {
+  SHIM_EXIT=1 PN_SHIM_EXIT=0 PN_SHIM_TEXT="$SAME_REV_TEXT" verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$(override_file nix-alpha "$ALPHA_SHA")")" = green ]
+  [ "$(jq -r .class "$(override_file nix-alpha "$ALPHA_SHA")")" = defect ]
+  lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
+  [ "$output" = defect ]
+  lib_eval "rr_override_reason nix-alpha $ALPHA_SHA"
+  [[ $output == *'not lock skew'* ]]
+  lib_eval "rr_override_text defect '$output'"
+  [[ $output == DEFECT:* ]]
+  [[ $output != *'relock is owed'* ]]
+  lib_eval "RR_M_PREFIX=pg_repo_runner; rr_m_add() { echo \"\$1 \$2 \$3\"; }; rr_surface_enabled() { return 1; }; rr_m_state_points nix-alpha"
+  [[ $output == *'pg_repo_runner_check_latest_red_class 1 repo=nix-alpha,class=defect'* ]]
+  [[ $output == *'pg_repo_runner_check_latest_red_class 0 repo=nix-alpha,class=skew'* ]]
+}
+
+@test "locked red at evaluation with differing override revisions and override green is still skew" {
+  SHIM_EXIT=1 SHIM_TEXT="error: attribute 'x' missing" PN_SHIM_EXIT=0 PN_SHIM_TEXT="$DIFF_REV_TEXT" verify
+  [ "$status" -eq 0 ]
+  [ "$(pn_runs)" -eq 1 ]
+  lib_eval "rr_override_class nix-alpha $ALPHA_SHA"
+  [ "$output" = skew ]
+  lib_eval "rr_override_text skew"
+  [[ $output == 'LOCK SKEW:'*'a relock is owed'* ]]
 }
 
 @test "an override check that does not run to a result stores no override verdict: unclassified, the run still exits 0" {

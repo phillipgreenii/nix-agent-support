@@ -284,16 +284,6 @@ early_verify() {
   return 1
 }
 
-# rr_override_text CLASS: the one-line reading of a red check's classification.
-# shellcheck disable=SC2329  # called by act_verify, which is itself invoked indirectly
-rr_override_text() {
-  case "$1" in
-  skew) printf 'LOCK SKEW: green with the sibling overrides, so the locked inputs are behind; a relock is owed: run pn workspace push; not a defect of this tip' ;;
-  defect) printf 'DEFECT: red with the locked inputs AND with the sibling overrides' ;;
-  *) printf 'unclassified: no sibling-override verdict (the override check did not run to a result)' ;;
-  esac
-}
-
 # rr_verify_override REPO SHA ROOT: the second check of a red locked check. Runs
 #   pn workspace flake-check --no-build --rev SHA REPO
 # (pn's own evaluation-only check of one commit with the repo's workspace siblings
@@ -303,7 +293,7 @@ rr_override_text() {
 # Never gates anything: the push gate reads the locked verdict only (ADR 0108).
 # shellcheck disable=SC2329  # called by act_verify, which is itself invoked indirectly
 rr_verify_override() {
-  local repo="$1" sha="$2" root="$3" olog started finished rc=0 res
+  local repo="$1" sha="$2" root="$3" olog started finished rc=0 res cls reason="" extra
   olog="$RR_STATE_DIR/logs/$repo/$sha.override.log"
   started="$(rr_now)"
   rr_resolve_pn
@@ -326,14 +316,25 @@ rr_verify_override() {
     ;;
   esac
   rr_log "override check: $repo@$sha is $res with the sibling overrides (pn exit $rc), output in $olog"
-  rr_verdict_write "$repo" "$sha" check "$res" override "$started" "$finished" "$rc" "$olog" || return 1
+  # the class the pair supports: green alone would read skew, but when every
+  # overridden input resolves to the locked revision the locked inputs are not behind
+  cls=defect
+  if [[ $res == green ]]; then
+    cls=skew
+    if rr_override_revs_identical "$olog"; then
+      cls=defect
+      reason='the sibling overrides resolve to the same revisions as the locked inputs, so this is not lock skew'
+    fi
+  fi
+  extra="$(rr_jq -nc --arg c "$cls" --arg r "$reason" '{class: $c} + (if $r == "" then {} else {classReason: $r} end)')" || return 1
+  rr_verdict_write "$repo" "$sha" check "$res" override "$started" "$finished" "$rc" "$olog" "$extra" || return 1
 }
 
 # act_verify: runner B. The precheck is only that the sha exists; the canonical
 # working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls reason
   root="$(rr_cfg '.workspace_root // empty')"
 
   # precheck: the sha exists as a commit
@@ -409,9 +410,18 @@ act_verify() {
     rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
     # a red locked check is classified by the same check over the sibling overrides
     # (signal only: the override verdict never opens the push gate)
-    rr_verify_override "$repo" "$full" "$root" || rr_log "override check: no verdict for $repo@$full"
+    # a build or test failure is invisible to the evaluation-only override check, so
+    # it is read unclassified with that reason and the override check is not run
+    reason=""
+    if rr_locked_build_failure "$log"; then
+      reason='build/test failure; the evaluation-only override check cannot classify it'
+      rr_log "override check: skipped for $repo@$full: $reason"
+    else
+      rr_verify_override "$repo" "$full" "$root" || rr_log "override check: no verdict for $repo@$full"
+      reason="$(rr_override_reason "$repo" "$full")"
+    fi
     cls="$(rr_override_class "$repo" "$full")"
-    rr_surface_raise "$repo" red "$full" "$(rr_override_text "$cls"), red check verdict, exit $rc, log $log" ||
+    rr_surface_raise "$repo" red "$full" "$(rr_override_text "$cls" "$reason"), red check verdict, exit $rc, log $log" ||
       rr_log "surface: raising the red transition failed for $repo@$full"
   fi
   rr_surface_flush_repo "$repo" || true

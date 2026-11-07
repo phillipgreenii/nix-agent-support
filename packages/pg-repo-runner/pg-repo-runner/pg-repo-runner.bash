@@ -1043,12 +1043,69 @@ rr_override_class() {
     printf unclassified
     return 0
   }
-  res="$(rr_jq -r 'select(.kind == "check" and .inputs == "override") | .result' "$f" 2>/dev/null)"
+  # the class the verify role stored wins (it saw the logs); a verdict without one
+  # (an older record) falls back to the result alone
+  res="$(rr_jq -r 'select(.kind == "check" and .inputs == "override") | (.class // (if .result == "green" then "skew" elif .result == "red" then "defect" else "unclassified" end))' "$f" 2>/dev/null)"
   case "$res" in
-  green) printf skew ;;
-  red) printf defect ;;
+  skew | defect) printf '%s' "$res" ;;
   *) printf unclassified ;;
   esac
+}
+
+# rr_override_reason REPO SHA: the stored reason the override verdict's class differs
+# from what its result alone would give; empty when there is none.
+rr_override_reason() {
+  local f="$RR_STATE_DIR/verdicts/$1/$2.check-override.json"
+  [[ -f $f ]] || return 0
+  rr_jq -r 'select(.kind == "check" and .inputs == "override") | .classReason // empty' "$f" 2>/dev/null || true
+}
+
+# rr_override_text CLASS [REASON]: the one-line reading of a red check's classification.
+# REASON, when given, says why the evidence could not support the class the override
+# result alone would give (build-stage failure, identical revisions).
+rr_override_text() {
+  case "$1" in
+  skew) printf 'LOCK SKEW: green with the sibling overrides, so the locked inputs are behind; a relock is owed: run pn workspace push; not a defect of this tip' ;;
+  defect)
+    if [[ -n ${2:-} ]]; then
+      printf 'DEFECT: red with the locked inputs; %s' "$2"
+    else
+      printf 'DEFECT: red with the locked inputs AND with the sibling overrides'
+    fi
+    ;;
+  *)
+    if [[ -n ${2:-} ]]; then
+      printf 'unclassified: %s' "$2"
+    else
+      printf 'unclassified: no sibling-override verdict (the override check did not run to a result)'
+    fi
+    ;;
+  esac
+}
+
+# rr_locked_build_failure LOG: succeeds when the locked check log shows a build or
+# test failure (nix reports it as "failed to build attribute" / "Cannot build")
+# rather than an evaluation error. The evaluation-only override check cannot say
+# anything about such a failure.
+rr_locked_build_failure() {
+  [[ -f $1 ]] && grep -Eq 'error: failed to build attribute|Cannot build ' "$1"
+}
+
+# rr_override_revs_identical LOG: succeeds when the override log has at least one
+# "Updated input" block and every block's replacement resolves to the SAME revision
+# as the locked input (only the URL scheme changed), so the pair cannot be skew.
+rr_override_revs_identical() {
+  [[ -f $1 ]] || return 1
+  awk '
+    /^• Updated input/ { inblk = 1; old = ""; next }
+    inblk && old == "" && match($0, /\/[0-9a-f]{40}/) { old = substr($0, RSTART + 1, 40); next }
+    inblk && match($0, /rev=[0-9a-f]{40}/) {
+      n++
+      if (old == "" || substr($0, RSTART + 4, 40) != old) bad = 1
+      inblk = 0
+    }
+    END { exit (n > 0 && !bad) ? 0 : 1 }
+  ' "$1"
 }
 
 # rr_push_siblings_ahead REPO: prints the consumed siblings (repos.<key>.consumes)
@@ -1526,7 +1583,7 @@ rr_m_state_points() {
        | pt("check_override_verdicts"; ($o | map(select(.result == $res)) | length); "repo=\($r),result=\($res)")),
       (($l != null and $l.result == "red") as $isred
        | ($o | map(select(.sha == ($l.sha // ""))) | last) as $ov
-       | (if $ov == null then "unclassified" elif $ov.result == "green" then "skew" else "defect" end) as $cls
+       | (if $ov == null then "unclassified" elif ($ov.class // "") != "" then $ov.class elif $ov.result == "green" then "skew" else "defect" end) as $cls
        | ["skew", "defect", "unclassified"][] as $c2
        | pt("check_latest_red_class"; (if $isred and $c2 == $cls then 1 else 0 end); "repo=\($r),class=\($c2)"))
   ' <<<"$v" 2>/dev/null)
