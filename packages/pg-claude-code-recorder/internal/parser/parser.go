@@ -8,6 +8,7 @@ package parser
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -242,7 +243,18 @@ func (p *Parser) Coalesce(stop <-chan struct{}) bool {
 // On a store opened for a bulk rebuild the writes of many files share one
 // transaction that commits on a record or byte budget (see store.BulkBegin);
 // otherwise each chunk of a file commits on its own.
-func (p *Parser) ParseAll() (first error) {
+func (p *Parser) ParseAll() error { return p.ParseAllUntil(nil) }
+
+// ErrParseStopped is what ParseAllUntil returns when stop closed before every
+// file was visited. The files not visited keep their old parse_state version,
+// so the next start re-parses them.
+var ErrParseStopped = errors.New("parse stopped before every file was visited")
+
+// ParseAllUntil is ParseAll that gives up between files once stop closes, so a
+// daemon being closed does not wait out a long startup re-parse (a stopped
+// daemon once held the store writer for over two hours that way). A nil stop
+// never fires.
+func (p *Parser) ParseAllUntil(stop <-chan struct{}) (first error) {
 	files, err := p.cfg.Store.AllFiles()
 	if err != nil {
 		return err
@@ -276,6 +288,14 @@ func (p *Parser) ParseAll() (first error) {
 		}
 	}()
 	for i, f := range files {
+		select {
+		case <-stop:
+			if first == nil {
+				first = ErrParseStopped
+			}
+			return first
+		default:
+		}
 		p.filesDone.Store(int64(i))
 		if !p.HasSource(f.Source) {
 			continue

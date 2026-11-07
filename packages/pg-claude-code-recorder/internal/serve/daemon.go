@@ -602,7 +602,7 @@ func (d *Daemon) Start() error {
 // version stored), then parses each file as the copier reports new bytes.
 func (d *Daemon) parseLoop() {
 	defer d.refreshing.Done()
-	if err := d.prs.ParseAll(); err != nil {
+	if err := d.prs.ParseAllUntil(d.stop); err != nil && !errors.Is(err, parser.ErrParseStopped) {
 		d.obs.Log.Warn("parse_all_failed", "err", err.Error())
 		d.noteNoSpace(obs.OpParseIndex, err)
 	}

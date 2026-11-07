@@ -2,10 +2,12 @@ package parser_test
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store/countdriver"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
@@ -77,5 +79,56 @@ func TestParseAllAfterReparseStaleParsesNothingTwice(t *testing.T) {
 	}
 	if k.Count(`SELECT COUNT(*) FROM records`) == 0 {
 		t.Fatal("no records parsed")
+	}
+}
+
+// A version-bump re-parse on a store that already holds the generation's rows
+// completes without a UNIQUE failure and leaves each row once.
+func TestVersionBumpReparseOverExistingRowsCompletes(t *testing.T) {
+	k := testkit.New(t)
+	k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
+	k.Parse()
+	before := k.Count(`SELECT COUNT(*) FROM records`)
+	if before == 0 {
+		t.Fatal("no records parsed")
+	}
+	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE parse_state SET version=0`)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Parser.ParseAll(); err != nil {
+		t.Fatalf("re-parse over existing rows: %v", err)
+	}
+	if after := k.Count(`SELECT COUNT(*) FROM records`); after != before {
+		t.Fatalf("records %d after re-parse, %d before", after, before)
+	}
+	if k.Count(`SELECT COUNT(*) FROM parse_state WHERE version=0`) != 0 {
+		t.Fatal("generation left at the old version")
+	}
+}
+
+// ParseAllUntil gives up between files once stop closes, leaving the stale
+// generation at its old version for the next start.
+func TestParseAllUntilStopsAndLeavesStaleGenerations(t *testing.T) {
+	k := testkit.New(t)
+	k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
+	k.Parse()
+	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE parse_state SET version=0`)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	close(stop)
+	if err := k.Parser.ParseAllUntil(stop); !errors.Is(err, parser.ErrParseStopped) {
+		t.Fatalf("err = %v, want ErrParseStopped", err)
+	}
+	if k.Count(`SELECT COUNT(*) FROM parse_state WHERE version=0`) == 0 {
+		t.Fatal("a stopped parse re-parsed anyway")
 	}
 }

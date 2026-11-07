@@ -138,6 +138,7 @@ func TestCrashMidBatchLeavesAFileTheNextStartRefuses(t *testing.T) {
 	if !crashed {
 		t.Fatal("the batch commit crash point was not reached")
 	}
+	_ = s.dirLock.Close() // the crashed process's state-directory lock dies with it
 	var unfinished *UnfinishedRebuildError
 	if _, err := Open(dir, Options{}); !errors.As(err, &unfinished) {
 		t.Fatalf("next start after a crash mid-rebuild: %v, want UnfinishedRebuildError", err)

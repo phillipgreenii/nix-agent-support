@@ -153,8 +153,9 @@ func (e *SchemaOlderError) Error() string {
 
 // Store is an open state directory.
 type Store struct {
-	driverName   string // database/sql driver name (Options.DriverName)
-	journalLimit int    // journal_size_limit in bytes
+	dirLock      *os.File // flock on the state directory, held until Close
+	driverName   string   // database/sql driver name (Options.DriverName)
+	journalLimit int      // journal_size_limit in bytes
 	readTO       time.Duration
 	stmtCtx      stmtCtxFunc
 	readCacheKiB int   // cache_size of each read connection, KiB
@@ -237,7 +238,35 @@ const (
 )
 
 // Open opens (creating or recovering) the state directory dir.
+//
+// Open holds an exclusive flock on the state directory until Close, so a second
+// instance fails with ErrStateDirLocked instead of racing the first for
+// index.db.
 func Open(dir string, opt Options) (*Store, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	lk, err := lockDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	opened := false
+	defer func() {
+		// Also runs on a panic, as process death would release the flock.
+		if !opened {
+			_ = lk.Close()
+		}
+	}()
+	s, err := openLocked(dir, opt)
+	if err != nil {
+		return nil, err
+	}
+	opened = true
+	s.dirLock = lk
+	return s, nil
+}
+
+func openLocked(dir string, opt Options) (*Store, error) {
 	if opt.FS == nil {
 		opt.FS = fsx.OS{}
 	}
@@ -325,7 +354,9 @@ func Open(dir string, opt Options) (*Store, error) {
 	endPhase()
 	if err != nil {
 		var older *SchemaOlderError
-		if !dbExisted || errors.As(err, &older) {
+		if !dbExisted || errors.As(err, &older) || !isCorruptDBError(err) {
+			// Only genuine corruption sets the file aside; a busy or locked
+			// error means a live process holds it and must fail the open.
 			return nil, err
 		}
 		// A corrupt index.db: keep it aside for diagnosis and rebuild from the journal.
@@ -403,8 +434,11 @@ func phaseOf(hook func(string) func(), name string) func() {
 	return func() {}
 }
 
+// busyTimeoutMS is the SQLite busy_timeout of every connection; a var so a test can shorten it.
+var busyTimeoutMS = 5000
+
 func (s *Store) openDB(path string, bulk bool) error {
-	dsn := "file:" + path + "?_pragma=journal_mode(" + ablateJournal + ")&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)" + ablateDSNExtra
+	dsn := "file:" + path + "?_pragma=journal_mode(" + ablateJournal + ")&_pragma=busy_timeout(" + strconv.Itoa(busyTimeoutMS) + ")&_pragma=synchronous(NORMAL)" + ablateDSNExtra
 	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
 	// it; it caps the WAL file left behind when the WAL restarts.
 	wdsn := dsn + "&_pragma=journal_size_limit(" + strconv.Itoa(s.journalLimit) + ")"
@@ -1099,6 +1133,10 @@ func (s *Store) Close() error {
 		s.obs.Event(obs.EvWALTruncateDone, "source", "close", "duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 	}
 	s.closeDBs()
+	if s.dirLock != nil {
+		_ = s.dirLock.Close()
+		s.dirLock = nil
+	}
 	return first
 }
 

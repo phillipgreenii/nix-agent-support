@@ -125,6 +125,10 @@ func newEnvWith(t *testing.T, cloneMode bool, pre func(*env)) *env {
 
 func (e *env) open() {
 	e.t.Helper()
+	if e.st != nil {
+		// A restart: the previous instance releases the state directory.
+		_ = e.st.Close()
+	}
 	e.rec = fsx.NewRecorder(nil)
 	e.rec.SoftFullSync = true
 	e.obs = obs.New(nil)
