@@ -51,6 +51,43 @@ func TestCompare_TrackerCallWithOnlyCetaEventsIsNotATrackerRecording(t *testing.
 	}
 }
 
+func TestCompare_TrackerOnlyRefusedBeforeAnyHookIsItsOwnCategory(t *testing.T) {
+	refused := trk("s", "t1", 1, 1000)
+	refused.ErrorText = "<tool_use_error>File has not been read yet.</tool_use_error>"
+	hooked := trk("s", "t2", 2, 1000)
+	hooked.ErrorText = refused.ErrorText
+	hooked.HookRan = true              // a hook ran, so the missing CETA row deserves a look
+	noError := trk("s", "t3", 3, 1000) // no hook, but no tool_use_error either
+	rep, err := Compare(Input{
+		Tracker: []trackeradapter.Row{refused, hooked, noError},
+		Sources: []trackeradapter.SessionSource{{SessionID: "s", HasTracker: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.RefusedBeforeHook) != 1 || rep.RefusedBeforeHook[0].ToolUseID != "t1" {
+		t.Errorf("refused before hook: %+v", rep.RefusedBeforeHook)
+	}
+	if len(rep.OnlyTracker) != 2 || rep.OnlyTracker[0].ToolUseID != "t2" || rep.OnlyTracker[1].ToolUseID != "t3" {
+		t.Errorf("only tracker: %+v", rep.OnlyTracker)
+	}
+	if rep.TrackerCalls != 3 {
+		t.Errorf("tracker calls %d", rep.TrackerCalls)
+	}
+}
+
+func TestCompare_OnlyRefusedBeforeHookCallsKeepTheReportClean(t *testing.T) {
+	refused := trk("s", "t1", 1, 1000)
+	refused.ErrorText = "<tool_use_error>InputValidationError</tool_use_error>"
+	rep, _ := Compare(Input{
+		Tracker: []trackeradapter.Row{refused},
+		Sources: []trackeradapter.SessionSource{{SessionID: "s", HasTracker: true}},
+	})
+	if !rep.Clean || len(rep.RefusedBeforeHook) != 1 {
+		t.Errorf("report: %+v", rep)
+	}
+}
+
 func TestCompare_BadCreatedAtIsAnError(t *testing.T) {
 	if _, err := Compare(Input{Ceta: []asklog.CompareRow{cet(1, "s", "t1", "yesterday")}}); err == nil {
 		t.Error("want an error for an unparseable created_at")

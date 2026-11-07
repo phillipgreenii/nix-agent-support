@@ -169,6 +169,10 @@ func printCompareTrackerTable(w io.Writer, r trackercompare.Report) {
 	for _, c := range r.OnlyTracker {
 		_, _ = fmt.Fprintf(w, "  %s %s %s (call_id %d)\n", c.SessionID, c.ToolUseID, c.ToolName, c.CallID)
 	}
+	_, _ = fmt.Fprintf(w, "\nRefused by Claude Code before any hook ran, tracker only (%d)\n", len(r.RefusedBeforeHook))
+	for _, c := range r.RefusedBeforeHook {
+		_, _ = fmt.Fprintf(w, "  %s %s %s (call_id %d)\n", c.SessionID, c.ToolUseID, c.ToolName, c.CallID)
+	}
 	_, _ = fmt.Fprintf(w, "\nDifferences (%d)\n", len(r.Differences))
 	cats := make([]string, 0, len(r.DifferenceCounts))
 	for c := range r.DifferenceCounts {

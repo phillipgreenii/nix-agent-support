@@ -372,3 +372,41 @@ func TestOutcomeOf_RefusalWinsOverResultError(t *testing.T) {
 		}
 	}
 }
+
+func TestRows_HookRanAndErrorTextDistinguishCallsRefusedBeforeAnyHook(t *testing.T) {
+	p := fixtureCopy(t, "tracker.db")
+	db, err := sql.Open("sqlite", "file:"+p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// sess-d/tu-d1: call_start and call_end only, as Claude Code's own
+	// input validation leaves a call (no pre_tool, no check).
+	for _, q := range []string{
+		`INSERT INTO events VALUES('d01','sess-d','tracker','tracker.call_start',1790000000301,'tu-d1',NULL,'{"tool":"Edit","input":{}}','f')`,
+		`INSERT INTO events VALUES('d02','sess-d','tracker','tracker.call_end',1790000000302,'tu-d1',NULL,'{"outcome":"error","error":"<tool_use_error>File has not been read yet.</tool_use_error>"}','f')`,
+		`INSERT INTO calls VALUES(30,'sess-d','tu-d1')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+	a, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	rows, err := a.Rows("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1 := byTool(t, rows, "tu-d1")
+	if d1.HookRan || !d1.TrackerSeen || !strings.Contains(d1.ErrorText, "<tool_use_error>") {
+		t.Errorf("d1: %+v", d1)
+	}
+	for _, id := range []string{"tu-a1", "tu-b2", "tu-c1"} {
+		if !byTool(t, rows, id).HookRan {
+			t.Errorf("%s: HookRan false", id)
+		}
+	}
+}

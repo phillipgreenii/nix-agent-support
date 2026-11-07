@@ -51,6 +51,9 @@
 //	tool_calls.permission_mode    -> DecisionRow.PermissionMode
 //	tool_calls.agent_type         -> DecisionRow.AgentType
 //	tool_calls.error_text         -> DecisionRow.OutcomeNotes
+//	tool_calls.error_text         -> Row.ErrorText
+//	tool_calls.verdict, permission_mode, engine_verdict, delivered_verdict
+//	                              -> Row.HookRan (any of them non-NULL)
 //	tool_calls.is_error           -> Row.IsError
 //	tool_calls.denial_reason      -> Row.DenialReason (and OutcomeNotes when
 //	                                 error_text is NULL)
@@ -182,6 +185,13 @@ type Row struct {
 	// TrackerSeen is true when a tracker event (tracker.call_start) recorded the
 	// call, false for a call only another source (ceta) reported.
 	TrackerSeen bool
+	// ErrorText is tool_calls.error_text ("" when NULL).
+	ErrorText string
+	// HookRan is true when any hook-side evidence exists for the call: a
+	// tracker.check decision (tool_calls.verdict), a permission mode (carried
+	// by tracker.pre_tool or tracker.post_tool), or a ceta.verdict. A call
+	// with none of them was refused by Claude Code before PreToolUse fired.
+	HookRan bool
 	// Label is the operator label joined in for this call (zero when none).
 	Label asklog.TrackerLabel
 }
@@ -192,7 +202,7 @@ func (r Row) Key() asklog.CallKey {
 }
 
 const rowSelect = `SELECT call_id, session_id, tool_use_id, tool_name, tool_input, cwd,
-	permission_mode, agent_type, result, error_text, call_start_ts, first_event_ts, is_error,
+	permission_mode, agent_type, verdict, result, error_text, call_start_ts, first_event_ts, is_error,
 	denial_reason, sandbox_enabled, engine_verdict, delivered_verdict, reason, settled_by,
 	settlement, converted_ask, failed_timing FROM tool_calls`
 
@@ -267,12 +277,12 @@ func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.T
 	for rows.Next() {
 		var r Row
 		var (
-			toolName, toolInput, cwd, mode, agentType, result, errText, denial sql.NullString
-			engine, delivered, reason, settledBy, settlement                   sql.NullString
-			startTs, firstTs, isErr, sandbox, converted, failedTiming          sql.NullInt64
+			toolName, toolInput, cwd, mode, agentType, result, errText, denial, checkVerdict sql.NullString
+			engine, delivered, reason, settledBy, settlement                                 sql.NullString
+			startTs, firstTs, isErr, sandbox, converted, failedTiming                        sql.NullInt64
 		)
 		if err := rows.Scan(&r.CallID, &r.SessionID, &r.ToolUseID, &toolName, &toolInput, &cwd,
-			&mode, &agentType, &result, &errText, &startTs, &firstTs, &isErr,
+			&mode, &agentType, &checkVerdict, &result, &errText, &startTs, &firstTs, &isErr,
 			&denial, &sandbox, &engine, &delivered, &reason, &settledBy,
 			&settlement, &converted, &failedTiming); err != nil {
 			return nil, fmt.Errorf("tracker database: %w", err)
@@ -289,6 +299,8 @@ func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.T
 		if !errText.Valid && denial.Valid {
 			r.OutcomeNotes = strPtr(denial)
 		}
+		r.ErrorText = errText.String
+		r.HookRan = checkVerdict.Valid || mode.Valid || engine.Valid || delivered.Valid
 		r.EngineVerdict = engine.String
 		r.DeliveredVerdict = delivered.String
 		r.Result = result.String

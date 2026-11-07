@@ -50,6 +50,14 @@
 // "auto_mode_classifier:", the only writer of a denial reason; tracker:
 // denial_reason non-empty).
 //
+// Refused before any hook. A tracker-only call with no hook evidence
+// (Row.HookRan false) whose error text contains "<tool_use_error>" was refused
+// by Claude Code's own input validation or tool preconditions before PreToolUse
+// fired; CETA runs only inside hooks, so its missing row is expected. Such a
+// call is listed under RefusedBeforeHook, not OnlyTracker, and never makes a
+// report unclean. A tracker-only call with hook evidence, or without that
+// error, stays in OnlyTracker.
+//
 // Clean. A report is clean when it lists no only-one-side call, difference,
 // duplicate, unkeyed CETA row or session without a tracker file. Skipped-line
 // counts are informational and never make a report unclean.
@@ -143,6 +151,7 @@ type Report struct {
 	Matched                int                `json:"matched"`
 	OnlyCeta               []CallRef          `json:"only_ceta"`
 	OnlyTracker            []CallRef          `json:"only_tracker"`
+	RefusedBeforeHook      []CallRef          `json:"refused_before_hook"`
 	Differences            []Diff             `json:"differences"`
 	DifferenceCounts       map[string]int     `json:"difference_counts"`
 	Duplicates             []Duplicate        `json:"duplicates"`
@@ -171,6 +180,7 @@ func Compare(in Input) (Report, error) {
 	rep := Report{
 		OnlyCeta:               []CallRef{},
 		OnlyTracker:            []CallRef{},
+		RefusedBeforeHook:      []CallRef{},
 		Differences:            []Diff{},
 		DifferenceCounts:       map[string]int{},
 		Duplicates:             []Duplicate{},
@@ -268,7 +278,12 @@ func Compare(in Input) (Report, error) {
 		case hasC && !hasT:
 			rep.OnlyCeta = append(rep.OnlyCeta, CallRef{SessionID: k.SessionID, ToolUseID: k.ToolUseID, ToolName: c.ToolName, CetaID: c.ID})
 		case hasT && !hasC:
-			rep.OnlyTracker = append(rep.OnlyTracker, CallRef{SessionID: k.SessionID, ToolUseID: k.ToolUseID, ToolName: t.ToolName, CallID: t.CallID})
+			ref := CallRef{SessionID: k.SessionID, ToolUseID: k.ToolUseID, ToolName: t.ToolName, CallID: t.CallID}
+			if refusedBeforeHook(t) {
+				rep.RefusedBeforeHook = append(rep.RefusedBeforeHook, ref)
+			} else {
+				rep.OnlyTracker = append(rep.OnlyTracker, ref)
+			}
 		default:
 			rep.Matched++
 			for _, d := range diffPair(c, t) {
@@ -302,6 +317,12 @@ func Compare(in Input) (Report, error) {
 	rep.Clean = len(rep.OnlyCeta) == 0 && len(rep.OnlyTracker) == 0 && len(rep.Differences) == 0 &&
 		len(rep.Duplicates) == 0 && rep.UnkeyedCeta == 0 && len(rep.SessionsWithoutTracker) == 0
 	return rep, nil
+}
+
+// refusedBeforeHook reports whether the tracker call never reached a hook and
+// ended in Claude Code's own tool_use_error.
+func refusedBeforeHook(t trackeradapter.Row) bool {
+	return !t.HookRan && strings.Contains(t.ErrorText, "<tool_use_error>")
 }
 
 // diffPair compares one matched call; the caller fills the identity fields.

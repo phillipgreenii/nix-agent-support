@@ -303,6 +303,12 @@ reads both CETA's database and, through the adapter, the tracker's) joins the tw
 `session_id` + `tool_use_id` over a time window and reports:
 
 - calls only CETA recorded, and calls only the tracker recorded;
+- tracker-only calls that Claude Code refused before any hook ran, in their own category
+  (`refused_before_hook`), kept out of the only-tracker list: the tracker has no `pre_tool`, no
+  `check` and no `ceta.verdict` for the call (no permission mode, no verdict through the published
+  views) and its error text contains `<tool_use_error>`. CETA runs only inside hooks, so its missing
+  row is expected. A tracker-only call with any hook evidence, or without that error, stays under
+  only-tracker. The category never makes a report unclean;
 - calls where CETA's recorded verdict differs from the tracker's `ceta.verdict`;
 - calls where the outcome differs (CETA's `approved` / `denied` / `rejected` / `failed` /
   `unresolved` against the tracker's `settlement`);
@@ -391,8 +397,8 @@ because calls still in flight in a live session (five calls of one session, CETA
     before the `PreToolUse` hook fires, so CETA, which runs only inside hooks, never sees them;
     the tracker's mod sees them because it observes the call itself. Expected gap, not a CETA
     defect. 121 of the 210 carry an agent id, which is why subagent calls dominate.
-    `compare-tracker` still lists them; excluding calls with no tracker hook event and a
-    `<tool_use_error>` result would remove them from the only-tracker list (not yet done).
+    `compare-tracker` now reports the 132 with a `<tool_use_error>` under `refused_before_hook`
+    rather than only-tracker (section 8.2, comparison); the 3 without a `call_end` stay listed.
   - 75 calls (Bash 59, Skill 5, Grep 4, Write 3, Glob 3, Monitor 1) did reach the hooks: the
     tracker has `pre_tool` and `check`. CETA's hook ran but its ask-log row was not written. The
     transcripts show two failure modes. (1) The harness cancelled CETA's `PreToolUse` hook:
