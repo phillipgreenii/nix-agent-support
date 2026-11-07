@@ -214,3 +214,38 @@ func TestNewIsolation_checkoutPoolLowDiskIsLowDisk(t *testing.T) {
 		t.Fatalf("err = %v, want ErrLowDisk", err)
 	}
 }
+
+// ownerPool is a checkoutpool.Client that, like the command run with --reuse,
+// answers a second lease for one owner with the lease that owner holds.
+type ownerPool struct{ held map[string]checkoutpool.Lease }
+
+func (p *ownerPool) Lease(_ context.Context, req checkoutpool.LeaseRequest) (checkoutpool.Lease, error) {
+	if l, ok := p.held[req.Owner]; ok {
+		return l, nil
+	}
+	l := checkoutpool.Lease{ID: "lease-" + req.Owner, Path: "/slot/" + req.Owner + "/tree"}
+	p.held[req.Owner] = l
+	return l, nil
+}
+func (p *ownerPool) Renew(context.Context, string) error   { return nil }
+func (p *ownerPool) Release(context.Context, string) error { return nil }
+
+func TestNewIsolation_checkoutPoolRedispatchReusesLease(t *testing.T) {
+	pool := &ownerPool{held: map[string]checkoutpool.Lease{}}
+	deps := Deps{Cfg: testCfg("/clone", ""), ExternalID: "sess-5", Pool: pool}
+	cfg := roles.IsolationConfig{Type: CheckoutPoolIsolation}
+	first := newIsolation(cfg, deps)
+	p1, err := first.Ensure(context.Background(), "bead-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := newIsolation(cfg, deps)
+	p2, err := second.Ensure(context.Background(), "bead-1")
+	if err != nil {
+		t.Fatalf("redispatch Ensure: %v", err)
+	}
+	if p1 != p2 || first.(leaseHolder).leaseID() != second.(leaseHolder).leaseID() {
+		t.Errorf("redispatch got %q/%q, want the first lease %q/%q",
+			p2, second.(leaseHolder).leaseID(), p1, first.(leaseHolder).leaseID())
+	}
+}

@@ -29,7 +29,7 @@ func TestLeaseBuildsArgvAndParses(t *testing.T) {
 	if got.ID != "L1" || got.Path != "/r/slots/slot-01/tree" {
 		t.Fatalf("lease = %+v", got)
 	}
-	want := []string{"lease", "--repo", "/repo", "--ref", "origin/main", "--owner", "sess-1", "--wait", "0s", "--bead", "bead-1", "--root", "/r"}
+	want := []string{"lease", "--repo", "/repo", "--ref", "origin/main", "--owner", "sess-1", "--wait", "0s", "--reuse", "--bead", "bead-1", "--root", "/r"}
 	if calls[0].name != Binary || !reflect.DeepEqual(calls[0].args, want) {
 		t.Fatalf("call = %+v, want args %v", calls[0], want)
 	}
@@ -73,5 +73,41 @@ func TestLeaseRejectsIncompleteOutput(t *testing.T) {
 	var calls []call
 	if _, err := (CLI{Exec: fakeExec(`{"leaseId":"L"}`, "", 0, &calls)}).Lease(t.Context(), LeaseRequest{}); err == nil {
 		t.Fatal("want error for a lease with no path")
+	}
+}
+
+// A redispatch leases again under the same owner: the command answers exit 11
+// unless --reuse is passed, and the client passes it, so the second Lease
+// returns the first lease.
+func TestLeaseTwiceForOneOwnerReusesTheLease(t *testing.T) {
+	held := map[string]bool{}
+	const out = `{"leaseId":"L1","slot":"slot-01","path":"/r/slots/slot-01/tree","branch":"b"}`
+	ex := func(_ context.Context, _ string, args []string) ([]byte, []byte, int, error) {
+		owner, reuse := "", false
+		for i, a := range args {
+			if a == "--owner" {
+				owner = args[i+1]
+			}
+			if a == "--reuse" {
+				reuse = true
+			}
+		}
+		if held[owner] && !reuse {
+			return nil, []byte("owner already leases"), 11, nil
+		}
+		held[owner] = true
+		return []byte(out), nil, 0, nil
+	}
+	c := CLI{Exec: ex}
+	first, err := c.Lease(t.Context(), LeaseRequest{Repo: "/repo", Ref: "main", Owner: "sess-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.Lease(t.Context(), LeaseRequest{Repo: "/repo", Ref: "main", Owner: "sess-1"})
+	if err != nil {
+		t.Fatalf("redispatch lease: %v", err)
+	}
+	if first != second {
+		t.Fatalf("redispatch lease = %+v, want %+v", second, first)
 	}
 }

@@ -44,7 +44,7 @@ const usage = `usage: pg-checkout-pool <command> [flags]
 
 commands:
   lease    --repo DIR --ref REF --owner SESSION-ID [--bead ID] [--branch NAME]
-           [--ttl 30m] [--wait 2m] [--max-slots 6] [--min-free-bytes N] [--keep PATH]...
+           [--ttl 30m] [--wait 2m] [--reuse] [--max-slots 6] [--min-free-bytes N] [--keep PATH]...
   renew    --lease ID [--ttl 30m]
   release  --lease ID [--disposition reset|keep|quarantine] [--keep PATH]...
   prewarm  --repo DIR --ref REF --count N [--delay 30s] [--max-slots 6] [--min-free-bytes N]
@@ -57,7 +57,7 @@ commands:
 every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status and metrics.
 exit codes: 0 ok; 2 usage; 3 pool-exhausted; 4 low-disk; 5 ref-unresolvable;
 6 quarantine-only; 7 git-wedged; 8 lease-not-found; 9 internal error;
-10 slot-busy; 11 owner-already-leases`
+10 slot-busy; 11 owner-already-leases (lease --reuse returns the owner's live lease instead)`
 
 func (a *app) run(args []string) int {
 	stderr, stdout, clock := a.stderr, a.stdout, a.clock

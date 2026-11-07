@@ -304,6 +304,10 @@ let
     ++ roleCfg.command.argv;
 
   ccpoolRoles = lib.filterAttrs (_name: roleCfg: kindOf roleCfg == "ccpool") cfg.roles;
+  # Whether any ccpool role leases pooled checkouts (isolation.type = "checkout-pool").
+  usesCheckoutPool = lib.any (roleCfg: roleCfg.ccpool.isolation.type == "checkout-pool") (
+    lib.attrValues ccpoolRoles
+  );
   # The ccpool roles that share the handler-wide pool (only meaningful while
   # `pool.enable`; otherwise they run on ccpool's unmanaged default pool).
   handlerPoolRoles = lib.optionalAttrs cfg.pool.enable (
@@ -1597,7 +1601,11 @@ let
                         resets the checkout, rescuing uncommitted tracked work to a ref)
                         on teardown, on the orphan reconcile and on every row-keyed
                         teardown. A full pool declines the dispatch as busy (no bead is
-                        touched). Off by default; dispatched agent sessions only.
+                        touched). A redispatch of a session that still holds its lease
+                        reuses that lease (same slot, no reset). Enabling this type for
+                        any role adds `pg-checkout-pool` to `home.packages`, so the
+                        handler finds it on PATH. Off by default; dispatched agent
+                        sessions only.
                       '';
                     };
                     ref = lib.mkOption {
@@ -2773,7 +2781,14 @@ in
       };
     }
     (lib.mkIf cfg.enable {
-      home.packages = [ cfg.package ];
+      # pg-checkout-pool joins the profile (and so the handler's inherited PATH)
+      # only when some ccpool role selects the opt-in "checkout-pool" isolation,
+      # because the handler runs it as an external command (internal/checkoutpool).
+      # Any other deployment's package set is unchanged.
+      home.packages = [
+        cfg.package
+      ]
+      ++ lib.optional usesCheckoutPool pkgs.pg-checkout-pool;
 
       # pg2-4roho decision item 4: register this handler's own worktree pool
       # with pg-disk-reclaimer as a belt-and-suspenders safety net -- see

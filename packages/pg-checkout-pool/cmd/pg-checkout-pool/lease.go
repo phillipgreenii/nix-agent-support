@@ -199,6 +199,7 @@ func (a *app) lease(args []string) int {
 	wait := fs.Duration("wait", defaultWait, "how long to wait for a free slot")
 	maxSlots := fs.Int("max-slots", defaultMaxSlots, "pool size cap")
 	minFree := fs.Uint64("min-free-bytes", defaultMinFree, "free-space floor below which the pool will not grow")
+	reuse := fs.Bool("reuse", false, "when the owner already holds a live lease, renew it and report it instead of failing with exit 11")
 	var keep multiFlag
 	fs.Var(&keep, "keep", "ignored path that survives a reset (repeatable; default is the built-in list)")
 	if err := fs.Parse(args); err != nil {
@@ -231,6 +232,9 @@ func (a *app) lease(args []string) int {
 	if _, held, err := st.FindByOwner(*owner); err != nil {
 		return a.fail(err)
 	} else if held {
+		if *reuse {
+			return a.reuseLease(st, *owner, *root, *ttl)
+		}
 		return a.fail(fmt.Errorf("%w: %s", errOwnerHasLease, *owner))
 	}
 	commit, err := prov.Resolve(ctx, *ref)
@@ -290,6 +294,35 @@ func (a *app) lease(args []string) int {
 		}
 		a.sleep(min(waitPoll, remaining))
 	}
+}
+
+// reuseLease reports the lease the owner already holds, extending it by ttl so
+// a redispatched session does not lose its slot to the reaper. The slot is not
+// reset: the session continues on its own checkout. A lease that is not in the
+// leased state (a release or reap is resetting it) is not reusable and fails
+// like a plain second lease.
+func (a *app) reuseLease(st *pool.Store, owner, root string, ttl time.Duration) int {
+	rec, _, err := st.FindByOwner(owner)
+	if err != nil {
+		return a.fail(err)
+	}
+	h, err := st.Lock(rec.Slot)
+	if err != nil {
+		return a.fail(err)
+	}
+	defer h.Unlock()
+	cur := h.Record()
+	if cur.OwnerSessionID != owner || cur.State != pool.Leased {
+		return a.fail(fmt.Errorf("%w: %s (lease is %s, not reusable)", errOwnerHasLease, owner, cur.State))
+	}
+	if err := h.Renew(ttl); err != nil {
+		return a.fail(err)
+	}
+	cur = h.Record()
+	return a.emit(leaseOut{
+		LeaseID: cur.LeaseID, Owner: cur.OwnerSessionID, Slot: cur.Slot, Path: treePath(root, cur.Slot),
+		Branch: cur.Branch, Head: cur.Commit, ExpiresAt: cur.Expiry, Daemon: "warm",
+	})
 }
 
 // finishLease resets the acquired slot to the commit and marks it leased.

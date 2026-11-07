@@ -111,13 +111,18 @@ func (c CLI) run(ctx context.Context, args ...string) ([]byte, error) {
 	return nil, fmt.Errorf("%w: %s", base, msg)
 }
 
+// A dispatch's lease is keyed on the session's external id, so a redispatch of
+// a session that still holds its lease must continue on the same slot. Lease
+// therefore always passes --reuse: the command then renews and reports the
+// owner's live lease (same lease id and path, no reset) instead of exiting 11.
+
 // leasePoolWait is how long a lease call waits for a slot. Zero: the handler
 // declines a dispatch (busy) rather than holding the offer open.
 const leasePoolWait = "0s"
 
 // Lease implements Client.
 func (c CLI) Lease(ctx context.Context, req LeaseRequest) (Lease, error) {
-	args := []string{"lease", "--repo", req.Repo, "--ref", req.Ref, "--owner", req.Owner, "--wait", leasePoolWait}
+	args := []string{"lease", "--repo", req.Repo, "--ref", req.Ref, "--owner", req.Owner, "--wait", leasePoolWait, "--reuse"}
 	if req.Bead != "" {
 		args = append(args, "--bead", req.Bead)
 	}

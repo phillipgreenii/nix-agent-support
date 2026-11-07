@@ -10043,6 +10043,30 @@
                   };
                   noRolesJson = rolesJsonDir noRoles;
 
+                  # checkout-pool isolation: the handler runs `pg-checkout-pool` as an
+                  # external command, so the module puts it on the profile PATH only
+                  # when a ccpool role selects that isolation type.
+                  poolIsolationRole = evalHM {
+                    enable = true;
+                    roles.pooled = {
+                      handler = ccpoolHandler;
+                      ccpool = {
+                        actor = "pooled-actor";
+                        completion = "close-only";
+                        onFailure = "unclaim";
+                        onDispatchFail = "leave";
+                        promptBody = "pooled prompt";
+                        isolation.type = "checkout-pool";
+                      };
+                    };
+                  };
+                  checkoutPoolOnPath = lib.boolToString (
+                    lib.elem pkgs.pg-checkout-pool poolIsolationRole.home.packages
+                  );
+                  checkoutPoolOnPathDefault = lib.boolToString (
+                    lib.elem pkgs.pg-checkout-pool twoRoles.home.packages
+                  );
+
                   # pool (pg2-1p4yp): disabled by default -- no
                   # home.activation entry at all (an existing deployment
                   # that hasn't opted in gets zero behavior change).
@@ -11196,6 +11220,8 @@
                           k31WrapJson
                           twoRolesJson
                           noRolesJson
+                          checkoutPoolOnPath
+                          checkoutPoolOnPathDefault
                           launchConfigFile
                           defaultLaunchConfigFile
                           ownPoolRolesJson
@@ -11244,6 +11270,9 @@
                         jq -e 'has("ccpool") | not' "$twoRolesJson/worker.json" >/dev/null
                         jq -e 'has("survivesShutdown") | not' "$twoRolesJson/worker.json" >/dev/null
                         [ "$(ls -1 "$noRolesJson" | wc -l)" -eq 0 ]
+                        # pg-checkout-pool is on the profile only for a checkout-pool role.
+                        [ "$checkoutPoolOnPath" = true ]
+                        [ "$checkoutPoolOnPathDefault" = false ]
 
                         # launchConfigFile (this bead, pg2-qsred): the
                         # overrides render, and everything left untouched

@@ -9,6 +9,10 @@
 
 `pg-checkout-pool lease --repo {{/path/to/clone}} --ref {{origin/main}} --owner {{session-id}} --bead {{work-item}}`
 
+- Lease again for a session that may already hold one (a redispatch): the live lease is renewed and returned unchanged (same lease id, slot and path; the checkout is not reset). Without `--reuse` the second lease exits 11:
+
+`pg-checkout-pool lease --repo {{/path/to/clone}} --ref {{origin/main}} --owner {{session-id}} --reuse`
+
 - Extend a lease before it expires:
 
 `pg-checkout-pool renew --lease {{lease-id}} --ttl {{30m}}`

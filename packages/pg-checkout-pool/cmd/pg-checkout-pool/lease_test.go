@@ -559,3 +559,38 @@ func TestHelpListsLeaseCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestLeaseReuseReturnsOwnersLiveLease(t *testing.T) {
+	e := newEnv(t)
+	a := e.mustLease("sess-a", "bead-1")
+	other := e.mustLease("sess-b", "bead-2")
+	e.clk.Advance(10 * time.Minute)
+
+	// Without the flag a second lease keeps failing with exit 11.
+	if _, code, _ := e.lease("sess-a", "bead-1"); code != exitOwnerHasLease {
+		t.Fatalf("second lease without --reuse: exit %d", code)
+	}
+	again := e.mustLease("sess-a", "bead-1", "--reuse")
+	if again.LeaseID != a.LeaseID || again.Slot != a.Slot || again.Path != a.Path || again.Branch != a.Branch {
+		t.Fatalf("reuse = %+v, want the original %+v", again, a)
+	}
+	if !again.ExpiresAt.After(a.ExpiresAt) {
+		t.Errorf("reuse did not extend the lease: %v vs %v", again.ExpiresAt, a.ExpiresAt)
+	}
+	if rec := e.record(a.Slot); rec.State != pool.Leased || rec.LeaseID != a.LeaseID {
+		t.Errorf("record after reuse: %+v", rec)
+	}
+	// A different owner is unaffected: --reuse with no lease of its own leases normally.
+	c := e.mustLease("sess-c", "bead-3", "--reuse")
+	if c.LeaseID == a.LeaseID || c.LeaseID == other.LeaseID || c.Slot == a.Slot || c.Slot == other.Slot {
+		t.Errorf("new owner with --reuse got %+v", c)
+	}
+	// After release the owner leases afresh, with a new lease id.
+	if code, _ := e.release(a.LeaseID); code != 0 {
+		t.Fatalf("release exit %d", code)
+	}
+	fresh := e.mustLease("sess-a", "bead-1", "--reuse")
+	if fresh.LeaseID == a.LeaseID {
+		t.Errorf("lease id reused after release: %s", fresh.LeaseID)
+	}
+}
