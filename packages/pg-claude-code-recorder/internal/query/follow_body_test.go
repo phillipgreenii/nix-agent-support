@@ -86,7 +86,7 @@ func TestFollowResultFromBodyMatchesTrigramLink(t *testing.T) {
 		if len(old) != want {
 			t.Fatalf("baseline for %s has %d links, want %d", rel, len(old), want)
 		}
-		if js(old) != js(append([]string(nil), got[rel]...)) && !(len(old) == 0 && len(got[rel]) == 0) {
+		if js(old) != js(append([]string(nil), got[rel]...)) && (len(old) != 0 || len(got[rel]) != 0) {
 			t.Errorf("%s: new %v, old %v", rel, got[rel], old)
 		}
 	}

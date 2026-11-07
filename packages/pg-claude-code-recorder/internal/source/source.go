@@ -143,7 +143,7 @@ func queryName(sf reflect.StructField, prefix string) string {
 }
 
 func structOf(t reflect.Type) (reflect.Type, bool) {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() == reflect.Struct && t != reflect.TypeOf(time.Time{}) {
@@ -163,7 +163,7 @@ func Extract(v any, prefix string) []Field {
 }
 
 func extract(rv reflect.Value, prefix string, out *[]Field) {
-	for rv.Kind() == reflect.Ptr {
+	for rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return
 		}
@@ -189,7 +189,7 @@ func extract(rv reflect.Value, prefix string, out *[]Field) {
 }
 
 func scalar(name string, kind Kind, fv reflect.Value) (Field, bool) {
-	for fv.Kind() == reflect.Ptr {
+	for fv.Kind() == reflect.Pointer {
 		if fv.IsNil() {
 			return Field{}, false
 		}

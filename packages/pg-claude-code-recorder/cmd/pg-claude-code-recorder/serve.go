@@ -41,7 +41,7 @@ func (a *app) serve(args []string) int {
 	if err != nil {
 		return a.emitError(false, wire.ErrUsage, err.Error())
 	}
-	var logw io.Writer = a.errw
+	logw := io.Writer(a.errw)
 	if cfg.LogFile != "" {
 		f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {

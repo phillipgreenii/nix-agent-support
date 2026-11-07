@@ -196,7 +196,7 @@ func TestPathFactsOfEverySourceShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srcs := sources.All()
 	bySrc := map[string]source.Source{}
 	for _, s := range srcs {

@@ -45,7 +45,7 @@ func TestVersionTwoStoreIsRefusedAndRebuildsIntoTheVersionThreeLayout(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if sum(t, path+".pre-rebuild") != before {
 		t.Fatal("the old file was not kept intact as index.db.pre-rebuild")
 	}
@@ -71,7 +71,7 @@ func TestVersionTwoStoreIsRefusedAndRebuildsIntoTheVersionThreeLayout(t *testing
 		t.Fatal(err)
 	}
 	s2 := open(t, dir)
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 	if s2.HasSessionText() || s2.HasTrigram() || !s2.HasExt() {
 		t.Fatal("a reopen changed the layout")
 	}
@@ -137,7 +137,7 @@ func TestBulkRebuildRecordsWallTimeRateAndProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	s.BulkBegin()
 	if err := s.BulkAdd(10, 100); err != nil {
 		t.Fatal(err)

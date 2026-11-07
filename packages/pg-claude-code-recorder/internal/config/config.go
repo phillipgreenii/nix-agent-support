@@ -326,7 +326,7 @@ func Load(path string, mustExist bool, getenv func(string) string) (Config, erro
 	c := Defaults(getenv)
 	var f file
 	if _, err := toml.DecodeFile(path, &f); err != nil {
-		if !(errors.Is(err, fs.ErrNotExist) && !mustExist) {
+		if !errors.Is(err, fs.ErrNotExist) || mustExist {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)
 		}
 	} else if err := apply(&c, f); err != nil {

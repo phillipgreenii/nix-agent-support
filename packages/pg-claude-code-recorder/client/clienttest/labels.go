@@ -140,8 +140,6 @@ func RunRow(t *testing.T, row LabelRow) *Env {
 
 func (e *Env) registryPath(pid int) string { return e.Path("sessions", strconv.Itoa(pid)+".json") }
 
-func (e *Env) historyPath() string { return e.Path("history.jsonl") }
-
 func (e *Env) step(t *testing.T, row LabelRow, i int, s LabelStep) {
 	t.Helper()
 	fail := func(err error) {

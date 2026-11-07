@@ -43,7 +43,7 @@ func TestWatcherRealFSEventsBurst(t *testing.T) {
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	// The start-up sweep is not under test; wait for it, then burst.
 	deadline := time.Now().Add(30 * time.Second)
 	for w.LastSweep().IsZero() {

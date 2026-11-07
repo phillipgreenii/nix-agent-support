@@ -441,7 +441,7 @@ func sessionFileFacts(db store.Querier, session string, byRef bool) (last int64,
 // still exist, and the end time when nothing better is known.
 func (e *Engine) transcriptFacts(ctx context.Context, c *Conversation) error {
 	db := store.BindCtx(ctx, e.St.Read())
-	rd := e.St.Reader.WithContext(ctx)
+	rd := e.St.WithContext(ctx)
 	var cwd sql.NullString
 	byRef := e.St.SessionRefReady()
 	cq := cwdQuery

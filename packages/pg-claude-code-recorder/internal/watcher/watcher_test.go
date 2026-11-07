@@ -128,7 +128,7 @@ func TestWatcherRescanRecoversMissedEvent(t *testing.T) {
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	eventually(t, "initial sweep", func() bool { return !w.LastSweep().IsZero() })
 
 	missed := filepath.Join(root, "example-project", "example-session.jsonl")
@@ -201,7 +201,7 @@ func TestWatcherHintsAndMustScan(t *testing.T) {
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	eventually(t, "initial sweep", func() bool { return !cp.get().LastSweep.IsZero() })
 	if fb.replay {
 		t.Fatal("first start replayed with no checkpoint")
@@ -242,7 +242,7 @@ func TestWatcherStartReplaysOrSweeps(t *testing.T) {
 		if err := w.Start(); err != nil {
 			t.Fatal(err)
 		}
-		defer w.Close()
+		defer func() { _ = w.Close() }()
 		if !fb.replay || fb.since != 99 {
 			t.Fatalf("backend started replay=%v since=%d", fb.replay, fb.since)
 		}
@@ -262,7 +262,7 @@ func TestWatcherStartReplaysOrSweeps(t *testing.T) {
 		if err := w.Start(); err != nil {
 			t.Fatal(err)
 		}
-		defer w.Close()
+		defer func() { _ = w.Close() }()
 		eventually(t, "gap sweep", func() bool { return !w.LastSweep().IsZero() })
 		if fb.replay {
 			t.Fatal("replayed across a volume change")
@@ -279,7 +279,7 @@ func TestWatcherPeriodicSweep(t *testing.T) {
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	write(t, filepath.Join(root, "example-p.jsonl"), "x")
 	eventually(t, "periodic sweep to report the file", func() bool { return len(sink.paths()) > 0 })
 }
@@ -403,7 +403,7 @@ func TestWatcherSweepsOnInjectedTicker(t *testing.T) {
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	eventually(t, "the start sweep to finish", func() bool { return !w.LastSweep().IsZero() })
 	write(t, filepath.Join(root, "example-p.jsonl"), "x")
 	time.Sleep(50 * time.Millisecond)

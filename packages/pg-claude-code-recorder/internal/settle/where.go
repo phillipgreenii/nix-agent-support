@@ -39,7 +39,7 @@ func (s *Settler) Held() ([]HeldRow, error) { return s.HeldCtx(context.Backgroun
 
 // HeldCtx is Held with the read under ctx.
 func (s *Settler) HeldCtx(ctx context.Context) ([]HeldRow, error) {
-	rows, err := s.st.Reader.WithContext(ctx).Stages()
+	rows, err := s.st.WithContext(ctx).Stages()
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 // cache (groups) is built for every caller and is not cancelled by one
 // request, so a disconnect cannot discard it.
 func (s *Settler) WhereCtx(ctx context.Context, session string) (WhereInfo, error) {
-	rd := s.st.Reader.WithContext(ctx)
+	rd := s.st.WithContext(ctx)
 	defer s.lockRun("where")()
 	now := s.cfg.Clock.Now()
 	info := WhereInfo{Session: session, BlockedBy: []string{}, RemovalEnabled: s.cfg.RemoveEnable}

@@ -694,18 +694,6 @@ func relTo(root, path string) (string, error) {
 	return path[len(root)+1:], nil
 }
 
-type pendingRec struct {
-	off int64
-	ln  int
-	rec source.Record
-}
-
-type badLine struct {
-	off    int64
-	ln     int
-	reason string
-}
-
 // parseGen parses a generation from its parse offset (from 0 for a re-parse,
 // which also replaces what was stored) to the last newline in the copy.
 func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, reparse bool) (int, error) {
@@ -1403,13 +1391,13 @@ func (p *Parser) fieldNameID(tx *pstx, name string) (int64, error) {
 // QueryRow runs a single-row query on a statement prepared once per transaction.
 func (p *pstx) QueryRow(q string, args ...any) *sql.Row {
 	if ablateNoPrepare {
-		return p.Tx.QueryRow(q, args...)
+		return p.QueryRow(q, args...)
 	}
 	st, ok := p.st[q]
 	if !ok {
 		var err error
-		if st, err = p.Tx.Prepare(q); err != nil {
-			return p.Tx.QueryRow(q, args...) // reports the same error from Scan
+		if st, err = p.Prepare(q); err != nil {
+			return p.QueryRow(q, args...) // reports the same error from Scan
 		}
 		p.st[q] = st
 	}
@@ -1452,7 +1440,7 @@ func (p *pstx) exec(q string, args ...any) (sql.Result, error) {
 	st, ok := p.st[q]
 	if !ok {
 		var err error
-		if st, err = p.Tx.Prepare(q); err != nil {
+		if st, err = p.Prepare(q); err != nil {
 			return nil, err
 		}
 		p.st[q] = st

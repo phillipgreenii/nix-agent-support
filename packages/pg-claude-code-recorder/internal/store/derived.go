@@ -273,15 +273,6 @@ func sessionRefIndexesSQL() string {
 	return b.String()
 }
 
-// derivedIndexesSQL is every derivedIndexes statement as one script.
-func derivedIndexesSQL() string {
-	var b strings.Builder
-	for _, ix := range derivedIndexes {
-		b.WriteString(ix.sql + ";\n")
-	}
-	return b.String()
-}
-
 // derivedSQL is the tables and then the indexes: what a normal open runs.
 // derivedTables is derivedTablesSQL, without the trigram table when tri is false
 // (the layout of a new index.db built with Options.NoTrigramIndex) and with the

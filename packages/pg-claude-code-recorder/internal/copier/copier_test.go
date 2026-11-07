@@ -205,12 +205,11 @@ func TestConcurrentAppenderGivesByteIdenticalCopyWithoutDuplicates(t *testing.T)
 			_, _ = fmt.Fprintf(f, "{\"line\":%d,\"pad\":\"%s\"}\n", i, strings.Repeat("x", i%40))
 		}
 	}()
-	var id int64
 	for ctx.Err() == nil {
-		id = e.ingest(p).File
+		e.ingest(p)
 	}
 	wg.Wait()
-	id = e.ingest(p).File
+	id := e.ingest(p).File
 	want, _ := os.ReadFile(p)
 	e.mustEqual(id, string(want))
 	if n := strings.Count(e.copyOf(id), "\n"); n != 300 {

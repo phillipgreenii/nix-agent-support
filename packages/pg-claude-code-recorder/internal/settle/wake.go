@@ -25,8 +25,6 @@ const (
 	ModeEvent = "event"
 )
 
-const quietBelowAfter = "quiet age below settle.after"
-
 // EventMode reports whether the settler runs the event-driven loop.
 func (s *Settler) EventMode() bool { return s.cfg.Mode == ModeEvent }
 

@@ -61,7 +61,7 @@ func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	s = open(t, dir)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	var def string
 	if err := s.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
 		t.Fatalf("a full fields_name_n survived open: %q, %v", def, err)

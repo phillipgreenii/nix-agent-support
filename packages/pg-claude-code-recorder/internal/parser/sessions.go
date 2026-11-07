@@ -176,7 +176,7 @@ func (p *Parser) sessionsOfGen(tx *pstx, file int64, gen int) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var s string

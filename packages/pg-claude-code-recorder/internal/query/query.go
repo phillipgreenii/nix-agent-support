@@ -242,13 +242,12 @@ func (e *Engine) rows(tx store.Querier, req Request, ans *Answer) *wire.Error {
 		return wire.FromErr(qerr)
 	}
 	type hit struct {
-		id       int64
-		ref      RecordRef
-		ln       int
-		src      string
-		row      []any
-		file     int64
-		rawBytes []byte
+		id   int64
+		ref  RecordRef
+		ln   int
+		src  string
+		row  []any
+		file int64
 	}
 	var hits []hit
 	for rs.Next() {

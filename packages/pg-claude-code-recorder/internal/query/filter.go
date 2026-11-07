@@ -46,7 +46,6 @@ type builder struct {
 	aliases  map[string]string
 	joins    []string
 	joinArgs []any
-	err      *wire.Error
 	// used counts, per stored field name, the filter leaves that named it.
 	used map[string]int
 	// claudeDir is the directory the recorded paths live under; it is what

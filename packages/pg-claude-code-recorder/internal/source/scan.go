@@ -65,7 +65,7 @@ func ArrayElements(raw []byte) (elems [][]byte, ok bool) {
 type member struct{ key, val []byte }
 
 func scanUnknown(raw []byte, t reflect.Type, path string, out *[]string) {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	i := skipWS(raw, 0)
@@ -74,7 +74,7 @@ func scanUnknown(raw []byte, t reflect.Type, path string, out *[]string) {
 	}
 	if t.Kind() == reflect.Slice {
 		et := t.Elem()
-		for et.Kind() == reflect.Ptr {
+		for et.Kind() == reflect.Pointer {
 			et = et.Elem()
 		}
 		if _, ok := structOf(et); !ok && et.Kind() != reflect.Slice {

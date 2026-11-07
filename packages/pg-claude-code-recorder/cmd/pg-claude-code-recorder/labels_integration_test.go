@@ -63,7 +63,7 @@ func TestLabelTableRowsThroughConversationsEnded(t *testing.T) {
 				t.Errorf("--suspected-crash lists %s = %v, want %v", row.Session, got, row.Suspected)
 			}
 			for _, r := range su {
-				if r.Label != lifecycle.LabelCrashed && !(r.Label == lifecycle.LabelUnknown && r.RegistryStaleAtDiscovery) {
+				if r.Label != lifecycle.LabelCrashed && (r.Label != lifecycle.LabelUnknown || !r.RegistryStaleAtDiscovery) {
 					t.Errorf("--suspected-crash listed a %s row without the stale fact", r.Label)
 				}
 			}

@@ -2,7 +2,6 @@ package parser
 
 import (
 	"container/heap"
-	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -327,8 +326,6 @@ func (l *lagState) genLag(k lagKey, lg *lagGen) GenLag {
 	}
 	return out
 }
-
-var errLagSeeded = errors.New("parser: lag state already seeded")
 
 type lagMaxEntry struct {
 	lag int64

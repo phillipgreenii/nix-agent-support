@@ -197,10 +197,9 @@ type Settler struct {
 
 	// doctorMu is the single flight of the doctor cursor: a rolling slice and a
 	// CLI doctor run never overlap.
-	doctorMu     sync.Mutex
-	doctorIdle   func() error
-	doctorSeamMu sync.Mutex
-	doctorSeam   doctorSeam
+	doctorMu   sync.Mutex
+	doctorIdle func() error
+	doctorSeam doctorSeam
 
 	// The incrementally kept file-to-Conversation map (see groups); guarded by run.
 	trk    *store.FileTracker

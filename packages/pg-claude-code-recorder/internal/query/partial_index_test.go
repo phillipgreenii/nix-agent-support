@@ -99,7 +99,7 @@ func plan(t *testing.T, st *store.Store, q string, args []any) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	var lines []string
 	for rs.Next() {
 		var id, parent, unused int
@@ -118,7 +118,7 @@ func ids(t *testing.T, st *store.Store, q string, args []any) []int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	var out []int64
 	for rs.Next() {
 		var id int64

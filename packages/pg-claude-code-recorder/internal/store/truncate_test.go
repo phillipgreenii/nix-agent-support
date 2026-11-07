@@ -41,7 +41,7 @@ func TestCheckpointTruncateShrinksTheWAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	wal := growWAL(t, s, dir, 200, limit)
 	log, done, err := s.Checkpoint()
 	if err != nil || log != done {
@@ -70,7 +70,7 @@ func TestCheckpointTruncateIsBusyWhileAReaderPinsTheWAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	commitFile(t, s)
 	tx, err := s.rdb.Begin()
 	if err != nil {
@@ -122,7 +122,7 @@ func TestCheckpointTruncateIsBusyWhileAReaderPinsTheWAL(t *testing.T) {
 func TestTruncateWithoutAllFramesStallsWriters(t *testing.T) {
 	const wait = 400 * time.Millisecond
 	s := open(t, t.TempDir())
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	commitFile(t, s)
 	tx, err := s.rdb.Begin()
 	if err != nil {

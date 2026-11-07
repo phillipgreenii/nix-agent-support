@@ -27,6 +27,7 @@ func getattrlist(path string, al *unix.Attrlist, buf []byte, opts uintptr) error
 	if err != nil {
 		return err
 	}
+	//nolint:staticcheck // x/sys/unix has no getattrlist wrapper; the raw syscall is the only pure-Go route
 	_, _, e := unix.Syscall6(unix.SYS_GETATTRLIST, uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(al)),
 		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), opts, 0)
 	if e != 0 {

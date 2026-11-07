@@ -256,9 +256,9 @@ func (s *Reader) TornTailOf(file int64, gen int) (TornTail, bool) {
 // (SessionRefReady) and from records.session otherwise.
 func (s *Store) SessionsOfFile(file int64) ([]string, error) {
 	if s.SessionRefReady() {
-		return s.Reader.sessionsOfFile(sessionsOfFileRefQuery, file)
+		return s.sessionsOfFile(sessionsOfFileRefQuery, file)
 	}
-	return s.Reader.sessionsOfFile(sessionsOfFileQuery, file)
+	return s.sessionsOfFile(sessionsOfFileQuery, file)
 }
 
 const sessionsOfFileQuery = `SELECT DISTINCT session FROM records WHERE file_id=? AND session<>''`

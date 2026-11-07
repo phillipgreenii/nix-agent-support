@@ -18,7 +18,7 @@ func commitFile(t *testing.T, s *Store) {
 
 func TestCheckpointReaderPin(t *testing.T) {
 	s := open(t, t.TempDir())
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	commitFile(t, s)
 	tx, err := s.rdb.Begin()
 	if err != nil {
@@ -63,7 +63,7 @@ func journalLimit(t *testing.T, db *sql.DB) int {
 
 func TestJournalSizeLimitInDSN(t *testing.T) {
 	s := open(t, t.TempDir())
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	want := 1073741824
 	if JournalSizeLimit != want {
 		t.Fatalf("JournalSizeLimit = %d", JournalSizeLimit)
@@ -111,7 +111,7 @@ func TestWALFileShrinksToLimitAfterCompleteCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if _, err := s.wdb.Exec(`PRAGMA wal_autocheckpoint=0`); err != nil {
 		t.Fatal(err)
 	}

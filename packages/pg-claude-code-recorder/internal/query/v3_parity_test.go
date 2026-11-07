@@ -53,7 +53,7 @@ func rowsOf(t *testing.T, k *testkit.Kit, qs string) string {
 	if err != nil {
 		t.Fatalf("%s: %v", qs, err)
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	var out []string
 	for rs.Next() {
 		var a, b any
@@ -127,10 +127,8 @@ func TestV3RebuildHoldsTheSameRecordsFactsAndAnswersAsV2(t *testing.T) {
 
 	// Query results: the session requests, the typed-field requests and the
 	// searches, over both stores.
-	var reqs []string
-	for _, r := range sessionRequests[:len(sessionRequests)-1] { // the last one follows a link type the corpus has no record of
-		reqs = append(reqs, r)
-	}
+	// The last session request follows a link type the corpus has no record of.
+	reqs := append([]string(nil), sessionRequests[:len(sessionRequests)-1]...)
 	reqs = append(reqs, typedRequests...)
 	reqs = append(
 		reqs,

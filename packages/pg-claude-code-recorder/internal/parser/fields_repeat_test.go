@@ -60,7 +60,7 @@ func TestFieldsRepeatedNameKeepsLastWinsAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	i := 0
 	for rows.Next() {
 		var name string
