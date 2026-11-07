@@ -7573,6 +7573,31 @@
                     touch "$out"
                   '';
 
+              # pg-checkout-pool: the alert rules. The script pins the Grafana-only fields (for,
+              # severity, noDataState, thresholds, dashboard panel links), compares the rule uids with
+              # the router probe's registeredRuleUIDs, then wraps refId A of each rule as a Prometheus
+              # alert and runs the cases under grafana/alerting/rule-tests/ under `promtool test rules`.
+              test-pg-checkout-pool-alert-rules =
+                pkgs.runCommand "test-pg-checkout-pool-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pg-checkout-pool/grafana/check-alert-rules.sh} \
+                      ${./packages/pg-checkout-pool/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-checkout-pool/grafana/pg-checkout-pool.json} \
+                      ${./packages/pg-checkout-pool/grafana/alerting/rule-tests} \
+                      ${./packages/pg-router-probe/cmd/pg-router-probe/run.go}
+                    touch "$out"
+                  '';
+
               # pg-connector-github: the PromQL behaviour of its Prometheus alert rules
               # (docket pg2-z5fax.6). refId A of each rule listed in
               # packages/pg-connector/grafana/check-alert-rules.sh is wrapped as a Prometheus

@@ -1,0 +1,238 @@
+# pg-checkout-pool unified-alerting rules. Metric names come from `pg-checkout-pool metrics`
+# (packages/pg-checkout-pool/internal/metrics); the series is delivered by whatever runs that
+# command on a schedule (a textfile collector), which is the deployment's job.
+#
+#   pg-checkout-pool-leaked-slots      a lease nobody holds and nobody reaped, for 10m
+#   pg-checkout-pool-quarantined       a slot quarantined, for 1h
+#   pg-checkout-pool-exhausted-waiting every slot busy while lease commands wait, for 15m
+#   pg-checkout-pool-reset-slow        reset p95 above 30 s over 30m, for 15m
+#   pg-checkout-pool-daemon-orphans    more fsmonitor daemons than slots plus one, for 15m
+#
+# The 30 s reset threshold is derived from docs/superpowers/specs/2026-11-07-monorepo-checkout-
+# pool-measurements.md: a reset of the real monorepo checkout took about 9 s (6.5 to 14.0 s
+# across the load-driven spread), so 30 s is more than twice the slowest measured reset and
+# well under the 120 s a create costs. It is a starting value; retune it from the reset
+# histogram once real leases have run.
+#
+# refId A is plain PromQL and refId C a single threshold stage (gt 0, or gt 30 for the reset
+# p95), so check-alert-rules.sh can wrap A with C's evaluator and run `promtool test rules`
+# over rule-tests/<uid>.test.yaml. Every rule has noDataState OK: a pool that is not in use
+# exports nothing wrong, and the exporter being absent is for the launchd health rules.
+#
+# Each uid is also in registeredRuleUIDs of packages/pg-router-probe/cmd/pg-router-probe/run.go
+# (a firing instance reaches the escalation flow), and a deployment that passes its own
+# --rule-uid list to the probe MUST add them to that list too. The folder "Claude Agents"
+# converges by title (never pin a folderUid, grafana/grafana#125079). Delivery is Grafana's
+# notification policy; this file adds none.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-checkout-pool
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: pg-checkout-pool-leaked-slots
+        title: Checkout pool has leaked slots
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-checkout-pool
+          __panelId__: "2"
+          summary: "{{ $values.A }} checkout pool slot(s) leased to nobody for 10+ min"
+          description: "A slot is leased or resetting, its lock is free and its expiry has passed, so no process holds it. Run pg-checkout-pool reap --dry-run to see what would be reclaimed, then pg-checkout-pool reap (uncommitted tracked work is captured to a rescue ref first). A slot that the reap quarantines is the quarantined rule's to report."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_checkout_pool_leaked_slots)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-checkout-pool-quarantined
+        title: Checkout pool has a quarantined slot
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-checkout-pool
+          __panelId__: "3"
+          summary: "{{ $values.A }} checkout pool slot(s) quarantined for 1+ hour"
+          description: "A slot was taken out of rotation with its directory kept: two failed resets, a failed rescue capture, a wedged git, or a release with the keep or quarantine disposition. pg-checkout-pool status lists it with the reason; look at the slot directory under the pool root, then fix or remove it. Nothing removes a quarantined slot automatically, and the pool grows a replacement only while it is under its cap."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_checkout_pool_quarantined_slots)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-checkout-pool-exhausted-waiting
+        title: Checkout pool exhausted with lease commands waiting
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-checkout-pool
+          __panelId__: "4"
+          summary: "{{ $values.A }} lease command(s) waiting for a checkout pool slot for 15+ min"
+          description: "No slot is warm-free and lease commands are waiting, so agent dispatches are held. Read pg-checkout-pool status: a long-held lease (Oldest lease age panel), quarantined slots, or a pool at its --max-slots cap or its free-space floor. Raise the cap only if the disk has room (a slot is about 3 GB of working tree on the monorepo)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_checkout_pool_waiters) and on() (sum(pg_checkout_pool_slots{state="warm-free"}) == 0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-checkout-pool-reset-slow
+        title: Checkout pool resets are slow
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-checkout-pool
+          __panelId__: "5"
+          summary: "Checkout pool reset p95 is {{ $values.A }} s over 30 min (threshold 30 s)"
+          description: "A measured reset of the real monorepo checkout takes about 9 s (at most 14 s under load); p95 above 30 s for 15 minutes means the host is overloaded, the dirty set is huge, or a slot's fsmonitor daemon is wedged. Check host load and the fsmonitor daemons panel, and pg-checkout-pool status for slots near quarantine."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: histogram_quantile(0.95, sum by (le) (rate(pg_checkout_pool_reset_seconds_bucket[30m])))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [30]
+      - uid: pg-checkout-pool-daemon-orphans
+        title: Checkout pool has orphan fsmonitor daemons
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-checkout-pool
+          __panelId__: "8"
+          summary: "{{ $values.A }} more fsmonitor daemon(s) than checkout pool slots plus one"
+          description: "The pool keeps one git fsmonitor daemon per slot, and one more is tolerated while a slot is being created. More means a daemon outlived a removed or replaced slot. Find the daemons whose cwd is under the pool's slots directory with ps and lsof, compare with pg-checkout-pool status, and stop the orphans with git -C <slot tree> fsmonitor--daemon stop (or kill the process of a slot directory that no longer exists)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_checkout_pool_fsmonitor_daemons) - (sum(pg_checkout_pool_slots{state!="retired"}) + 1)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

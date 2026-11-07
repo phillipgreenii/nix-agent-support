@@ -172,6 +172,12 @@ import (
 // crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled, request-slow, schema-rebuild-required and blocked-no-space. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
+// The five pg-checkout-pool-* rules of the checkout pool's alert file (packages/
+// pg-checkout-pool/grafana/alerting/alerts.yaml): leaked-slots, quarantined,
+// exhausted-waiting, reset-slow and daemon-orphans. Registered the same way, with no
+// escalation label. TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile compares the file's
+// uids with this list. A machine where the pool is not deployed never holds the rules.
+//
 // pg-router-pr-dispatch-failed (pg2-87pjb1: three or more pr.changed dispatches
 // ended failed in an hour) is likewise NOT registered at first; add it here and to
 // TestRegisteredRuleUIDsTrackAlertRules once it has proven quiet.
@@ -231,6 +237,11 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-loop-stalled",
 	"pg-ccrec-request-slow",
 	"pg-ccrec-schema-rebuild-required",
+	"pg-checkout-pool-leaked-slots",
+	"pg-checkout-pool-quarantined",
+	"pg-checkout-pool-exhausted-waiting",
+	"pg-checkout-pool-reset-slow",
+	"pg-checkout-pool-daemon-orphans",
 }
 
 // defaultGroupRuleUIDs are the rules that fire once per label value (repo,

@@ -292,6 +292,8 @@ type wrapped struct {
 	provision.Provisioner
 	rescue func() (string, error)
 	reset  func() (string, error)
+	// resetHook runs before every real reset (a test advances its clock in it).
+	resetHook func()
 }
 
 func (w wrapped) Rescue(ctx context.Context, dir, ref string) (string, error) {
@@ -304,6 +306,9 @@ func (w wrapped) Rescue(ctx context.Context, dir, ref string) (string, error) {
 func (w wrapped) Reset(ctx context.Context, dir, commit, branch string) (string, error) {
 	if w.reset != nil {
 		return w.reset()
+	}
+	if w.resetHook != nil {
+		w.resetHook()
 	}
 	return w.Provisioner.Reset(ctx, dir, commit, branch)
 }

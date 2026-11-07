@@ -30,3 +30,9 @@
 - Show every slot, its state, owner and expiry:
 
 `pg-checkout-pool status`
+
+- Print the Prometheus metrics (slot gauges plus reset, wait, failure and rescue counters), or write them atomically for a textfile collector:
+
+`pg-checkout-pool metrics`
+
+`pg-checkout-pool metrics --out {{/path/to/pg_checkout_pool.prom}}`

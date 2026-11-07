@@ -391,6 +391,11 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-ccrec-loop-stalled",
 		"pg-ccrec-request-slow",
 		"pg-ccrec-schema-rebuild-required",
+		"pg-checkout-pool-leaked-slots",
+		"pg-checkout-pool-quarantined",
+		"pg-checkout-pool-exhausted-waiting",
+		"pg-checkout-pool-reset-slow",
+		"pg-checkout-pool-daemon-orphans",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)
@@ -1075,5 +1080,45 @@ func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
 	}
 	if strings.Join(fromFile, ",") != strings.Join(registered, ",") {
 		t.Fatalf("rule file uids = %v, registeredRuleUIDs pg-ccrec entries = %v", fromFile, registered)
+	}
+}
+
+// checkoutPoolRuleFile is the pg-checkout-pool alert rules file, relative to this package.
+const checkoutPoolRuleFile = "../../../pg-checkout-pool/grafana/alerting/alerts.yaml"
+
+// The pg-checkout-pool-* entries of registeredRuleUIDs equal the uids of the pool's rule file, in
+// the file's order. The file lives in a sibling module, so a build that carries only this module
+// (the nix go-tests sandbox) cannot see it and the test then checks the list's own pinned five;
+// the pool's alert-rules flake check compares the real file with this list.
+func TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile(t *testing.T) {
+	var registered []string
+	for _, uid := range registeredRuleUIDs {
+		if strings.HasPrefix(uid, "pg-checkout-pool-") {
+			registered = append(registered, uid)
+		}
+	}
+	if len(registered) != 5 {
+		t.Fatalf("registered pg-checkout-pool uids = %d, want 5: %v", len(registered), registered)
+	}
+	for _, uid := range registered {
+		if len(uid) > 40 {
+			t.Fatalf("uid %q is over Grafana's 40-character cap", uid)
+		}
+	}
+	data, err := os.ReadFile(checkoutPoolRuleFile)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skipf("rule file not in this build (%s); the pool's alert-rules flake check covers it", checkoutPoolRuleFile)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fromFile []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "- uid: "); ok {
+			fromFile = append(fromFile, strings.TrimSpace(rest))
+		}
+	}
+	if strings.Join(fromFile, ",") != strings.Join(registered, ",") {
+		t.Fatalf("rule file uids = %v, registeredRuleUIDs pg-checkout-pool entries = %v", fromFile, registered)
 	}
 }

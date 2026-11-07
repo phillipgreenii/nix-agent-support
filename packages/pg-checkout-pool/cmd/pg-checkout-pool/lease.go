@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/pg-checkout-pool/internal/metrics"
 	"github.com/phillipgreenii/pg-checkout-pool/internal/pool"
 	"github.com/phillipgreenii/pg-checkout-pool/internal/provision"
 )
@@ -56,6 +57,9 @@ type app struct {
 	newProv        func(repo string, keep []string) (provision.Provisioner, error)
 	sleep          func(time.Duration)
 	freeBytes      func(path string) (uint64, error)
+	// daemons counts the fsmonitor daemons running inside a slots directory.
+	daemons func(slotsDir string) (int, error)
+	pid     func() int
 }
 
 func newApp(stdout, stderr io.Writer, clock pool.Clock) *app {
@@ -66,6 +70,8 @@ func newApp(stdout, stderr io.Writer, clock pool.Clock) *app {
 		},
 		sleep:     time.Sleep,
 		freeBytes: statfsFree,
+		daemons:   metrics.CountDaemons,
+		pid:       os.Getpid,
 	}
 }
 
@@ -87,6 +93,25 @@ func (a *app) newFlags(name string) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
 	return fs, fs.String("root", defaultRoot(), "pool state directory (env "+rootEnv+")")
+}
+
+// record applies fn to the metrics journal. Metrics are best effort: a failure
+// is reported on stderr and never changes a command's outcome.
+func (a *app) record(root string, fn func(*metrics.Journal)) {
+	if err := metrics.Update(root, fn); err != nil {
+		fmt.Fprintf(a.stderr, "pg-checkout-pool: metrics: %v\n", err)
+	}
+}
+
+// observeReset records one reset's duration, and a failed reset.
+func (a *app) observeReset(root string, started time.Time, err error) {
+	d := a.clock.Now().Sub(started).Seconds()
+	a.record(root, func(j *metrics.Journal) {
+		j.Reset.Observe(metrics.ResetBuckets, d)
+		if err != nil {
+			j.ResetFailures++
+		}
+	})
 }
 
 func (a *app) fail(err error) int {
@@ -213,11 +238,23 @@ func (a *app) lease(args []string) int {
 		return a.fail(err)
 	}
 	req := pool.AcquireRequest{OwnerSessionID: *owner, BeadHint: *bead, Repo: *repo, Commit: commit, Branch: br, TTL: *ttl}
-	deadline := a.clock.Now().Add(*wait)
+	waitStart := a.clock.Now()
+	deadline := waitStart.Add(*wait)
 	created := map[string]bool{}
+	observeWait := func() {
+		d := a.clock.Now().Sub(waitStart).Seconds()
+		a.record(*root, func(j *metrics.Journal) { j.AcquireWait.Observe(metrics.WaitBuckets, d) })
+	}
+	var stopWaiting func()
+	defer func() {
+		if stopWaiting != nil {
+			stopWaiting()
+		}
+	}()
 	for {
 		h, err := st.Acquire(req)
 		if err == nil {
+			observeWait()
 			out, retry, err := a.finishLease(ctx, prov, h, *root, req, created)
 			if err != nil {
 				return a.fail(err)
@@ -242,7 +279,14 @@ func (a *app) lease(args []string) int {
 		}
 		remaining := deadline.Sub(a.clock.Now())
 		if remaining <= 0 {
+			observeWait()
 			return a.fail(fmt.Errorf("%w (waited %s)", pool.ErrExhausted, *wait))
+		}
+		if stopWaiting == nil {
+			var werr error
+			if stopWaiting, werr = metrics.Waiting(*root, a.pid()); werr != nil {
+				fmt.Fprintf(a.stderr, "pg-checkout-pool: metrics: %v\n", werr)
+			}
 		}
 		a.sleep(min(waitPoll, remaining))
 	}
@@ -259,7 +303,9 @@ func (a *app) finishLease(ctx context.Context, prov provision.Provisioner, h *po
 	if err := prov.Verify(ctx, dir); err != nil {
 		return a.unusable(h, err)
 	}
+	resetStart := a.clock.Now()
 	head, err := a.resetTwice(ctx, func() (string, error) { return prov.Reset(ctx, dir, req.Commit, req.Branch) })
+	a.observeReset(root, resetStart, err)
 	if err != nil {
 		return a.unusable(h, err)
 	}
@@ -444,7 +490,7 @@ func (a *app) renew(args []string) int {
 // uncommitted tracked work to a rescue ref first (a failed capture quarantines
 // and never resets), detach, reset to the lease commit and clear the lease.
 // It returns the rescue ref when work was captured.
-func (a *app) reclaim(ctx context.Context, prov provision.Provisioner, h *pool.Handle, dir string) (string, error) {
+func (a *app) reclaim(ctx context.Context, prov provision.Provisioner, h *pool.Handle, root, dir string) (string, error) {
 	rec := h.Record()
 	if rec.State == pool.Leased {
 		if err := h.BeginReset(); err != nil {
@@ -460,11 +506,15 @@ func (a *app) reclaim(ctx context.Context, prov provision.Provisioner, h *pool.H
 	rescued := ""
 	if commit != "" {
 		rescued = ref
+		a.record(root, func(j *metrics.Journal) { j.Rescued++ })
 	}
 	if err := prov.Detach(ctx, dir); err != nil {
 		return rescued, quarantineSlot(h, err)
 	}
-	if _, err := a.resetTwice(ctx, func() (string, error) { return prov.Reset(ctx, dir, rec.Commit, "") }); err != nil {
+	resetStart := a.clock.Now()
+	_, err = a.resetTwice(ctx, func() (string, error) { return prov.Reset(ctx, dir, rec.Commit, "") })
+	a.observeReset(root, resetStart, err)
+	if err != nil {
 		return rescued, quarantineSlot(h, err)
 	}
 	return rescued, h.FinishReset()
@@ -513,7 +563,7 @@ func (a *app) release(args []string) int {
 			return a.fail(err)
 		}
 		var rescued string
-		rescued, err = a.reclaim(context.Background(), prov, h, treePath(*root, rec.Slot))
+		rescued, err = a.reclaim(context.Background(), prov, h, *root, treePath(*root, rec.Slot))
 		if rescued != "" {
 			out["rescueRef"] = rescued
 		}
@@ -572,7 +622,7 @@ func (a *app) reap(args []string) int {
 			var prov provision.Provisioner
 			prov, err = a.newProv(rec.Repo, keep)
 			if err == nil {
-				e.RescueRef, err = a.reclaim(ctx, prov, h, treePath(*root, id))
+				e.RescueRef, err = a.reclaim(ctx, prov, h, *root, treePath(*root, id))
 			}
 			if err != nil {
 				e.Action, e.Error = "quarantined", err.Error()

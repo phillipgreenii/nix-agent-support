@@ -1,0 +1,77 @@
+# promtool unit tests for the pg-checkout-pool-reset-slow alert. Run by the flake check
+# test-pg-checkout-pool-alert-rules through check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) <op> <threshold>`,
+# the rule's `for` and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+# promtool's clock starts at 0 and every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+# The reset histogram is cumulative: each minute one reset lands. "fast" resets take at most
+# 10 s (the measured ZR reset is about 9 s), "slow" ones between 30 and 60 s.
+tests:
+  - name: resets within 10 s never fire
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_reset_seconds_bucket{le="10"}
+        values: "0+1x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="30"}
+        values: "0+1x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="60"}
+        values: "0+1x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="+Inf"}
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: pg-checkout-pool-reset-slow
+        exp_alerts: []
+
+  - name: resets between 30 and 60 s fire after 15m and not before
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_reset_seconds_bucket{le="10"}
+        values: "0x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="30"}
+        values: "0x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="60"}
+        values: "0+1x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="+Inf"}
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-checkout-pool-reset-slow
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: pg-checkout-pool-reset-slow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: one slow reset among fast ones stays under p95
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_reset_seconds_bucket{le="10"}
+        values: "0+19x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="30"}
+        values: "0+19x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="60"}
+        values: "0+20x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="+Inf"}
+        values: "0+20x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: pg-checkout-pool-reset-slow
+        exp_alerts: []
+
+  - name: no resets in the window yields no sample and no alert
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_reset_seconds_bucket{le="10"}
+        values: "5x60"
+      - series: pg_checkout_pool_reset_seconds_bucket{le="+Inf"}
+        values: "5x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: pg-checkout-pool-reset-slow
+        exp_alerts: []

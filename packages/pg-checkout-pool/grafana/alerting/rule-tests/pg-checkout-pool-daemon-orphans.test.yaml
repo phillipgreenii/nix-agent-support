@@ -1,0 +1,61 @@
+# promtool unit tests for the pg-checkout-pool-daemon-orphans alert. Run by the flake check
+# test-pg-checkout-pool-alert-rules through check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) <op> <threshold>`,
+# the rule's `for` and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+# promtool's clock starts at 0 and every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: one daemon more than slots plus one fires after 15m
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_fsmonitor_daemons{job="textfile"}
+        values: "5x60"
+      - series: pg_checkout_pool_slots{state="warm-free"}
+        values: "1x60"
+      - series: pg_checkout_pool_slots{state="leased"}
+        values: "2x60"
+      - series: pg_checkout_pool_slots{state="retired"}
+        values: "5x60"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: pg-checkout-pool-daemon-orphans
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-checkout-pool-daemon-orphans
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: one daemon per slot and the slot being created are tolerated
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_fsmonitor_daemons{job="textfile"}
+        values: "4x60"
+      - series: pg_checkout_pool_slots{state="warm-free"}
+        values: "1x60"
+      - series: pg_checkout_pool_slots{state="leased"}
+        values: "2x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-checkout-pool-daemon-orphans
+        exp_alerts: []
+
+  - name: retired slots do not raise the allowance
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_fsmonitor_daemons{job="textfile"}
+        values: "3x60"
+      - series: pg_checkout_pool_slots{state="leased"}
+        values: "1x60"
+      - series: pg_checkout_pool_slots{state="retired"}
+        values: "3x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_checkout_pool_daemon_orphans)
+        eval_time: 10m
+        exp_samples:
+          - labels: "{}"
+            value: 1

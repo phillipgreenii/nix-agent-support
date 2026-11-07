@@ -1,0 +1,48 @@
+# promtool unit tests for the pg-checkout-pool-leaked-slots alert. Run by the flake check
+# test-pg-checkout-pool-alert-rules through check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) <op> <threshold>`,
+# the rule's `for` and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+# promtool's clock starts at 0 and every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a leaked slot fires after 10m and not before
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_leaked_slots{job="textfile"}
+        values: "0x5 1x60"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: pg-checkout-pool-leaked-slots
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: pg-checkout-pool-leaked-slots
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a leak reaped inside 10m never fires
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_leaked_slots{job="textfile"}
+        values: "0x5 1x6 0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-checkout-pool-leaked-slots
+        exp_alerts: []
+
+  - name: a healthy pool and an absent exporter never fire
+    interval: 1m
+    input_series:
+      - series: pg_checkout_pool_leaked_slots{job="textfile"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-checkout-pool-leaked-slots
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: some-other-alert
+        exp_alerts: []

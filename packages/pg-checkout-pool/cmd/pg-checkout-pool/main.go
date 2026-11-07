@@ -49,9 +49,10 @@ commands:
   release  --lease ID [--disposition reset|keep|quarantine] [--keep PATH]...
   reap     [--dry-run] [--grace DUR] [--keep PATH]...
   status   [--json]
+  metrics  [--out FILE]
   version
 
-every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status.
+every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status and metrics.
 exit codes: 0 ok; 2 usage; 3 pool-exhausted; 4 low-disk; 5 ref-unresolvable;
 6 quarantine-only; 7 git-wedged; 8 lease-not-found; 9 internal error;
 10 slot-busy; 11 owner-already-leases`
@@ -71,6 +72,8 @@ func (a *app) run(args []string) int {
 		return 0
 	case "status":
 		return status(args[1:], stdout, stderr, clock)
+	case "metrics":
+		return a.metrics(args[1:])
 	case "lease":
 		return a.lease(args[1:])
 	case "renew":
