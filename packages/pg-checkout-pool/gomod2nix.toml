@@ -1,9 +1,14 @@
 schema = 3
 cachePackages = [
-  'golang.org/x/sys/unix',
+  'github.com/phillipgreenii/x/pprofserver',
+  'golang.org/x/sys/unix'
 ]
 
 [mod]
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261106202408-ba17082cdd30'
+    hash = 'sha256-co6ccAn52pXMFV5b/iT6KrkCmrvitwZT808NTUH5N30='
+
   [mod.'golang.org/x/sys']
     version = 'v0.47.0'
     hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='

@@ -65,6 +65,9 @@ func (a *app) serve(args []string, ready func(addr string)) int {
 	srv := &http.Server{Handler: a.metricsHandler(*root), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Opt-in profiling endpoint (PG_CHECKOUT_POOL_PPROF_ADDR; serve only).
+	// Reports on stderr and never stops the daemon.
+	defer startPprofFromEnv(os.Getenv, a.stderr)()
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ln) }()
 	fmt.Fprintf(a.stderr, "pg-checkout-pool: serve: listening on %s, root %s\n", ln.Addr(), *root)

@@ -55,6 +55,7 @@ commands:
   serve    [--addr 127.0.0.1:9148]   loopback /metrics, rendered on each scrape
   version
 
+serve opens the opt-in pprof endpoint only when ` + pprofEnv + ` is set (absolute unix-socket path or loopback host:port).
 every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status and metrics.
 exit codes: 0 ok; 2 usage; 3 pool-exhausted; 4 low-disk; 5 ref-unresolvable;
 6 quarantine-only; 7 git-wedged; 8 lease-not-found; 9 internal error;

@@ -8417,6 +8417,10 @@
                   };
                   obsOff = evalModule false { enable = true; };
                   moduleOff = evalModule true { };
+                  pprofOn = evalModule true {
+                    enable = true;
+                    pprof.enable = true;
+                  };
 
                   inertOk =
                     c:
@@ -8452,6 +8456,14 @@
                     format = "raw";
                   };
                 assert lib.all (a: a.assertion) enabled.assertions;
+                # pprof is opt-in: off by default (no variable), on writes the
+                # 0600 unix socket path under the state dir.
+                assert !(ua.serviceConfig ? EnvironmentVariables);
+                assert
+                  pprofOn.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter.serviceConfig.EnvironmentVariables
+                  == {
+                    PG_CHECKOUT_POOL_PPROF_ADDR = "/Users/tester/.local/state/pg-checkout-pool-exporter/pprof.sock";
+                  };
                 pkgs.runCommand "test-pg-checkout-pool-exporter-darwin-module-ok" { } ''
                   touch "$out"
                 '';

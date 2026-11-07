@@ -38,6 +38,20 @@ in
       '';
     };
 
+    pprof.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Expose Go's runtime profiler (`net/http/pprof`) for the exporter on a
+        mode-0600 unix socket at `$XDG_STATE_HOME/pg-checkout-pool-exporter/pprof.sock`
+        (the module writes the resolved absolute path into the launchd agent's
+        `PG_CHECKOUT_POOL_PPROF_ADDR`). Off by default: when `false` the
+        variable is absent and the exporter opens no profiling listener. No
+        port is allocated, so the port ledger is not involved. Capture recipe:
+        `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
+      '';
+    };
+
     poolRoot = lib.mkOption {
       type = lib.types.str;
       default = "";
@@ -94,6 +108,13 @@ in
           ProcessType = "Background";
           StandardOutPath = stdoutLog;
           StandardErrorPath = stderrLog;
+        }
+        # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
+        # unix socket under the exporter's own state dir (created by the script
+        # above). launchd does not expand $XDG_STATE_HOME in
+        # EnvironmentVariables, so the resolved stateDir is written out.
+        // lib.optionalAttrs cfg.pprof.enable {
+          EnvironmentVariables.PG_CHECKOUT_POOL_PPROF_ADDR = "${stateDir}/pprof.sock";
         };
       };
 

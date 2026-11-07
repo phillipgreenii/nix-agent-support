@@ -45,6 +45,10 @@
 
 `pg-checkout-pool serve --addr {{127.0.0.1:9148}}`
 
+- Also expose Go's pprof endpoint while serving (off unless the variable is set; an absolute unix-socket path or a loopback `host:port`):
+
+`PG_CHECKOUT_POOL_PPROF_ADDR={{/path/to/pprof.sock}} pg-checkout-pool serve`
+
 - Grow a cold pool to a number of slots, one slot at a time with a pause between creations (refused below the free-space floor):
 
 `pg-checkout-pool prewarm --repo {{/path/to/clone}} --ref {{origin/main}} --count {{4}} --delay {{30s}}`
