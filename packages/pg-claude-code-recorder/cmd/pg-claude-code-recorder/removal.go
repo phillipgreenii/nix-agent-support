@@ -335,5 +335,11 @@ func (a *app) doctor(args []string) int {
 		}
 		_, _ = fmt.Fprintf(a.out, "  %s  %s%s: %s%s\n", m.Kind, m.Session, m.Path, m.Detail, fix)
 	}
+	if len(res.Notices) > 0 {
+		_, _ = fmt.Fprintf(a.out, "doctor: %d non-critical notice(s) (not mismatches; exit status unaffected)\n", len(res.Notices))
+		for _, m := range res.Notices {
+			_, _ = fmt.Fprintf(a.out, "  %s  %s%s: %s\n", m.Kind, m.Session, m.Path, m.Detail)
+		}
+	}
 	return code
 }

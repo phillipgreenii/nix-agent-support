@@ -288,6 +288,9 @@ func (s *Settler) DoctorProjection() (int64, time.Duration, error) {
 func countBad(ms []DoctorMismatch) int {
 	bad := map[int64]bool{}
 	for i, m := range ms {
+		if IsNotice(m.Kind) {
+			continue
+		}
 		if m.File != 0 {
 			bad[m.File] = true
 		} else {
@@ -399,9 +402,10 @@ func (s *Settler) sliceEnd(cur *DoctorCursor) error {
 // finishCycle writes doctor.json, sets the gauges and closes the cycle.
 func (s *Settler) finishCycle(cur *DoctorCursor) (DoctorResult, error) {
 	end := s.cfg.Clock.Now()
+	crit, notices := splitNotices(cur.Mismatches)
 	res := DoctorResult{
 		AtNS: end.UnixNano(), FilesChecked: cur.FilesDone, ArchivesCheck: cur.ArchivesDone,
-		MismatchFiles: countBad(cur.Mismatches), Mismatches: append([]DoctorMismatch{}, cur.Mismatches...),
+		MismatchFiles: countBad(crit), Mismatches: crit, Notices: notices,
 	}
 	sort.SliceStable(res.Mismatches, func(i, j int) bool { return res.Mismatches[i].File < res.Mismatches[j].File })
 	if err := s.writeDoctor(res); err != nil {

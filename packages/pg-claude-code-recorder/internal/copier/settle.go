@@ -63,6 +63,15 @@ func (c *Copier) ReclaimLocked(f store.File, gen int) error {
 	return c.fs.SyncDir(filepath.Dir(p))
 }
 
+// RestoreSnapshot stores data again as the bytes of a snapshot version whose
+// stored copy is missing (doctor repair from a verified source). It takes the
+// copier lock itself.
+func (c *Copier) RestoreSnapshot(file int64, version int, data []byte) error {
+	c.lock()
+	defer c.mu.Unlock()
+	return c.writeSnapshot(store.File{ID: file}, version, data)
+}
+
 // ReplaceCopyLocked atomically replaces the copy of a generation with the file
 // at tmp (a verified clone): rename, then directory flush.
 func (c *Copier) ReplaceCopyLocked(f store.File, gen int, tmp string) error {

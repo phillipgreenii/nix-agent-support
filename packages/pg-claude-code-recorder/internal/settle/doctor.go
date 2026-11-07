@@ -33,6 +33,28 @@ const (
 	MismatchManifest = "archive_differs_from_manifest"
 )
 
+// Non-critical kinds. They are reported in DoctorResult.Notices, never in
+// Mismatches: they do not count in mismatch_files, do not raise the doctor
+// mismatch alert and do not make the CLI exit with the mismatch status.
+// They describe a settled snapshot file whose stored bytes are missing.
+const (
+	// NoticeRestored: the source file still existed and hashed to the
+	// manifest value, so doctor stored its bytes again.
+	NoticeRestored = "copy_restored_from_source"
+	// NoticeOutOfScope: the current ingest allowlist rejects the file. The
+	// stored copy was removed on purpose (a store cleanup), so doctor never
+	// stores it again.
+	NoticeOutOfScope = "out_of_scope_after_cleanup"
+	// NoticeUnrecoverable: the stored bytes are missing and the source is gone
+	// or no longer hashes to the manifest value, so nothing can restore them.
+	NoticeUnrecoverable = "copy_unrecoverable"
+)
+
+// IsNotice reports whether kind is a non-critical kind.
+func IsNotice(kind string) bool {
+	return kind == NoticeRestored || kind == NoticeOutOfScope || kind == NoticeUnrecoverable
+}
+
 // DoctorMismatch is one thing doctor found wrong.
 type DoctorMismatch struct {
 	Kind    string `json:"kind"`
@@ -51,13 +73,29 @@ type DoctorResult struct {
 	ArchivesCheck int              `json:"archives_checked"`
 	MismatchFiles int              `json:"mismatch_files"`
 	Mismatches    []DoctorMismatch `json:"mismatches"`
+	// Notices are the non-critical findings (see the Notice kinds).
+	Notices []DoctorMismatch `json:"notices"`
+}
+
+// splitNotices moves the non-critical findings out of ms: it returns the
+// critical ones and the notices.
+func splitNotices(ms []DoctorMismatch) (crit, notices []DoctorMismatch) {
+	crit, notices = []DoctorMismatch{}, []DoctorMismatch{}
+	for _, m := range ms {
+		if IsNotice(m.Kind) {
+			notices = append(notices, m)
+		} else {
+			crit = append(crit, m)
+		}
+	}
+	return crit, notices
 }
 
 // doctorFull is the old synchronous comparison (doctor.bytes_per_slice = 0): it
 // holds the copier lock across every file's full hash.
 func (s *Settler) doctorFull() (DoctorResult, error) {
 	now := s.cfg.Clock.Now()
-	res := DoctorResult{AtNS: now.UnixNano(), Mismatches: []DoctorMismatch{}}
+	res := DoctorResult{AtNS: now.UnixNano(), Mismatches: []DoctorMismatch{}, Notices: []DoctorMismatch{}}
 	bad := map[int64]bool{}
 	add := func(m DoctorMismatch) {
 		res.Mismatches = append(res.Mismatches, m)
@@ -125,7 +163,8 @@ func (s *Settler) doctorFull() (DoctorResult, error) {
 	if err := s.doctorArchives(&res, add); err != nil {
 		return res, err
 	}
-	res.MismatchFiles = len(bad)
+	res.Mismatches, res.Notices = splitNotices(res.Mismatches)
+	res.MismatchFiles = countBad(res.Mismatches)
 	sort.SliceStable(res.Mismatches, func(i, j int) bool { return res.Mismatches[i].File < res.Mismatches[j].File })
 	if err := s.writeDoctor(res); err != nil {
 		return res, err
@@ -270,7 +309,7 @@ func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (check
 		}
 		ptr, err := s.st.OpenPointer(mf.File, mf.Gen)
 		if err != nil {
-			add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "opening the stored bytes: " + err.Error()})
+			s.doctorMissingBytes(session, mf, err, add)
 			continue
 		}
 		h, herr := hashReader(ptr, mf.Size)
@@ -285,6 +324,60 @@ func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (check
 		}
 	}
 	return true, hashed
+}
+
+// doctorMissingBytes handles a manifest file whose stored bytes cannot be
+// opened. Only a snapshot file whose bytes are absent (store.ErrNotFound) has a
+// repair or a non-critical state; every other failure stays a mismatch.
+//
+//   - the current ingest allowlist rejects the path: the copy was removed on
+//     purpose by a store cleanup, so it is NOT stored again (out_of_scope_after_cleanup).
+//   - the source exists and hashes to the manifest value: its bytes are stored
+//     again at the manifest's version (copy_restored_from_source).
+//   - the source is missing or differs: copy_unrecoverable.
+func (s *Settler) doctorMissingBytes(session string, mf store.ManifestFile, openErr error, add func(DoctorMismatch)) {
+	m := DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "opening the stored bytes: " + openErr.Error()}
+	if !errors.Is(openErr, store.ErrNotFound) || mf.Mode != "snapshot" {
+		add(m)
+		return
+	}
+	abs := filepath.Join(s.cfg.ClaudeDir, filepath.FromSlash(mf.Path))
+	if d := s.scope().Match(abs); !d.Ingest {
+		m.Kind = NoticeOutOfScope
+		m.Detail = "the ingest allowlist rejects this file (" + d.Reason + "); its stored copy was removed on purpose and is not stored again"
+		add(m)
+		return
+	}
+	fi, err := os.Lstat(abs)
+	if err != nil || !fi.Mode().IsRegular() {
+		m.Kind = NoticeUnrecoverable
+		m.Detail = "the stored bytes are missing and the source file is gone"
+		add(m)
+		return
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		m.Kind = NoticeUnrecoverable
+		m.Detail = "the stored bytes are missing and the source cannot be read: " + err.Error()
+		add(m)
+		return
+	}
+	h, _ := hashReader(bytes.NewReader(data), int64(len(data)))
+	if int64(len(data)) != mf.Size || hexHash(h) != mf.Hash {
+		m.Kind = NoticeUnrecoverable
+		m.Detail = "the stored bytes are missing and the source no longer matches the manifest"
+		add(m)
+		return
+	}
+	if err := s.cfg.Copier.RestoreSnapshot(mf.File, mf.Gen, data); err != nil {
+		m.Detail += "; restoring from the source failed: " + err.Error()
+		add(m)
+		return
+	}
+	m.Kind = NoticeRestored
+	m.Detail = "the stored bytes were missing; stored again from the source, which matches the manifest"
+	m.Repaired = true
+	add(m)
 }
 
 // writeDoctor writes the result file atomically.

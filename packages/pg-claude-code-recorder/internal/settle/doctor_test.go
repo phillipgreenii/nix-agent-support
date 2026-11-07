@@ -2,6 +2,7 @@ package settle
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -158,5 +159,143 @@ func TestDoctorIgnoresACommitInFlight(t *testing.T) {
 	}
 	if err := <-committed; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// snapshotSettled seeds a settled Conversation holding one in-scope snapshot
+// file and returns its relative path, its file id and its stored-bytes path.
+func (e *env) snapshotSettled(content string) (rel string, file int64, stored string) {
+	e.t.Helper()
+	rel = "projects/example-project/" + sess + "/subagents/agent-1.meta.json"
+	age := e.clk.Now().Add(-48 * time.Hour)
+	e.write(rel, content, age, false)
+	e.ingest(rel)
+	e.oldSettled(3, 48*time.Hour)
+	fl, err := e.st.FilesByCurrentPath(e.path(rel))
+	if err != nil || len(fl) == 0 {
+		e.t.Fatalf("no snapshot file: %v", err)
+	}
+	stored = e.st.SnapshotPath(fl[0].ID, 1)
+	// Reproduce the live damage: no plain copy and no archive range.
+	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DELETE FROM ranges WHERE file_id=?`, fl[0].ID)
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := os.Remove(stored); err != nil && !os.IsNotExist(err) {
+		e.t.Fatal(err)
+	}
+	return rel, fl[0].ID, stored
+}
+
+func noticeKinds(res DoctorResult) []string {
+	var k []string
+	for _, n := range res.Notices {
+		k = append(k, n.Kind)
+	}
+	return k
+}
+
+func TestDoctorRestoresAMissingSnapshotCopyFromAMatchingSource(t *testing.T) {
+	e := newEnv(t, false)
+	content := `{"agentType":"example"}`
+	rel, _, stored := e.snapshotSettled(content)
+	res, err := e.sett.Doctor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Mismatches) != 0 || res.MismatchFiles != 0 {
+		t.Fatalf("mismatches after repair: %+v", res)
+	}
+	if len(res.Notices) != 1 || res.Notices[0].Kind != NoticeRestored || !res.Notices[0].Repaired {
+		t.Fatalf("notices: %+v", res.Notices)
+	}
+	if b, err := os.ReadFile(stored); err != nil || string(b) != content {
+		t.Fatalf("stored bytes %q %v", b, err)
+	}
+	_ = rel
+	again, _ := e.sett.Doctor()
+	if len(again.Mismatches) != 0 || len(again.Notices) != 0 {
+		t.Fatalf("second run: %+v", again)
+	}
+}
+
+func TestDoctorReportsAnUnrecoverableMissingCopyAsANonCriticalNotice(t *testing.T) {
+	for name, damage := range map[string]func(abs string) error{
+		"source gone":    os.Remove,
+		"source changed": func(abs string) error { return os.WriteFile(abs, []byte(`{"agentType":"changed"}`), 0o600) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, false)
+			rel, _, stored := e.snapshotSettled(`{"agentType":"example"}`)
+			if err := damage(e.path(rel)); err != nil {
+				t.Fatal(err)
+			}
+			res, err := e.sett.Doctor()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Mismatches) != 0 || res.MismatchFiles != 0 {
+				t.Fatalf("mismatches: %+v", res)
+			}
+			if k := noticeKinds(res); len(k) != 1 || k[0] != NoticeUnrecoverable {
+				t.Fatalf("notices: %+v", res.Notices)
+			}
+			if _, err := os.Stat(stored); err == nil {
+				t.Fatal("an unrecoverable entry was stored")
+			}
+			if v, ok := e.obs.Reg.Gauge(obs.MDoctorMismatchFiles, nil); !ok || v != 0 {
+				t.Fatalf("doctor_mismatch_files %v %v", v, ok)
+			}
+		})
+	}
+}
+
+// A file the current allowlist rejects was removed on purpose: doctor must not
+// store it again, even though its source still exists and matches.
+func TestDoctorDoesNotRestoreAnOutOfScopeFile(t *testing.T) {
+	e := newEnv(t, false)
+	content := `{"agentType":"example"}`
+	rel, file, stored := e.snapshotSettled(content)
+	// Point the manifest at a path the allowlist rejects (a scratchpad file).
+	scratch := "projects/example-project/" + sess + "/scratchpad/note.md"
+	e.write(scratch, content, e.clk.Now().Add(-48*time.Hour), false)
+	st, ok, err := e.st.SettledOf(sess)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	var m store.Manifest
+	if err := json.Unmarshal(st.Manifest, &m); err != nil {
+		t.Fatal(err)
+	}
+	for i := range m.Files {
+		if m.Files[i].File == file {
+			m.Files[i].Path = scratch
+		}
+	}
+	b, _ := json.Marshal(m)
+	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE settled SET manifest=? WHERE session=?`, b, sess)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e.st.SegDir(sess), "manifest.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = rel
+	res, err := e.sett.Doctor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Mismatches) != 0 || res.MismatchFiles != 0 {
+		t.Fatalf("mismatches: %+v", res)
+	}
+	if k := noticeKinds(res); len(k) != 1 || k[0] != NoticeOutOfScope {
+		t.Fatalf("notices: %+v", res.Notices)
+	}
+	if _, err := os.Stat(stored); err == nil {
+		t.Fatal("an out-of-scope file was stored again")
 	}
 }

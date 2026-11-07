@@ -655,6 +655,21 @@ twice the budget. A file or copy that was reclaimed between the snapshot and the
 slice deferred because the copy is lagging counts as `deferred` and stretches the cycle. `doctor.bytes_per_slice = 0`
 selects the old synchronous doctor.
 
+Non-critical notices. A settled snapshot file whose stored bytes are missing (`store: not found`) is not a mismatch.
+Doctor decides per file, and lists it under `notices` in `doctor.json` (and in the `--json` answer) instead of
+`mismatches`; a notice does not count in `mismatch_files`, does not raise the `doctor-mismatch` alert and does not make
+the CLI exit 9:
+
+- `out_of_scope_after_cleanup`: the current ingest allowlist (`scope.Match`) rejects the path. A store cleanup removed
+  the stored copy on purpose, so doctor never stores it again (that would re-add data the cleanup removed).
+- `copy_restored_from_source`: the allowlist accepts the path, the source file still exists and its size and hash equal
+  the manifest's, so doctor stored its bytes again at the manifest's version (the repair; the next run reports nothing).
+- `copy_unrecoverable`: the allowlist accepts the path but the source is gone or no longer matches the manifest, so
+  nothing can restore the bytes.
+
+A missing copy of an append file, or any other failure to open stored bytes, stays an `archive_differs_from_manifest`
+mismatch. The repair needs no extra verb: run `pg-claude-code-recorder doctor` (or wait for the daemon's cycle).
+
 At start the daemon projects the cycle length (copy bytes over `doctor.bytes_per_slice`, rounded up, times
 `doctor.slice_every`; `doctor_projected_cycle_seconds`) and refuses to start when it exceeds `doctor.interval`, unless
 `doctor.allow_slow_cycle = true`. The CLI `doctor` runs inside the daemon: a run during a rolling cycle completes the remaining
