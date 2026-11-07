@@ -21,3 +21,7 @@ deleteRules:
     uid: pg-ccrec-free-space
   - orgId: 1
     uid: pg-ccrec-removal-backlog
+  - orgId: 1
+    uid: pg-ccrec-unknown-key-burst
+  - orgId: 1
+    uid: pg-ccrec-bad-line-rate

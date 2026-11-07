@@ -13,7 +13,7 @@
 #       M* string constants of obs.go and parser.go, each once
 #   R2  the pg-ccrec-* entries of registeredRuleUIDs in run.go are exactly the rule uids of the
 #       rules file, in its order
-#   R3  the deleteRules twin lists exactly the rule uids plus the retired uids pg-ccrec-free-space and pg-ccrec-removal-backlog
+#   R3  the deleteRules twin lists exactly the rule uids plus the retired uids pg-ccrec-free-space, pg-ccrec-removal-backlog, pg-ccrec-unknown-key-burst and pg-ccrec-bad-line-rate
 #   R4  every pg_claude_code_recorder_* token of a dashboard expression is catalogued, every
 #       expression parses under promtool, and the seven panels the design names plus the two schema v3 panels are present
 #   R5  the README documents remove.enable's readiness checklist only with the daemon-down
@@ -66,8 +66,8 @@ check() {
     rule_fail "RULE-R2: the rule file uids and the pg-ccrec-* entries of registeredRuleUIDs differ"
   fi
   # R3
-  if [ "$(yq -o=json '.' "$deletes" | jq -r '.deleteRules[].uid' | sort)" != "$(printf '%s\n%s\n%s\n' "$fromFile" "pg-ccrec-free-space" "pg-ccrec-removal-backlog" | sort)" ]; then
-    rule_fail "RULE-R3: the deleteRules twin does not list exactly the rule uids plus the retired pg-ccrec-free-space and pg-ccrec-removal-backlog"
+  if [ "$(yq -o=json '.' "$deletes" | jq -r '.deleteRules[].uid' | sort)" != "$(printf '%s\n%s\n%s\n%s\n%s\n' "$fromFile" "pg-ccrec-free-space" "pg-ccrec-removal-backlog" "pg-ccrec-unknown-key-burst" "pg-ccrec-bad-line-rate" | sort)" ]; then
+    rule_fail "RULE-R3: the deleteRules twin does not list exactly the rule uids plus the retired pg-ccrec-free-space, pg-ccrec-removal-backlog, pg-ccrec-unknown-key-burst and pg-ccrec-bad-line-rate"
   fi
   # R4
   local bad="" tok base exprs

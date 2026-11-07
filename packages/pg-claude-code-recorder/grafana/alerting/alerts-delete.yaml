@@ -12,7 +12,7 @@
 # deleteRules entry for a uid alongside the rule that defines it is never emitted). The two files
 # are therefore never loaded together.
 #
-# The uids MUST equal the rule uids of alerts.yaml plus the retired uids pg-ccrec-free-space and pg-ccrec-removal-backlog (the latter replaced by pg-ccrec-removal-due, removal being operator-run: its premise was automatic removal; Phillip, 2026-11-05: "removal becomes an operator-run command"): the
+# The uids MUST equal the rule uids of alerts.yaml plus the retired uids pg-ccrec-free-space, pg-ccrec-removal-backlog, pg-ccrec-unknown-key-burst and pg-ccrec-bad-line-rate (the latter replaced by pg-ccrec-removal-due, removal being operator-run: its premise was automatic removal; Phillip, 2026-11-05: "removal becomes an operator-run command"): the
 # free-space rule (a recorder-specific filesystem alert) was removed from alerts.yaml on the operator
 # ruling of Phillip, 2026-11-04: "there shouldn't be a pg-claud-code-recorder specific file system
 # alert." and "B.  it's ok to measure specifics about the app, but host level alerts belong elsewhere".
@@ -68,3 +68,5 @@ deleteRules:
     uid: pg-ccrec-schema-rebuild-required
   - orgId: 1
     uid: pg-ccrec-bad-line-rate
+  - orgId: 1
+    uid: pg-ccrec-format-drift

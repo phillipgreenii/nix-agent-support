@@ -5,7 +5,7 @@
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
 # Twenty rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
-# parse-stuck, held-old, unknown-key-burst, data-loss, removal-due, doctor-mismatch,
+# parse-stuck, held-old, format-drift (bad lines and unknown keys over lines parsed; it replaces unknown-key-burst), data-loss, removal-due, doctor-mismatch,
 # control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus blocked-no-space (the recorder could not do an operation for lack of space), plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow), plus schema-rebuild-required (the one Loki rule: a log event, not a metric). Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
@@ -252,54 +252,16 @@ groups:
                     type: gt
                     params: [259200]
 
-      # Unknown-key burst, design threshold: more than 100 new distinct keys in an hour. unknown_keys_total
-      # counts first-seen (source, type, key) tuples, not occurrences, so a backfill of known keys is silent;
-      # every source and type series is registered at zero at start, so a first burst above 100 is an increase.
-      - uid: pg-ccrec-unknown-key-burst
-        title: pg-claude-code-recorder many new unknown keys
-        condition: C
-        for: 5m
-        noDataState: OK
-        execErrState: Error
-        labels:
-          severity: warning
-        annotations:
-          summary: "pg-claude-code-recorder saw over 100 new unknown keys in an hour"
-          description: "More than 100 new distinct JSON keys (source, type, key) the parser had never seen arrived in the last hour (unknown_keys_total, counted once per distinct key, not per occurrence): Claude Code probably added a field. The share of bad lines has its own rule, pg-ccrec-bad-line-rate. Run pg-claude-code-recorder coverage to see the keys, then update the parser structs and re-parse."
-        data:
-          - refId: A
-            relativeTimeRange:
-              from: 600
-              to: 0
-            datasourceUid: prometheus
-            model:
-              refId: A
-              editorMode: code
-              instant: true
-              expr: "sum(increase(pg_claude_code_recorder_unknown_keys_total[1h]))"
-          - refId: B
-            datasourceUid: __expr__
-            model:
-              refId: B
-              type: reduce
-              expression: A
-              reducer: last
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: B
-              conditions:
-                - evaluator:
-                    type: gt
-                    params: [100]
-
-      # Bad-line rate: the share of parsed lines that were bad over a day. Removal no longer judges the
-      # parse (a matching archive hash is enough), so a wrong parse is caught here instead. The 100-line
-      # floor keeps a near-idle day from alerting on one bad line.
-      - uid: pg-ccrec-bad-line-rate
-        title: pg-claude-code-recorder high bad-line rate
+      # Format drift rate: bad lines plus new unknown keys, over the lines parsed, over a day. Removal no
+      # longer judges the parse (a matching archive hash is enough), so a wrong parse is caught here instead.
+      # One rule covers both signals (operator ruling, Phillip, 2026-11-05: one rate rule for bad lines and
+      # unknown keys, each over lines parsed; the absolute-count unknown-key-burst rule is retired). The 1
+      # percent threshold is the default of the removed format.holdRate (0.01), which this rule replaces. The
+      # 15m for rides out a single evaluation spike. The 100-line floor keeps a near-idle day from alerting
+      # on one bad line. unknown_keys_total counts first-seen (source, type, key) tuples, not occurrences.
+      # Each signal falls back to 0 so a missing series cannot blank the sum and hide the other one.
+      - uid: pg-ccrec-format-drift
+        title: pg-claude-code-recorder high bad-line and unknown-key rate
         condition: C
         for: 15m
         noDataState: OK
@@ -307,8 +269,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-claude-code-recorder: more than 1 percent of the lines parsed in the last day were bad"
-          description: "bad_lines_total over lines_parsed_total for the last day is above 1 percent: Claude Code probably changed its line format, or the parser regressed. Originals are still removed once their archive matches by hash, and the archive keeps every byte, so nothing is lost: run pg-claude-code-recorder coverage to see the bad lines, fix the parser, then re-parse."
+          summary: "pg-claude-code-recorder: bad lines plus new unknown keys were over 1 percent of the lines parsed in the last day"
+          description: "(bad_lines_total plus unknown_keys_total) over lines_parsed_total for the last day is above 1 percent: Claude Code probably changed its line format or added fields, or the parser regressed. Originals are still removed once their archive matches by hash, and the archive keeps every byte, so nothing is lost: run pg-claude-code-recorder coverage to see the bad lines, fix the parser, then re-parse."
         data:
           - refId: A
             relativeTimeRange:
@@ -319,7 +281,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "sum(increase(pg_claude_code_recorder_bad_lines_total[1d])) / (sum(increase(pg_claude_code_recorder_lines_parsed_total[1d])) > 100)"
+              expr: "((sum(increase(pg_claude_code_recorder_bad_lines_total[1d])) or vector(0)) + (sum(increase(pg_claude_code_recorder_unknown_keys_total[1d])) or vector(0))) / (sum(increase(pg_claude_code_recorder_lines_parsed_total[1d])) > 100)"
           - refId: B
             datasourceUid: __expr__
             model:
