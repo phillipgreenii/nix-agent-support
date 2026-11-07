@@ -244,6 +244,10 @@ func claimFlag(schema cmddesc.CommandSchema, tok string) (int, bool) {
 	if spec, ok := schema.Flags[tok]; ok {
 		return arity(spec), true
 	}
+	// Obsolete "-NUM" count (head -20), tc-kf5m0.
+	if d := tok[1:]; schema.NumericCount && d != "" && len(d) <= 18 && strings.Trim(d, "0123456789") == "" {
+		return 0, true
+	}
 	if eq := strings.IndexByte(tok, '='); eq > 0 {
 		if spec, ok := schema.Flags[tok[:eq]]; ok && spec.Arity != cmddesc.ArityNone {
 			return 0, true
