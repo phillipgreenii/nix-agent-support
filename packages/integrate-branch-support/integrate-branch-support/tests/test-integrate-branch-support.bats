@@ -1820,3 +1820,67 @@ rl_pair() {
 @test "pre-land reuse, control: a branch in pg-keep-awake and main in pg-router (no coupling) reuses" {
   rl_pair packages/pg-keep-awake/cmd/pg-keep-awake/x.go packages/pg-router/internal/r.go reused
 }
+
+# --- claude-marketplace plugins count as projects (FF-1b reuse) --------------
+
+# rl_add_plugin <name>: main gains a plugin directory (plugin.json plus a hook
+# file, no go.mod/package.json/pyproject.toml) and the feature branch rebases onto it.
+rl_add_plugin() {
+  rl_commit "$TEST_DIR" "add plugin $1" "claude-marketplace/$1/.claude-plugin/plugin.json" "claude-marketplace/$1/hooks/h.ts"
+  rl_git -C "$RL_WT" rebase -q main
+}
+
+@test "pre-land reuse: main gaining only claude-marketplace plugin files reuses the pass" {
+  rl_fixture
+  rl_add_plugin plug
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 1 ]
+  rl_advance_and_rebase claude-marketplace/plug/hooks/h.ts claude-marketplace/plug/README.md
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FF-1b: reused the pre-land pass"* ]]
+  [ "$(rl_runs)" -eq 1 ]
+}
+
+@test "pre-land reuse: plugin files plus a shared root file in the same main move re-runs" {
+  rl_fixture
+  rl_add_plugin plug
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase claude-marketplace/plug/hooks/h.ts flake.nix
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"shared path"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: the marketplace-level manifest (not inside a plugin) is shared and re-runs" {
+  rl_fixture
+  rl_add_plugin plug
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase claude-marketplace/.claude-plugin/marketplace.json
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"shared path"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a directory under claude-marketplace without plugin.json is not a project and re-runs" {
+  rl_fixture
+  rl_add_plugin plug
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase claude-marketplace/loose/notes.md
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"shared path"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a module naming a plugin near a .. token still joins it, so a plugin change re-runs" {
+  rl_fixture
+  rl_add_plugin plug
+  printf 'package a\n\nconst queues = "../../claude-marketplace/plug/queues.json"\n' >"$RL_WT/packages/a/a_test.go"
+  rl_git -C "$RL_WT" add -A
+  rl_git -C "$RL_WT" commit -q -m "a reads the plugin"
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase claude-marketplace/plug/queues.json
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"inside claude-marketplace/plug"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}

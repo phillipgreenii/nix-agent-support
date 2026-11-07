@@ -335,7 +335,10 @@ PG_HOOKS_MISSING_NOTICE='pg-hooks not installed on this machine; ask the operato
 #   4. every branch-diff path is inside a Go module (nearest ancestor directory
 #      holding go.mod, never the repo root), the tree has no go.work, and every
 #      path main gained since the recorded base (git diff --name-only) lies in
-#      a project directory (go.mod, package.json or pyproject.toml) that is NOT
+#      a project directory (go.mod, package.json or pyproject.toml, or a
+#      claude-marketplace/<plugin> directory holding .claude-plugin/plugin.json;
+#      a Go test that reads a plugin names it near a `..` token, so it joins the
+#      component like any sibling project) that is NOT
 #      in the diff's dependency component and is not a symlink target path. The
 #      component starts at the diff's modules and follows, to a fixpoint and in
 #      either direction, (a) every local `replace => ./x` / `=> ../x` of a
@@ -603,7 +606,12 @@ pre_land_reuse_check() {
     echo "FF-1b: re-running hooks (the repo has a go.work, so modules are coupled)"
     return 1
   fi
-  grep -E '/(go\.mod|package\.json|pyproject\.toml)$' "$tmp/tree" | sed 's|/[^/]*$||' | sort -u >"$markers" || true
+  # A project is a directory holding go.mod, package.json or pyproject.toml, or a
+  # claude-marketplace plugin directory (it holds .claude-plugin/plugin.json).
+  {
+    grep -E '/(go\.mod|package\.json|pyproject\.toml)$' "$tmp/tree" | sed 's|/[^/]*$||'
+    grep -E '^claude-marketplace/[^/]+/\.claude-plugin/plugin\.json$' "$tmp/tree" | sed 's|/\.claude-plugin/plugin\.json$||'
+  } | sort -u >"$markers" || true
   grep -E '/go\.mod$' "$tmp/tree" | sed 's|/go\.mod$||' | sort -u >"$gomods" || true
   : >"$edges"
   : >"$droots"
