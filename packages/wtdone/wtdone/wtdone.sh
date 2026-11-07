@@ -46,6 +46,8 @@ wtdone: Guarded worktree teardown -- the paired counterpart to wtnew
 Usage: wtdone <bead-or-branch> [OPTIONS]
 
 Given a bead id or branch name, performs, in order:
+  0. Refuse a worktree git holds locked (`git worktree lock`; every
+     checkout-pool slot is), before anything is touched.
   1. Liveness guard: refuse (and list the offending PIDs/commands) if a
      process whose name is on the blocking allow-list has its working
      directory anchored inside the associated worktree. Anchored processes
@@ -155,6 +157,13 @@ branch="$NAME"
 wt="$(wtdone_find_worktree "$cc" "$branch")"
 
 if [[ -n $wt ]]; then
+  # Step 0: a worktree git holds locked (`git worktree lock`, which every
+  # checkout-pool slot is) is never ours to remove: refuse before anything,
+  # the fsmonitor stop included, is touched.
+  if wtdone_worktree_locked "$cc" "$wt"; then
+    die "refusing to remove '$wt' -- it is locked (git worktree lock); unlock it deliberately first. Checkout-pool slots are locked and are reclaimed by the pool, never by wtdone."
+  fi
+
   # Step 1: liveness guard. Refuse before anything else is touched -- but
   # only for an anchored process on the blocking allow-list; every other
   # anchored process is reported and ignored (on the refuse path too).

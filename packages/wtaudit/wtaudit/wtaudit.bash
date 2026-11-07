@@ -48,17 +48,30 @@ wtaudit_branch_exists() {
   git -C "$1" rev-parse --verify -q "refs/heads/$2" >/dev/null 2>&1
 }
 
+# wtaudit_is_pool_slot <path> <lock-reason>: succeeds for a checkout-pool slot
+# (pg-checkout-pool): a worktree locked with a reason that starts with
+# "pool slot", or one whose path is <pool root>/slots/<id>/tree under a
+# directory named pg-checkout-pool (covers a slot whose lock was lost). The
+# pool owns those worktrees and reaps them itself; no audit may remove or
+# report one as abandoned.
+wtaudit_is_pool_slot() {
+  [[ $2 == "pool slot"* ]] && return 0
+  [[ $1 =~ /pg-checkout-pool/slots/[^/]+/tree$ ]]
+}
+
 # wtaudit_entries <repo> <primary>: print one record per candidate, fields
 # joined by WTAUDIT_US: kind, set, branch, worktree, wtstate, detached, head.
 #   kind     worktree | set-member | dangling-branch
 #   wtstate  ok | missing | locked | canonical | none
 # The first `git worktree list` entry is the canonical clone: it is emitted
 # only when it has a non-primary branch checked out (row 1a, wtstate
-# canonical); a detached canonical clone is never emitted. A dangling branch
+# canonical); a detached canonical clone is never emitted. A checkout-pool
+# slot (wtaudit_is_pool_slot) is never emitted, though the branch it has
+# checked out still counts as checked out. A dangling branch
 # is a local branch that is neither the primary nor checked out anywhere.
 wtaudit_entries() {
   local repo="$1" primary="$2"
-  local line key val path="" head="" branch="" detached=0 locked=0 first=1
+  local line key val path="" head="" branch="" detached=0 locked=0 lockreason="" first=1
   local kind set wtstate b
   local -a checked_out=()
   while IFS= read -r line; do
@@ -71,7 +84,10 @@ wtaudit_entries() {
       HEAD) head="$val" ;;
       branch) branch="${val#refs/heads/}" ;;
       detached) detached=1 ;;
-      locked) locked=1 ;;
+      locked)
+        locked=1
+        lockreason="$val"
+        ;;
       *) ;;
       esac
       continue
@@ -83,6 +99,8 @@ wtaudit_entries() {
         if [[ -n $branch && $branch != "$primary" ]]; then
           printf '%s\n' "worktree${WTAUDIT_US}${WTAUDIT_US}${branch}${WTAUDIT_US}${path}${WTAUDIT_US}canonical${WTAUDIT_US}0${WTAUDIT_US}${head}"
         fi
+      elif wtaudit_is_pool_slot "$path" "$lockreason"; then
+        : # a checkout-pool slot is never a candidate: not removed, not reported
       else
         kind="worktree"
         set=""
@@ -101,7 +119,7 @@ wtaudit_entries() {
       fi
       first=0
     fi
-    path="" head="" branch="" detached=0 locked=0
+    path="" head="" branch="" detached=0 locked=0 lockreason=""
   done < <(
     git -C "$repo" worktree list --porcelain 2>/dev/null
     printf '\n'

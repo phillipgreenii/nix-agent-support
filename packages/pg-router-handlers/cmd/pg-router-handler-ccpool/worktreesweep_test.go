@@ -363,6 +363,30 @@ func TestSweep_keptWhenGitLocked(t *testing.T) {
 	h.wantKept(path, "zr-k")
 }
 
+// A checkout-pool slot (a detached worktree locked with a "pool slot" reason,
+// or one whose lock was lost) is never reclaimed even when it sits under the
+// swept directory and is old: the pool reaps its own slots.
+func TestSweep_checkoutPoolSlotsAreNeverReclaimed(t *testing.T) {
+	h := newSweepHarness(t)
+	old := h.nowFixed.Add(-time.Hour)
+	locked := filepath.Join(h.wtDir, "slot-01")
+	h.git(h.repo, "worktree", "add", "-q", "--detach", locked)
+	h.git(h.repo, "worktree", "lock", "--reason", "pool slot (pg-checkout-pool)", locked)
+	unlocked := filepath.Join(h.wtDir, "slot-02")
+	h.git(h.repo, "worktree", "add", "-q", "--detach", unlocked)
+	for _, p := range []string{locked, unlocked} {
+		if err := os.Chtimes(filepath.Join(p, ".git"), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := h.sweep(); got != 0 {
+		t.Errorf("pool slots must be kept; removed %d", got)
+	}
+	if !h.exists(locked) || !h.exists(unlocked) {
+		t.Error("a pool slot was removed")
+	}
+}
+
 func TestSweep_keptWhenAnotherBranchIsCheckedOut(t *testing.T) {
 	h := newSweepHarness(t)
 	path := h.leak("zr-k")

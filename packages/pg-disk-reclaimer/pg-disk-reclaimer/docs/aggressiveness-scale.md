@@ -102,7 +102,12 @@ valued.
 
 Work that is already finished elsewhere, such as merged or stale worktrees and
 branches. There is nothing to regenerate. A level 1 variant SHOULD be guarded so
-that anything with uncommitted or unmerged work is left alone.
+that anything with uncommitted or unmerged work is left alone. A worktree git
+holds locked (`git worktree lock`) is never tidy work: every checkout-pool slot
+is locked by `pg-checkout-pool`, which reclaims its own slots, so a level 1
+worktree variant MUST skip locked worktrees and MUST NOT remove anything under a
+pool root (`.../pg-checkout-pool/slots/`). Removing through `wtdone` or
+`wtaudit remove` satisfies this, since both refuse or skip them.
 
 ### Level 2: caches
 

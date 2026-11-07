@@ -33,7 +33,8 @@ import (
 //
 //   - it is a linked worktree directly under WorktreeDir whose checked-out branch
 //     is exactly pg-router/<dir name>;
-//   - git does not hold it locked (<admin dir>/locked);
+//   - git does not hold it locked (<admin dir>/locked); every checkout-pool
+//     slot is locked and detached, so the sweep never touches one;
 //   - it is older than the grace window (the launch wait plus the lease TTL), a
 //     second guard behind the lock for a handler of an older build that does not
 //     take it;

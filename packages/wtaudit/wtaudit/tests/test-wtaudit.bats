@@ -611,3 +611,35 @@ EOF
   run --separate-stderr "$WTAUDIT" scan --repo "$REPO" --keep-branch
   [ "$status" -eq 2 ]
 }
+
+# ---- checkout-pool slots ----------------------------------------------------
+
+@test "scan: a locked detached pool slot and an unlocked slot under a pg-checkout-pool root are never candidates" {
+  fake_pnwf 0 ""
+  # slot locked the way pg-checkout-pool locks it (detached, reason "pool slot")
+  git -C "$REPO" worktree add -q --detach "$FX/pool-a" >/dev/null
+  git -C "$REPO" worktree lock --reason "pool slot (pg-checkout-pool)" "$FX/pool-a"
+  # a leased slot: on a lease branch, locked
+  git -C "$REPO" worktree add -q -b lease/s1 "$FX/pool-b" >/dev/null
+  git -C "$REPO" worktree lock --reason "pool slot (pg-checkout-pool)" "$FX/pool-b"
+  # a slot whose lock was lost, identified by its path under the pool layout
+  git -C "$REPO" worktree add -q --detach "$FX/state/pg-checkout-pool/slots/slot-03/tree" >/dev/null
+  # an ordinary locked worktree is still reported (kept), not skipped
+  git -C "$REPO" worktree add -q -b plain "$FX/plain" >/dev/null
+  git -C "$REPO" worktree lock --reason "operator hold" "$FX/plain"
+
+  run --separate-stderr cli_scan "$REPO"
+  [ "$status" -eq 0 ]
+  jq -e '(.candidates | length) == 1' <<<"$output"
+  jq -e '.candidates[0] | .branch == "plain" and .reason == "worktree-unreadable"' <<<"$output"
+  # the lease branch is checked out in a slot, so it is not a dangling branch either
+  ! jq -e '.candidates | any(.branch == "lease/s1")' <<<"$output"
+}
+
+@test "remove: a pool slot's lease branch is not a removal candidate" {
+  git -C "$REPO" worktree add -q -b lease/s2 "$FX/pool-c" >/dev/null
+  git -C "$REPO" worktree lock --reason "pool slot (pg-checkout-pool)" "$FX/pool-c"
+  do_remove "$REPO" lease/s2
+  [ "$status" -eq 10 ]
+  [ -d "$FX/pool-c" ]
+}

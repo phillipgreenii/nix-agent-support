@@ -134,12 +134,24 @@ func (w *Worktree) git(ctx context.Context, dir string, args ...string) (string,
 	return strings.TrimSpace(out.String()), nil
 }
 
-// Create adds a detached linked worktree at dir. git runs the repository's
-// post-checkout hook as part of worktree add: this is the one full hook run
-// of the slot's life.
+// LockReason is the `git worktree lock` reason every slot carries. The
+// worktree sweeps and audit tools treat a worktree locked with a reason that
+// starts with this text as a pool slot and never remove or report it.
+const LockReason = "pool slot (pg-checkout-pool)"
+
+// Create adds a detached linked worktree at dir and locks it with LockReason,
+// so git refuses to remove or prune it and every janitor that honours
+// `git worktree lock` leaves it alone. git runs the repository's post-checkout
+// hook as part of worktree add: this is the one full hook run of the slot's
+// life. When the lock cannot be taken the worktree is removed again, so a slot
+// is never left registered but unlocked.
 func (w *Worktree) Create(ctx context.Context, dir, commit string) error {
 	if _, err := w.git(ctx, "", "worktree", "add", "--detach", dir, commit); err != nil {
 		return err
+	}
+	if _, err := w.git(ctx, "", "worktree", "lock", "--reason", LockReason, dir); err != nil {
+		_, _ = w.git(ctx, "", "worktree", "remove", "--force", dir)
+		return fmt.Errorf("lock slot worktree: %w", err)
 	}
 	return nil
 }

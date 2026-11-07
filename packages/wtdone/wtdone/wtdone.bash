@@ -40,6 +40,17 @@ wtdone_find_worktree() {
   '
 }
 
+# wtdone_worktree_locked <cc> <worktree>: succeeds iff `git worktree list
+# --porcelain` marks <worktree> locked.
+wtdone_worktree_locked() {
+  local cc="$1" wt="$2"
+  git -C "$cc" worktree list --porcelain | awk -v wt="$wt" '
+    /^worktree / { cur=substr($0, 10); locked=0 }
+    /^locked/ && cur == wt { found=1 }
+    END { exit found ? 0 : 1 }
+  '
+}
+
 # wtdone_remaining_worktrees <cc>: print `git worktree list`'s report for
 # <cc>, for step 6's "remaining worktrees" line. Thin, named wrapper purely
 # so the lib tests can assert on it directly instead of shelling `git`

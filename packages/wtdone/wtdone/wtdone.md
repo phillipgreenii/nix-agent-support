@@ -1,6 +1,6 @@
 # wtdone
 
-> Guarded worktree teardown: refuses if a process on a blocking allow-list (claude, git, shells, python, editors, go, nix) is anchored inside the worktree (`lsof`), stops its fsmonitor daemon, removes the worktree, deletes the branch with a plain `git branch -d` (never `-D`), prunes, and prints the landed sha plus the canonical clone's remaining worktrees. Anchored processes under any other name (a language server, `caffeinate`, ...) are reported and ignored.
+> Guarded worktree teardown: refuses a worktree `git worktree lock` holds (every checkout-pool slot is locked; the pool reclaims its own slots) before touching anything, and refuses if a process on a blocking allow-list (claude, git, shells, python, editors, go, nix) is anchored inside the worktree (`lsof`), stops its fsmonitor daemon, removes the worktree, deletes the branch with a plain `git branch -d` (never `-D`), prunes, and prints the landed sha plus the canonical clone's remaining worktrees. Anchored processes under any other name (a language server, `caffeinate`, ...) are reported and ignored.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support>.
 
 - Tear down the worktree and branch for `{{pg2-abcde}}`, resolved against the canonical clone `cd`'d into:
