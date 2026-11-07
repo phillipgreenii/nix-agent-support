@@ -420,7 +420,7 @@ func removeOrphanWorktree(ctx context.Context, role roles.Role, deps executor.De
 		return
 	}
 	for _, o := range sessions {
-		if o.ExternalID == s.ExternalID || o.CWD != s.CWD || !o.Live {
+		if o.ExternalID == s.ExternalID || !o.SharesCheckout(s) || !o.Live {
 			continue
 		}
 		if o.State != ccpool.StateIdle && o.State != ccpool.StateErrored {

@@ -1133,7 +1133,7 @@ func (r *ccpoolRun) worktreeSharedWithLivePeer(ctx context.Context, name, wt str
 		return true
 	}
 	for _, s := range sessions {
-		if s.ExternalID == name || s.CWD != wt || !s.Live {
+		if s.ExternalID == name || !ccpool.SharesCheckout(s.CWD, s.CheckoutLease(), wt, r.lease) || !s.Live {
 			continue
 		}
 		if s.State != ccpool.StateIdle && s.State != ccpool.StateErrored {

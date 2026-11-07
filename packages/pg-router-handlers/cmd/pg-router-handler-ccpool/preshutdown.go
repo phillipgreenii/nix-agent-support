@@ -248,7 +248,7 @@ func worktreeHeldBySparedPeer(sessions []ccpool.Session, s ccpool.Session) bool 
 		return false
 	}
 	for _, o := range sessions {
-		if o.ExternalID != s.ExternalID && o.CWD == s.CWD && sparedSession(o) {
+		if o.ExternalID != s.ExternalID && o.SharesCheckout(s) && sparedSession(o) {
 			return true
 		}
 	}

@@ -213,7 +213,7 @@ func worktreeHeldByLivePeer(sessions []ccpool.Session, s ccpool.Session) bool {
 		return false
 	}
 	for _, o := range sessions {
-		if o.ExternalID != s.ExternalID && o.CWD == s.CWD && o.Live {
+		if o.ExternalID != s.ExternalID && o.SharesCheckout(s) && o.Live {
 			return true
 		}
 	}

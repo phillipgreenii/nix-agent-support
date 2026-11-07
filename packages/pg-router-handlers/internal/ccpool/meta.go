@@ -148,6 +148,24 @@ func (s Session) KeepsWorktree() bool { return s.Meta[MetaKeyKeepWorktree] != ""
 // when it holds none (MetaKeyCheckoutLease).
 func (s Session) CheckoutLease() string { return s.Meta[MetaKeyCheckoutLease] }
 
+// SharesCheckout reports whether o uses the same working directory as s AND
+// the same checkout. A pooled slot path is stable across leases, so two
+// sessions of different leases at one path are different occupants and never
+// peers; when either side holds no lease (every non-pooled session) the working
+// directory alone decides, as before. An empty working directory is never
+// shared.
+func (s Session) SharesCheckout(o Session) bool {
+	return SharesCheckout(s.CWD, s.CheckoutLease(), o.CWD, o.CheckoutLease())
+}
+
+// SharesCheckout is Session.SharesCheckout over the raw (cwd, lease) pairs.
+func SharesCheckout(cwdA, leaseA, cwdB, leaseB string) bool {
+	if cwdA == "" || cwdA != cwdB {
+		return false
+	}
+	return leaseA == "" || leaseB == "" || leaseA == leaseB
+}
+
 // PurgePending reports whether the session carries the two-phase-teardown
 // marker (MetaKeyPurgePending): its row is kept until its worktree is gone.
 func (s Session) PurgePending() bool { return s.Meta[MetaKeyPurgePending] != "" }

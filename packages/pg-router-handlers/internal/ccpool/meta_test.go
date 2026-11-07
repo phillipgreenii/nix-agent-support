@@ -131,3 +131,35 @@ func TestPurgePendingAccessors(t *testing.T) {
 		}
 	}
 }
+
+func TestSharesCheckout(t *testing.T) {
+	const slot = "/pool/slot-1"
+	mk := func(cwd, lease string) Session {
+		s := Session{CWD: cwd}
+		if lease != "" {
+			s.Meta = map[string]string{MetaKeyCheckoutLease: lease}
+		}
+		return s
+	}
+	cases := []struct {
+		name string
+		a, b Session
+		want bool
+	}{
+		{"non-pooled same path stays path-keyed", mk(slot, ""), mk(slot, ""), true},
+		{"non-pooled different path", mk(slot, ""), mk("/other", ""), false},
+		{"two leases of one slot path are separate", mk(slot, "lease-a"), mk(slot, "lease-b"), false},
+		{"same lease same path", mk(slot, "lease-a"), mk(slot, "lease-a"), true},
+		{"leased vs unleased at one path stays path-keyed", mk(slot, "lease-a"), mk(slot, ""), true},
+		{"different path same lease", mk(slot, "lease-a"), mk("/other", "lease-a"), false},
+		{"empty cwd never shared", mk("", ""), mk("", ""), false},
+	}
+	for _, c := range cases {
+		if got := c.a.SharesCheckout(c.b); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+		if got := c.b.SharesCheckout(c.a); got != c.want {
+			t.Errorf("%s (swapped): got %v want %v", c.name, got, c.want)
+		}
+	}
+}
