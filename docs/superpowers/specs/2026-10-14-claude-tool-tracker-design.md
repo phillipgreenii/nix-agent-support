@@ -354,10 +354,52 @@ because calls still in flight in a live session (five calls of one session, CETA
   three seconds later was recorded); for sessions 499f0a23 and 62683f59 the event files hold a
   tracker start for every CETA verdict, so their rows were in flight when the comparison ran and
   later joined. The single subagent call is not explained;
-  its cause would need a captured hook trace. The 9 unkeyed rows are CETA rows with no `tool_use_id` (nothing to join on).
-- Only the tracker, 210 (64 Bash, 50 Monitor, 46 Edit, 18 Write, 10 `EnterWorktree`; 19 in one
-  session). CETA wrote no row for them. Section 10 check 1 already found 25 such calls on the first
-  day, 18 of them subagent calls. Open question: which hook path skips CETA for these calls.
+  its cause would need a captured hook trace. The 9 unkeyed rows are CETA rows with no `tool_use_id` and an empty session id (nothing to join
+  on): they are hand-fed hook invocations, not Claude calls. All 9 were written within two seconds
+  at 2026-10-30T01:48:57Z to 01:48:58Z, each with outcome `pending` and no session, and their
+  commands (four refused `curl` forms, one plain loopback `curl`, two `cat` / `ls` of
+  `~/.claude/projects` and two controls) are exactly the post-apply check of a CETA change landed
+  the evening before, which a session piped as hand-written JSON into the installed hook binary
+  (the transcript of session 2c0e1201 holds the check list). The hook records any input it is
+  given into the live ask log, so they remain. Expected; no repo change.
+- Only the tracker, 210 (64 Bash, 50 Monitor, 46 Edit, 18 Write, 10 `EnterWorktree`, 22 of other
+  tools; 19 in one session). CETA wrote no row for them. Investigated 2026-11-07 from a copy of the
+  tracker database (each call's event kinds and its `call_end` error text) and the session and
+  subagent transcripts (the `hook_success` / `hook_cancelled` attachments of each call). Two causes
+  account for every call; neither is a hook-matcher or permission-path gap.
+  - 135 calls (Monitor 49, Edit 46, Write 15, `EnterWorktree` 10, Bash 5, `TaskStop` 4,
+    `ExitWorktree` 3, one each of `ToolSearch`, `StructuredOutput` and Grep) have a tracker
+    `call_start` but no `pre_tool` and no `check` event: no hook of any kind ran. 132 of them end
+    with a `<tool_use_error>` and the other 3 have no `call_end`. The errors are Claude Code's own
+    pre-hook input validation or tool-precondition refusals: `InputValidationError` (Monitor 49,
+    Write 3, and singles), "File has not been read yet", "String to replace not found", "File has
+    been modified since read", "Found N matches" and "No changes to make" (Edit), "Subagents should
+    return findings as text, not write reports" (Write 11), `EnterWorktree` / `ExitWorktree`
+    "cannot be called from a subagent", and `TaskStop` "No task found". These calls are refused
+    before the `PreToolUse` hook fires, so CETA, which runs only inside hooks, never sees them;
+    the tracker's mod sees them because it observes the call itself. Expected gap, not a CETA
+    defect. 121 of the 210 carry an agent id, which is why subagent calls dominate.
+    `compare-tracker` still lists them; excluding calls with no tracker hook event and a
+    `<tool_use_error>` result would remove them from the only-tracker list (not yet done).
+  - 75 calls (Bash 59, Skill 5, Grep 4, Write 3, Glob 3, Monitor 1) did reach the hooks: the
+    tracker has `pre_tool` and `check`. CETA's hook ran but its ask-log row was not written. The
+    transcripts show two failure modes. (1) The harness cancelled CETA's `PreToolUse` hook:
+    `hook_cancelled` with `timedOut` true and `timeoutMs` 5000, after 5.2 s to 60 s (at least 44 of
+    the 75; for example session 2bfbbf02, 2026-10-30T08:53Z, 8252 ms). (2) The hook's own stderr
+    reports `asklog open: ...` failures opening the ask log (at least 8): "migrate: create
+    schema_version: disk I/O error (4874)", "unable to open database file (14)", "set WAL mode:
+    database is locked". The hook still printed its verdict and wrote its `ceta.*` events
+    (34 of the 75 have a `ceta.verdict` event) but `RecordPreToolDecision` never ran. The rest
+    (about 23, among them 13 of session d503eec4's 19: the `date` calls every 60 s from
+    2026-11-06T10:04Z) have no hook attachment in the transcripts; they sit in the same hours as
+    the open failures and carry the same `ceta.verdict` event without a row, so the same cause
+    is inferred, not observed. The ask log is 3.5 GB, opened in WAL mode by one process per tool
+    call with a 3 s busy timeout, under a 5 s hook timeout; transcripts across all sessions
+    hold well over a thousand such `asklog open` / `asklog` stderr lines. This is a real CETA
+    logging loss (75 of 83794 calls, about 0.09 percent), not an exclusion candidate; fixing it means
+    reducing the ask log's open and write latency or contention, which is a separate decision
+    (follow-up bead). Section 10 check 1's 25 first-day calls (18 from subagents) match the
+    same two causes.
 - Verdict differs, 5: CETA `deny` against the tracker's `ask`. Open question: the tracker's engine
   verdict reads `ask` where CETA's own row says `deny` (the same call is delivered as a refusal
   elsewhere); not explained.
