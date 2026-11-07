@@ -30,7 +30,18 @@ type Provisioner interface {
 	// Detach leaves the lease branch and detaches HEAD, so the branch is
 	// free to be checked out elsewhere.
 	Detach(ctx context.Context, dir string) error
+	// Resolve turns ref into a full commit id, using only the objects the
+	// repository already has.
+	Resolve(ctx context.Context, ref string) (string, error)
+	// Rescue captures uncommitted tracked changes in dir (staged and unstaged)
+	// as a commit kept alive by the ref name. It returns the commit, or an
+	// empty string and no ref when the tracked tree is clean. A failure means
+	// the changes are NOT safe and the caller MUST NOT reset.
+	Rescue(ctx context.Context, dir, ref string) (string, error)
 }
+
+// ErrRefUnresolvable: the requested reference names no commit.
+var ErrRefUnresolvable = errors.New("reference does not resolve to a commit")
 
 // Errors that mark a slot as unusable. A caller turns them into a quarantine
 // with QuarantineIfWedged.

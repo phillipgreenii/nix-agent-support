@@ -266,3 +266,36 @@ func (w *Worktree) Detach(ctx context.Context, dir string) error {
 	_, err := w.git(ctx, dir, append(w.skip(), "checkout", "-q", "--detach")...)
 	return err
 }
+
+// Resolve returns the full commit id ref names in the configured repository.
+func (w *Worktree) Resolve(ctx context.Context, ref string) (string, error) {
+	out, err := w.git(ctx, "", "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		if errors.Is(err, ErrWedged) {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %q", ErrRefUnresolvable, ref)
+	}
+	return out, nil
+}
+
+// rescueIdent gives stash creation an identity without reading or writing any
+// configuration, so a host with no git identity still captures.
+var rescueIdent = []string{"-c", "user.name=pg-checkout-pool", "-c", "user.email=pg-checkout-pool@localhost"}
+
+// Rescue captures staged and unstaged tracked changes in dir as a stash-style
+// commit and points ref at it. Untracked files are not captured (they are
+// removed by the reset by design).
+func (w *Worktree) Rescue(ctx context.Context, dir, ref string) (string, error) {
+	commit, err := w.git(ctx, dir, append(append([]string{}, rescueIdent...), "stash", "create", "pg-checkout-pool rescue")...)
+	if err != nil {
+		return "", err
+	}
+	if commit == "" {
+		return "", nil
+	}
+	if _, err := w.git(ctx, dir, "update-ref", ref, commit); err != nil {
+		return "", err
+	}
+	return commit, nil
+}

@@ -1,6 +1,6 @@
-// pg-checkout-pool manages a bounded pool of reusable repository checkouts.
-// This version ships the slot store and a read-only `status` command; leasing
-// and resetting arrive with the provisioner.
+// pg-checkout-pool manages a bounded pool of reusable repository checkouts:
+// lease, renew, release and reap on top of the slot store and the worktree
+// provisioner, plus a read-only status command.
 package main
 
 import (
@@ -25,6 +25,10 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, pool.SystemClock{}))
 }
 
+func run(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
+	return newApp(stdout, stderr, clock).run(args)
+}
+
 func defaultRoot() string {
 	if v := os.Getenv(rootEnv); v != "" {
 		return v
@@ -36,9 +40,26 @@ func defaultRoot() string {
 	return filepath.Join(home, ".local", "state", "pg-checkout-pool")
 }
 
-func run(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
+const usage = `usage: pg-checkout-pool <command> [flags]
+
+commands:
+  lease    --repo DIR --ref REF --owner SESSION-ID [--bead ID] [--branch NAME]
+           [--ttl 30m] [--wait 2m] [--max-slots 6] [--min-free-bytes N] [--keep PATH]...
+  renew    --lease ID [--ttl 30m]
+  release  --lease ID [--disposition reset|keep|quarantine] [--keep PATH]...
+  reap     [--dry-run] [--grace DUR] [--keep PATH]...
+  status   [--json]
+  version
+
+every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status.
+exit codes: 0 ok; 2 usage; 3 pool-exhausted; 4 low-disk; 5 ref-unresolvable;
+6 quarantine-only; 7 git-wedged; 8 lease-not-found; 9 internal error;
+10 slot-busy; 11 owner-already-leases`
+
+func (a *app) run(args []string) int {
+	stderr, stdout, clock := a.stderr, a.stdout, a.clock
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(stderr, "usage: pg-checkout-pool status [--root DIR] [--json]\n       pg-checkout-pool version")
+		fmt.Fprintln(stderr, usage)
 		if len(args) == 0 {
 			return 2
 		}
@@ -50,6 +71,14 @@ func run(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
 		return 0
 	case "status":
 		return status(args[1:], stdout, stderr, clock)
+	case "lease":
+		return a.lease(args[1:])
+	case "renew":
+		return a.renew(args[1:])
+	case "release":
+		return a.release(args[1:])
+	case "reap":
+		return a.reap(args[1:])
 	}
 	fmt.Fprintf(stderr, "pg-checkout-pool: unknown command %q\n", args[0])
 	return 2
@@ -66,7 +95,7 @@ func status(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
 	sts, err := pool.NewStore(*root, clock).Status()
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-checkout-pool: %v\n", err)
-		return 1
+		return exitInternal
 	}
 	if *asJSON {
 		if sts == nil {
@@ -76,7 +105,7 @@ func status(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(sts); err != nil {
 			fmt.Fprintf(stderr, "pg-checkout-pool: %v\n", err)
-			return 1
+			return exitInternal
 		}
 		return 0
 	}

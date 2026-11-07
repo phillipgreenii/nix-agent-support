@@ -16,8 +16,16 @@ mkGoApp {
 
   subPackages = [ "cmd/pg-checkout-pool" ];
 
+  # The tldr page, flat under share/tldr/pages.common (the layout pg-probe and
+  # pg-keep-awake ship; a home module registers it through
+  # programs.tldr.customPages).
+  postInstall = ''
+    mkdir -p $out/share/tldr/pages.common
+    cp ${./share/tldr/pages.common/pg-checkout-pool.md} $out/share/tldr/pages.common/pg-checkout-pool.md
+  '';
+
   meta = {
-    description = "Bounded pool of reusable repository checkouts: per-slot lock, atomic lease records and slot state machine, with a status command";
+    description = "Bounded pool of reusable repository checkouts: per-slot lock, atomic lease records and slot state machine, with lease, renew, release, reap and status commands";
     mainProgram = "pg-checkout-pool";
   };
 }
