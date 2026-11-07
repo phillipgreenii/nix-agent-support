@@ -126,11 +126,12 @@ type ImplicitEffectV1 struct {
 // non-empty (the generic, empty-string interpreter is not itself a fact
 // needing a citation).
 const (
-	citationKeyProvenance  = "provenance"
-	citationKeyStdin       = "stdin"
-	citationKeyStdout      = "stdout"
-	citationKeyUnknownFlag = "unknownFlag"
-	citationKeyInterpreter = "interpreter"
+	citationKeyProvenance   = "provenance"
+	citationKeyStdin        = "stdin"
+	citationKeyStdout       = "stdout"
+	citationKeyUnknownFlag  = "unknownFlag"
+	citationKeyInterpreter  = "interpreter"
+	citationKeyNumericCount = "numericCount"
 )
 
 // CommandSpecV1 is the v1 on-disk serialization of cmddesc.CommandSchema —
@@ -150,6 +151,7 @@ type CommandSpecV1 struct {
 	Stdin                 string                   `json:"stdin"`
 	Stdout                string                   `json:"stdout"`
 	UnknownFlag           string                   `json:"unknownFlag"`
+	NumericCount          bool                     `json:"numericCount,omitempty"`
 	EndOfOptions          bool                     `json:"endOfOptions,omitempty"`
 	PositionalsEndOptions bool                     `json:"positionalsEndOptions,omitempty"`
 	Interpreter           string                   `json:"interpreter,omitempty"`

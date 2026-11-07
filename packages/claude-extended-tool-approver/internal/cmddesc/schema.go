@@ -726,15 +726,21 @@ type ImplicitEffect struct {
 // ImplicitEffect); the generic interpreter emits them like any other effect,
 // so transforms and policies apply to them identically.
 type CommandSchema struct {
-	Name                  string
-	Provenance            string
-	Flags                 map[string]FlagSpec
-	Positionals           PositionalSpec
-	ImplicitEffects       []ImplicitEffect
-	Stdin                 StdinSpec
-	Stdout                StdoutKind
-	UnknownFlag           UnknownFlagPolicy
-	EndOfOptions          bool
+	Name            string
+	Provenance      string
+	Flags           map[string]FlagSpec
+	Positionals     PositionalSpec
+	ImplicitEffects []ImplicitEffect
+	Stdin           StdinSpec
+	Stdout          StdoutKind
+	UnknownFlag     UnknownFlagPolicy
+	EndOfOptions    bool
+	// NumericCount says the command accepts the obsolete GNU "-NUM" count
+	// spelling (head -20, tail -100): a lone "-" followed only by decimal
+	// digits is an inert line/byte count, the same count -n NUM carries
+	// (tc-kf5m0). False leaves such a token to the ordinary flag lookup, so
+	// it stays an unknown flag.
+	NumericCount          bool
 	PositionalsEndOptions bool
 	Interpreter           string
 	Subcommands           map[string]CommandSchema

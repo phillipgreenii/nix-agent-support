@@ -198,7 +198,6 @@ var knownLiveLooser = []liveLooserClass{
 			"ls_unknown_flag",
 			"wc_unknown_flag",
 			"tail_unknown_flag",
-			"head_numeric_shorthand_project",
 			"find_frobnicate",
 			"which_read_alias",
 			"pgrep_signal",

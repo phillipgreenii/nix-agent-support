@@ -782,6 +782,10 @@ func (st *interpState) flag(tok string, i int) (int, bool) {
 	if spec, ok := st.schema.Flags[tok]; ok {
 		return st.applyFlag(tok, spec, i, "", false)
 	}
+	// Obsolete "-NUM" count (head -20): inert, same as -n NUM (tc-kf5m0).
+	if st.schema.NumericCount && isNumericCountFlag(tok) {
+		return 0, true
+	}
 	// --flag=value
 	if strings.HasPrefix(tok, "--") {
 		if spec, name, val, ok := st.gluedFlag(tok); ok {
@@ -1113,4 +1117,20 @@ func (st *interpState) resolveStraightLine(tok string) (string, bool) {
 		}
 	}
 	return cmdparse.ExpandInCommand(tok, safe)
+}
+
+// isNumericCountFlag reports whether tok is "-" followed by 1..18 decimal
+// digits and nothing else: the obsolete "-NUM" count spelling (tc-kf5m0). The
+// length cap keeps the value inside a signed 64-bit count.
+func isNumericCountFlag(tok string) bool {
+	d := strings.TrimPrefix(tok, "-")
+	if len(d) == len(tok) || d == "" || len(d) > 18 {
+		return false
+	}
+	for _, c := range d {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

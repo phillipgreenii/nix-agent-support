@@ -6,6 +6,9 @@
     "name": "head",
     "provenance": "GNU coreutils 9.x head --help",
     "citations": {
+      "numericCount": {
+        "source": "head --help: \"-n, --lines=[-]NUM print the first NUM lines instead of the first 10;\" -- the obsolete -NUM spelling is the same count (GNU coreutils manual, \"head invocation\": \"For compatibility ‘head’ also supports an obsolete option syntax ‘-[NUM][bkm][cqv]’, which is recognized only if it is specified first.\"); verified live on this host: `printf 'a\\nb\\nc\\n' | head -2` prints \"a\" and \"b\""
+      },
       "provenance": {
         "source": "head --help: \"Usage: head [OPTION]... [FILE]...\""
       },
@@ -134,6 +137,7 @@
     "stdin": "when-no-path-operands",
     "stdout": "content",
     "unknownFlag": "insufficient",
+    "numericCount": true,
     "endOfOptions": true
   }
 }

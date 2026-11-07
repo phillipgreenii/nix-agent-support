@@ -143,10 +143,12 @@ var headSchema = CommandSchema{
 		"-q": inert, "--quiet": inert,
 		"-v": inert, "--verbose": inert,
 	},
-	Positionals:  PositionalSpec{Rest: PathRead, StdinToken: "-"},
-	Stdin:        StdinWhenNoPathOperands,
-	Stdout:       StdoutContent,
-	UnknownFlag:  UnknownFlagInsufficient,
+	Positionals: PositionalSpec{Rest: PathRead, StdinToken: "-"},
+	Stdin:       StdinWhenNoPathOperands,
+	Stdout:      StdoutContent,
+	UnknownFlag: UnknownFlagInsufficient,
+	// tc-kf5m0: the obsolete `head -NUM` count spelling.
+	NumericCount: true,
 	EndOfOptions: true,
 }
 
@@ -1576,17 +1578,14 @@ var sortSchema = CommandSchema{
 // tailSchema: `-f`/`-F`/`--follow` just keeps reading the same file(s) as
 // they grow; `--pid` is the one glued value spelling worth modeling
 // (literal). Flags verified against this host's `tail --help`.
-//
-// pg2-cjfpy.2: the legacy single-digit `-N` line count (`tail -1`, the form
-// beads-lifecycle's worktree-review probe pipes into) is registered as
-// "-1".."-9". It is the same inert count `-n N` is. A multi-digit `-10` is
-// NOT enumerated: it parses as the bundle -1,-0 and the unregistered "-0"
+// pg2-cjfpy.2 / tc-kf5m0: the legacy `-NUM` line count (`tail -1`, `tail -100`)
+// is the schema-level NumericCount form, the same inert count `-n NUM` is.
+// (It was once enumerated as "-1".."-9" only; multi-digit counts abstained.)
 // makes it insufficient (abstain), the fail-closed direction.
 var tailSchema = CommandSchema{
 	Name:       "tail",
 	Provenance: "tail (GNU coreutils) 9.11, tail --help",
 	Flags: map[string]FlagSpec{
-		"-1": inert, "-2": inert, "-3": inert, "-4": inert, "-5": inert, "-6": inert, "-7": inert, "-8": inert, "-9": inert,
 		"-n": literal1, "--lines": literal1,
 		"-c": literal1, "--bytes": literal1,
 		"-f": inert, "-F": inert, "--follow": literalOpt,
@@ -1600,6 +1599,8 @@ var tailSchema = CommandSchema{
 	Stdout:       StdoutContent,
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
+	// tc-kf5m0: any `tail -NUM` count (supersedes the old -1..-9 enumeration).
+	NumericCount: true,
 }
 
 // grepSchema: this host's `grep` is ugrep (a GNU-grep-compatible CLI,

@@ -370,11 +370,15 @@ func fromSchema(s cmddesc.CommandSchema, citations map[string]Citation, prefix s
 		Stdout:                stdoutStr,
 		UnknownFlag:           unknownFlagStr,
 		EndOfOptions:          s.EndOfOptions,
+		NumericCount:          s.NumericCount,
 		PositionalsEndOptions: s.PositionalsEndOptions,
 		Interpreter:           s.Interpreter,
 		DefaultSubcommand:     s.DefaultSubcommand,
 		VerbFamily:            s.VerbFamily,
 		DefaultVerb:           s.DefaultVerb,
+	}
+	if s.NumericCount {
+		out.Citations[citationKeyNumericCount] = citations[prefix+citationKeyNumericCount]
 	}
 	if s.Interpreter != "" {
 		out.Citations[citationKeyInterpreter] = citations[prefix+citationKeyInterpreter]
@@ -445,6 +449,7 @@ func ToSchema(c CommandSpecV1) (cmddesc.CommandSchema, error) {
 		Stdout:                stdout,
 		UnknownFlag:           unknownFlag,
 		EndOfOptions:          c.EndOfOptions,
+		NumericCount:          c.NumericCount,
 		PositionalsEndOptions: c.PositionalsEndOptions,
 		Interpreter:           c.Interpreter,
 		DefaultSubcommand:     c.DefaultSubcommand,

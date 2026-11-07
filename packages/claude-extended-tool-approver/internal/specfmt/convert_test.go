@@ -41,12 +41,13 @@ func cite(s string) Citation { return Citation{Source: s} }
 // result is byte-for-byte the same schema.
 func kitchenSinkSchema() (cmddesc.CommandSchema, map[string]Citation) {
 	citations := map[string]Citation{
-		citationKeyProvenance:  cite("man:kitchen-sink(1)"),
-		citationKeyStdin:       cite("help: reads stdin when no FILE operand given"),
-		citationKeyStdout:      cite("help: prints file contents"),
-		citationKeyUnknownFlag: cite("help: no undocumented flags observed"),
-		citationKeyInterpreter: cite("source-line: uses xargs semantics"),
-		"positionals":          cite("help synopsis: kitchen-sink [OPTS] FILE...  DEST"),
+		citationKeyProvenance:   cite("man:kitchen-sink(1)"),
+		citationKeyStdin:        cite("help: reads stdin when no FILE operand given"),
+		citationKeyStdout:       cite("help: prints file contents"),
+		citationKeyUnknownFlag:  cite("help: no undocumented flags observed"),
+		citationKeyInterpreter:  cite("source-line: uses xargs semantics"),
+		citationKeyNumericCount: cite("help: obsolete -NUM count"),
+		"positionals":           cite("help synopsis: kitchen-sink [OPTS] FILE...  DEST"),
 	}
 
 	flags := map[string]cmddesc.FlagSpec{}
@@ -113,6 +114,7 @@ func kitchenSinkSchema() (cmddesc.CommandSchema, map[string]Citation) {
 		Stdout:                cmddesc.StdoutContent,
 		UnknownFlag:           cmddesc.UnknownFlagInsufficient,
 		EndOfOptions:          true,
+		NumericCount:          true,
 		PositionalsEndOptions: false,
 		Interpreter:           "xargs",
 	}

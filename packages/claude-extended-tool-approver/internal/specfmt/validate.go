@@ -89,6 +89,9 @@ func validateCommand(specName string, c CommandSpecV1) []error {
 	requireCitation(citationKeyStdin)
 	requireCitation(citationKeyStdout)
 	requireCitation(citationKeyUnknownFlag)
+	if c.NumericCount {
+		requireCitation(citationKeyNumericCount)
+	}
 	if c.Interpreter != "" {
 		requireCitation(citationKeyInterpreter)
 		if _, ok := cmddesc.LookupInterpreter(c.Interpreter); !ok {

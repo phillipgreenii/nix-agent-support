@@ -6,6 +6,9 @@
     "name": "tail",
     "provenance": "tail (GNU coreutils) 9.11, tail --help",
     "citations": {
+      "numericCount": {
+        "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10;\" -- the obsolete -NUM spelling is the same count (GNU coreutils manual, \"tail invocation\": \"For compatibility ‘tail’ also supports an obsolete usage ‘tail -[NUM][bcl][f] [FILE]’\"); verified live on this host: `printf 'a\\nb\\nc\\n' | tail -2` prints \"b\" and \"c\""
+      },
       "provenance": {
         "source": "tail --help: \"Usage: tail [OPTION]... [FILE]...\""
       },
@@ -116,114 +119,6 @@
           "source": "tail --help: \"-z, --zero-terminated line delimiter is NUL, not newline\""
         }
       },
-      "-1": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-2": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-3": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-4": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-5": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-6": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-7": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-8": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
-      "-9": {
-        "arity": "none",
-        "operand": {
-          "kind": "literal"
-        },
-        "transform": {
-          "kind": "none"
-        },
-        "citation": {
-          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10\" -- the legacy single-digit -NUM spelling is the obsolescent form of -n NUM (GNU coreutils manual, \"tail invocation\"); verified live on this host: `printf 'a\\nb\\n' | tail -1` prints \"b\""
-        }
-      },
       "-F": {
         "arity": "none",
         "operand": {
@@ -326,6 +221,7 @@
     "stdin": "when-no-path-operands",
     "stdout": "content",
     "unknownFlag": "insufficient",
+    "numericCount": true,
     "endOfOptions": true
   }
 }

@@ -174,6 +174,9 @@ func citationsFor(schema cmddesc.CommandSchema, prefix string, cite specfmt.Cita
 		prefix + "unknownFlag": cite,
 		prefix + "positionals": cite,
 	}
+	if schema.NumericCount {
+		out[prefix+"numericCount"] = cite
+	}
 	if schema.Interpreter != "" {
 		out[prefix+"interpreter"] = cite
 	}

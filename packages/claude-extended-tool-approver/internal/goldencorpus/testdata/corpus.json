@@ -16353,5 +16353,117 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-jlgi9 guardrail: a runtime-expanded destination could carry data in the DNS name."
+  },
+  {
+    "case": "head_numeric_count_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "head -20 README.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-kf5m0: obsolete head -NUM count is an inert count like -n NUM; read-only input approves."
+  },
+  {
+    "case": "tail_numeric_count_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "tail -100 README.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-kf5m0: obsolete tail -NUM count (multi-digit) is an inert count; read-only input approves."
+  },
+  {
+    "case": "head_numeric_count_pipeline_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "cat README.md | head -50" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "tc-kf5m0: head -N as a pipeline sink approves."
+  },
+  {
+    "case": "head_unmodeled_flag_not_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "head -z README.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-kf5m0 guardrail: an unmodeled flag still abstains."
+  },
+  {
+    "case": "head_numeric_suffix_not_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "head -20q README.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-kf5m0 guardrail: the -NUM[bkm][cqv] suffix forms are not the plain count and stay unmodeled."
+  },
+  {
+    "case": "head_numeric_ssh_key_not_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "head -20 ~/.ssh/id_ed25519" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-kf5m0 guardrail: the numeric count does not widen a credential-store read."
+  },
+  {
+    "case": "tail_numeric_dotenv_not_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "tail -100 .env" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-kf5m0 guardrail: the numeric count does not widen a dotenv read."
+  },
+  {
+    "case": "head_numeric_unknown_zone_not_approve",
+    "tags": ["ceta-spec", "tc-kf5m0"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "head -20 /srv/outside-zone/data.txt" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "tc-kf5m0 guardrail: the numeric count does not widen an unknown-zone absolute path."
   }
 ]

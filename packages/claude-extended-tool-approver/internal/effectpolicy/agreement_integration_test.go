@@ -68,10 +68,8 @@ var goldenAgreementCases = func() []agreementCase {
 // spike and the live rule chain:
 //
 //   - head_numeric_shorthand / head_numeric_shorthand_project: GNU `head -N`
-//     (the legacy glued-digit form) is not a flag the registry's headSchema
-//     models (only -n/--lines/-c/--bytes/-q/-v) — safecmds recognizes it and
-//     approves; the spike's generic interpreter sees an unknown short flag and
-//     abstains.
+//     (the legacy glued-digit form) was once an unknown flag the spike abstained
+//     on; tc-kf5m0 models it (headSchema.NumericCount), so it now agrees.
 //   - bash_n_script / sh_n_script: `-n` (noexec) is deliberately left out of
 //     bashSchema (see registry.go's own comment) so it abstains; safecmds
 //     approves a syntax-check of a readable script.
