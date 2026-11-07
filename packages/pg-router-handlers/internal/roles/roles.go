@@ -138,7 +138,9 @@ type IsolationConfig struct {
 	// directory, see Path), or "workforest" (create-or-reuse a coordinated
 	// multi-repo set keyed by item id), or "bead-worktree" (look at an existing
 	// drain/<item id> worktree in Repos, else Fallback; creates and removes
-	// nothing, see Repos and Fallback).
+	// nothing, see Repos and Fallback), or "checkout-pool" (lease a pooled,
+	// already-warm checkout from pg-checkout-pool, keyed on the dispatched
+	// session's id; see Ref and PoolRoot).
 	Type string
 	// Path is the fixed directory to create-or-reuse; set iff Type == "path".
 	Path string
@@ -154,6 +156,13 @@ type IsolationConfig struct {
 	// a deployment whose triager has no tree of its own). It is never created.
 	// Empty means the handler's RepoRoot. Set only with Type == "bead-worktree".
 	Fallback string
+	// Ref is the commit reference a "checkout-pool" lease checks out ("" means
+	// "origin/main"). Set only with Type == "checkout-pool".
+	Ref string
+	// PoolRoot is the pg-checkout-pool state directory ("" lets the command pick
+	// its default, honouring PG_CHECKOUT_POOL_ROOT). Absolute when set. Set only
+	// with Type == "checkout-pool".
+	PoolRoot string
 	// Prefetch (bead pg2-hh32y), when non-nil, has the HANDLER pin the freshly
 	// ensured worktree to a commit and pre-generate the diff before the session
 	// starts, instead of leaving the model to fetch/checkout/diff on its own

@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/checkoutpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/complete"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
@@ -69,6 +70,15 @@ type ccpoolRun struct {
 	finished     bool
 	waitErr      error
 	outcomeDone  bool
+
+	// lease is the pg-checkout-pool lease this dispatch took ("checkout-pool"
+	// isolation; "" otherwise) and leaseRoot the pool state directory it came
+	// from. Set once, by the dispatch's own goroutine, right after Ensure.
+	// lease and leaseRoot never change after that; leaseReleased flips once the
+	// lease is given back (the renewal goroutine reads it).
+	lease         string
+	leaseRoot     string
+	leaseReleased atomic.Bool
 }
 
 // recordOutcome writes the ONE outcome record an accepted dispatch owes after
@@ -335,8 +345,16 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, fErr)
 		}
 	}
-	wt, wtErr := newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
+	iso := newIsolation(cc.Isolation, r.deps)
+	wt, wtErr := iso.Ensure(ctx, d.Item.ID)
 	if wtErr != nil {
+		if errors.Is(wtErr, ErrPoolAtCapacity) {
+			// The checkout pool has no free slot: a busy decline, exactly like a
+			// full ccpool pool, with no bead mutation at all (the pool command
+			// leased nothing).
+			slog.Info("dispatch declined: checkout pool exhausted", "role", d.Role.Name, "bead", d.Item.ID, "err", wtErr)
+			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+		}
 		if errors.Is(wtErr, ErrLowDisk) {
 			// Low disk is the ONE isolation failure this function does NOT treat
 			// like an ordinary launch failure (bead pg2-8vn8t): it is a
@@ -386,6 +404,17 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
 	env["WORKSPACE_ROOT"] = wt
 	meta := ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))
+	if lh, ok := iso.(leaseHolder); ok && lh.leaseID() != "" {
+		// POOL-17: the lease id reaches the session as an environment variable
+		// (set after sessionEnv, so it always wins) and travels on the row so every
+		// teardown path can release it.
+		r.lease, r.leaseRoot = lh.leaseID(), cc.Isolation.PoolRoot
+		env[CheckoutLeaseEnv] = r.lease
+		meta[ccpool.MetaKeyCheckoutLease] = r.lease
+		if r.leaseRoot != "" {
+			meta[ccpool.MetaKeyCheckoutRoot] = r.leaseRoot
+		}
+	}
 	if cc.Isolation.Type == BeadWorktreeIsolation {
 		// The directory is not this handler's: every teardown path leaves it alone
 		// (bead pg2-b49ydt, ccpool.MetaKeyKeepWorktree).
@@ -583,7 +612,7 @@ func (r *ccpoolRun) worktreePathExists(beadID string) bool {
 // worktree-keyed sweep (cmd/pg-router-handler-ccpool/worktreesweep.go,
 // pg2-ganjb, INV-CCH-19), which keys on the worktree rather than a session row.
 func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPoolConfig, beadID, wt string, createdHere bool) {
-	if wt == "" || !createdHere || !usesWorktreeIsolation(cc.Isolation) {
+	if wt == "" || !createdHere || !(usesWorktreeIsolation(cc.Isolation) || r.lease != "") {
 		return
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
@@ -824,7 +853,12 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 // worktree may now be removed (removeWorktree); the quietResult is as
 // cleanupWorktree's.
 func (r *ccpoolRun) prepareWorktreeCleanup(ctx context.Context, cc *roles.CCPoolConfig, name, wt string) (q quietResult, proceed bool) {
-	if wt == "" || !usesWorktreeIsolation(cc.Isolation) {
+	if wt == "" || !(usesWorktreeIsolation(cc.Isolation) || UsesCheckoutPoolIsolation(cc.Isolation)) {
+		return quietResult{}, false
+	}
+	if UsesCheckoutPoolIsolation(cc.Isolation) && r.lease == "" {
+		// An absorbed session's lease belongs to the dispatch that took it; its
+		// row carries the lease id, and the teardown paths release it from there.
 		return quietResult{}, false
 	}
 	if r.needsInputAlive(ctx, name) {
@@ -857,6 +891,12 @@ func (r *ccpoolRun) removeWorktree(ctx context.Context, name, beadID, wt string)
 	} else if keep {
 		slog.Info("dispatch: worktree cleanup deferred -- a live process has it as its working directory (left for next sweep)",
 			"session", name, "worktree", wt)
+		return
+	}
+	if r.lease != "" {
+		// A pooled checkout is given back to the pool (which resets it for the
+		// next lease), never removed as a worktree.
+		r.releaseLease(ctx, name)
 		return
 	}
 	wm, err := r.deps.gitOpener()(ctx, wt)
@@ -1500,8 +1540,8 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 		// Per-bead budget-stop counter (pg2-6akgz); 0 = disabled.
 		BudgetStopEscalateAfter: d.Role.CCPool.BudgetStopEscalateAfter,
 		RepoRoot:                r.deps.Cfg.RepoRoot,
-		WorktreeDir:             worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
-		Start:                   start,       // zero = now; an absorbed session passes its recorded launch time
+		WorktreeDir:             r.watchdogResetDir(worktreeDir), // the per-bead worktree the worker ran in (pg2-yukh)
+		Start:                   start,                           // zero = now; an absorbed session passes its recorded launch time
 		ReminderMsg:             r.deps.Cfg.ReminderMsg,
 		WrapUpMsg:               r.deps.Cfg.WrapUpMsg,
 		Git:                     r.deps.git(),
@@ -2140,4 +2180,35 @@ func (r *ccpoolRun) alertNeedsInput(externalID, beadID string) {
 			"session needs input; operator must attach",
 			map[string]any{"session": externalID, "bead": beadID, "attach": "ccpool attach " + externalID})
 	}
+}
+
+// releaseLease gives this dispatch's pooled checkout back to the pool. It is
+// the pool counterpart of the worktree removal: the same guards (needs_input,
+// quiet window, live process) run before it. A lease the pool no longer knows
+// (released or reaped already) is the goal state. Any other failure is logged
+// and left to the row-keyed teardown (the row carries the lease id) and to the
+// pool's own expiry reaper; it never fails the dispatch.
+func (r *ccpoolRun) releaseLease(ctx context.Context, name string) {
+	if r.leaseReleased.Load() {
+		return
+	}
+	if err := r.deps.PoolClient(r.leaseRoot).Release(ctx, r.lease); err != nil && !errors.Is(err, checkoutpool.ErrNoLease) {
+		slog.Warn("dispatch: checkout lease release failed (left for the row teardown and the pool reaper)",
+			"session", name, "lease", r.lease, "err", err)
+		return
+	}
+	slog.Info("dispatch: checkout lease released", "session", name, "lease", r.lease)
+	r.leaseReleased.Store(true)
+}
+
+// watchdogResetDir is the directory the budget hard stop may `reset --hard` and
+// `clean`: the per-bead worktree, but never a pooled checkout. A pooled
+// checkout's uncommitted tracked work is captured to a rescue ref by the lease
+// release; a reset first would destroy it. "" disables the reset (safeToReset
+// refuses an empty directory).
+func (r *ccpoolRun) watchdogResetDir(worktreeDir string) string {
+	if r.lease != "" {
+		return ""
+	}
+	return worktreeDir
 }

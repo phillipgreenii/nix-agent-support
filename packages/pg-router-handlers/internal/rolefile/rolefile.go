@@ -236,6 +236,15 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 			return roles.Role{}, fmt.Errorf("role config %s: isolation.fallback must be an absolute path, got %q", path, iso.Fallback)
 		}
 	}
+	// isolation.ref and isolation.poolRoot belong to the checkout-pool type alone;
+	// poolRoot names a directory the handler's working directory does not define.
+	if iso := rf.CCPool.Isolation; iso.Type != executor.CheckoutPoolIsolation {
+		if iso.Ref != "" || iso.PoolRoot != "" {
+			return roles.Role{}, fmt.Errorf("role config %s: isolation.ref and isolation.poolRoot require type %q, not %q", path, executor.CheckoutPoolIsolation, iso.Type)
+		}
+	} else if iso.PoolRoot != "" && !filepath.IsAbs(iso.PoolRoot) {
+		return roles.Role{}, fmt.Errorf("role config %s: isolation.poolRoot must be an absolute path, got %q", path, iso.PoolRoot)
+	}
 	r.CCPool = &roles.CCPoolConfig{
 		Actor: rf.CCPool.Actor, SkillMD: rf.CCPool.SkillMD,
 		Completion: rf.CCPool.Completion, OnFailure: rf.CCPool.OnFailure, OnDispatchFail: rf.CCPool.OnDispatchFail,

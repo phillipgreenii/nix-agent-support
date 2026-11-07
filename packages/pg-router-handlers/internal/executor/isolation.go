@@ -3,11 +3,13 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/checkoutpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/parknote"
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
@@ -45,6 +47,8 @@ func newIsolation(cfg roles.IsolationConfig, deps Deps) Isolation {
 		return workforestIsolation{cmd: deps.Cmd}
 	case BeadWorktreeIsolation:
 		return beadWorktreeIsolation{cfg: cfg, repoRoot: deps.Cfg.RepoRoot, git: parknote.OSGit{}}
+	case CheckoutPoolIsolation:
+		return &poolIsolation{client: deps.PoolClient(cfg.PoolRoot), repo: deps.Cfg.RepoRoot, ref: cfg.Ref, owner: deps.ExternalID}
 	default:
 		return errIsolation{err: fmt.Errorf("unknown isolation type %q", cfg.Type)}
 	}
@@ -189,6 +193,67 @@ func (b beadWorktreeIsolation) Ensure(ctx context.Context, itemID string) (strin
 			itemID, itemID, loc.Describe())
 	}
 }
+
+// CheckoutPoolIsolation is the IsolationConfig.Type that leases a pooled,
+// already-warm checkout from pg-checkout-pool instead of creating a worktree.
+// It is opt-in per role ([role.ccpool.isolation] type = "checkout-pool", with
+// optional ref and poolRoot) and is never the default; a role that does not
+// name it is unaffected. Dispatched agent sessions only: an interactive session
+// never goes through this handler and never leases.
+const CheckoutPoolIsolation = "checkout-pool"
+
+// DefaultPoolRef is the ref a "checkout-pool" lease checks out when the role
+// sets none.
+const DefaultPoolRef = "origin/main"
+
+// CheckoutLeaseEnv is the environment variable that carries the lease id to the
+// dispatched session, so anything keyed by working directory (a pooled path is
+// stable across beads) can also be keyed, or attributed, by lease (POOL-17).
+const CheckoutLeaseEnv = "PG_CHECKOUT_LEASE_ID"
+
+// UsesCheckoutPoolIsolation reports whether cfg selects "checkout-pool".
+func UsesCheckoutPoolIsolation(cfg roles.IsolationConfig) bool {
+	return cfg.Type == CheckoutPoolIsolation
+}
+
+// poolIsolation leases a checkout keyed on the dispatched session's external id
+// (owner); the item id is only the pool's affinity hint (prefer the slot last
+// used for that item), never the key. It is a pointer type: the executor reads
+// the lease back after Ensure (leaseID) to export it and to release it.
+type poolIsolation struct {
+	client checkoutpool.Client
+	repo   string
+	ref    string
+	owner  string
+	lease  checkoutpool.Lease
+}
+
+func (p *poolIsolation) Ensure(ctx context.Context, itemID string) (string, error) {
+	ref := p.ref
+	if ref == "" {
+		ref = DefaultPoolRef
+	}
+	l, err := p.client.Lease(ctx, checkoutpool.LeaseRequest{Repo: p.repo, Ref: ref, Owner: p.owner, Bead: itemID})
+	switch {
+	case err == nil:
+	case errors.Is(err, checkoutpool.ErrExhausted):
+		// Not a defect of this item: the same busy decline as a full ccpool pool,
+		// mutating no bead.
+		return "", fmt.Errorf("checkout pool lease for %s: %w: %v", p.owner, ErrPoolAtCapacity, err)
+	case errors.Is(err, checkoutpool.ErrLowDisk):
+		return "", fmt.Errorf("checkout pool lease for %s: %w: %v", p.owner, ErrLowDisk, err)
+	default:
+		return "", fmt.Errorf("checkout pool lease for %s: %w", p.owner, err)
+	}
+	p.lease = l
+	return l.Path, nil
+}
+
+// leaseID is the id of the lease Ensure took ("" before a successful Ensure).
+func (p *poolIsolation) leaseID() string { return p.lease.ID }
+
+// leaseHolder is implemented by an Isolation that holds a pooled lease.
+type leaseHolder interface{ leaseID() string }
 
 // errIsolation always fails Ensure — see newIsolation's default case.
 type errIsolation struct{ err error }

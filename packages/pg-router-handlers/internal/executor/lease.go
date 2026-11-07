@@ -57,6 +57,7 @@ func (l *leaseRefresher) refresh(ctx context.Context) {
 	defer cancel()
 	until := l.r.deps.clock().Add(l.r.deps.Cfg.LeaseTTL)
 	err := l.r.deps.CC.SetMeta(wctx, l.name, ccpool.MetaKeyLeaseUntil, ccpool.FormatMetaTime(until))
+	l.r.renewCheckoutLease(wctx, l.name)
 	if err == nil {
 		if l.failures > 0 {
 			slog.Info("lease refresh recovered", "session", l.name, "after_failures", l.failures)
@@ -187,5 +188,18 @@ func (r *ccpoolRun) lockSession(ctx context.Context, externalID string) (*sessio
 			return nil, ctx.Err()
 		case <-time.After(absorbLockStep):
 		}
+	}
+}
+
+// renewCheckoutLease extends the pooled checkout's lease while the dispatch is
+// alive, on the same cadence as the supervision lease, so a long session does
+// not lose its checkout to the pool's expiry reaper. Best effort: a failure is
+// logged and retried on the next tick.
+func (r *ccpoolRun) renewCheckoutLease(ctx context.Context, name string) {
+	if r.lease == "" || r.leaseReleased.Load() {
+		return
+	}
+	if err := r.deps.PoolClient(r.leaseRoot).Renew(ctx, r.lease); err != nil && ctx.Err() == nil {
+		slog.Warn("checkout lease renew failed", "session", name, "lease", r.lease, "err", err)
 	}
 }

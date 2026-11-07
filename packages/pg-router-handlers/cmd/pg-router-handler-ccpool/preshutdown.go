@@ -378,7 +378,10 @@ func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, r
 	// teardown runs for sessions of every role. closeSinglePhase repeats the
 	// check so no caller can reach the force-remove around it.
 	keepWorktree = keepWorktree || s.KeepsWorktree()
-	if keepWorktree || !twoPhaseEligible(s, repoRoot, worktreeDir) {
+	// A pooled checkout is always torn down in two phases, whatever its path: the
+	// lease release stands where the worktree removal stands, and the row is
+	// purged only once the pool has the checkout back (finishPurge).
+	if keepWorktree || !(twoPhaseEligible(s, repoRoot, worktreeDir) || s.CheckoutLease() != "") {
 		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
 	}
 	// The marker goes on BEFORE the non-purge close: a handler-closed idle row
@@ -406,6 +409,13 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
 		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false
+	}
+	if s.CheckoutLease() != "" {
+		// Reached only when the two-phase marker could not be written: the row is
+		// already purged, so the lease is released best effort; the pool's expiry
+		// reaper covers a failed release.
+		releaseSessionLease(ctx, teardownPoolClient(s.Meta[ccpool.MetaKeyCheckoutRoot]), s)
+		return true
 	}
 	if s.KeepsWorktree() {
 		slog.Info("teardown: worktree kept -- the session's isolation does not own it (bead-worktree)",

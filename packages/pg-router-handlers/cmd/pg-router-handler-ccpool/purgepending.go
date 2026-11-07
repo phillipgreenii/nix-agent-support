@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/checkoutpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 )
@@ -90,6 +91,19 @@ func pathStrictlyUnder(path, dir string) bool {
 // and only then purge the row. It returns true iff the row was purged; on any
 // failure the row is left, still carrying purge_pending, for the next retry.
 func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
+	if s.CheckoutLease() != "" {
+		// A pooled checkout is released to the pool, never removed as a worktree;
+		// the row is purged only once the pool has the checkout back.
+		if !releaseSessionLease(ctx, teardownPoolClient(s.Meta[ccpool.MetaKeyCheckoutRoot]), s) {
+			return false
+		}
+		if err := cc.Close(ctx, s.ExternalID, true); err != nil {
+			slog.Warn("teardown: purge failed; the row keeps purge_pending for the next reconcile",
+				"session", s.ExternalID, "cwd", s.CWD, "err", err)
+			return false
+		}
+		return true
+	}
 	// A bead-worktree session's directory is never ours to remove, even if a
 	// stray purge_pending marker reached its row (bead pg2-b49ydt).
 	if s.KeepsWorktree() {
@@ -261,6 +275,27 @@ func retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Open
 	slog.Info("reconcile: purge_pending teardown completed",
 		"session", s.ExternalID, "cwd", s.CWD, "attempt", attempt, "elapsed", time.Since(start))
 	return true, true
+}
+
+// teardownPoolClient builds the pg-checkout-pool client the teardown paths
+// release leases through, for the pool state directory root recorded on the
+// session row (""  = the command's default). The teardown entry points have no
+// Deps in hand, so this is a process-wide seam; tests substitute a fake.
+var teardownPoolClient = func(root string) checkoutpool.Client { return checkoutpool.CLI{Root: root} }
+
+// releaseSessionLease gives the pooled checkout s holds back to the pool and
+// reports whether it is released: a lease the pool no longer knows (released or
+// reaped already) counts as released; any other failure does not, so the
+// caller keeps the row for a retry.
+func releaseSessionLease(ctx context.Context, client checkoutpool.Client, s ccpool.Session) bool {
+	err := client.Release(ctx, s.CheckoutLease())
+	if err != nil && !errors.Is(err, checkoutpool.ErrNoLease) {
+		slog.Warn("teardown: checkout lease release failed; the row keeps its lease for the next reconcile",
+			"session", s.ExternalID, "lease", s.CheckoutLease(), "err", err)
+		return false
+	}
+	slog.Info("teardown: checkout lease released", "session", s.ExternalID, "lease", s.CheckoutLease())
+	return true
 }
 
 // teardownProbe is the live-process probe the closed-bead teardown uses; nil

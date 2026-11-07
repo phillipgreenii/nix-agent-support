@@ -346,7 +346,7 @@ func stopActiveOrphan(ctx context.Context, role roles.Role, deps executor.Deps, 
 		Role: role.Name, Pool: cc.PoolDir,
 		BudgetStopEscalateAfter: cc.BudgetStopEscalateAfter,
 		RepoRoot:                deps.Cfg.RepoRoot,
-		WorktreeDir:             s.CWD, // the orphan's own worktree, which safeToReset requires
+		WorktreeDir:             orphanResetDir(s), // the orphan's own worktree, which safeToReset requires
 	}
 	slog.Info("orphan reconcile: over-budget orphan; running the hard stop", "session", s.ExternalID, "bead", beadID,
 		"role", role.Name, "state", string(s.State), "elapsed", elapsed, "budget", limit)
@@ -405,6 +405,13 @@ func closeNeverPromptedOrphan(ctx context.Context, role roles.Role, deps executo
 // read AFTER the orphan was closed.
 func removeOrphanWorktree(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, s ccpool.Session, sessions []ccpool.Session) {
 	cc := role.CCPool
+	if s.CheckoutLease() != "" {
+		// A pooled checkout is given back to the pool, not removed. The orphan row
+		// is already closed; a failed release leaves the lease to the pool's expiry
+		// reaper.
+		releaseSessionLease(ctx, deps.PoolClient(s.Meta[ccpool.MetaKeyCheckoutRoot]), s)
+		return
+	}
 	if s.CWD == "" || s.CWD == deps.Cfg.RepoRoot || !executor.UsesWorktreeIsolation(cc.Isolation) {
 		return
 	}
@@ -434,4 +441,14 @@ func removeOrphanWorktree(ctx context.Context, role roles.Role, deps executor.De
 	}
 	slog.Info("orphan reconcile: worktree removed", "session", s.ExternalID, "worktree", s.CWD)
 	deleteAnchorBranch(ctx, env.open, deps.Cfg.RepoRoot, s.ExternalID, s.Meta[ccpool.MetaKeyBead])
+}
+
+// orphanResetDir is the directory the orphan's hard stop may reset: its own
+// worktree, but never a pooled checkout, whose uncommitted tracked work the
+// lease release captures to a rescue ref first ("" disables the reset).
+func orphanResetDir(s ccpool.Session) string {
+	if s.CheckoutLease() != "" {
+		return ""
+	}
+	return s.CWD
 }

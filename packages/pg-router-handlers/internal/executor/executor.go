@@ -16,6 +16,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/checkoutpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
@@ -122,7 +123,11 @@ type Deps struct {
 	// FreeBytes reports the bytes available to unprivileged writers at a path
 	// (nil => statfs). The free-space floor before a worktree is created reads
 	// it (INV-CCH-8); tests substitute a fake.
-	FreeBytes   func(path string) (uint64, error)
+	FreeBytes func(path string) (uint64, error)
+	// Pool is the pg-checkout-pool client the "checkout-pool" isolation leases
+	// from (nil => the pg-checkout-pool command, see PoolClient). Tests
+	// substitute a fake so they never run the command.
+	Pool        checkoutpool.Client
 	PoolListing []ccpool.Session
 	PoolListed  bool
 }
@@ -150,6 +155,16 @@ func (d Deps) gitOpener() worktree.Opener {
 		return d.GitOpener
 	}
 	return worktree.GitOpener
+}
+
+// PoolClient returns the checkout-pool client for the pool state directory
+// root ("" = the command's default): the injected Pool when set, else the
+// pg-checkout-pool command.
+func (d Deps) PoolClient(root string) checkoutpool.Client {
+	if d.Pool != nil {
+		return d.Pool
+	}
+	return checkoutpool.CLI{Root: root}
 }
 
 func (d Deps) clock() time.Time {

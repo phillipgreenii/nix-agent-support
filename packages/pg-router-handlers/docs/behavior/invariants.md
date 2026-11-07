@@ -1440,6 +1440,34 @@ changes a core gate or `INV-LIFE-2`.
       found worktree. The role's prompt MUST forbid edits; nothing in the handler prevents them.
     - **Scope.** The type is for roles that look; it is not a persistent role worktree (see "No
       persistent role worktree" above) and it takes no pre-fetch (`INV-CCH-21`).
+  - **A pooled checkout: `checkout-pool` isolation.** A role MAY run with the `checkout-pool`
+    isolation (`[role.ccpool.isolation] type = "checkout-pool"`, with optional `ref`, default
+    `origin/main`, and `poolRoot`), which leases an already-warm checkout of the handler's repository
+    root from the `pg-checkout-pool` command instead of creating a worktree. It is opt-in per role and
+    never the default; only dispatched agent sessions go through it, an interactive session never leases.
+    - **Keyed on the session.** The lease owner is the dispatched session's external id; the bead id is
+      passed only as the pool's affinity hint (prefer the slot last used for that bead), never as the
+      key. The session's working directory and `WORKSPACE_ROOT` are the leased path.
+    - **The lease id is exported.** The session's environment carries `PG_CHECKOUT_LEASE_ID`, and the
+      session row carries the lease id (`pgrouter.checkout_lease`, and `pgrouter.checkout_root` when a
+      pool root is configured), so a pooled path, which is stable across beads, can still be attributed
+      to one dispatch.
+    - **A full pool is a busy decline.** A pool with no free slot (the command's exit code 3) declines
+      the dispatch exactly as a full ccpool pool does (`ErrPoolAtCapacity`), mutating no bead and
+      launching no session; a low-disk refusal (exit code 4) is the low-disk decline. The lease call
+      waits for no slot.
+    - **Renewed while the dispatch runs**, on the supervision lease's cadence.
+    - **Released, never removed.** Wherever a worktree would be removed the lease is released to the
+      pool instead (the pool resets the checkout and captures uncommitted tracked work to a rescue
+      ref): the dispatch-end cleanup under the same needs_input, quiet-window and live-process guards,
+      the abandoned-launch reclaim, the orphan reconcile, and every row-keyed teardown. The row-keyed
+      teardown is two-phase (`INV-CCH-20`): `purge_pending` marker, non-purge close, release, purge;
+      a failed release keeps the marked row for the next reconcile, while a lease the pool no longer
+      knows (exit code 8) counts as released. The budget hard stop never resets a pooled checkout.
+    - **Not reached by the worktree sweep** (`INV-CCH-19`), which is scoped to the `worktree`
+      isolation; the pool's own expiry reaper covers a release that never ran.
+    - **Scope.** No pre-fetch (`INV-CCH-21`). A redispatch whose session id still holds a lease (exit
+      code 11) fails the dispatch until that lease is released or reaped.
   - **The origin gate is unchanged.** A `path` role is gated by the origin watched at its OWN path
     (`INV-CCH-10`), not by the handler-wide repository root: a role moved to a directory that is not a
     watched repository is no longer declined while that repository's origin is down, and a `path`
