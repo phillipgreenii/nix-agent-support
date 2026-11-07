@@ -346,3 +346,29 @@ func TestRows_TrackerSeenIsFalseForACallOnlyCetaReported(t *testing.T) {
 		t.Error("c1 carries only ceta events")
 	}
 }
+
+// A refusal wins over result error: a call CETA refused through a hook error
+// (or that the mode refused) ends with result error but never ran, so it is
+// rejected or denied, not failed. A call that ran and errored (settlement
+// approved) stays failed.
+func TestOutcomeOf_RefusalWinsOverResultError(t *testing.T) {
+	cases := []struct {
+		name string
+		row  Row
+		want string
+	}{
+		{"ceta refused, hook error", Row{Result: "error", Settlement: "refused", SettledBy: "ceta"}, asklog.OutcomeRejected},
+		{"mode refused, error text", Row{Result: "error", Settlement: "refused", SettledBy: "mode"}, asklog.OutcomeDenied},
+		{"refused without result", Row{Settlement: "refused", SettledBy: "person"}, asklog.OutcomeDenied},
+		{"ran and errored", Row{Result: "error", Settlement: "approved", SettledBy: "ceta"}, asklog.OutcomeFailed},
+		{"errored, still pending", Row{Result: "error", Settlement: "pending"}, asklog.OutcomeFailed},
+		{"approved", Row{Result: "ok", Settlement: "approved"}, asklog.OutcomeApproved},
+		{"pending", Row{Settlement: "pending"}, asklog.OutcomePending},
+		{"unresolved", Row{Settlement: "unresolved"}, asklog.OutcomeUnresolved},
+	}
+	for _, c := range cases {
+		if got := outcomeOf(c.row); got != c.want {
+			t.Errorf("%s: outcomeOf = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

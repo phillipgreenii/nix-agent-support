@@ -64,8 +64,11 @@
 //	tool_calls.failed_timing      -> Row.FailedTiming
 //
 // DecisionRow.Outcome is derived from the stored settlement, in the ask log's
-// vocabulary: result error -> failed; settlement refused -> rejected when CETA
-// settled it, else denied; approved -> approved; pending -> pending; anything
+// vocabulary: settlement refused -> rejected when CETA settled it, else denied
+// (a refusal wins over result error: a call refused by a hook error or by the
+// mode ends with result error, but it never ran, so it is not "failed", which
+// means the hook let the call through and the tool then errored); otherwise
+// result error -> failed; approved -> approved; pending -> pending; anything
 // else (unresolved) -> unresolved. DecisionRow.PromptID is "person" when
 // settled_by is person (so asklog.ApprovalSource sees a prompt) and nil
 // otherwise. DecisionRow.CorrectDec and Excluded come from the label join
@@ -361,13 +364,13 @@ func hookDecisionWord(v string) string {
 
 func outcomeOf(r Row) string {
 	switch {
-	case r.Result == "error":
-		return asklog.OutcomeFailed
 	case r.Settlement == "refused":
 		if r.SettledBy == "ceta" {
 			return asklog.OutcomeRejected
 		}
 		return asklog.OutcomeDenied
+	case r.Result == "error":
+		return asklog.OutcomeFailed
 	case r.Settlement == "approved":
 		return asklog.OutcomeApproved
 	case r.Settlement == "pending":

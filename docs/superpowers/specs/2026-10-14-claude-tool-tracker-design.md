@@ -432,8 +432,57 @@ because calls still in flight in a live session (five calls of one session, CETA
   disagree. Of the `unresolved` calls, the sample shows `dontAsk` mode refusals ("Permission to use
   Bash has been denied because Claude Code is running ...", `settled_by` `mode`) and summary calls
   ("No tools needed for summary"): CETA never sees a post-tool event for them, the tracker does.
-  Open question: whether the tracker should report CETA hook-error refusals as `rejected` (section 6) and whether the 22 `unresolved`, `approved` and the 4 `approved`, `pending` calls are timing
-  only.
+  Both open questions were examined on 2026-11-07 (follow-up), from copies of both databases.
+
+  Decision, hook-error refusals (Decided, mapping only; the tracker's recording is unchanged): the
+  tracker already records them correctly. For the 668 `rejected` calls, the tracker's stored
+  `settled_by` is `ceta` and `settlement` is `refused` (the section 6 row "`allow` or `deny`, CETA
+  decided"), with `result` `error` and the hook-error text as `error_text`; for CETA the hook
+  decision of all 668 is `deny`. Only the adapter's outcome mapping was wrong: it checked result
+  `error` before settlement and so turned a refusal into `failed`. `failed` means the hook let the
+  call through and the tool then errored (`evaluate` grades `failed` like `approved`), so the old
+  mapping would have graded 668 refusals as calls CETA allowed. The mapping now checks a refusal
+  first (settlement `refused` -> `rejected` when `settled_by` is `ceta`, else `denied`), then result
+  `error` -> `failed`. A call that ran and errored stays `approved` for settlement and `failed` for
+  outcome, as section 6 says. The change is in the shared adapter, so `--source tracker` in
+  `evaluate`, `report` and `show` sees the same corrected outcome as `compare-tracker`. The 17
+  `denied` calls (auto-mode classifier refusals) are NOT fixed by this: the tracker stores them as
+  `settlement` `approved` (the ingest defect already recorded in live check 2), so they still map to
+  `failed` until that ingest bug is fixed, after which they map to `denied` and match.
+  The `dontAsk` mode refusals also have `settlement` `refused` and result `error`; they now map to
+  `denied` instead of `failed`, still against CETA's `unresolved` or `pending` (CETA never receives a
+  post event for them).
+
+  The small groups (counts from a later snapshot of both databases, so a few differ by one from the
+  list above: 58 `pending`/`failed`, 23 `unresolved`/`approved`, 6 `pending`/`unresolved`, 5
+  `approved`/`pending`, 3 `pending`/`approved`, 2 `approved`/`unresolved`). Only one group is a
+  timing artifact; the rest persist and have causes.
+  - `approved`/`pending`, 5: timing. The tracker snapshot ends at 07:23:27Z; CETA wrote each of
+    these five rows' resolution between 07:23:30Z and 07:25:25Z, after it, for calls started
+    between 07:19:48Z and 07:23:27Z (calls in flight at ingest; one is the session running the
+    comparison). They agree after a re-ingest.
+  - `unresolved`/`approved`, 23: not timing. Each call ran and the tracker has a `call_end`
+    `ok`; CETA's row was flipped to `unresolved` by the `SessionEnd` sweep (`resolved_at` within 2 s
+    of the tracker's `session_end` for 21 of 23; the other 2 have no `session_end` after the call),
+    which means CETA's post-tool write for the call never landed. The gap from `call_end` to the
+    sweep is 0 to 13633 s (three sweeps precede the tracker's `call_end` by 54 to 289 s). Same cause as the lost CETA rows above (ask log contention and hook timeouts),
+    a CETA recording loss. Not an exclusion candidate.
+  - `pending`/`failed`, 58: not timing. Calls whose error is a `dontAsk` refusal (34), "No tools needed
+    for summary" (21) or a hook error / a kill (3); CETA gets no post event for them, and CETA's
+    row stays `pending` because its `SessionEnd` sweep never ran for the session (no `unresolved`
+    row in any of those sessions; 34 have no tracker `session_end` either). The same calls in a swept
+    session are the `unresolved`/`failed` group (984). So this is the 984 group in sessions CETA
+    never swept.
+  - `pending`/`unresolved`, 6: not timing. The tracker settles a call whose session went quiet as
+    `unresolved` (section 6's quiet period; 5 of the 6 sessions have no `session_end`); CETA has no
+    quiet period and no sweep ran, so it stays `pending`. A design asymmetry, not a defect.
+  - `pending`/`approved`, 3: not timing. The call ran (tracker `call_end` `ok`) and CETA never saw the
+    post event; two of the sessions later ended (6 and 5 minutes after the call) yet CETA never swept them; the
+    third (`d503eec4`) is still running, in the ask log failure window noted above. CETA recording loss.
+  - `approved`/`unresolved`, 2: not timing, not explained further. CETA recorded `approved` at the
+    moment of the tracker's `session_end` (08:28:39Z and 17:11:46Z), and the tracker has no
+    `call_end` for the call, so the tracker lost the `call_end` at session close (or CETA's
+    PostToolUse ran after the mod stopped); a captured hook trace would be needed.
 
 Result for the operator: the two recorders agree on 80195 matched calls for every carried field
 except the groups above; the counts do not show a defect that blocks the cut-over by themselves,

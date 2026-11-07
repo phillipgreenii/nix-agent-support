@@ -28,10 +28,12 @@
 // counted in UnkeyedCeta.
 //
 // Outcome mapping. Both sides speak CETA's outcome vocabulary: the adapter
-// derives the tracker's from its stored settlement (result error -> failed;
-// refused settled by ceta -> rejected, refused otherwise -> denied; approved ->
-// approved; pending -> pending; anything else -> unresolved) and the outcomes
-// are compared for equality.
+// derives the tracker's from its stored settlement (refused settled by ceta ->
+// rejected, refused otherwise -> denied; else result error -> failed; approved
+// -> approved; pending -> pending; anything else -> unresolved) and the
+// outcomes are compared for equality. A refusal is checked before result
+// error: a call refused by a hook error or by the mode ends with result error
+// but never ran, and "failed" means the call was let through and then errored.
 //
 // Verdict. CETA's hook_decision (allow, deny, ask, abstain) against the
 // tracker's DELIVERED verdict (ceta.verdict "delivered": approve, reject, ask,
