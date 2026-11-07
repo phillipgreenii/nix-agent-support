@@ -818,7 +818,7 @@ The state directory defaults to `$XDG_DATA_HOME/pg-claude-code-recorder` and hol
   Conversation wakes up and goes quiet again.
 
 **Observations versus derived data.** File ids, generations, path history, deletion records,
-snapshot seen-times, the time the recorder saw each byte, Process and Conversation facts, and last-seen alive are observations (the feed sequence is not: it restarts in a new epoch after a rebuild): they cannot be re-derived from copies. They live in
+snapshot seen-times, Process and Conversation facts, and last-seen alive are observations (the feed sequence is not: it restarts in a new epoch after a rebuild): they cannot be re-derived from copies. They live in
 the database and in the journal, which is how a lost database is rebuilt. Records and search indexes
 are derived, so deleting them and re-parsing every copy reproduces the same records and values
 (row ids and sequences may differ). A rebuild bumps the feed epoch, so clients resync (see
@@ -2063,7 +2063,7 @@ The 2026-10-30 six-dimension review found these; each is a requirement on the ph
   that the copier's appends are weaker than the settle and removal path, which uses `F_FULLFSYNC`. A full-hash
   mismatch at settle or removal starts a new generation from byte 0 (a reset entry follows) and keeps the old one;
   `doctor` does the same. The journal is written first with a sequence number, the database records the last
-  sequence applied, and replay is idempotent; seen-times are stored per copy commit. Re-cloning at settle
+  sequence applied, and replay is idempotent; per-chunk commit times are not kept (see Amendment 2026-11-06). Re-cloning at settle
   re-hashes the clone before it replaces the preserved copy. A snapshot is atomic per file, and the feed after
   it carries the remaining resets; reset entries are not pruned by the retention floor until clients behind them advance.
 - **Phase 4 (facts).** A Conversation's end is the moment the registry stops naming it; the label of the
@@ -2147,6 +2147,10 @@ The 2026-10-30 six-dimension review found these; each is a requirement on the ph
   file byte-exact, can be read back by byte range, and can grow by segments. Tuning comes later.
 - Metric and log names, and the Linux supervision choice (unsupervised unless a unit is added).
 - Test fixtures (generic `example-*` names only, per the identifier guard).
+
+## Amendment 2026-11-06: no per-chunk commit times
+
+Phillip ruled on 2026-11-05: "this table seems like too much. i think we drop it and try to figure out other way to get similar information for the existing usecases." The index no longer has a `commits` table (one row per copy commit). The journal still holds every commit record, so nothing is lost. The recorder keeps no per-chunk commit times: a record's time comes only from its own timestamp field (the one exception is a tombstone, which keeps the recorder's observation time of the deletion). What the table served now comes from `generations.copy_offset`, `tail_hash` and `tail_len` (the resume cursor), `files.last_copy_ns` (the time of the newest copy commit, for the settler's last-seen decision) and the parser's in-memory unparsed-since value (parse lag). The observations list above no longer includes "the time the recorder saw each byte". An existing database that still holds the table is left alone and ignored.
 
 ## Open questions
 

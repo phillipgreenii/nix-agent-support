@@ -34,6 +34,13 @@ package store
 // version bump: Open adds the column in place and backfills it once from the
 // commits table (addLastCopyColumn). Replaying the journal reproduces the same
 // value, so a migrated and a rebuilt database agree.
+//
+// The commits table (one row per copy commit) was removed from version 4
+// without a version bump: nothing reads it, the journal keeps every commit
+// record, and the copy offset, tail hash and last_copy_ns carry what the apply
+// step needs. New databases do not create it; an existing database keeps it
+// untouched (Open never drops it, Dump and CountObservations ignore it) until
+// the operator runs DROP TABLE commits once. No rebuild or bump is needed.
 const SchemaVersion = 4
 
 const schemaSQL = `
@@ -74,15 +81,6 @@ CREATE TABLE IF NOT EXISTS generations(
   tail_hash INTEGER NOT NULL DEFAULT 0,
   tail_len INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(file_id, gen)
-);
-CREATE TABLE IF NOT EXISTS commits(
-  file_id INTEGER NOT NULL,
-  gen INTEGER NOT NULL,
-  seq INTEGER NOT NULL,
-  from_off INTEGER NOT NULL,
-  to_off INTEGER NOT NULL,
-  seen_ns INTEGER NOT NULL,
-  PRIMARY KEY(file_id, gen, seq)
 );
 CREATE TABLE IF NOT EXISTS snapshots(
   file_id INTEGER NOT NULL,

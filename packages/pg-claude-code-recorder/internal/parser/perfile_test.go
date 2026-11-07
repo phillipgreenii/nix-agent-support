@@ -11,7 +11,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
 )
 
-// ParseAll resolves a file's path and reads its copy commits once per file, not
+// ParseAll resolves a file's path once per file, not
 // once per generation, and does not fetch the file again after AllFiles.
 func TestParseAllQueriesOncePerFile(t *testing.T) {
 	const files = 6
@@ -29,8 +29,8 @@ func TestParseAllQueriesOncePerFile(t *testing.T) {
 	if n := c.Matching("FROM paths WHERE file_id=? AND closed_ns IS NULL"); n != files {
 		t.Fatalf("CurrentPaths ran %d times for %d files with 2 generations each", n, files)
 	}
-	if n := c.Matching("FROM commits WHERE file_id"); n > files {
-		t.Fatalf("CopyCommits ran %d times for %d files", n, files)
+	if n := c.Matching("FROM commits"); n != 0 {
+		t.Fatalf("the parser ran %d statements against the removed commits table", n)
 	}
 	// OpenPointer's own mode look-up reads only `mode`; the File query reads
 	// the whole row (id, source, mode, ...).

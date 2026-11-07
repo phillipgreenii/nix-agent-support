@@ -369,32 +369,6 @@ func (s *Reader) Tombstones(file int64) ([]int64, error) {
 	return out, rows.Err()
 }
 
-// Commit describes one copy commit (the time the recorder saw those bytes).
-type CopyCommit struct {
-	Gen      int
-	Seq      int64
-	From, To int64
-	SeenNS   int64
-}
-
-// CopyCommits returns the per-commit seen-times of a file.
-func (s *Reader) CopyCommits(file int64) ([]CopyCommit, error) {
-	rows, err := s.q.Query(`SELECT gen,seq,from_off,to_off,seen_ns FROM commits WHERE file_id=? ORDER BY seq`, file)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []CopyCommit
-	for rows.Next() {
-		var c CopyCommit
-		if err := rows.Scan(&c.Gen, &c.Seq, &c.From, &c.To, &c.SeenNS); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
 // LastSeenByFile returns, in one aggregate statement, the newest time the
 // recorder saw each of the given files change: the latest of its last copy
 // commit (files.last_copy_ns, derived from the journal), snapshot versions and
@@ -514,7 +488,7 @@ func (s *Store) StartGeneration(file int64, reason, method string, atNS int64) (
 // CountObservations returns row counts used by tests and status.
 func (s *Reader) CountObservations() (map[string]int, error) {
 	out := map[string]int{}
-	for _, t := range []string{"files", "paths", "generations", "commits", "snapshots", "tombstones", "resets"} {
+	for _, t := range []string{"files", "paths", "generations", "snapshots", "tombstones", "resets"} {
 		var n int
 		if err := s.q.QueryRow(`SELECT COUNT(*) FROM ` + t).Scan(&n); err != nil {
 			return nil, err
@@ -533,7 +507,6 @@ func (s *Reader) Dump() (string, error) {
 		{"files", `SELECT id||'|'||source||'|'||mode||'|'||dev||'|'||ino||'|'||birth_ns||'|'||first_hash||'|'||link_target||'|'||state||'|'||first_seen_ns||'|'||last_size||'|'||last_copy_ns||'|'||cur_gen||'|'||deleted_ns FROM files ORDER BY id`},
 		{"paths", `SELECT file_id||'|'||path||'|'||first_seen_ns||'|'||COALESCE(closed_ns,'') FROM paths ORDER BY file_id,path,first_seen_ns`},
 		{"generations", `SELECT file_id||'|'||gen||'|'||method||'|'||reason||'|'||start_ns||'|'||copy_offset||'|'||tail_hash||'|'||tail_len FROM generations ORDER BY file_id,gen`},
-		{"commits", `SELECT file_id||'|'||gen||'|'||seq||'|'||from_off||'|'||to_off||'|'||seen_ns FROM commits ORDER BY seq`},
 		{"snapshots", `SELECT file_id||'|'||version||'|'||hash||'|'||size||'|'||seen_ns FROM snapshots ORDER BY file_id,version`},
 		{"tombstones", `SELECT file_id||'|'||path||'|'||at_ns FROM tombstones ORDER BY file_id,at_ns`},
 		{"resets", `SELECT id||'|'||file_id||'|'||from_gen||'|'||to_gen||'|'||reason||'|'||at_ns||'|'||pinned FROM resets ORDER BY id`},
@@ -690,35 +663,4 @@ func (s *Reader) PathsByFiles(ids []int64) (map[int64][]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// UnparsedCommit is one copy commit that still holds bytes the parser has not
-// parsed (its end is past its generation's parse offset).
-type UnparsedCommit struct {
-	File     int64
-	Gen      int
-	From, To int64
-	SeenNS   int64
-}
-
-// UnparsedCommits returns, in one statement, every copy commit that ends past
-// its generation's parse offset, ordered by file, generation and commit
-// sequence. It seeds the parser's maintained lag state.
-func (s *Reader) UnparsedCommits() ([]UnparsedCommit, error) {
-	rows, err := s.q.Query(`SELECT c.file_id,c.gen,c.from_off,c.to_off,c.seen_ns FROM commits c
-JOIN generations g ON g.file_id=c.file_id AND g.gen=c.gen
-WHERE c.to_off>g.parse_offset ORDER BY c.file_id,c.gen,c.seq`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []UnparsedCommit
-	for rows.Next() {
-		var c UnparsedCommit
-		if err := rows.Scan(&c.File, &c.Gen, &c.From, &c.To, &c.SeenNS); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
 }

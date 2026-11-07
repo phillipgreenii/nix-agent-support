@@ -29,7 +29,7 @@ func gaugeVal(d *Daemon, name string) float64 {
 }
 
 // A refresh_gauges pass reads only maintained values: it issues no AllFiles,
-// AllGenerations or CopyCommits statement, and the four gauges equal what a
+// or AllGenerations statement, and the four gauges equal what a
 // whole-table rebuild computes on the same state.
 func TestRefreshGaugesIssuesNoWholeTableReads(t *testing.T) {
 	d, e, c := openCounting(t, "lag-gauges-counting")
@@ -38,7 +38,7 @@ func TestRefreshGaugesIssuesNoWholeTableReads(t *testing.T) {
 	d.startLagRebuild() // the one start-up rebuild, outside the measured call
 	c.Reset()
 	d.refreshGauges()
-	for _, q := range []string{"FROM files ORDER BY id", "FROM generations ORDER BY file_id, gen", "FROM commits WHERE file_id"} {
+	for _, q := range []string{"FROM files ORDER BY id", "FROM generations ORDER BY file_id, gen"} {
 		if n := c.Matching(q); n != 0 {
 			t.Fatalf("refreshGauges issued %d statements matching %q", n, q)
 		}

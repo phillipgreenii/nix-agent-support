@@ -925,16 +925,20 @@ func TestRecoverRemovesLeftoverTemporaryFiles(t *testing.T) {
 
 // ---- seen-times, metrics and the store primitive ----
 
-func TestSeenTimesStoredPerCopyCommit(t *testing.T) {
+func TestCopyCommitsAdvanceLastCopyTimeAndKeepNoCommitRows(t *testing.T) {
 	e := newEnv(t)
 	p := e.write(tx, "a\n")
 	r := e.ingest(p)
 	e.clk.Advance(time.Hour)
 	e.appendTo(tx, "b\n")
 	e.ingest(p)
-	cs, _ := e.st.CopyCommits(r.File)
-	if len(cs) != 2 || cs[0].SeenNS != t0.UnixNano() || cs[1].SeenNS != t0.Add(time.Hour).UnixNano() || cs[1].From != 2 || cs[1].To != 4 {
-		t.Fatalf("commits %+v", cs)
+	var last int64
+	if err := e.st.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, r.File).Scan(&last); err != nil || last != t0.Add(time.Hour).UnixNano() {
+		t.Fatalf("last_copy_ns %d, %v; want the second commit's time", last, err)
+	}
+	var n int
+	if err := e.st.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='commits'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a new database must not hold a commits table (%d, %v)", n, err)
 	}
 }
 

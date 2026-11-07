@@ -12,10 +12,9 @@ import (
 // statements for every file.
 func perFileLastSeen(st *store.Store, f store.File) time.Time {
 	ns := f.FirstSeen
-	if cc, err := st.CopyCommits(f.ID); err == nil {
-		for _, c := range cc {
-			ns = max(ns, c.SeenNS)
-		}
+	var lc int64
+	if err := st.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, f.ID).Scan(&lc); err == nil {
+		ns = max(ns, lc)
 	}
 	if sn, err := st.Snapshots(f.ID); err == nil {
 		for _, x := range sn {

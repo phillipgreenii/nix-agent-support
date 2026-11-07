@@ -937,18 +937,6 @@ func (p *Parser) bad(tx *pstx, f store.File, g store.Generation, off int64, ln i
 	return err
 }
 
-// seenAt returns the time the recorder saw the byte at off (the commit that
-// covered it), or 0.
-func seenAt(commits []store.CopyCommit, gen int, off int64) int64 {
-	for i := len(commits) - 1; i >= 0; i-- {
-		c := commits[i]
-		if c.Gen == gen && c.From <= off && off < c.To {
-			return c.SeenNS
-		}
-	}
-	return 0
-}
-
 // Metric names the parser adds to the shared registry.
 const (
 	// MLinesParsed counts every line handed to the parser, stored or bad, so

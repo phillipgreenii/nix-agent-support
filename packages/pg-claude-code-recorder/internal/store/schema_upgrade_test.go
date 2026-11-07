@@ -407,6 +407,11 @@ func TestOpenAddsLastCopyColumnAndBackfillsItFromCommits(t *testing.T) {
 	if _, err := s.wdb.Exec(`ALTER TABLE files DROP COLUMN last_copy_ns`); err != nil {
 		t.Fatal(err)
 	}
+	// An old database still holds the commits table the code no longer writes.
+	if _, err := s.wdb.Exec(`CREATE TABLE commits(file_id INTEGER NOT NULL, gen INTEGER NOT NULL, seq INTEGER NOT NULL, from_off INTEGER NOT NULL, to_off INTEGER NOT NULL, seen_ns INTEGER NOT NULL, PRIMARY KEY(file_id, gen, seq));
+INSERT INTO commits VALUES(?,1,1,0,5,40),(?,1,2,5,9,70)`, a, a); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -434,5 +439,102 @@ func TestOpenAddsLastCopyColumnAndBackfillsItFromCommits(t *testing.T) {
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func commitsTableCount(t *testing.T, s *Store) int {
+	t.Helper()
+	var n int
+	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commits'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A journal that holds commit records does not create the commits table, and
+// replaying it reproduces the index (the doctor's journal-versus-index check
+// compares the two dumps).
+func TestJournalCommitRecordsDoNotCreateTheCommitsTable(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := s.NewFileID()
+	if err := s.Commit(
+		&Rec{T: TFile, At: 10, File: id, Source: "claude-transcript", Mode: "append", Dev: 1, Ino: 2, Birth: 3},
+		&Rec{T: TGen, At: 11, File: id, Gen: 1, Method: "bytes", Reason: "first"},
+		&Rec{T: TCommit, At: 40, File: id, Gen: 1, From: 0, To: 5, Size: 5, Tail: 1, TailLen: 1},
+		&Rec{T: TCommit, At: 70, File: id, Gen: 1, From: 5, To: 9, Size: 9, Tail: 1, TailLen: 1},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if n := commitsTableCount(t, s); n != 0 {
+		t.Fatal("applying commit records created the commits table")
+	}
+	var off int64
+	if err := s.Read().QueryRow(`SELECT copy_offset FROM generations WHERE file_id=?`, id).Scan(&off); err != nil || off != 9 {
+		t.Fatalf("copy_offset %d, %v; want 9", off, err)
+	}
+	dump, err := s.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(dump, "commits") {
+		t.Fatalf("dump lists the commits table:\n%s", dump)
+	}
+	replay, err := ReplayDump(filepath.Join(dir, JournalName))
+	if err != nil || replay != dump {
+		t.Fatalf("replay differs: %v\n%s\n---\n%s", err, replay, dump)
+	}
+	_ = s.Close()
+}
+
+// A database that still holds the commits table (from before it was removed)
+// keeps working: Open does not drop it, new commits do not write to it, Dump
+// and the counts ignore it, so the journal comparison still passes.
+func TestExistingCommitsTableIsLeftAloneAndIgnored(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := s.NewFileID()
+	if err := s.Commit(
+		&Rec{T: TFile, At: 10, File: id, Source: "claude-transcript", Mode: "append", Dev: 1, Ino: 2, Birth: 3},
+		&Rec{T: TGen, At: 11, File: id, Gen: 1, Method: "bytes", Reason: "first"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.wdb.Exec(`CREATE TABLE commits(file_id INTEGER NOT NULL, gen INTEGER NOT NULL, seq INTEGER NOT NULL, from_off INTEGER NOT NULL, to_off INTEGER NOT NULL, seen_ns INTEGER NOT NULL, PRIMARY KEY(file_id, gen, seq));
+INSERT INTO commits VALUES(?,1,1,0,5,40)`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s = open(t, dir)
+	defer func() { _ = s.Close() }()
+	if commitsTableCount(t, s) != 1 {
+		t.Fatal("Open dropped the existing commits table")
+	}
+	if err := s.Commit(&Rec{T: TCommit, At: 70, File: id, Gen: 1, From: 0, To: 9, Size: 9, Tail: 1, TailLen: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM commits`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("commits rows %d, %v; want the one old row untouched", n, err)
+	}
+	var counts map[string]int
+	if err := s.ReadTx(func(rd *Reader) (e error) {
+		counts, e = rd.CountObservations()
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := counts["commits"]; ok {
+		t.Fatalf("CountObservations lists commits: %v", counts)
+	}
+	dump, err := s.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := ReplayDump(filepath.Join(dir, JournalName))
+	if err != nil || replay != dump {
+		t.Fatalf("replay differs: %v\n%s\n---\n%s", err, replay, dump)
 	}
 }

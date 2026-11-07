@@ -12,7 +12,7 @@
 // corrupts, but a power loss or OS crash may roll back the last commits (a
 // process crash loses nothing; the WAL survives). That is acceptable because
 // every table is re-derivable. The capture-side tables (files, paths,
-// generations, the commits list, the copy offset, last_seq, the epoch) are
+// generations, the copy offset, last_seq, the epoch) are
 // written from journal records that are fsynced BEFORE the database commit, and
 // Open replays every journal record past last_seq idempotently, so a rolled
 // back capture write is re-applied from the journal. The derived tables
@@ -725,7 +725,7 @@ func (s *Store) OnWrite(fn func()) {
 // OffsetsHook is called when a generation's copy offset or parse offset has
 // changed: after the commit that changed it, still under the write lock, with
 // the generation's committed offsets. at is the commit's seen time for a copy
-// change (the commits.seen_ns of the new span) and the store clock for a parse
+// change (the journal commit record's time) and the store clock for a parse
 // change. A hook MUST NOT block, MUST be idempotent (the same offsets may be
 // delivered twice) and MAY assume neither offset ever decreases.
 type OffsetsHook func(file int64, gen int, copyOffset, parseOffset int64, at time.Time)
@@ -1154,8 +1154,7 @@ func applyRec(tx *sql.Tx, r *Rec, notes *[]offNote) error {
 			_, err = tx.Exec(`INSERT OR IGNORE INTO resets(id,file_id,from_gen,to_gen,reason,at_ns,pinned) VALUES(?,?,?,?,?,?,1)`, r.Seq, r.File, r.Gen-1, r.Gen, r.Reason, r.At)
 		}
 	case TCommit:
-		_, err = tx.Exec(`INSERT OR IGNORE INTO commits(file_id,gen,seq,from_off,to_off,seen_ns) VALUES(?,?,?,?,?,?)`, r.File, r.Gen, r.Seq, r.From, r.To, r.At)
-		if err == nil {
+		{
 			var res sql.Result
 			res, err = tx.Exec(`UPDATE generations SET copy_offset=?, tail_hash=?, tail_len=? WHERE file_id=? AND gen=? AND copy_offset<=?`,
 				r.To, int64(r.Tail), r.TailLen, r.File, r.Gen, r.To)

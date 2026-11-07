@@ -831,7 +831,18 @@ last_copy_ns INTEGER NOT NULL DEFAULT 0` when the column is missing and, in the 
 database for a column one aggregate can fill; measured on the live 13 GB database (106,500 commits over 54,900 files,
 90,602 files rows) the aggregate takes 44 ms. The backfill value equals what a replay computes, so a migrated and a
 rebuilt database agree. A file with no commit keeps 0, and the backfill never runs again once the column exists, so
-dropping the `commits` table later leaves it untouched.
+dropping the `commits` table (see below) leaves it untouched.
+
+### The commits table is gone
+
+The index no longer stores one row per copy commit. The apply step for a journal commit record still advances
+`generations.copy_offset`, `tail_hash`, `tail_len`, `files.last_size` and `files.last_copy_ns`, and no longer inserts
+anything else. The journal keeps every commit record, so a rebuild loses nothing, and `Dump` (hence the doctor's
+journal-versus-index check) no longer lists the table. No schema version bump is needed: a new database never creates
+it, and `Open` never drops it. A database that still holds the table keeps it untouched and ignores it; the table
+only wastes space, and the operator drops it once with `DROP TABLE commits` (then a `VACUUM`, or just let the freed pages
+be reused). `addLastCopyColumn` still reads the table once when it adds `last_copy_ns` to a database that predates the
+column, and does nothing when the table is absent.
 
 ### Removal gauges are approximate
 
