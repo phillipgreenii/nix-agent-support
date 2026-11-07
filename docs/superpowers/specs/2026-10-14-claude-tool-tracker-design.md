@@ -411,6 +411,31 @@ plus headless `claude -p` sessions; check 5 is not part of this run):
    was not reached, because CETA decides first while it is installed, so the `mode` case stays
    unobserved (it needs a call CETA abstains on).
 
+Follow-up results for checks 2 and 4 (observed 2026-11-07, same laptop, same method):
+
+2. 2026-11-07, observed. The 2026-10-30 "not observed" result is superseded: by 2026-11-07 the
+   tracker had recorded 17 real auto-mode classifier denials (first on 2026-11-01) among 82991
+   calls. Shape: `tracker.check` has decision `ask` and no deciding hook, `ceta.verdict` is
+   `abstain`, then `tracker.denied` carries `reason` (for example `[Git Destructive]`,
+   `[Irreversible Local Destruction]`, `Classifier unavailable`, or "The server-side auto mode
+   classifier judged this action dangerous (it gave no explanation)"), `permission_mode` `auto`,
+   `tool_name` and `agent_type`; then `tracker.call_end` carries `outcome` `error` (not `refused`)
+   with an error text beginning "Permission for this action was denied by the Claude Code auto
+   mode classifier. Reason: ...". The view shows `denial_reason` set, `settled_by` `classifier`.
+   CONTRADICTION with section 6: all 17 have `settlement` `approved` and `failed_timing` 1, because
+   ingest treats outcome `error` as "ran"; the `classifier` row says a call that did not run is
+   `refused`. Section 6 is left as written; a bug is filed for ingest (the same defect shape as the
+   earlier `dontAsk` one). Example: session 08cf3751-f20c-4bd2-a441-80c5bde698a0, call
+   toolu_01EMM2SP5vbq3qHSRY7UGfug. Query: `select settled_by, settlement, failed_timing, count(*)
+from tool_calls where denial_reason is not null group by 1,2,3` gives `classifier|approved|1|17`.
+3. 2026-11-07, `bypassPermissions` observed. A headless `claude -p --permission-mode
+bypassPermissions` session (id 35100c2c-1270-403d-982a-e4ea25f96a2b) with its cwd in a scratch
+   directory read and wrote files in another directory (Read and Write, which CETA abstains on
+   outside the cwd; Bash and in-cwd Read were approved by CETA first in earlier attempts). Both
+   rows show `permission_mode` `bypassPermissions`, `verdict` `allow`, no `deciding_hook`,
+   `engine_verdict` and `delivered_verdict` `abstain`, `settled_by` `mode`, `settlement` `approved`,
+   `result` `ok`. This matches the `allow`, no deciding hook, `bypassPermissions` row of section 6.
+
 ## 11. Chunks
 
 Each chunk lands on its own; sizes are t-shirt sizes.
