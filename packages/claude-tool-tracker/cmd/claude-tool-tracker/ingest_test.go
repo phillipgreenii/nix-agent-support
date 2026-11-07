@@ -93,6 +93,45 @@ func (a *app) fullCall(session, tu, cwd string, ts int64) {
 	a.append(session, "ceta", "ceta.verdict", tu, n(1), tu+"-7", `{"verdict":"ask","delivered":"reject","reason":"unattended","sandbox_enabled":true}`)
 }
 
+// A call whose mod call_start append was lost (observed in live sessions: the
+// hook events and call_end arrive, the call_start never does) is still one
+// call in tool_calls, flagged missing_call_start; a ceta-only call is not
+// tracker_seen; a normal call has both flags 0/1 as expected.
+func TestIngestFlagsCallWithoutCallStart(t *testing.T) {
+	a := newApp(t)
+	a.fullCall("s1", "tuFull", "/nonexistent-tracker-test/proj", 1700000000000)
+	a.append("s1", "tracker", "tracker.pre_tool", "tuLost", "1700000010000", "l-1", `{"tool_name":"Bash","permission_mode":"auto"}`)
+	a.append("s1", "ceta", "ceta.verdict", "tuLost", "1700000010100", "l-2", `{"verdict":"approve","delivered":"approve","sandbox_enabled":false}`)
+	a.append("s1", "tracker", "tracker.check", "tuLost", "1700000010200", "l-3", `{"decision":"allow","hook":"PreToolUse"}`)
+	a.append("s1", "tracker", "tracker.post_tool", "tuLost", "1700000010300", "l-4", `{"hook_event":"PostToolUse","tool_name":"Bash","duration_ms":5,"is_error":false}`)
+	a.append("s1", "tracker", "tracker.call_end", "tuLost", "1700000010310", "l-5", `{"outcome":"ok"}`)
+	a.append("s2", "ceta", "ceta.verdict", "tuRace", "1700000020000", "r-1", `{"verdict":"approve","delivered":"approve","sandbox_enabled":false}`)
+	a.ingest()
+	db := a.open()
+	type flags struct{ seen, missing int }
+	get := func(session, tu string) flags {
+		var f flags
+		if err := db.QueryRow("SELECT tracker_seen, missing_call_start FROM tool_calls WHERE session_id=? AND tool_use_id=?", session, tu).Scan(&f.seen, &f.missing); err != nil {
+			t.Fatalf("%s: %v", tu, err)
+		}
+		return f
+	}
+	for tu, want := range map[string]flags{"tuFull": {1, 0}, "tuLost": {1, 1}} {
+		if got := get("s1", tu); got != want {
+			t.Errorf("%s flags = %+v, want %+v", tu, got, want)
+		}
+	}
+	if got := get("s2", "tuRace"); got != (flags{0, 0}) {
+		t.Errorf("ceta-only call flags = %+v, want {0 0}", got)
+	}
+	if got := scalar[any](t, db, "SELECT call_start_ts FROM tool_calls WHERE tool_use_id='tuLost'"); got != nil {
+		t.Errorf("call_start_ts = %v, want NULL", got)
+	}
+	if got := scalar[string](t, db, "SELECT tool_name FROM tool_calls WHERE tool_use_id='tuLost'"); got != "Bash" {
+		t.Errorf("tool_name = %q, want Bash from pre_tool", got)
+	}
+}
+
 func TestIngestBuildsViewsAndCountsSkips(t *testing.T) {
 	a := newApp(t)
 	a.fullCall("sess1", "tu1", "/nonexistent-tracker-test/proj", 1700000000000)

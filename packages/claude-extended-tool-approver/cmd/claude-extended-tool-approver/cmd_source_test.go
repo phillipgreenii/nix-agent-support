@@ -260,8 +260,8 @@ func TestSourceTracker_LabelsSurviveReingest(t *testing.T) {
 				t.Errorf("excluded call %s still in evaluate", c.id)
 			}
 		}
-		if len(rows) != 4 {
-			t.Errorf("evaluate rows = %d, want 4", len(rows))
+		if len(rows) != 5 {
+			t.Errorf("evaluate rows = %d, want 5", len(rows))
 		}
 	}
 	// labels under tracker never leak into CETA's own history
@@ -305,7 +305,7 @@ func TestSourceTracker_BaselineUsesCallIDs(t *testing.T) {
 		ids = append(ids, r.ID)
 	}
 	sort.Ints(ids)
-	if fmt.Sprint(ids) != "[1 4 16 21 25]" || env.Filters.Source != "tracker" {
+	if fmt.Sprint(ids) != "[1 4 16 21 25 26]" || env.Filters.Source != "tracker" {
 		t.Errorf("baseline ids %v filters %+v", ids, env.Filters)
 	}
 	// a second run compares against it without complaint

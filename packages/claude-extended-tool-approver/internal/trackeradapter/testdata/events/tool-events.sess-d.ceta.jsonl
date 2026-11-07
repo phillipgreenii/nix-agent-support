@@ -1,0 +1,1 @@
+{"schema":"tool-events/1","event_id":"d02","ts":1790000000302,"source":"ceta","kind":"ceta.verdict","session_id":"sess-d","tool_use_id":"tu-d1","data":{"verdict":"approve","delivered":"approve","reason":"read-only","rule":"git-readonly","sandbox_enabled":true}}

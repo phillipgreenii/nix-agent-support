@@ -114,5 +114,29 @@
     "converted_ask": false,
     "engine_verdict": "abstain",
     "delivered_verdict": "abstain"
+  },
+  {
+    "id": 26,
+    "tool_name": "Bash",
+    "tool_summary": "Bash",
+    "command_class": "Bash",
+    "hook_decision": "allow",
+    "replay_result": "",
+    "replay_module": "",
+    "replay_reason": "",
+    "category": "stale-cwd",
+    "outcome": "approved",
+    "sandbox_enabled": 1,
+    "approval_source": "hook",
+    "permission_mode": "default",
+    "agent_type": null,
+    "outcome_notes": null,
+    "tool_response": null,
+    "settled_by": "ceta",
+    "settlement": "approved",
+    "converted_ask": false,
+    "engine_verdict": "approve",
+    "delivered_verdict": "approve",
+    "is_error": false
   }
 ]

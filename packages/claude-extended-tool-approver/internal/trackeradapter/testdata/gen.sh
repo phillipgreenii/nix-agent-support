@@ -53,6 +53,15 @@ echo 'not json' >>"$D/$F"
 
 ev tool-events.sess-c.ceta.jsonl c01 1790000000201 ceta ceta.verdict sess-c tu-c1 '{"verdict":"abstain","delivered":"abstain","sandbox_enabled":false}'
 
+# sess-d: a call whose tracker.call_start was never recorded (the shape seen live
+# around a subagent finishing): hook events and call_end, no call_start.
+F=tool-events.sess-d.tracker.jsonl
+ev $F d01 1790000000301 tracker tracker.pre_tool sess-d tu-d1 '{"permission_mode":"default","tool_name":"Bash","cwd":"/nonexistent/example-repo"}'
+ev tool-events.sess-d.ceta.jsonl d02 1790000000302 ceta ceta.verdict sess-d tu-d1 '{"verdict":"approve","delivered":"approve","reason":"read-only","rule":"git-readonly","sandbox_enabled":true}'
+ev $F d03 1790000000303 tracker tracker.check sess-d tu-d1 '{"decision":"allow","hook":"PreToolUse","reason":"read-only"}'
+ev $F d04 1790000000304 tracker tracker.post_tool sess-d tu-d1 '{"hook_event":"PostToolUse","tool_name":"Bash","permission_mode":"default","duration_ms":9,"is_error":false}'
+ev $F d05 1790000000305 tracker tracker.call_end sess-d tu-d1 '{"outcome":"ok"}'
+
 tmp="$(mktemp -d)"
 built="$tmp/built"
 mkdir -p "$built" "$tmp/events2"

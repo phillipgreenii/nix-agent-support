@@ -60,7 +60,7 @@
 //	tool_calls.reason             -> Row.Reason (show's hook reason)
 //	tool_calls.result             -> Row.Result
 //	tool_calls.call_start_ts      -> Row.StartMs (first_event_ts when NULL)
-//	                                 and Row.TrackerSeen (call_start_ts is not NULL)
+//	                                 and Row.TrackerSeen (tracker_seen: any tracker event, so a call missing its call_start counts)
 //	tool_calls.settled_by         -> Row.SettledBy
 //	tool_calls.settlement         -> Row.Settlement
 //	tool_calls.converted_ask      -> Row.ConvertedAsk
@@ -100,7 +100,7 @@ var _ = sqlite.Driver{} // registers the "sqlite" driver
 var views = map[string][]string{
 	"tool_calls": {
 		"call_id", "session_id", "tool_use_id", "agent_id", "tool_name", "tool_input", "cwd",
-		"permission_mode", "agent_type", "result", "error_text", "call_start_ts", "first_event_ts",
+		"permission_mode", "agent_type", "result", "error_text", "call_start_ts", "tracker_seen", "first_event_ts",
 		"is_error", "denial_reason", "sandbox_enabled", "engine_verdict", "delivered_verdict",
 		"reason", "settled_by", "settlement", "converted_ask", "failed_timing",
 	},
@@ -182,7 +182,7 @@ type Row struct {
 	FailedTiming     *bool
 	DenialReason     string
 	StartMs          int64
-	// TrackerSeen is true when a tracker event (tracker.call_start) recorded the
+	// TrackerSeen is true when any tracker-source event recorded the
 	// call, false for a call only another source (ceta) reported.
 	TrackerSeen bool
 	// ErrorText is tool_calls.error_text ("" when NULL).
@@ -202,7 +202,7 @@ func (r Row) Key() asklog.CallKey {
 }
 
 const rowSelect = `SELECT call_id, session_id, tool_use_id, tool_name, tool_input, cwd,
-	permission_mode, agent_type, verdict, result, error_text, call_start_ts, first_event_ts, is_error,
+	permission_mode, agent_type, verdict, result, error_text, call_start_ts, tracker_seen, first_event_ts, is_error,
 	denial_reason, sandbox_enabled, engine_verdict, delivered_verdict, reason, settled_by,
 	settlement, converted_ask, failed_timing FROM tool_calls`
 
@@ -279,10 +279,10 @@ func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.T
 		var (
 			toolName, toolInput, cwd, mode, agentType, result, errText, denial, checkVerdict sql.NullString
 			engine, delivered, reason, settledBy, settlement                                 sql.NullString
-			startTs, firstTs, isErr, sandbox, converted, failedTiming                        sql.NullInt64
+			startTs, firstTs, trackerSeen, isErr, sandbox, converted, failedTiming           sql.NullInt64
 		)
 		if err := rows.Scan(&r.CallID, &r.SessionID, &r.ToolUseID, &toolName, &toolInput, &cwd,
-			&mode, &agentType, &checkVerdict, &result, &errText, &startTs, &firstTs, &isErr,
+			&mode, &agentType, &checkVerdict, &result, &errText, &startTs, &trackerSeen, &firstTs, &isErr,
 			&denial, &sandbox, &engine, &delivered, &reason, &settledBy,
 			&settlement, &converted, &failedTiming); err != nil {
 			return nil, fmt.Errorf("tracker database: %w", err)
@@ -317,7 +317,7 @@ func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.T
 			b := failedTiming.Int64 != 0
 			r.FailedTiming = &b
 		}
-		r.TrackerSeen = startTs.Valid
+		r.TrackerSeen = trackerSeen.Int64 != 0
 		r.StartMs = startTs.Int64
 		if !startTs.Valid {
 			r.StartMs = firstTs.Int64

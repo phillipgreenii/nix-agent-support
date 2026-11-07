@@ -37,6 +37,11 @@ INSERT INTO events VALUES('b12','sess-b','tracker','tracker.pre_tool',1790000000
 INSERT INTO events VALUES('b13','sess-b','tracker','tracker.check',1790000000113,'tu-b2',NULL,'{"decision":"allow","reason":"rule"}','tool-events.sess-b.tracker.jsonl');
 INSERT INTO events VALUES('b14','sess-b','tracker','tracker.call_end',1790000000114,'tu-b2',NULL,'{"outcome":"ok"}','tool-events.sess-b.tracker.jsonl');
 INSERT INTO events VALUES('c01','sess-c','ceta','ceta.verdict',1790000000201,'tu-c1',NULL,'{"verdict":"abstain","delivered":"abstain","sandbox_enabled":false}','tool-events.sess-c.ceta.jsonl');
+INSERT INTO events VALUES('d02','sess-d','ceta','ceta.verdict',1790000000302,'tu-d1',NULL,'{"verdict":"approve","delivered":"approve","reason":"read-only","rule":"git-readonly","sandbox_enabled":true}','tool-events.sess-d.ceta.jsonl');
+INSERT INTO events VALUES('d01','sess-d','tracker','tracker.pre_tool',1790000000301,'tu-d1',NULL,'{"permission_mode":"default","tool_name":"Bash","cwd":"/nonexistent/example-repo"}','tool-events.sess-d.tracker.jsonl');
+INSERT INTO events VALUES('d03','sess-d','tracker','tracker.check',1790000000303,'tu-d1',NULL,'{"decision":"allow","hook":"PreToolUse","reason":"read-only"}','tool-events.sess-d.tracker.jsonl');
+INSERT INTO events VALUES('d04','sess-d','tracker','tracker.post_tool',1790000000304,'tu-d1',NULL,'{"hook_event":"PostToolUse","tool_name":"Bash","permission_mode":"default","duration_ms":9,"is_error":false}','tool-events.sess-d.tracker.jsonl');
+INSERT INTO events VALUES('d05','sess-d','tracker','tracker.call_end',1790000000305,'tu-d1',NULL,'{"outcome":"ok"}','tool-events.sess-d.tracker.jsonl');
 CREATE TABLE calls (
 		call_id     INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id  TEXT NOT NULL,
@@ -48,6 +53,7 @@ INSERT INTO calls VALUES(4,'sess-a','tu-a2');
 INSERT INTO calls VALUES(16,'sess-b','tu-b1');
 INSERT INTO calls VALUES(21,'sess-b','tu-b2');
 INSERT INTO calls VALUES(25,'sess-c','tu-c1');
+INSERT INTO calls VALUES(26,'sess-d','tu-d1');
 CREATE TABLE call_settlement (
 		call_id       INTEGER PRIMARY KEY REFERENCES calls(call_id),
 		settled_by    TEXT,
@@ -59,6 +65,7 @@ INSERT INTO call_settlement VALUES(4,'person','approved',0,1);
 INSERT INTO call_settlement VALUES(16,'ceta','refused',1,0);
 INSERT INTO call_settlement VALUES(21,'rule','approved',0,0);
 INSERT INTO call_settlement VALUES(25,NULL,'unresolved',0,NULL);
+INSERT INTO call_settlement VALUES(26,'ceta','approved',0,0);
 CREATE TABLE cwd_repo (
 		cwd  TEXT PRIMARY KEY,
 		repo TEXT NOT NULL
@@ -67,7 +74,7 @@ CREATE TABLE ingest_runs (
 		run_id     INTEGER PRIMARY KEY AUTOINCREMENT,
 		started_ms INTEGER NOT NULL
 	);
-INSERT INTO ingest_runs VALUES(1,1793309163510);
+INSERT INTO ingest_runs VALUES(1,1794057463172);
 CREATE TABLE files (
 		file        TEXT PRIMARY KEY,
 		session_id  TEXT NOT NULL,
@@ -79,6 +86,8 @@ INSERT INTO files VALUES('tool-events.sess-a.tracker.jsonl','sess-a','tracker',2
 INSERT INTO files VALUES('tool-events.sess-b.ceta.jsonl','sess-b','ceta',252);
 INSERT INTO files VALUES('tool-events.sess-b.tracker.jsonl','sess-b','tracker',1790);
 INSERT INTO files VALUES('tool-events.sess-c.ceta.jsonl','sess-c','ceta',220);
+INSERT INTO files VALUES('tool-events.sess-d.ceta.jsonl','sess-d','ceta',262);
+INSERT INTO files VALUES('tool-events.sess-d.tracker.jsonl','sess-d','tracker',905);
 CREATE TABLE file_runs (
 		run_id                INTEGER NOT NULL REFERENCES ingest_runs(run_id),
 		file                  TEXT NOT NULL REFERENCES files(file),
@@ -95,8 +104,10 @@ INSERT INTO file_runs VALUES(1,'tool-events.sess-a.tracker.jsonl',11,11,0,0,0,1)
 INSERT INTO file_runs VALUES(1,'tool-events.sess-b.ceta.jsonl',1,1,0,0,0,0);
 INSERT INTO file_runs VALUES(1,'tool-events.sess-b.tracker.jsonl',9,8,0,1,0,0);
 INSERT INTO file_runs VALUES(1,'tool-events.sess-c.ceta.jsonl',1,1,0,0,0,0);
+INSERT INTO file_runs VALUES(1,'tool-events.sess-d.ceta.jsonl',1,1,0,0,0,0);
+INSERT INTO file_runs VALUES(1,'tool-events.sess-d.tracker.jsonl',4,4,0,0,0,0);
 INSERT INTO sqlite_sequence VALUES('ingest_runs',1);
-INSERT INTO sqlite_sequence VALUES('calls',25);
+INSERT INTO sqlite_sequence VALUES('calls',30);
 CREATE VIEW tool_calls AS SELECT t.*, r.repo AS repo, s.settled_by AS settled_by, s.settlement AS settlement, s.converted_ask AS converted_ask, s.failed_timing AS failed_timing FROM (SELECT
   c.call_id AS call_id,
   c.session_id AS session_id,
@@ -116,6 +127,8 @@ CREATE VIEW tool_calls AS SELECT t.*, r.repo AS repo, s.settled_by AS settled_by
   (SELECT e.ts FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.call_start' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1) AS call_start_ts,
   (SELECT e.ts FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.running' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1) AS running_ts,
   (SELECT e.ts FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.call_end' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1) AS call_end_ts,
+  EXISTS (SELECT 1 FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.source = 'tracker') AS tracker_seen,
+  (EXISTS (SELECT 1 FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.source = 'tracker') AND NOT EXISTS (SELECT 1 FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.call_start')) AS missing_call_start,
   (SELECT MIN(e.ts) FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id) AS first_event_ts,
   (SELECT MAX(e.ts) FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id) AS last_event_ts,
   COALESCE((SELECT json_extract(e.data, '$.is_error') FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.post_tool' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1), CASE (SELECT json_extract(e.data, '$.outcome') FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.call_end' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1) WHEN 'error' THEN 1 WHEN 'ok' THEN 0 WHEN 'refused' THEN 0 WHEN 'interrupted' THEN 0 END) AS is_error,

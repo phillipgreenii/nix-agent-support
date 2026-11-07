@@ -11,7 +11,8 @@
 //
 // Which side recorded a call. CETA recorded a call when the ask log has a row
 // with that session_id + tool_use_id. The tracker recorded it when the call has
-// a tracker event (Row.TrackerSeen: tracker.call_start); a tracker call that
+// a tracker event (Row.TrackerSeen: any tracker-source event, so a call whose
+// tracker.call_start was lost still counts); a tracker call that
 // only carries CETA's ceta.* events is NOT a tracker recording, so a CETA row
 // matched only by those is "only CETA recorded".
 //

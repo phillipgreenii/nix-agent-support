@@ -54,7 +54,7 @@ time suffices, and both sides are then read whole). Skipped-line counts cover
 the ingest runs that started in the window.
 
 Definitions. A call is "recorded by the tracker" when it has a tracker event
-(tracker.call_start); a call carrying only ceta.* events is not. Outcomes are
+(any tracker event, tracker.call_start or not); a call carrying only ceta.* events is not. Outcomes are
 compared in CETA's vocabulary (approved, denied, rejected, failed, pending,
 unresolved); the tracker's settlement maps as: result error -> failed; refused
 and settled by CETA -> rejected; refused otherwise -> denied; approved ->

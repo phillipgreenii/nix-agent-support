@@ -12,7 +12,7 @@ import (
 
 // The fixture databases (testdata/*.sql, loaded into a temp database) were built by the real
 // claude-tool-tracker ingest from testdata/events (see testdata/gen.sh).
-// tracker.db holds five calls: sess-a/tu-a1 (CETA approve, call_id 1),
+// tracker.db holds six calls: sess-a/tu-a1 (CETA approve, call_id 1),
 // sess-a/tu-a2 (CETA ask answered by a person, errored, 4), sess-b/tu-b1
 // (CETA ask delivered as reject in an unattended session, 16), sess-b/tu-b2
 // (allowed by a rule, 21) and sess-c/tu-c1 (a CETA-only session, 25).
@@ -69,8 +69,8 @@ func TestRows_MapsEveryColumnToTheEvaluationRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 5 {
-		t.Fatalf("got %d rows, want 5", len(rows))
+	if len(rows) != 6 {
+		t.Fatalf("got %d rows, want 6", len(rows))
 	}
 
 	a1 := byTool(t, rows, "tu-a1")
@@ -160,7 +160,7 @@ func TestRows_SinceFiltersOnCallStart(t *testing.T) {
 		t.Errorf("a future --since kept %d rows", len(rows))
 	}
 	rows, err = a.Rows("2020-01-01T00:00:00Z", nil)
-	if err != nil || len(rows) != 5 {
+	if err != nil || len(rows) != 6 {
 		t.Errorf("past --since: %d rows, err %v", len(rows), err)
 	}
 	if _, err := a.Rows("last tuesday", nil); err == nil {
@@ -230,10 +230,10 @@ func TestSkippedCounts_PerWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all.Files != 5 || all.SkippedInvalidJSON != 1 || all.SkippedMissingField != 0 || all.SkippedTotal != 1 {
+	if all.Files != 7 || all.SkippedInvalidJSON != 1 || all.SkippedMissingField != 0 || all.SkippedTotal != 1 {
 		t.Errorf("whole history: %+v", all)
 	}
-	if all.LinesRead != 27 || all.EventsNew != 26 {
+	if all.LinesRead != 32 || all.EventsNew != 31 {
 		t.Errorf("whole history lines/new: %+v", all)
 	}
 	none, err := a.SkippedCounts(0, 1000)
@@ -251,7 +251,7 @@ func TestSessionSources_PerSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 3 {
+	if len(list) != 4 {
 		t.Fatalf("got %d sessions: %+v", len(list), list)
 	}
 	c, ok, err := a.SourcesFor("sess-c")
@@ -285,7 +285,7 @@ func TestLabels_ExcludeAndJoinByLastingKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(rows) != 4 {
+		if len(rows) != 5 {
 			t.Errorf("%s: an excluded call must drop out of Rows, got %d rows", db, len(rows))
 		}
 		b1 := byTool(t, rows, "tu-b1")
@@ -379,12 +379,12 @@ func TestRows_HookRanAndErrorTextDistinguishCallsRefusedBeforeAnyHook(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	// sess-d/tu-d1: call_start and call_end only, as Claude Code's own
+	// sess-e/tu-e1: call_start and call_end only, as Claude Code's own
 	// input validation leaves a call (no pre_tool, no check).
 	for _, q := range []string{
-		`INSERT INTO events VALUES('d01','sess-d','tracker','tracker.call_start',1790000000301,'tu-d1',NULL,'{"tool":"Edit","input":{}}','f')`,
-		`INSERT INTO events VALUES('d02','sess-d','tracker','tracker.call_end',1790000000302,'tu-d1',NULL,'{"outcome":"error","error":"<tool_use_error>File has not been read yet.</tool_use_error>"}','f')`,
-		`INSERT INTO calls VALUES(30,'sess-d','tu-d1')`,
+		`INSERT INTO events VALUES('e01','sess-e','tracker','tracker.call_start',1790000000301,'tu-e1',NULL,'{"tool":"Edit","input":{}}','f')`,
+		`INSERT INTO events VALUES('e02','sess-e','tracker','tracker.call_end',1790000000302,'tu-e1',NULL,'{"outcome":"error","error":"<tool_use_error>File has not been read yet.</tool_use_error>"}','f')`,
+		`INSERT INTO calls VALUES(30,'sess-e','tu-e1')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
@@ -400,7 +400,7 @@ func TestRows_HookRanAndErrorTextDistinguishCallsRefusedBeforeAnyHook(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	d1 := byTool(t, rows, "tu-d1")
+	d1 := byTool(t, rows, "tu-e1")
 	if d1.HookRan || !d1.TrackerSeen || !strings.Contains(d1.ErrorText, "<tool_use_error>") {
 		t.Errorf("d1: %+v", d1)
 	}

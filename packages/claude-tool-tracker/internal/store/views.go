@@ -46,6 +46,8 @@ func viewsSQL() string {
 		eventTS(callStart) + " AS call_start_ts",
 		eventTS(running) + " AS running_ts",
 		eventTS(callEnd) + " AS call_end_ts",
+		"EXISTS (SELECT 1 FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.source = 'tracker') AS tracker_seen",
+		"(EXISTS (SELECT 1 FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.source = 'tracker') AND NOT EXISTS (SELECT 1 FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id AND e.kind = 'tracker.call_start')) AS missing_call_start",
 		"(SELECT MIN(e.ts) FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id) AS first_event_ts",
 		"(SELECT MAX(e.ts) FROM events e WHERE e.session_id = c.session_id AND e.tool_use_id = c.tool_use_id) AS last_event_ts",
 		coalesce(field(post, "is_error"),

@@ -524,6 +524,54 @@ Result for the operator: the two recorders agree on 80195 matched calls for ever
 except the groups above; the counts do not show a defect that blocks the cut-over by themselves,
 but the open questions above are unexplained and are not accepted here (section 8.4).
 
+#### Calls without `call_start`: captured trace, handling, hypothesis
+
+Captured from the live event files on 2026-11-07 (read-only; ids shortened, tool names only). A
+subagent's last call is its `SubagentHandback` call (agent prefix `a33a01`); times are milliseconds
+after that call's `post_tool`. In session `499f0a23` the next two calls were the parent's:
+
+| +ms   | source  | kind                | call       | note                                        |
+| ----- | ------- | ------------------- | ---------- | ------------------------------------------- |
+| -165  | tracker | `tracker.pre_tool`  | `01XMsbVv` | `SubagentHandback`, agent `a33a01`          |
+| -139  | ceta    | `ceta.verdict`      | `01XMsbVv` |                                             |
+| 0     | tracker | `tracker.post_tool` | `01XMsbVv` | no `call_start`, no `check`, no `call_end`  |
+| +2171 | tracker | `tracker.pre_tool`  | `01Uqx9NK` | `Bash`, parent; no `call_start` precedes it |
+| +2457 | ceta    | `ceta.verdict`      | `01Uqx9NK` |                                             |
+| +2593 | tracker | `tracker.post_tool` | `01Uqx9NK` |                                             |
+| +2600 | tracker | `tracker.call_end`  | `01Uqx9NK` | `call_end` present: the mod ran `tool.call` |
+
+A normal call in the same file runs `call_start`, `pre_tool` (about 30 ms later), `ceta.verdict`,
+`check`, `post_tool`, `call_end`. The other lost calls: `62683f59` (`Bash`: `pre_tool`, `post_tool`,
+`call_end`), `cd63f2a6` (`Bash`: `pre_tool`, `check`, `post_tool`, `call_end`; and a `Bash` call with
+`pre_tool`, `check` only, whose session ended or was cut off). Of the eight calls without `call_start`
+since 2026-11-03, the ones with a `call_end` prove the mod's `tool.call` handler returned, so its
+`call_start` append (a separate process per event, fire-and-forget, errors swallowed) was lost or never
+started while the `call_end` append succeeded.
+
+Hypothesis (not reproduced): `emit` awaits `$.session.id()` before it spawns the append; if that or
+the clock read rejects for a moment around a subagent finishing, the `catch` drops the event with no
+trace, and the later `call_end` emit succeeds. The `SubagentHandback` call itself never reaches
+`tool.call` (it has no `call_start`, `check` or `call_end` by design of the harness), which is a
+second, expected kind of gap.
+
+Handling. The reader no longer needs `call_start`: `tool_calls` carries `tracker_seen` and
+`missing_call_start`, and the comparison treats any tracker-source event as "the tracker recorded
+it" (start time falls back to the call's first event), so these calls are matched, not CETA-only.
+Tests: the tracker's `TestIngestFlagsCallWithoutCallStart` and the adapter fixture `sess-d`.
+
+Expected gap (no code can recover it): a call that has only a `ceta.verdict` event and no tracker
+event at all, such as the 10:02:46Z call in `cd63f2a6`. It raced a subagent stop: CETA's hook ran,
+the harness stopped the subagent before any tracker hook ran. It stays "only CETA recorded" and is
+not a defect of ingest.
+
+Live reproduction for a later person (cannot be done from a test): enable the mod's debug logging,
+capture the stderr of the `claude-tool-tracker hook` command for PreToolUse, and run a session in
+which a subagent finishes (its `SubagentHandback`) while the parent starts a `Bash` call; repeat
+until a call shows `missing_call_start = 1` in `tool_calls`. Then check whether the mod's `tool.call`
+hook ran (a `call_end` for the call proves it) and whether `$.session.id()` or the append process
+failed at that moment. If the cause is a failing `$.session.id()`, cache the id from `session.start`
+in `register.ts`.
+
 ### 8.3 Rollout: this laptop first, cut-over per machine
 
 DECIDED (Phillip, 2026-10-29): approved, with the cut-over gated on the tracker recording. CETA runs on more

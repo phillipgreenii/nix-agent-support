@@ -21,7 +21,7 @@ import (
 // call of the fixture starts at 2026-09-21T14:13:20Z.
 const ctCreated = "2026-09-21T14:13:20Z"
 
-// ctSeed writes the ask log into a fresh XDG_DATA_HOME. The four rows agree
+// ctSeed writes the ask log into a fresh XDG_DATA_HOME. The five rows agree (tu-d1 is the call whose call_start was lost, which still counts as tracker-recorded)
 // with the tracker fixture on every compared field.
 func ctSeed(t *testing.T, mutate ...string) {
 	t.Helper()
@@ -39,7 +39,8 @@ func ctSeed(t *testing.T, mutate ...string) {
 		 (1,'sess-a','/x','Bash','tu-a1','h1','{}','allow','approved',NULL,'default',1,0,'` + ctCreated + `'),
 		 (2,'sess-a','/x','Bash','tu-a2','h2','{}','ask','failed','tool_failure: boom','default',0,1,'` + ctCreated + `'),
 		 (3,'sess-b','/x','Bash','tu-b1','h3','{}','deny','rejected',NULL,'dontAsk',1,NULL,'` + ctCreated + `'),
-		 (4,'sess-b','/x','Write','tu-b2','h4','{}',NULL,'approved',NULL,'default',NULL,NULL,'` + ctCreated + `')`)
+		 (4,'sess-b','/x','Write','tu-b2','h4','{}',NULL,'approved',NULL,'default',NULL,NULL,'` + ctCreated + `'),
+		 (5,'sess-d','/x','Bash','tu-d1','h5','{}','allow','approved',NULL,'default',1,0,'` + ctCreated + `')`)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestCompareTracker_NoDifferencesIsClean(t *testing.T) {
 	if code := ctExit(t, err); code != 0 {
 		t.Fatalf("exit %d, report %+v", code, rep)
 	}
-	if !rep.Clean || rep.Matched != 4 || rep.CetaCalls != 4 || rep.TrackerCalls != 4 ||
+	if !rep.Clean || rep.Matched != 5 || rep.CetaCalls != 5 || rep.TrackerCalls != 5 ||
 		len(rep.OnlyCeta)+len(rep.OnlyTracker)+len(rep.Differences)+len(rep.Duplicates)+len(rep.SessionsWithoutTracker) != 0 {
 		t.Errorf("not clean: %+v", rep)
 	}
@@ -244,7 +245,7 @@ func TestCompareTracker_WindowSelectsCalls(t *testing.T) {
 		t.Errorf("until exclusive: %v %+v", err, rep)
 	}
 	rep, err = ctRun(t, "--since", "2026-09-21T14:13:00Z", "--until", "2026-09-21T14:14:00Z")
-	if ctExit(t, err) != 0 || rep.Matched != 4 {
+	if ctExit(t, err) != 0 || rep.Matched != 5 {
 		t.Errorf("inside: %v %+v", err, rep)
 	}
 }
@@ -255,29 +256,29 @@ func TestCompareTracker_EitherSideTimeSelectsAndBothAreReadWhole(t *testing.T) {
 	// only-the-tracker-recorded it.
 	ctSeed(t, `UPDATE tool_decisions SET created_at='2026-09-21T14:13:19Z' WHERE tool_use_id='tu-a1'`)
 	rep, err := ctRun(t, "--since", "2026-09-21T14:13:20Z", "--until", "2026-09-21T14:14:00Z")
-	if ctExit(t, err) != 0 || rep.Matched != 4 || len(rep.OnlyTracker) != 0 {
+	if ctExit(t, err) != 0 || rep.Matched != 5 || len(rep.OnlyTracker) != 0 {
 		t.Errorf("%v %+v", err, rep)
 	}
 }
 
 func TestCompareTracker_IngestSkippedCountsForTheWindow(t *testing.T) {
 	ctSeed(t)
-	// The fixture's one ingest run started at 2026-10-29T21:26:03.510Z and
-	// skipped one invalid line; the five event files were read in it.
-	rep, _ := ctRun(t, "--since", "2026-10-29T21:26:03.510Z")
-	if rep.Skips.SkippedTotal != 1 || rep.Skips.SkippedInvalidJSON != 1 || rep.Skips.IngestFiles != 5 || rep.Skips.LinesRead != 27 {
+	// The fixture's one ingest run started at 2026-11-07T13:17:43.172Z and
+	// skipped one invalid line; the seven event files were read in it.
+	rep, _ := ctRun(t, "--since", "2026-11-07T13:17:43.172Z")
+	if rep.Skips.SkippedTotal != 1 || rep.Skips.SkippedInvalidJSON != 1 || rep.Skips.IngestFiles != 7 || rep.Skips.LinesRead != 32 {
 		t.Errorf("window containing the run: %+v", rep.Skips)
 	}
-	rep, _ = ctRun(t, "--since", "2026-10-29T21:26:03.511Z")
+	rep, _ = ctRun(t, "--since", "2026-11-07T13:17:43.173Z")
 	if rep.Skips.IngestFiles != 0 || rep.Skips.SkippedTotal != 0 {
 		t.Errorf("window after the run: %+v", rep.Skips)
 	}
-	rep, _ = ctRun(t, "--since", "2026-10-29T00:00:00Z", "--until", "2026-10-29T21:26:03.510Z")
+	rep, _ = ctRun(t, "--since", "2026-11-07T00:00:00Z", "--until", "2026-11-07T13:17:43.172Z")
 	if rep.Skips.IngestFiles != 0 {
 		t.Errorf("until is exclusive: %+v", rep.Skips)
 	}
-	out, _ := ctRunRaw(t, "--since", "2026-10-29T21:26:03.510Z")
-	if !strings.Contains(out, "Ingest skipped lines for the window: 1 (invalid json 1, missing field 0) of 27 read in 5 files") {
+	out, _ := ctRunRaw(t, "--since", "2026-11-07T13:17:43.172Z")
+	if !strings.Contains(out, "Ingest skipped lines for the window: 1 (invalid json 1, missing field 0) of 32 read in 7 files") {
 		t.Errorf("table output:\n%s", out)
 	}
 }

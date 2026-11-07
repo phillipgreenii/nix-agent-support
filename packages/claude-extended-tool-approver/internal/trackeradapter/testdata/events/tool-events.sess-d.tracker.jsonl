@@ -1,0 +1,4 @@
+{"schema":"tool-events/1","event_id":"d01","ts":1790000000301,"source":"tracker","kind":"tracker.pre_tool","session_id":"sess-d","tool_use_id":"tu-d1","data":{"permission_mode":"default","tool_name":"Bash","cwd":"/nonexistent/example-repo"}}
+{"schema":"tool-events/1","event_id":"d03","ts":1790000000303,"source":"tracker","kind":"tracker.check","session_id":"sess-d","tool_use_id":"tu-d1","data":{"decision":"allow","hook":"PreToolUse","reason":"read-only"}}
+{"schema":"tool-events/1","event_id":"d04","ts":1790000000304,"source":"tracker","kind":"tracker.post_tool","session_id":"sess-d","tool_use_id":"tu-d1","data":{"hook_event":"PostToolUse","tool_name":"Bash","permission_mode":"default","duration_ms":9,"is_error":false}}
+{"schema":"tool-events/1","event_id":"d05","ts":1790000000305,"source":"tracker","kind":"tracker.call_end","session_id":"sess-d","tool_use_id":"tu-d1","data":{"outcome":"ok"}}
