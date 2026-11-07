@@ -411,7 +411,7 @@ plus headless `claude -p` sessions; check 5 is not part of this run):
    was not reached, because CETA decides first while it is installed, so the `mode` case stays
    unobserved (it needs a call CETA abstains on).
 
-Follow-up results for checks 2 and 4 (observed 2026-11-07, same laptop, same method):
+Follow-up results for checks 2 and 4 (item 4 below covers the `bypassPermissions` row; observed 2026-11-07, same laptop, same method):
 
 2. 2026-11-07, observed. The 2026-10-30 "not observed" result is superseded: by 2026-11-07 the
    tracker had recorded 17 real auto-mode classifier denials (first on 2026-11-01) among 82991
