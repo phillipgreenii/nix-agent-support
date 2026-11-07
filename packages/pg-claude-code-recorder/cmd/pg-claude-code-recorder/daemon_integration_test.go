@@ -19,8 +19,12 @@ import (
 
 func TestClientNameReachesTheDaemonLog(t *testing.T) {
 	sock, logbuf, _ := liveDaemon(t)
+	// A successful request is logged at debug (counted in requests_total), so
+	// the client name reaches the info-level log through a failed request.
 	a, _, _ := testApp(nil)
-	a.run([]string{"status", "--socket", sock, "--allow-partial", "--client", "example-check"})
+	if code := a.run([]string{"processes", "--socket", sock, "--pid", "9999", "--client", "example-check"}); code != 4 {
+		t.Fatalf("unknown pid: exit %d", code)
+	}
 	if !strings.Contains(logbuf.String(), `"client":"example-check"`) {
 		t.Fatalf("log lacks the client name:\n%s", logbuf.String())
 	}
@@ -111,7 +115,12 @@ func TestStatusCarriesCrashedRecentAndSuspectedRecent(t *testing.T) {
 	row := twoCrashes(base)
 	row.Steps = append(row.Steps, clienttest.LabelStep{Do: "registry", Pid: 604, Session: "example-stale", Ms: base + 1000, StartMs: base})
 	e := clienttest.RunRow(t, row)
-	code, out, _ := run(t, e, "status", "--json")
+	// The crash counts have a 500ms budget by default; under -race and a
+	// loaded host that expires, so this test gives them room.
+	a, o, _ := testApp(nil)
+	a.recentBudget = time.Minute
+	code := a.run([]string{"status", "--json", "--socket", e.Socket})
+	out := o.String()
 	var st wire.Status
 	if err := json.Unmarshal([]byte(out), &st); err != nil || code != 0 {
 		t.Fatalf("%d %v %s", code, err, out)
@@ -119,7 +128,10 @@ func TestStatusCarriesCrashedRecentAndSuspectedRecent(t *testing.T) {
 	if st.CrashedRecent == nil || *st.CrashedRecent != 2 || st.SuspectedRecent == nil || *st.SuspectedRecent != 3 {
 		t.Fatalf("crashed_recent %v suspected_recent %v", st.CrashedRecent, st.SuspectedRecent)
 	}
-	_, text, _ := run(t, e, "status")
+	a, o, _ = testApp(nil)
+	a.recentBudget = time.Minute
+	a.run([]string{"status", "--socket", e.Socket})
+	text := o.String()
 	if !strings.Contains(text, "crashed (7d): 2") {
 		t.Fatalf("status text %q", text)
 	}

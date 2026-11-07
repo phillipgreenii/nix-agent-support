@@ -409,8 +409,10 @@ func TestClientNameIsLoggedAndPprofSocketAnswers(t *testing.T) {
 	c.Env = d.env
 	launch(t, c)
 	d.waitCaughtUp(t)
-	if _, _, code := d.cli(t, "status", "--client", "example-check"); code != 0 {
-		t.Fatalf("status exit %d", code)
+	// Successful requests log at debug; a failed one carries the client name
+	// into the info-level log.
+	if _, _, code := d.cli(t, "processes", "--pid", "9999", "--client", "example-check"); code != 4 {
+		t.Fatalf("unknown pid: exit %d", code)
 	}
 	logb, _ := os.ReadFile(d.logFile)
 	if !strings.Contains(string(logb), `"client":"example-check"`) || !strings.Contains(string(logb), `"service":"pg-claude-code-recorder"`) {

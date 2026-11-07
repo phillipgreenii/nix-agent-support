@@ -429,6 +429,8 @@ func TestStatusOverTheWireHasTheStableShape(t *testing.T) {
 	if !st.Healthy || st.Short != "ok" || st.SchemaVersion != store.SchemaVersion || st.ProtocolVer != 1 || st.FreeBytes <= 0 {
 		t.Fatalf("%+v", st)
 	}
+	// Successful requests log at debug; a failed one names the client. process.show without a pid is a bad request.
+	_ = c.Post(context.Background(), "process.show", nil, nil)
 	if !strings.Contains(e.log.String(), `"client":"cli"`) {
 		t.Fatalf("request log lacks the client name:\n%s", e.log.String())
 	}
@@ -486,7 +488,7 @@ func TestHelloAndTheDaemonFeedOperations(t *testing.T) {
 	if h.ProtocolVersion != wire.ProtocolVersion || h.SchemaVersion < 1 || h.Epoch < 1 || h.Service == "" {
 		t.Fatalf("hello %+v", h)
 	}
-	want := []string{"conversation.list", "conversation.show", "coverage", "doctor", "extract", "feed", "held", "hello", "process.list", "process.show", "query", "raw", "remove", "search", "snapshot", "status", "where"}
+	want := []string{"conversation.list", "conversation.show", "coverage", "doctor", "extract", "feed", "held", "hello", "process.list", "process.show", "query", "raw", "remove", "search", "snapshot", "status", "sweep", "where"}
 	if strings.Join(h.Capabilities, ",") != strings.Join(want, ",") {
 		t.Fatalf("capabilities %v, want %v", h.Capabilities, want)
 	}
