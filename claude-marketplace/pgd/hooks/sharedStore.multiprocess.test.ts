@@ -118,8 +118,8 @@ test('several real headless sessions share keys through $.store', { timeout: 540
               stdio: ['ignore', 'pipe', 'pipe'],
             },
           )
-          p.stdout.on('data', d => logs.push(`[${i}] ${d}`))
-          p.stderr.on('data', d => logs.push(`[${i}!] ${d}`))
+          p.stdout.on('data', (d: unknown) => logs.push(`[${i}] ${d}`))
+          p.stderr.on('data', (d: unknown) => logs.push(`[${i}!] ${d}`))
           p.on('close', resolve)
         }),
     )
