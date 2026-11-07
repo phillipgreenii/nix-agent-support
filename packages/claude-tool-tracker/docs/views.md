@@ -69,7 +69,9 @@ whose `delivered` is `approve`, `reject` or `ask` (an `abstain` falls through to
 | CETA engine `ask`, delivered `reject` | any                 | `ceta`       | `refused`, and `converted_ask` is `1`      |
 
 "Ran" means `tracker.call_end` `outcome` is `ok` or `error`; `refused` and `interrupted` did not
-complete. A call with no `tracker.call_end` is `pending` while its session may still be running and
+complete. A call with a `tracker.denied` event never ran, whatever its `call_end` says (a classifier
+refusal ends as `error`): it settles `refused` with `failed_timing` `0`, keeping its `settled_by`
+(`classifier` for an auto-mode refusal, including "Classifier unavailable"). A call with no `tracker.call_end` is `pending` while its session may still be running and
 `unresolved` once the session has a `tracker.session_end` or has written no event for the quiet
 period of 2 hours (measured against the clock of the ingest run, since a crashed session never sends
 `session_end`). The `classifier`, `dontAsk` and `bypassPermissions` rows are implemented as specified

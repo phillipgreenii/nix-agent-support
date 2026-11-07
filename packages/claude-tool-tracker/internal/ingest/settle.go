@@ -31,6 +31,7 @@ type settleInput struct {
 	delivered     string // ceta.verdict delivered; "" when absent
 	mode          string // live permission mode; "" when absent
 	outcome       string // tracker.call_end outcome; "" when no call_end
+	denied        bool   // a tracker.denied event exists for the call
 	sessionOver   bool   // the session has a session_end or has been quiet too long
 }
 
@@ -60,7 +61,8 @@ func derive(in settleInput) settleResult {
 		r.convertedAsk = true
 	}
 
-	ran := in.outcome == "ok" || in.outcome == "error"
+	// A denied call never ran, whatever outcome its denial text produced.
+	ran := (in.outcome == "ok" || in.outcome == "error") && !in.denied
 	byOutcome := refused
 	if ran {
 		byOutcome = approved
@@ -98,6 +100,9 @@ func derive(in settleInput) settleResult {
 		r.settlement = byOutcome // no verdict event at all: settled_by stays NULL
 	}
 
+	if in.denied && in.outcome != "" {
+		r.settlement = refused
+	}
 	if in.outcome == "" && !r.convertedAsk {
 		// No call_end yet: pending while the session may still run.
 		r.settlement = pending
@@ -125,6 +130,7 @@ const settleSelect = `SELECT c.call_id, c.session_id,
           (SELECT json_extract(e.data,'$.permission_mode') FROM events e WHERE e.session_id=c.session_id AND e.tool_use_id=c.tool_use_id AND e.kind='tracker.post_tool' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1), ''),
  COALESCE((SELECT json_extract(e.data,'$.outcome') FROM events e WHERE e.session_id=c.session_id AND e.tool_use_id=c.tool_use_id AND e.kind='tracker.call_end' ORDER BY e.ts DESC, e.rowid DESC LIMIT 1), ''),
  EXISTS (SELECT 1 FROM events e WHERE e.session_id=c.session_id AND e.kind='tracker.session_end'),
+ EXISTS (SELECT 1 FROM events e WHERE e.session_id=c.session_id AND e.tool_use_id=c.tool_use_id AND e.kind='tracker.denied'),
  COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.session_id=c.session_id), 0)
 FROM calls c WHERE c.call_id = ?`
 
@@ -166,7 +172,7 @@ func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
 		var ended bool
 		var lastTS int64
 		if err := tx.QueryRow(settleSelect, id).Scan(&callID, &session, &in.checkDecision, &in.engine,
-			&in.delivered, &in.mode, &in.outcome, &ended, &lastTS); err != nil {
+			&in.delivered, &in.mode, &in.outcome, &ended, &in.denied, &lastTS); err != nil {
 			return err
 		}
 		in.sessionOver = ended || now.UnixMilli()-lastTS > QuietPeriod.Milliseconds()

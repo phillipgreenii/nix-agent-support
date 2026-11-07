@@ -160,3 +160,25 @@ func TestSettlementDontAskRefusedErrorIsNotFailedTiming(t *testing.T) {
 		t.Errorf("failed_timing = %v, want 0", failed)
 	}
 }
+
+// A classifier refusal arrives as check ask, ceta abstain, tracker.denied and
+// a call_end with outcome error. The call never ran, so it settles refused and
+// is not failed for timing.
+func TestSettlementClassifierDeniedIsRefusedNotFailedTiming(t *testing.T) {
+	for i, reason := range []string{"[Git Destructive]", "Classifier unavailable"} {
+		a := newApp(t)
+		now := time.Now().UnixMilli() - 1000
+		sess := a.feed(settleCase{check: "ask", mode: "auto", cetaEngine: "abstain", cetaDeliv: "abstain", outcome: "error"}, i, now)
+		tu := "tu" + strconv.Itoa(i)
+		a.append(sess, "tracker", "tracker.denied", tu, strconv.FormatInt(now+4, 10), tu+"-6",
+			`{"tool_name":"Bash","reason":"`+reason+`","permission_mode":"auto"}`)
+		a.ingest()
+		by, st, _, failed := settleOf(t, a.open(), tu)
+		if by.String != "classifier" || st.String != "refused" {
+			t.Errorf("%q: got %q %q, want classifier refused", reason, by.String, st.String)
+		}
+		if !failed.Valid || failed.Int64 != 0 {
+			t.Errorf("%q: failed_timing = %v, want 0", reason, failed)
+		}
+	}
+}
