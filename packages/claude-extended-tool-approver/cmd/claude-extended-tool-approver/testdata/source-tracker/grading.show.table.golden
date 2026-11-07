@@ -1,0 +1,17 @@
+ID  TOOL  SUMMARY               HOOK  OUTCOME   CORRECT  SANDBOX
+1   Bash  git push origin main  ask   approved  -        off
+  SETTLED: person, approved
+  TRACE:
+    1. fixture-rule  -> ask: fixture
+5                    Write  Write: /nonexistent/example-repo/x.txt  ask  approved  -  off
+  SETTLED: person, approved
+  TRACE:
+    1. fixture-rule  -> ask: fixture
+9                    Bash  curl example.invalid  deny  rejected  -  off
+  SETTLED: ceta, refused (converted ask)
+  TRACE:
+    1. fixture-rule  -> ask: fixture
+27                   Bash  npm test  ask  unresolved  -  off
+  SETTLED: person, unresolved
+  TRACE:
+    1. fixture-rule  -> ask: fixture

@@ -45,7 +45,8 @@
     "converted_ask": false,
     "engine_verdict": "ask",
     "delivered_verdict": "ask",
-    "is_error": true
+    "is_error": true,
+    "grading_cell": "ask/person/approved"
   },
   {
     "id": 16,
@@ -69,7 +70,8 @@
     "converted_ask": true,
     "engine_verdict": "ask",
     "delivered_verdict": "reject",
-    "is_error": false
+    "is_error": false,
+    "grading_cell": "ask/converted"
   },
   {
     "id": 21,
@@ -91,7 +93,8 @@
     "settled_by": "rule",
     "settlement": "approved",
     "converted_ask": false,
-    "is_error": false
+    "is_error": false,
+    "grading_cell": "abstain/rule-or-mode"
   },
   {
     "id": 25,

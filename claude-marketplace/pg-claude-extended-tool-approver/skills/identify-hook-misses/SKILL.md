@@ -23,6 +23,7 @@ Analyze the decision database to find patterns where the hook makes wrong decisi
 - `hook_decision` — the decision the hook returned (`allow`/`ask`/`deny`/`abstain`); from the `hook_decision` field of `evaluate`/`show` output.
 - `category` — `miss-uncaught`, `miss-caught-by-settings`, `correct`, `needs-review`, `unresolved`, `stale-cwd`; from the `category` field of `evaluate`.
 - `outcome` — what actually happened to the call (ground truth): `approved`, `denied` (somebody declined it — always carries a reason in `outcome_notes`), `rejected` (CETA itself refused it; nobody was asked), `unresolved` (never resolved — interrupted/abandoned/session died; **NOT a denial** and never a miss), `pending`; from the `outcome` field. Full table: [../references/database-schema.md](../references/database-schema.md#outcomes).
+- `settled_by` / `settlement` / `converted_ask` / `grading_cell` — the settlement dimension, present only with `--source tracker` (Step 0): who settled the call (`ceta`, `person`, `mode`, `rule`, `classifier`), how (`approved`, `refused`, `pending`, `unresolved`), whether CETA's ask was converted to a reject in an unattended session (counts as an ask), and the call's cell of the grading table. Full table: [../references/database-schema.md](../references/database-schema.md#who-settled-it---source-tracker).
 - `sandbox_enabled` — `0` or `1` (or `null`) indicating whether the OS bash sandbox was active for this invocation; from the `sandbox_enabled` field.
 - `command_class` — stable, non-truncated grouping key; the field to bucket "same command" on.
 - `replay_result` — the decision the _current_ rule engine returns when replaying the row (`allow`/`ask`/`deny`/`abstain`, or empty for rows the engine did not replay, e.g. `stale-cwd`).
@@ -48,13 +49,31 @@ Full schema: [../references/database-schema.md](../references/database-schema.md
 
 All commands in this phase use `claude-extended-tool-approver` or `jq` — no raw sqlite3, no file modifications. The four raw fields the calibration steps consume (`permission_mode`, `agent_type`, `outcome_notes`, `tool_response`) are exposed on `evaluate --format=json`, so the "no raw sqlite3" rule holds; the CLI stays the sanctioned interface.
 
+### Step 0: Pick the source
+
+`evaluate`, `report` and `show` read either CETA's own ask log (`--source ceta`, the default) or the claude-tool-tracker database (`--source tracker`, read-only). The tracker records who settled each call, but this skill needs a week or more of its data. Read the tracker's earliest event from the `event_span` view (`scope` `all`, `earliest_ts` in epoch milliseconds; documented in `packages/claude-tool-tracker/docs/views.md`), after `claude-tool-tracker ingest` has brought the database up to date:
+
+```bash
+claude-tool-tracker ingest >/dev/null
+DB="${XDG_STATE_HOME:-$HOME/.local/state}/claude-tool-tracker/tracker.db"
+EARLIEST_MS=$(sqlite3 -readonly "$DB" "SELECT earliest_ts FROM event_span WHERE scope = 'all'")
+if [ -n "$EARLIEST_MS" ] && [ "$EARLIEST_MS" -le $(( ($(date +%s) - 7*86400) * 1000 )) ]; then
+  SRC="--source tracker"
+else
+  SRC=""
+fi
+echo "SRC=[$SRC]"
+```
+
+Pass `$SRC` to every `evaluate`, `report` and `show` below. It is `--source tracker` ONLY when the earliest event is at least 7 days old; otherwise it stays empty and the default source `ceta` is used. State which source you used in the findings. The two histories are never mixed, and under the tracker source the ids are the tracker's `call_id`. If `event_span` is empty or the database is missing, use the default source.
+
 ### Step 1: Capture the datasets
 
 The miss-ranking steps (2-3) run over misses only; the calibration steps (4-6) run over the FULL dataset (they are NOT `--misses-only` "misses" — they segment every row). Capture both once, then query the files (re-running `evaluate` replays every row through the engine and is slow):
 
 ```bash
-claude-extended-tool-approver evaluate --misses-only --format=json > /tmp/ceta-misses.json
-claude-extended-tool-approver evaluate --format=json > /tmp/ceta-all.json
+claude-extended-tool-approver evaluate $SRC --misses-only --format=json > /tmp/ceta-misses.json
+claude-extended-tool-approver evaluate $SRC --format=json > /tmp/ceta-all.json
 ```
 
 Check how many misses exist:
@@ -66,7 +85,7 @@ jq 'length' /tmp/ceta-misses.json
 If zero misses, skip Steps 2-3 and go straight to the calibration steps (4-6) — they run over the full dataset regardless of the miss count.
 
 **Keep `/tmp/ceta-all.json`.** Once the implementation ticket (Phase 2) lands a rule-module
-change for one of these patterns, re-run `evaluate --format=json --baseline=/tmp/ceta-all.json`
+change for one of these patterns, re-run `evaluate $SRC --format=json --baseline=/tmp/ceta-all.json`
 to get the decision delta in one command instead of a second manual replay — see that ticket's
 Reproduce section below.
 
@@ -99,10 +118,40 @@ jq 'group_by(.command_class) | map({
 For the top 5-10 pattern groups, get full details on 2-3 sample rows per group:
 
 ```bash
-claude-extended-tool-approver show <sample_id_1> <sample_id_2> <sample_id_3> --format=json
+claude-extended-tool-approver show $SRC <sample_id_1> <sample_id_2> <sample_id_3> --format=json
 ```
 
+Under `--source tracker`, `show` prints the call's stored `ceta.trace` as `trace` and who settled it (`settled_by`, `settlement`, `grading_cell`).
+
 **Tip:** If tracing was enabled (`CLAUDE_TOOL_APPROVER_TRACE=1`), the `show` output includes a `trace` array showing every rule that was evaluated, its decision, and reason. This reveals _why_ each rule abstained — invaluable for deciding which command's spec needs updating.
+
+### Step 3b: Who settled it (tracker source only)
+
+Skip this step under the default source. Under `--source tracker`, `/tmp/ceta-all.json` already places every call by CETA's verdict and by who settled it. The calls CETA did not settle are the work list: they cost a person's attention, classifier tokens or an unattended agent's detour. Print the ranked table, then rank the groups of one cell from the JSON:
+
+```bash
+claude-extended-tool-approver evaluate $SRC | sed -n '/^Who settled it/,$p'
+```
+
+```bash
+# Groups of each ask/abstain cell, by count (Bash by command_class; the cell order is the priority order).
+jq 'map(select(.grading_cell != null))
+    | group_by(.grading_cell)
+    | map({cell: .[0].grading_cell, calls: length,
+           top: (group_by(if .tool_name=="Bash" then .command_class else .tool_name end)
+                 | map({group: (if .[0].tool_name=="Bash" then .[0].command_class else .[0].tool_name end), count: length, sample_ids: ([.[].id][0:3])})
+                 | sort_by(-.count) | .[0:5])})' /tmp/ceta-all.json
+```
+
+How to read the cells (a converted ask, `ask/converted`, counts as an ask):
+
+- `ask/person/approved` and `abstain/classifier/approved`: a person or the classifier approved what CETA did not, so a CETA approve rule is missing. A person approving is the stronger evidence.
+- `ask/person/refused` and `abstain/classifier/refused`: a CETA reject rule is missing.
+- `ask/converted`: an unattended agent was refused where CETA was unsure; an approve or reject rule would spare it the detour.
+- `abstain/person`: either direction; read `settlement` per call.
+- `abstain/rule-or-mode`: nothing was spent; lowest priority.
+
+Rows with `settlement` `pending` or `unresolved` are never graded (their `category` is `unresolved`); they are counted, not dropped. The correctness check (`category`) is graded against `settlement`: `approved` expects `allow`, `refused` expects `deny`, and a call that ran and errored (`outcome` `failed`) expects `allow`.
 
 ### Step 4: APPROVE candidates — segment by `approval_source` tier
 
@@ -337,7 +386,7 @@ Omit any list whose query returned an empty set, but STATE that it was empty and
 
 ## Phase 2: Create Beads (After User Approval)
 
-For each user-approved pattern, create a bead. Both pattern-analysis skills create `task` beads since they propose improvements rather than fix defects:
+For each user-approved pattern, create a bead. In the Reproduce and Verifying commands of the templates below, `` is Step 0's flag: write it out literally (`--source tracker`, or nothing), so the bead reproduces against the same source. Both pattern-analysis skills create `task` beads since they propose improvements rather than fix defects:
 
 ```bash
 bd create \
@@ -385,7 +434,7 @@ on it, and denies it inside `$(...)`.
 
 claude-extended-tool-approver specs list --format=json | jq -r '.[].name' | grep -x '<command>' # no output = still no spec
 
-claude-extended-tool-approver show <id1> <id2> <id3> --format=json
+claude-extended-tool-approver show $SRC <id1> <id2> <id3> --format=json
 
 ## Next step
 
@@ -424,17 +473,17 @@ expected decision is `<expected_decision>` (based on user outcome: <outcome>).
 
 ## Reproduce
 
-claude-extended-tool-approver evaluate --misses-only --format=json | \
+claude-extended-tool-approver evaluate $SRC --misses-only --format=json | \
  jq '[.[] | select(.command_class | test("<pattern-regex>"))]'
 
-claude-extended-tool-approver show <id1> <id2> <id3> --format=json
+claude-extended-tool-approver show $SRC <id1> <id2> <id3> --format=json
 
 ## Verifying the fix (spec-authoring ticket)
 
 After the command spec change lands, confirm the decision delta in one command rather than a
 second manual replay:
 
-claude-extended-tool-approver evaluate --format=json \
+claude-extended-tool-approver evaluate $SRC --format=json \
  --baseline=/tmp/ceta-all.json # the file captured in this ticket's Step 1, before the change
 
 This reports every row whose replay verdict moved, classified more-restrictive vs
@@ -446,7 +495,7 @@ and that nothing else regressed.
 
 If `CLAUDE_TOOL_APPROVER_TRACE=1` was set when the hook originally ran, the `show` output includes a `trace` array with the full rule evaluation chain — every rule, its decision, and reason. Use this to see exactly why each rule abstained:
 
-claude-extended-tool-approver show <id1> --format=json | jq '.[] | .trace'
+claude-extended-tool-approver show $SRC <id1> --format=json | jq '.[] | .trace'
 
 If trace data is not available (tracing was off), enable it for future sessions:
 
@@ -471,5 +520,6 @@ Beads should include the `claude-extended-tool-approver` and `spec-authoring` la
 
 - Binary: `packages/claude-extended-tool-approver/cmd/claude-extended-tool-approver/`
 - Rule modules (frozen per R1 — deletions only, no new fixes): `packages/claude-extended-tool-approver/internal/rules/*/`
-- Database: `~/.local/share/claude-extended-tool-approver/asks.db`
+- Database (default source `ceta`): `~/.local/share/claude-extended-tool-approver/asks.db`
+- Tracker database (`--source tracker`): `${XDG_STATE_HOME:-~/.local/state}/claude-tool-tracker/tracker.db` (read-only; `--tracker-db PATH` overrides)
 - Trace env var: `CLAUDE_TOOL_APPROVER_TRACE=1` — enables per-rule decision tracing in `show` output

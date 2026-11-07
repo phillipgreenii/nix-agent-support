@@ -23,6 +23,8 @@
 //     calls included (what show needs).
 //   - (*Adapter).Key(callID) (asklog.CallKey, bool, error): the lasting
 //     session_id + tool_use_id identity under which operator labels are stored.
+//   - (*Adapter).Traces(callIDs) (map[int][]TraceEntry, error): the stored
+//     ceta.trace annotation of each call that has one (what show renders).
 //   - (*Adapter).SkippedCounts(fromMs, toMs) (SkipCounts, error): the ingest
 //     skipped-line counts of every ingest run whose ingest_ms is in the window.
 //   - (*Adapter).SessionSources() ([]SessionSource, error) and
@@ -71,7 +73,7 @@
 // (a refusal wins over result error: a call refused by a hook error or by the
 // mode ends with result error, but it never ran, so it is not "failed", which
 // means the hook let the call through and the tool then errored); otherwise
-// result error -> failed; approved -> approved; pending -> pending; anything
+// result error -> failed; approved -> failed when the call ran and errored (failed_timing), else approved; pending -> pending; anything
 // else (unresolved) -> unresolved. DecisionRow.PromptID is "person" when
 // settled_by is person (so asklog.ApprovalSource sees a prompt) and nil
 // otherwise. DecisionRow.CorrectDec and Excluded come from the label join
@@ -107,6 +109,9 @@ var views = map[string][]string{
 	"ingest_skips": {
 		"ingest_ms", "lines_read", "events_new", "events_duplicate", "skipped_invalid_json",
 		"skipped_missing_field", "skipped_total", "events_without_call",
+	},
+	"annotations": {
+		"event_id", "session_id", "tool_use_id", "call_id", "source", "kind", "ts", "data",
 	},
 	"session_sources": {
 		"session_id", "sources", "has_tracker", "has_ceta", "tracker_events", "ceta_events",
@@ -384,12 +389,64 @@ func outcomeOf(r Row) string {
 	case r.Result == "error":
 		return asklog.OutcomeFailed
 	case r.Settlement == "approved":
+		if r.FailedTiming != nil && *r.FailedTiming {
+			return asklog.OutcomeFailed
+		}
 		return asklog.OutcomeApproved
 	case r.Settlement == "pending":
 		return asklog.OutcomePending
 	default:
 		return asklog.OutcomeUnresolved
 	}
+}
+
+// TraceEntry is one rule of a stored ceta.trace annotation, in CETA's own
+// trace shape.
+type TraceEntry struct {
+	RuleOrder int    `json:"rule_order"`
+	RuleName  string `json:"rule_name"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// Traces returns, per call_id, the rule trace stored in the call's ceta.trace
+// annotation (the latest one when a resumed session wrote several). A call with
+// no stored trace, or one whose trace is not a list, is absent from the map.
+func (a *Adapter) Traces(callIDs []int) (map[int][]TraceEntry, error) {
+	out := map[int][]TraceEntry{}
+	if len(callIDs) == 0 {
+		return out, nil
+	}
+	marks := make([]string, len(callIDs))
+	args := make([]any, len(callIDs))
+	for i, id := range callIDs {
+		marks[i] = "?"
+		args[i] = id
+	}
+	rows, err := a.db.Query(`SELECT call_id, data FROM annotations WHERE kind = 'ceta.trace' AND call_id IN (`+
+		strings.Join(marks, ",")+`) ORDER BY ts, event_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("tracker database: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int
+		var data string
+		if err := rows.Scan(&id, &data); err != nil {
+			return nil, fmt.Errorf("tracker database: %w", err)
+		}
+		var d struct {
+			Trace []TraceEntry `json:"trace"`
+		}
+		if json.Unmarshal([]byte(data), &d) != nil || len(d.Trace) == 0 {
+			continue
+		}
+		out[id] = d.Trace
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("tracker database: %w", err)
+	}
+	return out, nil
 }
 
 // SkipCounts totals the ingest runs in a time window.

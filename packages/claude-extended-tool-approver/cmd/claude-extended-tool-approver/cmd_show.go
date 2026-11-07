@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/settlegrade"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,7 @@ type showResult struct {
 	DeliveredVerdict string `json:"delivered_verdict,omitempty"`
 	IsError          *bool  `json:"is_error,omitempty"`
 	DenialReason     string `json:"denial_reason,omitempty"`
+	GradingCell      string `json:"grading_cell,omitempty"`
 }
 
 func newShowCmd() *cobra.Command {
@@ -52,7 +54,10 @@ func newShowCmd() *cobra.Command {
 		Use:   "show ID [ID ...]",
 		Short: "Show full details and rule-trace for logged decision rows",
 		Long: `Display the full details of one or more logged decision rows,
-including the rule-evaluation trace that produced the hook decision.
+including the rule-evaluation trace that produced the hook decision. Under
+--source tracker the trace is the call's stored ceta.trace annotation, and the
+output also carries who settled the call (settled_by, settlement) and its cell
+of the settlement grading table.
 
 Use --format=json for machine-readable output or --format=table
 (default) for a human-readable tabular view.`,
@@ -166,6 +171,13 @@ func writeShow(format string, results []showResult) {
 			}
 			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				r.ID, r.ToolName, r.ToolSummary, r.HookDecision, r.Outcome, correct, sandbox)
+			if r.SettledBy != "" {
+				conv := ""
+				if r.ConvertedAsk != nil && *r.ConvertedAsk {
+					conv = " (converted ask)"
+				}
+				fmt.Fprintf(w, "  SETTLED: %s, %s%s\n", r.SettledBy, r.Settlement, conv)
+			}
 			if len(r.Trace) > 0 {
 				fmt.Fprintln(w, "  TRACE:")
 				for _, tr := range r.Trace {
@@ -182,13 +194,22 @@ func writeShow(format string, results []showResult) {
 }
 
 // showTrackerResults is show's --source tracker path: the ids are the
-// tracker's call_ids, and the rows come from its published views. show does not
-// replay: the engine trace belongs to the ceta.trace annotation, which the
-// miss-analysis packet renders.
+// tracker's call_ids, and the rows come from its published views. The rule
+// trace is the call's stored ceta.trace annotation; a call with none shows no
+// trace (show does not replay), and its grading cell is shown beside it.
 func showTrackerResults(src sourceFlags, ids []int) []showResult {
 	a := openTrackerOrExit(src)
 	defer func() { _ = a.Close() }()
 	rows, err := a.RowsByIDs(ids, loadTrackerLabels())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	callIDs := make([]int, len(rows))
+	for i, r := range rows {
+		callIDs[i] = r.CallID
+	}
+	traces, err := a.Traces(callIDs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -218,6 +239,12 @@ func showTrackerResults(src sourceFlags, ids []int) []showResult {
 		}
 		conv := r.ConvertedAsk
 		res.ConvertedAsk = &conv
+		for _, te := range traces[r.CallID] {
+			res.Trace = append(res.Trace, showTraceEntry{RuleOrder: te.RuleOrder, RuleName: te.RuleName, Decision: te.Decision, Reason: te.Reason})
+		}
+		if cell, kind := settlegrade.Place(r); kind == settlegrade.Placed {
+			res.GradingCell = string(cell)
+		}
 		if r.HookDecision != nil {
 			res.HookDecision = *r.HookDecision
 		}

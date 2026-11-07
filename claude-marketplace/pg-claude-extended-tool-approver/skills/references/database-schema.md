@@ -6,23 +6,28 @@ This reference describes the JSON fields produced by `evaluate` and `show`. Sour
 
 Each row in the output array has the following fields:
 
-| Field             | Type           | Description                                                                                                                                                          |
-| ----------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int            | Row id in the asks database.                                                                                                                                         |
-| `tool_name`       | string         | Tool that was invoked (e.g. `Bash`, `Read`, `Edit`).                                                                                                                 |
-| `tool_summary`    | string         | One-line DISPLAY summary of the invocation. Truncated — MUST NOT be used as a grouping key; use `command_class` instead.                                             |
-| `command_class`   | string         | Stable, non-truncated grouping key for the invocation. Analysis that buckets rows by "same command" MUST group on this.                                              |
-| `hook_decision`   | string         | The decision the hook returned at log time: `allow`, `ask`, `deny`, or `abstain` (or empty for a built-in ASK with no CETA row).                                     |
-| `replay_result`   | string         | The decision the current rule engine returns when replaying this row.                                                                                                |
-| `settings_result` | string         | (Only with `--settings=<path>`) The decision `settings.local.json` would have returned.                                                                              |
-| `category`        | string         | `correct`, `miss-uncaught`, `miss-caught-by-settings`, `needs-review`, `unresolved`, or `stale-cwd`.                                                                 |
-| `outcome`         | string         | What actually happened to the call — ground truth (`approved`, `denied`, `rejected`, `unresolved`, `pending`). See [Outcomes](#outcomes).                            |
-| `sandbox_enabled` | int or null    | `1`, `0`, or `null`. See [sandbox-enabled.md](sandbox-enabled.md).                                                                                                   |
-| `approval_source` | string         | Derived approval-MECHANISM bucket. One of `unknown`, `bypass`, `auto`, `settings`, `hook`, `user`. See below.                                                        |
-| `permission_mode` | string or null | Raw Claude Code permission mode at log time, stored VERBATIM (e.g. `default`, `plan`, `acceptEdits`, `dontAsk`, `auto`, `bypassPermissions`). `null` on pre-v5 rows. |
-| `agent_type`      | string or null | The subagent type that issued the call (e.g. `Explore`), or `null` for the main agent. A SEPARATE axis from `approval_source`.                                       |
-| `outcome_notes`   | string or null | Free-form notes attached at resolution (e.g. the `auto_mode_classifier: <reason>` string on an auto-mode denial).                                                    |
-| `tool_response`   | object or null | The PostToolUse result payload as a nested JSON object, or `null`. See [`tool_response` shape](#tool_response-shape).                                                |
+| Field                                                              | Type           | Description                                                                                                                                                          |
+| ------------------------------------------------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                               | int            | Row id in the asks database.                                                                                                                                         |
+| `tool_name`                                                        | string         | Tool that was invoked (e.g. `Bash`, `Read`, `Edit`).                                                                                                                 |
+| `tool_summary`                                                     | string         | One-line DISPLAY summary of the invocation. Truncated — MUST NOT be used as a grouping key; use `command_class` instead.                                             |
+| `command_class`                                                    | string         | Stable, non-truncated grouping key for the invocation. Analysis that buckets rows by "same command" MUST group on this.                                              |
+| `hook_decision`                                                    | string         | The decision the hook returned at log time: `allow`, `ask`, `deny`, or `abstain` (or empty for a built-in ASK with no CETA row).                                     |
+| `replay_result`                                                    | string         | The decision the current rule engine returns when replaying this row.                                                                                                |
+| `settings_result`                                                  | string         | (Only with `--settings=<path>`) The decision `settings.local.json` would have returned.                                                                              |
+| `category`                                                         | string         | `correct`, `miss-uncaught`, `miss-caught-by-settings`, `needs-review`, `unresolved`, or `stale-cwd`.                                                                 |
+| `outcome`                                                          | string         | What actually happened to the call — ground truth (`approved`, `denied`, `rejected`, `unresolved`, `pending`). See [Outcomes](#outcomes).                            |
+| `sandbox_enabled`                                                  | int or null    | `1`, `0`, or `null`. See [sandbox-enabled.md](sandbox-enabled.md).                                                                                                   |
+| `approval_source`                                                  | string         | Derived approval-MECHANISM bucket. One of `unknown`, `bypass`, `auto`, `settings`, `hook`, `user`. See below.                                                        |
+| `permission_mode`                                                  | string or null | Raw Claude Code permission mode at log time, stored VERBATIM (e.g. `default`, `plan`, `acceptEdits`, `dontAsk`, `auto`, `bypassPermissions`). `null` on pre-v5 rows. |
+| `agent_type`                                                       | string or null | The subagent type that issued the call (e.g. `Explore`), or `null` for the main agent. A SEPARATE axis from `approval_source`.                                       |
+| `outcome_notes`                                                    | string or null | Free-form notes attached at resolution (e.g. the `auto_mode_classifier: <reason>` string on an auto-mode denial).                                                    |
+| `tool_response`                                                    | object or null | The PostToolUse result payload as a nested JSON object, or `null`. See [`tool_response` shape](#tool_response-shape).                                                |
+| `settled_by`                                                       | string         | (Only `--source tracker`) Who settled the call: `ceta`, `person`, `mode`, `rule` or `classifier`. See [Who settled it](#who-settled-it---source-tracker).            |
+| `settlement`                                                       | string         | (Only `--source tracker`) `approved`, `refused`, `pending` or `unresolved`.                                                                                          |
+| `converted_ask`                                                    | bool           | (Only `--source tracker`) `true` when CETA said ask and an unattended session delivered a reject. Counts as an ask in the miss analysis.                             |
+| `grading_cell`                                                     | string         | (Only `--source tracker`) The call's cell of the settlement grading table; empty for a call CETA settled itself or one that fits no cell.                            |
+| `engine_verdict`, `delivered_verdict`, `is_error`, `denial_reason` | various        | (Only `--source tracker`) CETA's own verdict and the verdict delivered (`approve`, `ask`, `reject`, `abstain`), whether the call errored, and the denial reason.     |
 
 ## `show <id...> --format=json`
 
@@ -66,6 +71,48 @@ one session sharing one `resolved_at`, days after `created_at`, with empty
 manufactured a phantom false-allow population that dominated the apparent
 false-allow set. A `denied` row now always carries a real decline reason in
 `outcome_notes`.
+
+## Source: `ceta` and `tracker`
+
+`evaluate`, `report`, `show`, `set-correct-decision` and `mark-excluded` take `--source ceta|tracker`
+(default `ceta`). `--source ceta` reads CETA's own ask log, as everything above describes.
+`--source tracker` reads the claude-tool-tracker database, read-only, through its published views
+(`--tracker-db PATH` overrides the default path): `id` is the tracker's stable `call_id`, and
+`outcome` is derived from the stored settlement (`refused` is `rejected` when CETA settled it and
+`denied` otherwise, `approved` is `approved`, or `failed` when the call ran and errored). The two
+histories are never mixed: old ask-log rows lack the settlement data. Operator labels
+(`set-correct-decision`, `mark-excluded`) stay in CETA's database, keyed by `session_id` +
+`tool_use_id`, and are joined in. Tracker output keeps the fields above and adds the ones marked
+"Only `--source tracker`".
+
+## Who settled it (`--source tracker`)
+
+The settlement dimension places every call by CETA's verdict (`engine_verdict`) and by who settled
+it and how (`settled_by`, `settlement`). It is a separate axis from `approval_source`: that one
+infers the mechanism from the permission mode and a prompt id, this one is recorded by the tracker.
+A converted ask (`converted_ask`) counts as an ask. A call with no CETA verdict counts as an abstain.
+The calls CETA did not settle fall in these cells (`grading_cell`), listed in priority order:
+
+| `grading_cell`                | CETA's verdict | Settled by / as           | What it costs                       | Points at                 |
+| ----------------------------- | -------------- | ------------------------- | ----------------------------------- | ------------------------- |
+| `ask/person/approved`         | `ask`          | person, approved          | work stopped until answered         | a CETA approve rule       |
+| `ask/person/refused`          | `ask`          | person, refused           | work stopped until answered         | a CETA reject rule        |
+| `ask/converted`               | `ask`          | CETA, refused (converted) | the unattended agent had to reroute | an approve or reject rule |
+| `abstain/classifier/approved` | `abstain`      | classifier, approved      | classifier tokens                   | a CETA approve rule       |
+| `abstain/classifier/refused`  | `abstain`      | classifier, refused       | classifier tokens                   | a CETA reject rule        |
+| `abstain/person`              | `abstain`      | person, either            | work stopped until answered         | an approve or reject rule |
+| `abstain/rule-or-mode`        | `abstain`      | rule or mode              | nothing; lowest priority            | optional                  |
+
+`evaluate` (summary) prints this table with the groups of each cell ranked by count, ties by name,
+grouped by tool and, for Bash, by `command_class`. `report --group-by grading` prints the same as
+`<cell> | <group>` entries (cells in priority order), and `report --group-by settled_by|settlement`
+counts the raw columns. Calls CETA settled itself and calls that fit no cell (pending, unresolved,
+no `settled_by`) are counted below the table, never ranked.
+
+The correctness check is graded against `settlement`: `approved` grades as `allow`, `refused` as
+`deny`, a call that ran and errored (`outcome` `failed`) as `allow`; `pending` and `unresolved` are
+left out of the grading and counted as `unresolved`. Under `--source tracker`, `show` also prints
+the call's stored `ceta.trace` annotation as `trace` (a call with no stored trace shows none).
 
 ## `approval_source`
 

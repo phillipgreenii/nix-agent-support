@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/settlegrade"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/trackeradapter"
 	"github.com/spf13/cobra"
 )
 
@@ -36,17 +38,30 @@ time window.
 
 --misses-only skips rows whose outcome records no decision at all ("pending"
 and "unresolved"): with nothing having decided the call, the hook cannot have
-disagreed with anything.`,
+disagreed with anything.
+
+Under --source tracker, --group-by also takes settled_by and settlement (the
+tracker's "who settled it" columns) and grading: the settlement grading table of
+evaluate, one entry per cell and group, keyed "<cell> | <group>", cells in
+priority order and groups ranked by count within a cell (ties by name), with
+Bash grouped by command class. Calls CETA settled itself and calls that fit no
+cell are left out of grading.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := src.validate(); err != nil {
 				return err
 			}
+			switch groupBy {
+			case "settled_by", "settlement", "grading":
+				if !src.isTracker() {
+					return fmt.Errorf("--group-by %s needs --source tracker (the ask log does not record who settled a call)", groupBy)
+				}
+			}
 			runReport(groupBy, missesOnly, format, days, since, src)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&groupBy, "group-by", "tool_name", "Group results by: tool_name|hook_decision|outcome|sandbox_enabled|command")
+	cmd.Flags().StringVar(&groupBy, "group-by", "tool_name", "Group results by: tool_name|hook_decision|outcome|sandbox_enabled|command (tracker source also: settled_by|settlement|grading)")
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show miss categories")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: json|table")
 	cmd.Flags().IntVar(&days, "days", 0, "Only report rows from the last N days")
@@ -69,7 +84,12 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 
 	// report only ever reads rows to summarize them — it never writes to the ask
 	// log, so it opens read-only (pg2-cbihz).
-	rows, _ := loadSourceRows(src, sinceDate)
+	rows, trackerRows := loadSourceRows(src, sinceDate)
+
+	if *groupBy == "grading" {
+		printGrading(rows, trackerRows, *missesOnly, *format)
+		return
+	}
 
 	counts := map[string]int{}
 	for _, row := range rows {
@@ -89,6 +109,10 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 			key = row.Outcome
 		case "sandbox_enabled":
 			key = sandboxEnabledKey(row.SandboxEnabled)
+		case "settled_by":
+			key = emptyAsNull(trackerRows[row.ID].SettledBy)
+		case "settlement":
+			key = emptyAsNull(trackerRows[row.ID].Settlement)
 		case "command":
 			key = asklog.CommandClass(row.ToolName, json.RawMessage(row.ToolInputJSON), row.CWD)
 		default:
@@ -139,4 +163,39 @@ func isReportMiss(row asklog.DecisionRow) bool {
 	}
 	expected := outcomeToExpectedDecision(row.Outcome)
 	return expected == "" || hookDec != expected
+}
+
+func emptyAsNull(s string) string {
+	if s == "" {
+		return "NULL"
+	}
+	return s
+}
+
+// printGrading is report --group-by grading: one entry per cell and group of
+// the settlement grading table. --misses-only keeps the rows isReportMiss keeps.
+func printGrading(rows []asklog.DecisionRow, trackerRows map[int]trackeradapter.Row, missesOnly bool, format string) {
+	var kept []trackeradapter.Row
+	for _, row := range rows {
+		if missesOnly && !isReportMiss(row) {
+			continue
+		}
+		kept = append(kept, trackerRows[row.ID])
+	}
+	entries := []reportEntry{}
+	for _, c := range settlegrade.Build(kept).Cells {
+		for _, g := range c.Groups {
+			entries = append(entries, reportEntry{Key: string(c.Cell) + " | " + g.Group, Count: g.Count})
+		}
+	}
+	switch format {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(entries)
+	default:
+		for _, e := range entries {
+			fmt.Printf("%-70s %5d\n", e.Key, e.Count)
+		}
+	}
 }

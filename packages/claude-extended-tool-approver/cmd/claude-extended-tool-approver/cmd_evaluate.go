@@ -15,7 +15,9 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/goldencorpus"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/settingseval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/settlegrade"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/trackeradapter"
 	"github.com/spf13/cobra"
 )
 
@@ -64,6 +66,10 @@ type evalResult struct {
 	DeliveredVerdict string `json:"delivered_verdict,omitempty"`
 	IsError          *bool  `json:"is_error,omitempty"`
 	DenialReason     string `json:"denial_reason,omitempty"`
+	// grading_cell is the call's cell of the settlement grading table
+	// (internal/settlegrade); empty for a call CETA settled itself or one that
+	// fits no cell.
+	GradingCell string `json:"grading_cell,omitempty"`
 }
 
 func newEvaluateCmd() *cobra.Command {
@@ -136,7 +142,14 @@ from its published views; --tracker-db overrides the path) instead of CETA's ask
 log. The default is --source ceta. The two histories are never mixed; under
 tracker, ids are the tracker's call_id and each row also carries settled_by,
 settlement, converted_ask, engine_verdict, delivered_verdict, is_error and
-denial_reason. Operator labels stay in CETA's database (set-correct-decision and
+denial_reason, plus grading_cell, the call's cell of the settlement grading
+table. The summary then also prints that table: every call CETA did not settle
+placed by CETA's verdict and by who settled it and how (ask or abstain, person,
+classifier, rule or mode, converted ask), ranked by count and grouped by tool
+(Bash by command class); see internal/settlegrade. The correctness check is
+graded against settlement: approved grades as allow, refused as deny, a call
+that ran and errored as allow; pending and unresolved are left out and counted
+as unresolved. Operator labels stay in CETA's database (set-correct-decision and
 mark-excluded take the same --source), keyed by session_id + tool_use_id.
 
 --corpus <path> switches evaluate to an entirely different grading source: the
@@ -234,6 +247,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 	// duration of this replay — see setup.EngineCache. Measured: 351,719 rows
 	// against 1,240 distinct CWDs (pg2-rszk3).
 	engines := setup.NewEngineCache()
+	var gradedTracker []trackeradapter.Row
 
 	for _, row := range rows {
 		// approval_source classifies CONTEXT, not outcome, so it is derived and
@@ -258,6 +272,10 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		}
 		if tr, ok := trackerRows[row.ID]; ok {
 			r.applyTracker(tr)
+			gradedTracker = append(gradedTracker, tr)
+			if cell, kind := settlegrade.Place(tr); kind == settlegrade.Placed {
+				r.GradingCell = string(cell)
+			}
 		}
 		if row.ToolResponse != nil && *row.ToolResponse != "" {
 			r.ToolResponse = json.RawMessage(*row.ToolResponse)
@@ -356,6 +374,9 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		fmt.Printf("Unresolved:          %5d\n", counts["unresolved"])
 		fmt.Printf("By sandbox:          on=%d off=%d unknown=%d\n",
 			sandboxCounts["on"], sandboxCounts["off"], sandboxCounts["unknown"])
+		if src.isTracker() {
+			fmt.Print(settlegrade.Build(gradedTracker).Format())
+		}
 	}
 }
 
@@ -371,6 +392,13 @@ func categorize(r evalResult, row asklog.DecisionRow) string {
 			return "miss-caught-by-settings"
 		}
 		return "miss-uncaught"
+	}
+
+	// A call still pending (tracker source: no call_end yet, the session may
+	// still run) has no settlement to grade against either; it is counted with the
+	// unresolved ones and never graded.
+	if r.Settlement == "pending" {
+		return "unresolved"
 	}
 
 	// Nobody ever decided this call, so there is no ground truth to grade

@@ -7,3 +7,16 @@ Misses (uncaught):       1
 Needs review:            0
 Unresolved:              0
 By sandbox:          on=3 off=2 unknown=1
+Who settled it (calls CETA did not settle, by priority):
+  ask/person/approved                1
+          1  rm -rf build
+  ask/person/refused                 0
+  ask/converted                      1
+          1  curl example.invalid
+  abstain/classifier/approved        0
+  abstain/classifier/refused         0
+  abstain/person                     0
+  abstain/rule-or-mode               1
+          1  Write
+  settled by CETA (not ranked)       2
+  not placed (pending/unresolved/other)     1

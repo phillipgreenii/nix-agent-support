@@ -1,0 +1,144 @@
+[
+  {
+    "id": 1,
+    "session_id": "sess-g",
+    "cwd": "/nonexistent/example-repo",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"git push origin main\"}",
+    "tool_summary": "git push origin main",
+    "hook_decision": "ask",
+    "hook_reason": "fixture",
+    "outcome": "approved",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:21Z",
+    "sandbox_enabled": 0,
+    "trace": [
+      {
+        "rule_order": 1,
+        "rule_name": "fixture-rule",
+        "decision": "ask",
+        "reason": "fixture"
+      }
+    ],
+    "settled_by": "person",
+    "settlement": "approved",
+    "converted_ask": false,
+    "engine_verdict": "ask",
+    "delivered_verdict": "ask",
+    "is_error": false,
+    "grading_cell": "ask/person/approved"
+  },
+  {
+    "id": 9,
+    "session_id": "sess-g",
+    "cwd": "/nonexistent/example-repo",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"curl example.invalid\"}",
+    "tool_summary": "curl example.invalid",
+    "hook_decision": "deny",
+    "hook_reason": "fixture",
+    "outcome": "rejected",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:21Z",
+    "sandbox_enabled": 0,
+    "trace": [
+      {
+        "rule_order": 1,
+        "rule_name": "fixture-rule",
+        "decision": "ask",
+        "reason": "fixture"
+      }
+    ],
+    "settled_by": "ceta",
+    "settlement": "refused",
+    "converted_ask": true,
+    "engine_verdict": "ask",
+    "delivered_verdict": "reject",
+    "is_error": false,
+    "grading_cell": "ask/converted"
+  },
+  {
+    "id": 23,
+    "session_id": "sess-g",
+    "cwd": "/nonexistent/example-repo",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"go test ./...\"}",
+    "tool_summary": "go test ./...",
+    "hook_decision": "ask",
+    "hook_reason": "fixture",
+    "outcome": "failed",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:22Z",
+    "sandbox_enabled": 0,
+    "trace": [
+      {
+        "rule_order": 1,
+        "rule_name": "fixture-rule",
+        "decision": "ask",
+        "reason": "fixture"
+      }
+    ],
+    "settled_by": "person",
+    "settlement": "approved",
+    "converted_ask": false,
+    "engine_verdict": "ask",
+    "delivered_verdict": "ask",
+    "is_error": true,
+    "grading_cell": "ask/person/approved"
+  },
+  {
+    "id": 27,
+    "session_id": "sess-g",
+    "cwd": "/nonexistent/example-repo",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"npm test\"}",
+    "tool_summary": "npm test",
+    "hook_decision": "ask",
+    "hook_reason": "fixture",
+    "outcome": "unresolved",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:22Z",
+    "sandbox_enabled": 0,
+    "trace": [
+      {
+        "rule_order": 1,
+        "rule_name": "fixture-rule",
+        "decision": "ask",
+        "reason": "fixture"
+      }
+    ],
+    "settled_by": "person",
+    "settlement": "unresolved",
+    "converted_ask": false,
+    "engine_verdict": "ask",
+    "delivered_verdict": "ask"
+  },
+  {
+    "id": 29,
+    "session_id": "sess-g",
+    "cwd": "/nonexistent/example-repo",
+    "tool_name": "Bash",
+    "tool_input_json": "{\"command\":\"git status\"}",
+    "tool_summary": "git status",
+    "hook_decision": "allow",
+    "hook_reason": "fixture",
+    "outcome": "approved",
+    "excluded": 0,
+    "created_at": "2026-09-21T14:13:22Z",
+    "sandbox_enabled": 0,
+    "trace": [
+      {
+        "rule_order": 1,
+        "rule_name": "fixture-rule",
+        "decision": "approve",
+        "reason": "fixture"
+      }
+    ],
+    "settled_by": "ceta",
+    "settlement": "approved",
+    "converted_ask": false,
+    "engine_verdict": "approve",
+    "delivered_verdict": "approve",
+    "is_error": false
+  }
+]

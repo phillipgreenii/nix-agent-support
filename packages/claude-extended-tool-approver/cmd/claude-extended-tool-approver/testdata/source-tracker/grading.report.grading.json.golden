@@ -1,0 +1,46 @@
+[
+  {
+    "key": "ask/person/approved | git push origin main",
+    "count": 2
+  },
+  {
+    "key": "ask/person/approved | Write",
+    "count": 1
+  },
+  {
+    "key": "ask/person/approved | go test ./...",
+    "count": 1
+  },
+  {
+    "key": "ask/person/refused | docker run example",
+    "count": 1
+  },
+  {
+    "key": "ask/person/refused | make build",
+    "count": 1
+  },
+  {
+    "key": "ask/converted | curl example.invalid",
+    "count": 1
+  },
+  {
+    "key": "abstain/classifier/approved | make build",
+    "count": 1
+  },
+  {
+    "key": "abstain/classifier/refused | make build",
+    "count": 1
+  },
+  {
+    "key": "abstain/person | kubectl delete pod x",
+    "count": 1
+  },
+  {
+    "key": "abstain/person | kubectl get pods",
+    "count": 1
+  },
+  {
+    "key": "abstain/rule-or-mode | ls",
+    "count": 2
+  }
+]

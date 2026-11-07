@@ -80,3 +80,21 @@ derives to `approval_source == "unknown"`, so:
 When you hit this state, fall back to the `agent_type` axis for the weaker-tier
 segmentation and STATE the caveat in your findings rather than reporting the
 empty human tier as "no candidates".
+
+## Settlement dimension (`--source tracker`)
+
+`approval_source` is inferred from `permission_mode` and a prompt id. Under `--source tracker` the
+tracker records who settled each call, so the inference is not needed: `settled_by` (`ceta`,
+`person`, `mode`, `rule`, `classifier`) and `settlement` (`approved`, `refused`, `pending`,
+`unresolved`) say it directly, and `evaluate` ranks the calls CETA did not settle by cell (see
+[database-schema.md](database-schema.md#who-settled-it---source-tracker)). The two-way reading in this page
+carries over:
+
+- `abstain/classifier/approved` and `ask/person/approved`: APPROVE candidates. A person approving is
+  the human (PRIMARY) tier; the classifier approving is the weaker tier.
+- `abstain/classifier/refused` and `ask/person/refused`: REJECT candidates (a CETA reject rule).
+- `ask/converted`: an unattended agent was refused where CETA was unsure; an approve or reject rule
+  would have spared it the detour.
+
+The data-state caveat above applies to `--source ceta` only: the tracker source needs no
+`permission_mode` inference.

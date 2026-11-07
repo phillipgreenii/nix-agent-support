@@ -1,0 +1,30 @@
+Total rows:             16
+Stale CWD:              16
+Retired root:            0
+Correct:                 0
+Misses (settings):       0
+Misses (uncaught):       0
+Needs review:            0
+Unresolved:              0
+By sandbox:          on=0 off=16 unknown=0
+Who settled it (calls CETA did not settle, by priority):
+  ask/person/approved                4
+          2  git push origin main
+          1  Write
+          1  go test ./...
+  ask/person/refused                 2
+          1  docker run example
+          1  make build
+  ask/converted                      1
+          1  curl example.invalid
+  abstain/classifier/approved        1
+          1  make build
+  abstain/classifier/refused         1
+          1  make build
+  abstain/person                     2
+          1  kubectl delete pod x
+          1  kubectl get pods
+  abstain/rule-or-mode               2
+          2  ls
+  settled by CETA (not ranked)       2
+  not placed (pending/unresolved/other)     1

@@ -1,0 +1,11 @@
+ask/person/approved | git push origin main                                 2
+ask/person/approved | Write                                                1
+ask/person/approved | go test ./...                                        1
+ask/person/refused | docker run example                                    1
+ask/person/refused | make build                                            1
+ask/converted | curl example.invalid                                       1
+abstain/classifier/approved | make build                                   1
+abstain/classifier/refused | make build                                    1
+abstain/person | kubectl delete pod x                                      1
+abstain/person | kubectl get pods                                          1
+abstain/rule-or-mode | ls                                                  2
