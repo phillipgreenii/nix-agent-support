@@ -233,6 +233,14 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-schema-rebuild-required",
 }
 
+// defaultGroupRuleUIDs are the rules that fire once per label value (repo,
+// queue type) on a single systemic event, so a bead per label set were
+// near-duplicates of each other.
+var defaultGroupRuleUIDs = []string{
+	"pg-repo-runner-tips-stale",
+	"pg-router-queue-stalled",
+}
+
 func defaultSnapshotPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -252,6 +260,9 @@ type runOptions struct {
 	grafanaTimeout     time.Duration
 	pgConnectorTimeout time.Duration
 	ruleUIDs           []string
+	// groupRuleUIDs lists rule uids whose label sets share one bead
+	// (an episode comment per label set) instead of one bead each.
+	groupRuleUIDs []string
 
 	haveQueueDepth bool
 	queueDepth     int
@@ -358,6 +369,7 @@ func newRunCmd() *cobra.Command {
 		grafanaTimeout:     10 * time.Second,
 		pgConnectorTimeout: 30 * time.Second,
 		ruleUIDs:           append([]string{}, registeredRuleUIDs...),
+		groupRuleUIDs:      append([]string{}, defaultGroupRuleUIDs...),
 		snapshotPath:       defaultSnapshotPath(),
 		pgRouterPath:       "pg-router",
 		statusTimeout:      10 * time.Second,
@@ -385,6 +397,7 @@ never closes beads; close one once its alert clears after remediation.`,
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the registered rule UIDs")
+	cmd.Flags().StringSliceVar(&opts.groupRuleUIDs, "group-rule-uid", opts.groupRuleUIDs, "Grafana rule UID whose label sets share ONE bead, each label set an episode comment (repeatable); other rules file one bead per label set. Pass an empty value to disable grouping")
 	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading, recorded in the snapshot only (no check escalates on it)")
 	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading, recorded in the snapshot only (no check escalates on it)")
 	cmd.Flags().BoolVar(&opts.backlogFromStatus, "backlog-from-status", false, "read the backlog from `pg-router status --json` (sum of queues[].depth) instead of --backlog")
@@ -680,7 +693,17 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 			alertsChanged = true
 		}
 
+		grouped := make(map[string]bool, len(opts.groupRuleUIDs))
+		for _, uid := range opts.groupRuleUIDs {
+			if uid != "" {
+				grouped[uid] = true
+			}
+		}
+
 		for _, f := range findings {
+			if f.Kind == kindGrafanaAlert && grouped[f.RuleUID] {
+				f.GroupKey = groupFingerprint(f.RuleUID)
+			}
 			st, haveState := alertStates[f.Fingerprint]
 			action, match := decideAction(f, existing, dedupContext{state: st, haveState: haveState, now: now, stillFiringInterval: opts.stillFiringInterval})
 			switch action {
@@ -691,12 +714,48 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				}
 				body := renderBody(f, now, skippedNote, predecessor)
 				createCtx, cancel := withPgTimeout()
-				_, err := deps.createIssue(createCtx, escalationTitle(f), escalationLabels(f), trackedMetadata(f), body, warn)
+				created, err := deps.createIssue(createCtx, escalationTitle(f), escalationLabels(f), trackedMetadata(f), body, warn)
 				cancel()
 				if err != nil {
 					writeFailed(f, fmt.Sprintf("failed to create bd issue for %s", f.Fingerprint), err)
 				} else if f.Kind == kindGrafanaAlert {
 					noted(f)
+					if f.GroupKey != "" {
+						// Later members of this burst must find the new
+						// group bead, and this label set is its first
+						// episode comment.
+						meta := trackedMetadata(f)
+						meta[metaEpisodeCount] = "1"
+						existing = append(existing, connectorIssue{ID: created.ID, Labels: escalationLabels(f), Metadata: meta})
+						episodeCtx, cancel3 := withPgTimeout()
+						err := deps.comment(episodeCtx, created.ID, stillFiringComment(f, alertStates[f.Fingerprint], now), warn)
+						cancel3()
+						if err != nil {
+							writeFailed(f, fmt.Sprintf("failed to comment on bd issue %s for %s", created.ID, f.Fingerprint), err)
+						}
+					}
+				}
+			case actionJoin:
+				after := recordEpisode(st, f.StartsAt, now)
+				commentCtx, cancel := withPgTimeout()
+				err := deps.comment(commentCtx, match.ID, stillFiringComment(f, after, now), warn)
+				cancel()
+				if err != nil {
+					// State stays put, so the next tick retries the join.
+					writeFailed(f, fmt.Sprintf("failed to comment on bd issue %s for %s", match.ID, f.Fingerprint), err)
+					continue
+				}
+				noted(f)
+				joinMeta := recurrenceMetadata(f, match)
+				updateCtx, cancel2 := withPgTimeout()
+				err = deps.updateMetadata(updateCtx, match.ID, joinMeta, warn)
+				cancel2()
+				if err != nil {
+					writeFailed(f, fmt.Sprintf("failed to update bd issue %s for %s", match.ID, f.Fingerprint), err)
+				} else {
+					for k, v := range joinMeta {
+						match.Metadata[k] = v
+					}
 				}
 			case actionUpdate:
 				body := renderBody(f, now, skippedNote, "")

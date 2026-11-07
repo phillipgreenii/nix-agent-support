@@ -37,8 +37,11 @@ const escalationSource = "pg-router-probe"
 func renderBody(f finding, firstSeen time.Time, skippedNote, predecessorID string) string {
 	body := fmt.Sprintf(
 		"Pg-Router-Escalation-Fingerprint: %s\n\nSource: %s\nFinding: %s\nSince: %s\nEvidence:\n%s\n",
-		f.Fingerprint, escalationSource, f.Summary, firstSeen.UTC().Format(time.RFC3339), f.Evidence,
+		bodyFingerprint(f), escalationSource, f.Summary, firstSeen.UTC().Format(time.RFC3339), f.Evidence,
 	)
+	if f.GroupKey != "" {
+		body += "\nGroup member: " + f.Fingerprint + "\n"
+	}
 	if f.Escalation == escalationHuman {
 		body += remediationSection(f)
 	}
@@ -49,6 +52,15 @@ func renderBody(f finding, firstSeen time.Time, skippedNote, predecessorID strin
 		body += "\nNote: this run's other sub-check(s) were skipped/degraded: " + skippedNote + "\n"
 	}
 	return body
+}
+
+// bodyFingerprint is the fingerprint a body advertises: the group key for a
+// grouped finding (the bead's own fingerprint), else the finding's own.
+func bodyFingerprint(f finding) string {
+	if f.GroupKey != "" {
+		return f.GroupKey
+	}
+	return f.Fingerprint
 }
 
 // remediationSection renders the alert's static annotations for a bead filed

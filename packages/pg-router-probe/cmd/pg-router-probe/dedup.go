@@ -43,7 +43,16 @@ const (
 	actionSeed        // open match, no snapshot state yet: record state, write nothing
 	actionRecurrence  // open match, startsAt changed: comment now, episode++
 	actionStillFiring // open match, same startsAt, last noted >= interval ago: comment
+	// actionJoin: a grouped finding (finding.GroupKey) whose label set has
+	// no state yet, matched to the open group bead: comment an episode for
+	// this label set and bump the episode count.
+	actionJoin
 )
+
+// groupFingerprint is the bead fingerprint shared by every label set of a
+// grouped rule uid. It has no "|", so stripGrafanaFolder leaves it alone
+// and it can never equal a per-label-set fingerprint.
+func groupFingerprint(ruleUID string) string { return "group:" + ruleUID }
 
 // matchExisting finds the first existing issue whose own fingerprint
 // metadata, or semicolon-joined alias list, equals f.Fingerprint —
@@ -51,8 +60,18 @@ const (
 // key" paragraph]. The comparison is insensitive to the grafana_folder
 // label on both sides (stripGrafanaFolder), so beads whose stored
 // fingerprint or aliases still carry a folder keep matching.
+//
+// A grouped finding (GroupKey set) matches its own per-label-set
+// fingerprint first (a bead filed before the rule was grouped keeps
+// receiving its own label set), then the shared group bead.
 func matchExisting(f finding, existing []connectorIssue) *connectorIssue {
-	want := stripGrafanaFolder(f.Fingerprint)
+	if m := matchFingerprint(stripGrafanaFolder(f.Fingerprint), existing); m != nil || f.GroupKey == "" {
+		return m
+	}
+	return matchFingerprint(f.GroupKey, existing)
+}
+
+func matchFingerprint(want string, existing []connectorIssue) *connectorIssue {
 	for i := range existing {
 		e := &existing[i]
 		if stripGrafanaFolder(e.Metadata[metaFingerprint]) == want {
@@ -150,6 +169,9 @@ func decideAction(f finding, existing []connectorIssue, dc dedupContext) (dedupA
 	switch f.Kind {
 	case kindGrafanaAlert:
 		if !dc.haveState {
+			if f.GroupKey != "" && match.Metadata[metaFingerprint] == f.GroupKey {
+				return actionJoin, match
+			}
 			return actionSeed, match
 		}
 		if !f.StartsAt.IsZero() && !f.StartsAt.Equal(dc.state.LastStartsAt) {
@@ -194,7 +216,9 @@ func newestClosedMatch(f finding, closed []connectorIssue) *connectorIssue {
 // bumps the count (recurrenceMetadata).
 func trackedMetadata(f finding) map[string]string {
 	m := map[string]string{metaFingerprint: f.Fingerprint}
-	if len(f.Aliases) > 0 {
+	if f.GroupKey != "" {
+		m[metaFingerprint] = f.GroupKey
+	} else if len(f.Aliases) > 0 {
 		m[metaFingerprintAlias] = joinAliases(f.Aliases)
 	}
 	m[metaState] = f.State
@@ -246,6 +270,11 @@ func recordEpisode(st alertState, startsAt, now time.Time) alertState {
 // (<duration>); episodes in last 7d: <n>; current value: <__values__>."
 // st is the state AFTER recordEpisode for this note.
 func stillFiringComment(f finding, st alertState, now time.Time) string {
+	prefix := ""
+	if f.GroupKey != "" {
+		// A shared group bead: say which label set the note is about.
+		prefix = "[" + f.Fingerprint + "] "
+	}
 	startsAt := f.StartsAt
 	if startsAt.IsZero() {
 		startsAt = st.LastStartsAt
@@ -258,8 +287,8 @@ func stillFiringComment(f finding, st alertState, now time.Time) string {
 	if values == "" {
 		values = "unknown"
 	}
-	return fmt.Sprintf("still firing since %s (%s); episodes in last 7d: %d; current value: %s",
-		formatStartsAt(startsAt), dur, episodesInWindow(st, now), values)
+	return fmt.Sprintf("%sstill firing since %s (%s); episodes in last 7d: %d; current value: %s",
+		prefix, formatStartsAt(startsAt), dur, episodesInWindow(st, now), values)
 }
 
 // episodesInWindow counts the recorded episodes within alertEpisodeWindow

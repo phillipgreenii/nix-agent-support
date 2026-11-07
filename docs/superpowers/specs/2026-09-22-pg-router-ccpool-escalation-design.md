@@ -147,6 +147,22 @@ own split between `lat-survey`'s exact-match and the LLM step's fuzzy rename det
 - Grafana-alert findings (`pg-router-probe`): `<rule-uid>|<sorted key=value labels>`, plus a
   semicolon-joined alias field on the bead (`pg_router_escalation_fingerprint_aliases`) so a rule
   UID/label change doesn't spawn a duplicate — verbatim reuse of `lat-survey`'s scheme.
+  **Per-rule grouping (2026-11-07 amendment).** A rule that fires once per label value on a single
+  systemic event (one per repo, one per queue type) filed a burst of near-duplicate beads: in a
+  7-day window 21 of 53 beads were `pg-repo-runner-tips-stale` in bursts of 4 to 6 within a
+  minute, 10 were `pg-router-queue-stalled`, and about half closed as "same cause as sibling".
+  Rule uids listed in `pg-router-probe run --group-rule-uid` (repeatable; default
+  `pg-repo-runner-tips-stale` and `pg-router-queue-stalled`; an empty value disables grouping) are
+  therefore GROUPED: the bead's fingerprint is `group:<rule-uid>`, and each label set is an episode
+  comment on it (prefixed `[<per-label-set fingerprint>]`) plus an episode-count bump, so a
+  6-label burst yields one bead and six episode comments. The per-label-set fingerprint stays the
+  key of the probe's own alert state (episode and still-firing throttling are per label set). A
+  grouped finding matches its own per-label-set fingerprint first, so a bead filed before the rule
+  was grouped keeps receiving its label set. Every other rule keeps one bead per fingerprint.
+  Known limits: after a lost snapshot every label set of a grouped rule re-joins once (a comment
+  burst on the one bead, not new beads). A general burst cap (after N new beads for one rule in a
+  window, file a parent and comment the rest) was considered as a backstop and NOT implemented: it
+  needs time-windowed state the probe does not keep; revisit if an ungrouped rule bursts.
 - `needs_input` findings (`ccpool-probe`): `needs-input:<ccpool session external_id>`.
 - Zombie-count drift (`ccpool-probe`): `zombie-count:<severity band>` (see "nothing new" rule
   below for how the band is computed).

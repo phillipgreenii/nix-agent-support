@@ -56,10 +56,18 @@ const (
 type finding struct {
 	Kind        findingKind
 	Fingerprint string
-	Aliases     []string // non-empty only for kindGrafanaAlert
-	Summary     string
-	Evidence    string
-	State       string
+	// RuleUID is the Grafana rule uid (kindGrafanaAlert only).
+	RuleUID string
+	// GroupKey, when non-empty (kindGrafanaAlert only, set by run.go for
+	// rules listed in --group-rule-uid), makes the finding share ONE bead
+	// with every other label set of the same rule: the bead's fingerprint
+	// metadata is GroupKey, and each label set is an episode comment on
+	// it. Fingerprint stays the per-label-set identity (alert state key).
+	GroupKey string
+	Aliases  []string // non-empty only for kindGrafanaAlert
+	Summary  string
+	Evidence string
+	State    string
 	// StartsAt/Values are kindGrafanaAlert only (zero/"" otherwise): the
 	// alert instance's startsAt (identifies the episode) and its rendered
 	// __values__ annotation (the "current value"). They are NOT part of
@@ -88,6 +96,7 @@ func checkGrafanaAlerts(alerts []grafanaAlert) []finding {
 		findings = append(findings, finding{
 			Kind:        kindGrafanaAlert,
 			Fingerprint: fp,
+			RuleUID:     a.RuleUID,
 			// The alias carries the SAME fingerprint today (this probe has
 			// no other identity for the same alert to alias yet) — dedup.go
 			// still checks it, so a future rule-uid/label rename that
