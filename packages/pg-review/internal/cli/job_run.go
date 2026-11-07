@@ -49,6 +49,7 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 	}
 	defer l.Close()
 	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout(), Evidence: runner.EvidenceStage{}}
+	runner.RegisterCcpool(d)
 	if runnerHook != nil {
 		runnerHook(d)
 	}

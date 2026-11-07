@@ -30,6 +30,7 @@ func newJobMaintainCmd() *cobra.Command {
 			}
 			defer l.Close()
 			d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout()}
+			runner.RegisterCcpool(d)
 			if runnerHook != nil {
 				runnerHook(d)
 			}

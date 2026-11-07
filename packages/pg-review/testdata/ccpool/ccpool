@@ -1,0 +1,28 @@
+#!/bin/bash
+# Fake ccpool CLI for unit tests. FAKE_CCPOOL_SCENARIO names a file of
+# VAR=value lines that selects the behaviour; FAKE_CCPOOL_LOG receives one line
+# per command: "<command> CCPOOL_POOL=<value or UNSET>". Synthetic values only.
+scenario="${FAKE_CCPOOL_SCENARIO:-/dev/null}"
+# shellcheck disable=SC1090
+. "$scenario"
+default_capacity='{"max_sessions":4,"free":2}'
+default_state='{"name":"1","state":"idle","live":true}'
+cmd="$1"
+shift
+printf '%s CCPOOL_POOL=%s\n' "$cmd" "${CCPOOL_POOL-UNSET}" >>"${FAKE_CCPOOL_LOG:-/dev/null}"
+printf '%s\n' "$cmd $*" >>"${FAKE_CCPOOL_LOG:-/dev/null}.args"
+case "$cmd" in
+capacity) echo "${capacity_json:-$default_capacity}" ;;
+new) exit "${new_exit:-0}" ;;
+reply)
+  [ "${reply_exit:-0}" = 0 ] || exit "$reply_exit"
+  echo "turn-1"
+  ;;
+result)
+  [ "${result_exit:-0}" = 0 ] || exit "$result_exit"
+  echo "${result_text:-final message}"
+  ;;
+state) echo "${state_json:-$default_state}" ;;
+cancel | close) exit 0 ;;
+*) exit 1 ;;
+esac

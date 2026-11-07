@@ -77,7 +77,7 @@ func TestJobRunRunKeyAndShowRun(t *testing.T) {
 		t.Errorf("repeat exit %d", code)
 	}
 	// A manual run over the same window runs.
-	manual := append([]string(nil), args[:len(args)-6]...)
+	manual := append(append([]string(nil), args[:len(args)-6]...), "--analyst", "none")
 	if code, out, _ := run(t, manual...); code != exitcode.OK || !strings.Contains(out, "run 2 Filed") {
 		t.Errorf("manual exit %d %q", code, out)
 	}
