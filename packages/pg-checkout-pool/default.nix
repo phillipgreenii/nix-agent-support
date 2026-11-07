@@ -6,7 +6,7 @@
 mkGoApp {
   pname = "pg-checkout-pool";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): a single stdlib-only module
+  # Pattern A (phillipg-nix-repo-base ADR 0008): a single module (golang.org/x/sys only)
   # rooted at this package dir, no local `replace`, modRoot or parent-rooted
   # fileset (same shape as packages/pg-router-disk-watchdog).
   src = lib.cleanSource ./.;

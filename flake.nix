@@ -373,7 +373,7 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-checkout-pool: Pattern A, stdlib-only slot store (per-slot flock,
+          # pg-checkout-pool: Pattern A, slot store (golang.org/x/sys only, for clonefile) (per-slot flock,
           # atomic lease records, slot state machine) plus a status command.
           pg-checkout-pool = final.callPackage ./packages/pg-checkout-pool {
             inherit (goBuilders) mkGoApp;
