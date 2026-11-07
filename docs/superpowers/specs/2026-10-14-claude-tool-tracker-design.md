@@ -327,12 +327,34 @@ because calls still in flight in a live session (five calls of one session, CETA
 
 - Only CETA, 3599. 2764 rows sit in 112 sessions whose first CETA row precedes the first tracker
   session of 2026-10-30T01:25Z to 05:00Z ramp-up: the tracker's hooks load at session start, so
-  sessions begun before the apply never wrote a tracker file. Explained. 785 rows are not
-  explained: sessions 0f3990be (472 rows) and 8d9c4dd8 (312 rows) began on 2026-10-30 after the
-  apply, and one single-row session on 2026-11-05, and none has a tracker file. A further 50 rows
-  sit in sessions that do have a tracker file (46 in session 16b760bf during two bursts on
-  2026-10-30, 4 on 2026-11-03 to 2026-11-06). Open question: why those sessions and bursts have no
-  tracker events. The 9 unkeyed rows are CETA rows with no `tool_use_id` (nothing to join on).
+  sessions begun before the apply never wrote a tracker file. Explained. The remaining 835 rows are explained as follows (investigated 2026-11-07 from the transcripts
+  and the event files). The tracker's command hooks and mod load when the Claude Code process
+  starts, not when a session id begins, and `/clear` (or a resume inside a running process) makes a
+  new session id in the same process. Sessions 0f3990be (472 rows), 8d9c4dd8 (312 rows) and
+  16b760bf (46 of its 56 CETA rows, 2026-10-30T18:37Z) each begin with a `/clear` command in a
+  process that started before the plugin was installed (installed 2026-10-30T00:11Z); their
+  transcripts show CETA's hooks and no `claude-tool-tracker hook` entry for any call. Two more
+  sessions without a tracker file (2a6cd36c and 9e37d224, first CETA rows 2026-10-30T18:35Z and
+  18:23Z) show the same signature: a `/clear` or `/plugin` command dated 2026-10-29 in the same
+  process, and no tracker hook entry. Session 16b760bf has tracker events only from
+  2026-11-03T14:29Z, when it was resumed in a new process. Sessions that started in a fresh
+  process after the rollout (for example 50a30c1b at 06:12Z) all carry tracker events. The
+  expected gap: a tracker plugin takes effect per process, so every session id begun inside a
+  process that predates the install (a long-lived terminal) is invisible until that process is
+  restarted; no repo change can close it, and no new such sessions can appear once those processes
+  end. The one-row session `a161b5c3` (2026-11-05) has no event file and no transcript on this
+  laptop (only an empty session-environment directory from 2026-11-05T05:30Z); its row exists in
+  CETA's own database only, and it is not separately explained. A one-row session `s`
+  with tool use id `t` (2026-11-06) in the event directory is a test fixture of another tool
+  writing into the real event directory, not a Claude session; it is noted for the owners of that
+  tool. Of the 50 rows in sessions that have a tracker file, 46 are the 16b760bf group above
+  (the file belongs to the later resume). Of the other 4, one is a call
+  in the subagent `acf11f0b7aa87c6ca` of session cd63f2a6 (2026-11-06T10:02:46Z: CETA approved it,
+  the tracker has no `call_start`, `pre_tool` or `check` for it, and a call from the same subagent
+  three seconds later was recorded); for sessions 499f0a23 and 62683f59 the event files hold a
+  tracker start for every CETA verdict, so their rows were in flight when the comparison ran and
+  later joined. The single subagent call is not explained;
+  its cause would need a captured hook trace. The 9 unkeyed rows are CETA rows with no `tool_use_id` (nothing to join on).
 - Only the tracker, 210 (64 Bash, 50 Monitor, 46 Edit, 18 Write, 10 `EnterWorktree`; 19 in one
   session). CETA wrote no row for them. Section 10 check 1 already found 25 such calls on the first
   day, 18 of them subagent calls. Open question: which hook path skips CETA for these calls.
