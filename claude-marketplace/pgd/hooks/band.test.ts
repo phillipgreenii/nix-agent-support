@@ -69,7 +69,6 @@ function describe_band_widths() {
   ]
   for (const [title, name, width] of cases) {
     test(`band at ${title}: labels whole, every row clear of the engine control`, () => {
-      clearBandButtons()
       registerBandButton({ id: 'focus', order: 60, label: () => 'Focus', action: 'focus' })
       registerBandButton({ id: 'wrapup', order: 70, label: () => 'Wrap up', action: 'wrapup' })
       registerBandButton({ id: 'band-toggle', order: 100, label: () => '[-]', action: 'band' })
@@ -86,7 +85,6 @@ function describe_band_widths() {
       }
       if (width === 200) expect(rows.length).toBe(1)
       if (width === 52) expect(rows.length > 1).toBe(true)
-      clearBandButtons()
     })
   }
 }
