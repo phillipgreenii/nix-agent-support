@@ -326,6 +326,7 @@ rr_verify_override() {
       reason='the sibling overrides resolve to the same revisions as the locked inputs, so this is not lock skew'
     fi
   fi
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
   extra="$(rr_jq -nc --arg c "$cls" --arg r "$reason" '{class: $c} + (if $r == "" then {} else {classReason: $r} end)')" || return 1
   rr_verdict_write "$repo" "$sha" check "$res" override "$started" "$finished" "$rc" "$olog" "$extra" || return 1
 }
