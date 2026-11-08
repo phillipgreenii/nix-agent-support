@@ -74,14 +74,36 @@ func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string
 			return e
 		}
 		if feed {
-			return s.confirmIngestedFeed(ctx, fw, externalID, mark, window)
+			return s.withHookEvidence(ctx, externalID, res.sentGen, s.confirmIngestedFeed(ctx, fw, externalID, mark, window))
 		}
 		if window > 0 && (mode == ModeNoWait || mode == ModeQueue) {
-			return s.confirmIngested(ctx, externalID, window)
+			return s.withHookEvidence(ctx, externalID, res.sentGen, s.confirmIngested(ctx, externalID, window))
 		}
 		return nil
 	})
 	return res, err
+}
+
+// withHookEvidence turns a "not ingested" or "unknown" verdict into success when
+// ccpool's own store shows the session ran a hook after the delivery. Every hook
+// transition (Stop, StopFailure, Notification, AskUserQuestion) bumps the row's
+// generation, and none can fire unless the model started a turn on the prompt,
+// so a generation past the one stamped at delivery is a fact that does not depend
+// on the recorder having indexed the transcript yet. The recorder can lag past
+// the confirm window (and a session that finishes its turn inside the window has
+// already fired its Stop hook), so an empty feed window alone never proves the
+// prompt was dropped. A queue-mode delivery into a busy session can also see the
+// earlier turn's hook; that errs toward "ingested", the direction that does not
+// kill a working session.
+func (s *Service) withHookEvidence(ctx context.Context, externalID string, sentGen int64, verdict error) error {
+	if verdict == nil || (!errors.Is(verdict, ErrPromptNotIngested) && !errors.Is(verdict, ErrIngestUnknown)) {
+		return verdict
+	}
+	row, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
+	if err == nil && ok && sentGen > 0 && row.Generation > sentGen {
+		return nil
+	}
+	return verdict
 }
 
 // FeedWaiter is the optional Transcript extension backed by the recorder's change
@@ -200,7 +222,7 @@ func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mod
 	}
 
 	if mode == ModeNoWait || mode == ModeQueue {
-		return Result{State: store.Working}, nil
+		return Result{State: store.Working, sentGen: since}, nil
 	}
 
 	out, err := s.d.Wait.Wait(ctx, externalID, since)

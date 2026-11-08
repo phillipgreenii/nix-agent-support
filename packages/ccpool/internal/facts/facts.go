@@ -355,6 +355,8 @@ func (r *Reader) Mark(ctx context.Context) (string, error) {
 // caller must treat this as "unknown", never as "not ingested".
 var ErrFeedUnanswered = errors.New("the recorder feed did not answer within the window")
 
+var errFeedDegraded = errors.New("the recorder is behind: its feed page was marked degraded")
+
 // feedRetryPause is the gap before asking the feed again after a retryable
 // failure (busy, unavailable, query timeout).
 const feedRetryPause = 500 * time.Millisecond
@@ -420,11 +422,18 @@ func (r *Reader) WaitMessage(ctx context.Context, transcriptPath, mark string, w
 			}
 			continue
 		}
-		answered, lastErr = true, nil
 		for _, en := range ans.Entries {
 			if en.Kind == "record" {
 				return true, nil
 			}
+		}
+		// A degraded page (the recorder is behind or backfilling) that holds no
+		// record is not an answer that nothing matched: the record may not be
+		// indexed yet.
+		if ans.Degraded {
+			answered, lastErr = false, errFeedDegraded
+		} else {
+			answered, lastErr = true, nil
 		}
 		if ans.More && len(ans.Entries) > 0 {
 			cursor = ans.Entries[len(ans.Entries)-1].Seq

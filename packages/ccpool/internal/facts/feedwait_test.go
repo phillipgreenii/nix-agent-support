@@ -118,3 +118,16 @@ func TestWaitMessageBusyAtEndAfterGoodPageIsUnanswered(t *testing.T) {
 		t.Fatalf("WaitMessage = %v, %v; want false, ErrFeedUnanswered", ok, err)
 	}
 }
+
+// An empty page the recorder marks degraded (it is behind) does not say the
+// record is absent: the record may not be indexed yet.
+func TestWaitMessageDegradedEmptyPageIsUnansweredNotAbsent(t *testing.T) {
+	sock, _ := fakeRecorder(t, func(int32) (int, any) {
+		return http.StatusOK, map[string]any{"entries": []any{}, "next_cursor": "1:1", "degraded": true}
+	})
+	r := newFakeReader(sock)
+	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 1200*time.Millisecond)
+	if ok || !errors.Is(err, facts.ErrFeedUnanswered) {
+		t.Fatalf("WaitMessage = %v, %v; want false, ErrFeedUnanswered", ok, err)
+	}
+}

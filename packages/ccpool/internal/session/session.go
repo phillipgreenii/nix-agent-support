@@ -171,6 +171,10 @@ type Result struct {
 	State    store.State
 	Reply    string
 	TimedOut bool
+
+	// sentGen is the row generation stamped when a fire-and-forget prompt was
+	// delivered; a later generation means a hook fired since.
+	sentGen int64
 }
 
 // LaunchWaiter is an optional Waiter extension: WaitLaunch is Wait for a launch

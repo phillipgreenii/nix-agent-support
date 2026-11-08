@@ -224,3 +224,39 @@ func TestResumable_probeErrorIsNotGone(t *testing.T) {
 		t.Fatalf("resumable = %v, %v; want true", ok, err)
 	}
 }
+
+// hookingTranscript is a feed whose window ends empty (the recorder has not
+// indexed the transcript), while the session's Stop hook fires during the wait.
+type hookingTranscript struct {
+	feedTranscript
+	onWait func()
+}
+
+func (h hookingTranscript) WaitMessage(ctx context.Context, p, mark string, w time.Duration) (bool, error) {
+	h.onWait()
+	return h.feedTranscript.WaitMessage(ctx, p, mark, w)
+}
+
+// A session that ran its turn (its Stop hook bumped the row) inside the confirm
+// window is ingested even when the feed saw nothing, and so is one whose feed
+// could not answer.
+func TestSend_confirmIngest_hookActivityBeatsAnEmptyFeed(t *testing.T) {
+	for name, tr := range map[string]feedTranscript{
+		"feed empty":      {appeared: false},
+		"feed unanswered": {waitErr: errors.New("recorder busy")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var s *Service
+			h := hookingTranscript{feedTranscript: tr}
+			h.onWait = func() {
+				if _, err := s.d.Store.Transition(context.Background(), "a", store.Idle, "", ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s = feedService(t, h, &sendTmux{live: true})
+			if _, err := s.SendWithConfirm(context.Background(), "a", "do it", ModeNoWait, 20*time.Millisecond); err != nil {
+				t.Fatalf("SendWithConfirm = %v; want nil (a hook fired after delivery)", err)
+			}
+		})
+	}
+}
