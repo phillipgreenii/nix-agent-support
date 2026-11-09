@@ -12,12 +12,15 @@ func wakeCount(d *Daemon, reason string) float64 {
 	return v
 }
 
-// The default mode is the scan: no event loop state is built and the loop runs
-// Tick on the minute ticker.
-func TestSettleModeDefaultsToScan(t *testing.T) {
+// The default mode is the event loop; scan stays selectable.
+func TestSettleModeDefaultsToEvent(t *testing.T) {
 	_, d, _ := seamDaemon(t, nil)
+	if !d.sett.EventMode() {
+		t.Fatal("the default settle mode is not event")
+	}
+	_, d, _ = seamDaemon(t, func(e *env) { e.cfg.SettleMode = "scan" })
 	if d.sett.EventMode() {
-		t.Fatal("the default settle mode is not scan")
+		t.Fatal("settle mode scan did not select the scan loop")
 	}
 }
 

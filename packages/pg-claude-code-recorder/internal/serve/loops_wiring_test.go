@@ -97,7 +97,7 @@ func TestEachProductionLoopRecordsExactlyOneRunPerTick(t *testing.T) {
 		run    func(*Daemon)
 		mod    func(*env)
 	}{
-		{"settle tick and its removal pass", obs.LoopSettleTick, []string{obs.LoopRemovalPass, obs.LoopSettleTick}, (*Daemon).settleLoop, func(e *env) { e.cfg.RemoveEnable = true }},
+		{"settle tick and its removal pass", obs.LoopSettleTick, []string{obs.LoopRemovalPass, obs.LoopSettleTick}, (*Daemon).settleLoop, func(e *env) { e.cfg.SettleMode = "scan"; e.cfg.RemoveEnable = true }},
 		{"refresh gauges", obs.LoopRefreshGauges, []string{obs.LoopRefreshGauges}, (*Daemon).refreshLoop, nil},
 		{"wal checkpoint", obs.LoopWALCheckpoint, []string{obs.LoopWALCheckpoint}, (*Daemon).walCheckpointLoop, nil},
 		{"tracker tick and poll", obs.LoopTrackerTick, []string{obs.LoopTrackerTick, obs.LoopTrackerPoll}, (*Daemon).trackLoop, nil},

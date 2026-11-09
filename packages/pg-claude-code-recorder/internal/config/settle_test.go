@@ -67,7 +67,7 @@ func TestQueryTimeoutDefaultsTo25sAndIsConfigurable(t *testing.T) {
 func TestSettleLoopKeys(t *testing.T) {
 	e := env(map[string]string{"HOME": "/h"})
 	d := Defaults(e)
-	if d.SettleMode != "scan" || d.SettleReconcile != time.Hour || d.SettleMinWake != 5*time.Second || d.SettleTick != 5*time.Minute {
+	if d.SettleMode != "event" || d.SettleReconcile != time.Hour || d.SettleMinWake != 5*time.Second || d.SettleTick != 5*time.Minute {
 		t.Fatalf("defaults %q %v %v", d.SettleMode, d.SettleReconcile, d.SettleMinWake)
 	}
 	load := func(body string) (Config, error) {

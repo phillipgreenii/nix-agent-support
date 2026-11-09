@@ -232,11 +232,11 @@ in
           "scan"
           "event"
         ];
-        default = "scan";
+        default = "event";
         description = ''
-          The settle loop: `scan` runs the whole-store pass every `settle.tick`;
-          `event` settles from a dirty set and a due-time queue and runs the
-          scan only as the reconciliation. Changing it needs a daemon restart.
+          The settle loop: `event` (the default) settles from a dirty set and a
+          due-time queue and runs the scan only as the reconciliation; `scan`
+          runs the whole-store pass every `settle.tick`. Changing it needs a daemon restart.
           Rendered as `settle.mode`.
         '';
       };

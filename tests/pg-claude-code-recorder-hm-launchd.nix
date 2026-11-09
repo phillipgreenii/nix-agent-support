@@ -348,7 +348,7 @@ let
     removeDisabledByDefault = d.remove.enable == false && (opts on).remove.enable == false;
     settleAndRemoveDefaults = d.settle.after == "24h" && d.remove.after == "30d";
     settleLoopDefaults =
-      d.settle.mode == "scan"
+      d.settle.mode == "event"
       && d.settle.tick == "5m"
       && d.settle.reconcile == "1h"
       && d.settle.min_wake == "5s";
