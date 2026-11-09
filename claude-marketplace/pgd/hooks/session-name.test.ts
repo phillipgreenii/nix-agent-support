@@ -142,7 +142,7 @@ test('with components.sessionName off no registry file is read and the id is sho
   const clock = fakeClock()
   const s = stubHost({ [`${DIR}/4242.json`]: ENTRY_USER })
   initSources(s.host, clock)
-  const off = { ...DEFAULT_OPTIONS, components: { ...DEFAULT_OPTIONS.components, sessionName: false } }
+  const off = { ...DEFAULT_OPTIONS, components: { ...DEFAULT_OPTIONS.components, assume: false, sessionName: false } }
   setOptions(off)
   registerComponents(off, s.host)
   const hooks: Record<string, (...a: unknown[]) => unknown> = {}

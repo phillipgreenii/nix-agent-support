@@ -96,6 +96,13 @@ export const register: Register = on => {
       env: {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
         awsProfile: () => $.env.get('AWS_PROFILE'),
+        awsConfigFile: () => $.env.get('AWS_CONFIG_FILE'),
+        // The four names Apply and Clear set: each its own literal (the engine refuses a generic
+        // variable-name forwarder). Used only by the Assume component.
+        setAwsProfile: (v: string) => $.env.set('AWS_PROFILE', v),
+        setAwsRegion: (v: string) => $.env.set('AWS_REGION', v),
+        setAwsDefaultRegion: (v: string) => $.env.set('AWS_DEFAULT_REGION', v),
+        setGrantedCommand: (v: string) => $.env.set('GRANTED_COMMAND', v),
         home: () => $.env.get('HOME'),
         claudeConfigDir: () => $.env.get('CLAUDE_CONFIG_DIR'),
       },

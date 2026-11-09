@@ -18,7 +18,7 @@ export interface AlertInputs {
   dolt?: boolean
   thresholds: AlertThresholds
   mode?: unknown
-  assume?: unknown
+  assume?: { role?: string; expiresAt?: number }
   now: number
 }
 
@@ -68,6 +68,13 @@ export const ALERT_ITEMS: AlertItem[] = [
       return typeof p === 'number' && p >= v.thresholds.contextAlert
     },
     text: v => `context ${Math.round(v.usage?.contextPercent ?? 0)}%`,
+  },
+  {
+    // a missing expiry never raises it
+    id: 'assume-expired',
+    priority: 50,
+    condition: v => v.assume?.expiresAt !== undefined && v.assume.expiresAt <= v.now,
+    text: () => 'assume expired',
   },
 ].sort((a, b) => b.priority - a.priority)
 
@@ -127,6 +134,7 @@ export function alertRow(): string {
     usage: readCached<Usage>('usage'),
     dolt: options.components.beads ? readCached<boolean>('dolt') : undefined,
     mode: options.components.sessionMode ? readCached('sessionMode') : undefined,
+    assume: options.components.assume ? readCached<{ role?: string; expiresAt?: number }>('assume') : undefined,
     thresholds: options.alerts.thresholds,
     now: Date.now(),
   }

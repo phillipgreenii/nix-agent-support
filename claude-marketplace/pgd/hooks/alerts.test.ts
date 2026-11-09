@@ -29,7 +29,7 @@ const limits = (five: number, seven: number) => ({
 test('items are ordered by priority, highest first', () => {
   const p = ALERT_ITEMS.map(i => i.priority)
   expect(p).toEqual([...p].sort((a, b) => b - a))
-  expect(ALERT_ITEMS.map(i => i.id)).toEqual(['wrapping-up', 'dolt', 'limit', 'context'])
+  expect(ALERT_ITEMS.map(i => i.id)).toEqual(['wrapping-up', 'dolt', 'limit', 'context', 'assume-expired'])
 })
 
 test('only true conditions appear, highest priority first', () => {

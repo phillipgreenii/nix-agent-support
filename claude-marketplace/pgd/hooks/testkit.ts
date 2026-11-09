@@ -53,9 +53,12 @@ export interface StubHost {
   host: any
   calls: string[]
   files: Map<string, string>
-  state: { cwd: string; model: string; id: string; stateHome?: string; awsProfile?: string; claudeConfigDir?: string }
+  state: { cwd: string; model: string; id: string; stateHome?: string; awsProfile?: string; awsConfigFile?: string; claudeConfigDir?: string }
   // Every fs.write as { path, text }, in order.
   writes: Array<{ path: string; text: string }>
+  // Every env.set closure call as { name, value }, in order; set envSetFail to make them throw.
+  envSets: Array<{ name: string; value: string }>
+  envSetFail: { on: boolean }
   // The in-memory plugin store behind host.store; set storeFail to make every call throw.
   // Arguments of every config.set, prompt.fill and prompt.submit, in order.
   configSets: unknown[]
@@ -80,12 +83,18 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
   const storeFail = { on: false }
   const configSets: unknown[] = []
   const fills: unknown[] = []
+  const envSets: StubHost['envSets'] = []
+  const envSetFail = { on: false }
   const submits: unknown[] = []
   const commands: StubHost['commands'] = []
   const panes: StubHost['panes'] = []
   const facts: StubHost['facts'] = {
     version: '2.1.314',
     repo: { root: '/work/repo', remote: null, name: 'owner/repo' },
+  }
+  const setEnv = (name: string, value: string): void => {
+    if (envSetFail.on) throw new Error('denied')
+    envSets.push({ name, value })
   }
   const host = {
     process: {
@@ -158,6 +167,11 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         calls.push('env.awsProfile')
         return state.awsProfile
       },
+      awsConfigFile: async () => state.awsConfigFile,
+      setAwsProfile: async (v: string) => setEnv('AWS_PROFILE', v),
+      setAwsRegion: async (v: string) => setEnv('AWS_REGION', v),
+      setAwsDefaultRegion: async (v: string) => setEnv('AWS_DEFAULT_REGION', v),
+      setGrantedCommand: async (v: string) => setEnv('GRANTED_COMMAND', v),
     },
     ui: {
       invalidate: () => {
@@ -190,5 +204,5 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
       repo: async () => facts.repo,
     },
   }
-  return { host, calls, files: fileMap, state, configSets, fills, submits, storeData, storeFail, writes, commands, panes, facts }
+  return { host, calls, files: fileMap, state, configSets, fills, submits, envSets, envSetFail, storeData, storeFail, writes, commands, panes, facts }
 }

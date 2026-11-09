@@ -197,14 +197,41 @@ Each of these is covered by a test in `hooks/model-modal.test.ts`.
 
 The Assume button (band order 50) shows the AWS profile the session's own processes run with: the
 `AWS_PROFILE` value in the Claude process environment, read once at session start through the
-facade's `env.awsProfile()`. It has no modal, Apply, Clear or alert yet; the button is the only
-place the profile is shown.
+facade's `env.awsProfile()`. Pressing it opens the Assume modal.
 
 - Label: `Assume` when the variable is unset or empty, otherwise the profile name.
 - Colour, matching the name ignoring case: unset or empty is dim; a name containing `prod` is red;
   otherwise a name containing `dev` is green; any other value is yellow. `prod` is checked first,
   so a name containing both is red.
-- Source: `assume`, value `{ role?, expiresAt? }`, event-driven, feeds the band.
+- Source: `assume`, value `{ role?, expiresAt? }` (epoch milliseconds), polled once a minute
+  (`intervalMs` 60000, feeds the band and the alert); Apply and Clear update it directly.
+- Modal `assume`: the current role and its expiry when known, one `role:<name>` row per profile, and
+  the actions `apply`, `clear` and `close`. Choosing a role only marks it; Apply uses the marked
+  role (else the current role when the config lists it).
+- Alert `assume expired` (priority 50): true when a stored expiry has passed. A missing expiry never
+  raises it.
+
+### Choices the design left to the builder
+
+- Role list: the profile names in the AWS config (the file named by `AWS_CONFIG_FILE`, else
+  `~/.aws/config`), read once through `host.fs.read`. `[default]` and `[profile NAME]` sections
+  count; other sections (for example `sso-session`) do not. A missing file leaves the list empty.
+- Apply: sets `AWS_PROFILE`, `AWS_REGION`, `AWS_DEFAULT_REGION` and `GRANTED_COMMAND` with
+  `$.env.set` through four facade closures (each a fixed string literal), and does not run
+  `assume`. The profile name is the value of `AWS_PROFILE` and `GRANTED_COMMAND`; the region
+  variables are set only when the profile has a `region` key. A denied set leaves the stored role as
+  it was. The operator's verification found the AWS CLI authenticates with the profile and the two
+  region variables alone, and that a model-run Bash call sees values set this way.
+- Clear: sets the four variables to empty strings (the host has no unset) and clears the stored role
+  and expiry.
+- Expiry source: the `Expiration` field of `aws configure export-credentials --profile NAME --format
+process`, run once after each Apply. Only that field is read; the credentials are never stored or
+  logged. The call runs with a five-minute timeout, because a lapsed SSO login can open a keychain
+  prompt and a browser window, which does not fit the 30-second default. A failed or timed out
+  lookup leaves no expiry (button and modal work, no alert). A profile that was already set when the
+  session started has no expiry either; applying it again records one.
+- Check: the one-minute poll returns the stored value and asks for one redraw when the expiry has
+  just passed, so the alert row appears without another event.
 
 Known limit: a profile exported inside a `!` command or a Bash call changes only that child shell,
 so the button does not show it.
