@@ -785,7 +785,7 @@ groups:
           severity: warning
         annotations:
           summary: "The focus rank is silently degraded"
-          description: "At least one rank input has been degraded for over 30 minutes (unparseable due dates, unmapped priorities, age fallbacks, unavailable unblocks or an absent status category), so the ranking is less reliable than it looks. The input label of pg_desk_focus_rank_degraded_inputs names which; run `pg-desk focus explain` on an affected item."
+          description: "A tracker format change has been silently degrading the rank for over 30 minutes: due values that do not parse (unparseable_due) or Jira issues with no status category (status_category_absent). The input label of pg_desk_focus_rank_degraded_inputs names which; run `pg-desk focus explain` on an affected item. The other inputs (age_fallback, unblocks_unavailable, unmapped_priority) are standing conditions that are non-zero in normal operation and are dashboard-only, not alerted."
         data:
           - refId: A
             relativeTimeRange:
@@ -796,7 +796,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum(pg_desk_focus_rank_degraded_inputs)
+              expr: sum(pg_desk_focus_rank_degraded_inputs{input=~"unparseable_due|status_category_absent"})
           - refId: B
             datasourceUid: __expr__
             model:

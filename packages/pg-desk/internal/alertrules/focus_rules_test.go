@@ -177,11 +177,16 @@ var focusRules = []focusRule{
 	},
 	{
 		uid:       "pg-desk-focus-rank-degraded",
-		expr:      `sum(pg_desk_focus_rank_degraded_inputs)`,
+		expr:      `sum(pg_desk_focus_rank_degraded_inputs{input=~"unparseable_due|status_category_absent"})`,
 		forText:   "30m",
 		forDur:    30 * time.Minute,
 		threshold: 0,
-		agg:       sumOf,
+		agg: func(in []focusSample) (float64, bool) {
+			// Only the two tracker-format-change signals; =~ is fully anchored.
+			return sumOf(matchSeries(in, func(l map[string]string) bool {
+				return l["input"] == "unparseable_due" || l["input"] == "status_category_absent"
+			}))
+		},
 	},
 	{
 		uid: "pg-desk-focus-consumer-lag",
@@ -251,7 +256,7 @@ func (r focusRule) hot() []focusSample {
 	case "pg-desk-watch-listing-degraded":
 		return []focusSample{{map[string]string{"type": "issue", "status": "degraded"}, 1}}
 	case "pg-desk-focus-rank-degraded":
-		return []focusSample{{map[string]string{"input": "age_fallback"}, 1}}
+		return []focusSample{{map[string]string{"input": "unparseable_due"}, 1}, {map[string]string{"input": "age_fallback"}, 35}}
 	case "pg-desk-focus-consumer-lag":
 		return []focusSample{{map[string]string{"type": "issue", "consumer": "focus"}, 501}}
 	}
@@ -286,7 +291,14 @@ func (r focusRule) cold() []focusSample {
 		// An issue listing that is ok, and a degraded PR listing: out of scope after P8a.
 		return []focusSample{{map[string]string{"type": "issue", "status": "ok"}, 3}, {map[string]string{"type": "pr", "status": "degraded"}, 7}}
 	case "pg-desk-focus-rank-degraded":
-		return []focusSample{{map[string]string{"input": "age_fallback"}, 0}, {map[string]string{"input": "unmapped_priority"}, 0}}
+		return []focusSample{
+			{map[string]string{"input": "unparseable_due"}, 0},
+			{map[string]string{"input": "status_category_absent"}, 0},
+			// Standing, by-design or data conditions stay dashboard-only.
+			{map[string]string{"input": "age_fallback"}, 35},
+			{map[string]string{"input": "unblocks_unavailable"}, 56},
+			{map[string]string{"input": "unmapped_priority"}, 19},
+		}
 	case "pg-desk-focus-consumer-lag":
 		// At the provisional threshold exactly; a pr-type consumer far over it.
 		return []focusSample{
@@ -349,7 +361,7 @@ func TestFocusRulesPinTheYAML(t *testing.T) {
 			if strings.Count(blk, "expr:") != 1 {
 				t.Errorf("rule has %d expr lines, want exactly one", strings.Count(blk, "expr:"))
 			}
-			if !strings.Contains(r.expr, "{") && r.uid != "pg-desk-focus-rank-degraded" {
+			if !strings.Contains(r.expr, "{") {
 				t.Errorf("model error: %s has no label selector", r.uid)
 			}
 		})
