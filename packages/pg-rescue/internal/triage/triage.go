@@ -94,9 +94,18 @@ type Options struct {
 	Verify func(path string, snap livestate.Snapshot, opt livestate.Options) livestate.Result
 }
 
+// BeadID returns the bare bead id of an item id. pg-router names an event
+// "<bead id>@<change id>", and the tracker knows only the bead id, so every
+// tracker call MUST use this form; the full id stays for dedup and provenance.
+func BeadID(itemID string) string {
+	id, _, _ := strings.Cut(itemID, "@")
+	return id
+}
+
 // Run triages one item. It returns an error only when the tracker failed; a
 // claim it took is released on that path, best effort.
 func Run(tr Tracker, o Options) (Outcome, error) {
+	o.ItemID = BeadID(o.ItemID)
 	it, err := tr.Show(o.ItemID)
 	if err != nil {
 		return Outcome{}, err

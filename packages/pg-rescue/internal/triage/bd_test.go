@@ -96,3 +96,24 @@ func TestBDClaimRefusedIsPeerHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestRunStripsChangeSuffixBeforeTracker pins the event id shape pg-router
+// hands the role ("<bead id>@<change id>"): bd knows only the bare bead id.
+func TestRunStripsChangeSuffixBeforeTracker(t *testing.T) {
+	var argvs [][]string
+	run := func(_ context.Context, argv []string) ([]byte, int, error) {
+		argvs = append(argvs, argv)
+		return []byte(`[{"id":"pg2-s5mjbx","status":"closed"}]`), 0, nil
+	}
+	id := "pg2-s5mjbx@c764162a3b51c764162a3b51c764162a3b51abcd"
+	if _, err := Run(BD{Run: run}, Options{ItemID: id, Actor: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"bd", "show", "pg2-s5mjbx", "--json"}
+	if len(argvs) != 1 || !reflect.DeepEqual(argvs[0], want) {
+		t.Fatalf("argv = %v, want [%v]", argvs, want)
+	}
+	if BeadID("x-1") != "x-1" {
+		t.Fatal("bare id must pass through")
+	}
+}
