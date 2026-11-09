@@ -3641,6 +3641,41 @@
                 assert lib.length (lib.filter (a: !a.assertion) noUser.assertions) == 2;
                 pkgs.runCommand "test-darwin-primary-user-modules-ok" { } "touch $out";
 
+              # nixos/modules/beads: the NixOS counterpart of the darwin beads policy
+              # module exports BEADS_DOLT_AUTO_START=0 by default, honours an explicit
+              # opt-out, and propagates the flag to home-manager as a specialArg.
+              test-nixos-beads-module =
+                let
+                  evalNixos =
+                    extra:
+                    (lib.evalModules {
+                      modules = [
+                        ./nixos/modules/beads/default.nix
+                        {
+                          options = {
+                            environment.variables = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.str;
+                              default = { };
+                            };
+                            home-manager.extraSpecialArgs = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                        }
+                        extra
+                      ];
+                      specialArgs = { inherit pkgs; };
+                    }).config;
+                  dflt = evalNixos { };
+                  off = evalNixos { phillipgreenii.beads.forbidDoltAutoStart = false; };
+                in
+                assert dflt.environment.variables.BEADS_DOLT_AUTO_START == "0";
+                assert dflt.home-manager.extraSpecialArgs.forbidDoltAutoStart;
+                assert !(off.environment.variables ? BEADS_DOLT_AUTO_START);
+                assert !off.home-manager.extraSpecialArgs.forbidDoltAutoStart;
+                pkgs.runCommand "test-nixos-beads-module-ok" { } "touch $out";
+
               # darwin/modules/pg-connector-github (bead pg2-z5fax.6.5, docket
               # pg2-z5fax.6): registers the pg-connector-github daemon's three log
               # files, its alert rules file and its dashboard with the observability

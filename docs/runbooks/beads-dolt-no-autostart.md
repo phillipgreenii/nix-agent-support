@@ -14,7 +14,8 @@ serving the real data under `~/.local/share/beads-dolt`. The machine-wide `bd`
 (the overlay/`package.nix` wrapper) exports `BEADS_DOLT_AUTO_START=0`, so no
 context transparently auto-starts a server. The generic no-autostart posture is
 gated by `phillipgreenii.beads.forbidDoltAutoStart` (darwin scope, default
-`true`); the Mac-local launchd-server portion of the agent rule is gated
+`true`; on NixOS the same option is declared by `nixos/modules/beads` and exports
+`BEADS_DOLT_AUTO_START=0` through `environment.variables`); the Mac-local launchd-server portion of the agent rule is gated
 separately by `phillipgreenii.beads.localDoltLaunchdServer` (darwin scope,
 default `true`; machines without the launchd server render no launchd text).
 
