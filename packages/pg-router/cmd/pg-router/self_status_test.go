@@ -133,3 +133,44 @@ func TestRoute_selfStatus(t *testing.T) {
 		t.Fatal("helpText does not mention self-status")
 	}
 }
+
+// An empty stdin (what `pg-router self-status` sees when run by hand with no
+// piped request) must be refused by the CLI as a usage error naming what is
+// needed, never forwarded to the core, which would answer
+// "cli.self-status: expected object, got null".
+func TestRunSelfStatusIO_EmptyStdinIsUsageErrorNotNullToCore(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+	ref := svc.Ref()
+
+	var stdout, stderr strings.Builder
+	code := runSelfStatusIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(""), &stdout, &stderr)
+	if code != conformance.ExitUsage {
+		t.Fatalf("exit = %d, want %d/usage; stderr=%s", code, conformance.ExitUsage, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "got null") {
+		t.Fatalf("empty stdin reached the core as null: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "participantId") {
+		t.Fatalf("stderr = %q, want the required request shape named", stderr.String())
+	}
+}
+
+// A real request on stdin still round-trips through runSelfStatusIO to the
+// real core.
+func TestRunSelfStatusIO_RequestOnStdinReachesCore(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+	if _, err := svc.Register("h1", core.KindHandler); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	ref := svc.Ref()
+	var stdout, stderr strings.Builder
+	code := runSelfStatusIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(testSelfStatusRequest), &stdout, &stderr)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"accepted":true`) {
+		t.Fatalf("stdout = %q, want accepted reply", stdout.String())
+	}
+}

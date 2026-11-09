@@ -163,6 +163,18 @@ else the discovery record under the log dir. With **no core running it fails** w
 "no running core" error and exit 1 — it never starts one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)).
 
+`self-status` is not a way to ask the daemon how it is: it needs a JSON request object on stdin
+(`schemaVersion`, `id`, `participantId`, `self`). Run with an empty stdin it exits 2 with a usage
+message naming the required shape, instead of sending nothing to the core. To inspect the daemon use
+`pg-router status`.
+
+`pg-router doctor` reads the config at the path resolved from the **current directory**
+(`.pg-router/config.toml`), not the running daemon's config. Run from a directory without that file
+it therefore warns "no pg-router config found" and "validate: no enabled role" even when the daemon
+runs from another (for example a store) config. This is intended: doctor validates the config a
+`pg-router` started from that directory would use. Use `pg-router config --show` or
+`pg-router status` for the daemon's own resolved config.
+
 ## Roles, prompts & queries (`config.toml`)
 
 Roles, their prompts, and their discovery queries are configured in a repo-local

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,33 +41,49 @@ import (
 // duplicated in every caller
 // (see TestCallCore_SelfStatus_DiscriminatesErrorBeforeReplySchema).
 func runSelfStatus(args []string) int {
+	return runSelfStatusIO(args, os.Stdin, os.Stdout, os.Stderr)
+}
+
+// runSelfStatusIO is runSelfStatus with its streams injected, so a test can
+// drive the real subcommand against a real core without touching the process's
+// stdio.
+func runSelfStatusIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("self-status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves
 	socket := fs.String("socket", "", "path to the running core's socket (from the core-issued callback)")
 	token := fs.String("token", "", "auth token for the running core (from the core-issued callback)")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
-		fmt.Println(helpText)
+		fmt.Fprintln(stdout, helpText)
 		return exitOK
 	case err != nil:
-		fmt.Fprintln(os.Stderr, "self-status:", err)
+		fmt.Fprintln(stderr, "self-status:", err)
 		return conformance.ExitUsage
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintln(os.Stderr, "self-status: unexpected argument:", fs.Arg(0))
-		fmt.Fprintln(os.Stderr, "self-status takes its request as JSON on stdin, never as arguments")
+		fmt.Fprintln(stderr, "self-status: unexpected argument:", fs.Arg(0))
+		fmt.Fprintln(stderr, "self-status takes its request as JSON on stdin, never as arguments")
 		return conformance.ExitUsage
 	}
 
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
-		reportNoCore(os.Stderr, core.SubcommandSelfStatus, err)
+		reportNoCore(stderr, core.SubcommandSelfStatus, err)
 		return conformance.ExitError
 	}
-	request, err := io.ReadAll(os.Stdin)
+	request, err := io.ReadAll(stdin)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "self-status: read request from stdin:", err)
+		fmt.Fprintln(stderr, "self-status: read request from stdin:", err)
 		return conformance.ExitError
 	}
-	return callCore(os.Stdout, os.Stderr, ref, core.SubcommandSelfStatus, request)
+	if len(bytes.TrimSpace(request)) == 0 {
+		// An empty stdin is not a request: the core's schema wants an object
+		// (it would answer "expected object, got null"). The fix is here, in
+		// the CLI refusing to forward nothing, not in the schema accepting null:
+		// a self-status push is only meaningful for a named participant.
+		fmt.Fprintln(stderr, "self-status: no request on stdin; this is a participant callback and needs a JSON object on stdin,")
+		fmt.Fprintln(stderr, `  e.g. {"schemaVersion":"1","id":"<tracking id>","participantId":"<id>","self":"healthy|degraded|unavailable"}`)
+		return conformance.ExitUsage
+	}
+	return callCore(stdout, stderr, ref, core.SubcommandSelfStatus, request)
 }
