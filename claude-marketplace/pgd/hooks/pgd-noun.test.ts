@@ -112,5 +112,6 @@ test('the noun is inert until enabled, and with enable false', async () => {
 test('registerComponents no longer touches the engine', () => {
   const s = stubHost()
   registerComponents(DEFAULT_OPTIONS, s.host)
-  expect(s.calls).toEqual([])
+  // the only call is the Assume source's one-time AWS_PROFILE read at start
+  expect(s.calls).toEqual(['env.awsProfile'])
 })

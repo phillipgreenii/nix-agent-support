@@ -130,7 +130,7 @@ test('a draw of the pane rows starts no fetch, process or file read', async () =
   await put(w, 'bead:b-1', 1, { url: 'https://e.test/1' })
   focusRows()
   focusSpec()
-  expect(w.sh.calls.filter(c => c !== 'ui.invalidate')).toEqual([])
+  expect(w.sh.calls.filter(c => c !== 'ui.invalidate' && c !== 'env.awsProfile')).toEqual([])
 })
 
 test('pressing a row open runs the opener from the action with the item url, never from a draw', async () => {
