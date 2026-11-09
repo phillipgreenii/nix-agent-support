@@ -34,6 +34,7 @@ import (
 // this package's OWN call-site logic chose, then restore the real function.
 var (
 	recordCancel                    = telemetry.RecordCancel
+	seedCounters                    = telemetry.SeedCounters
 	recordReapClosure               = telemetry.RecordReapClosure
 	recordReapPhantomPruned         = telemetry.RecordReapPhantomPruned
 	recordSessionsPreservedForHuman = telemetry.RecordSessionsPreservedForHuman

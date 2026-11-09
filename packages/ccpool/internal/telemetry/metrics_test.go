@@ -607,3 +607,81 @@ func TestSessionRecords_GaugePerKind(t *testing.T) {
 		t.Error("ccpool_session_records not collected")
 	}
 }
+
+// TestSeed_ZeroSamplePerKnownLabelCombination asserts seed exposes a zero
+// sample for every known label combination of each seeded counter, that a
+// subsequent first increment reads as exactly 1 on that same series, and that
+// seeding adds no series with a new name or label set.
+func TestSeed_ZeroSamplePerKnownLabelCombination(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	inst, err := newMetricsInstruments(mp.Meter("test"))
+	if err != nil {
+		t.Fatalf("newMetricsInstruments: %v", err)
+	}
+	ctx := context.Background()
+	attrs := MetricAttrs("/pools/alpha", nil, nil)
+	inst.seed(ctx, attrs)
+
+	collect := func() map[string]map[string]int64 {
+		var rm metricdata.ResourceMetrics
+		if err := reader.Collect(ctx, &rm); err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		out := map[string]map[string]int64{}
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				if !ok {
+					continue
+				}
+				pts := map[string]int64{}
+				for _, dp := range sum.DataPoints {
+					pts[dp.Attributes.Encoded(attribute.DefaultEncoder())] = dp.Value
+				}
+				out[m.Name] = pts
+			}
+		}
+		return out
+	}
+
+	got := collect()
+	want := map[string]int{
+		"ccpool_reap_closures_total":       3,
+		"ccpool_reap_phantom_pruned_total": 1,
+		"ccpool_cancel_total":              2,
+		"ccpool_retries_total":             4,
+		"ccpool_retry_exhausted_total":     1,
+		"ccpool_launch_outcome_total":      15,
+	}
+	for name, n := range want {
+		pts := got[name]
+		if len(pts) != n {
+			t.Errorf("%s: %d seeded series, want %d (%v)", name, len(pts), n, pts)
+		}
+		for k, v := range pts {
+			if v != 0 {
+				t.Errorf("%s{%s}: seeded value %d, want 0", name, k, v)
+			}
+			if !strings.Contains(k, "pool=alpha") {
+				t.Errorf("%s{%s}: missing pool label", name, k)
+			}
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("seeding produced %d counters, want %d", len(got), len(want))
+	}
+
+	// A first real event lands on the seeded series: 0 -> 1.
+	inst.reapClosure(ctx, "idle_ttl", attrs)
+	after := collect()["ccpool_reap_closures_total"]
+	keySet := attribute.NewSet(attribute.String("pool", "alpha"), attribute.String("reason", "idle_ttl"))
+	key := keySet.Encoded(attribute.DefaultEncoder())
+	if after[key] != 1 {
+		t.Errorf("first increment: got %d, want 1 on the seeded series (%v)", after[key], after)
+	}
+	if len(after) != 3 {
+		t.Errorf("increment created a new series: %v", after)
+	}
+}

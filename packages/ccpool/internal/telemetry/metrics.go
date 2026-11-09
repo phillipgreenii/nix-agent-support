@@ -351,6 +351,63 @@ func (m metricsInstruments) sessionOutputTokens(ctx context.Context, tokens int6
 	m.sessionOutputTokensTotal.Add(ctx, tokens, withAttrs(attrs))
 }
 
+// Known label values for the seeded counters. Kept beside the call sites'
+// vocabulary: reap reasons (internal/session/reap.go), cancel outcomes
+// (cancel_close.go), retry classes (cmd/ccpool/retry.go retryClassName) and
+// launch routes/outcomes (see RecordLaunchOutcome).
+var (
+	seedReapReasons    = []string{"idle_ttl", "cap_eviction", "dead_needs_input_ttl"}
+	seedCancelOutcomes = []string{"success", "unconfirmed"}
+	seedRetryClasses   = []string{"transient_server", "transient_network", "rate_limited", "terminal"}
+	seedLaunchRoutes   = []string{"reuse_live", "resume", "resume_fresh_starting", "brand_new", "preflight"}
+	seedLaunchOutcomes = []string{"success", "timeout", "error"}
+)
+
+// seed adds 0 to every seeded counter for each known label combination under
+// attrs, so the series exists with a zero sample before its first real event
+// and that first event reads as an increase of 1 (a series that first appears
+// at 1 has no earlier sample for increase() to subtract). A zero Add changes no
+// value. Only label values known in advance are seeded; the open-ended pool and
+// role attributes are whatever attrs carries, so the series seeded are exactly
+// the ones whose attribute set matches attrs.
+func (m metricsInstruments) seed(ctx context.Context, attrs []attribute.KeyValue) {
+	if m.reapClosuresTotal != nil {
+		for _, r := range seedReapReasons {
+			m.reapClosuresTotal.Add(ctx, 0, withAttrs(attrs, attribute.String("reason", r)))
+		}
+	}
+	if m.reapPhantomPrunedTotal != nil {
+		m.reapPhantomPrunedTotal.Add(ctx, 0, withAttrs(attrs))
+	}
+	if m.cancelTotal != nil {
+		for _, o := range seedCancelOutcomes {
+			m.cancelTotal.Add(ctx, 0, withAttrs(attrs, attribute.String("outcome", o)))
+		}
+	}
+	if m.retriesTotal != nil {
+		for _, c := range seedRetryClasses {
+			m.retriesTotal.Add(ctx, 0, withAttrs(attrs, attribute.String("class", c)))
+		}
+	}
+	if m.retryExhaustedTotal != nil {
+		m.retryExhaustedTotal.Add(ctx, 0, withAttrs(attrs))
+	}
+	if m.launchOutcomeTotal != nil {
+		for _, r := range seedLaunchRoutes {
+			for _, o := range seedLaunchOutcomes {
+				m.launchOutcomeTotal.Add(ctx, 0, withAttrs(attrs, attribute.String("route", r), attribute.String("outcome", o)))
+			}
+		}
+	}
+}
+
+// SeedCounters seeds the event counters with a zero sample for every known
+// label combination under attrs (a MetricAttrs result; reap passes the
+// pool-only set). Call it once per pool per invocation, before any event.
+func SeedCounters(attrs []attribute.KeyValue) {
+	ensureInstruments().seed(context.Background(), attrs)
+}
+
 // ClaudeSessionIDAttrKey is the attribute key carrying a Claude session id on
 // ccpool_session_info, and on that gauge ONLY.
 //

@@ -91,6 +91,9 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// Seed the pool's event counters with a zero sample so the first real
+	// event after a restart is a visible increase.
+	seedCounters(s.poolMetricAttrs())
 	rows, err := s.d.Store.List(ctx)
 	if err != nil {
 		return err
