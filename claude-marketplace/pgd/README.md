@@ -179,6 +179,22 @@ Each of these is covered by a test in `hooks/model-modal.test.ts`.
 | Closing               | Both Apply and an effort choice close the modal.                                                                                                         |
 | Facade                | `host.config.set` takes the engine's `{ key, value }` object; `host.prompt.fill` is one added closure over `$.prompt.fill`.                              |
 
+## Assume (`components.assume`)
+
+The Assume button (band order 50) shows the AWS profile the session's own processes run with: the
+`AWS_PROFILE` value in the Claude process environment, read once at session start through the
+facade's `env.awsProfile()`. It has no modal, Apply, Clear or alert yet; the button is the only
+place the profile is shown.
+
+- Label: `Assume` when the variable is unset or empty, otherwise the profile name.
+- Colour, matching the name ignoring case: unset or empty is dim; a name containing `prod` is red;
+  otherwise a name containing `dev` is green; any other value is yellow. `prod` is checked first,
+  so a name containing both is red.
+- Source: `assume`, value `{ role?, expiresAt? }`, event-driven, feeds the band.
+
+Known limit: a profile exported inside a `!` command or a Bash call changes only that child shell,
+so the button does not show it.
+
 ## Wrap up (always drawn)
 
 The Wrap up button is the last of the component buttons (order 70, after Focus; only the band toggle follows). It has no component flag: it is

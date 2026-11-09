@@ -5,12 +5,13 @@ import type { Usage } from './usage'
 import { timedDraw } from './metrics'
 import { isOpen, toggle } from './toggles'
 import { markBandDrawn } from './modal'
+import type { AssumeValue } from './assume'
 
 // The phase 1 band: plain labels (no buttons yet) for the session id, model and effort, and the
 // context percent, the last coloured by level. renderBand is a plain data description, so a later
 // phase can turn each label into a button without changing its text. The band hook reads cached
 // values only (readCached): it never starts a fetch, a process or a file read.
-export type Level = 'normal' | 'yellow' | 'red'
+export type Level = 'normal' | 'yellow' | 'red' | 'green' | 'dim'
 
 export interface BandRow {
   id: string
@@ -27,6 +28,8 @@ export interface BandButton {
   order: number
   label: (v: BandValues) => string | undefined
   action?: string
+  // The button's colour level, from the same cached values; undefined draws it plain.
+  level?: (v: BandValues) => Level | undefined
 }
 
 let buttons: BandButton[] = []
@@ -65,6 +68,8 @@ export interface BandValues {
   usage?: Usage
   model?: string
   effort?: string
+  // The AWS profile the session runs with (the assume source's role); unset or empty is undefined.
+  assumeRole?: string
 }
 
 // A level boundary value belongs to the higher level.
@@ -92,7 +97,9 @@ export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
   }
   for (const b of buttons) {
     const label = b.label(v)
-    if (label) labels.push({ id: b.id, label, ...(b.action ? { action: b.action } : {}) })
+    if (!label) continue
+    const level = b.level?.(v)
+    labels.push({ id: b.id, label, ...(level ? { level } : {}), ...(b.action ? { action: b.action } : {}) })
   }
   return labels
 }
@@ -129,7 +136,13 @@ export function renderBand(v: BandValues, width: number, t: AlertThresholds): Ba
   return rows
 }
 
-type Next = (e: unknown) => unknown
+// yellow, red and green are Text colours; dim is the Text dim property (dimColor); normal is plain.
+function textStyle(level: Level | undefined): Record<string, unknown> {
+  if (level === 'dim') return { dimColor: true }
+  return level && level !== 'normal' ? { color: level } : {}
+}
+
+type Next =(e: unknown) => unknown
 
 // The AbovePrompt render hook. It awaits next(e) first and nests that answer above its own rows,
 // so another plugin's band survives; with nothing to draw it returns that answer untouched.
@@ -149,6 +162,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
       usage: readCached<Usage>('usage'),
       model: options.components.modelEffort ? model : undefined,
       effort: options.components.modelEffort ? readCached<string>('effort') : undefined,
+      assumeRole: options.components.assume ? readCached<AssumeValue>('assume')?.role : undefined,
     },
     e?.props?.bodyColumns ?? e?.viewport?.columns ?? 80,
     options.alerts.thresholds,
@@ -161,7 +175,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
       flexDirection: 'row',
       flexShrink: 0,
       children: row.flatMap((l, j) => {
-        const text = l.level && l.level !== 'normal' ? { color: l.level } : {}
+        const text = textStyle(l.level)
         const item = l.action
           ? Button({
               key: l.id,

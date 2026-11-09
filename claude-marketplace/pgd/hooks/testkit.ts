@@ -53,7 +53,7 @@ export interface StubHost {
   host: any
   calls: string[]
   files: Map<string, string>
-  state: { cwd: string; model: string; id: string; stateHome?: string }
+  state: { cwd: string; model: string; id: string; stateHome?: string; awsProfile?: string }
   // Every fs.write as { path, text }, in order.
   writes: Array<{ path: string; text: string }>
   // The in-memory plugin store behind host.store; set storeFail to make every call throw.
@@ -153,6 +153,10 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
     env: {
       stateHome: async () => state.stateHome,
       home: async () => '/home/u',
+      awsProfile: async () => {
+        calls.push('env.awsProfile')
+        return state.awsProfile
+      },
     },
     ui: {
       invalidate: () => {

@@ -94,6 +94,7 @@ export const register: Register = on => {
       },
       env: {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
+        awsProfile: () => $.env.get('AWS_PROFILE'),
         home: () => $.env.get('HOME'),
       },
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
