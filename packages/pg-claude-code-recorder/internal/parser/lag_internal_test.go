@@ -12,11 +12,11 @@ import (
 var lagTestNow = time.Unix(0, 50_000_000_000)
 
 func lagTestState() *lagState {
-	return newLagState(func(s string) bool { return s != "none" }, func(file int64) (string, bool) {
+	return newLagState(func(s, _ string) bool { return s != "none" }, func(file int64) (string, string, bool) {
 		if file >= 1000 {
-			return "none", true
+			return "none", "append", true
 		}
-		return "src", true
+		return "src", "append", true
 	}, func() time.Time { return lagTestNow })
 }
 

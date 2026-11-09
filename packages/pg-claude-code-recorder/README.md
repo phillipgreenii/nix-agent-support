@@ -229,6 +229,8 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   copier and parser commit adjusts the lag state, so a refresh reads no whole table. `lag_rebuild_total{result}`
   (`match` or `drift`) counts the periodic reconcile against a full rebuild, and a `lag_drift` warning is logged when
   the maintained state differed from the rebuilt one (lag bytes and unknown kinds; lag seconds is not compared).
+- Parse lag counts only files parsed by offset (append mode, with a parser): a snapshot file is parsed by version and
+  its generation row never advances `parse_offset`, so it is left out of the gauge, the rebuild and the seed.
 - Parse lag seconds (`parse_lag_seconds`, `parse_lag_s` in `status --json`) is how long parse has been behind copy
   WITHOUT ADVANCING: one in-memory value per generation, the later of the time copy first got ahead of parse and the
   time parse last advanced its offset while still behind. A partial parse that moves the parse offset sets it to that

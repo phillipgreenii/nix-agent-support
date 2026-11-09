@@ -1138,6 +1138,14 @@ ON CONFLICT(source,rtype,path) DO NOTHING`, src.Name(), k[0], k[1], c)
 	return nil
 }
 
+// countsLag reports whether a file of this source and mode is part of the parse
+// lag: its source has a parser and it is parsed by offset. A snapshot file is
+// parsed by version (parse_state) and never advances parse_offset, so a
+// generation row it carries would read as a backlog for good.
+func (p *Parser) countsLag(src, mode string) bool {
+	return p.HasSource(src) && mode == "append"
+}
+
 // Rebuilt is the lag figures RebuildLag computes from the whole tables.
 type Rebuilt struct {
 	LagBytes int64
@@ -1174,13 +1182,16 @@ func (p *Parser) RebuildLag() (r Rebuilt, ok bool) {
 			}
 			continue
 		}
+		if !p.countsLag(f.Source, f.Mode) {
+			continue
+		}
 		t := totals[f.ID]
 		copied += t.Copy
 		parsed += t.Parse
 	}
 	for _, g := range lagging {
 		f, found := fileByID(files, g.File)
-		if !found || !p.HasSource(f.Source) {
+		if !found || !p.countsLag(f.Source, f.Mode) {
 			continue
 		}
 		if lag := g.CopyOffset - g.ParseOffset; lag > r.LagBytes {

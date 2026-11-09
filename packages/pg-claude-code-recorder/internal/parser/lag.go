@@ -16,7 +16,8 @@ import (
 //
 //   - every generation, old ones included, stays in the sums and in the maximum
 //     lag; a deleted file is not special here;
-//   - a source without a parser (HasSource false) is left out of the sums, the
+//   - a source without a parser (HasSource false) and a snapshot-mode file (parsed
+//     by version, its parse offset never moves) are left out of the sums, the
 //     maximum and the oldest-unparsed value;
 //   - the lag-seconds origin is one in-memory value per generation: how long
 //     parse has been behind WITHOUT ADVANCING (operator ruling, 2026-11-05). It
@@ -37,9 +38,9 @@ import (
 // nothing. The hook runs under the store's write lock and never blocks: it
 // takes only mu.
 type lagState struct {
-	hasSource func(string) bool
-	sourceOf  func(file int64) (string, bool)
-	now       func() time.Time // the injected clock, for the start-up seed
+	counts   func(source, mode string) bool // a file of this source and mode lags by parse offset
+	sourceOf func(file int64) (source, mode string, ok bool)
+	now      func() time.Time // the injected clock, for the start-up seed
 
 	mu               sync.Mutex
 	counted          map[int64]bool // file -> its source has a parser (positive lookups only)
@@ -86,8 +87,8 @@ type GenLag struct {
 	UnparsedSince time.Time
 }
 
-func newLagState(hasSource func(string) bool, sourceOf func(int64) (string, bool), now func() time.Time) *lagState {
-	return &lagState{hasSource: hasSource, sourceOf: sourceOf, now: now, counted: map[int64]bool{}, gens: map[lagKey]*lagGen{}}
+func newLagState(counts func(source, mode string) bool, sourceOf func(int64) (string, string, bool), now func() time.Time) *lagState {
+	return &lagState{counts: counts, sourceOf: sourceOf, now: now, counted: map[int64]bool{}, gens: map[lagKey]*lagGen{}}
 }
 
 // StartLag creates the maintained lag state, subscribes it to the store's
@@ -99,12 +100,12 @@ func newLagState(hasSource func(string) bool, sourceOf func(int64) (string, bool
 // idempotent, so one already inside the read is harmless.
 func (p *Parser) StartLag() (*Lag, error) {
 	st := p.cfg.Store
-	l := newLagState(p.HasSource, func(file int64) (string, bool) {
+	l := newLagState(p.countsLag, func(file int64) (string, string, bool) {
 		f, err := st.File(file)
 		if err != nil {
-			return "", false
+			return "", "", false
 		}
-		return f.Source, true
+		return f.Source, f.Mode, true
 	}, p.cfg.Clock.Now)
 	l.seeding = true
 	st.OnOffsets(l.hook)
@@ -136,7 +137,7 @@ func (l *lagState) seed(files []store.File, gens []store.Generation) {
 	defer l.mu.Unlock()
 	start := l.now().UnixNano()
 	for _, f := range files {
-		if l.hasSource(f.Source) {
+		if l.counts(f.Source, f.Mode) {
 			l.counted[f.ID] = true
 		}
 	}
@@ -180,11 +181,11 @@ func (l *lagState) fileCounted(file int64) bool {
 	if c, ok := l.counted[file]; ok {
 		return c
 	}
-	src, ok := l.sourceOf(file)
+	src, mode, ok := l.sourceOf(file)
 	if !ok {
 		return false
 	}
-	c := l.hasSource(src)
+	c := l.counts(src, mode)
 	l.counted[file] = c
 	return c
 }

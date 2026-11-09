@@ -215,3 +215,34 @@ func TestLagStartupRecovery(t *testing.T) {
 	k.Parse()
 	lagEqual(t, k, l, "parsed after restart")
 }
+
+// A snapshot file is parsed by version (parse_state), never by parse offset, so
+// a generation row it carries has its parse offset left at 0 for good. Neither
+// the oracle nor the maintained state may count that as a backlog: it was a
+// permanent phantom lag in the gauge while status, which reads append files
+// only, said caught up.
+func TestLagSnapshotFileGenerationRowIsNotABacklog(t *testing.T) {
+	k := newLagKit(t)
+	l := startLag(t, k)
+	id := k.AddRegistry("4242", `{"pid":4242}`)
+	at := int64(1_700_000_000_000_000_000 + 500)
+	if err := k.Store.Commit(
+		&store.Rec{T: store.TGen, At: at, File: id, Gen: 1, Method: "clone", Reason: "first"},
+		&store.Rec{T: store.TCommit, At: at + 1, File: id, Gen: 1, From: 0, To: 1022927, Size: 1022927, Tail: 1, TailLen: 1},
+	); err != nil {
+		t.Fatal(err)
+	}
+	k.Parse()
+	if r, ok := k.Parser.RebuildLag(); !ok || r.LagBytes != 0 || r.Progress != 1 {
+		t.Fatalf("rebuild counts a snapshot file's generation row: %+v ok=%v", r, ok)
+	}
+	if b, _, p := l.Gauges(lagNow); b != 0 || p != 1 {
+		t.Fatalf("maintained state counts a snapshot file's generation row: bytes %d progress %v", b, p)
+	}
+	k.Reopen()
+	l = startLag(t, k)
+	if b, _, _ := l.Gauges(lagNow); b != 0 {
+		t.Fatalf("a seeded state counts a snapshot file's generation row: bytes %d", b)
+	}
+	lagEqual(t, k, l, "snapshot generation row")
+}
