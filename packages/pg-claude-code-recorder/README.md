@@ -231,6 +231,18 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   the maintained state differed from the rebuilt one (lag bytes and unknown kinds; lag seconds is not compared).
 - Parse lag counts only files parsed by offset (append mode, with a parser): a snapshot file is parsed by version and
   its generation row never advances `parse_offset`, so it is left out of the gauge, the rebuild and the seed.
+- A snapshot file normally has no generation row, and the copier never creates one for it. Two legacy
+  `claude-control-end` snapshot files (ids 92755 and 92757, deleted) carry one generation each (clone, reason `first`,
+  copy offset 1,022,927 and 151) from 2026-11-07 06:09:03 UTC. The cause was a file-id collision, not a snapshot code
+  path: a writer allocated ids 92754 to 92760 a second time, eleven minutes after they had been given to snapshot rows
+  and one append file. The journal's `file` record is applied with `INSERT OR IGNORE`, so the new transcript took over
+  the old snapshot rows' paths and generation rows. The recorder now takes an exclusive lock on the state directory
+  (a second instance is refused), which removes the two-writers condition that let the id counter lag behind the
+  journal. The rows stay in the journal and are not rewritten. Readers that ignore a snapshot file's generation row:
+  the parse lag gauge, its periodic rebuild and its seed (`countsLag`: append mode only), the generation invariants
+  check (append files only), and the settle archive and manifest path for a snapshot file (it reads snapshot versions).
+  Readers that still count it: the copy-bytes figure (`CopyBytes` sums `copy_offset` of every generation row until an
+  archive range covers it) and the per-conversation pending-bytes figure in settle.
 - Parse lag seconds (`parse_lag_seconds`, `parse_lag_s` in `status --json`) is how long parse has been behind copy
   WITHOUT ADVANCING: one in-memory value per generation, the later of the time copy first got ahead of parse and the
   time parse last advanced its offset while still behind. A partial parse that moves the parse offset sets it to that
