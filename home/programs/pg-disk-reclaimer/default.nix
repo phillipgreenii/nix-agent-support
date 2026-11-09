@@ -239,8 +239,8 @@ in
     # bead pg2-9lfsj: build-time aggregation option for the tool's registry,
     # mirroring phillipg-nix-ziprecruiter's `services.localProxy.registrations`
     # precedent (structured submodule data, no ordering requirement, so plain
-    # `listOf` concatenation is enough -- unlike status-line-parts, which needs
-    # mkBefore/mkOrder/mkAfter banding because render order is user-visible).
+    # `listOf` concatenation is enough -- unlike claude-hook-router delegates, which need
+    # mkBefore/mkOrder/mkAfter banding because run order is user-visible).
     # Any module MAY append entries here, gated on its own feature's
     # `phillipgreenii.programs.<x>.enable` (capability-model skill: an
     # integration fragment gates on a feature flag, never on

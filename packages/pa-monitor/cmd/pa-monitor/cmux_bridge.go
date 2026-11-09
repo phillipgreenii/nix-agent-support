@@ -897,7 +897,7 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 	}
 
 	// Workspace accent color for the 5h rate-limit window (clear/yellow/red),
-	// mirroring the claude-status-line 5h logic. Uses the 5h reset (proto field
+	// mirroring the former shell status line 5h logic. Uses the 5h reset (proto field
 	// 24), NOT the paused window reset. FiveHourPct is passed as the *float64 so
 	// nil (unknown) is preserved. HasWorkspaceColor is always true here: the
 	// bridge has an opinion on every live snapshot. The red-branch countdown, when

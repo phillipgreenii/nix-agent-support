@@ -10,7 +10,7 @@ configuration files, not hardcoded here.
 
 ## What it provides
 
-- **Claude Code setup** (`home/programs/claude-*`): settings, status line, hook router, a
+- **Claude Code setup** (`home/programs/claude-*`): settings, hook router, a
   nix-built plugin marketplace (`claude-marketplace/`), and the tool approver
   (`packages/claude-extended-tool-approver`).
 - **Agent work orchestration**: `pg-router` (event router and scheduler), `ccpool` (session

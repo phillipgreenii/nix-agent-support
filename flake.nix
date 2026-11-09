@@ -750,7 +750,7 @@
           # session-mode (bead pg2-gzrn2): per-session "which loop is running"
           # tracking (drain-beads / unblock-human-beads / wrap-up-session /
           # ...), consumed by the pb marketplace's commands, its SessionEnd
-          # hook, and the claude-status-line segment. Single mkBashScript
+          # hook. Single mkBashScript
           # tool (backed by its own session-mode-lib), so -- same rationale
           # as wtnew/wtdone/pg-disk-reclaimer above -- it takes
           # `result.session-mode.script`
@@ -16004,6 +16004,8 @@
                   # retention guarantee). noFlicker and the promptCacheTtl null-cleanup
                   # are the only other filters emitted.
                   allNull = activationWith { };
+                  # Explicit null opts out of the empty-command default.
+                  statusLineNull = activationWith { statusLine = null; };
 
                   # Positive controls: a set value must emit its assignment.
                   themeSet = activationWith { theme = "dark"; };
@@ -16043,8 +16045,15 @@
                 # forms are the real regression guard (a silent scrub would add them). The
                 # assignment/del substrings are jq syntax, so they cannot collide with the
                 # activation-script boilerplate.
-                assert !(hasSub ".statusLine = " allNull);
+                assert !(hasSub ".statusLine = " statusLineNull);
+                assert !(hasSub "del(.statusLine)" statusLineNull);
                 assert !(hasSub "del(.statusLine)" allNull);
+                # The default retires the shell status line: the empty command renders
+                # (Claude Code loads it and draws no shell row), and the other
+                # top-level keys are untouched by it.
+                assert hasSub ''.statusLine = {"command":"","type":"command"}'' allNull;
+                assert !(hasSub ".theme = " allNull);
+                assert hasSub ".cleanupPeriodDays = 365" statusLineNull;
                 assert !(hasSub ".showClearContextOnPlanAccept = " allNull);
                 assert !(hasSub "del(.showClearContextOnPlanAccept)" allNull);
                 assert !(hasSub ".showThinkingSummaries = " allNull);
@@ -18645,60 +18654,6 @@
                   tests = ./home/programs/ollama/tests;
                   extraInputs = [ ];
                 };
-
-              # Test claude-status-line wrapper and part scripts (nerd-font OFF: text fallbacks).
-              test-claude-status-line =
-                let
-                  slScripts = import ./home/programs/claude-status-line/scripts.nix {
-                    inherit pkgs lib;
-                    nerdFont = false;
-                  };
-                  wrapperScript = slScripts.mkWrapperScript {
-                    parts = slScripts.defaultParts;
-                    reserve = 20;
-                  };
-                in
-                checksHelpers.testBashScripts {
-                  package = pkgs.writeShellScriptBin "claude-status-line" ''
-                    exec ${wrapperScript} "$@"
-                  '';
-                  tests = ./home/programs/claude-status-line;
-                  extraInputs = [ ];
-                };
-
-              # Same bats suite, but built with nerd-font ON so the glyph literals are asserted.
-              # Cannot reuse checksHelpers.testBashScripts (it can't inject an env var), so this
-              # mirrors that helper and exports CLAUDE_SL_TEST_NERD_FONT=1 as the mode marker the
-              # shared bats file branches on.
-              test-claude-status-line-nerdfont =
-                let
-                  slScripts = import ./home/programs/claude-status-line/scripts.nix {
-                    inherit pkgs lib;
-                    nerdFont = true;
-                  };
-                  wrapperScript = slScripts.mkWrapperScript {
-                    parts = slScripts.defaultParts;
-                    reserve = 20;
-                  };
-                  package = pkgs.writeShellScriptBin "claude-status-line" ''
-                    exec ${wrapperScript} "$@"
-                  '';
-                in
-                pkgs.runCommand "test-bash-scripts"
-                  {
-                    nativeBuildInputs = [
-                      pkgs.bats
-                      pkgs.git
-                      pkgs.which
-                      package
-                    ];
-                  }
-                  ''
-                    export PATH="${package}/bin:$PATH"
-                    export CLAUDE_SL_TEST_NERD_FONT=1
-                    bats ${./home/programs/claude-status-line}
-                    touch $out
-                  '';
 
               test-claude-settings-replace = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.replaceManagedKeys.script;

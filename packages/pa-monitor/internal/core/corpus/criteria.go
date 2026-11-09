@@ -12,7 +12,7 @@ const (
 	// Subagent is a per-subagent transcript: <slug>/<id>/subagents/agent-*.jsonl.
 	Subagent
 	// StatusSibling is a rate_limits status sibling: <slug>/<id>.status.jsonl
-	// (written by capture-status.bash), consumed by the Limits observer.
+	// (written by the retired shell status-line wrapper), consumed by the Limits observer.
 	StatusSibling
 )
 

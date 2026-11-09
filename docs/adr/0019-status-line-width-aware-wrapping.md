@@ -1,6 +1,6 @@
 # Status Line Width-Aware Wrapping
 
-**Status**: Accepted
+**Status**: Accepted; the shell status line it describes was retired in November 2026 (the display mod replaces it), so this is history only
 **Date**: 2026-06-29
 **Deciders**: phillipg
 

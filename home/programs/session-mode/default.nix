@@ -17,7 +17,7 @@ in
       description = ''
         Install the session-mode CLI: per-session "which loop is running" tracking
         (drain-beads / unblock-human-beads / wrap-up-session / ...), consumed by the pb
-        marketplace's commands, its SessionEnd hook, and the claude-status-line segment.
+        marketplace's commands and its SessionEnd hook.
         Defaults on exactly when Claude is enabled, since it exists only to serve a Claude
         Code session.
       '';

@@ -702,8 +702,8 @@ func TestReplayingABytesRangeDoesNotDuplicate(t *testing.T) {
 	}
 }
 
-// A <session>.status.jsonl is the status-line capture the claude-status-line
-// hook writes beside a transcript: rate-limit records, not transcript events.
+// A <session>.status.jsonl is the status-line capture the (retired) shell
+// status line wrote beside a transcript: rate-limit records, not transcript events.
 // It must never be discovered, and so never reach the files or events tables.
 func TestStatusSiblingIsNotDiscoveredAsTranscript(t *testing.T) {
 	root := fixtureCorpus(t)

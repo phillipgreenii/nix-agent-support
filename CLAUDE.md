@@ -315,11 +315,14 @@ model, the breaking changes, and the one-way schema version 2 store migration), 
 under `packages/work-report/docs/behavior/`, and ADR 0102 in `docs/adr/` (the process contract).
 The `identifier-allowlist` hook covers its `.go` files, `docs/` and `testdata/`: use `example-*` names there.
 
-## Status Line (`home/programs/claude-status-line`)
+## Status Line
 
-Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to
-the `.claude/rules/claude-status-line.md` path-rule (tc-ql0o Stage D, 2026-08-26) — it rides in
-only while editing files under `home/programs/claude-status-line/`.
+The shell status line (the `claude-status-line` module and its part scripts) is retired. The
+`statusLine` option of the claude-settings module defaults to the empty command
+`{ type = "command"; command = ""; }`, which Claude Code loads and draws no shell row for; the
+display mod (`claude-marketplace/pgd`) draws the band and status row. See
+`docs/guides/claude-code-mods.md` (F2) and the display layer design. Do not reintroduce part
+scripts or a `status-line-parts` option.
 
 ## Development Workflow
 
@@ -500,7 +503,7 @@ Verified against Claude Code 2.1.186:
 - PATH-SCOPED RULE PATTERN (tc-ql0o Stage D, 2026-08-26): file-keyed detail whose violation
   window is scoped to a file FAMILY (not a `bd`/git verb) MAY move into `.claude/rules/*.md` with
   `paths:` frontmatter instead — a repo-level example is this repo's own
-  `claude-status-line.md`/`package-versioning.md`/`markdown-conventions.md`; the user-level
+  `package-versioning.md`/`markdown-conventions.md`; the user-level
   analogue (delivered by `home/programs/agent-rules`) is `nix-how-to.md`/`code-file-standards.md`
   under `~/.claude/rules/`. `paths:` (NOT `applies-to:`) is the recognized scoping key — confirmed
   empirically against deployed Claude Code 2.1.233 (tc-ql0o Stage B.1 spike): a rule scoped with

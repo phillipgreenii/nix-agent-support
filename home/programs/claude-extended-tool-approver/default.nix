@@ -460,7 +460,7 @@ in
         #
         # Per Phase C1's ordering-mechanism correction, the lib.mkOrder wrap
         # goes on the WHOLE LIST assigned here (matching ADR 0020's
-        # status-line-parts = lib.mkOrder 1000 … precedent), never on a
+        # banded mkOrder convention precedent), never on a
         # per-element priority field.
         claude-hook-router.delegates = lib.mkIf routerEnabled (
           lib.mkOrder 1000 [

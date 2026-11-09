@@ -1,6 +1,6 @@
 # A compaction leaves a marker file beside the transcript, and the status line shows it
 
-**Status**: Accepted (extends 0019 and 0021; resolves `pg2-thkh0`)
+**Status**: Accepted (extends 0019 and 0021; resolves `pg2-thkh0`); the shell status line display half was retired in November 2026, the marker file itself is still written by the PostCompact hook
 **Date**: 2026-10-14
 **Deciders**: Phillip Green II
 

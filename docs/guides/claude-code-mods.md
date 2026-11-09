@@ -33,8 +33,9 @@ repo a null option is a deliberate no-op that leaves an already-written `statusL
 settings file.
 
 Consequence: the shell line is retired by setting the `statusLine` option to
-`{ type = "command"; command = ""; }`, which the option already accepts; a delete filter is optional
-cleanup, not a blocker.
+`{ type = "command"; command = ""; }`, which the option already accepts. This is now the claude-settings
+default, and the shell part scripts and their module are removed. Writing the empty command
+overwrites any stale `statusLine` the old module left, so no delete filter was added.
 
 ## F3: the band above the prompt
 

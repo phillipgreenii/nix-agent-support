@@ -4,7 +4,6 @@
     ./programs/claude-code
     ./programs/claude-settings
     ./programs/claude-auto-mode
-    ./programs/claude-status-line
     ./programs/claude-theme
     ./programs/pgii-claude-plugins
     ./programs/claude-marketplaces

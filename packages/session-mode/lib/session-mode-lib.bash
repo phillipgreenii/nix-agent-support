@@ -191,7 +191,7 @@ session_mode_read() {
 # mktemp + mv, so a concurrent reader (the status-line wrapper) never observes
 # a half-written file (POSIX rename is atomic). Creates the directory if
 # absent. Mode 0600 (this repo's convention for session-adjacent state files,
-# matching capture-status.bash's status.jsonl).
+# matching the status.jsonl capture file).
 session_mode_write_atomic() {
   local path="$1" json="$2" dir tmp
   dir="${path%/*}"

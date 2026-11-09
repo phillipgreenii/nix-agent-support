@@ -7,7 +7,7 @@ import (
 )
 
 // cmux workspace accent colors for the 5h rate-limit window, mirroring the
-// claude-status-line limits part.
+// former shell status-line limits part.
 const (
 	fiveHourRed    = "#cc3333"
 	fiveHourYellow = "#e0b000"
@@ -25,7 +25,7 @@ const blockSecs int64 = 18000
 
 // CmuxFiveHourColor returns the cmux workspace color hex ("" means "clear / no
 // color") and a countdown string ("" when none) for the 5-hour rate-limit
-// window, mirroring the claude-status-line 5h render_limit logic. fivePct is
+// window, mirroring the former shell status line 5h render_limit logic. fivePct is
 // Claude's used_percentage [0,100] (nil = unknown). resetsAt is the 5h window
 // reset (zero = unknown). now is the comparison time.
 //

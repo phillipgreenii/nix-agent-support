@@ -1218,7 +1218,7 @@ pgdr_reclaim_size_item() {
 # dryRunCommand/removeCommand are trusted operator-authored strings from
 # the registry JSON (not user input), so running them via `eval` is safe
 # and matches this repo's existing pattern for trusted command strings
-# (e.g. claude-status-line's scripts.nix, agent-script.nix).
+# (e.g. agent-script.nix).
 #
 # Exit status: 0 if every dry-run/remove command that actually ran
 # exited 0 AND every explicitly-requested id was valid; 1 if

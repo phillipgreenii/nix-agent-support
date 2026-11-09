@@ -185,13 +185,20 @@ in
 
     statusLine = lib.mkOption {
       type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
-      default = null;
+      default = {
+        type = "command";
+        command = "";
+      };
       description = ''
-        statusLine config object to set in ~/.claude/settings.json. `null`
-        (default) is a deliberate no-op: a previously written `.statusLine` is
-        left in place, not deleted (unlike `promptCacheTtl`). Claude Code's
-        `/statusline` command writes `.statusLine` itself, so a scrub-on-null
-        would fight an interactive change.
+        statusLine config object to set in ~/.claude/settings.json. The default
+        is the empty command, which Claude Code loads and draws no shell status
+        row for (the shell line is retired; the pgd display mod draws the band
+        and status row instead). Writing it also overwrites any stale
+        `.statusLine` left by the retired shell implementation, so no delete
+        filter is needed. `null` is a deliberate no-op: a previously written
+        `.statusLine` is left in place, not deleted (unlike `promptCacheTtl`),
+        because Claude Code's `/statusline` command writes `.statusLine` itself
+        and a scrub-on-null would fight an interactive change.
       '';
     };
 

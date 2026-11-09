@@ -208,8 +208,8 @@ func Run(ctx context.Context, db *sql.DB, opt Options) (Stats, error) {
 	return stats, nil
 }
 
-// statusSiblingSuffix marks the status-line capture file the claude-status-line
-// hook writes beside a transcript (<session>.status.jsonl). Its lines carry
+// statusSiblingSuffix marks the status-line capture file the (retired) shell
+// status line wrote beside a transcript (<session>.status.jsonl). Its lines carry
 // rate-limit fields, not transcript events, so it is never a transcript. This
 // mirrors claude-transcript's DiscoverTranscripts, which skips the same file.
 const statusSiblingSuffix = ".status.jsonl"
