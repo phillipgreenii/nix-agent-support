@@ -48,7 +48,7 @@ func Main(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "keepertest: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	out := filepath.Join(tmp, "pg-keep-awake")
 	cmd := exec.Command("go", "build", "-o", out, ".")
 	cmd.Dir = src

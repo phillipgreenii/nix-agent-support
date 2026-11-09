@@ -10,12 +10,11 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
-// hostSignaler counts Detect calls; classifier mimics CmuxSignaler.
+// hostSignaler counts Detect calls.
 type hostSignaler struct {
-	name       string
-	detect     bool
-	classifier bool
-	detects    int
+	name    string
+	detect  bool
+	detects int
 }
 
 func (h *hostSignaler) Name() string { return h.name }

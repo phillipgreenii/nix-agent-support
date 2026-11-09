@@ -318,8 +318,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// Deliver), and the reaper (prunes members whose process has died).
 	// Defaulting to a fresh registry when BridgeRegistry is unset keeps
 	// bridgeDeliverer's reg field always non-nil; the bridge route is simply
-	// unreachable in that configuration since cmuxAncestorFn below then also
-	// has nothing to resolve against.
+	// unreachable in that configuration.
 	// Connection-timing windows. Both derive from the same base cadences (see
 	// internal/timing), so the registry stale cutoff and the per-bridge snapshot
 	// push interval cannot drift into an inversion. Zero opts values fall back to
@@ -337,15 +336,6 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	bridgeReg := opts.BridgeRegistry
 	if bridgeReg == nil {
 		bridgeReg = bridge.NewRegistry(staleAfter)
-	}
-	// cmuxAncestorFn resolves a target PID's cmux server ancestor for
-	// delivery routing. serve()'s bridges param tolerates nil, so
-	// opts.CmuxAncestor may legitimately be nil too; guard with an
-	// always-false stand-in so compositeDeliverer routes every target
-	// in-daemon instead of nil-derefing on opts.CmuxAncestor(pid).
-	cmuxAncestorFn := opts.CmuxAncestor
-	if cmuxAncestorFn == nil {
-		cmuxAncestorFn = func(int) (int, bool) { return 0, false }
 	}
 	// tr correlates in-flight bridge deliveries to their DeliverResult acks
 	// (see delivery.go). It must exist before serve() (which wires

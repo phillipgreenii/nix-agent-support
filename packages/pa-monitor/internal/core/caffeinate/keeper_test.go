@@ -109,10 +109,10 @@ func TestHelperKeeperProcess(t *testing.T) {
 		c.Configured = os.Getenv(helperBinEnv)
 	}
 	if err := c.Acquire(os.Getpid()); err != nil {
-		os.Stdout.WriteString("err: " + err.Error() + "\n")
+		_, _ = os.Stdout.WriteString("err: " + err.Error() + "\n")
 		os.Exit(0)
 	}
-	os.Stdout.WriteString("ok\n")
+	_, _ = os.Stdout.WriteString("ok\n")
 	os.Exit(0)
 }
 

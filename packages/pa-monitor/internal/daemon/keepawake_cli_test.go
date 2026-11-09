@@ -20,14 +20,6 @@ func TestMain(m *testing.M) {
 	os.Exit(keepertest.Main(m))
 }
 
-// noopKeeper is a caffeinate.Keeper that does nothing, for tests that drive the
-// tick loop but do not care about the keeper.
-type noopKeeper struct{}
-
-func (noopKeeper) Acquire(int) error               { return nil }
-func (noopKeeper) Release() error                  { return nil }
-func (noopKeeper) Observe() caffeinate.Observation { return caffeinate.Observation{} }
-
 const (
 	activeMetric       = "pa_monitor.caffeinate.active"
 	keeperUpMetric     = "pa_monitor.keep_awake.keeper_up"
