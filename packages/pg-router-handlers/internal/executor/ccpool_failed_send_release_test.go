@@ -48,6 +48,13 @@ func TestDispatch_notIngested_releaseIsGuardedByTheObservedHolder(t *testing.T) 
 	if v := verbOf(res); v != report.Unclaimed {
 		t.Errorf("a landed release is reported as Unclaimed; got %q", v)
 	}
+	// The failure names its cause, and keeps the "prompt not ingested" text the
+	// router classifies as a retryable class.
+	for _, want := range []string{"prompt not ingested", "no model turn observed after delivery", "claim released"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must contain %q", err, want)
+		}
+	}
 }
 
 func TestDispatch_notIngested_refusedReleaseIsLoggedAndNotReported(t *testing.T) {

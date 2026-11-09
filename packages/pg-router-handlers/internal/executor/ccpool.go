@@ -514,7 +514,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			if released {
 				res = failureAction(report.Unclaimed, d.Item.ID)
 			}
-			return res, fmt.Errorf("send %s: prompt not ingested: %w", r.deps.ExternalID, err)
+			return res, fmt.Errorf("send %s: prompt not ingested (the model started no turn within the confirm window, or the session was not live; session closed, claim released: %v): %w", r.deps.ExternalID, notIngestedCause(err), err)
 		}
 		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
 		if cc.OnDispatchFail == roles.DispatchUnclaim {
@@ -2211,4 +2211,15 @@ func (r *ccpoolRun) watchdogResetDir(worktreeDir string) string {
 		return ""
 	}
 	return worktreeDir
+}
+
+// notIngestedCause names why the send was judged not ingested, so the failure
+// carries a cause instead of only the sentinel text. ccpool's own logs hold no
+// deeper reason: the later "reap pruned phantom session" line is the cleanup of
+// the session this path closed, not the cause.
+func notIngestedCause(err error) string {
+	if errors.Is(err, errSessionNotLive) {
+		return "session not live at send time"
+	}
+	return "no model turn observed after delivery"
 }

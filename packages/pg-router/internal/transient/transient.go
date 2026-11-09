@@ -32,6 +32,12 @@ const (
 	// ClassUnavailable: the handler or a backend it drives reported itself
 	// unavailable (the connector wire taxonomy's retryable "unavailable" code).
 	ClassUnavailable = "unavailable"
+	// ClassNotIngested: ccpool delivered the prompt but the model never started a
+	// turn inside the confirm window (a dropped nudge or a session that did not
+	// come up). The handler already closed the empty session and released the
+	// bead's claim, so a re-run starts clean on a fresh session; ccpool's own
+	// logs record only the later cleanup, never why the turn did not start.
+	ClassNotIngested = "not-ingested"
 )
 
 // Classify reports whether err is a transient handler failure worth one more
@@ -66,6 +72,8 @@ func Classify(err error) (class string, ok bool) {
 		return ClassDeadline, true
 	case strings.Contains(msg, "unavailable"):
 		return ClassUnavailable, true
+	case strings.Contains(msg, "prompt not ingested"):
+		return ClassNotIngested, true
 	}
 	return "", false
 }

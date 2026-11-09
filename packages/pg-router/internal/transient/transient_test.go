@@ -26,6 +26,8 @@ func TestClassify(t *testing.T) {
 		{"typed exit -1", fmt.Errorf("x: %w", &wireclient.ExitError{Role: "r", Code: -1}), ClassKilled, true},
 		{"deadline wins over unavailable", errors.New(`unavailable: deadline exceeded`), ClassDeadline, true},
 		{"context deadline", fmt.Errorf("x: %w", context.DeadlineExceeded), ClassDeadline, true},
+		{"not ingested send failure", errors.New(`wireclient: role "drain" exited 1: send s1: prompt not ingested: ccpool: prompt not ingested: s1`), ClassNotIngested, true},
+		{"not ingested loses to killed", errors.New(`prompt not ingested: signal: killed`), ClassKilled, true},
 		{"cancelled is never transient", fmt.Errorf("unavailable: %w", context.Canceled), "", false},
 		{"deterministic exit", &wireclient.ExitError{Role: "r", Code: 1, Detail: "invalid_argument: bad"}, "", false},
 	}
