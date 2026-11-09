@@ -203,7 +203,13 @@ func planInventory(cutoff time.Time, active []string) []client.InventoryRequest 
 }
 
 // resumeInventory runs the planned inventory requests that are not done yet. A
-// request that fails stays pending, with every request before it kept.
+// request that fails stays pending, with every request before it kept. A request
+// the recorder answers degraded (its per-file table is still being backfilled, or
+// it is behind) may have left files out, so it also stays pending, and it and the
+// requests after it run again on the next Scan. The files listed so far are kept
+// and the Scan goes on with them, so a recorder that is catching up neither
+// stalls the reading of the status and transcript files nor makes a partial
+// (possibly empty) list final.
 func (r *reader) resumeInventory(ctx context.Context, c *client.Client) error {
 	for len(r.pending) > 0 {
 		if r.gate != nil {
@@ -211,8 +217,12 @@ func (r *reader) resumeInventory(ctx context.Context, c *client.Client) error {
 				return err
 			}
 		}
-		if err := r.inventory(ctx, c, r.pending[0]); err != nil {
+		degraded, err := r.inventory(ctx, c, r.pending[0])
+		if err != nil {
 			return err
+		}
+		if degraded {
+			return nil
 		}
 		r.pending = r.pending[1:]
 	}
@@ -220,15 +230,17 @@ func (r *reader) resumeInventory(ctx context.Context, c *client.Client) error {
 }
 
 // inventory lists the files that match req (all its pages) and adds the ones
-// not known yet.
-func (r *reader) inventory(ctx context.Context, c *client.Client, req client.InventoryRequest) error {
+// not known yet. It reports whether any page was answered degraded (files may
+// be missing from the list).
+func (r *reader) inventory(ctx context.Context, c *client.Client, req client.InventoryRequest) (degraded bool, err error) {
 	req.Limit = inventoryPage
 	for {
 		r.queries++
 		ans, err := c.FilesInventory(ctx, req)
 		if err != nil {
-			return err
+			return degraded, err
 		}
+		degraded = degraded || ans.Degraded
 		for _, f := range ans.Files {
 			ref := fmt.Sprintf("f_%d", f.File)
 			last, _ := time.Parse(time.RFC3339Nano, f.Last)
@@ -243,7 +255,7 @@ func (r *reader) inventory(ctx context.Context, c *client.Client, req client.Inv
 			r.files[ref] = fs
 		}
 		if !ans.More || len(ans.Files) == 0 {
-			return nil
+			return degraded, nil
 		}
 		req.After = ans.Files[len(ans.Files)-1].File
 	}
@@ -266,7 +278,14 @@ func (r *reader) ensureSessions(ctx context.Context, c *client.Client, ids []str
 	if len(missing) == 0 {
 		return nil
 	}
-	return r.inventory(ctx, c, client.InventoryRequest{Sources: []string{sourceTranscript}, Sessions: missing})
+	degraded, err := r.inventory(ctx, c, client.InventoryRequest{Sources: []string{sourceTranscript}, Sessions: missing})
+	if err != nil || degraded {
+		// Ask again on the next Scan: the answer failed or may have left files out.
+		for _, id := range missing {
+			delete(r.asked, id)
+		}
+	}
+	return err
 }
 
 // drain applies what the feed says changed since the cursor: a reset entry
