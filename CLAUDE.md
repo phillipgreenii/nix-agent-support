@@ -554,8 +554,15 @@ Verified against Claude Code 2.1.186:
   (override or `defaultEnabled`); an override cannot enable a plugin whose required feature is off.
   Effect on a machine that does not enable the feature (for example cb00): the pb, beads family,
   pg-ccaudit and ceta plugins turn off, as do plan-decompose and session-wrapup (both
-  `requires` `beads`, tc-5urm4; they have no beads-free mode). A machine MUST set the feature enables directly (the
-  `cetaCutover`-style block) or those plugins go off. `bash-lsp` and `pg-go-mutate` declare no
+  `requires` `beads`, tc-5urm4; they have no beads-free mode). A machine SHOULD enable the agent-support bundle
+  (`phillipgreenii.bundles.agent-support.enable`) or the leaf capability; explicit feature enables
+  (the `cetaCutover`-style block) are for features no bundle covers. Opt-out and cascade rules:
+  veto beads with `phillipgreenii.capabilities.beads.enable = false` or
+  `phillipgreenii.programs.beads.enable = false` (an explicit setting beats the bundle's
+  `mkDefault`); either also turns off the pb plugin and pgd's beads component, and
+  `claude-code.marketplaces.overrides` cannot turn those back on; turn off one plugin only with
+  `claude-code.marketplaces.overrides."<plugin>" = false`. On a new machine beads stays off unless
+  it is enabled. `test-bundle-beads-switch` covers the switch, the chain and the veto. `bash-lsp` and `pg-go-mutate` declare no
   `requires` because no `programs.<f>` feature owns `bash-language-server` or `pg-go-mutate`
   (owner `-` in the check's `binaryOwners`).
 - **Mechanical check** (beads `tc-mxc0v`, `tc-u7kqs`): `checks.<system>.test-claude-plugin-binary-default-parity`

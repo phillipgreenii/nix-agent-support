@@ -41,8 +41,10 @@
       ];
     }
     # codeburn is a SEPARATE opt-in token/cost tracker leaf, not in any bundle.
-    # Inert on darwin (the capabilities/isHuman layer is NixOS-only); the darwin machine enables
-    # it via a plain `phillipgreenii.programs.codeburn.enable = true`.
+    # The capability framework is home-manager based and runs on darwin too; only the NixOS
+    # accounts module that feeds `account.isHuman` is NixOS-only, so on darwin `isHuman` stays
+    # at its default unless the machine sets it. This leaf has no human-only features, so it
+    # works on both; a machine MAY also set `phillipgreenii.programs.codeburn.enable = true`.
     {
       name = "codeburn";
       features = [ "codeburn" ];

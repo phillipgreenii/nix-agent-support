@@ -17616,7 +17616,11 @@
               # phillipgreenii.programs.beads.enable (eval cases in tests/bundle-beads-switch.nix).
               test-bundle-beads-switch =
                 let
-                  r = import ./tests/bundle-beads-switch.nix { inherit lib pkgs; };
+                  r = import ./tests/bundle-beads-switch.nix {
+                    inherit lib pkgs;
+                    inherit (phillipgreenii-nix-base.lib) mkCapability mkBundle;
+                    framework = phillipgreenii-nix-base.homeModules.capability-framework;
+                  };
                 in
                 pkgs.runCommand "test-bundle-beads-switch" { } ''
                   ${lib.optionalString (r.failures != [ ]) ''

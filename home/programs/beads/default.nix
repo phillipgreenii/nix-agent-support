@@ -19,7 +19,12 @@ in
     # Stopgap until BD_JSON_ENVELOPE becomes the bd default: opt every bd
     # invocation into the JSON envelope without callers passing --json. Remove
     # once upstream bd defaults the envelope on.
-    home.sessionVariables.BD_JSON_ENVELOPE = "1";
+    home.sessionVariables = {
+      BD_JSON_ENVELOPE = "1";
+      # Turn bd's automatic backup off on machines that lack a wrapper which already
+      # bakes BD_BACKUP_ENABLED=0 in (the same value, so a wrapper machine is unchanged).
+      BD_BACKUP_ENABLED = "0";
+    };
 
     programs.bash.initExtra = lib.mkIf config.phillipgreenii.programs.bash.enable ''
       source <(bd completion bash)
