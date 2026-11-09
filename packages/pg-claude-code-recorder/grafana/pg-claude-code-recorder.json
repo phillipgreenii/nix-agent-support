@@ -14,9 +14,9 @@
   "panels": [
     {
       "id": 1,
-      "type": "timeseries",
+      "type": "state-timeline",
       "title": "Copy and parse lag",
-      "description": "Age of the oldest byte the recorder has seen but not yet copied (copy lag) and, for parse lag, how long parse has been behind copy (since the recorder copied bytes parse had not yet reached; after a restart it counts from the restart), in seconds. The copy-lag alert fires above 120 s for 10 minutes; parse-stuck fires when parse lag bytes stay above 0 with no progress.",
+      "description": "Is anything behind? Two rows, each green (OK) or red (PROBLEM). Copy is PROBLEM when the 10-minute average of copy lag is over 120 s (the copy-lag alert threshold). Parse is PROBLEM when parse lag bytes did not reach 0 at any point in the last 15 minutes (a healthy parser catches up many times in that window); this reads the lag gauge, so a gauge that disagrees with `status` shows here too. A daemon restart does not move either row, unlike the lag in seconds.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -29,7 +29,43 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PROBLEM",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
         },
         "overrides": []
       },
@@ -40,9 +76,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(pg_claude_code_recorder_copy_lag_seconds)",
+          "expr": "max(avg_over_time(pg_claude_code_recorder_copy_lag_seconds[10m])) > bool 120",
           "range": true,
-          "legendFormat": "copy lag"
+          "legendFormat": "copying"
         },
         {
           "refId": "B",
@@ -50,11 +86,19 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(pg_claude_code_recorder_parse_lag_seconds)",
+          "expr": "min_over_time(max(pg_claude_code_recorder_parse_lag_bytes)[15m:1m]) > bool 0",
           "range": true,
-          "legendFormat": "parse lag"
+          "legendFormat": "parsing"
         }
-      ]
+      ],
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        }
+      }
     },
     {
       "id": 2,

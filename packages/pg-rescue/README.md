@@ -319,8 +319,14 @@ log has a `ts` field and no `time` or `level`, which the `jsonl` log-source cont
 Loki line is therefore the verbatim run-log line, stamped with its ingestion time, and history starts
 at the first activation that ships the source.
 
-The panels give, per chain, the same numbers as the recipes above: common-case rate, agent rate,
-escape rate, agent cost, and failing handlers by handler and reason. LogQL cannot iterate the
+The panels give, per chain, the same figures as the recipes above (common-case rate, agent rate,
+escape rate, agent cost, and failing handlers by handler and reason) with one difference: the three
+rates divide by the runs that needed rescue (`result` is not `success`), because on a busy chain
+most runs are a wrapped command that succeeded with no handler involved, which would otherwise make
+the rates meaningless. The common-case rate there counts only runs resolved by a `deterministic`
+attempt. To get the same figures from the jq recipes, add `map(select(.result != "success"))` after
+the `group_by`. The `Runs that needed rescue` panel shows that denominator, and the `give-up` chain
+always reads 100% escape because it is terminal. LogQL cannot iterate the
 `attempts` array, so the queries read the verbatim JSON line with RE2 line filters and `regexp`
 stages. They depend on the field order `internal/runlog` writes (`tags` then `outcome` in an
 attempt) and, for agent cost and failing handlers, look at attempt positions 1 to 8 only. The

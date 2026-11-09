@@ -2619,7 +2619,7 @@
 
                     # (2) the line filters count what the README recipes count
                     count_filter() { expr_of "$1" | grep -oP '\|~ `\K[^`]+' | sed -n 1p | { read -r re; grep -cP -- "$re" "$fixture"; }; }
-                    [ "$(count_filter 'Common-case rate')" = 5 ] || fail "common-case filter: want 5 runs"
+                    [ "$(count_filter 'Common-case rate')" = 1 ] || fail "common-case filter: want 1 run (resolved by a deterministic attempt)"
                     [ "$(count_filter 'Agent rate')" = 2 ] || fail "agent filter: want 2 runs"
                     [ "$(count_filter 'Escape rate')" = 4 ] || fail "escape filter: want 4 runs"
 
@@ -2636,7 +2636,7 @@
                     want="$(printf '%s\n' '2 ag,timed out after 8m' '1 ag,exit 1')"
                     [ "$(printf '%s\n' "$failing" | sort)" = "$(printf '%s\n' "$want" | sort)" ] || fail "failing handlers: want $want, got $failing"
 
-                    echo "ok: uid pg-rescue-runs, $n queries parse, filters count 5/2/4, cost 0.875, failing handlers match"
+                    echo "ok: uid pg-rescue-runs, $n queries parse, filters count 1/2/4, cost 0.875, failing handlers match"
                     touch $out
                   '';
 

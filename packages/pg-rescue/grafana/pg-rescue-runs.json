@@ -54,11 +54,11 @@
         "type": "loki",
         "uid": "loki"
       },
-      "description": "Wrapped runs in the selected range, per chain, including the happy path. This is the denominator of the three rates beside it.",
+      "description": "Wrapped runs in the selected range, per chain, including the many where the wrapped command succeeded and no rescue was needed. The rates beside it use \"Runs that needed rescue\" as their denominator.",
       "gridPos": {
         "x": 0,
         "y": 1,
-        "w": 6,
+        "w": 4,
         "h": 8
       },
       "targets": [
@@ -99,18 +99,18 @@
       }
     },
     {
-      "id": 3,
-      "title": "Common-case rate",
+      "id": 12,
+      "title": "Runs that needed rescue",
       "type": "bargauge",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
-      "description": "Share of runs that ended `success`, or `resolved` by an attempt tagged `deterministic`. The line filter keys on the attempt object field order tags, outcome, as the run-log writer encodes it.",
+      "description": "Runs in the selected range whose wrapped command did not simply succeed, so the chain's handlers ran (any result other than `success`). This is the denominator of the three rates beside it.",
       "gridPos": {
-        "x": 6,
+        "x": 4,
         "y": 1,
-        "w": 6,
+        "w": 4,
         "h": 8
       },
       "targets": [
@@ -119,7 +119,59 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"success\"|\"result\":\"resolved\".*\"tags\":\\[[^\\]]*\"deterministic\"[^\\]]*\\],\"outcome\":\"resolved\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "expr": "sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no rescue runs in range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Common-case rate",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Of the runs that needed rescue, the share resolved by an attempt tagged `deterministic`. A run where the wrapped command simply succeeded needed no rescue and is not counted. The line filter keys on the attempt object field order tags, outcome, as the run-log writer encodes it.",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 5,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"resolved\".*\"tags\":\\[[^\\]]*\"deterministic\"[^\\]]*\\],\"outcome\":\"resolved\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
           "legendFormat": "{{pr_chain}}",
           "refId": "A",
           "instant": true,
@@ -132,7 +184,7 @@
             "mode": "palette-classic-by-name"
           },
           "unit": "percentunit",
-          "noValue": "no runs",
+          "noValue": "no rescue runs in range",
           "min": 0,
           "max": 1
         },
@@ -160,11 +212,11 @@
         "type": "loki",
         "uid": "loki"
       },
-      "description": "Share of runs `resolved` by an attempt tagged `agent`.",
+      "description": "Of the runs that needed rescue, the share `resolved` by an attempt tagged `agent`.",
       "gridPos": {
-        "x": 12,
+        "x": 13,
         "y": 1,
-        "w": 6,
+        "w": 5,
         "h": 8
       },
       "targets": [
@@ -173,7 +225,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"resolved\".*\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],\"outcome\":\"resolved\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"resolved\".*\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],\"outcome\":\"resolved\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
           "legendFormat": "{{pr_chain}}",
           "refId": "A",
           "instant": true,
@@ -186,7 +238,7 @@
             "mode": "palette-classic-by-name"
           },
           "unit": "percentunit",
-          "noValue": "no runs",
+          "noValue": "no rescue runs in range",
           "min": 0,
           "max": 1
         },
@@ -214,7 +266,7 @@
         "type": "loki",
         "uid": "loki"
       },
-      "description": "Share of runs that ended `deferred` or `unhandled`, i.e. escaped the chain.",
+      "description": "Of the runs that needed rescue, the share that ended `deferred` or `unhandled`, i.e. escaped the chain. The `give-up` chain is terminal and escapes by design, so it always reads 100%.",
       "gridPos": {
         "x": 18,
         "y": 1,
@@ -227,7 +279,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"(deferred|unhandled)\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"(deferred|unhandled)\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
           "legendFormat": "{{pr_chain}}",
           "refId": "A",
           "instant": true,
@@ -240,7 +292,7 @@
             "mode": "palette-classic-by-name"
           },
           "unit": "percentunit",
-          "noValue": "no runs",
+          "noValue": "no rescue runs in range",
           "min": 0,
           "max": 1
         },
@@ -262,13 +314,13 @@
     },
     {
       "id": 6,
-      "title": "Runs by chain and result",
+      "title": "Rescue runs by chain and result",
       "type": "timeseries",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
-      "description": "Run count per interval by chain and result (success, resolved, deferred, unhandled, error, interrupted).",
+      "description": "Run count per interval by chain and result (resolved, deferred, unhandled, error, interrupted) for runs that needed rescue. Runs where the wrapped command succeeded are left out: there are thousands a day and they hide the rest. The Runs panel counts them.",
       "gridPos": {
         "x": 0,
         "y": 9,
@@ -281,7 +333,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (pr_chain, pr_result) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | regexp `\"result\":\"(?P<pr_result>[a-z]+)\"` | pr_chain =~ \"$chain\" [$__interval]))",
+          "expr": "sum by (pr_chain, pr_result) (count_over_time({service_name=\"pg-rescue\"} !~ `\"result\":\"success\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | regexp `\"result\":\"(?P<pr_result>[a-z]+)\"` | pr_chain =~ \"$chain\" [$__interval]))",
           "legendFormat": "{{pr_chain}} / {{pr_result}}",
           "refId": "A",
           "queryType": "range"
