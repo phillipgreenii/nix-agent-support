@@ -3,5 +3,6 @@
   "description": "Display mod: a session band, alerts and modals drawn from cached sources, with every component opt-in through the Home Manager module options",
   "version": "1.0.0",
   "defaultEnabled": true,
+  "uses": ["beads", "session-mode", "pg-ccaudit"],
   "types": "./types/index.d.ts"
 }

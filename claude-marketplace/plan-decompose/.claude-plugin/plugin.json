@@ -3,5 +3,6 @@
   "description": "Claude skill + agents: decompose an approved design into curated, self-contained work-packet beads (docket epic + children), with staleness stamps, reconcile, and a packet-first implementer agent.",
   "version": "0.1.0",
   "defaultEnabled": true,
-  "requires": ["beads"]
+  "requires": ["beads"],
+  "uses": ["pb"]
 }
