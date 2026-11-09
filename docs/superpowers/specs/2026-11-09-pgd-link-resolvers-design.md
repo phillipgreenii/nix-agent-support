@@ -1,6 +1,8 @@
 # pgd link resolvers: context-aware transcript links
 
-Status: draft 1, 2026-11-09, for operator review. Nothing here is built.
+Status: draft 2, 2026-11-09, for operator review. Draft 2 folds in an independent review of
+draft 1 (stale-link and refresh-trigger blockers, protected spans, `file-ref` safety, counters,
+test gaps). Nothing here is built.
 Package: `claude-marketplace/pgd` (hooks in `hooks/links.ts`, Home Manager module in
 `home/programs/pgd/default.nix`). Public repo: no employer-specific names, hosts or keys in
 code, tests, comments or docs; deployments supply them as data.
@@ -59,10 +61,17 @@ Anti-goals (a failure even if it technically works):
   during the pass so a later rule cannot match inside them. The URL takes the whole match,
   percent-encoded, as `{0}`.
 - The hook is synchronous. Host reads (`host.session.cwd()`, `host.session.repo()`) are async,
-  so the display already caches them through the source layer (`source.ts`: cache-aside,
-  throttling, backoff) and redraws with `$.ui.invalidate('ui.render')`.
-- `pr.ts` `repoSlugOf` turns `host.session.repo()` (`{ name, remote }`) into `owner/repo`;
-  `gitHead.ts` reads the branch and worktree from `.git` through `host.fs`.
+  so values the hook needs are cached by sources (`source.ts`: cache-aside, throttling, backoff)
+  and the display redraws with `$.ui.invalidate('ui.render')`. A source with no `feeds` runs no
+  timer; `gitHead.ts` re-reads `cwd` only when a `turn.complete` forces a refresh, throttled to
+  10 seconds.
+- `pr.ts` `repoSlugOf` turns `host.session.repo()` (`{ name, remote }`) into `owner/repo`, but
+  the slug itself is a private module variable read once at start; it is not refreshed. The
+  design below gives the link context its own re-read.
+- `links.ts` uses the whole regex match as the link text, escapes `\`, `[`, `]` and backtick in
+  it, and percent-encodes the whole match into `{0}`. Protected spans are fences and code spans
+  only. `compile()` logs a `warn` for an invalid rule on every `rewriteLinks` call.
+- `host.env.home()` (`register.ts`) reads `$HOME`.
 - Verified live 2026-11-09 on Claude Code 2.1.318: a rewritten match is drawn as a terminal
   hyperlink and ctrl+click opens it (plain click is consumed by tmux mouse mode).
 
@@ -72,7 +81,7 @@ A. Named resolvers (chosen by the operator). A rule is `{ kind, name, options }`
 kind has a scanner that finds candidates and a resolver that returns a URL or declines. The
 regex kind keeps `pattern` and `url`. Rules still apply in list order through the existing
 protected-span pass. Trade-off: two kinds can both claim a token (`src/ABC-12.go:5`); list
-order settles it, and the shipped default order puts `file-ref` first.
+order settles it, and the README recommends `file-ref` first (the shipped list is empty).
 
 B. One tokenizer pass that finds every candidate for every kind, settles overlaps once, then
 dispatches to resolvers. Trade-off: one place for overlap, but it replaces the rewrite
@@ -86,7 +95,7 @@ mechanism, which the operator ruled out.
 
 ```mermaid
 flowchart LR
-  T["assistant message text"] --> P["protect fences and code spans"]
+  T["assistant message text"] --> P["protect fences, code spans, markdown links, autolinks, bare URLs"]
   P --> R1["rule 1: scan(kind)"]
   R1 --> D1{"resolve(match, text, context)"}
   D1 -->|"url"| L1["markdown link, protect span"]
@@ -100,80 +109,142 @@ flowchart LR
 
 Options JSON `links` becomes a list of objects with an optional `kind` (default `regex`, so every
 existing `{ name, pattern, url }` entry keeps working unchanged) and a kind-specific `options`
-object. The Home Manager option gains `kind` and a `settings` attribute set rendered as that
-`options` object; the builder chooses the exact Nix typing. An unknown kind or an invalid options
-object skips that rule only and writes one `warn` log line naming the rule, as an invalid regex
-rule does today.
+object. Required changes, all part of this work:
+
+- `PgdLink` in `types.ts` becomes a union by kind; `PgdOptions` and `DEFAULT_OPTIONS` gain a
+  top-level `github` object; `parseOptions` accepts them and its link filter (today it drops any
+  entry without `pattern` and `url`) validates per kind.
+- The Home Manager module (`home/programs/pgd/default.nix`) gains `kind`, a `settings` attribute
+  set rendered as `options`, and a top-level `github` option; `pattern` and `url` become
+  `nullOr` with nulls stripped from the rendered JSON, and the fixed `inherit` list that builds
+  the rendered options (line 23) gains `github`. An entry without `kind` must still render
+  exactly as today.
+- Validation: `jira.baseUrl` must be an `http` or `https` URL; `jira.keys` entries must match
+  `^[A-Z][A-Z0-9_]*$`; `github.repos` entries must match `^[^/\s]+/[^/\s]+$`; `localTemplate`
+  must follow the scheme rules under `file-ref`.
+- A rule that fails validation, an unknown `kind`, or an inactive rule (an empty `keys`) is
+  skipped alone with ONE `warn` line when the options load, naming the rule. Rules are compiled
+  once per options set, not on every `rewriteLinks` call.
 
 ### Context snapshot
 
-The render hook reads one synchronous snapshot, filled by a `linkContext` source and refreshed at
-session start, after `turn.complete` and on a working-directory change, with an invalidate when
-it changes: `cwd`, `repoSlug` (`owner/repo` of the session repo, via `repoSlugOf`), `home` when
-the host exposes one, and `knownRepos` (the session repo plus the configured `github.repos`).
+The render hook reads one synchronous snapshot with these fields: `cwd`, `repoSlug` (`owner/repo`
+of the session repo, via `repoSlugOf`), `home` (from `host.env.home()`), `githubHost`,
+`githubOwners` and `knownRepos` (the session repo plus the configured `github.repos`).
 
-Where it lives and how it is read: the snapshot is a module-level value in a new
-`hooks/linkContext.ts`, written only by the source's fetch and read through a getter, the same
-pattern as the memoized repo slug in `pr.ts`. `linkHook` reads the snapshot and passes it as a
-third argument, `rewriteLinks(text, rules, context)`, so `rewriteLinks` stays a pure function of
-its arguments and tests inject a context object directly. A rule whose kind needs no context
-(`regex`, `jira`) ignores it.
+Where it lives: a module-level value in a new `hooks/linkContext.ts`, written only by a
+`linkContext` source's fetch and read through a getter. `linkHook` passes it as an OPTIONAL third
+argument, `rewriteLinks(text, rules, context?)`, so `rewriteLinks` stays a pure function of its
+arguments, existing callers and tests keep working, and new tests inject a context object. A
+kind that needs no context (`regex`, `jira`) ignores it.
+
+Refresh triggers (named, because the source layer has none of its own): the source refreshes,
+forced past the throttle, at `session.start` and on every `turn.complete`, and re-reads BOTH
+`host.session.cwd()` and `host.session.repo()` each time (it does not copy the one-shot slug in
+`pr.ts`). A directory or repo change is therefore seen at the next turn boundary, so a link
+resolved in the same turn as the change can use the previous directory: accepted, as a turn is
+the unit the reply is written in. The snapshot changes only when a refreshed value differs, and
+then invalidates `ui.render`.
 
 Where the GitHub data lives: one top-level options object `github` with `host` (default
-`github.com`) and `repos` (a list of `owner/repo`); it is not repeated per rule. `github-pr` and
-the remote form of `file-ref` both read it through the snapshot's `knownRepos` and the snapshot's
-`githubHost`.
+`github.com`) and `repos` (a list of `owner/repo`); it is not repeated per rule.
 
 Before the snapshot has loaded: forms that carry everything in the token still link (an explicit
-`owner/repo#123`, a configured-key issue link, an absolute file path, an explicit remote
-`owner/repo:path:line` whose repo is in `github.repos`). Everything else declines with the reason
-`no-context`, including a relative file path; the resolver never guesses a base directory.
+`owner/repo#123` whose owner is known, an issue key from the allowlist, an absolute file path, an
+explicit remote `owner/repo:path:line` whose repo is in `github.repos`). Everything else declines
+with the reason `no-context`, including a relative file path; the resolver never guesses a base
+directory.
+
+Resolved links are final. The memo (see "Cost and observability") is keyed by the message text
+and the rule set only, never by the snapshot version, and a message whose rewrite linked is never
+re-resolved. After a directory or repo change, old messages keep the links they were given
+against the old context; only a message that DECLINED with `no-context` is left out of the memo
+and tried again on the next draw. This is why the first paint of a resumed session, before the
+snapshot loads, links only the token-complete forms and fills in the rest as the snapshot
+arrives.
 
 ### Kind `github-pr`
 
-Options: none of its own; it reads the top-level `github` options through the context snapshot.
+Options: `sessionRepoFallback` (boolean, default `false`); the rest comes from the top-level
+`github` options through the context snapshot.
 
 Scanner (case-insensitive): `owner/repo#N`; `PR N`, `PR #N`, `pull request N`, `pull request #N`
-and `pull #N`. A bare `#N` is not scanned. Only the number is the link text for the keyword
-forms, as today; the whole `owner/repo#N` is the link text for the explicit form.
+and `pull #N`. A bare `#N` is not scanned. The link text is the WHOLE token (`PR 12`, not just
+`12`), which is a bigger click target and matches the explicit form and what a regex rule gives.
 
-Repo resolution, first hit wins: (1) the explicit `owner/repo` in the token; (2) the nearest
-earlier mention in the same message of a known repo, by `owner/repo` or by bare repo name when
-exactly one known repo has that name, scanning back at most one paragraph; (3) the session
-repo's slug; (4) decline. URL: `https://<host>/<owner>/<repo>/pull/<N>`.
+Repo resolution, first hit wins:
+
+1. The explicit `owner/repo` in the token, only when its owner is the owner of at least one
+   known repo; otherwise decline as `unknown-repo` (so `src/utils#3` is never linked).
+2. The nearest earlier mention in the same message and paragraph of a known repo written in full
+   as `owner/repo`. A bare repo name (`api`, `docs`) is never matched.
+3. Only when `sessionRepoFallback` is `true`: the session repo's slug.
+4. Otherwise decline as `no-repo`.
+
+The fallback defaults to off because a wrong repo is the worst outcome and an assistant working in
+one repo often discusses another. A deployment whose sessions mostly discuss their own repo turns
+it on. URL: `https://<host>/<owner>/<repo>/pull/<N>`, built from validated segments.
 
 ### Kind `jira`
 
 Options: `baseUrl` (required, for example `https://tracker.example/browse`), `keys` (required
 list of allowed project keys). The scanner is built from the allowlist: `\b(?:K1|K2|...)-[0-9]+\b`,
-case-sensitive, keys regex-escaped. An empty or missing `keys` makes the rule inactive (decline
-reason `no-key`): it never guesses. A candidate is also rejected when it touches a path or
-identifier character: directly preceded or followed by `/`, `\` or `_`, or followed by `.` and a
-word character, or followed by `:` and a digit (so `src/ABC-12.go:5` is left to `file-ref` even
-when `jira` is listed first). The `github-pr` scanner applies the same adjacency rejection. URL: `<baseUrl>/<match>`. The kind name stays `jira` because that is the tracker the
+case-sensitive, keys regex-escaped. An empty or missing `keys` makes the rule inactive (one
+`warn` at options load): it never guesses. A candidate is rejected (decline reason `adjacent`)
+when it sits in a path: directly preceded by `/` or `\`, or followed by `.` and a word character,
+or followed by `:` and a digit (so `src/ABC-12.go:5` is left to `file-ref` even when `jira` is
+listed first). `ZR-1/ZR-2` still links both keys. The `github-pr` scanner applies the same
+rejection. URL: `<baseUrl>/<match>`. The kind name stays `jira` because that is the tracker the
 first deployment uses; nothing else in the code is tracker-specific.
 
 ### Kind `file-ref`
 
-Scanner: a path followed by `:line` and optionally `:col`, where the path has a `/` or ends in a
-file extension and `line` is digits. It must not match inside a URL (`http://host:80`), a time
-(`12:30`) or a `file:///` URL already present.
+Scanner: a path followed by `:line`, then optionally `:col` or a range `-line2`, where `line` is
+digits and the path either contains a `/` or is a `name.ext` with an alphabetic extension of 1 to
+8 characters. It rejects, as plain text: anything inside a URL or an existing markdown link; a
+time (`12:30`); a host-like token (`api.example.com:8080`, `10.0.0.1:443`: a name with no `/`
+whose extension is a common top-level domain such as `com`, `net`, `org`, `io`, `dev`, or whose
+dotted parts are all digits); and a token adjacent to a word character on either side. Trailing
+punctuation (`.`, `,`, `;`, `)`) after the digits is not part of the token, and a leading `(` is
+not part of the path, so `(foo.go:42).` links `foo.go:42`. A range links to the first line and
+the link text includes the whole range.
 
 Local form (the default; operator ruling): an absolute path is used as is; a relative path is
-joined onto `cwd` from the context snapshot (declined as `no-context` before it loads); `~/`
-expands from the snapshot's `home`, and is declined as `no-context` when the host exposes none.
-No existence check. The URL comes from `options.localTemplate`, default
-`file://{path}:{line}` with `{path}`, `{line}` and `{col}` available, so the form can change to
-`file://{path}#L{line}` or an editor scheme (`vscode://file/{path}:{line}:{col}`) by data alone.
-The first deployment's job is to learn what the operator's terminal does with the default.
+joined onto `cwd` from the context snapshot (declined as `no-context` before it loads) with `.`
+and `..` segments normalized; `~/` expands from the snapshot's `home` and is declined as
+`no-context` when it is absent. No existence check. The URL comes from `options.localTemplate`,
+default `file://{path}:{line}` with `{path}`, `{line}` and `{col}` available, so the form can
+change to `file://{path}#L{line}` or an editor scheme (`vscode://file/{path}:{line}:{col}`) by
+data alone. The first deployment's job is to learn what the operator's terminal does with the
+default.
+
+Safety of the template and the path. Assistant text can come from a prompt injection, and a
+ctrl+click opens the target, so: the template's scheme must be in a short allowlist (`file`,
+`vscode`, `vscode-insiders`, `cursor`, `zed`); it must contain `{path}`; each path segment is
+percent-encoded with `encodeURIComponent`, and `( ) ! ' *` are encoded as well (that function
+leaves them as is, and `)` would end the markdown link early), with `/` kept; spaces are
+encoded; and under the `file` scheme a path whose extension is one macOS launches or runs
+(`app`, `command`, `pkg`, `dmg`, `sh`, `workflow`, `terminal`, `tool`) is declined as `unsafe`.
 
 Remote form: only when the token itself names a known repo: `owner/repo:path:line` where
 `owner/repo` is in `knownRepos`. The scanner splits at the FIRST `:`; the text before it is the
 prefix, checked against `knownRepos`; a path that itself contains `:` is out of scope. URL:
-`https://<host>/<owner>/<repo>/blob/HEAD/<path>#L<line>`; a `:col` is dropped silently (GitHub
-has no column anchor) and `#L<line>-L<line2>` is not supported. Any other prefix, including
-something that looks like `a/b/c.go:5`, makes the whole token a local relative path. A token
-with no `:digits` suffix, such as `owner/repo#123`, is never a `file-ref`.
+`https://<host>/<owner>/<repo>/blob/HEAD/<path>#L<line>` with the path segments encoded as above
+(so a `#` in a path stays in the path, not the fragment); a `:col` is dropped silently (GitHub has
+no column anchor) and a range uses its first line. Any other prefix, including something that
+looks like `a/b/c.go:5`, makes the whole token a local relative path. A token with no `:digits`
+suffix, such as `owner/repo#123`, is never a `file-ref`. When `github-pr` and `file-ref` could
+both claim a token, the rule listed first wins; the two scanners do not overlap on the forms
+above, because `#N` has no `:digits` and `owner/repo:path:N` has no `#`.
+
+### Protected spans and link text
+
+Before any rule runs, besides fences and code spans, the pass also protects existing markdown
+links (`[text](url)`), autolinks (`<https://...>`) and bare URLs (`https?://\S+`), so an
+assistant-written `[ZR-12](https://...)` or a URL with `#12` in it is never nested or rewritten.
+The link-text escaping gains `_`, `*` and `<` (it escapes `\`, `[`, `]` and backtick today), so
+`__init__.py:12` shows as written and is not read as bold. This changes the text of regex rules
+too, which is a fix; a test pins it.
 
 ### Kind `regex`
 
@@ -190,47 +261,83 @@ link.
 ### Cost and observability
 
 The render hook runs on every draw of every message, so rewriting is memoized: the result for a
-message is cached by (text, rule list, snapshot version) in a small bounded cache (64 entries),
-and the snapshot version changes only when a refresh changes the snapshot. A cache hit does no
-scanning.
+message is cached by (text, rule set) in a small bounded cache (64 entries, least recently used).
+The key does not include the snapshot (see "Context snapshot": a message that linked keeps its
+links, and a message that declined with `no-context` is not stored). A cache hit does no
+scanning. The cache has a reset function for tests so test order cannot matter.
 
-Counters `pgd_links_rewritten_total{kind}` and `pgd_links_declined_total{kind,reason}` count only
-on a cache miss, so a redraw of the same message does not inflate them. Reasons: `no-repo` (the
-snapshot has loaded but yields no repo for a PR), `no-context` (the snapshot has not loaded, or
-lacks `cwd` or `home`), `no-key` (an empty issue-key allowlist), `invalid` (a bad options object).
-They go through the existing metrics path; there is no per-link log line.
+A message that is still streaming is re-scanned as it grows, so a token can change as it
+completes (`foo.go:4`, then `foo.go:42`). The link text and URL then change with it; this is
+accepted, because the hook cannot tell a partial token from a whole one.
+
+Counters (names to be added to `METRIC_NAMES`), labelled by `kind` and by the rule `name` (a set
+bounded by configuration): `pgd_links_resolved_total{kind,rule}` and
+`pgd_links_declined_total{kind,rule,reason}`. They count resolutions on cache misses, which is an
+approximation, not a count of unique links: a streaming message is a miss on every chunk, an
+evicted message is counted again when it is redrawn, and a `no-context` decline later followed by
+a link counts once in each. They answer "is this kind ever linking, and why does it decline",
+not "how many links did the operator see".
+
+Decline reasons, each reachable at resolve time: `no-context` (the snapshot is not loaded or
+lacks `cwd` or `home`), `no-repo` (no repo found for a PR), `unknown-repo` (an explicit
+`owner/repo` whose owner is unknown), `adjacent` (the path or identifier adjacency rejection),
+`unsafe` (a launchable file type under the `file` scheme). Rule problems (an unknown kind, bad
+options, an empty allowlist) are not counter reasons: they are the one `warn` at options load.
+
+Logging: the first decline per (kind, reason) in a session writes one `debug` line carrying the
+kind and the reason and none of the message text; there is no per-link line.
 
 ### Options parsing
 
-`parseOptions` ignores unknown fields. A rule of kind `regex` without `pattern` or `url`, an
-unknown `kind`, or a kind with invalid options is skipped alone with one `warn` line naming the
-rule, as an invalid regex rule is today.
+`parseOptions` ignores unknown fields and treats a JSON `null` as absent. Per-kind validation is
+under "Rule format and compatibility".
 
 ## Testing
 
 - Unit tests per kind over the pure scan and resolve functions with real strings: positive and
-  negative tables (the false positives named in this document: `UTF-8`, `SHA-256`, `PRs 7`,
-  `a/b/c.go:5`, `12:30`, `http://host:80`), code-span and fence protection, overlap order, decline
-  paths, and the unchanged regex kind (the existing `links.test.ts` stays green).
-- An options-parsing test for the new fields and for the compatibility rule that an entry without
-  `kind` is a regex rule.
-- A Nix evaluation check that the Home Manager option accepts the new shape and renders it into
-  the options JSON.
+  negative tables, code-span and fence protection, overlap order, decline paths, and the
+  unchanged regex kind (the existing `links.test.ts` stays green; `rewriteLinks` keeps working
+  with two arguments). Negative cases that MUST be plain text: `UTF-8`, `SHA-256`, `PRs 7`,
+  `pr 5 times`, `a/b/c.go:5` (local, relative), `12:30`, `http://host:80`, `api.example.com:8080`,
+  `10.0.0.1:443`, `[ZR-1](https://h/x)`, `https://h/foo/bar#12`, `src/utils#3`, `../x:3` (links,
+  normalized), `ZR-1/ZR-2` (both link), `src/ABC-12.go:5` with `jira` listed before `file-ref`,
+  and a launchable file under the `file` scheme. Cases that must link: `foo.go:42.`,
+  `(foo.go:42)`, `foo.go:42-50`, `__init__.py:3` (underscores escaped), `app/(g)/page.tsx:3`
+  (parentheses encoded), `~/x.go:1` with and without `home`.
+- Stale-state tests for the snapshot and the memo: a snapshot change followed by a redraw of a
+  message that already linked (must not change); a `no-context` decline followed by a load (must
+  link on the next draw); eviction at the 64-entry boundary; counters across streamed prefixes
+  of one message; and the counts after a redraw.
+- An options-parsing test for the new fields, for `null` as absent, and for the compatibility
+  rule that an entry without `kind` is a regex rule.
+- A Nix evaluation check that the Home Manager option accepts the new shape, renders it into the
+  options JSON, and still renders an old `{ name, pattern, url }` entry exactly as before.
 - An end-to-end test with the real Claude Code binary in tmux, opt-in and not part of the unit
   gate: it needs a reply with fixed text. Preferred route: a local stub server behind
-  `ANTHROPIC_BASE_URL`, which keeps it hermetic and free of model calls. Whether the binary
-  accepts a stub server under the account's authentication is unverified; a short spike decides,
-  and the fallback is a test over the real render hook with canned draw events.
+  `ANTHROPIC_BASE_URL`, which keeps it hermetic and free of model calls. The assertion reads the
+  pane with `tmux capture-pane -p -e`, which keeps the OSC 8 hyperlink sequence (verified on
+  2026-11-09: it showed `ESC]8;id=...;https://example.com/browse/TKT-123`), so the URL itself is
+  checked, not only the text. Whether the binary accepts a stub server under the account's
+  authentication is unverified; a short spike decides (the spike must say how authentication is
+  satisfied), and the fallback is a test over the real render hook with canned draw events,
+  which proves the pure function and the hook but not the host.
 
 ## Calls I made (correct any)
 
 - Bare `#123` is not linked: it appears in headings, step numbers and issue lists too often.
-- A bare `PR #123` with no repo in the message falls back to the session repo's remote, because
-  that is usually right; the operator has not ruled on it.
+- A bare `PR #123` with no `owner/repo` in the message declines by default; the session repo
+  fallback is an option, `sessionRepoFallback`, default `false` (changed after review: a wrong
+  repo is the worst outcome). The operator has not ruled on the default.
+- The keyword PR forms link the whole token (`PR 12`), not just the number.
+- Existing markdown links, autolinks and bare URLs are protected from rewriting; link-text
+  escaping gains `_`, `*` and `<`.
+- A link that was resolved is final: the memo ignores later snapshot changes.
+- The `file` scheme declines macOS-launchable file types, and the template scheme is allowlisted.
 - Remote file links use `HEAD` (GitHub resolves it to the default branch), not the local sha,
   because the local commit may be unpushed.
 - `file://{path}:{line}` as the first local form, an experiment per the operator's ruling.
-- Counter names, decline reasons, and counting on cache misses only.
+- Counter names, decline reasons, and counting resolutions on cache misses (an approximation,
+  stated as such).
 - One top-level `github` options object, not per-rule repo lists.
 - A relative file path or a `~/` path declines when the context is missing; no guessed base.
 - Rule order is list order only; adjacency rejection protects against a wrong order.
@@ -248,5 +355,6 @@ rule, as an invalid regex rule is today.
 
 ## Left to the builder
 
-Nix typing of `settings`; the exact paragraph window for the repo-mention scan; the source
-refresh trigger set for the context snapshot; whether `~/` expansion has a host source.
+Nix typing of `settings`; the exact set of top-level-domain extensions the host-like rejection
+uses; the exact launchable-extension list; and the order in which the scanners run inside one
+rule.
