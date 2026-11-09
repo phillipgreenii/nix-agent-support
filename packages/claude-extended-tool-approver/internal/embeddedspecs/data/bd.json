@@ -479,16 +479,16 @@
         "provenance": "bd blocked --help",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            "source": "bd blocked --help: \"Show blocked issues\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            "source": "bd blocked --help: \"bd blocked [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            "source": "bd blocked --help: \"bd blocked [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            "source": "bd blocked --help: `bd blocked --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- live invocation rejects an unrecognized flag outright (Cobra default unknown-flag handling)"
           }
         },
         "flags": {
@@ -501,7 +501,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd blocked --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
           "--help": {
@@ -513,7 +513,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd blocked --help: \"-h, --help help for blocked\""
             }
           },
           "-C": {
@@ -525,7 +525,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd blocked --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
             }
           },
           "-h": {
@@ -537,7 +537,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd blocked --help: \"-h, --help help for blocked\""
             }
           }
         },
@@ -551,7 +551,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+            "source": "bd blocked --help: \"bd blocked [flags]\""
           }
         },
         "implicitEffects": [
@@ -562,7 +562,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd blocked --help: \"bd blocked [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -756,7 +756,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd children --help: \"-h, --help help for children\""
             }
           },
           "-C": {
@@ -780,7 +780,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd children --help: \"-h, --help help for children\""
             }
           }
         },
@@ -841,7 +841,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd close --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--database": {
@@ -853,7 +853,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd close --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -865,7 +865,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd close --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--directory": {
@@ -889,7 +889,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd close --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "--reason-file": {
@@ -974,7 +974,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd comment --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--database": {
@@ -986,7 +986,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd comment --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -998,7 +998,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd comment --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--directory": {
@@ -1022,7 +1022,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd comment --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "--file": {
@@ -1119,7 +1119,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd comments --help: \"-h, --help help for comments\""
             }
           },
           "-C": {
@@ -1143,7 +1143,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd comments --help: \"-h, --help help for comments\""
             }
           }
         },
@@ -1192,7 +1192,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd comments add --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
                 }
               },
               "--database": {
@@ -1204,7 +1204,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd comments add --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
                 }
               },
               "--db": {
@@ -1216,7 +1216,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd comments add --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
                 }
               },
               "--directory": {
@@ -1240,7 +1240,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd comments add --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
                 }
               },
               "--file": {
@@ -1349,7 +1349,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd comments list --help: \"-h, --help help for list\""
                 }
               },
               "-C": {
@@ -1373,7 +1373,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd comments list --help: \"-h, --help help for list\""
                 }
               }
             },
@@ -1522,7 +1522,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd context --help: \"-h, --help help for context\""
             }
           },
           "-C": {
@@ -1546,7 +1546,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd context --help: \"-h, --help help for context\""
             }
           }
         },
@@ -1619,7 +1619,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd count --help: \"-h, --help help for count\""
             }
           },
           "-C": {
@@ -1643,7 +1643,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd count --help: \"-h, --help help for count\""
             }
           }
         },
@@ -1704,7 +1704,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--assignee": {
@@ -1716,7 +1716,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-a, --assignee string Assignee\""
             }
           },
           "--body-file": {
@@ -1740,7 +1740,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -1752,7 +1752,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--defer": {
@@ -1764,7 +1764,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--defer string Defer until date (issue hidden from bd ready until then). Same formats as --due\""
             }
           },
           "--deps": {
@@ -1776,7 +1776,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--deps strings Dependencies as 'type:id' or bare 'id'. Bare 'id', 'depends-on:id', and 'blocked-by:id' all make THIS issue depend on id; 'blocks:id' reverses direction (id depends on this issue). E.g. 'blocked-by:bd-20,discovered-from:bd-15'\""
             }
           },
           "--design-file": {
@@ -1812,7 +1812,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "--due": {
@@ -1824,7 +1824,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--defer string Defer until date (issue hidden from bd ready until then). Same formats as --due\""
             }
           },
           "--estimate": {
@@ -1836,7 +1836,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-e, --estimate int Time estimate in minutes (e.g., 60 for 1 hour)\""
             }
           },
           "--external-ref": {
@@ -1848,7 +1848,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--external-ref string External reference (e.g., 'gh-9', 'jira-ABC', Linear URL)\""
             }
           },
           "--file": {
@@ -1884,7 +1884,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--id string Explicit issue ID (e.g., 'bd-42' for partitioning)\""
             }
           },
           "--labels": {
@@ -1896,7 +1896,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-l, --labels strings Labels (comma-separated)\""
             }
           },
           "--metadata": {
@@ -1920,7 +1920,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--mol-type string Molecule type: swarm (multi-agent), patrol (recurring ops), work (default)\""
             }
           },
           "--parent": {
@@ -1932,7 +1932,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--parent string Parent issue ID for hierarchical child (e.g., 'bd-a3f8e9')\""
             }
           },
           "--priority": {
@@ -1944,7 +1944,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-p, --priority string Priority (0-4 or P0-P4, 0=highest) (default \"2\")\""
             }
           },
           "--spec-id": {
@@ -1956,7 +1956,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--spec-id string Link to specification document\""
             }
           },
           "--status": {
@@ -1968,7 +1968,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-s, --status string Initial status\""
             }
           },
           "--storage-class": {
@@ -1980,7 +1980,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--storage-class string Storage class: versioned, unversioned, or ephemeral (default: storage-class.<type> config, else versioned)\""
             }
           },
           "--type": {
@@ -1992,7 +1992,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-t, --type string Issue type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision (default \"task\")\""
             }
           },
           "--waits-for": {
@@ -2004,7 +2004,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--waits-for string Spawner issue ID to wait for (creates waits-for dependency for fanout gate)\""
             }
           },
           "--waits-for-gate": {
@@ -2016,7 +2016,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--waits-for-gate string Gate type: all-children (wait for all) or any-children (wait for first) (default \"all-children\")\""
             }
           },
           "--wisp-type": {
@@ -2028,7 +2028,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"--wisp-type string Wisp type for TTL-based compaction: heartbeat, ping, patrol, gc_report, recovery, error, escalation\""
             }
           },
           "-C": {
@@ -2052,7 +2052,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-a, --assignee string Assignee\""
             }
           },
           "-e": {
@@ -2064,7 +2064,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-e, --estimate int Time estimate in minutes (e.g., 60 for 1 hour)\""
             }
           },
           "-f": {
@@ -2088,7 +2088,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-l, --labels strings Labels (comma-separated)\""
             }
           },
           "-p": {
@@ -2100,7 +2100,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-p, --priority string Priority (0-4 or P0-P4, 0=highest) (default \"2\")\""
             }
           },
           "-s": {
@@ -2112,7 +2112,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-s, --status string Initial status\""
             }
           },
           "-t": {
@@ -2124,7 +2124,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd create --help: \"-t, --type string Issue type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision (default \"task\")\""
             }
           }
         },
@@ -2258,7 +2258,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd defer --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--database": {
@@ -2270,7 +2270,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd defer --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -2282,7 +2282,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd defer --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--directory": {
@@ -2306,7 +2306,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd defer --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "-C": {
@@ -2464,7 +2464,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd dep --help: \"-h, --help help for dep\""
             }
           },
           "-C": {
@@ -2488,7 +2488,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd dep --help: \"-h, --help help for dep\""
             }
           }
         },
@@ -2537,7 +2537,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep add --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
                 }
               },
               "--database": {
@@ -2549,7 +2549,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep add --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
                 }
               },
               "--db": {
@@ -2561,7 +2561,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep add --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
                 }
               },
               "--directory": {
@@ -2585,7 +2585,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep add --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
                 }
               },
               "--file": {
@@ -2682,7 +2682,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep cycles --help: \"-h, --help help for cycles\""
                 }
               },
               "-C": {
@@ -2706,7 +2706,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep cycles --help: \"-h, --help help for cycles\""
                 }
               }
             },
@@ -2779,7 +2779,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep list --help: \"-h, --help help for list\""
                 }
               },
               "-C": {
@@ -2803,7 +2803,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep list --help: \"-h, --help help for list\""
                 }
               }
             },
@@ -3022,7 +3022,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep tree --help: \"-h, --help help for tree\""
                 }
               },
               "-C": {
@@ -3046,7 +3046,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dep tree --help: \"-h, --help help for tree\""
                 }
               }
             },
@@ -3267,7 +3267,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd dolt --help: \"-h, --help help for dolt\""
             }
           },
           "-C": {
@@ -3291,7 +3291,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd dolt --help: \"-h, --help help for dolt\""
             }
           }
         },
@@ -3863,7 +3863,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dolt show --help: \"-h, --help help for show\""
                 }
               },
               "-C": {
@@ -3887,7 +3887,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dolt show --help: \"-h, --help help for show\""
                 }
               }
             },
@@ -4033,7 +4033,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dolt status --help: \"-h, --help help for status\""
                 }
               },
               "-C": {
@@ -4057,7 +4057,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dolt status --help: \"-h, --help help for status\""
                 }
               }
             },
@@ -4203,7 +4203,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dolt test --help: \"-h, --help help for test\""
                 }
               },
               "-C": {
@@ -4227,7 +4227,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd dolt test --help: \"-h, --help help for test\""
                 }
               }
             },
@@ -4594,7 +4594,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd export --help: \"-h, --help help for export\""
             }
           },
           "--output": {
@@ -4630,7 +4630,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd export --help: \"-h, --help help for export\""
             }
           },
           "-o": {
@@ -5080,7 +5080,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd graph --help: \"-h, --help help for graph\""
             }
           },
           "-C": {
@@ -5104,7 +5104,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd graph --help: \"-h, --help help for graph\""
             }
           }
         },
@@ -5177,7 +5177,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd history --help: \"-h, --help help for history\""
             }
           },
           "-C": {
@@ -5201,7 +5201,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd history --help: \"-h, --help help for history\""
             }
           }
         },
@@ -5347,7 +5347,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd human --help: \"-h, --help help for human\""
             }
           },
           "-C": {
@@ -5371,7 +5371,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd human --help: \"-h, --help help for human\""
             }
           }
         },
@@ -5505,7 +5505,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd human list --help: \"-h, --help help for list\""
                 }
               },
               "-C": {
@@ -5529,7 +5529,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd human list --help: \"-h, --help help for list\""
                 }
               }
             },
@@ -5675,7 +5675,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd human stats --help: \"-h, --help help for stats\""
                 }
               },
               "-C": {
@@ -5699,7 +5699,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd human stats --help: \"-h, --help help for stats\""
                 }
               }
             },
@@ -5848,7 +5848,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd info --help: \"-h, --help help for info\""
             }
           },
           "-C": {
@@ -5872,7 +5872,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd info --help: \"-h, --help help for info\""
             }
           }
         },
@@ -6091,7 +6091,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd label --help: \"-h, --help help for label\""
             }
           },
           "-C": {
@@ -6115,7 +6115,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd label --help: \"-h, --help help for label\""
             }
           }
         },
@@ -6164,7 +6164,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label add --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
                 }
               },
               "--database": {
@@ -6176,7 +6176,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label add --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
                 }
               },
               "--db": {
@@ -6188,7 +6188,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label add --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
                 }
               },
               "--directory": {
@@ -6212,7 +6212,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label add --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
                 }
               },
               "-C": {
@@ -6297,7 +6297,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label list --help: \"-h, --help help for list\""
                 }
               },
               "-C": {
@@ -6321,7 +6321,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label list --help: \"-h, --help help for list\""
                 }
               }
             },
@@ -6394,7 +6394,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label list-all --help: \"-h, --help help for list-all\""
                 }
               },
               "-C": {
@@ -6418,7 +6418,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label list-all --help: \"-h, --help help for list-all\""
                 }
               }
             },
@@ -6552,7 +6552,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label remove --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
                 }
               },
               "--database": {
@@ -6564,7 +6564,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label remove --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
                 }
               },
               "--db": {
@@ -6576,7 +6576,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label remove --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
                 }
               },
               "--directory": {
@@ -6600,7 +6600,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+                  "source": "bd label remove --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
                 }
               },
               "-C": {
@@ -6760,7 +6760,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd lint --help: \"-h, --help help for lint\""
             }
           },
           "-C": {
@@ -6784,7 +6784,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd lint --help: \"-h, --help help for lint\""
             }
           }
         },
@@ -6857,7 +6857,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd list --help: \"-h, --help help for list\""
             }
           },
           "-C": {
@@ -6881,7 +6881,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd list --help: \"-h, --help help for list\""
             }
           }
         },
@@ -6954,7 +6954,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd memories --help: \"-h, --help help for memories\""
             }
           },
           "-C": {
@@ -6978,7 +6978,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd memories --help: \"-h, --help help for memories\""
             }
           }
         },
@@ -7197,7 +7197,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd onboard --help: \"-h, --help help for onboard\""
             }
           },
           "-C": {
@@ -7221,7 +7221,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd onboard --help: \"-h, --help help for onboard\""
             }
           }
         },
@@ -7294,7 +7294,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd prime --help: \"-h, --help help for prime\""
             }
           },
           "-C": {
@@ -7318,7 +7318,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd prime --help: \"-h, --help help for prime\""
             }
           }
         },
@@ -7525,7 +7525,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd q --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--database": {
@@ -7537,7 +7537,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd q --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -7549,7 +7549,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd q --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--directory": {
@@ -7573,7 +7573,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd q --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "-C": {
@@ -7658,7 +7658,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd query --help: \"-h, --help help for query\""
             }
           },
           "-C": {
@@ -7682,7 +7682,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd query --help: \"-h, --help help for query\""
             }
           }
         },
@@ -7755,7 +7755,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd quickstart --help: \"-h, --help help for quickstart\""
             }
           },
           "-C": {
@@ -7779,7 +7779,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd quickstart --help: \"-h, --help help for quickstart\""
             }
           }
         },
@@ -7852,7 +7852,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd ready --help: \"-h, --help help for ready\""
             }
           },
           "-C": {
@@ -7876,7 +7876,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd ready --help: \"-h, --help help for ready\""
             }
           }
         },
@@ -7949,7 +7949,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd recall --help: \"-h, --help help for recall\""
             }
           },
           "-C": {
@@ -7973,7 +7973,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd recall --help: \"-h, --help help for recall\""
             }
           }
         },
@@ -8265,7 +8265,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd search --help: \"-h, --help help for search\""
             }
           },
           "-C": {
@@ -8289,7 +8289,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd search --help: \"-h, --help help for search\""
             }
           }
         },
@@ -8508,7 +8508,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd show --help: \"-h, --help help for show\""
             }
           },
           "-C": {
@@ -8532,7 +8532,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd show --help: \"-h, --help help for show\""
             }
           }
         },
@@ -8605,7 +8605,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd stale --help: \"-h, --help help for stale\""
             }
           },
           "-C": {
@@ -8629,7 +8629,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd stale --help: \"-h, --help help for stale\""
             }
           }
         },
@@ -8702,7 +8702,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd state --help: \"-h, --help help for state\""
             }
           },
           "-C": {
@@ -8726,7 +8726,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd state --help: \"-h, --help help for state\""
             }
           }
         },
@@ -8799,7 +8799,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd stats --help: \"-h, --help help for status\""
             }
           },
           "-C": {
@@ -8823,7 +8823,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd stats --help: \"-h, --help help for status\""
             }
           }
         },
@@ -8896,7 +8896,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd status --help: \"-h, --help help for status\""
             }
           },
           "-C": {
@@ -8920,7 +8920,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd status --help: \"-h, --help help for status\""
             }
           }
         },
@@ -8993,7 +8993,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd statuses --help: \"-h, --help help for statuses\""
             }
           },
           "-C": {
@@ -9017,7 +9017,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd statuses --help: \"-h, --help help for statuses\""
             }
           }
         },
@@ -9382,7 +9382,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd types --help: \"-h, --help help for types\""
             }
           },
           "-C": {
@@ -9406,7 +9406,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd types --help: \"-h, --help help for types\""
             }
           }
         },
@@ -9467,7 +9467,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd undefer --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--database": {
@@ -9479,7 +9479,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd undefer --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -9491,7 +9491,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd undefer --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--directory": {
@@ -9515,7 +9515,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd undefer --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "-C": {
@@ -9588,7 +9588,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--actor string Actor name for audit trail (default: $BEADS_ACTOR, git user.name, $USER)\""
             }
           },
           "--add-label": {
@@ -9600,7 +9600,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--add-label strings Add labels (repeatable)\""
             }
           },
           "--assignee": {
@@ -9612,7 +9612,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-a, --assignee string Assignee\""
             }
           },
           "--await-id": {
@@ -9624,7 +9624,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--await-id string Set gate await_id (e.g., GitHub run ID for gh:run gates)\""
             }
           },
           "--body-file": {
@@ -9648,7 +9648,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--database string Run against a different server database for this invocation, without changing the project's configured database (proxied-server mode only)\""
             }
           },
           "--db": {
@@ -9660,7 +9660,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
             }
           },
           "--defer": {
@@ -9672,7 +9672,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--defer string Defer until date (empty to clear). Issue hidden from bd ready until then, then auto-wakes to open\""
             }
           },
           "--design-file": {
@@ -9708,7 +9708,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--dolt-auto-commit string Dolt auto-commit policy (off|on|batch). 'on': commit after each write. 'batch': defer commits to bd dolt commit; uncommitted changes persist in the working set until then (a live batch-mode bd process also flushes on SIGTERM/SIGHUP, except in proxied-server mode, where bd dolt commit is the only flush point). In proxied-server mode the deferral covers the writes the CLI makes on that route, including config and version metadata; explicit commit points (bd batch, bd mol bond/pour/squash, bd mol wisp create, and the wisp half of bd mol burn) still commit, and a bd serve process on the same database is unaffected. Default: on. Override via config key dolt.auto-commit\""
             }
           },
           "--due": {
@@ -9720,7 +9720,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--due string Due date/time (empty to clear). Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15\""
             }
           },
           "--estimate": {
@@ -9732,7 +9732,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-e, --estimate int Time estimate in minutes (e.g., 60 for 1 hour)\""
             }
           },
           "--external-ref": {
@@ -9744,7 +9744,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--external-ref string External reference (e.g., 'gh-9', 'jira-ABC', Linear URL)\""
             }
           },
           "--if-assignee": {
@@ -9756,7 +9756,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--if-assignee string Apply the update only if the current assignee equals this value (--if-assignee '' requires unassigned); a mismatch writes nothing and exits 13 (vs 1 for other failures). Requires a field update; cannot combine with --claim\""
             }
           },
           "--if-status": {
@@ -9768,7 +9768,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--if-status string Apply the update only if the current status equals this value; a mismatch writes nothing and exits 13 (vs 1 for other failures). Requires a field update; cannot combine with --claim\""
             }
           },
           "--metadata": {
@@ -9792,7 +9792,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--parent string New parent issue ID (reparents the issue, use empty string to remove parent)\""
             }
           },
           "--priority": {
@@ -9804,7 +9804,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-p, --priority string Priority (0-4 or P0-P4, 0=highest)\""
             }
           },
           "--remove-label": {
@@ -9816,7 +9816,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--remove-label strings Remove labels (repeatable)\""
             }
           },
           "--session": {
@@ -9828,7 +9828,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--session string Claude Code session ID for status=closed (or set CLAUDE_SESSION_ID env var)\""
             }
           },
           "--set-labels": {
@@ -9840,7 +9840,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--set-labels strings Set labels, replacing all existing (repeatable)\""
             }
           },
           "--set-metadata": {
@@ -9852,7 +9852,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--set-metadata stringArray Set metadata key=value (repeatable, e.g., --set-metadata team=platform)\""
             }
           },
           "--spec-id": {
@@ -9864,7 +9864,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--spec-id string Link to specification document\""
             }
           },
           "--status": {
@@ -9876,7 +9876,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-s, --status string New status\""
             }
           },
           "--type": {
@@ -9888,7 +9888,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-t, --type string New type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision\""
             }
           },
           "--unset-metadata": {
@@ -9900,7 +9900,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"--unset-metadata stringArray Remove metadata key (repeatable, e.g., --unset-metadata team)\""
             }
           },
           "-C": {
@@ -9924,7 +9924,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-a, --assignee string Assignee\""
             }
           },
           "-e": {
@@ -9936,7 +9936,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-e, --estimate int Time estimate in minutes (e.g., 60 for 1 hour)\""
             }
           },
           "-p": {
@@ -9948,7 +9948,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-p, --priority string Priority (0-4 or P0-P4, 0=highest)\""
             }
           },
           "-s": {
@@ -9960,7 +9960,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-s, --status string New status\""
             }
           },
           "-t": {
@@ -9972,7 +9972,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd update --help: \"-t, --type string New type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision\""
             }
           }
         },
@@ -10118,7 +10118,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd version --help: \"-h, --help help for version\""
             }
           },
           "-C": {
@@ -10142,7 +10142,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd version --help: \"-h, --help help for version\""
             }
           }
         },
@@ -10215,7 +10215,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd where --help: \"-h, --help help for where\""
             }
           },
           "-C": {
@@ -10239,7 +10239,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bd\"]"
+              "source": "bd where --help: \"-h, --help help for where\""
             }
           }
         },
