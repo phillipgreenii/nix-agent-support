@@ -144,6 +144,11 @@ type Emitter struct {
 	keeperUpVal   int64
 	keeperUpAttrs []attribute.KeyValue
 	keeperUpKnown bool
+
+	// scanLastSuccess is the epoch-seconds time of the last successful corpus
+	// scan (0 = none since daemon start); scanLastSuccessKnown flips on the first push.
+	scanLastSuccess      int64
+	scanLastSuccessKnown bool
 	// autoResumeEnabledVal / autoResumeEnabledAttrs / autoResumeEnabledKnown
 	// mirror the caffeinate triplet for the pa_monitor.auto_resume.enabled
 	// gauge.
@@ -319,6 +324,15 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	// Staleness signal for the session metrics: epoch seconds of the last
+	// successful corpus scan, 0 until one succeeds. A failed scan keeps the last
+	// good session gauges, so alert on time() - this. Prometheus name:
+	// pa_monitor_scan_last_success_timestamp_seconds.
+	scanLastSuccessGauge, err := meter.Int64ObservableGauge("pa_monitor.scan.last_success_timestamp",
+		metric.WithUnit("s"), metric.WithDescription("unix time of the last successful corpus scan (0 = none since start)"))
+	if err != nil {
+		return err
+	}
 	// Per-session gauges. Cardinality contract: session_id is unbounded
 	// over the lifetime of the daemon (every started session is a new id),
 	// so the producer (RecordSessionInfo) MUST cap which sessions it
@@ -448,6 +462,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		caffVal, caffAttrs, caffKnown := e.caffeinateActiveVal, e.caffeinateAttrs, e.caffeinateActiveKnown
 		caffGrace := e.caffeinateGraceVal
 		keeperVal, keeperAttrs, keeperKnown := e.keeperUpVal, e.keeperUpAttrs, e.keeperUpKnown
+		scanTS, scanKnown := e.scanLastSuccess, e.scanLastSuccessKnown
 		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
@@ -466,6 +481,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		}
 		if keeperKnown {
 			o.ObserveInt64(keeperUpGauge, keeperVal, metric.WithAttributes(keeperAttrs...))
+		}
+		if scanKnown {
+			o.ObserveInt64(scanLastSuccessGauge, scanTS)
 		}
 		if autoKnown {
 			o.ObserveInt64(autoResumeGauge, autoVal, metric.WithAttributes(autoAttrs...))
@@ -517,7 +535,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveInt64(weekUsageResetsGauge, weekUsageResetsAt, metric.WithAttributes(weekUsageAttrs...))
 		}
 		return nil
-	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, keeperUpGauge, sessionsErroredGauge,
+	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, keeperUpGauge, scanLastSuccessGauge, sessionsErroredGauge,
 		nudgeDeferredGauge,
 		blockCostGauge, weekCostGauge,
 		sessionInfoGauge, sessionTokensGauge, sessionCostGauge,
@@ -661,6 +679,19 @@ func (e *Emitter) RecordKeepAwakeKeeperUp(up bool, attrs map[string]string) {
 	e.keeperUpVal = v
 	e.keeperUpAttrs = kv
 	e.keeperUpKnown = true
+	e.mu.Unlock()
+}
+
+// RecordScanLastSuccess sets the pa_monitor.scan.last_success_timestamp gauge
+// (epoch seconds of the last successful corpus scan; 0 = none since start).
+// nil-safe; observed only after the first push.
+func (e *Emitter) RecordScanLastSuccess(epochSeconds int64) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.scanLastSuccess = epochSeconds
+	e.scanLastSuccessKnown = true
 	e.mu.Unlock()
 }
 

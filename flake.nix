@@ -7555,6 +7555,27 @@
                     touch "$out"
                   '';
 
+              # pa-monitor: the scan-stale alert rule. The script pins the Grafana-only fields and the
+              # expression, then wraps refId A as a Prometheus alert and runs the cases under
+              # grafana/alerting/rule-tests/ under `promtool test rules`.
+              test-pa-monitor-alert-rules =
+                pkgs.runCommand "test-pa-monitor-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pa-monitor/check-alert-rules.sh} \
+                      ${./packages/pa-monitor/grafana/alerting/scan-stale.yaml} \
+                      ${./packages/pa-monitor/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
               # pg-keep-awake: the alert rules (docket pg2-8bgxg.2, packet 18-alerts). The script
               # pins the design's expressions and the Grafana-only fields (for, severity,
               # noDataState), then wraps refId A of each rule as a Prometheus alert and runs the

@@ -180,3 +180,28 @@ func TestUsageGauges_NilSafe(t *testing.T) {
 	e.RecordBlockUsage(&p, time.Unix(1, 0), nil)
 	e.RecordWeekUsage(nil, time.Time{}, map[string]string{"plan_tier": "x"})
 }
+
+// TestScanLastSuccessGauge: the staleness signal is absent until first pushed,
+// then reports the epoch seconds (0 = no scan has succeeded yet).
+func TestScanLastSuccessGauge(t *testing.T) {
+	e, reader := newTestEmitter(t)
+	if _, ok := collectMetric(t, reader, "pa_monitor.scan.last_success_timestamp"); ok {
+		t.Fatal("gauge emitted before the first push")
+	}
+	e.RecordScanLastSuccess(0)
+	m, ok := collectMetric(t, reader, "pa_monitor.scan.last_success_timestamp")
+	if !ok {
+		t.Fatal("gauge not emitted after RecordScanLastSuccess(0)")
+	}
+	if v := m.Data.(metricdata.Gauge[int64]).DataPoints[0].Value; v != 0 {
+		t.Errorf("value = %d, want 0", v)
+	}
+	if m.Unit != "s" {
+		t.Errorf("unit = %q, want s (yields the _seconds Prometheus suffix)", m.Unit)
+	}
+	e.RecordScanLastSuccess(1782958200)
+	m, _ = collectMetric(t, reader, "pa_monitor.scan.last_success_timestamp")
+	if v := m.Data.(metricdata.Gauge[int64]).DataPoints[0].Value; v != 1782958200 {
+		t.Errorf("value = %d, want 1782958200", v)
+	}
+}

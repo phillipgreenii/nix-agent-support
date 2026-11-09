@@ -1,0 +1,79 @@
+# promtool unit tests for the pa-monitor-scan-stale alert (run by the flake check
+# test-pa-monitor-alert-rules). The gauge holds the epoch seconds of the last successful scan;
+# the wrapped rule is `time() - max(gauge) > 900` with `for: 5m`. Under promtool time() is the
+# eval offset in seconds, so a fresh stamp is one that grows 60 per minute; a real stamp is an
+# epoch, which makes a never-scanned daemon (stamp 0) fire at once, while here it needs 15m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a scan that keeps succeeding never fires
+    interval: 1m
+    input_series:
+      - series: pa_monitor_scan_last_success_timestamp_seconds
+        values: "0+60x240"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pa-monitor-scan-stale
+        exp_alerts: []
+
+  - name: scans that stop succeeding fire once the age passes 15m plus the 5m hold
+    interval: 1m
+    input_series:
+      - series: pa_monitor_scan_last_success_timestamp_seconds
+        # advances for 30m then freezes at its last value
+        values: "0+60x30 1800x200"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pa-monitor-scan-stale
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: pa-monitor-scan-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      - eval_time: 100m
+        alertname: pa-monitor-scan-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a recovered scan resolves the alert
+    interval: 1m
+    input_series:
+      - series: pa_monitor_scan_last_success_timestamp_seconds
+        # frozen from minute 10 to 50, then advancing again in step with the clock
+        values: "0+60x10 600x40 3060+60x100"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: pa-monitor-scan-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      - eval_time: 70m
+        alertname: pa-monitor-scan-stale
+        exp_alerts: []
+
+  - name: a daemon that never completed a scan (stamp 0) fires
+    interval: 1m
+    input_series:
+      - series: pa_monitor_scan_last_success_timestamp_seconds
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pa-monitor-scan-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: no series at all does not fire
+    interval: 1m
+    input_series:
+      - series: pa_monitor_scan_last_success_timestamp_seconds
+        values: "_x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pa-monitor-scan-stale
+        exp_alerts: []

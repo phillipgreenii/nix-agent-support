@@ -42,6 +42,12 @@ type Producer struct {
 
 	ref atomic.Pointer[DerivedState]
 
+	// lastScanOK is the unix time (seconds) of the last Assemble that read the
+	// corpus successfully (0 = never). A failed Assemble publishes nothing, so
+	// the last good DerivedState stays in ref and keeps being served; this stamp
+	// is what tells the daemon how stale that state has become.
+	lastScanOK atomic.Int64
+
 	// changes drives the loop cadence (feed cadence, or an injected source).
 	changes ChangeSource
 
@@ -91,9 +97,7 @@ func (pr *Producer) Start(ctx context.Context) {
 		// Seed BEFORE spawning so exactly one goroutine ever mutates the Monitor /
 		// providers (single writer): the seed runs on the caller's goroutine with
 		// no concurrent assembler, and thereafter only pr.loop assembles.
-		if ds, err := pr.Assemble(cctx, pr.now()); err == nil {
-			pr.Publish(ds)
-		}
+		pr.refresh(cctx)
 		pr.wg.Add(1)
 		go pr.loop(cctx, cs)
 	})
@@ -119,10 +123,35 @@ func (pr *Producer) loop(ctx context.Context, cs ChangeSource) {
 		if !cs.WaitForChange(ctx) {
 			return // ctx cancelled (Stop or parent shutdown)
 		}
-		if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
-			pr.Publish(ds)
-		}
+		pr.refresh(ctx)
 	}
+}
+
+// refresh runs one Assemble and, on success, publishes the result and stamps the
+// last-success time. On failure it keeps the previously published state (the
+// last good session tree) and leaves the stamp alone, so ScanLastSuccess ages.
+// An offline batch (recorder not answering) is published so the tree says
+// "daemon offline", but it is not a successful scan and does not refresh the stamp.
+func (pr *Producer) refresh(ctx context.Context) {
+	now := pr.now()
+	ds, err := pr.Assemble(ctx, now)
+	if err != nil {
+		return
+	}
+	pr.Publish(ds)
+	if !ds.Offline {
+		pr.lastScanOK.Store(now.Unix())
+	}
+}
+
+// ScanLastSuccess returns when the corpus was last scanned successfully; the
+// zero Time means no scan has succeeded since the daemon started.
+func (pr *Producer) ScanLastSuccess() time.Time {
+	v := pr.lastScanOK.Load()
+	if v == 0 {
+		return time.Time{}
+	}
+	return time.Unix(v, 0)
 }
 
 // now returns the producer clock (Now, or time.Now when unset).

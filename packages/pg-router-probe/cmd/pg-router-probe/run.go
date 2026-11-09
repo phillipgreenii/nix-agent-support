@@ -178,6 +178,10 @@ import (
 // escalation label. TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile compares the file's
 // uids with this list. A machine where the pool is not deployed never holds the rules.
 //
+// pa-monitor-scan-stale is the age alert on pa-monitor's last successful corpus scan
+// (packages/pa-monitor/grafana/alerting/scan-stale.yaml): a failing scan keeps the last good
+// session gauges, so only the age shows it. Registered the same way, with no escalation label.
+//
 // pg-router-pr-dispatch-failed (pg2-87pjb1: three or more pr.changed dispatches
 // ended failed in an hour) is likewise NOT registered at first; add it here and to
 // TestRegisteredRuleUIDsTrackAlertRules once it has proven quiet.
@@ -243,6 +247,7 @@ var registeredRuleUIDs = []string{
 	"pg-checkout-pool-reset-slow",
 	"pg-checkout-pool-daemon-orphans",
 	"pg-checkout-pool-exporter-down",
+	"pa-monitor-scan-stale",
 }
 
 // defaultGroupRuleUIDs are the rules that fire once per label value (repo,

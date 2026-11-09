@@ -550,6 +550,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		defer func() { opts.Emitter.RecordTickDuration(time.Since(tickStart)) }()
 
 		tickCount++
+		// Publish the corpus scan freshness BEFORE anything can return early, so a
+		// failing scan (whose last good state keeps being served) is still visible.
+		recordScanFreshness(opts.Emitter, opts.Poller)
 		// Pick up a changed decorator config without a restart (pg2-r1f1j.8).
 		// Runs in this (the tick) goroutine, so swapping `decorators` and
 		// clearing `labelCache` is race-free — both are owned here.
@@ -1461,6 +1464,19 @@ func monitorLimits(p any) *Limits {
 		return m.MonitorLimits()
 	}
 	return nil
+}
+
+// recordScanFreshness pushes the last successful corpus scan time (epoch
+// seconds, 0 = none since start) to the emitter. A poller that does not track
+// it (bare test fake) is skipped, so no gauge is emitted for it.
+func recordScanFreshness(e *otel.Emitter, p any) {
+	if m, ok := p.(interface{ ScanLastSuccess() time.Time }); ok {
+		var ts int64
+		if t := m.ScanLastSuccess(); !t.IsZero() {
+			ts = t.Unix()
+		}
+		e.RecordScanLastSuccess(ts)
+	}
 }
 
 func monitorWeekly(p any, now time.Time) *usage.WeeklyEntry {

@@ -285,6 +285,15 @@ The daemon emits:
   - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.caffeinate.battery_releases_total` (by `reason`), `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`, `pa_monitor.session.context.limit_hits_total` (context-window-exceeded / "prompt is too long" hits, by `model`), `pa_monitor.signaler.binary_missing_total` (fired once per required signaler binary — `tmux`/`cmux` — not found on the daemon's PATH at startup, by `signaler` + `binary`).
 - **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `caffeinate.battery_release`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`, `session.context.limit_hit`, `signaler.binary_missing`.
 
+- **`pa_monitor.scan.last_success_timestamp`** (Prometheus `pa_monitor_scan_last_success_timestamp_seconds`) —
+  gauge, epoch seconds of the daemon's last successful corpus scan, 0 until the first. A failed scan
+  (for example the recorder query hitting its deadline) keeps serving the last good session tree
+  instead of zeroing it, so the session gauges stay present but age; this stamp is the staleness
+  signal. A provisioned Grafana alert (`grafana/alerting/scan-stale.yaml`, uid
+  `pa-monitor-scan-stale`, registered with the router probe) fires when
+  `time() - max(pa_monitor_scan_last_success_timestamp_seconds) > 900` for 5m (`noDataState: OK`).
+  Check: `test-pa-monitor-alert-rules`.
+
 The cmux-bridge and TUI additionally emit:
 
 - **`pa_monitor.daemon.connected{component="cmux-bridge"|"tui"}`** — gauge, 1 = connected, 0 =

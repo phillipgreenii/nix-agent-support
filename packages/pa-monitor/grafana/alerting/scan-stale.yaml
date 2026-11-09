@@ -1,0 +1,60 @@
+# pa-monitor session-metrics staleness alert. When the corpus scan fails (for example the
+# recorder query hits its deadline), the daemon keeps serving the last good session tree and
+# the session gauges look healthy while their numbers age, and a daemon that never completed a
+# scan serves no sessions at all. pa_monitor_daemon_connected stays 1 in both cases, so
+# daemon-connection.yaml cannot see it. The daemon pushes
+# pa_monitor_scan_last_success_timestamp_seconds (epoch seconds of the last successful scan, 0
+# until the first one) every tick; the alert is the age of that stamp.
+#
+# max() collapses any resource labels. noDataState is OK: no series means pa-monitor is not
+# running (or is a build that predates the gauge), which daemon-connection.yaml and launchd
+# health cover. refId A is plain PromQL and refId C one threshold stage, so
+# packages/pa-monitor/check-alert-rules.sh wraps it and runs the promtool cases under
+# rule-tests/. The uid is also registered with the router probe (registeredRuleUIDs in
+# packages/pg-router-probe/cmd/pg-router-probe/run.go).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pa-monitor-scan-stale
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: pa-monitor-scan-stale
+        title: pa-monitor session metrics are stale
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pa-monitor has not scanned the session corpus successfully for over 15m"
+          description: "The last successful corpus scan is more than 15 minutes old (or none has succeeded since the daemon started, in which case the age is the whole epoch). The session gauges are the last good values or absent, not current. Check that the recorder (pg-claude-code-recorder) is answering and not timing out, then the pa-monitor daemon log."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: time() - max(pa_monitor_scan_last_success_timestamp_seconds)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [900]

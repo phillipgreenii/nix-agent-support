@@ -200,6 +200,16 @@ func (p *Poller) MonitorWeekly(now time.Time) *usage.WeeklyEntry {
 	return ds.Weekly
 }
 
+// ScanLastSuccess reports when the producer last scanned the corpus
+// successfully (zero = never since start). A failed scan keeps serving the last
+// good DerivedState, so this is the only signal that the served state is stale.
+func (p *Poller) ScanLastSuccess() time.Time {
+	if p.producer == nil {
+		return time.Time{}
+	}
+	return p.producer.ScanLastSuccess()
+}
+
 // MonitorPRByDir returns the cwd -> *PRInfo map from the last PUBLISHED
 // DerivedState (C5). The daemon's snapshot() re-annotates the DB-materialised
 // tree with it (F1: PRInfo is not persisted, so the served tree would otherwise
