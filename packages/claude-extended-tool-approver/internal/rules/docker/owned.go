@@ -350,7 +350,7 @@ func loadOwned(path string) *ownedObjects {
 	if err != nil {
 		return newOwnedObjects()
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return readOwned(f)
 }
 

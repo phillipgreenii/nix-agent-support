@@ -34,7 +34,7 @@ func readLines(t *testing.T, state, session string) []line {
 	if err != nil {
 		t.Fatalf("open event file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if st, _ := f.Stat(); st.Mode().Perm() != 0o600 {
 		t.Errorf("file mode = %v, want 0600", st.Mode().Perm())
 	}

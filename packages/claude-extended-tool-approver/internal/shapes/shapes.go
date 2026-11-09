@@ -337,7 +337,7 @@ func isAssignment(w string) bool {
 		return false
 	}
 	for j, r := range w[:i] {
-		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (j > 0 && r >= '0' && r <= '9')) {
+		if r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (j == 0 || r < '0' || r > '9') {
 			return false
 		}
 	}
@@ -611,7 +611,7 @@ func PathClass(p, cwd string) string {
 		return "ref-delete"
 	case strings.HasPrefix(p, "-"):
 		return "flag-like"
-	case abs && !(cwd != "" && under(strings.TrimRight(cwd, "/"))):
+	case abs && (cwd == "" || !under(strings.TrimRight(cwd, "/"))):
 		return "other-absolute"
 	case strings.Contains(p, "/") || strings.HasPrefix(p, "."):
 		return "project"
