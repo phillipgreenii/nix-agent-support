@@ -90,10 +90,12 @@ async function capturePath(id: string): Promise<string | undefined> {
 // Record one usage reading; returns without waiting for the write (flushLimitsCapture waits).
 export function captureLimits(usage: Usage): void {
   if (!host) return
+  // The record is stamped when the reading arrives, not when the serial chain reaches it.
+  const ts = Math.floor(nowMs() / 1000)
   chain = chain
     .then(async () => {
       const id = String((await host.session.id()) ?? '')
-      const rec = buildRecord(usage, id, Math.floor(nowMs() / 1000))
+      const rec = buildRecord(usage, id, ts)
       if (!rec) return
       const sig = signature(rec)
       if (sig === lastSig) return
