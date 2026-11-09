@@ -1,6 +1,7 @@
 // Package limits owns the account-global rate_limits (5h / 7d) window-peak fold
-// (ADR 0021 §1, ADR 0029). It is a pure leaf: the (retired) shell status-line wrapper
-// appended per-session records to
+// (ADR 0021 §1, ADR 0029). It is a pure leaf: the pgd display mod
+// (claude-marketplace/pgd, limits-capture; the retired shell status-line wrapper before it)
+// appends per-session records to
 // <ClaudeHome>/projects/**/<session_id>.status.jsonl, and this package parses one
 // such file's lines (ReadStatusRecords) and collapses a set of records into the
 // current-window reading (Current). Discovery of which files to read lives in the
@@ -26,7 +27,7 @@ type Limits struct {
 	CapturedAt       time.Time
 }
 
-// Record is the on-disk shape written by the retired shell status-line wrapper (one line of a
+// Record is the on-disk shape written by the pgd display mod (one line of a
 // <session_id>.status.jsonl sibling). Every field is a pointer / optional so
 // "absent" is distinguishable from a real 0 — a nil *float64 stays nil; a missing
 // epoch stays a zero time.Time.

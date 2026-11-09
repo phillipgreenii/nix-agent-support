@@ -29,6 +29,20 @@ The types contract is [`types/pgd.d.ts`](types/pgd.d.ts) and the one documented 
 [`types/example.ts`](types/example.ts); the flake check `test-pgd-types` compiles the example
 against the contract with `tsc --noEmit`.
 
+## Rate-limit capture (always on with the mod)
+
+Every `session.measure` that changes the five-hour or seven-day reading appends one record to
+`<claude dir>/projects/<slug>/<session-id>.status.jsonl` (`hooks/limits-capture.ts`; the claude dir
+is `CLAUDE_CONFIG_DIR`, else `~/.claude`). The retired shell status line was this file's only
+writer. Its readers are unchanged: pa-monitor's account-global limit reading (and its corpus
+monitor), the recorder's `claude-status` source, `pg-ccaudit` ingest and transcript discovery, which
+skips these files as transcripts. The line carries `ts`, `session_id` and whichever of
+`five_hour_pct`, `five_hour_resets_at`, `seven_day_pct`, `seven_day_resets_at` are valid (a
+percentage outside 0 to 100 and an unparseable reset are left out, never written as 0). Records are
+written on change only, and the session's text is kept in memory and rewritten whole because
+`$.fs.write` replaces a file. A write the host refuses is dropped silently; a session whose file
+never appears shows as a stale limit reading in pa-monitor.
+
 ## Modals and toggles
 
 The session id label and the context label in the band are buttons. Each opens its own modal pane

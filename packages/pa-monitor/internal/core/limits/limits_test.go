@@ -332,3 +332,22 @@ func TestCurrentDiscardsSevenDayResetBeyondWindow(t *testing.T) {
 	}
 	wantPct(t, "SevenDayPct", l.SevenDayPct, f(60))
 }
+
+// TestCurrentReadsTheDisplayModCaptureLine pins the line the pgd display mod writes to
+// <session>.status.jsonl (claude-marketplace/pgd/hooks/limits-capture.test.ts asserts the same
+// bytes): a fixture record in, the expected 5h/7d reading out.
+func TestCurrentReadsTheDisplayModCaptureLine(t *testing.T) {
+	line := `{"ts":1794225600,"session_id":"abc-123","five_hour_pct":12.5,"five_hour_resets_at":1794236400,"seven_day_pct":3,"seven_day_resets_at":1794614400}` + "\n"
+	l := Current(ParseStatusRecords([]byte(line)))
+	if l == nil {
+		t.Fatal("Current returned nil for a capture line")
+	}
+	wantPct(t, "FiveHourPct", l.FiveHourPct, f(12.5))
+	wantPct(t, "SevenDayPct", l.SevenDayPct, f(3))
+	if !l.FiveHourResetsAt.Equal(at(1794236400)) || !l.SevenDayResetsAt.Equal(at(1794614400)) {
+		t.Errorf("resets = %v / %v", l.FiveHourResetsAt, l.SevenDayResetsAt)
+	}
+	if !l.CapturedAt.Equal(at(1794225600)) {
+		t.Errorf("CapturedAt = %v", l.CapturedAt)
+	}
+}

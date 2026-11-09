@@ -1,3 +1,4 @@
+import { captureLimits } from './limits-capture'
 import { pgdEnabled } from './options'
 import { defineSource, noteEvent, setValue } from './source'
 import type { ModApi } from './types'
@@ -49,7 +50,10 @@ export function registerUsageHooks(on: ModApi): void {
     if (pgdEnabled()) {
       noteEvent()
       try {
-        setValue('usage', mapUsage(await $.session.usage()))
+        const usage = mapUsage(await $.session.usage())
+        setValue('usage', usage)
+        // The limit readings also go to the session's status.jsonl, the file pa-monitor reads.
+        captureLimits(usage)
       } catch {
         // keep the last cached value; the next measurement tries again
       }

@@ -1,6 +1,6 @@
 // Package claudestatus is the claude-status source:
 // projects/{project}/{session}.status.jsonl, one record per line (the
-// status-line wrapper's rate-limit captures).
+// pgd display mod's rate-limit captures).
 package claudestatus
 
 import (

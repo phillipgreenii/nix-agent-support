@@ -10,6 +10,7 @@ import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { registerUsageHooks, startUsage } from './usage'
 import { registerBandHooks } from './band'
 import { registerAlertHooks } from './alerts'
+import { initLimitsCapture } from './limits-capture'
 import { initLog } from './log'
 import { exportMetrics, initExporter } from './exporter'
 import { hydrateToggles, setToggleStore } from './toggles'
@@ -96,6 +97,7 @@ export const register: Register = on => {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
         awsProfile: () => $.env.get('AWS_PROFILE'),
         home: () => $.env.get('HOME'),
+        claudeConfigDir: () => $.env.get('CLAUDE_CONFIG_DIR'),
       },
       clock: { after: (ms: number, fn: () => void) => $.clock.after(ms, fn) },
     }
@@ -109,6 +111,7 @@ export const register: Register = on => {
     setToggleStore({ save: state => void Promise.resolve(update($, togglesAtom, () => state)).catch(() => undefined) })
     if (options.enable) {
       initLog(host)
+      initLimitsCapture(host)
       initExporter(host)
       initSources(host, { setTimer: (fn, ms) => host.clock.after(ms, fn) })
       initContributions({ now: () => Date.now(), setTimer: (fn, ms) => host.clock.after(ms, fn), requestInvalidate })
