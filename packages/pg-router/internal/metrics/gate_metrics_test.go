@@ -235,3 +235,77 @@ func TestQueueLogBytesGauge(t *testing.T) {
 		}
 	}
 }
+
+// A watchdog-style gate (short TTL, renewed repeatedly) on a REAL file-backed
+// store: the gauge reads 1 while it is renewed, drops out when the lease lapses
+// even though no expiry sweep ran, and a queue reopened from the same log after
+// a clear reports no gate. The gauge reads the in-memory gate registry, which
+// lives in the event log (there is no gates/ directory any more), so a gauge of 1
+// with an empty gates/ directory is a live, renewed gate and not a stale series.
+func TestGateMetrics_ActiveGaugeFollowsRenewalLapseAndClearOnFileStore(t *testing.T) {
+	path := t.TempDir() + "/queue.jsonl"
+	store, err := eventqueue.NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	clk := &mockClock{t: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)}
+	var q *eventqueue.Queue
+	emitter, err := New(mp, func() map[string]int { return q.DepthByType() }, WithClock(clk.now),
+		WithActiveGates(func() []eventqueue.Gate { return q.ActiveGates() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err = eventqueue.New(store, eventqueue.WithClock(clk.now),
+		eventqueue.WithObserver(emitter), eventqueue.WithGateObserver(emitter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{reader: reader, mp: mp, emitter: emitter, q: q, clk: clk}
+	const typ = "LOW_DISK_USAGE"
+	renew := func() {
+		t.Helper()
+		if _, err := q.SetGate(eventqueue.GateRequest{Type: typ, Owner: "watchdog", TTL: 7 * time.Minute}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := 0; i < 5; i++ {
+		renew()
+		clk.advance(time.Minute)
+		if got := gaugeVal(h.collect(t), MetricActiveGates, "type", typ); got != 1 {
+			t.Fatalf("renewal %d: gauge = %d, want 1", i, got)
+		}
+	}
+
+	// Renewals stop: the lease lapses with no Expire sweep, and the gauge follows.
+	clk.advance(8 * time.Minute)
+	if got := gaugeVal(h.collect(t), MetricActiveGates, "type", typ); got != -1 {
+		t.Errorf("gauge = %d after the lease lapsed, want absent", got)
+	}
+
+	// Set again, clear, and reopen the same log: no gate is reported.
+	renew()
+	if _, _, err := q.ClearGate(typ, "op"); err != nil {
+		t.Fatal(err)
+	}
+	if got := gaugeVal(h.collect(t), MetricActiveGates, "type", typ); got != -1 {
+		t.Errorf("gauge = %d after clear, want absent", got)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store2, err := eventqueue.NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store2.Close() })
+	q2, err := eventqueue.New(store2, eventqueue.WithClock(clk.now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := q2.ActiveGates(); len(g) != 0 {
+		t.Errorf("reopened queue reports gates %v, want none", g)
+	}
+}
