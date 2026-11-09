@@ -68,7 +68,7 @@ test('with components.assume off nothing is registered and the facade is not cal
   const sh = await world('example-dev', off)
   expect(bandLabels({ sessionId: 'sess-1' }, T).find(l => l.id === 'assume')).toBe(undefined)
   expect(readCached('assume')).toBe(undefined)
-  expect(sh.calls).not.toContain('env.awsProfile')
+  expect(sh.calls.includes('env.awsProfile')).toBe(false)
 })
 
 const flat = (n: any): any[] =>
@@ -92,7 +92,7 @@ test('the band draws green as a Text colour and dim as the Text dim property', a
     await world(profile)
     const tree = await bandHook(stub$(), { props: { bodyColumns: 80 } }, async () => undefined)
     const t = flat(tree).find(n => n.type === 'Text' && n.key === 'assume')
-    expect(t).toBeDefined()
+    expect(t === undefined).toBe(false)
     expect({ color: t.color, dimColor: t.dimColor }).toEqual({ color: undefined, dimColor: undefined, ...expected })
   }
 })
