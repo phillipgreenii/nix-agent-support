@@ -597,9 +597,17 @@ func (e *Engine) aggregate(tx store.Querier, req Request, ans *Answer) *wire.Err
 	}
 	e.noteFilter("query", b)
 	if len(sel) == 0 {
-		sel = []string{"r.id"}
+		sel = []string{"0"}
 	}
-	q := "SELECT " + strings.Join(sel, ",") + base(req.OldGenerations) + " " + strings.Join(b.joins, " ") + " WHERE " + wsql
+	// SQLite collapses the matching rows to one row per distinct tuple of the
+	// selected columns with its multiplicity, in order of each tuple's first
+	// record, so Go folds distinct tuples instead of every record.
+	pos := make([]string, len(sel))
+	for i := range sel {
+		pos[i] = strconv.Itoa(i + 1)
+	}
+	q := "SELECT " + strings.Join(sel, ",") + ",COUNT(*)" + base(req.OldGenerations) + " " + strings.Join(b.joins, " ") +
+		" WHERE " + wsql + " GROUP BY " + strings.Join(pos, ",") + " ORDER BY MIN(r.id)"
 	rs, qerr := tx.Query(q, append(append([]any{}, b.joinArgs...), wargs...)...)
 	if qerr != nil {
 		return wire.FromErr(qerr)
@@ -608,10 +616,12 @@ func (e *Engine) aggregate(tx store.Querier, req Request, ans *Answer) *wire.Err
 	var order []string
 	for rs.Next() {
 		vals := make([]any, len(sel))
-		dest := make([]any, len(sel))
+		dest := make([]any, len(sel)+1)
 		for i := range vals {
 			dest[i] = &vals[i]
 		}
+		var w int64 // records sharing this tuple
+		dest[len(sel)] = &w
 		if err := rs.Scan(dest...); err != nil {
 			_ = rs.Close()
 			return wire.FromErr(err)
@@ -634,6 +644,7 @@ func (e *Engine) aggregate(tx store.Querier, req Request, ans *Answer) *wire.Err
 			order = append(order, key)
 		}
 		for i, p := range plans {
+			n := w
 			if p.hasD && vals[p.dIdx] != nil {
 				dk := fmt.Sprint(vals[p.dIdx])
 				if g.seen[i] == nil {
@@ -643,24 +654,27 @@ func (e *Engine) aggregate(tx store.Querier, req Request, ans *Answer) *wire.Err
 					continue
 				}
 				g.seen[i][dk] = true
+				n = 1 // a distinct value counts once, however many records carry it
 			}
 			if !p.hasF {
-				g.counts[i]++
+				g.counts[i] += n
 				continue
 			}
 			v := vals[p.fIdx]
 			if v == nil {
 				continue
 			}
-			g.counts[i]++
+			g.counts[i] += n
 			switch x := v.(type) {
 			case int64:
-				g.isum[i] += x
-				g.sums[i] += float64(x)
+				g.isum[i] += x * n
+				g.sums[i] += float64(x) * float64(n)
 			case float64:
-				g.sums[i] += x
+				for j := int64(0); j < n; j++ { // repeated addition, as one row at a time
+					g.sums[i] += x
+				}
 			}
-			g.n[i]++
+			g.n[i] += n
 			if g.mins[i] == nil || less(v, g.mins[i]) {
 				g.mins[i] = v
 			}
