@@ -516,3 +516,79 @@ lib() {
   # pushes, resets, reverts, checks out, commits, rebases or cleans
   [ -z "$(grep -nE '^\s*(rr_git|git)\b.* (push|reset|revert|checkout|commit|rebase|cherry-pick|stash|clean)( |$)' "$SCRIPTS_DIR/pg-repo-runner.bash" "$SCRIPTS_DIR/pg-repo-runner.sh")" ]
 }
+
+# ---- a bead closed outside the runner -------------------------------------------
+
+@test "a newer red after the bead was closed outside the runner files one new bead naming it, and a repeat files nothing" {
+  verify nix-alpha "$ALPHA_SHA" 1
+  local old sha2 new
+  old="$(runner_beads nix-alpha | jq -r '.[0].id')"
+  # someone else judges that tip moot and closes the runner's bead
+  bd -C "$TDIR" close "$old" --reason "moot" >/dev/null
+  [ "$(notifications)" -eq 1 ]
+  sha2="$(commit_in "$WS/nix-alpha")"
+  verify nix-alpha "$sha2" 1
+  [ "$status" -eq 0 ]
+  [ "$(bead_count nix-alpha)" -eq 2 ]
+  new="$(runner_beads nix-alpha | jq -r --arg old "$old" '.[] | select(.id != $old) | .id')"
+  [ "$(bd_fixture_show_json "$new" | jq -r .status)" = open ]
+  [ "$(bd_fixture_show_json "$new" | jq -r '.labels | index("agent-support") != null')" = true ]
+  [ "$(bd_fixture_show_json "$new" | jq -r '.metadata.runner')" = pg-repo-runner ]
+  [ "$(bd_fixture_show_json "$new" | jq -r '.metadata.sha')" = "$sha2" ]
+  [[ "$(bd_fixture_show_json "$new" | jq -r .description)" == *"Replaces $old"* ]]
+  [ "$(notifications)" -eq 2 ]
+  [ "$(record nix-alpha red | jq -r .bead)" = "$new" ]
+  # the closed bead is neither reopened nor commented on
+  [ "$(bd_fixture_show_json "$old" | jq -r .status)" = closed ]
+  [ -z "$(comments_of "$old")" ]
+  # the same newer red again: nothing
+  verify nix-alpha "$sha2" 1
+  [ "$status" -eq 0 ]
+  lib 'rr_surface_raise nix-alpha red '"$sha2"' "again"'
+  [ "$status" -eq 0 ]
+  [ "$(bead_count nix-alpha)" -eq 2 ]
+  [ "$(notifications)" -eq 2 ]
+  [ -z "$(comments_of "$old")" ]
+  # an even newer red now goes to the new, open bead as a comment
+  local sha3
+  sha3="$(commit_in "$WS/nix-alpha")"
+  verify nix-alpha "$sha3" 1
+  [ "$(bead_count nix-alpha)" -eq 2 ]
+  comments_of "$new" | grep -q "$sha3"
+  assert_repos_untouched
+}
+
+@test "an unreachable tracker during the status read keeps the part owed: the newer red is retried" {
+  verify nix-alpha "$ALPHA_SHA" 1
+  local old sha2
+  old="$(runner_beads nix-alpha | jq -r '.[0].id')"
+  bd -C "$TDIR" close "$old" --reason "moot" >/dev/null
+  sha2="$(commit_in "$WS/nix-alpha")"
+  write_config "$TEST_DIR/no-such-tracker"
+  verify nix-alpha "$sha2" 1
+  [ "$status" -eq 0 ]
+  # nothing filed, nothing notified, and the newer sha is not marked as seen
+  [ "$(bead_count nix-alpha)" -eq 1 ]
+  [ "$(notifications)" -eq 1 ]
+  [ "$(record nix-alpha red | jq -r .bead)" = "$old" ]
+  [ "$(record nix-alpha red | jq -r .lastSha)" = "$ALPHA_SHA" ]
+  # the tracker is back: the same report now replaces the closed bead
+  write_config "$TDIR"
+  lib 'rr_surface_raise nix-alpha red '"$sha2"' "retry"'
+  [ "$status" -eq 0 ]
+  [ "$(bead_count nix-alpha)" -eq 2 ]
+  [ "$(notifications)" -eq 2 ]
+  [ -z "$(comments_of "$old")" ]
+}
+
+@test "diverged has no newer-evidence report: a closed bead is left closed and nothing is refiled" {
+  lib 'rr_surface_raise nix-beta diverged '"$ALPHA_SHA"' "ahead 1, behind 1"'
+  local id
+  id="$(runner_beads nix-beta | jq -r '.[0].id')"
+  bd -C "$TDIR" close "$id" --reason "handled by hand" >/dev/null
+  lib 'rr_surface_raise nix-beta diverged '"$ALPHA_SHA"' "ahead 2, behind 1"'
+  [ "$status" -eq 0 ]
+  [ "$(bead_count nix-beta)" -eq 1 ]
+  [ "$(notifications)" -eq 1 ]
+  [ -z "$(comments_of "$id")" ]
+}

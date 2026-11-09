@@ -653,11 +653,16 @@ rr_surface_title() {
   esac
 }
 
-# rr_surface_body REPO KIND SHA DETAIL: the self-contained bead description.
+# rr_surface_body REPO KIND SHA DETAIL [REPLACES]: the self-contained bead
+# description. REPLACES is the id of the closed bead this one supersedes.
 rr_surface_body() {
-  local repo="$1" kind="$2" sha="$3" detail="$4"
+  local repo="$1" kind="$2" sha="$3" detail="$4" replaces="${5:-}"
   printf 'pg-repo-runner saw a transition on %s: %s (at %s).\n\n' "$repo" "$kind" "$sha"
   [[ -z $detail ]] || printf 'Evidence: %s\n\n' "$detail"
+  if [[ -n $replaces ]]; then
+    printf 'Replaces %s: that bead was closed while the repo was still in this state, and the state is now ' "$replaces"
+    printf 'reported at a newer tip (%s). The closed bead is left as it was; this one tracks the newer report.\n\n' "$sha"
+  fi
   printf 'Read-only facts: `pg-repo-runner status` lists the verdicts and the open transitions.\n\n'
   if [[ $kind == diverged ]]; then
     printf 'The primary branch has commits the remote lacks AND the remote has commits it lacks. '
@@ -686,11 +691,11 @@ rr_bead_find() {
   rr_bd_norm <<<"$out" | rr_jq -r 'if type == "array" then (.[0].id // empty) else empty end'
 }
 
-# rr_bead_create REPO KIND SHA DETAIL: files the P1 bead and prints its id.
+# rr_bead_create REPO KIND SHA DETAIL [REPLACES]: files the P1 bead and prints its id.
 # Refuses (return 1) without a repo label: a bead with no repo label would be
 # invisible to its owner.
 rr_bead_create() {
-  local repo="$1" kind="$2" sha="$3" detail="$4" label meta out
+  local repo="$1" kind="$2" sha="$3" detail="$4" replaces="${5:-}" label meta out
   label="$(rr_surface_label "$repo")"
   if [[ -z $label ]]; then
     rr_err "surface: no repo label for '$repo' in surface.repo_labels: no bead is filed"
@@ -700,9 +705,17 @@ rr_bead_create() {
   meta="$(rr_jq -nc --arg repo "$repo" --arg kind "$kind" --arg sha "$sha" \
     '{runner: "pg-repo-runner", repo: $repo, kind: $kind, sha: $sha}')" || return 1
   out="$(rr_bd create "$(rr_surface_title "$repo" "$kind" "$sha")" --type task --priority 1 \
-    --labels "$label" --metadata "$meta" --description "$(rr_surface_body "$repo" "$kind" "$sha" "$detail")" \
+    --labels "$label" --metadata "$meta" --description "$(rr_surface_body "$repo" "$kind" "$sha" "$detail" "$replaces")" \
     --json 2>/dev/null)" || return 1
   rr_bd_norm <<<"$out" | rr_jq -r 'if type == "array" then .[0].id else .id end // empty'
+}
+
+# rr_bead_status ID: prints the status of bead ID. Returns 1 when the tracker
+# could not be read.
+rr_bead_status() {
+  local out
+  out="$(rr_bd show "$1" --json 2>/dev/null)" || return 1
+  rr_bd_norm <<<"$out" | rr_jq -r 'if type == "array" then .[0] else . end | .status // ""'
 }
 
 # rr_bead_close_own ID EVIDENCE: comments EVIDENCE on bead ID and closes it, but
@@ -770,7 +783,7 @@ rr_surface_flush() {
   detail="$(rr_jq -r '.detail // ""' <<<"$rec")"
   if [[ -z $bead ]]; then
     if id="$(rr_bead_find "$repo" "$kind")" && [[ -z $id ]]; then
-      id="$(rr_bead_create "$repo" "$kind" "$sha" "$detail")" || id=""
+      id="$(rr_bead_create "$repo" "$kind" "$sha" "$detail" "$(rr_jq -r '.replaces // ""' <<<"$rec")")" || id=""
     fi
     if [[ -n ${id:-} ]]; then
       bead="$id"
@@ -809,9 +822,11 @@ rr_surface_flush_repo() {
 # The first report after a clear (or ever) is the TRANSITION: it opens a record
 # and surfaces it (one bead, one notification). A report while the record is
 # already open is a steady state: no bead, no notification; a newer red sha is
-# commented on the bead. Returns 2 on a bad argument.
+# commented on the bead, unless the bead was closed outside the runner: then the
+# newer sha is a NEW transition (one new bead naming the closed one, one
+# notification; the closed bead is never reopened or commented). Returns 2 on a bad argument.
 rr_surface_raise() {
-  local repo="$1" kind="$2" sha="$3" detail="${4:-}" rec last bead now
+  local repo="$1" kind="$2" sha="$3" detail="${4:-}" rec last bead now status
   rr_surface_enabled || return 0
   rr_valid_key "$repo" && rr_surface_kind_valid "$kind" && rr_valid_sha "$sha" || {
     rr_err "surface: bad arguments: $repo $kind $sha"
@@ -835,13 +850,34 @@ rr_surface_raise() {
   else
     last="$(rr_jq -r '.lastSha // ""' <<<"$rec")"
     if [[ ($kind == red || $kind == build-red) && $sha != "$last" ]]; then
-      # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
-      rec="$(rr_jq -c --arg sha "$sha" --arg now "$now" '.lastSha = $sha | .updatedAt = $now' <<<"$rec")"
-      rr_surface_store "$repo" "$kind" "$rec" || return 1
       bead="$(rr_jq -r '.bead // ""' <<<"$rec")"
+      status=""
       if [[ -n $bead ]]; then
-        rr_bd comments add "$bead" "Still red at a newer tip: $sha. ${detail}" >/dev/null 2>&1 ||
-          rr_log "surface: $repo $kind: could not comment on $bead"
+        # one bd show, the read rr_bead_close_own does: a bead closed outside the
+        # runner while the state continues makes this newer sha a new transition
+        if ! status="$(rr_bead_status "$bead")"; then
+          # unreadable tracker: lastSha stays, so the next pass reads again
+          rr_log "surface: $repo $kind: could not read $bead; the newer tip $sha is retried next pass"
+          rr_surface_flush "$repo" "$kind"
+          return 0
+        fi
+      fi
+      if [[ $status == closed ]]; then
+        # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+        rec="$(rr_jq -nc --arg repo "$repo" --arg kind "$kind" --arg sha "$sha" --arg detail "$detail" \
+          --arg now "$now" --arg old "$bead" \
+          '{repo: $repo, kind: $kind, state: "open", sha: $sha, lastSha: $sha, detail: $detail,
+            bead: "", notified: false, replaces: $old, openedAt: $now, updatedAt: $now}')" || return 1
+        rr_surface_store "$repo" "$kind" "$rec" || return 1
+        rr_log "surface: $repo $kind: $bead was closed outside the runner; new transition at $sha"
+      else
+        # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+        rec="$(rr_jq -c --arg sha "$sha" --arg now "$now" '.lastSha = $sha | .updatedAt = $now' <<<"$rec")"
+        rr_surface_store "$repo" "$kind" "$rec" || return 1
+        if [[ -n $bead ]]; then
+          rr_bd comments add "$bead" "Still red at a newer tip: $sha. ${detail}" >/dev/null 2>&1 ||
+            rr_log "surface: $repo $kind: could not comment on $bead"
+        fi
       fi
     fi
   fi

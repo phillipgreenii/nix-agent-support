@@ -192,3 +192,26 @@ build_with() {
   [ "$(bead_count)" -eq 0 ]
   [ "$(jq -r .bead "$STATE/surface/workspace.build-red.json")" = "" ]
 }
+
+@test "a newer red build after the bead was closed outside the runner files one new bead naming it" {
+  build_with 3
+  local old new h2
+  old="$(runner_beads | jq -r '.[0].id')"
+  bd -C "$TDIR" close "$old" --reason "moot" >/dev/null
+  ws_commit_in "$WS/nix-alpha"
+  h2="$(ws_hash)"
+  build_with 3
+  [ "$status" -eq 0 ]
+  [ "$(bead_count)" -eq 2 ]
+  new="$(runner_beads | jq -r --arg old "$old" '.[] | select(.id != $old) | .id')"
+  [ "$(bd_fixture_show_json "$new" | jq -r .status)" = open ]
+  [ "$(bd_fixture_show_json "$new" | jq -r '.metadata.sha')" = "$h2" ]
+  [[ "$(bd_fixture_show_json "$new" | jq -r .description)" == *"Replaces $old"* ]]
+  [ "$(notifications)" -eq 2 ]
+  [ -z "$(comments_of "$old")" ]
+  # the same newer tuple again files nothing
+  ws_build
+  [ "$status" -eq 0 ]
+  [ "$(bead_count)" -eq 2 ]
+  [ "$(notifications)" -eq 2 ]
+}

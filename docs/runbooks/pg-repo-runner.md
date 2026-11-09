@@ -143,6 +143,11 @@ flowchart TD
 - The first red report after a clear files one bead (metadata `runner = pg-repo-runner`, `repo`,
   `kind`, `sha`) and one notification. A repeat report files nothing; a newer red sha is commented
   on the existing bead. `status` lists the open transitions.
+- If someone closes the runner's bead while the repo is still red, the next NEWER red sha (or
+  build-red tuple) files ONE new bead whose body names the closed one, with one notification. The closed
+  bead is not reopened or commented on: close a bead for a red tip only when you judge that tip, and
+  expect a newer red to come back as a new bead. While the tracker is unreachable the newer sha is retried
+  on each pass. A `diverged` or `needs-relock` bead closed by hand while the state persists stays closed.
 - The fix is forward: a new commit. The runner MUST NOT revert, reset, rebase, edit or push a repo
   to clear a red tip, and no code in it can.
 - A green verdict at a sha that descends from the red tip (`git merge-base --is-ancestor`) closes

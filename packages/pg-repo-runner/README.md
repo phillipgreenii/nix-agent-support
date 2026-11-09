@@ -240,8 +240,15 @@ Per (repo, kind) the state is a Memento, `$XDG_STATE_HOME/pg-repo-runner/surface
    1, the repo's label from `surface.repo_labels`, metadata `runner = pg-repo-runner`, `repo`, `kind`,
    `sha`) and posts ONE macOS notification (through the `pg-osx-notify post` CLI: title and body travel as
    argument values with `--source pg-repo-runner` and a `--timeout`; a failed call logs its exit code and stays owed).
-2. A repeated report while the record is open files nothing and notifies nothing. A newer red sha is
-   commented on the bead.
+2. A repeated report while the record is open files nothing and notifies nothing. A newer `red` or
+   `build-red` sha is commented on the bead, after one `bd show` of it: when that bead reads closed (someone
+   else closed it while the repo stayed in the bad state), the newer sha is a NEW transition instead. The
+   record is replaced, ONE new bead is filed (its body names the closed bead it replaces) with ONE
+   notification, and the closed bead is never reopened or commented on, because whoever closed it judged
+   that sha and a newer one is new evidence. The same newer sha reported again files nothing. When the
+   tracker cannot be read the newer sha is not recorded as seen and the next report reads again.
+   `diverged` and `needs-relock` carry no newer-evidence report and never comment on a bead, so a bead
+   closed by hand while they persist is left closed (a re-file on every pass would undo the close).
 3. A green check at a sha that DESCENDS from the red tip (`git merge-base --is-ancestor`, a read) comments
    the green verdict on the bead and closes it, but only a bead whose metadata says `runner =
 pg-repo-runner`; any other bead is left alone and the record is cleared. A green that does not
