@@ -174,13 +174,11 @@ test('the band and each modal toggle from a slash command', async () => {
   expect(isOpen('band')).toBe(true)
 })
 
-test('the band toggle button is drawn after the labels and presses toggle the band', async () => {
+test('the band draws no toggle button of its own: the engine draws the only [-]', async () => {
   await world({ contextPercent: 10, limits: [] })
   const got = renderBand({ sessionId: 'abcdef12', usage: { contextPercent: 10, limits: [] } }, 80, T)
-  expect(got[0].map(l => l.label)).toEqual(['abcdef12', 'ctx 10%', 'Focus', 'Wrap up', '[-]'])
-  expect(got[0][4].action).toBe('band')
-  pressButton('band')
-  expect(isOpen('band')).toBe(false)
+  expect(got[0].map(l => l.label)).toEqual(['abcdef12', 'ctx 10%', 'Focus', 'Wrap up'])
+  expect(got.flat().some(l => l.action === 'band')).toBe(false)
 })
 
 test('a modal the host closed (Esc or dismiss) resyncs the toggle state', async () => {

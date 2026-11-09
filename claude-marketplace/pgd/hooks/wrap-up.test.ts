@@ -32,11 +32,11 @@ const row = () =>
     .flat()
     .find(l => l.id === 'wrapup')
 
-test('the button is drawn with every component off, before the band toggle', () => {
+test('the button is drawn with every component off, last in the band', () => {
   world()
   expect(row()).toEqual({ id: 'wrapup', label: WRAP_UP_LABEL, action: 'wrapup' })
   const ids = renderBand({ sessionId: 'sess-1' }, 200, T).flat().map(l => l.id)
-  expect(ids[ids.length - 2]).toBe('wrapup')
+  expect(ids[ids.length - 1]).toBe('wrapup')
 })
 
 test('no button when enable is false', () => {

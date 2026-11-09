@@ -52,7 +52,7 @@ test('labels wrap when the next would pass the width; a wide label gets its own 
   expect(labels(renderBand(v, 10, T))).toEqual([['abcdef12'], ['sonnet · high'], ['ctx 5%']])
 })
 
-// The bead's band: session name, model, Focus, Wrap up and the [-] button, as the real components
+// The bead's band: session name, model, Focus and Wrap up buttons (no toggle button: the engine draws the only [-]), as the real components
 // register them (real labels, real button chrome).
 describe_band_widths()
 function describe_band_widths() {
@@ -71,10 +71,9 @@ function describe_band_widths() {
     test(`band at ${title}: labels whole, every row clear of the engine control`, () => {
       registerBandButton({ id: 'focus', order: 60, label: () => 'Focus', action: 'focus' })
       registerBandButton({ id: 'wrapup', order: 70, label: () => 'Wrap up', action: 'wrapup' })
-      registerBandButton({ id: 'band-toggle', order: 100, label: () => '[-]', action: 'band' })
       const v = { sessionId: 'abcdef1234', sessionName: NAMES[name], model: 'claude-sonnet-5-5' }
       const rows = renderBand(v, width, T)
-      const expected = ['session', 'model', 'focus', 'wrapup', 'band-toggle']
+      const expected = ['session', 'model', 'focus', 'wrapup']
       // nothing dropped or split: every label appears once, whole, in order
       expect(rows.flat().map(l => l.id)).toEqual(expected)
       expect(rows.flat().find(l => l.id === 'wrapup')?.label).toBe('Wrap up')

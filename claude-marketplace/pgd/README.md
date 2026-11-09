@@ -53,7 +53,7 @@ Each of these is covered by a test in `hooks/modals.test.ts`, `hooks/modal.test.
 | What `pressButton` does         | It toggles: the first press opens the modal, a second press on the open modal closes it.                               |
 | Close action                    | Always added with id `close`; the framework closes the modal itself and `onAction` never receives it.                  |
 | Info name row without a name    | Shows the session id (the session id also has its own row).                                                            |
-| Band collapse button            | A `[-]` button after the labels (order 100, action `band`); a hidden band draws nothing, so use `/pgd-band`.           |
+| Band collapse button            | No plugin button: the engine draws the only `[-]`; `/pgd-band` hides or shows the band.                                |
 | Toggle ids                      | `band`, `info`, `context`. The band is open and each modal closed by default.                                          |
 | Slash commands                  | `/pgd-band`, `/pgd-info`, `/pgd-context`, no arguments; each toggles and answers `<id> shown.` or `<id> hidden.`.      |
 | Host-closed pane (Esc, dismiss) | A `ui.close` with origin `person` for a `pgd-` pane resyncs the toggle state to closed.                                |

@@ -1,5 +1,4 @@
 import type { PgdOptions, ModApi } from './types'
-import { registerBandButton } from './band'
 import { registerModalBuilder, setPaneApi, registerModalHooks, applyBandState } from './modal'
 import { infoSpec, loadSessionFacts } from './info-modal'
 import { contextSpec, startLastCompaction } from './context-modal'
@@ -18,7 +17,6 @@ export function registerModals(_options: PgdOptions, host: ModApi): void {
   startLastCompaction()
   registerModalBuilder('info', infoSpec, undefined, () => loadSessionFacts(host))
   registerModalBuilder('context', contextSpec)
-  registerBandButton({ id: 'band-toggle', order: 100, label: () => '[-]', action: 'band' })
   applyBandState()
   registerToggleCommandSpecs(host)
 }
