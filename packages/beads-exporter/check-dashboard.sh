@@ -83,7 +83,7 @@ lint() {
          if contains("beads_exporter_up") then test("^min( by \\([^)]*\\))? ?\\(")
          elif contains("_timestamp_seconds") then test("^time\\(\\) - min( by \\([^)]*\\))? ?\\(")
          elif contains("collect_duration") then test("^max by \\(")
-         else test("^(label_replace\\()*(topk\\([0-9]+, )?sum( by \\([^)]*\\))? ?\\(") end)' "$d"
+         else test("^(label_replace\\()*(sort_desc\\()?(topk\\([0-9]+, )?sum( by \\([^)]*\\))? ?\\(") end)' "$d"
   rule B8 "every non-row panel needs a description" \
     '[.. | objects | select(has("gridPos") and .type != "row")]
      | length > 0 and all((.description // "") | length > 0)' "$d"

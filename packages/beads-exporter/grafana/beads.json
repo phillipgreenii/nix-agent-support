@@ -1640,45 +1640,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(20, sum by (bead_label) (beads_not_closed_by_bead_label{db=~\"$db\",bead_label!=\"__other__\"}))",
+          "expr": "sort_desc(topk(20, sum by (bead_label) (beads_not_closed_by_bead_label{db=~\"$db\",bead_label!=\"__other__\"})))",
           "instant": true,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "indexByName": {
-              "bead_label": 0,
-              "Value": 1
-            },
-            "renameByName": {
-              "bead_label": "Label",
-              "Value": "Not closed"
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
-              {
-                "field": "Not closed",
-                "desc": true
-              }
-            ]
-          }
+          "legendFormat": "{{bead_label}}"
         }
       ],
       "options": {
         "reduceOptions": {
-          "values": true,
-          "calcs": [],
-          "fields": "/^Not closed$/"
+          "calcs": ["lastNotNull"]
         },
         "orientation": "horizontal",
         "displayMode": "basic",
