@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,10 @@ import (
 //
 // Issue rows need no event here: the focus_selected annotation appends an
 // annotation_changed change_log row that the issue feed delivers.
+//
+// A PR the lock removes from the plan (strike, operator removal, replaced
+// period) is announced the same way with a distinct `focus-remove:` event id
+// (removalEvent), so the decider holds its bead.
 //
 // A failed injection (no router on PATH, no running core) is a one-line stderr
 // warning; the lock's outcome and exit code are never affected.
@@ -70,6 +75,68 @@ func focusAnnouncer(period string, now func() time.Time) func(context.Context, [
 		}
 		return nil
 	}
+}
+
+// focusRemovalAnnouncer returns the LockDeps.EmitRemoved of a run: one
+// `pr.changed` event per PR the lock removed from the plan, so the decider
+// runs its hold rule for a PR whose annotation now reads none.
+func focusRemovalAnnouncer(period string, now func() time.Time) func(context.Context, []focus.Key) error {
+	return func(ctx context.Context, keys []focus.Key) error {
+		var failed []string
+		for _, k := range keys {
+			if k.Type != "pr" {
+				continue
+			}
+			ev, err := removalEvent(k, period, now().UTC())
+			if err == nil {
+				err = focusInject(ctx, ev)
+			}
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v); run pg-pr-change apply %s", k.ID, err, k.ID))
+			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("%s", strings.Join(failed, "; "))
+		}
+		return nil
+	}
+}
+
+// removalEvent builds the pr.changed event of one PR removed from the plan.
+// Its event id "focus-remove:<id>@<period>@<unix seconds of the lock run>"
+// never equals the selection id "focus-select:<id>@<period>", so the router
+// queue does not fold it with the earlier selection of the same period, and a
+// later removal after a re-selection (a different run time) is a new event;
+// a retried injection of one run reuses the id and folds. The payload delivery
+// suffix hashes "<id>|<period>|removed|<unix seconds>" and so differs from the
+// selection's suffix.
+func removalEvent(k focus.Key, period string, now time.Time) (string, error) {
+	stamp := strconv.FormatInt(now.Unix(), 10)
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(k.ID + "|" + period + "|removed|" + stamp))
+	suffix := fmt.Sprintf("%012x", h.Sum64()&0xffffffffffff)
+	if suffix == "000000000000" {
+		suffix = "000000000001"
+	}
+	ev := map[string]any{
+		"id":        "focus-remove:" + k.ID + "@" + period + "@" + stamp,
+		"type":      "pr.changed",
+		"at":        now.Format(time.RFC3339),
+		"expiresAt": now.Add(focusAnnounceTTL).Format(time.RFC3339),
+		"payload": map[string]any{
+			"id":    k.ID + "@" + suffix,
+			"type":  "pr",
+			"title": k.ID,
+			"metadata": map[string]any{
+				"entity_type": "pr",
+				"entity_id":   k.ID,
+				"kinds":       []string{"focus_removed"},
+				"origin":      "pg-desk",
+			},
+		},
+	}
+	b, err := json.Marshal(ev)
+	return string(b), err
 }
 
 // selectionEvent builds the pr.changed event of one newly selected PR. The

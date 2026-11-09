@@ -478,6 +478,20 @@ already has a bead. A failed injection (no router on PATH, no running core) is o
 stderr naming `pg-pr-change apply <id>` as the by-hand remedy; it never changes the lock's outcome or
 exit code. A preview announces nothing.
 
+**The removal announcement.** A PR row the lock deletes (an operator strike or removal, or a row
+replaced by a new period) has the same gap in the other direction: its annotation reads `none`, but
+no `pr.changed` event follows, so the decider would not hold the PR's bead until the PR next changed.
+After the annotations are written, `select --apply` and `pull` therefore inject one `pr.changed`
+event per distinct PR the lock deleted and did not insert again in the same run. Its event id is
+`focus-remove:<id>@<period>@<unix seconds of the lock run>`, never equal to the selection id
+`focus-select:<id>@<period>`, so the router queue does not fold a removal with the earlier selection
+of the same period; its payload carries the kind `focus_removed` and a delivery key hashed from the
+id, the period and the run time, which differs from the selection's. One run's injections reuse the
+same id (a retry folds); a later removal after a re-selection is a new run and a new event. The
+`pr-change` role then finds the annotation `none` and the decider holds the open, unclaimed bead.
+Failure handling is the selection announcement's: one `WARNING:` line, no change to the outcome or
+exit code, and a preview announces nothing.
+
 **Hand-add hydration** is a separate, reported pre-step, not part of the atomic parse: a key the store
 has never gathered is hydrated first (a read of the tracker that writes the store's own entity row),
 the run is recomputed over the result and the hydrated keys are listed. A failure is a usage error

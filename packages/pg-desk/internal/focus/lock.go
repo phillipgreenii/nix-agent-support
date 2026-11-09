@@ -102,6 +102,13 @@ type LockDeps struct {
 	// alone triggers only the issue feed. A failure is a one-line warning on
 	// Stderr and never changes the lock's outcome or exit code.
 	Emit func(ctx context.Context, keys []Key) error
+	// EmitRemoved, when non-nil, is called once after Emit with the distinct
+	// keys this lock deleted from the plan and did not insert again (a strike,
+	// an operator removal or a replaced period). The annotation of such an
+	// entity reads none by then; a PR row has no change feed of its own, so
+	// without this call the decider would never hold the bead of a removed PR.
+	// A failure is a one-line warning on Stderr and never changes the outcome.
+	EmitRemoved func(ctx context.Context, keys []Key) error
 }
 
 func (d LockDeps) repo() string {
@@ -416,6 +423,25 @@ func Lock(ctx context.Context, d LockDeps, in LockInput) (LockResult, error) {
 		}
 		if err := d.Emit(ctx, keys); err != nil && d.Stderr != nil {
 			_, _ = fmt.Fprintf(d.Stderr, "WARNING: focus: selection not announced to the decider: %v\n", err)
+		}
+	}
+	if d.EmitRemoved != nil && len(res.Deleted) > 0 {
+		reinserted := map[Key]bool{}
+		for _, ins := range res.Inserted {
+			reinserted[ins.Key] = true
+		}
+		seen := map[Key]bool{}
+		var keys []Key
+		for _, del := range res.Deleted {
+			if !seen[del.Key] && !reinserted[del.Key] {
+				seen[del.Key] = true
+				keys = append(keys, del.Key)
+			}
+		}
+		if len(keys) > 0 {
+			if err := d.EmitRemoved(ctx, keys); err != nil && d.Stderr != nil {
+				_, _ = fmt.Fprintf(d.Stderr, "WARNING: focus: removal not announced to the decider: %v\n", err)
+			}
 		}
 	}
 	for _, a := range res.Annotations {

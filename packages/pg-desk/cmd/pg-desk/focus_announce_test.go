@@ -6,7 +6,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -146,4 +148,108 @@ func TestSelectApplyQuietPRAndIssueReachDeciderExactlyOnce(t *testing.T) {
 	if h := kindsOf(t, f.st, "issue", "J-9"); len(h) != len(issHist) {
 		t.Errorf("re-run changed issue history: %v -> %v", issHist, h)
 	}
+}
+
+// A PR the lock removes from the plan is announced with a removal event whose
+// id differs from the selection event of the same period, so the router queue
+// does not fold the two: select then strike in one period yields two distinct
+// event ids, and the removal carries the focus_removed kind.
+func TestStrikeAfterSelectAnnouncesRemovalWithADistinctEventID(t *testing.T) {
+	f := newSelFixture(t)
+	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
+	f.showDraft(t)
+	got := captureInject(t, nil)
+
+	_, _, err := sel(t, "ok", "--apply")
+	mustOK(t, err)
+	_, _, err = sel(t, "-1", "--apply")
+	mustOK(t, err)
+	if len(*got) != 2 {
+		t.Fatalf("announced %d events, want select + removal: %v", len(*got), *got)
+	}
+	type evt struct {
+		ID      string `json:"id"`
+		Type    string `json:"type"`
+		Payload struct {
+			ID       string `json:"id"`
+			Metadata struct {
+				EntityID string   `json:"entity_id"`
+				Kinds    []string `json:"kinds"`
+			} `json:"metadata"`
+		} `json:"payload"`
+	}
+	var sele, rem evt
+	if err := json.Unmarshal([]byte((*got)[0]), &sele); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte((*got)[1]), &rem); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(sele.ID, "focus-select:o/r#1@") {
+		t.Errorf("selection id = %q", sele.ID)
+	}
+	if !strings.HasPrefix(rem.ID, "focus-remove:o/r#1@"+showToday+"@") || rem.ID == sele.ID {
+		t.Errorf("removal id = %q, want a focus-remove id distinct from %q", rem.ID, sele.ID)
+	}
+	if rem.Type != "pr.changed" || rem.Payload.Metadata.EntityID != "o/r#1" ||
+		len(rem.Payload.Metadata.Kinds) != 1 || rem.Payload.Metadata.Kinds[0] != "focus_removed" ||
+		!strings.HasPrefix(rem.Payload.ID, "o/r#1@") || rem.Payload.ID == sele.Payload.ID {
+		t.Errorf("removal event = %s", (*got)[1])
+	}
+	if a := f.annotation(t, focus.Key{Type: "pr", ID: "o/r#1"}); a != "none" {
+		t.Errorf("annotation = %q, want none before the decider runs", a)
+	}
+}
+
+// The event id is stable for one lock run (a retried injection folds) and a
+// later removal at another time is a new event.
+func TestRemovalEventIDIsStablePerRunAndNewPerRun(t *testing.T) {
+	k := focus.Key{Type: "pr", ID: "o/r#1"}
+	t0 := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	a, err := removalEvent(k, showToday, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := removalEvent(k, showToday, t0)
+	c, _ := removalEvent(k, showToday, t0.Add(time.Minute))
+	id := func(s string) string {
+		var e struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(s), &e)
+		return e.ID
+	}
+	if a != b {
+		t.Errorf("same run built two different events:\n%s\n%s", a, b)
+	}
+	if id(a) == id(c) {
+		t.Errorf("a later removal reused id %q", id(a))
+	}
+}
+
+func TestRemovalIsNotAnnouncedOnDryRun(t *testing.T) {
+	f := newSelFixture(t)
+	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
+	f.showDraft(t)
+	_, _, err := sel(t, "ok", "--apply")
+	mustOK(t, err)
+	got := captureInject(t, nil)
+	_, _, err = sel(t, "-1", "--dry-run")
+	mustOK(t, err)
+	if len(*got) != 0 {
+		t.Errorf("dry-run strike announced %v", *got)
+	}
+}
+
+// A failed removal injection warns and keeps the exit code.
+func TestRemovalAnnounceFailureWarnsAndKeepsExitOK(t *testing.T) {
+	f := newSelFixture(t)
+	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
+	f.showDraft(t)
+	_, _, err := sel(t, "ok", "--apply")
+	mustOK(t, err)
+	captureInject(t, errors.New("no running core"))
+	_, errOut, err := sel(t, "-1", "--apply")
+	mustOK(t, err)
+	mustContain(t, errOut, "removal not announced to the decider", "pg-pr-change apply o/r#1")
 }
