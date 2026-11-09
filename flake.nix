@@ -5417,7 +5417,13 @@
                     pg-repo-runner -
                     pg-go-mutate -
                     bash-language-server -
+                    wtdone wtdone hard
+                    wtaudit wtaudit hard
+                    wtnew wtnew hard
                   '';
+                  # A third column "hard" means a plugin whose markdown mentions the
+                  # command MUST list the feature in requires (uses is not enough): the
+                  # plugin is otherwise on while the tool is off.
                 in
                 pkgs.runCommand "test-claude-plugin-binary-default-parity" { nativeBuildInputs = [ pkgs.jq ]; } ''
                                     # scan <marketplace-dir> <programs-dir>; violations to stderr,
@@ -5454,10 +5460,15 @@
                                             bad=$((bad + 1))
                                           fi
                                         done
-                                        while read -r c own; do
+                                        while read -r c own hard; do
                                           [ "$own" != "-" ] || continue
                                           if grep -rqE --include='*.md' "(^|[[:space:]\`(])$c([[:space:]\`).,:;]|\$)" "$mkt/$name"; then
-                                            if ! grep -qxF "$own" <<<"$reqs
+                                            if [ "$hard" = hard ]; then
+                                              if ! grep -qxF "$own" <<<"$reqs"; then
+                                                echo "FAIL: plugin '$name' markdown mentions '$c' (hard owner '$own') but plugin.json requires does not list '$own' (uses is not enough)" >&2
+                                                bad=$((bad + 1))
+                                              fi
+                                            elif ! grep -qxF "$own" <<<"$reqs
                   $uses"; then
                                               echo "FAIL: plugin '$name' markdown mentions '$c' (owned by feature '$own') but plugin.json lists '$own' in neither requires nor uses" >&2
                                               bad=$((bad + 1))
@@ -5515,6 +5526,16 @@
                                     # Negative 5: requires names a feature with no program module.
                                     mkfx req '{"name":"req","requires":["nope"]}' "pb x" none none
                                     negfx neg5.log "default.nix is missing"
+
+                                    # Negative 6: markdown mentions a hard owner (wtdone), the plugin lists
+                                    # it only in uses. The hook command is owned by "-" and the wtdone
+                                    # feature dir exists, so no other failure can produce the message.
+                                    mkfx hu '{"name":"hu","uses":["wtdone"]}' "pn x" 'run `wtdone` last' wtdone
+                                    negfx neg6.log "markdown mentions 'wtdone' (hard owner"
+
+                                    # Negative 7: markdown mentions a hard owner (wtdone), lists nothing.
+                                    mkfx hn '{"name":"hn"}' "pn x" 'run `wtdone` last' wtdone
+                                    negfx neg7.log "markdown mentions 'wtdone' (hard owner"
 
                                     echo "ok: current tree passes; violating fixtures are flagged"
                                     touch $out
@@ -17625,6 +17646,25 @@
                 pkgs.runCommand "test-bundle-beads-switch" { } ''
                   ${lib.optionalString (r.failures != [ ]) ''
                     echo "bundle beads switch eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                    exit 1
+                  ''}
+                  touch $out
+                '';
+
+              # Worktree-tools switch: one toggle feeds wtnew, wtdone and wtaudit, and the pb,
+              # integrate-branch and session-wrapup plugins require wtdone (eval cases in
+              # tests/worktree-tools-switch.nix).
+              test-worktree-tools-switch =
+                let
+                  r = import ./tests/worktree-tools-switch.nix {
+                    inherit lib pkgs;
+                    inherit (phillipgreenii-nix-base.lib) mkCapability mkBundle;
+                    framework = phillipgreenii-nix-base.homeModules.capability-framework;
+                  };
+                in
+                pkgs.runCommand "test-worktree-tools-switch" { } ''
+                  ${lib.optionalString (r.failures != [ ]) ''
+                    echo "worktree tools switch eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
                     exit 1
                   ''}
                   touch $out

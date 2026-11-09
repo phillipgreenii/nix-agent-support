@@ -72,6 +72,7 @@ let
     "wtaudit"
     "wtdone"
     "wtnew"
+    "worktree-tools"
   ];
 
   eval =

@@ -64,9 +64,7 @@ let
     cc_binary_on = (p cCC).claude-code.enable == true;
     cc_ceta_default_on = (p cCC).claude-extended-tool-approver.enable == true;
     bundle_enables_beads = (p cBundleHuman).beads.enable == true;
-    bundle_enables_wtnew = (p cBundleHuman).wtnew.enable == true;
-    bundle_enables_wtdone = (p cBundleHuman).wtdone.enable == true;
-    bundle_enables_wtaudit = (p cBundleHuman).wtaudit.enable == true;
+    bundle_enables_worktree_tools = (p cBundleHuman).worktree-tools.enable == true;
     bundle_enables_pb = (p cBundleHuman).pb.enable == true;
     bundle_enables_pb_agent = (p cBundleAgent).pb.enable == true;
     beads_human_gets_perles = (p cBundleHuman).perles.enable == true;

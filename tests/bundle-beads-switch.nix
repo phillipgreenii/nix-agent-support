@@ -99,6 +99,11 @@ let
       options.phillipgreenii.programs = {
         # stub of home/programs/beads (the real one installs packages)
         beads.enable = lib.mkEnableOption "beads";
+        # stubs of the worktree CLIs the real worktree-tools module turns on; pb and
+        # session-wrapup require wtdone
+        wtnew.enable = lib.mkEnableOption "wtnew (stub)";
+        wtdone.enable = lib.mkEnableOption "wtdone (stub)";
+        wtaudit.enable = lib.mkEnableOption "wtaudit (stub)";
         session-mode.enable = fromClaude;
         handoff-create.enable = fromClaude;
         claude-code = {
@@ -120,9 +125,6 @@ let
         programs = {
           claude-extended-tool-approver.enable = lib.mkEnableOption "ceta (stub)";
           perles.enable = lib.mkEnableOption "perles (stub)";
-          wtnew.enable = lib.mkEnableOption "wtnew (stub)";
-          wtdone.enable = lib.mkEnableOption "wtdone (stub)";
-          wtaudit.enable = lib.mkEnableOption "wtaudit (stub)";
         }
         # Features of the capability leaves this test never turns on. The module system
         # checks every definition under a leaf even when its `mkIf` is false, so each feature
@@ -150,6 +152,7 @@ let
   realModules = [
     ../home/programs/pb/default.nix
     ../home/programs/pgd/default.nix
+    ../home/programs/worktree-tools/default.nix
     ../home/programs/claude-marketplaces/default.nix
   ];
 

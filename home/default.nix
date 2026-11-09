@@ -45,6 +45,7 @@
     ./programs/pg-probe
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
+    ./programs/worktree-tools
     ./programs/pnwf
     # wsplan: pnwf's sibling command from the same repo-base module (Stage A of
     # the workforest `land`); its enable default follows phillipgreenii.pn.enable, like ./programs/pnwf.

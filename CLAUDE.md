@@ -565,6 +565,17 @@ Verified against Claude Code 2.1.186:
   it is enabled. `test-bundle-beads-switch` covers the switch, the chain and the veto. `bash-lsp` and `pg-go-mutate` declare no
   `requires` because no `programs.<f>` feature owns `bash-language-server` or `pg-go-mutate`
   (owner `-` in the check's `binaryOwners`).
+- **Worktree tools: one toggle, plugins require the exact tool.** `phillipgreenii.programs.worktree-tools.enable`
+  (`home/programs/worktree-tools`, default `claude-code.enable`) turns on `wtnew`, `wtdone` and `wtaudit`
+  at `lib.mkDefault true`; the `worktree-tools` capability leaf sets only that toggle. Opt out with
+  `phillipgreenii.programs.worktree-tools.enable = false`, or set one tool's own flag
+  (`programs.wtdone.enable = false`) to turn off just that tool. Plugins require the exact tool they
+  call, not the toggle: `wtdone` for `pb`, `integrate-branch` and `session-wrapup`, and (in
+  `phillipg-nix-repo-base`) `wtdone` and `wtaudit` for `pn-workspace-rules`. So turning a tool or the
+  toggle off also turns off every plugin that requires it, and `wtaudit.enable = false` disables the
+  WHOLE `pn-workspace-rules` plugin, not just `audit-worktrees`. The three tools are "hard" owners in
+  `test-claude-plugin-binary-default-parity`: markdown that mentions one needs it in `requires`
+  (`uses` is not enough). `test-worktree-tools-switch` covers the toggle, the leaf, the cascade and the bundle.
 - **Mechanical check** (beads `tc-mxc0v`, `tc-u7kqs`): `checks.<system>.test-claude-plugin-binary-default-parity`
   in `flake.nix` fails when a plugin's hooks.json or `lspServers` invokes a bare command that is
   not in the closed `binaryOwners` list, when an owned command's feature is not in `requires`,

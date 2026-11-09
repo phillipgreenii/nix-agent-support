@@ -78,11 +78,7 @@
     # the agent-support bundle below rather than a standalone opt-in leaf.
     {
       name = "worktree-tools";
-      features = [
-        "wtnew"
-        "wtdone"
-        "wtaudit"
-      ];
+      features = [ "worktree-tools" ];
     }
     # Git helper CLIs — human git work. (The pr-tools feature was retired with
     # the PR tool's removal, bead pg2-ijsep; the capability name is kept so any
