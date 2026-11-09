@@ -110,6 +110,10 @@ flowchart TB
 | beads        | `pb`; pgd's `components.beads` switch                 | `phillipgreenii.programs.beads.enable` is true | None (after the session-mode hooks leave `pb`)                                                                                 | None yet; the later Focus-row push is `pb`'s mod                                                                                                               |
 | ZR           | no plugin; ZR settings of pgd options such as `links` | Work machines (set by the sibling repo)        | None                                                                                                                           | None (pgd's own hooks read the options)                                                                                                                        |
 
+The machine-readable form of the Members column is `docs/mod-bundles.json`; the
+check `test-mod-bundle-membership` reads it and enforces G1 for every plugin in this
+repo that runs code in a session. Keep the two in step.
+
 The table shows the layout after the moves this note records: the two
 session-mode hooks (SessionEnd and PostCompact) live in the `session-mode`
 plugin's `hooks/hooks.json` (moved out of `pb` on 2026-11-09).

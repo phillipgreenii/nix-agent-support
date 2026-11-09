@@ -9,7 +9,8 @@
 # committed claude-marketplace/ tree (default-enabled); this module renders the
 # options as one JSON document in PG_CLAUDE_DISPLAY_OPTIONS (home.sessionVariables),
 # which the mod reads at session start. It installs no binary and no settings.
-# Defaults match today's shell line: every component on.
+# Defaults match today's shell line: every component on, except beads, which follows
+# phillipgreenii.programs.beads.enable.
 let
   cfg = config.phillipgreenii.programs.pgd;
   component =
@@ -37,7 +38,13 @@ in
     };
 
     components = {
-      beads = component "Beads contributions: dolt alert and Focus rows.";
+      # Bundle switch (design note docs/superpowers/specs/2026-11-07-mod-bundle-grouping-design.md,
+      # "beads"): the beads bundle's pgd component follows
+      # phillipgreenii.programs.beads.enable; an explicit setting still wins. `or false`
+      # reads a machine that does not declare the beads option as off.
+      beads = component "Beads contributions: dolt alert and Focus rows." // {
+        default = config.phillipgreenii.programs.beads.enable or false;
+      };
       assume = component "Assume button, modal, expiry alert and source.";
       sessionMode = component "Session mode button, modal and stop action.";
       prStatus = component "PR status source and row.";

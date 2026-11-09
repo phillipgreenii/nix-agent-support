@@ -1,0 +1,12 @@
+{
+  "bundles": {
+    "Safety": ["claude-extended-tool-approver"],
+    "Tracking": ["claude-tool-tracker"],
+    "Control": ["pg-claude-control"],
+    "Display": ["pgd"],
+    "Session mode": ["session-mode"],
+    "ccpool": ["ccpool"],
+    "beads": ["pb"],
+    "ZR": []
+  }
+}

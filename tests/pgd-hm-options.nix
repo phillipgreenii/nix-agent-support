@@ -11,6 +11,9 @@ let
         (
           { lib, ... }:
           {
+            # stub of the beads switch that components.beads defaults from
+            options.phillipgreenii.programs.beads.enable = lib.mkEnableOption "beads";
+            config.phillipgreenii.programs.beads.enable = true;
             options.home.sessionVariables = lib.mkOption {
               type = lib.types.attrsOf lib.types.str;
               default = { };

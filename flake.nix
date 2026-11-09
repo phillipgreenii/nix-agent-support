@@ -17601,6 +17601,82 @@
                   touch $out
                 '';
 
+              # Beads bundle switch: pb.enable and pgd components.beads follow
+              # phillipgreenii.programs.beads.enable (eval cases in tests/bundle-beads-switch.nix).
+              test-bundle-beads-switch =
+                let
+                  r = import ./tests/bundle-beads-switch.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "test-bundle-beads-switch" { } ''
+                  ${lib.optionalString (r.failures != [ ]) ''
+                    echo "bundle beads switch eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                    exit 1
+                  ''}
+                  touch $out
+                '';
+
+              # Rule G1 of the mod bundle grouping note: every plugin that runs code in a session
+              # is in exactly one bundle of docs/mod-bundles.json. Fixtures run the same script
+              # over synthetic trees (a plugin in no bundle, a plugin in two) and require it to FAIL.
+              test-mod-bundle-membership =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace
+                      ./packages/ccpool/ccpool-plugin
+                      ./docs/mod-bundles.json
+                      ./tests/mod-bundle-membership.sh
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-mod-bundle-membership"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.bash
+                    ];
+                  }
+                  ''
+                    scan=${src}/tests/mod-bundle-membership.sh
+                    # Positive: the current tree passes.
+                    bash "$scan" ${src}/docs/mod-bundles.json ${src}/claude-marketplace/*/ ${src}/packages/ccpool/ccpool-plugin
+
+                    mkfx() {
+                      rm -rf fx
+                      mkdir -p fx/p/.claude-plugin fx/p/hooks
+                      echo '{"name":"example"}' > fx/p/.claude-plugin/plugin.json
+                      echo "$1" > fx/p/hooks/hooks.json
+                      echo "$2" > fx/bundles.json
+                    }
+                    negfx() {
+                      if bash "$scan" fx/bundles.json fx/p 2>fx/log; then
+                        echo "FAIL: negative fixture ($1) was NOT flagged" >&2
+                        exit 1
+                      fi
+                      grep -q "$1" fx/log || { echo "FAIL: fixture did not report '$1'" >&2; cat fx/log >&2; exit 1; }
+                    }
+                    cmdhook='{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"example hook"}]}]}}'
+                    modhook='{"modules":["./register.ts"]}'
+                    mkfx "$cmdhook" '{"bundles":{"A":["other"]}}'
+                    negfx "is in no bundle"
+                    mkfx "$modhook" '{"bundles":{"A":["other"]}}'
+                    negfx "is in no bundle"
+                    mkfx "$cmdhook" '{"bundles":{"A":["example"],"B":["example"]}}'
+                    negfx "is in 2 bundles"
+                    # Control: the same fixture in exactly one bundle passes.
+                    mkfx "$cmdhook" '{"bundles":{"A":["example"],"B":[]}}'
+                    bash "$scan" fx/bundles.json fx/p
+                    # A plugin with no code (no hooks file) is not required to be in a bundle.
+                    rm -r fx/p/hooks
+                    echo '{"bundles":{}}' > fx/bundles.json
+                    if bash "$scan" fx/bundles.json fx/p 2>fx/log; then
+                      echo "FAIL: scan with no code-running plugin must report a broken scan" >&2
+                      exit 1
+                    fi
+                    touch $out
+                  '';
+
               # pg-claude-control plugin validation (docket pg2-v77tsx, phase 8c): runs the real
               # `claude plugin validate` on the control mod, outside the Go unit gate. A failed
               # validation fails the check; warnings and advice do not (the command's own verdict).
