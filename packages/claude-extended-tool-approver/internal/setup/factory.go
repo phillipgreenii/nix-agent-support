@@ -30,6 +30,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgreview"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
@@ -342,6 +343,11 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// uniformly. Ordering relative to its neighbours does not matter:
 		// "pg-ccaudit" is recognized by no other rule in this chain.
 		pgccaudit.New(),
+		// pg-review approves `pg-review agent q`, the one command the unattended
+		// analyst runs, mirroring the pg-review command spec (which alone drives
+		// only evaluate/replay, not this chain). No consumer config; "pg-review"
+		// is recognized by no other rule here.
+		pgreview.New(),
 		// pg-connector approves the `pg-connector issue show/comment/update/
 		// close` verb family already granted by
 		// PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools (bead pg2-s9zh5),
