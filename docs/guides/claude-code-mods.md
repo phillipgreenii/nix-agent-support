@@ -22,6 +22,10 @@ warning glyph and the plugin's manifest `name`. Newlines draw as a replacement g
 show literally; long text is cut with an ellipsis; there is no ordering control; an updated line
 moves to the bottom of the mod lines. The `displayName` and `title` manifest keys are ignored.
 
+An empty string does not clear the row: the prefix still draws, a bare "⚠ pgd:". The documented
+clear is `$.ui.status(undefined)` (the typings declare `status: (text: string | undefined) => void`
+and say `undefined` removes the row). **Docs only**: this comes from the typings, not verified live.
+
 Consequence: the status line is for short, focused alerts only, and one plugin SHOULD own all of
 them as one line it fits itself.
 
@@ -160,6 +164,7 @@ them.
   name refresh on demand and not on a timer.
 - Whether the `PromptHint` or `SessionMode` sites accept a colored multi-row tree (not needed for
   this design).
+- Verify live that `$.ui.status(undefined)` removes the status row (docs only so far).
 - The assume expiry source and whether the four variables suffice, the wrap-up command text, and the
   alert thresholds. The plugin name `pgd` (operator ruling 2026-11-06) is accepted for now and MAY
   change later; bead links are deferred until a target exists.
@@ -182,3 +187,14 @@ date.
 - consequence: the exporter's `exportMetrics()` MAY post OTLP over `$.http.fetch` to the configured
   `metrics.endpoint`; no emitter command is needed. Only loopback was tested; a non-loopback endpoint
   is still subject to the organization's web policy.
+
+### Clearing the status row
+
+- result: docs only, not observed live. The typings declare `$.ui.status` as
+  `(text: string | undefined) => void` and say `undefined` removes the row. An empty string sets an
+  empty row, so the engine still draws the prefix: a bare "⚠ pgd:".
+- version: typings bundled with 2.1.318
+- date: 2026-11-09
+- consequence: the `pgd` alert hook calls `$.ui.status(undefined)` when no alert is true, and always
+  sends one call on the first render after a load. Whether `undefined` really removes the row is an
+  open item above.

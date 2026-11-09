@@ -92,8 +92,8 @@ function hooks() {
 }
 
 function statusRecorder() {
-  const rows: string[] = []
-  return { $: { ui: { status: (r: string) => rows.push(r) } }, rows }
+  const rows: Array<string | undefined> = []
+  return { $: { ui: { status: (r: string | undefined) => rows.push(r) } }, rows }
 }
 
 test('the width is the viewport columns read by a pass-through hook on PromptHint', () => {
@@ -110,7 +110,11 @@ test('the width is the viewport columns read by a pass-through hook on PromptHin
   const e = { viewport: { columns: 7 + 'context 91%'.length } }
   // the hook passes the event through unchanged
   expect(h.fn($, e, (x: unknown) => x)).toBe(e)
-  expect(rows).toEqual([]) // nothing true yet
+  // nothing is true yet: the first render clears the row (undefined), never sets an empty string
+  expect(rows).toEqual([undefined])
+  // a second render with nothing changed sends nothing more
+  h.fn($, e, (x: unknown) => x)
+  expect(rows).toEqual([undefined])
 })
 
 function bootDolt(opts = DEFAULT_OPTIONS) {
@@ -134,13 +138,29 @@ test('the hook sets the status row fitted to the captured width, also after the 
   const pass = (x: unknown) => x
   const narrow = 7 + '5h limit 85%'.length
   h.fn($, { viewport: { columns: narrow } }, pass)
-  expect(rows).toEqual(['5h limit 85%'.length ? 'dolt unavailable'.length <= 5 ? '' : '5h limit 85%' : ''])
+  expect(rows).toEqual(['5h limit 85%'])
   setVisible('band', false)
   h.fn($, { viewport: { columns: 200 } }, pass)
   expect(rows[rows.length - 1]).toBe('5h limit 85% · context 91%')
   // with no width ever read the row is left to the engine's ellipsis: unfitted
   resetAlertState()
   expect(alertRow()).toBe('5h limit 85% · context 91%')
+})
+
+test('an alert that goes away clears the row with undefined, not an empty string', async () => {
+  const { clock, s } = bootDolt()
+  defineSource({ id: 'usage', intervalMs: 0, feeds: ['alert'] })
+  setValue('usage', { contextPercent: 91, ...limits(85, 0) })
+  await clock.advance(1)
+  const [h] = hooks()
+  const { $, rows } = statusRecorder()
+  const pass = (x: unknown) => x
+  h.fn($, { viewport: { columns: 200 } }, pass)
+  setValue('usage', { contextPercent: 10, limits: [] })
+  await clock.advance(1)
+  h.fn($, { viewport: { columns: 200 } }, pass)
+  expect(rows).toEqual(['5h limit 85% · context 91%', undefined])
+  void s
 })
 
 test('a draw starts no fetch, process or file read', async () => {

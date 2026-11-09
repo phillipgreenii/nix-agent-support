@@ -103,11 +103,15 @@ export function fitAlerts(inputs: AlertInputs, width: number): string {
 // Width captured from a pass-through hook on a site that keeps drawing while the engine has
 // collapsed the band (the band hook is not a reliable width source then). Undefined until read.
 let lastWidth: number | undefined
-let lastRow = ''
+// The value last sent to $.ui.status; undefined means cleared. `sent` is false until the first
+// call after a (re)load, so that render always sends one and removes any stale row.
+let lastRow: string | undefined
+let sent = false
 
 export function resetAlertState(): void {
   lastWidth = undefined
-  lastRow = ''
+  lastRow = undefined
+  sent = false
 }
 
 export function currentWidth(): number | undefined {
@@ -133,14 +137,16 @@ type Next = (e: unknown) => unknown
 
 // A pass-through ui.render hook on PromptHint: it records e.viewport.columns, then sets the status
 // row ($.ui.status is called here, inside the callback, and takes no width). It reads cached values
-// only and returns next(e) unchanged. The row is set only when it changed.
+// only and returns next(e) unchanged. The row is set only when it changed, and cleared with undefined when no alert is true.
 export function alertHook($: ModApi, e: ModApi, next: Next): unknown {
   const options = getOptions()
   if (options?.enable) {
     const cols = e?.viewport?.columns
     if (typeof cols === 'number' && cols > 0) lastWidth = cols
-    const row = alertRow()
-    if (row !== lastRow) {
+    // An empty string would still draw the bare prefix; undefined is the documented clear.
+    const row = alertRow() || undefined
+    if (!sent || row !== lastRow) {
+      sent = true
       lastRow = row
       $.ui.status(row)
     }

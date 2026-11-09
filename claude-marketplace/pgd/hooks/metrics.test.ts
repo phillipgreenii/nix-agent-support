@@ -124,8 +124,8 @@ test('the registered alert hook times its draw, and a draw starts no fetch, proc
     registered = fn
   })
   const before = stub.calls.length
-  const status: string[] = []
-  registered!({ ui: { status: (r: string) => status.push(r) } }, { viewport: { columns: 80 } }, (e: unknown) => e)
+  const status: Array<string | undefined> = []
+  registered!({ ui: { status: (r: string | undefined) => status.push(r) } }, { viewport: { columns: 80 } }, (e: unknown) => e)
   expect(find('pgd_draw_total', { surface: 'alert' })?.value).toBe(1)
   expect(stub.calls.length).toBe(before)
   expect(typeof alertHook).toBe('function')
