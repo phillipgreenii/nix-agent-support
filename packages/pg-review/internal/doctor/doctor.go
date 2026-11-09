@@ -164,6 +164,11 @@ func (d *Deps) run(ctx context.Context, name string, args []string, stdin string
 	return d.Exec(cctx, name, args, stdin, env, dir)
 }
 
+// flagUsageExit is the exit code of a Go flag-package program asked for
+// --help: it prints its usage and exits 2. The probe only needs the command to
+// start and answer, so this counts the same as a clean 0.
+const flagUsageExit = 2
+
 func checkProviders(ctx context.Context, d *Deps) Result {
 	if d.Config == nil {
 		return fail(CheckProviders, exitcode.ValidationRejected, "no effective configuration")
@@ -182,7 +187,7 @@ func checkProviders(ctx context.Context, d *Deps) Result {
 		args := append(append([]string{}, p.Command[1:]...), "--help")
 		if _, code, err := d.run(ctx, path, args, "", nil, ""); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: --help failed: %v", p.Name, err))
-		} else if code != 0 {
+		} else if code != 0 && code != flagUsageExit {
 			bad = append(bad, fmt.Sprintf("%s: --help exited %d", p.Name, code))
 		}
 	}
