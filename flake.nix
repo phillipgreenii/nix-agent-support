@@ -8031,10 +8031,12 @@
                     bash "$script" "$alerts" "$table"
                     # Negative control: the crashed class selector flipped must not read the table's share.
                     yq '(.groups[0].rules[] | select(.uid == "pg-ccrec-crash-share") | .data[0].model.expr) |= sub("clear_entry=\"false\"", "clear_entry=\"true\"")' "$alerts" > mutant.yaml
+                    echo "NEGATIVE CONTROL (expected): the next promtool block prints 'FAILED: round(crash_share, 0.01)' on purpose; the mutated rule MUST be rejected" >&2
                     if bash "$script" mutant.yaml "$table"; then
                       echo "negative control: the mutated crash-share rule was accepted" >&2
                       exit 1
                     fi
+                    echo "NEGATIVE CONTROL OK: the mutated crash-share rule was rejected as expected (the FAILED block above is that rejection)" >&2
                     touch "$out"
                   '';
 
