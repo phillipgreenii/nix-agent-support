@@ -564,17 +564,41 @@ A `dispatch` row (`msg` `dispatch result`) carries `role`, `bead` and `actions`,
 (RFC 3339 UTC) and `duration_ms` (whole milliseconds of handler run). Queue wait is
 `started_at - enqueued_at`; the fields are additive and omitted when unknown.
 
-Collection into Loki is pull-based: the darwin module
-`darwin/modules/pg-router/default.nix` registers
-`phillipgreenii.observability.logSources.pg-router-events` (`serviceName =
+#### Event-log retention (`events.jsonl` rotation)
+
+`events.jsonl` (the observability ledger above) is size-and-age bounded; before this it grew without
+limit (about 85 MB in the router's state directory and 145 MB for the ccpool handler's own
+`pg-router-ccpool-handler/events.jsonl`). It is NOT the replayed log: `queue.jsonl` (events and
+gates) is untouched here and keeps its own compaction (see "Queue log compaction"). Nothing in the
+daemon reads `events.jsonl` back; its only consumers are the Loki/Alloy tail and operators.
+
+- When a write finds the file at or over the size cap, the file is rotated: `events.jsonl` becomes
+  `events.jsonl.1`, the old `.1` becomes `.2`, and so on; the generation past the keep count is
+  deleted. A rotated generation older than the age bound is also deleted (checked at each rotation).
+- Defaults: 25 MiB cap, 3 kept generations, 14 days. Worst case on disk is about 100 MiB per file.
+- Overrides (environment of the daemon or handler process): `PG_ROUTER_EVENTS_MAX_BYTES` (bytes, `0`
+  disables rotation), `PG_ROUTER_EVENTS_KEEP` (generations), `PG_ROUTER_EVENTS_MAX_AGE` (Go duration,
+  for example `336h`, `0` disables the age bound). Unset or unparsable values use the defaults. The
+  same variables bound the ccpool handler's `events.jsonl` and `origin-events.jsonl`.
+- Several processes append to one file (the handler runs one process per dispatch), so rotation takes
+  a `flock` on `events.jsonl.lock` and re-checks the size under it; every writer re-opens the live
+  path when it notices it was rotated, so appends never land in a rotated generation.
+- Readers: the Loki source tails the exact `events.jsonl` path (Alloy follows a rename-and-recreate
+  rotation), and the rotated `.N` and `.lock` files do not match the `*.jsonl` glob. No Go code
+  reads `events.jsonl`. Rotation is best effort: a failed rotation never drops an event.
+- The change takes effect when the daemon (and each handler process) restarts on the new binary; a
+  file already over the cap rotates on its next write.
+  Collection into Loki is pull-based: the darwin module
+  `darwin/modules/pg-router/default.nix` registers
+  `phillipgreenii.observability.logSources.pg-router-events` (`serviceName =
 "pg-router-events"`; guarded on `obs.enable`, so it is a no-op on machines without the
-observability stack) — relabeled from the plain `pg-router` name so it no longer
-collides with the OTLP log push's own `service_name="pg-router"` (above). The glob and
-`events.jsonl` file are unchanged; only the Loki label moved. That same darwin module
-also calls `obs.mkEmitterEnv { serviceName = "pg-router"; protocol = "grpc"; }`
-(mirroring `pa-monitor`'s own darwin module) and merges the result into the daemon
-LaunchAgent's `EnvironmentVariables`, wiring `OTEL_EXPORTER_OTLP_ENDPOINT`/
-`OTEL_SERVICE_NAME` for the logs half above.
+  observability stack) — relabeled from the plain `pg-router` name so it no longer
+  collides with the OTLP log push's own `service_name="pg-router"` (above). The glob and
+  `events.jsonl` file are unchanged; only the Loki label moved. That same darwin module
+  also calls `obs.mkEmitterEnv { serviceName = "pg-router"; protocol = "grpc"; }`
+  (mirroring `pa-monitor`'s own darwin module) and merges the result into the daemon
+  LaunchAgent's `EnvironmentVariables`, wiring `OTEL_EXPORTER_OTLP_ENDPOINT`/
+  `OTEL_SERVICE_NAME` for the logs half above.
 
 ## Profiling
 

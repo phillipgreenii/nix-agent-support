@@ -2,7 +2,8 @@
 // NOT Claude's transcript. Each line conforms to the phillipgreenii JSONL
 // standard (`time`/`level`/`msg`, with `kind` kept as an ordinary event-type
 // field). Safe for concurrent emitters (a mutex serializes marshal+write so
-// lines never interleave).
+// lines never interleave) and for several processes appending to one path:
+// the file is size-and-age bounded by rotation (see rotate.go).
 package eventlog
 
 import (
@@ -15,8 +16,12 @@ import (
 
 // Writer is a JSONL event log writer. Safe for concurrent use.
 type Writer struct {
-	mu sync.Mutex
-	f  *os.File
+	mu   sync.Mutex
+	f    *os.File
+	path string
+	// Retention bounds the file by rotation; New sets DefaultRetention().
+	// Set it before the first Emit (a zero value disables rotation).
+	Retention Retention
 	// Now is an injectable clock seam (mirrors watchdog.Watchdog.Now); New
 	// defaults it to time.Now. Each emitted record is stamped with it.
 	Now func() time.Time
@@ -31,7 +36,7 @@ func New(path string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Writer{f: f, Now: time.Now}, nil
+	return &Writer{f: f, path: path, Retention: DefaultRetention(), Now: time.Now}, nil
 }
 
 func (w *Writer) now() time.Time {
@@ -68,7 +73,33 @@ func (w *Writer) Emit(level, kind, msg string, fields map[string]any) error {
 	b = append(b, '\n')
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	// Rotation is housekeeping: a failure must not drop the event.
+	_ = w.rotateLocked()
 	_, err = w.f.Write(b)
+	return err
+}
+
+// rotateLocked rotates the file when it has reached the size cap and reopens
+// it when another process (or this one) rotated it from under the open
+// descriptor, so appends always land in the live path and never in a rotated
+// generation. Caller holds w.mu.
+func (w *Writer) rotateLocked() error {
+	if w.path == "" {
+		return nil
+	}
+	if fi, err := os.Stat(w.path); err == nil && !fi.Mode().IsRegular() {
+		return nil // /dev/null fallback and the like
+	}
+	err := rotateIfNeeded(w.path, w.Retention, w.now())
+	if sameFile(w.f, w.path) {
+		return err
+	}
+	nf, oerr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if oerr != nil {
+		return oerr
+	}
+	_ = w.f.Close()
+	w.f = nf
 	return err
 }
 
