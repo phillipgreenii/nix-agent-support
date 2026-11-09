@@ -1,7 +1,10 @@
 # Display layer design: a mod-based session display
 
 Status: reviewed 2026-11-06 (see "Review"). All 21 decisions are `accepted`;
-D3, D10 and D14 by operator ruling the same day.
+D3, D10 and D14 by operator ruling the same day. Amended 2026-11-09: the
+Assume button's label and color and its session-start read, its display slice
+ahead of phase 3, and a ZR bundle without a plugin (operator rulings recorded in
+`2026-11-07-mod-bundle-grouping-design.md`).
 Date: 2026-11-05. Claude Code version the findings come from: 2.1.314.
 
 ## Intent
@@ -14,8 +17,8 @@ a display where:
 - the always-needed facts are compact,
 - facts that matter only sometimes appear only then,
 - detail is one click away,
-- other bundles (beads, ccpool, a ZR plugin in a sibling repo) contribute items
-  without editing shared scripts,
+- other bundles (beads, ccpool, ZR configuration from a sibling repo) contribute
+  items without editing shared scripts,
 - buttons smooth workflow edges that today need an exit and resume, such as
   assuming a role, changing the model, or wrapping up a session.
 
@@ -107,7 +110,7 @@ flowchart LR
     subgraph Bundles["Contributing bundles"]
         BE["beads"]
         CC["ccpool"]
-        ZR["ZR plugin (sibling repo)"]
+        ZR["ZR options (sibling repo)"]
     end
     Sources --> S
     Bundles -->|"display.put (data)"| S
@@ -144,21 +147,21 @@ sequenceDiagram
 
 ## Surfaces and placement
 
-| Item                                                      | Surface                                                                      | Lifetime and toggle         |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------- |
-| Session name, or session id when no name                  | Band button 1, opens the Info modal                                          | Always                      |
-| Model and effort                                          | Band button 2, label `Model · effort`, opens the Model modal                 | Always                      |
-| Context percent                                           | Band button 3, label `ctx N%`, colored by level, opens the Context modal     | Always                      |
-| Session mode (`RUNNING`, `STOPPING`, `DONE`, wrapping up) | Band button 4, opens the Session mode modal                                  | Only while a mode is active |
-| Assume                                                    | Band button 5; label `Assume`, then the current role; opens the Assume modal | Always                      |
-| Focus                                                     | Band button 6; opens and closes the Focus pane                               | Always                      |
-| Wrap up                                                   | Band button 7; pre-fills the wrap-up command in the prompt box               | Always                      |
-| Repo, worktree, branch, PR review state                   | Info modal, one item per line                                                | On demand                   |
-| Version, actor, cost, both limits in full                 | Info and Context modals                                                      | On demand                   |
-| Beads, Jira, threads, PRs                                 | Focus pane only (never the band)                                             | Pane open or closed         |
-| Alerts (see below)                                        | Status line, one fitted row                                                  | Only while true             |
-| Events (compacted, worker finished)                       | Toast                                                                        | Seconds                     |
-| Bead and Jira ids in replies                              | Transcript links                                                             | Always                      |
+| Item                                                      | Surface                                                                                                       | Lifetime and toggle         |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Session name, or session id when no name                  | Band button 1, opens the Info modal                                                                           | Always                      |
+| Model and effort                                          | Band button 2, label `Model · effort`, opens the Model modal                                                  | Always                      |
+| Context percent                                           | Band button 3, label `ctx N%`, colored by level, opens the Context modal                                      | Always                      |
+| Session mode (`RUNNING`, `STOPPING`, `DONE`, wrapping up) | Band button 4, opens the Session mode modal                                                                   | Only while a mode is active |
+| Assume                                                    | Band button 5; label `Assume`, then the current profile, colored by it (see "Assume"); opens the Assume modal | Always                      |
+| Focus                                                     | Band button 6; opens and closes the Focus pane                                                                | Always                      |
+| Wrap up                                                   | Band button 7; pre-fills the wrap-up command in the prompt box                                                | Always                      |
+| Repo, worktree, branch, PR review state                   | Info modal, one item per line                                                                                 | On demand                   |
+| Version, actor, cost, both limits in full                 | Info and Context modals                                                                                       | On demand                   |
+| Beads, Jira, threads, PRs                                 | Focus pane only (never the band)                                                                              | Pane open or closed         |
+| Alerts (see below)                                        | Status line, one fitted row                                                                                   | Only while true             |
+| Events (compacted, worker finished)                       | Toast                                                                                                         | Seconds                     |
+| Bead and Jira ids in replies                              | Transcript links                                                                                              | Always                      |
 
 Rules:
 
@@ -273,8 +276,8 @@ refreshing disappears. Contributors push when their state changes; Display never
 calls back into a contributor. How a contributed action (a button press) runs
 is open (see "Open items").
 
-The ZR plugin in the sibling repo depends on the Display plugin and calls
-`pgd.put`, replacing its part scripts.
+The sibling repo's ZR bundle needs no plugin: it sets pgd options and drops or
+maps its part scripts (`2026-11-07-mod-bundle-grouping-design.md`, "ZR").
 
 ## Data sources and throttling
 
@@ -296,7 +299,7 @@ Every source MUST follow these rules:
 | PR number and review state | `gh pr view` through `$.process.run` with branch and repo passed explicitly                          | At most every 5 minutes, and once when the branch changes; shared across sessions through the store if available                                                |
 | Session name (phase 4)     | The session's own entry in `~/.claude/sessions/<pid>.json` through `$.fs` (D10)                      | Found once at start; re-read after `turn.complete`, at most once per 10 seconds                                                                                 |
 | Session mode (phase 2)     | `session-mode show` through `$.process.run`, with `CLAUDE_CODE_SESSION_ID` passed in the run's `env` | On `turn.complete` and after a stop action; at most once per 10 seconds                                                                                         |
-| Assume state               | Process environment and a stored expiry                                                              | On assume actions and on a one-minute check                                                                                                                     |
+| Assume state               | Process environment (`AWS_PROFILE`, read at session start) and a stored expiry                       | At session start, on assume actions and on a one-minute check                                                                                                   |
 | dolt availability          | A cheap probe                                                                                        | At most every 30 seconds, while the alert row is enabled (not tied to the band being shown)                                                                     |
 
 Visibility and timers. A source that feeds an alert MUST keep running while the
@@ -347,6 +350,27 @@ current role. `assume` is the `granted` command-line tool. In a shell after
 profile name). It holds no access key or session token, so the credentials come
 from the profile (SSO or a credential process), not from exported keys.
 
+Button label and color (operator rulings, Phillip, 2026-11-09; verbatim text in
+`2026-11-07-mod-bundle-grouping-design.md`, section "ZR"). The button is the only
+place the profile is shown; there is no profile alert.
+
+- The button MUST show the profile the session's own processes run with: the
+  `AWS_PROFILE` value in the Claude process environment, whether it was set before
+  the session started or by Apply. It MUST read it at session start through
+  `$.env.get('AWS_PROFILE')` (a literal name, through one facade closure) and MUST
+  update the cached value when Apply or Clear sets it.
+- Label: `Assume` when the variable is unset or empty; otherwise the profile name.
+- Color, matching the profile name ignoring case: unset or empty is dim; a name
+  containing `prod` is red; otherwise a name containing `dev` is green; any other
+  value is yellow. `prod` is checked first, so a name containing both is red.
+- Known limit: a profile exported inside a `!` command or a Bash call changes only
+  that child shell, so later processes of the session do not run with it and the
+  button does not show it.
+- The label and color are the button's display slice. It MUST ship before phase 3
+  retires the shell line, ahead of the modal, Apply and the expiry alert, which wait
+  on the open items below. A test MUST cover each color rule and the session-start
+  read.
+
 Proposed mechanism: Apply sets those four variables with `$.env.set` (names are
 string literals in source) and does not run `assume`, so a later AWS call in the
 session resolves credentials from the profile. The role list is the profile names
@@ -379,8 +403,10 @@ sequenceDiagram
 
 1. Display ships and runs alongside the shell line (both draw; mod alerts appear
    above the shell rows).
-2. The ZR parts move to `pgd.put` in the sibling repo, on its own schedule.
-3. Once the ZR plugin has adopted the contract, the shell line is retired by
+2. The sibling repo moves its parts to pgd options or drops them, on its own
+   schedule; it ships no plugin (`2026-11-07-mod-bundle-grouping-design.md`, "ZR").
+3. Once the sibling repo has done so and the Assume button's display slice has
+   landed (see "Assume"), the shell line is retired by
    setting the `statusLine` option to `{ type = "command"; command = ""; }`
    (verified to load and draw no shell row, F2) and, after that, removing the
    part scripts. A delete filter for the stale `statusLine` key is optional
@@ -528,8 +554,8 @@ a capability that is not yet available.
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | 1     | Display only, matching today's shell line: the band shows plain labels (session id, model and effort, context) and the status row shows alerts (limits, context, dolt). No buttons and no contribution path. The shell line keeps running beside it. Includes the source layer, cache, throttling, the opt-in switches (defaults match today's shell line: all on), counters with a no-op exporter, the OTLP spike, and the findings guide. | none                                                                                   |
 | 2     | Buttons with modals and panes for what the shell line already shows: Info (version, repo, worktree, branch, PR), Context and usage, Session mode (with stop). The labels from phase 1 become buttons. Ships the `pgd` noun (`alert` and `focus` surfaces) and its types contract, and the "wrapping up" alert.                                                                                                                              | phase 1                                                                                |
-| 3     | Retire the shell implementation: after the ZR plugin has adopted the `pgd` contract (sibling repo, the operator's schedule), set `statusLine` to the empty command and remove the part scripts. The settings delete filter is optional cleanup.                                                                                                                                                                                             | phase 2; ZR adoption (sibling repo)                                                    |
-| 4     | New capabilities, each independent of phase 3: the model and effort modal, Wrap up, Assume, transcript links, session name (the session registry entry), and the Focus pane.                                                                                                                                                                                                                                                                | phase 2; Assume needs the open assume items; Focus items from pg-desk wait for pg-desk |
+| 3     | Retire the shell implementation: after the sibling repo has moved its parts to pgd options or dropped them (the operator's schedule) and the Assume button's display slice has landed, set `statusLine` to the empty command and remove the part scripts. The settings delete filter is optional cleanup.                                                                                                                                   | phase 2; ZR adoption (sibling repo); Assume display slice                              |
+| 4     | New capabilities, each independent of phase 3: the model and effort modal, Wrap up, Assume (its modal, Apply and expiry alert; the button's display slice ships before phase 3), transcript links, session name (the session registry entry), and the Focus pane.                                                                                                                                                                           | phase 2; Assume needs the open assume items; Focus items from pg-desk wait for pg-desk |
 
 Phases 3 and 4 both follow phase 2 and MAY proceed in either order or together.
 The OTLP check in phase 1 is a spike: if the route is not allowed, phase 1 ships
@@ -584,17 +610,17 @@ is off MUST register nothing: no band button, no modal, no source, no timer, no
 alert, no command and no `$.env.set` name. A disabled feature costs nothing at
 runtime.
 
-| Component        | Off means                                                    |
-| ---------------- | ------------------------------------------------------------ |
-| beads            | No dolt alert, no beads contributions or Focus rows          |
-| assume           | No Assume button, modal, expiry alert, source or `$.env.set` |
-| session mode     | No mode button, modal or stop action                         |
-| PR status        | No `gh` source, no PR row                                    |
-| recorder name    | No session registry read; the id is shown                    |
-| transcript links | No render hook                                               |
-| model and effort | No button or modal                                           |
-| Focus pane       | No button, pane or contribution storage                      |
-| ccpool, ZR       | Not Display's concern; those bundles do not push             |
+| Component        | Off means                                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| beads            | No dolt alert, no beads contributions or Focus rows                                                                                                                  |
+| assume           | No Assume button, modal, expiry alert, source or `$.env.set`                                                                                                         |
+| session mode     | No mode button, modal or stop action                                                                                                                                 |
+| PR status        | No `gh` source, no PR row                                                                                                                                            |
+| recorder name    | No session registry read; the id is shown                                                                                                                            |
+| transcript links | No render hook                                                                                                                                                       |
+| model and effort | No button or modal                                                                                                                                                   |
+| Focus pane       | No button, pane or contribution storage                                                                                                                              |
+| ccpool, ZR       | No pgd component: ccpool does not push today (it may contribute later), and ZR ships no plugin; it sets pgd options (see `2026-11-07-mod-bundle-grouping-design.md`) |
 
 The switches are options in the Home Manager module (rendered into the plugin's
 options), each defaulting to the operator's choice. Proposed option names under
@@ -603,7 +629,7 @@ options), each defaulting to the operator's choice. Proposed option names under
 `components.sessionName`, `components.links`, `components.modelEffort`,
 `components.focus`, plus `links` (the link list) and `alerts.thresholds`. Display reads them in
 `register`, so a disabled component never loads. A bundle that is turned off
-(beads, ccpool) MUST stop pushing, and Display MUST drop what it already holds
+(beads, ccpool, ZR) MUST stop pushing, and Display MUST drop what it already holds
 when the contribution expires.
 
 ## Mod findings guide (a deliverable)
