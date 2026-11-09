@@ -170,8 +170,9 @@ groups:
                     type: gt
                     params: [120]
 
-      # Parse stuck: lag above zero while the progress ratio did not change in 10 minutes (it moves
-      # whenever the parser or the copier advances); for: 10m on top of the 10m window.
+      # Parse stuck: parse lag bytes did not reach 0 at any point in 15 minutes (a healthy parser
+      # catches up many times in that window); for: 10m on top of the window. The progress ratio is
+      # not used: it moves whenever the copier advances, so it never stays still while a session writes.
       - uid: pg-ccrec-parse-stuck
         title: pg-claude-code-recorder parsing is stuck
         condition: C
@@ -181,19 +182,19 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-claude-code-recorder parse lag is above zero with no progress for 10 minutes"
-          description: "parse_lag_bytes (copied bytes not yet parsed) is above 0 and parse_progress has not changed for 10 minutes: the parser is not advancing. A Conversation with an unparsed file is held and never removed. Run pg-claude-code-recorder coverage, then read the recorder log for parse_failed."
+          summary: "pg-claude-code-recorder parse lag has not reached zero for 15 minutes"
+          description: "parse_lag_bytes (copied bytes not yet parsed) did not reach 0 at any point in the last 15 minutes, for 10 minutes: the parser is not catching up. A Conversation with an unparsed file is held and never removed. Run pg-claude-code-recorder coverage, then read the recorder log for parse_failed."
         data:
           - refId: A
             relativeTimeRange:
-              from: 600
+              from: 900
               to: 0
             datasourceUid: prometheus
             model:
               refId: A
               editorMode: code
               instant: true
-              expr: "max(pg_claude_code_recorder_parse_lag_bytes) > 0 and on() (max(changes(pg_claude_code_recorder_parse_progress[10m])) == 0)"
+              expr: "min_over_time(max(pg_claude_code_recorder_parse_lag_bytes)[15m:1m]) > 0"
           - refId: B
             datasourceUid: __expr__
             model:

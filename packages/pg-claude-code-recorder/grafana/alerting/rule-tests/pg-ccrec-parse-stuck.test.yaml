@@ -10,8 +10,38 @@ rule_files:
 
 evaluation_interval: 1m
 
-# Parse stuck: lag above zero while the progress ratio did not change over a 10m window.
+# Parse stuck: parse lag bytes did not reach 0 at any point in a 15m window (min_over_time over a
+# 1m subquery of the max), held for 10m. The progress ratio is not used: it also moves when the copier advances.
 tests:
+  - name: lag constant above zero with a moving progress ratio (copier active) fires
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_parse_lag_bytes{job="pg-claude-code-recorder"}
+        values: "1022927x120"
+      - series: pg_claude_code_recorder_parse_progress{job="pg-claude-code-recorder"}
+        values: "0.5+0.001x120"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-ccrec-parse-stuck
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-ccrec-parse-stuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: lag that dips to zero inside the window does not fire
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_parse_lag_bytes{job="pg-claude-code-recorder"}
+        values: "4096x49 0 4096x70"
+      - series: pg_claude_code_recorder_parse_progress{job="pg-claude-code-recorder"}
+        values: "0.5+0.001x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-parse-stuck
+        exp_alerts: []
+
   - name: lag above zero with a frozen progress ratio fires after the window and the for
     interval: 1m
     input_series:
@@ -29,13 +59,25 @@ tests:
           - exp_labels:
               severity: warning
 
-  - name: lag above zero while progress is advancing (catching up) does not fire
+  - name: lag that keeps returning to zero while progress is advancing (catching up) does not fire
     interval: 1m
     input_series:
       - series: pg_claude_code_recorder_parse_lag_bytes{job="pg-claude-code-recorder"}
-        values: "4096x120"
+        values: "4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0 4096 4096 0"
       - series: pg_claude_code_recorder_parse_progress{job="pg-claude-code-recorder"}
         values: "0.1+0.005x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-ccrec-parse-stuck
+        exp_alerts: []
+
+  - name: zero lag never fires, even with a moving progress ratio
+    interval: 1m
+    input_series:
+      - series: pg_claude_code_recorder_parse_lag_bytes{job="pg-claude-code-recorder"}
+        values: "0x120"
+      - series: pg_claude_code_recorder_parse_progress{job="pg-claude-code-recorder"}
+        values: "0.5+0.001x120"
     alert_rule_test:
       - eval_time: 60m
         alertname: pg-ccrec-parse-stuck
