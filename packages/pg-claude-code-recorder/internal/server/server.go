@@ -176,16 +176,16 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 		ans, werr := s.call(obs.WithTrace(ctx, tr), op, body)
 		s.observe(name, op.kind, s.now().Sub(start))
-		s.warnIfSlow(name, client, s.now().Sub(start))
+		s.warnIfSlow(name, client, tr, body, s.now().Sub(start))
 		if werr != nil {
 			werr = s.classify(r.Context(), werr)
 			switch werr.Name {
 			case wire.ErrQueryTimeout:
 				s.obs.Reg.Add(obs.MQueryTimeouts, map[string]string{"op": opLabel(name)}, 1)
 				s.logQueryTimeout(name, client, tr, body, s.now().Sub(start))
-				s.countCancelled(name, client, "deadline", s.now().Sub(start))
+				s.countCancelled(name, client, "deadline", tr, body, s.now().Sub(start))
 			case wire.ErrCancelled:
-				s.countCancelled(name, client, "client_gone", s.now().Sub(start))
+				s.countCancelled(name, client, "client_gone", tr, body, s.now().Sub(start))
 			}
 			s.fail(w, name, client, start, werr)
 			return
@@ -216,11 +216,29 @@ func (s *Server) classify(reqCtx context.Context, werr *wire.Error) *wire.Error 
 }
 
 // countCancelled counts one cancelled request (reason is client_gone or
-// deadline) and logs the request_cancelled event.
-func (s *Server) countCancelled(op, client, reason string, elapsed time.Duration) {
+// deadline) and logs the request_cancelled event. The event names what was
+// asked (request_id, query_kind, args) and where the time went (wait_ms,
+// exec_ms), as query_timeout does, so a client_gone cancel can be traced to the
+// query that was slow.
+func (s *Server) countCancelled(op, client, reason string, tr *obs.ReqTrace, body []byte, elapsed time.Duration) {
 	s.obs.Reg.Add(obs.MRequestCancelled, map[string]string{"op": opLabel(op), "reason": reason}, 1)
-	s.obs.Event(obs.EvRequestCancelled, "op", opLabel(op), "client", client, "reason", reason,
-		"ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
+	s.obs.Event(obs.EvRequestCancelled, append([]string{
+		"op", opLabel(op), "client", client, "reason", reason,
+		"ms", strconv.FormatInt(elapsed.Milliseconds(), 10),
+	}, requestFields(op, tr, body, elapsed)...)...)
+}
+
+// requestFields returns the log fields that identify a request: its id, the
+// query kind and key arguments (never a result), and the split of elapsed time
+// between SQLite execution (exec_ms) and everything else (wait_ms).
+func requestFields(op string, tr *obs.ReqTrace, body []byte, elapsed time.Duration) []string {
+	exec := tr.Exec()
+	kind, args := describeBody(op, body)
+	return []string{
+		"request_id", tr.ID, "query_kind", kind, "args", args,
+		"wait_ms", strconv.FormatInt(max(elapsed-exec, 0).Milliseconds(), 10),
+		"exec_ms", strconv.FormatInt(exec.Milliseconds(), 10),
+	}
 }
 
 func (s *Server) call(ctx context.Context, op operation, body []byte) (ans any, werr *wire.Error) {
@@ -251,7 +269,7 @@ const (
 	slowRequestEvery = time.Minute
 )
 
-func (s *Server) warnIfSlow(name, client string, d time.Duration) {
+func (s *Server) warnIfSlow(name, client string, tr *obs.ReqTrace, body []byte, d time.Duration) {
 	if d <= slowRequest {
 		return
 	}
@@ -265,7 +283,12 @@ func (s *Server) warnIfSlow(name, client string, d time.Duration) {
 	}
 	s.slowLogged[op] = now
 	s.slowMu.Unlock()
-	s.obs.Log.Warn(obs.EvSlowRequest, "op", op, "client", client, "ms", strconv.FormatInt(d.Milliseconds(), 10))
+	kv := append([]string{"op", op, "client", client, "ms", strconv.FormatInt(d.Milliseconds(), 10)}, requestFields(name, tr, body, d)...)
+	attrs := make([]any, len(kv))
+	for i, v := range kv {
+		attrs[i] = v
+	}
+	s.obs.Log.Warn(obs.EvSlowRequest, attrs...)
 }
 
 func (s *Server) finish(w http.ResponseWriter, op, client, outcome string, start time.Time, status int, v any) {

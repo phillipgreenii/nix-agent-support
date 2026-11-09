@@ -278,7 +278,7 @@ func TestSlowRequestLogsOncePerOpPerMinute(t *testing.T) {
 	if count() != 1 {
 		t.Fatalf("want one slow_request, got:\n%s", buf)
 	}
-	for _, want := range []string{"level=WARN", "op=slow", "client=", "ms=11000"} {
+	for _, want := range []string{"level=WARN", "op=slow", "client=", "ms=11000", "request_id=", "query_kind=slow", "wait_ms=", "exec_ms="} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("slow_request line lacks %q:\n%s", want, buf)
 		}
@@ -392,6 +392,13 @@ func TestCancelledRequestIsClientGoneNotATimeout(t *testing.T) {
 		}
 		if !hasEvent(o, obs.EvRequestCancelled) || hasEvent(o, obs.EvQueryTimeout) {
 			t.Fatalf("%v: events %+v", handlerErr, o.Events())
+		}
+		// The cancel names the query so a client_gone can be traced to it.
+		ev := o.EventsNamed(obs.EvRequestCancelled)[0]
+		for _, k := range []string{"request_id", "query_kind", "args", "wait_ms", "exec_ms"} {
+			if _, ok := ev.Attrs[k]; !ok {
+				t.Fatalf("%v: request_cancelled lacks %q: %+v", handlerErr, k, ev.Attrs)
+			}
 		}
 	}
 }
