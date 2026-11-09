@@ -58,14 +58,12 @@ func TestCalendarNextPrev(t *testing.T) {
 	havana := mustLoc(t, "America/Havana")
 
 	type tc struct {
-		name       string
-		c          CalendarTrigger
-		after      time.Time
-		wantNext   time.Time
-		wantPrev   time.Time // Prev(after)
-		next2      time.Time // Next(wantNext), zero to skip
-		skipPrev   bool
-		prevOfNext time.Time // Prev(wantNext) == wantNext always; kept implicit
+		name     string
+		c        CalendarTrigger
+		after    time.Time
+		wantNext time.Time
+		wantPrev time.Time // Prev(after)
+		next2    time.Time // Next(wantNext), zero to skip
 	}
 	utc := func(s string) time.Time {
 		v, err := time.Parse("2006-01-02 15:04", s)

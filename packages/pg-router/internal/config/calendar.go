@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,20 @@ var (
 	onMissedPolicies = []string{"run-now", "next-slot"}
 )
 
+// parseClock converts the already pattern-matched hour and minute digit strings
+// of an "at" value to integers, reporting a malformed value as an error.
+func parseClock(hour, minute string) (int, int, error) {
+	h, err := strconv.Atoi(hour)
+	if err != nil {
+		return 0, 0, fmt.Errorf("hour %q is not a number: %w", hour, err)
+	}
+	m, err := strconv.Atoi(minute)
+	if err != nil {
+		return 0, 0, fmt.Errorf("minute %q is not a number: %w", minute, err)
+	}
+	return h, m, nil
+}
+
 // buildCalendarTrigger validates a kind = "calendar" trigger and returns it. All
 // problems are aggregated so one config check reports them together.
 func buildCalendarTrigger(t *triggerTOML, queryType string) (query.Trigger, error) {
@@ -55,8 +70,12 @@ func buildCalendarTrigger(t *triggerTOML, queryType string) (query.Trigger, erro
 	case m == nil:
 		add("at %q is not a 24-hour HH:MM time (two digits each, e.g. \"02:00\")", t.At)
 	default:
-		fmt.Sscanf(m[1], "%d", &ct.At.Hour)
-		fmt.Sscanf(m[2], "%d", &ct.At.Minute)
+		h, mi, err := parseClock(m[1], m[2])
+		if err != nil {
+			add("at %q: %v", t.At, err)
+			break
+		}
+		ct.At.Hour, ct.At.Minute = h, mi
 	}
 
 	if t.Days != nil {

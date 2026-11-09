@@ -129,6 +129,18 @@ binds = ["e"]
 	}
 }
 
+func TestParseClock(t *testing.T) {
+	if h, m, err := parseClock("02", "05"); err != nil || h != 2 || m != 5 {
+		t.Errorf("parseClock(02,05) = %d,%d,%v", h, m, err)
+	}
+	if _, _, err := parseClock("xx", "00"); err == nil || !strings.Contains(err.Error(), `hour "xx" is not a number`) {
+		t.Errorf("bad hour err = %v", err)
+	}
+	if _, _, err := parseClock("01", "9x"); err == nil || !strings.Contains(err.Error(), `minute "9x" is not a number`) {
+		t.Errorf("bad minute err = %v", err)
+	}
+}
+
 // Every problem is reported together, not one per run.
 func TestLoad_calendarErrorsAreAggregated(t *testing.T) {
 	got := loadErr(t, calTrig(`at = "9:5"`, `days = ["funday"]`))
