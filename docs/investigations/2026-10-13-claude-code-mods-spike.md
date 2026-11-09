@@ -81,12 +81,12 @@ No `classic.*` hook in the spike ever fired, in the interactive session or headl
 log of a headless run gives the reason:
 
 ```text
-cc-plugin-sec-default@builtin seated outermost: this machine has managed settings
-hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend); events: classic.*, ...
-plugin.register: mod-spike (user, mod-spike@inline), judged by cc-plugin-sec-default: admitted
-mod-spike: classic.PreToolUse bypassed by cc-plugin-sec-default (tier user); beneath runs
-mod-spike: classic.PostToolUse bypassed by cc-plugin-sec-default (tier user); beneath runs
-mod-spike: classic.Stop bypassed by cc-plugin-sec-default (tier user); beneath runs
+the managed security plugin seated outermost: this machine has managed settings
+hooks module the managed security plugin loaded (native, environment 1, tier prepend); events: classic.*, ...
+plugin.register: mod-spike (user, mod-spike@inline), judged by the managed security plugin: admitted
+mod-spike: classic.PreToolUse bypassed by the managed security plugin (tier user); beneath runs
+mod-spike: classic.PostToolUse bypassed by the managed security plugin (tier user); beneath runs
+mod-spike: classic.Stop bypassed by the managed security plugin (tier user); beneath runs
 Hooks: Stop [...] (plugin mod-spike@inline) finished with status 0 (36ms)
 ```
 
@@ -224,7 +224,7 @@ These are the consequences the spike points to. They are inputs to planning, not
 1. Run `claude --version` and compare it with 2.1.296.
 2. Check whether the guard still loads and still skips user mods on classic events: start
    `claude -p --debug --plugin-dir <a mod that hooks classic.Stop>` and search the debug log
-   (`~/.claude/debug/latest`) for `bypassed by cc-plugin-sec-default`.
+   (`~/.claude/debug/latest`) for `bypassed by the managed security plugin`.
 3. Re-read the guard's README for its `classic.*` row, and the admin page for new guard options.
 4. Re-run the dialog sequence (approve, No, Esc) to see whether a later build separates "No" from Esc.
 5. Re-test `$.fs.write` under concurrent tool calls before trusting it for per-event files.
