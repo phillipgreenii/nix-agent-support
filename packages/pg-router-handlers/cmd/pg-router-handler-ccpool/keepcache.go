@@ -21,7 +21,7 @@ import (
 // An entry is honored only while it has not expired (Config.WorktreeKeepRecheck)
 // AND the worktree's signature is unchanged: the mtimes of its git admin HEAD
 // and index and of the loose branch ref. A worktree that gained a commit or had
-// its index rewritten therefore gets re-examined at once. The cheap guards (age,
+// its index rewritten therefore gets re-examined at once. A checked-out branch other than the anchor branch is cached the same way. The cheap guards (age,
 // row, process working directory, git lock) are never cached.
 //
 // The files are written atomically (temp file plus rename), so a reader sees a

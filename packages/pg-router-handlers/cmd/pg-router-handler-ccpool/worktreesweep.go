@@ -389,6 +389,13 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	if err != nil || cur != branch {
 		slog.Info("worktree sweep: checked-out branch is not the anchor branch; keeping the worktree",
 			"bead", c.bead, "worktree", c.path, "branch", cur, "err", err)
+		if err == nil {
+			// A different checked-out branch is a stable keep decision: checking out
+			// another branch rewrites the admin HEAD, which changes the signature.
+			// Without caching it, every kept monorepo worktree cost a git open on
+			// every run and the examination cap left candidates unreached.
+			keepRemember(env.lockDir, c, sig, now, deps.Cfg.WorktreeKeepRecheck)
+		}
 		return false, didGit, false
 	}
 	dirty, err := st.Status(ctx)

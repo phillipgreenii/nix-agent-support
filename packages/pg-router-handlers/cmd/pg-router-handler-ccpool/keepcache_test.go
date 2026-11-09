@@ -335,3 +335,41 @@ func (h *sweepHarness) examFiles() []string {
 	m, _ := filepath.Glob(filepath.Join(h.lockDir, examFilePrefix+"*"+examFileSuffix))
 	return m
 }
+
+// Worktrees whose checked-out branch is not the anchor branch are kept, and that
+// decision is cached like a dirty keep. With more of them than one run may
+// examine, every candidate is examined within two runs and the pass reports none
+// unexamined from then on, so a long-running janitor reaches steady state
+// instead of re-paying for the same kept worktrees each run. Real git.
+func TestKeepCache_otherBranchKeepIsCachedSoEveryCandidateIsReached(t *testing.T) {
+	h := newSweepHarness(t)
+	h.env.cwds = func(context.Context) ([]string, error) { return nil, nil }
+	total := worktreeSweepMaxExamined*2 + 3
+	paths := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		p := h.leak(fmt.Sprintf("zr-%02d", i))
+		h.git(p, "checkout", "-q", "-b", fmt.Sprintf("feature-%02d", i))
+		paths = append(paths, p)
+	}
+
+	const bound = 4
+	var c *passCounts
+	for run := 1; run <= bound; run++ {
+		_, c = h.sweepCounted()
+		if c.Unexamined == 0 {
+			break
+		}
+	}
+	if c.Unexamined != 0 {
+		t.Fatalf("still %d unexamined after %d runs: %+v", c.Unexamined, bound, c)
+	}
+	// Steady state: nothing is examined with git again while the keeps are valid.
+	opens := h.countOpens()
+	_, c = h.sweepCounted()
+	if opens.Load() != 0 || c.Examined != 0 || c.Cached != total || c.Unexamined != 0 {
+		t.Fatalf("steady-state run opened %d worktrees, counters %+v; want 0 opens, all %d cached", opens.Load(), c, total)
+	}
+	for i, p := range paths {
+		h.wantKept(p, fmt.Sprintf("zr-%02d", i))
+	}
+}
