@@ -105,17 +105,17 @@ flowchart TB
 | Tracking     | `claude-tool-tracker`                                 | Every session                                  | PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied                                               | `session.start`, `tool.call`, `tool.check`, `ui.render`, `session.end`                                                                                         |
 | Control      | `pg-claude-control`                                   | Every session                                  | None                                                                                                                           | `session.start`, `turn.start`, `turn.complete`, `session.end`                                                                                                  |
 | Display      | `pgd`                                                 | Every session; each component opt-in           | None                                                                                                                           | `engine.create` (the `pgd` noun), `session.start`, `session.measure`, `turn.complete`, `session.compact`, `config.set`, `command.run`, `ui.render`, `ui.close` |
-| Session mode | `session-mode` (new; its hooks move out of `pb`)      | Every session                                  | SessionEnd, PostCompact (until the placement follow-up decides on a native port)                                               | None yet                                                                                                                                                       |
+| Session mode | `session-mode` (new; its hooks move out of `pb`)      | Every session                                  | SessionEnd, PostCompact (decided: stay command hooks, see "Placement findings")                                                | None yet                                                                                                                                                       |
 | ccpool       | the ccpool plugin (`packages/ccpool/ccpool-plugin`)   | Pool sessions only                             | SessionStart, Stop, StopFailure, SessionEnd, Notification (`permission_prompt`, `idle_prompt`), PreToolUse (`AskUserQuestion`) | None                                                                                                                                                           |
 | beads        | `pb`; pgd's `components.beads` switch                 | `phillipgreenii.programs.beads.enable` is true | None (after the session-mode hooks leave `pb`)                                                                                 | None yet; the later Focus-row push is `pb`'s mod                                                                                                               |
 | ZR           | no plugin; ZR settings of pgd options such as `links` | Work machines (set by the sibling repo)        | None                                                                                                                           | None (pgd's own hooks read the options)                                                                                                                        |
 
-The table shows the target layout, after the moves this note records. The one
-difference from today: the two session-mode hooks (SessionEnd and PostCompact)
-still live in `pb`'s `hooks/hooks.json`, and no `session-mode` plugin exists yet.
+The table shows the layout after the moves this note records: the two
+session-mode hooks (SessionEnd and PostCompact) live in the `session-mode`
+plugin's `hooks/hooks.json` (moved out of `pb` on 2026-11-09).
 The event lists are read from each plugin's `hooks/hooks.json` and its hooks
 module on 2026-11-07. "None yet" means the member has no native mod hook today and
-may gain one later. The session-mode row names a planned member; the beads row
+may gain one later. The beads row
 names an existing plugin, `pb`; the ZR row names configuration, not a plugin.
 
 ### Base: on in every session
@@ -301,6 +301,39 @@ Command hook beside a mod:
   check"). The check cannot prove a consumer enabled the feature. When the
   session-mode hooks move, the new `session-mode` plugin MUST require
   `session-mode`.
+
+## Placement findings (2026-11-09)
+
+Read from Claude Code 2.1.318's own `claude-code.d.ts` (the declarations the
+`plugin-authoring` skill writes). No live headless probe was run: the types
+decide each question, and a native `Notification` or `Stop` moment cannot be
+forced in a `claude -p` run without a model call.
+
+**session-mode: the two hooks stay command hooks.**
+
+- `PostCompact` has no native counterpart. `session.compact` fires when the
+  conversation is _about to be_ compacted (and for `precompute`), so it cannot say
+  that a compaction happened; its `trigger` is not the classic `manual|auto` value
+  the marker file and the recorder read (ADR 0096).
+- `session.end` exists, but a mod could only reach the CLI through `$.process.run`,
+  the same one process spawn the command hook costs, and the `SessionEnd` payload
+  fields the CLI reads (`transcript_path`) are the classic ones. Splitting the two
+  hooks across mechanisms buys nothing (H1 is SHOULD; H3 allows the command hook).
+- The plugin therefore ships `hooks/hooks.json` only, no module.
+
+**ccpool: nothing changes (native-event check recorded).**
+
+| Classic event | Native counterpart                                                               | Verdict        |
+| ------------- | -------------------------------------------------------------------------------- | -------------- |
+| Stop          | `turn.complete` (`reason` answer, aborted, refusal, error; also fires per agent) | Not equivalent |
+| StopFailure   | None; `turn.complete` with `reason: "error"` carries no API error class          | None           |
+| Notification  | None; `ui.notify` only hears notifications a plugin raised                       | None           |
+
+`turn.complete` hears subagent turns and an aborted turn, while `Stop` is the
+main loop's stop, and `StopFailure` carries the classified API error
+(`SDKAssistantMessageError`) that ccpool's `hook fail` reads. Notification
+(`permission_prompt`, `idle_prompt`) has no native event. Under H2 all of them
+stay command hooks, and the ccpool plugin stays as one `--plugin-dir` plugin.
 
 ## Follow-up work
 

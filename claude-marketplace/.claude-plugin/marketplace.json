@@ -35,6 +35,11 @@
       "description": "Observer-only command hooks recording tool-call facts for the tool-event log"
     },
     {
+      "name": "session-mode",
+      "source": "./session-mode",
+      "description": "session-mode command hooks: the SessionEnd backstop that flips a stale running record to finished, and the PostCompact hook that records each compaction (base bundle, on in every session)"
+    },
+    {
       "name": "pg-claude-control",
       "source": "./pg-claude-control",
       "description": "Control mod: a per-process inbox for submitting, interrupting, running allowlisted slash commands and reading the prompt draft of a running Claude, plus the session end reason"

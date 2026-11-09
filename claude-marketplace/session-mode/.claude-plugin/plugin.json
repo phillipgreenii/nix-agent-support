@@ -1,0 +1,7 @@
+{
+  "name": "session-mode",
+  "description": "session-mode command hooks: a SessionEnd backstop that flips a stale running/stopping record to finished when the session terminates, and a PostCompact hook that records each compaction (a marker file beside the transcript, shown by the status line and ingested by pg-claude-code-recorder). Base-bundle member, on in every session.",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "requires": ["session-mode"]
+}

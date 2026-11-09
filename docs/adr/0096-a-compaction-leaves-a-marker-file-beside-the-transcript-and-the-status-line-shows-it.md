@@ -35,7 +35,7 @@ flowchart LR
 
 1. **The marker file is the contract between the writer and the reader.** The writer is
    `session-mode hook post-compact` (package `session-mode`, registered as a `PostCompact` entry
-   without a matcher in the `pb` plugin's `hooks/hooks.json`). The reader is the status-line
+   without a matcher in the `session-mode` plugin's `hooks/hooks.json`). The reader is the status-line
    wrapper (`home/programs/claude-status-line/compaction-status.bash`). They share no code and no
    runtime; only the file's path and shape bind them.
 2. **Path.** `<transcript_dir>/<session_id>.compaction.json`, where `<transcript_dir>` is

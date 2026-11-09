@@ -59,7 +59,7 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
     part MUST check it itself (its empty-string guard does not catch the string `0`) and print a
     dim `ctx:...` placeholder with NO alert glyph. The alert MUST NOT be suppressed by any
     percentage-to-token inference (on a 1M window it can legitimately be true at 25%).
-  - The `session-mode hook post-compact` PostCompact hook (pb plugin `hooks.json`) writes
+  - The `session-mode hook post-compact` PostCompact hook (session-mode plugin `hooks.json`) writes
     `<transcript_dir>/<session_id>.compaction.json` (`{"ts":<epoch s>,"trigger":"manual|auto|unknown"}`,
     one line, mode 0600). The wrapper reads it jq-free via `compaction-status.bash`
     (`read_compaction_marker PATH NOW`: `ts` MUST be a positive integer; a missing, zero-byte or
