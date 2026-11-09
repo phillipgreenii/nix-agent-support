@@ -12,7 +12,7 @@ tests:
   - name: a scan that keeps succeeding never fires
     interval: 1m
     input_series:
-      - series: pa_monitor_scan_last_success_timestamp_seconds
+      - series: pa_monitor_scan_last_success_timestamp
         values: "0+60x240"
     alert_rule_test:
       - eval_time: 120m
@@ -22,7 +22,7 @@ tests:
   - name: scans that stop succeeding fire once the age passes 15m plus the 5m hold
     interval: 1m
     input_series:
-      - series: pa_monitor_scan_last_success_timestamp_seconds
+      - series: pa_monitor_scan_last_success_timestamp
         # advances for 30m then freezes at its last value
         values: "0+60x30 1800x200"
     alert_rule_test:
@@ -43,7 +43,7 @@ tests:
   - name: a recovered scan resolves the alert
     interval: 1m
     input_series:
-      - series: pa_monitor_scan_last_success_timestamp_seconds
+      - series: pa_monitor_scan_last_success_timestamp
         # frozen from minute 10 to 50, then advancing again in step with the clock
         values: "0+60x10 600x40 3060+60x100"
     alert_rule_test:
@@ -59,7 +59,7 @@ tests:
   - name: a daemon that never completed a scan (stamp 0) fires
     interval: 1m
     input_series:
-      - series: pa_monitor_scan_last_success_timestamp_seconds
+      - series: pa_monitor_scan_last_success_timestamp
         values: "0x120"
     alert_rule_test:
       - eval_time: 30m
@@ -71,7 +71,7 @@ tests:
   - name: no series at all does not fire
     interval: 1m
     input_series:
-      - series: pa_monitor_scan_last_success_timestamp_seconds
+      - series: pa_monitor_scan_last_success_timestamp
         values: "_x120"
     alert_rule_test:
       - eval_time: 60m

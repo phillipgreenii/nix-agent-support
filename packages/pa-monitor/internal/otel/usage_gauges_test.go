@@ -197,7 +197,7 @@ func TestScanLastSuccessGauge(t *testing.T) {
 		t.Errorf("value = %d, want 0", v)
 	}
 	if m.Unit != "s" {
-		t.Errorf("unit = %q, want s (yields the _seconds Prometheus suffix)", m.Unit)
+		t.Errorf("unit = %q, want s (unit is metadata only; the collector adds no unit suffix to the Prometheus name)", m.Unit)
 	}
 	e.RecordScanLastSuccess(1782958200)
 	m, _ = collectMetric(t, reader, "pa_monitor.scan.last_success_timestamp")

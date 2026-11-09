@@ -327,7 +327,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	// Staleness signal for the session metrics: epoch seconds of the last
 	// successful corpus scan, 0 until one succeeds. A failed scan keeps the last
 	// good session gauges, so alert on time() - this. Prometheus name:
-	// pa_monitor_scan_last_success_timestamp_seconds.
+	// pa_monitor_scan_last_success_timestamp.
 	scanLastSuccessGauge, err := meter.Int64ObservableGauge("pa_monitor.scan.last_success_timestamp",
 		metric.WithUnit("s"), metric.WithDescription("unix time of the last successful corpus scan (0 = none since start)"))
 	if err != nil {

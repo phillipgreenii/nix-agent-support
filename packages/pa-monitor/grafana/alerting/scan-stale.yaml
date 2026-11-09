@@ -3,7 +3,7 @@
 # the session gauges look healthy while their numbers age, and a daemon that never completed a
 # scan serves no sessions at all. pa_monitor_daemon_connected stays 1 in both cases, so
 # daemon-connection.yaml cannot see it. The daemon pushes
-# pa_monitor_scan_last_success_timestamp_seconds (epoch seconds of the last successful scan, 0
+# pa_monitor_scan_last_success_timestamp (epoch seconds of the last successful scan, 0
 # until the first one) every tick; the alert is the age of that stamp.
 #
 # max() collapses any resource labels. noDataState is OK: no series means pa-monitor is not
@@ -40,7 +40,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: time() - max(pa_monitor_scan_last_success_timestamp_seconds)
+              expr: time() - max(pa_monitor_scan_last_success_timestamp)
           - refId: B
             datasourceUid: __expr__
             model:

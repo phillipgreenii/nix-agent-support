@@ -39,7 +39,7 @@ printf '%s' "$alerts_json" | jq -e '
     and .for == "5m"
     and .noDataState == "OK"
     and .labels.severity == "warning"
-    and (.data[0].model.expr == "time() - max(pa_monitor_scan_last_success_timestamp_seconds)")
+    and (.data[0].model.expr == "time() - max(pa_monitor_scan_last_success_timestamp)")
     and (.data[2].model.conditions[0].evaluator == {"type": "gt", "params": [900]})' >/dev/null ||
   fail "pa-monitor-scan-stale: condition C, for 5m, noDataState OK, severity warning, age expression, gt 900"
 
