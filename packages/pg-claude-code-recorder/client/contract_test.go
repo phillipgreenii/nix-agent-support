@@ -1,9 +1,12 @@
+//go:build integration
+
 package client_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +18,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 )
 
+// These helpers are shared by the integration-tagged contract, latency and
+// lifecycle suites, so they carry the same build tag.
+//
 // The wire-contract suite: a real daemon (store, copier, parser, feed, listener)
 // in process, one case per operation and one per error (the conversation and
 // process operations are in lifecycle_integration_test.go), over its Unix socket. The cases for operations that need
@@ -28,6 +34,10 @@ const (
 	cL4 = `{"type":"summary","uuid":"a4","sessionId":"s1","timestamp":"2026-10-29T20:00:03Z","summary":"registry file deleted early"}` + "\n"
 	rel = "projects/example-proj/s1.jsonl"
 )
+
+// errorsIs and errorsAs wrap the errors package for the integration cases.
+func errorsIs(err, target error) bool           { return errors.Is(err, target) }
+func errorsAs(err error, t **client.Error) bool { return errors.As(err, t) }
 
 func ctx() context.Context { return context.Background() }
 
