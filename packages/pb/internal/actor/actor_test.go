@@ -97,6 +97,11 @@ func TestDerive_everyBranchReportsItsSourceAndSuffix(t *testing.T) {
 			Result{Actor: sidC + "-unstick", SessionID: sidC, Source: SourceScratchpad},
 		},
 		{
+			"handoff role keeps its own suffix",
+			Params{Role: "handoff", Getenv: env(map[string]string{"CLAUDE_SESSION_ID": sidA})},
+			Result{Actor: sidA + "-handoff", SessionID: sidA, Source: SourceEnv},
+		},
+		{
 			"blank env is trimmed when set",
 			Params{Role: "drain", Getenv: env(map[string]string{"CLAUDE_SESSION_ID": " " + sidA + " "})},
 			Result{Actor: sidA + "-drain", SessionID: sidA, Source: SourceEnv},
@@ -123,7 +128,7 @@ func TestDerive_rejectsAnUnknownRoleBeforeAnythingElse(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	for _, want := range []string{`"bogus"`, "drain, unblock, unstick"} {
+	for _, want := range []string{`"bogus"`, "drain, unblock, unstick, handoff"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}

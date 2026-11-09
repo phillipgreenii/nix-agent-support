@@ -15,8 +15,9 @@ import (
 // actors distinct per role: /drain-beads' resume query recovers every in-progress
 // bead of its own actor, so it must never share an id with /unblock-human-beads,
 // and a dispatched subagent must never derive its orchestrator's actor id
-// (operator ruling pg2-mcp1j).
-var Roles = []string{"drain", "unblock", "unstick"}
+// (operator ruling pg2-mcp1j). /process-handoff holds a claimed `human` handoff
+// for the whole session, so it needs its own suffix for the same reason.
+var Roles = []string{"drain", "unblock", "unstick", "handoff"}
 
 // Source says which branch of the fallback chain produced the session id.
 type Source string

@@ -2364,6 +2364,29 @@
                     touch $out
                   '';
 
+              # Handoff selection filter of /pb:process-handoff: the jq filter is EXTRACTED from
+              # the command markdown and run over a fixture in both `bd --json` shapes, so the
+              # type-or-title rule (the `handoff` type is not registered in every tracker) cannot
+              # drift from the command text.
+              test-pb-process-handoff-selection =
+                pkgs.runCommand "test-pb-process-handoff-selection"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.jq
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export PBPH_CMD="${./claude-marketplace/pb/commands/process-handoff.md}"
+                    export HOME="$TMPDIR"
+                    bats --verbose-run ${./tests/pb-process-handoff-selection.bats}
+                    touch $out
+                  '';
+
               # LEAVE terminal action and narrowed DEFER for /pb:unblock-human-beads (bead
               # pg2-8gvdfi): text assertions over the command file, each with a mutated-copy
               # negative control that fails exactly one assertion, plus contract checks of the

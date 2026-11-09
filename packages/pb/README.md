@@ -298,7 +298,7 @@ close: the session identifier plus a role suffix. It replaces the per-command pr
 improvised `uuidgen` shell that prose produced. Run it once per session and keep the printed value.
 
 ```
-pb actor --role <drain|unblock|unstick> [--scratchpad <path>]
+pb actor --role <drain|unblock|unstick|handoff> [--scratchpad <path>]
 ```
 
 The session identifier, first match wins:
@@ -311,7 +311,7 @@ The session identifier, first match wins:
 3. A fresh random UUID (version 4). It cannot be persisted, so the caller MUST remember the printed
    id for the whole session; a note on stderr says so.
 
-Then `-<role>` is appended. The suffix is load-bearing: `drain`, `unblock` and `unstick` give three
+Then `-<role>` is appended. The suffix is load-bearing: `drain`, `unblock`, `unstick` and `handoff` give four
 different actors for one session, so `/drain-beads`' resume query (`bd list --status in_progress
 --assignee ID`, no label filter) never recovers another command's claims, and a dispatched subagent
 never derives its orchestrator's actor id (operator ruling `pg2-mcp1j`). An unknown or missing

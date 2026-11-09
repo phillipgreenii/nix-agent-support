@@ -144,6 +144,17 @@ open member). A spent handoff has nothing left to resume, so it is closed whatev
    the other unattended paths (a dispatched session handed one by id, the `/unstick-beads`
    worker, an untyped but unmistakable handoff).
 
+   **Not unattended: a subagent an interactive session dispatches.** The guard exists to keep
+   drain loops and other sessions with no operator behind them away from an unconsumed attended
+   handoff. A triage subagent that an interactive session dispatches on the operator's behalf
+   (`/pb:process-handoff`) has the operator behind it, so it is the step 2 case, not this guard,
+   and a `human` label on the handoff is a claim for it to verify (it may be there by error). It
+   absorbs and closes a resolved handoff. When person-steps remain it does NOT close the handoff
+   and does NOT file those steps as separate beads: it archives the original body in an
+   `ORIGINAL BODY:` comment, rewrites the body to list only those steps (keeping `human`), and
+   returns them to the interactive session. That session works them with the operator and closes
+   the handoff when they are done, first filing a `human` bead for any step left unfinished.
+
    Absorb procedure (every case except a not-spent `human` handoff read unattended):
    1. TRACE every item in the body to where it durably lives: a bead id, or a label that indexes
       the cluster (`bd list --label <label>`, which outperforms any hand-copied member list).
