@@ -753,15 +753,23 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				cancel()
 				if err != nil {
 					writeFailed(f, fmt.Sprintf("failed to create bd issue for %s", f.Fingerprint), err)
-				} else if f.Kind == kindGrafanaAlert {
+				} else {
+					// Every kind: a later finding in THIS run with the same
+					// fingerprint (or the same group) must find the bead
+					// just filed and comment on it instead of filing a
+					// second one; the dedup list above was read before
+					// this create.
+					meta := trackedMetadata(f)
+					if f.GroupKey != "" {
+						meta[metaEpisodeCount] = "1"
+					}
+					existing = append(existing, connectorIssue{ID: created.ID, Labels: escalationLabels(f), Metadata: meta})
+				}
+				if err == nil && f.Kind == kindGrafanaAlert {
 					noted(f)
 					if f.GroupKey != "" {
-						// Later members of this burst must find the new
-						// group bead, and this label set is its first
-						// episode comment.
-						meta := trackedMetadata(f)
-						meta[metaEpisodeCount] = "1"
-						existing = append(existing, connectorIssue{ID: created.ID, Labels: escalationLabels(f), Metadata: meta})
+						// This label set is the group bead's first episode
+						// comment.
 						episodeCtx, cancel3 := withPgTimeout()
 						err := deps.comment(episodeCtx, created.ID, stillFiringComment(f, alertStates[f.Fingerprint], now), warn)
 						cancel3()
