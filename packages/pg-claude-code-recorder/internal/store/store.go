@@ -225,6 +225,9 @@ type Store struct {
 
 	// TornBytes is the size of the torn journal tail dropped on open.
 	TornBytes int64
+	// ReplayCollisions lists the file ids whose journal holds file records of
+	// different mode or source (tolerated: the first one wins, as it always did).
+	ReplayCollisions []int64
 	// Rebuilt is true when index.db was rebuilt from the journal on open.
 	Rebuilt bool
 }
@@ -393,6 +396,7 @@ func openLocked(dir string, opt Options) (*Store, error) {
 		_ = s.Close()
 		return nil, &SchemaNewerError{Found: int(v), Known: SchemaVersion}
 	}
+	s.noteReplayCollisions(recs)
 	endPhase = phaseOf(opt.Phase, "store_replay")
 	err = s.replay(recs)
 	endPhase()
@@ -940,6 +944,9 @@ func (s *Store) lockWrite() {
 func (s *Store) commit(full bool, recs []*Rec) error {
 	s.lockWrite()
 	defer s.mu.Unlock()
+	if err := s.checkFileIDs(recs); err != nil {
+		return err
+	}
 	var buf []byte
 	for _, r := range recs {
 		r.Seq = s.nextSeq
@@ -983,6 +990,78 @@ func (s *Store) commit(full bool, recs []*Rec) error {
 		h()
 	}
 	return nil
+}
+
+// FileIDCollisionError is a new file record whose id already names a file of a
+// different mode or source.
+type FileIDCollisionError struct {
+	ID                        int64
+	Mode, Source              string
+	ExistingMode, ExistingSrc string
+}
+
+func (e *FileIDCollisionError) Error() string {
+	return fmt.Sprintf("file id %d already exists as %s/%s; refusing %s/%s", e.ID, e.ExistingSrc, e.ExistingMode, e.Source, e.Mode)
+}
+
+// checkFileIDs rejects, before anything reaches the journal, a file record
+// whose id already exists (in the index or earlier in recs) with a different
+// mode or source. A same-mode, same-source repeat stays an idempotent no-op.
+// Replay does not call it: a journal that already holds a collision must still
+// open (see noteReplayCollisions).
+func (s *Store) checkFileIDs(recs []*Rec) error {
+	var seen map[int64]*Rec
+	for _, r := range recs {
+		if r.T != TFile {
+			continue
+		}
+		mode, src, found := "", "", false
+		if prev, ok := seen[r.File]; ok {
+			mode, src, found = prev.Mode, prev.Source, true
+		} else if err := s.wdb.QueryRow(`SELECT mode, source FROM files WHERE id=?`, r.File).Scan(&mode, &src); err == nil {
+			found = true
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if found && (mode != r.Mode || src != r.Source) {
+			s.obs.Reg.Add(obs.MFileIDCollisions, map[string]string{"where": "write"}, 1)
+			s.obs.Event(obs.EvFileIDCollision, "where", "write", "file", strconv.FormatInt(r.File, 10),
+				"existing", src+"/"+mode, "new", r.Source+"/"+r.Mode)
+			return &FileIDCollisionError{ID: r.File, Mode: r.Mode, Source: r.Source, ExistingMode: mode, ExistingSrc: src}
+		}
+		if seen == nil {
+			seen = map[int64]*Rec{}
+		}
+		seen[r.File] = r
+	}
+	return nil
+}
+
+// noteReplayCollisions records, once per id, journal file records that disagree
+// with the first record of that id on mode or source. The replay itself is
+// unchanged (INSERT OR IGNORE keeps the first), so a journal that already holds
+// reissued ids still opens.
+func (s *Store) noteReplayCollisions(recs []Rec) {
+	first := map[int64]*Rec{}
+	done := map[int64]bool{}
+	for i := range recs {
+		r := &recs[i]
+		if r.T != TFile {
+			continue
+		}
+		f, ok := first[r.File]
+		if !ok {
+			first[r.File] = r
+			continue
+		}
+		if (f.Mode != r.Mode || f.Source != r.Source) && !done[r.File] {
+			done[r.File] = true
+			s.ReplayCollisions = append(s.ReplayCollisions, r.File)
+			s.obs.Reg.Add(obs.MFileIDCollisions, map[string]string{"where": "replay"}, 1)
+			s.obs.Event(obs.EvFileIDCollision, "where", "replay", "file", strconv.FormatInt(r.File, 10),
+				"existing", f.Source+"/"+f.Mode, "new", r.Source+"/"+r.Mode)
+		}
+	}
 }
 
 // txBeginner is what applyAll opens its transaction on: the write handle, or a

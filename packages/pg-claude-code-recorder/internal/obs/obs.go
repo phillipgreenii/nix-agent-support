@@ -59,6 +59,11 @@ const (
 	MFeedWaiters      = "feed_waiters"
 	MIndexRebuilds    = "index_rebuilds_total"
 	EvIndexRebuilt    = "index_rebuilt"
+	// EvFileIDCollision and MFileIDCollisions: a file id met a file record of a
+	// different mode or source (a rejected new write, or a replayed journal that
+	// already holds one).
+	EvFileIDCollision = "file_id_collision"
+	MFileIDCollisions = "file_id_collisions_total"
 	// EvRebuildRefused and MRebuildRefused: a rebuild stopped by the free-space
 	// preflight before it moved anything. EvRebuildPreflight is a passed check.
 	EvRebuildRefused   = "rebuild_refused_low_space"
@@ -424,6 +429,8 @@ func (o *Obs) RegisterStandard() {
 	}
 	o.Reg.Add(MIndexRebuilds, nil, 0)
 	o.Reg.Add(MRebuildRefused, nil, 0)
+	o.Reg.Add(MFileIDCollisions, map[string]string{"where": "write"}, 0)
+	o.Reg.Add(MFileIDCollisions, map[string]string{"where": "replay"}, 0)
 	for _, op := range NoSpaceOps {
 		o.Reg.Add(MBlockedNoSpace, map[string]string{"op": op}, 0)
 	}

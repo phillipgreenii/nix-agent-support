@@ -27,6 +27,7 @@ var helpTexts = map[string]string{
 	MCaughtUp:                 "1 when the startup backfill has finished, else 0.",
 	MFeedWaiters:              "Feed requests currently waiting for new data.",
 	MIndexRebuilds:            "Index rebuilds run.",
+	MFileIDCollisions:         "File records that met an existing file id of a different mode or source, by where (write: rejected; replay: tolerated from the journal).",
 	MRebuildRefused:           "Index rebuilds refused by the free-space preflight.",
 	MBlockedNoSpace:           "Times the recorder could not do an operation because the volume had no room for it, by op (copy, parse_index, archive, removal_barrier, index_checkpoint, rebuild).",
 	MConversationEnd:          "Conversation ends observed, by the evidence available.",
