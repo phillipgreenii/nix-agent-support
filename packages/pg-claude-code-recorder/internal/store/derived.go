@@ -37,6 +37,15 @@ import (
 // session_ref column, see addSessionRefColumn) at open, but its older rows keep
 // session_ref 0 and are absent from the session tables until it is rebuilt.
 //
+// file_facts holds one row per file that has records: the path facts the
+// file's source captured (project, file_session, agent_id) and the newest record
+// time over every generation of the file. The parser upserts it in the commit
+// transaction that writes the records (see parser.flushFileFacts) and
+// recomputes it when it deletes a generation's records, so the file inventory
+// is answered from this small table and never scans records. It is derived from
+// records and rebuildable from them; a database that existed before the table is
+// backfilled in the background (metaFileFactsComplete, see filefacts.go).
+//
 // Lookup tables (schema v3 slice 4). lk_cwd, lk_branch, lk_version,
 // lk_entrypoint and lk_user_type intern a string once as (id, v); a record
 // carries cwd_id, branch_id, version_id, entrypoint_id and user_type_id (NULL
@@ -97,6 +106,13 @@ CREATE TABLE IF NOT EXISTS session_files(
   file_id INTEGER NOT NULL,
   PRIMARY KEY(session_ref, file_id)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS file_facts(
+  file_id INTEGER PRIMARY KEY,
+  project TEXT,
+  file_session TEXT,
+  agent_id TEXT,
+  last_time_ns INTEGER NOT NULL
+) STRICT;
 CREATE TABLE IF NOT EXISTS field_names(
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE

@@ -52,6 +52,11 @@ type (
 	Order = query.Order
 	// QueryAnswer is the query answer.
 	QueryAnswer = query.Answer
+	// InventoryRequest, InventoryAnswer and InventoryFile are the files.inventory
+	// operation's shapes.
+	InventoryRequest = query.InventoryRequest
+	InventoryAnswer  = query.InventoryAnswer
+	InventoryFile    = query.InventoryFile
 	// SearchRequest is the search operation's body.
 	SearchRequest = query.SearchRequest
 	// SearchAnswer is the search answer.

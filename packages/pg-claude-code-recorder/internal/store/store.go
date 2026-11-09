@@ -541,6 +541,12 @@ func (s *Store) openDB(path string, bulk bool) error {
 			ddl += sessionRefIndexesSQL()
 		}
 	}
+	// A database created empty by this code has every file's facts from its
+	// first record on; one that already had records is backfilled in the
+	// background and marked when that finishes (see filefacts.go).
+	if hasRecords == 0 {
+		ddl += `INSERT OR IGNORE INTO meta(key,value) VALUES('` + MetaFileFactsComplete + `','1');` + "\n"
+	}
 	if err := execInTx(w, ddl); err != nil {
 		_ = w.Close()
 		return err

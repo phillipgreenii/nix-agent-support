@@ -629,6 +629,9 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 			if err := p.flushSessions(tx); err != nil {
 				return err
 			}
+			if err := p.flushFileFacts(tx); err != nil {
+				return err
+			}
 			return p.mark(tx)
 		}
 		if err := p.cfg.Store.WithWrite("parse.before-commit", fn); err != nil {
@@ -768,6 +771,9 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 		if err := p.flushSessions(tx); err != nil {
 			return err
 		}
+		if err := p.flushFileFacts(tx); err != nil {
+			return err
+		}
 		return p.mark(tx)
 	}
 	// A re-parse is one transaction so the new records appear together.
@@ -814,7 +820,10 @@ WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.
 			return err
 		}
 	}
-	return p.recomputeSessionStats(tx, affected)
+	if err := p.recomputeSessionStats(tx, affected); err != nil {
+		return err
+	}
+	return recomputeFileFact(tx, file)
 }
 
 // chunk parses lines from off, at most ChunkBytes of them, never past the last
@@ -1043,6 +1052,7 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 			return err
 		}
 		tx.noteSession(ref, tns, f.ID, lk)
+		tx.noteFileFact(f.ID, tns, caps)
 		id, _ := res.LastInsertId()
 		var extRows map[int]*extRow
 		for _, fl := range r.Fields {
@@ -1420,8 +1430,9 @@ func (p *pstx) QueryRow(q string, args ...any) *sql.Row {
 type pstx struct {
 	*sql.Tx
 	st   map[string]*sql.Stmt
-	sess *sessionBatch // session activity of this transaction, see flushSessions
-	acc  *stepAcc      // step timers of this transaction (nil: none)
+	sess *sessionBatch  // session activity of this transaction, see flushSessions
+	ffs  *fileFactBatch // per-file facts of this transaction, see flushFileFacts
+	acc  *stepAcc       // step timers of this transaction (nil: none)
 }
 
 // The insert tables of ExecL, matching store.Table* and obs.InsertTables.

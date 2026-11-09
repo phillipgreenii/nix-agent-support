@@ -588,6 +588,21 @@ over the parsed records: every registry version and its deletion time (`session-
   files `ingested`, `invalid` (by the schema) and `removed`; `conversation_end_total{registry_present,
 exit_observed,clear_entry,exit_entry}` counts evidence classes (never labels).
 
+**File inventory (`files.inventory`).** Lists the files that have records with their source, project,
+file session, agent id and newest record time, for a caller that must know which files exist without
+reading records (pa-monitor's bootstrap). It is answered from `file_facts`, a small per-file table, and
+touches no row of `records`: the newest record time of a file is upserted in the parser's commit
+transaction (the same transaction as the records) and recomputed when a generation's records are deleted.
+Request: `sources`, `since` (RFC 3339) OR `sessions` (a file is kept when either matches; neither set
+means no narrowing), `after` and `limit` (paging by file id, `more` in the answer). The newest time
+covers every generation of the file. A database created by this code carries `file_facts_complete` from
+the start; one that existed before the table is backfilled in the background by the daemon (25 files per
+2 s, each file its own small write transaction, the saved cursor lets a restart resume), answers
+`degraded` until the backfill marks it complete, and never rewrites the table in one transaction. After
+that the daemon compares 500 files per 10 minutes with a recompute over records and logs WARN
+`file_facts_drift` (and repairs the row) on a difference. A rebuild (a fresh index.db) fills the table as it
+parses.
+
 Operations (the evidence list is shared): `conversation.show`, `conversation.list` (any evidence field is
 a filter, and a filter returns a superset of its label's rows), `process.show` and `process.list`.
 A Conversation is **open** while a live Process holds it (stage `live`) and **closed** otherwise (stage

@@ -31,8 +31,8 @@ func TestInventory_TimeoutKeepsProgressAndCursor(t *testing.T) {
 		t.Fatal("cursor must be taken before the inventory")
 	}
 	total := len(r.pending)
-	if total < 3 {
-		t.Fatalf("expected status plus several transcript windows, got %d slices", total)
+	if total != 2 {
+		t.Fatalf("expected the status and the transcript requests, got %d", total)
 	}
 
 	// The second slice times out.
@@ -70,20 +70,21 @@ func TestInventory_TimeoutKeepsProgressAndCursor(t *testing.T) {
 	for _, f := range r.files {
 		kinds[f.kind]++
 	}
-	if kinds[kindStatus] != 1 {
-		t.Fatalf("files by kind = %v, want the status file", kinds)
+	if kinds[kindStatus] != 1 || kinds[kindTranscript] != 1 {
+		t.Fatalf("files by kind = %v, want the status and the transcript file", kinds)
 	}
 }
 
-func TestPlanInventory_WindowsCoverCutoffToNowNewestFirst(t *testing.T) {
-	cutoff := t0
-	plan := planInventory(cutoff, t0.Add(60*time.Hour), []string{"s1"})
-	// status, 3 windows (24h+24h+open), active session
-	if len(plan) != 5 {
-		t.Fatalf("plan has %d slices, want 5", len(plan))
+func TestPlanInventory_StatusThenTranscriptsSinceCutoffOrActive(t *testing.T) {
+	plan := planInventory(t0, []string{"s1"})
+	if len(plan) != 2 {
+		t.Fatalf("plan has %d requests, want 2", len(plan))
 	}
-	last := plan[1].All[1].Range
-	if last.Lt != nil || last.Gte != t0.Add(48*time.Hour).Format(time.RFC3339) {
-		t.Fatalf("newest window must be open-ended from 48h: %+v", last)
+	if len(plan[0].Sources) != 1 || plan[0].Sources[0] != sourceStatus || plan[0].Since != "" {
+		t.Fatalf("first request must list the status files: %+v", plan[0])
+	}
+	tr := plan[1]
+	if len(tr.Sources) != 1 || tr.Sources[0] != sourceTranscript || tr.Since != t0.UTC().Format(time.RFC3339) || len(tr.Sessions) != 1 || tr.Sessions[0] != "s1" {
+		t.Fatalf("transcript request: %+v", tr)
 	}
 }

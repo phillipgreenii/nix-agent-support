@@ -125,10 +125,10 @@ func (f *fileState) finish() {
 type reader struct {
 	facts   Facts
 	cursor  string
-	pending []client.Filter       // inventory slices still to run after a bootstrap
-	gate    func() error          // test seam: called before each inventory slice
-	files   map[string]*fileState // by file ref
-	asked   map[string]bool       // session ids whose files were asked for by id
+	pending []client.InventoryRequest // inventory requests still to run after a bootstrap
+	gate    func() error              // test seam: called before each inventory request
+	files   map[string]*fileState     // by file ref
+	asked   map[string]bool           // session ids whose files were asked for by id
 
 	// perf counters of the last sync.
 	queries     int
@@ -143,27 +143,6 @@ func newReader(f Facts) *reader {
 func eqStr(field, v string) client.Filter {
 	b, _ := json.Marshal(v)
 	return client.Filter{Field: field, Eq: b}
-}
-
-func inStrs(field string, vs []string) client.Filter {
-	in := make([]any, len(vs))
-	for i, v := range vs {
-		in[i] = v
-	}
-	return client.Filter{Field: field, In: in}
-}
-
-func num(v any) int64 {
-	switch x := v.(type) {
-	case float64:
-		return int64(x)
-	case int64:
-		return x
-	case json.Number:
-		n, _ := x.Int64()
-		return n
-	}
-	return 0
 }
 
 func str(v any) string { s, _ := v.(string); return s }
@@ -192,17 +171,15 @@ func sourcesFilter() client.Filter {
 	return client.Filter{Any: []client.Filter{eqStr("source", sourceTranscript), eqStr("source", sourceStatus)}}
 }
 
-// inventoryWindow is the width of one time slice of the transcript inventory.
-// One grouped scan over a week of records outlasts readTimeout on a loaded
-// host, so the scan is cut into slices that each finish on their own.
-const inventoryWindow = 24 * time.Hour
+// inventoryPage is how many files one inventory request asks for.
+const inventoryPage = 10000
 
 // bootstrap takes the feed cursor first (so nothing committed after it is
 // missed) and plans the inventory of the files that matter: transcripts with
 // records since cutoff or belonging to an active session, and every status
-// file. It runs nothing heavy: resumeInventory works the plan off in slices,
-// keeping the slices already done when a Scan times out, so the next Scan
-// continues instead of starting the whole inventory again.
+// file. The cursor does not depend on the inventory: it is kept when the
+// inventory fails or times out, and resumeInventory runs the steps still
+// pending on the next Scan.
 func (r *reader) bootstrap(ctx context.Context, c *client.Client, cutoff time.Time, active []string) error {
 	head, err := r.query(ctx, c, client.QueryRequest{From: "records", Select: []string{"type"}, Limit: 1})
 	if err != nil {
@@ -211,42 +188,22 @@ func (r *reader) bootstrap(ctx context.Context, c *client.Client, cutoff time.Ti
 	r.files = map[string]*fileState{}
 	r.asked = map[string]bool{}
 	r.cursor = head.AsOf
-	r.pending = planInventory(cutoff, time.Now(), active)
+	r.pending = planInventory(cutoff, active)
 	return nil
 }
 
-// planInventory lists the scopes of the inventory, newest transcripts first so
-// the sessions in use are known after the first slices.
-func planInventory(cutoff, now time.Time, active []string) []client.Filter {
-	transcriptOnly := func(f client.Filter) client.Filter {
-		return client.Filter{All: []client.Filter{eqStr("source", sourceTranscript), f}}
+// planInventory lists the inventory requests: the status files, then the
+// transcripts with records since cutoff plus the active sessions' transcripts.
+// The recorder answers each from its per-file table, so each is one cheap call.
+func planInventory(cutoff time.Time, active []string) []client.InventoryRequest {
+	return []client.InventoryRequest{
+		{Sources: []string{sourceStatus}},
+		{Sources: []string{sourceTranscript}, Since: cutoff.UTC().Format(time.RFC3339), Sessions: active},
 	}
-	stamp := func(t time.Time) string { return t.UTC().Format(time.RFC3339) }
-
-	var windows []client.Filter
-	for lo := cutoff; ; lo = lo.Add(inventoryWindow) {
-		hi := lo.Add(inventoryWindow)
-		rg := client.Range{Gte: stamp(lo), Lt: stamp(hi)}
-		if !hi.Before(now) {
-			rg = client.Range{Gte: stamp(lo)}
-		}
-		windows = append(windows, transcriptOnly(client.Filter{Field: "time", Range: &rg}))
-		if !hi.Before(now) {
-			break
-		}
-	}
-	plan := []client.Filter{eqStr("source", sourceStatus)}
-	for i := len(windows) - 1; i >= 0; i-- {
-		plan = append(plan, windows[i])
-	}
-	if len(active) > 0 {
-		plan = append(plan, transcriptOnly(inStrs("file_session", active)))
-	}
-	return plan
 }
 
-// resumeInventory runs the planned inventory slices that are not done yet. A
-// slice that fails stays pending, with every slice before it kept.
+// resumeInventory runs the planned inventory requests that are not done yet. A
+// request that fails stays pending, with every request before it kept.
 func (r *reader) resumeInventory(ctx context.Context, c *client.Client) error {
 	for len(r.pending) > 0 {
 		if r.gate != nil {
@@ -262,36 +219,34 @@ func (r *reader) resumeInventory(ctx context.Context, c *client.Client) error {
 	return nil
 }
 
-// inventory lists the files holding records that match scope and adds the ones
+// inventory lists the files that match req (all its pages) and adds the ones
 // not known yet.
-func (r *reader) inventory(ctx context.Context, c *client.Client, scope client.Filter) error {
-	ans, err := r.query(ctx, c, client.QueryRequest{
-		From:      "records",
-		Where:     &scope,
-		Group:     []string{"file", "source", "project", "file_session", "agent_id"},
-		Aggregate: []client.Agg{{Fn: "max", Field: "time", As: "last"}},
-		Limit:     10000,
-	})
-	if err != nil {
-		return err
-	}
-	for _, row := range ans.Rows {
-		if len(row) < 6 {
-			continue
+func (r *reader) inventory(ctx context.Context, c *client.Client, req client.InventoryRequest) error {
+	req.Limit = inventoryPage
+	for {
+		r.queries++
+		ans, err := c.FilesInventory(ctx, req)
+		if err != nil {
+			return err
 		}
-		id := num(row[0])
-		ref := fmt.Sprintf("f_%d", id)
-		if fs, ok := r.files[ref]; ok {
-			if t := parseTime(row[5]); t.After(fs.last) {
-				fs.last = t
+		for _, f := range ans.Files {
+			ref := fmt.Sprintf("f_%d", f.File)
+			last, _ := time.Parse(time.RFC3339Nano, f.Last)
+			if fs, ok := r.files[ref]; ok {
+				if last.After(fs.last) {
+					fs.last = last
+				}
+				continue
 			}
-			continue
+			fs := newFileState(f.File, kindOf(f.Source, f.AgentID), f.Project, f.FileSession, f.AgentID)
+			fs.last = last
+			r.files[ref] = fs
 		}
-		fs := newFileState(id, kindOf(str(row[1]), str(row[4])), str(row[2]), str(row[3]), str(row[4]))
-		fs.last = parseTime(row[5])
-		r.files[ref] = fs
+		if !ans.More || len(ans.Files) == 0 {
+			return nil
+		}
+		req.After = ans.Files[len(ans.Files)-1].File
 	}
-	return nil
 }
 
 // ensureSessions asks, once per session, for the files of the active sessions
@@ -311,7 +266,7 @@ func (r *reader) ensureSessions(ctx context.Context, c *client.Client, ids []str
 	if len(missing) == 0 {
 		return nil
 	}
-	return r.inventory(ctx, c, client.Filter{All: []client.Filter{eqStr("source", sourceTranscript), inStrs("file_session", missing)}})
+	return r.inventory(ctx, c, client.InventoryRequest{Sources: []string{sourceTranscript}, Sessions: missing})
 }
 
 // drain applies what the feed says changed since the cursor: a reset entry

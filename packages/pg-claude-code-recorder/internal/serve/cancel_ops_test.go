@@ -21,6 +21,7 @@ import (
 var cancelBodies = map[string]string{
 	"coverage":          `{}`,
 	"query":             `{}`,
+	"files.inventory":   `{}`,
 	"search":            `{"q":"line"}`,
 	"feed":              `{}`,
 	"snapshot":          `{}`,

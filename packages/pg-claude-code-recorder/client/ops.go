@@ -50,6 +50,16 @@ func (c *Client) Hello(ctx context.Context) (Hello, error) {
 // Capabilities returns what the last hello reported.
 func (c *Client) Capabilities() []string { return c.hello.Capabilities }
 
+// FilesInventory lists the files that have records with their path facts and
+// newest record time, from the recorder's per-file table (no scan of records).
+func (c *Client) FilesInventory(ctx context.Context, req InventoryRequest) (*InventoryAnswer, error) {
+	var ans InventoryAnswer
+	if err := c.post(ctx, "files.inventory", 0, req, &ans); err != nil {
+		return nil, err
+	}
+	return &ans, nil
+}
+
 // Query runs a query. A degraded answer (the recorder is catching up) is
 // returned with a nil error; check QueryAnswer.Degraded.
 func (c *Client) Query(ctx context.Context, req QueryRequest) (*QueryAnswer, error) {

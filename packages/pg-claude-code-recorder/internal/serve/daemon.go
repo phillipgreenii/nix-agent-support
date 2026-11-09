@@ -534,6 +534,7 @@ func (d *Daemon) registerOps() {
 	d.srv.Register("status", server.KindQuery, d.opStatus)
 	d.srv.Register("coverage", server.KindQuery, d.opCoverage)
 	d.srv.Register("query", server.KindQuery, d.opQuery)
+	d.srv.Register("files.inventory", server.KindQuery, d.opFilesInventory)
 	d.srv.Register("search", server.KindQuery, d.opSearch)
 	d.srv.Register("feed", server.KindFeed, d.fe.Feed)
 	d.srv.Register("snapshot", server.KindQuery, d.fe.Snapshot)
@@ -585,8 +586,9 @@ func (d *Daemon) Start() error {
 	d.tr.Startup()
 	endPhase()
 	d.startLagRebuild()
-	d.refreshing.Add(8)
+	d.refreshing.Add(9)
 	go d.lagReconcileLoop()
+	go d.fileFactsLoop()
 	d.statusLoopOn.Store(true)
 	go d.statusLoop()
 	go d.walCheckpointLoop()
@@ -946,6 +948,72 @@ func (d *Daemon) reconcileLag() {
 		return
 	}
 	d.obs.Reg.Add(obs.MLagRebuild, map[string]string{"result": "match"}, 1)
+}
+
+// file_facts maintenance cadence. A database that existed before the table is
+// backfilled a few files at a time, each file in its own small transaction, so
+// the write lock is never held for more than one file's merge; once it is
+// complete, a slice of files is compared with a recompute per tick and a
+// difference logs WARN file_facts_drift and is repaired.
+const (
+	fileFactsStart        = 30 * time.Second
+	fileFactsBackfillGap  = 2 * time.Second
+	fileFactsBackfillStep = 25
+	fileFactsCheckEvery   = 10 * time.Minute
+	fileFactsCheckStep    = 500
+)
+
+func (d *Daemon) fileFactsLoop() {
+	defer d.refreshing.Done()
+	wait := fileFactsStart
+	var after int64
+	for {
+		tick, stop := d.timer("file_facts", wait)
+		select {
+		case <-d.stop:
+			stop()
+			return
+		case <-tick:
+		}
+		stop()
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			select {
+			case <-d.stop:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		wait = d.fileFactsPass(ctx, &after)
+		cancel()
+	}
+}
+
+// fileFactsPass runs one backfill batch or one drift-check slice and returns
+// the wait before the next.
+func (d *Daemon) fileFactsPass(ctx context.Context, after *int64) time.Duration {
+	if !d.st.FileFactsComplete() {
+		done, n, err := d.prs.BackfillFileFacts(ctx, fileFactsBackfillStep)
+		if err != nil {
+			d.obs.Log.Warn("file_facts_backfill_failed", "err", err.Error())
+			return fileFactsCheckEvery
+		}
+		if done {
+			d.obs.Event("file_facts_backfill_done", "files", fmt.Sprint(n))
+			return fileFactsCheckEvery
+		}
+		return fileFactsBackfillGap
+	}
+	drifts, next, err := d.prs.CheckFileFacts(ctx, *after, fileFactsCheckStep, true)
+	if err != nil {
+		d.obs.Log.Warn("file_facts_check_failed", "err", err.Error())
+		return fileFactsCheckEvery
+	}
+	*after = next
+	for _, dr := range drifts {
+		d.obs.Log.Warn("file_facts_drift", "file", dr.File, "stored_ns", dr.Stored, "recomputed_ns", dr.Computed, "missing", dr.Missing)
+	}
+	return fileFactsCheckEvery
 }
 
 // refreshGaugesPass is the body of one refresh_gauges pass.

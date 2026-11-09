@@ -451,6 +451,18 @@ func (d *Daemon) opQuery(ctx context.Context, body []byte) (any, *wire.Error) {
 	return ans, nil
 }
 
+func (d *Daemon) opFilesInventory(ctx context.Context, body []byte) (any, *wire.Error) {
+	var req query.InventoryRequest
+	if err := query.Decode(body, &req); err != nil {
+		return nil, err
+	}
+	ans, err := d.qe.Inventory(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return ans, nil
+}
+
 func (d *Daemon) opSearch(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req query.SearchRequest
 	if err := query.Decode(body, &req); err != nil {
