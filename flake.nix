@@ -2444,6 +2444,7 @@
                     "ccpool_cancel_total"
                     "ccpool_session_info"
                     "ccpool_session_states"
+                    "ccpool_session_records"
                     "ccpool_sessions_preserved_for_human"
                     "ccpool_pool_capacity"
                     "pa_monitor_session_tokens"

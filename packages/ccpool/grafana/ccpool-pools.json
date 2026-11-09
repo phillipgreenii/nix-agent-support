@@ -1043,7 +1043,7 @@
       "id": 38,
       "type": "timeseries",
       "title": "Reap closures by reason",
-      "description": "Sessions the reaper closed, by reason (idle_ttl, cap_eviction, dead_needs_input_ttl and others). A burst of cap_eviction means the pool is oversubscribed; dead_needs_input_ttl means abandoned sessions waiting on a human.",
+      "description": "Sessions the reaper closed, by reason (idle_ttl, cap_eviction, dead_needs_input_ttl and others), as a rolling 24h count (the counter writes a sample only when it changes, so a short window would show nothing). window: fixed - 24h so two samples fall inside it; reads 0 (none) when quiet. A burst of cap_eviction means the pool is oversubscribed; dead_needs_input_ttl means abandoned sessions waiting on a human.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1060,7 +1060,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (reason) (increase(ccpool_reap_closures_total[$__rate_interval]))",
+          "expr": "sum by (reason) (increase(ccpool_reap_closures_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[1d])) or (label_replace(vector(0), \"reason\", \"none\", \"\", \"\") and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
           "legendFormat": "{{reason}}",
           "refId": "A"
         }
@@ -1093,7 +1093,7 @@
       "id": 39,
       "type": "timeseries",
       "title": "Phantoms pruned",
-      "description": "Phantom session records the reaper pruned. A steady non-zero rate means sessions keep disappearing without a close.",
+      "description": "Phantom session records the reaper pruned, as a rolling 24h count. window: fixed - 24h because the counter writes a sample only when it changes; reads 0 when quiet. A steady non-zero rate means sessions keep disappearing without a close.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1110,7 +1110,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(ccpool_reap_phantom_pruned_total[$__rate_interval]))",
+          "expr": "sum(increase(ccpool_reap_phantom_pruned_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[1d])) or (vector(0) and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
           "legendFormat": "pruned",
           "refId": "A"
         }
@@ -1136,7 +1136,7 @@
       "id": 40,
       "type": "timeseries",
       "title": "Cancels by outcome",
-      "description": "Session cancels, by outcome. Outcomes other than success mean a cancel did not take effect.",
+      "description": "Session cancels, by outcome, as a rolling 24h count. window: fixed - 24h because the counter writes a sample only when it changes; reads 0 (none) when quiet. Outcomes other than success mean a cancel did not take effect.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1153,7 +1153,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (outcome) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "expr": "sum by (outcome) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[1d])) or (label_replace(vector(0), \"outcome\", \"none\", \"\", \"\") and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -1478,7 +1478,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Launch outcomes",
-      "description": "Session launch outcomes by pool, outcome and route. Anything other than a success outcome means launches are failing.",
+      "description": "Session launch outcomes by pool, outcome and route, as a rolling 1h count. window: fixed - 1h because the counter writes a sample only when it changes. Anything other than a success outcome means launches are failing.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1495,7 +1495,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pool, outcome, route) (increase(ccpool_launch_outcome_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "expr": "sum by (pool, outcome, route) (increase(ccpool_launch_outcome_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[1h]))",
           "legendFormat": "{{pool}} {{outcome}} {{route}}",
           "refId": "A"
         }
@@ -1855,7 +1855,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Retries and exhausted",
-      "description": "Retries by class and genuinely exhausted retry policies, by pool. Any exhausted retry means a launch gave up.",
+      "description": "Retries by class and genuinely exhausted retry policies, by pool, as a rolling 24h count. window: fixed - 24h because the counters write a sample only when they change; reads 0 when quiet. Any exhausted retry means a launch gave up.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1872,7 +1872,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pool, class) (increase(ccpool_retries_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "expr": "sum by (pool, class) (increase(ccpool_retries_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[1d])) or (label_replace(label_replace(vector(0), \"pool\", \"all\", \"\", \"\"), \"class\", \"none\", \"\", \"\") and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
           "legendFormat": "retries {{pool}} {{class}}",
           "refId": "A"
         },
@@ -1881,7 +1881,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pool) (increase(ccpool_retry_exhausted_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "expr": "sum by (pool) (increase(ccpool_retry_exhausted_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[1d])) or (label_replace(vector(0), \"pool\", \"all\", \"\", \"\") and on() (max(last_over_time(ccpool_pool_capacity[35m])) >= 0))",
           "legendFormat": "exhausted {{pool}}",
           "refId": "B"
         }
