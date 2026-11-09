@@ -17,9 +17,24 @@ func has(l []string, s string) bool {
 	return false
 }
 
+// fixtureTree builds the project/home/outside fixture under literal /tmp, not
+// t.TempDir(). The evaluator's built-in writable zone for scratch space is
+// /tmp (resolved, so /private/tmp on macOS); t.TempDir() follows GOTMPDIR (Go
+// 1.26+) and TMPDIR, so on a machine that exports GOTMPDIR to another volume
+// the fake HOME falls in no known zone and a HOME-relative write verdict
+// becomes "zone unknown" instead of the intended approve. The env twin clears
+// the environment, so the zone must come from the built-in /tmp rule rather
+// than from a CETA_EXTRA_* variable (which would itself be a consulted input).
 func fixtureTree(t *testing.T) (root, proj, home string) {
 	t.Helper()
-	root = t.TempDir()
+	tmp, err := os.MkdirTemp("/tmp", "shapereplay-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+	if root, err = filepath.EvalSymlinks(tmp); err != nil {
+		t.Fatal(err)
+	}
 	proj = filepath.Join(root, "proj")
 	home = filepath.Join(root, "home")
 	for _, d := range []string{proj, home, filepath.Join(root, "outside")} {

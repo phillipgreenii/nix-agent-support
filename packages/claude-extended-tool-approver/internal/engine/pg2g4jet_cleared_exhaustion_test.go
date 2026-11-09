@@ -100,6 +100,11 @@ func TestPg2G4jet_SubstitutionClearedExhaustionAbstainsInCommandPosition(t *test
 // allowlist. (The bare assignment form `x=$(mktemp -d)` is deliberately not asserted
 // here: it is governed by the separate pg2-mtnmb assignment-only floor.)
 func TestPg2G4jet_MktempBodyApprovesInCommandPositionOnlyInsideTempRoot(t *testing.T) {
+	// A bare `mktemp -d` creates under $TMPDIR, and approval needs that root to be
+	// writable per the path evaluator. The evaluator grants literal /tmp but not a
+	// per-user /var/folders/.../T session TMPDIR (that falls back to the prompt, by
+	// design), so pin TMPDIR instead of inheriting the caller's.
+	t.Setenv("TMPDIR", "/tmp")
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
