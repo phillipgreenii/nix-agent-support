@@ -225,6 +225,9 @@ func (m *Monitor) sync(now time.Time, ids []string) (foldErr, err error) {
 			return nil, m.rd.facts.Wrap(err)
 		}
 	}
+	if err := m.rd.resumeInventory(ctx, c); err != nil {
+		return nil, m.rd.facts.Wrap(err)
+	}
 	if err := m.rd.ensureSessions(ctx, c, ids); err != nil {
 		return nil, m.rd.facts.Wrap(err)
 	}
