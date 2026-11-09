@@ -29,7 +29,7 @@ import (
 var suiteRuleIDs = []string{
 	"all.closed", "all.reopened", "anchor.lazy", "anchor.backfill", "anchor.priority",
 	"adoption", "adoption.node-id", "review.head-advanced", "feedback.digest-changed",
-	"fixci.failing-on-head", "conflict.present", "land.ready", "focus.item",
+	"fixci.failing-on-head", "conflict.present", "land.ready", "thread-activity", "focus.item",
 }
 
 func suiteRaw(t *testing.T, name string) []byte {
@@ -154,7 +154,7 @@ func suiteWantShapes(t *testing.T, name string, res action.PlanResult, want ...s
 // linked focus bead); the testdata/focus fixtures cover it, one per entity
 // type the rule is registered for.
 var suiteTriggerFixtures = []string{
-	"pr_new_everything", "pr_anchor_drift", "pr_merged_open_anchor", "pr_reopened_anchor_closed",
+	"pr_new_everything", "pr_thread_activity", "pr_anchor_drift", "pr_merged_open_anchor", "pr_reopened_anchor_closed",
 }
 
 func TestSuiteRegistryHoldsAllTwelvePRRules(t *testing.T) {

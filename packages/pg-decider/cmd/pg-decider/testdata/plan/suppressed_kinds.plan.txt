@@ -16,4 +16,5 @@ skipped:
   review.head-advanced   suppressed  kind=review-pr
   fixci.failing-on-head  suppressed  kind=fix-ci
   land.ready             not matched
+  thread-activity        not matched
   focus.item             not matched  cause=not-selected

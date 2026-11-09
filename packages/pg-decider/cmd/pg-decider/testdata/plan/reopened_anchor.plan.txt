@@ -16,4 +16,5 @@ skipped:
   fixci.failing-on-head    not matched
   conflict.present         not matched
   land.ready               not matched
+  thread-activity          not matched
   focus.item               not matched  cause=not-selected

@@ -86,6 +86,13 @@
       }
     },
     {
+      "rule": "thread-activity",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
       "rule": "focus.item",
       "reason": "hidden",
       "facts": {

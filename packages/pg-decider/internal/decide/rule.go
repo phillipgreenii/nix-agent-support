@@ -76,6 +76,9 @@ const (
 	// OrdinalFocusItem runs after every PR rule, so a focus bead's mint, hold
 	// or release is planned after the rules that could close a work item.
 	OrdinalFocusItem = 110
+	// OrdinalThreadActivity is the annotate-only thread-activity rule; it
+	// ships in plan mode (see rules.HoldPlanOnlyRules).
+	OrdinalThreadActivity = 105
 )
 
 // EntityTypePR is the entity type that ships a decider on day one (S20).

@@ -16,4 +16,5 @@ skipped:
   fixci.failing-on-head    not matched  pr_state=merged
   conflict.present         not matched  pr_state=merged
   land.ready               not matched  pr_state=merged
+  thread-activity          not matched
   focus.item               not matched  cause=not-selected

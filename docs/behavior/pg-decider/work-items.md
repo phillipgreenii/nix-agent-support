@@ -458,6 +458,38 @@ rollback) MUST fail the run closed: `plan` and `apply` print the reason `view-la
 on stderr and exit `3`, before any rule or hook runs and with nothing written. A present `null` is
 not absent: it means unset.
 
+## The `thread-activity` rule
+
+`thread-activity` is registered for the `pr` entity type only. It is ANNOTATE-ONLY: it creates no
+work item, closes nothing and never opens or reopens a review item. It is a pure function of the
+view and of the configured source list (`thread_activity_sources`, see [`config.md`](config.md)).
+
+**Input.** The view's optional member `thread_changes` lists thread change records. A record is
+source-agnostic and versioned: `{version, thread_id, parent: {kind, id}, message_id, author,
+timestamp, excerpt, source}`. The parent reference is part of the record from version 1. The rule
+reads nothing about any source beyond the `source` label. No connector or feed fills the member yet,
+so the rule is dormant: a view without it is `not matched`.
+
+**Condition.** For each record of the view the rule proposes exactly one `annotate` action when ALL
+hold: the version is `1`; the `source` is on the accepted list (default: the chat source `slack`
+only; the list is data, so another source is accepted by configuring it, never by a code path); the
+parent is the viewed PR (`kind` `pr`, `id` equal to the view's id); the PR is not merged or closed;
+and the PR has not yet annotated the message. The action sets the key
+`decider.pr-decider.thread-activity.<thread id>.<message id>` (shown in the view as
+`annotations.decider["pr-decider"]["thread-activity.<thread id>.<message id>"]`) to a JSON value
+carrying thread id, message id, author, timestamp and an excerpt of at most 200 characters with
+whitespace collapsed. A thread linked to two PRs is two records, one per parent, and so one
+annotation on each PR and none elsewhere.
+
+**Skips.** No records, a terminal PR and a record of no accepted source or other parent are
+`not matched`; when every matching message is already annotated the rule is `already handled`. A
+record of an unknown version is never read and never an error: its version is listed in the facts
+(`unknown_versions`) of the skip or of the actions produced beside it.
+
+**Plan mode.** The rule ships in plan mode. `plan` lists the proposed annotations; `apply` holds the
+rule's actions back, writes none of them, and lists the rule as skipped with the facts `mode: plan`
+and the number held. `thread_activity_mode: "apply"` (the operator's call) lets `apply` write them.
+
 ## Invariants
 
 - **INV-DECIDER-1.** <!-- uuid: 39ef94c7-3460-4eea-9eef-9c44ebb1eb35 --> Every work item the decider creates MUST carry a `dedup_key` of the form
@@ -490,3 +522,8 @@ not absent: it means unset.
   unadoptable, and its disposition MUST be ADOPT or CLOSE; it MUST NOT be left alone.
 - **INV-DECIDER-31.** <!-- uuid: 212b3917-157b-4c58-bbb7-54fd4b0fc34d --> A merged or closed PR MUST have every open `review-pr` item of it closed, a
   claimed one included.
+- **INV-DECIDER-32.** <!-- uuid: 2f56301f-c7e4-4e61-a42a-2cb1883fd49c --> The `thread-activity` rule MUST be annotate-only and idempotent on `(pr, thread id,
+message id)`: it MUST propose at most one annotation per key, none for a message the PR has
+  annotated, none for a record of an unaccepted source, an unknown version or another parent, and it
+  MUST NOT create, close, reopen or update a work item. In plan mode `apply` MUST write none of its
+  annotations.

@@ -94,7 +94,7 @@ var (
 		"adoption", "adoption.node-id", "all.closed", "all.reopened",
 		"anchor.backfill", "anchor.lazy", "anchor.priority",
 		"conflict.present", "feedback.digest-changed", "fixci.failing-on-head",
-		"focus.item", "land.ready", "review.head-advanced",
+		"focus.item", "land.ready", "review.head-advanced", "thread-activity",
 	}
 	Actions  = []string{"create", "update", "reopen", "close", "annotate", "escalate", "skip"}
 	Outcomes = []string{"planned", "applied", "deduped", "skipped", "failed"}

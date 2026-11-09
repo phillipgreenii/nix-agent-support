@@ -64,7 +64,7 @@ The PR decider evaluates a set of rules against the view. The condition of every
 exactly one place, [`work-items.md`](work-items.md): the section "The PR rules" for the PR rules
 (`review.head-advanced`, `feedback.digest-changed`, `fixci.failing-on-head`, `conflict.present`, and
 the closure and reopen rules `all.closed` and `all.reopened`), the section "Adoption" for the adoption
-policy, and the section "The `focus.item` rule" for the focus rule. The decisions behind the entity
+policy, the section "The `focus.item` rule" for the focus rule, and the section "The `thread-activity` rule" for the annotate-only thread rule. The decisions behind the entity
 change flow are recorded in `docs/adr/0077-entity-change-flow.md`, which holds no rule table. Other
 docs MUST NOT restate a rule's condition; they cite rule ids and state the invariants the rules
 uphold. The rule ids registered so far, in evaluation order of the work-creating rules:
@@ -75,6 +75,7 @@ uphold. The rule ids registered so far, in evaluation order of the work-creating
 | `feedback.digest-changed` | `process-feedback`        |
 | `fixci.failing-on-head`   | `fix-ci`                  |
 | `conflict.present`        | `resolve-conflict`        |
+| `thread-activity`         | none (annotate-only)      |
 | `focus.item`              | `focus-item`              |
 
 A rule is added to this table, and its condition to `work-items.md`, in the change that registers it.
@@ -83,7 +84,7 @@ A rule is added to this table, and its condition to `work-items.md`, in the chan
 
 The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RFC 2119 language:
 
-- `INV-DECIDER-1` to `INV-DECIDER-6` and `INV-DECIDER-29` to `INV-DECIDER-31` are in [`work-items.md`](work-items.md).
+- `INV-DECIDER-1` to `INV-DECIDER-6` and `INV-DECIDER-29` to `INV-DECIDER-32` are in [`work-items.md`](work-items.md).
 - `INV-DECIDER-7` to `INV-DECIDER-20`, `INV-DECIDER-25`, `INV-DECIDER-27` and `INV-DECIDER-28` are in [`plan-and-apply.md`](plan-and-apply.md).
 - `INV-DECIDER-21` to `INV-DECIDER-24` and `INV-DECIDER-26` are in [`config.md`](config.md).
 - `INV-PRCHANGE-1` to `INV-PRCHANGE-14` are in [`pr-change.md`](pr-change.md).

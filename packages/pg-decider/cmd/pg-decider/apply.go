@@ -90,7 +90,7 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 		return exitcode.LookupUntrusted
 	}
 	vd := lk.Augment(v)
-	planned := arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(vd), decideFn(vd, typ, cfg)), vd, cfg)
+	planned := rules.HoldPlanOnlyRules(arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(vd), decideFn(vd, typ, cfg)), vd, cfg), cfg)
 	res := apply.Run(ctx, apply.Input{
 		Type: typ, ID: id, View: v, Actions: planned.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, planned.Skipped, lk),
 		Env:    apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut},

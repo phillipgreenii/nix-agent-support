@@ -81,6 +81,16 @@ project or tracker of its own.
 The focus rule's condition has a durable home: the section "The `focus.item` rule" of
 [`work-items.md`](work-items.md), which [`README.md`](README.md) names. This doc owns only the keys.
 
+### Thread-activity keys
+
+These keys serve the `thread-activity` rule (see [`work-items.md`](work-items.md), "The
+`thread-activity` rule"). Each is optional.
+
+| Key                       | Type             | Default | Effect                                                                                                                                              |
+| ------------------------- | ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `thread_activity_mode`    | string           | `plan`  | `plan` lists the rule's annotations and `apply` writes none; `apply` lets `apply` write them. Any other value makes `apply` exit `1` before a write |
+| `thread_activity_sources` | array of strings | `slack` | The thread change record sources the rule accepts; a configured list REPLACES the default whole. A blank entry makes `apply` exit `1`               |
+
 ### The work-item lookup keys
 
 These two keys serve the bounded work-item lookup of a `pr` run (see "The work-item lookup" in

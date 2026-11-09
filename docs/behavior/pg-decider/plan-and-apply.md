@@ -117,6 +117,14 @@ issue-change feed, and widening it would pull every closed work item into the is
   composed command persists the number in the run record, and the metric that exports it belongs to
   pg-desk.
 
+### Plan-mode rules
+
+A rule that ships in plan mode (today `thread-activity`, see [`work-items.md`](work-items.md)) is
+evaluated by `plan` like any other, so its proposed actions are listed. `apply` removes its actions
+from the list before it executes, writes nothing for it, and lists the rule in `skipped` as `not
+matched` with the facts `mode: plan` and `held` (how many actions were held back), until the
+operator sets the rule's mode key to `apply` (see [`config.md`](config.md)).
+
 ### Precedence
 
 Two stops are evaluated before any rule runs:

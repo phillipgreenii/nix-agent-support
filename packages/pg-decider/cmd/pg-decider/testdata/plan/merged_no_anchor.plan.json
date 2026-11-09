@@ -78,6 +78,10 @@
       }
     },
     {
+      "rule": "thread-activity",
+      "reason": "not matched"
+    },
+    {
       "rule": "focus.item",
       "reason": "not matched",
       "facts": {

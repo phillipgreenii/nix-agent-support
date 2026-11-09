@@ -96,6 +96,14 @@ type Config struct {
 	// replaces the default (Highest:P0, High:P1, Medium:P2, Low:P3, Lowest:P4)
 	// whole; read it through FocusPriority.
 	FocusPriorityMap map[string]string `json:"focus_priority_map,omitempty"`
+	// ThreadActivityMode is thread_activity_mode: "plan" (the default) lists
+	// the thread-activity rule's annotations and apply writes none; "apply"
+	// lets apply write them. Read it through ThreadActivityAppliesWrites.
+	ThreadActivityMode string `json:"thread_activity_mode,omitempty"`
+	// ThreadActivitySources is thread_activity_sources: the thread change
+	// record sources the rule accepts. Empty means the default, the chat
+	// source. Read it through ThreadActivitySourceList.
+	ThreadActivitySources []string `json:"thread_activity_sources,omitempty"`
 }
 
 // BeadIDRegexp returns the compiled bead_id_pattern, or (nil, nil) when it is
@@ -211,6 +219,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %q: %w", path, err)
 	}
 	if err := validateFocusKeys(&c); err != nil {
+		return nil, fmt.Errorf("config: %q: %w", path, err)
+	}
+	if err := validateThreadActivityKeys(&c); err != nil {
 		return nil, fmt.Errorf("config: %q: %w", path, err)
 	}
 	if err := validateLookupKeys(&c); err != nil {

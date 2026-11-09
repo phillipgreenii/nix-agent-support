@@ -33,6 +33,10 @@ type View struct {
 	Decorations Decorations
 	Annotations Annotations
 	Links       []Link
+	// ThreadChanges are the thread change records the view shows (the
+	// optional `thread_changes` member, absent today: no connector feeds it
+	// yet).
+	ThreadChanges []ThreadChange
 }
 
 // PRSnapshot is the subset of pg-connector's schema.PR the rules read.
@@ -240,6 +244,8 @@ func Parse(data []byte) (*View, error) {
 		Decorations Decorations     `json:"decorations"`
 		Annotations Annotations     `json:"annotations"`
 		Links       []Link          `json:"links"`
+
+		ThreadChanges []ThreadChange `json:"thread_changes"`
 	}
 	if err := json.Unmarshal(data, &w); err != nil {
 		return nil, fmt.Errorf("parse view: %w", err)
@@ -251,6 +257,7 @@ func Parse(data []byte) (*View, error) {
 		Raw: json.RawMessage(data), Contract: w.Contract, Type: w.Type, ID: w.ID,
 		Version: w.Version, AsOf: w.AsOf, Stale: w.Stale, SnapshotRaw: w.Snapshot,
 		Decorations: w.Decorations, Annotations: w.Annotations, Links: w.Links,
+		ThreadChanges: w.ThreadChanges,
 	}
 	if w.Type == "pr" && len(w.Snapshot) > 0 && string(w.Snapshot) != "null" {
 		if err := json.Unmarshal(w.Snapshot, &v.Snapshot); err != nil {
