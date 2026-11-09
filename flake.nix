@@ -1994,6 +1994,7 @@
                     root = ./packages;
                     fileset = lib.fileset.unions [
                       ./packages/pa-monitor
+                      ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
                     ];
                   };
@@ -2040,6 +2041,7 @@
                     root = ./packages;
                     fileset = lib.fileset.unions [
                       ./packages/pa-monitor
+                      ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
                     ];
                   };
