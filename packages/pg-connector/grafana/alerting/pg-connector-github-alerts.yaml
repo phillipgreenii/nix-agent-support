@@ -267,7 +267,11 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max by (consumer, query) (pg_connector_github_consumer_oldest_unacked_age_seconds)
+              # The pg-desk freshness probe consumers (pg-desk-freshness-<query>) are
+              # read-only: they poll with --no-ack and never acknowledge (see
+              # docs/behavior/pg-desk/freshness.md), so their unacknowledged age grows
+              # without bound by design and is not a stuck consumer.
+              expr: max by (consumer, query) (pg_connector_github_consumer_oldest_unacked_age_seconds{consumer!~"pg-desk-freshness-.+"})
           - refId: B
             datasourceUid: __expr__
             model:

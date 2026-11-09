@@ -121,6 +121,27 @@ tests:
               query: other
               severity: warning
 
+  # The pg-desk freshness probe consumers are read-only (--no-ack) and never acknowledge, so
+  # their unacked age grows forever by design; the rule excludes them. A stuck real consumer
+  # beside them still fires.
+  - name: the read-only pg-desk freshness probe consumers never fire, a stuck consumer still does
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="pg-desk-freshness-team",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "90000x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="pg-desk-freshness-mine",query="mine",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "90000x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="pg-desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "3000x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts:
+          - exp_labels:
+              consumer: pg-desk
+              query: team
+              severity: warning
+
   - name: an absent series gives no alert (noDataState is OK for this rule)
     interval: 1m
     input_series:
