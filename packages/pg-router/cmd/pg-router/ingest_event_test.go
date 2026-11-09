@@ -228,3 +228,42 @@ func TestRoute_ingestEvent(t *testing.T) {
 		t.Fatal("helpText does not mention ingest-event")
 	}
 }
+
+// An empty stdin must be refused by the CLI as a usage error naming the
+// required shape, never forwarded to the real core, which would answer
+// "cli.ingest-event: expected object, got null".
+func TestRunIngestEventIO_EmptyStdinIsUsageErrorNotForwardedToCore(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+	ref := svc.Ref()
+
+	for _, in := range []string{"", " \n\t"} {
+		var stdout, stderr strings.Builder
+		code := runIngestEventIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(in), &stdout, &stderr)
+		if code != conformance.ExitUsage {
+			t.Fatalf("stdin %q: exit = %d, want %d/usage; stderr=%s", in, code, conformance.ExitUsage, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "core refused") || stdout.Len() != 0 {
+			t.Fatalf("stdin %q reached the core: stdout=%q stderr=%q", in, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), `"events"`) {
+			t.Fatalf("stderr = %q, want the required request shape named", stderr.String())
+		}
+	}
+}
+
+// A real request on stdin still round-trips through runIngestEventIO to the
+// real core.
+func TestRunIngestEventIO_RequestOnStdinReachesCore(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+	ref := svc.Ref()
+	var stdout, stderr strings.Builder
+	code := runIngestEventIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(testIngestRequest), &stdout, &stderr)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"accepted"`) {
+		t.Fatalf("stdout = %q, want an ingest reply", stdout.String())
+	}
+}

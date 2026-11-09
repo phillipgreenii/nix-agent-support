@@ -41,6 +41,12 @@ const (
 // state dir, the socket, the active gates, the unavailable roles, per-role
 // progress, and each handler's validate), printing one verdict line per finding.
 //
+// CONFIG SOURCE: doctor validates the config resolved from the CURRENT directory
+// (.pg-router/config.toml), by design: it answers "would a pg-router started
+// here be healthy", and stays usable when no daemon runs. It deliberately does
+// not adopt the daemon's config path; `pg-router config --show` and
+// `pg-router status` report the daemon's own resolved config.
+//
 // EXIT CODES: 0 when no probe is FAIL, 1 otherwise, 2 usage. It never starts a
 // core: the probes that read the running core report info when none is running.
 func runDoctor(args []string) int {
