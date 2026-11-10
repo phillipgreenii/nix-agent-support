@@ -252,42 +252,213 @@ until the next user input).
 ## Transcript links (`components.links`)
 
 A render hook on assistant-message text (`ui.render`, component `AssistantMessage`) rewrites
-matches of the configured link rules into markdown links. Rules come from the `links` option list
-(`name`, `pattern`, `url`); adding a link type is adding an entry. `pattern` is a regular
-expression and `url` a template where `{0}` is the match. Rules apply in list order. A rewrite
-changes only what is drawn (the hook hands the engine a copy of the draw event; nothing stored
-changes). Bead ids have no link target for now, so the shipped list is empty and holds no bead
-entry.
+matches of the configured link rules into markdown links. A rewrite changes only what is drawn
+(the hook hands the engine a copy of the draw event; nothing stored changes). Rules come from the
+`links` option list and apply in list order. The shipped list is empty: no rule is on until it is
+configured.
 
-### Choices the design left to the builder
+### Rule format
 
-- Registration: the engine takes hooks at module load, before the options are known, so the render
-  hook is registered at load like the other event hooks and gated on every draw: with
-  `components.links` (or `enable`) false it hands the event on untouched and rewrites nothing.
-- Regular expression: JavaScript `RegExp` with flag `g` only (no `u`, `i` or `m`); a match of zero
-  length is skipped.
-- Nix type of a rule: a list of submodules with the string fields `name`, `pattern` and `url`; the
-  Home Manager module renders the list as-is into the `links` array of the options JSON.
+A rule is `{ kind, name, options }`. An entry with no `kind` is a `regex` rule, so an entry
+written before kinds existed (`name`, `pattern`, `url`) keeps working unchanged. There are four
+kinds.
+
+| Kind        | Finds                                                    | Options                                        |
+| ----------- | -------------------------------------------------------- | ---------------------------------------------- |
+| `regex`     | any match of `pattern`                                   | none; takes `pattern` and `url` on the rule    |
+| `github-pr` | pull request references                                  | `sessionRepoFallback` (boolean, default false) |
+| `jira`      | issue keys of the listed projects                        | `baseUrl` (required), `keys` (required)        |
+| `file-ref`  | `path:line`, `path:line:col` and `path:line-line2` paths | `localTemplate` (default below)                |
+
+Top-level `github` options (not per rule) feed `github-pr` and `file-ref`:
+
+| Option         | Default      | Meaning                                                           |
+| -------------- | ------------ | ----------------------------------------------------------------- |
+| `github.host`  | `github.com` | Host the github-pr and remote file-ref links point at.            |
+| `github.repos` | `[]`         | Known repositories, each `owner/repo`; any other form is skipped. |
+
+In the Home Manager module a rule has `name`, `kind` (null means regex), `pattern` and `url` (regex
+rules) and `settings`, a free attribute set rendered as the rule's `options` (left out when empty).
+
+#### regex
+
+JavaScript `RegExp` with flag `g` only (no `u`, `i` or `m`); a match of zero length is skipped. The
+`url` is a template where `{0}` is the whole match, percent-encoded (`encodeURIComponent`). A
+pattern that is not a valid regular expression, or a url with no `{0}` or that is not a valid URL
+once `{0}` is filled, skips that rule only.
+
+#### github-pr
+
+Scans `owner/repo#N`, `PR N` and `PR #N`, `pull request N` and `pull request #N`, and `pull #N`.
+`PR` MUST be uppercase: a lowercase `pr 5 times` is prose and is not linked. The keyword forms
+`pull request` and `pull` are case-insensitive. A bare `#N` is never linked (see "Calls"). The link
+text is the whole token (`PR 12`, not only `12`). The URL is `https://<host>/<owner>/<repo>/pull/N`.
+
+The repository is settled by the first hit of these:
+
+1. The explicit `owner/repo` of the token. Its owner MUST be the owner of a known repository (the
+   session repository or an entry of `github.repos`), else the token declines `unknown-repo`.
+2. The nearest earlier `owner/repo` written in full in the same paragraph (a blank line ends a
+   paragraph) that is a known repository. A bare repository name never counts, and a mention an
+   earlier rule already rewrote is not visible.
+3. With `sessionRepoFallback` true, the session repository.
+4. Otherwise the token declines `no-repo`.
+
+Owner and repository comparisons ignore case; the link keeps the case the text used.
+
+#### jira
+
+The scanner is built from `keys`: `\b(?:KEY1|KEY2)-[0-9]+\b`, case sensitive, keys escaped, so
+`UTF-8` or `SHA-256` never match unless listed. The link is `<baseUrl>/<KEY-N>` (trailing slashes
+of `baseUrl` are dropped). `baseUrl` MUST be an `http` or `https` URL and each key MUST match
+`^[A-Z][A-Z0-9_]*$`. An empty `keys` list makes the rule inactive: it is skipped with a message
+and links nothing.
+
+#### file-ref
+
+Scans `path:line`, `path:line:col` and `path:line-line2` (a range links its first line). A path
+with a `/` is a path; a path without one needs a short alphabetic extension that is not a
+top-level domain such as `com` or `io`, so `example.com:443` is not linked.
+
+- Local form (the default): a relative path is made absolute against the session working
+  directory, `~/` against the home directory; an absolute path is used as is. There is no
+  existence check, and `.` and `..` segments are resolved textually.
+- Remote form: when the text before the first colon is a known `owner/repo`
+  (`acme/widgets:src/a.go:12`), the link is
+  `https://<host>/<owner>/<repo>/blob/HEAD/<path>#L<line>`. An `owner/repo` that is not known
+  declines `unknown-repo`.
+- `localTemplate` renders the local form. `{path}` (absolute, leading slash included, every
+  segment percent-encoded), `{line}` and `{col}` (1 when the token has none) are filled. The
+  default is `file://{path}:{line}`. The template MUST contain `{path}` and its scheme MUST be one
+  of `file`, `vscode`, `vscode-insiders`, `cursor` or `zed`; a rule whose template breaks either
+  is skipped.
+
+### Declines
+
+A scanned token that cannot be linked safely stays plain text and is counted with a reason.
+
+| Reason         | When                                                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `no-context`   | The snapshot lacks what the token needs: no working directory for a relative path, no home for `~/`, no snapshot at all for github-pr.                               |
+| `no-repo`      | A github-pr token with no repository by the order above.                                                                                                             |
+| `unknown-repo` | An explicit `owner/repo` that is not known.                                                                                                                          |
+| `adjacent`     | The token sits in a path: preceded by `/` or `\`, followed by `.` and a word character, or followed by `:` and a digit.                                              |
+| `unsafe`       | A github-pr owner, repository or host that is not plain; a `file:` link to a launchable type (`app`, `command`, `pkg`, `dmg`, `sh`, `workflow`, `terminal`, `tool`). |
+
+For `jira`, a `/` that directly follows a complete listed key-number token does not make the next
+key adjacent, so `ABC-1/ABC-2` links both keys while `a/ABC-12` stays plain.
+
+### Link context
+
+The kinds read a snapshot, never a host call, while drawing: the working directory, the session
+repository, the home directory, the github host and the known repositories and their owners. It is
+seeded at session start from `github` and refreshed, past the usual throttle, at session start and
+at the end of every turn (`turn.complete`). A refresh that fails keeps the last value of that field;
+a repository read that answers "no repository" clears it. The drawing is invalidated only when a
+refreshed value differs.
+
+### Protected spans, memo and streaming
+
 - Protected spans: fenced code blocks (CommonMark: a fence of three or more backticks or tildes,
   indented at most three spaces, closed by a fence of the same character and at least the same
   length, or by the end of the text), inline code spans (a backtick run closed by a run of equal
-  length) and any span an earlier rule rewrote. Each is replaced by one private-use character
-  (U+E000 to U+F8FF) during the pass, so a later rule cannot match inside it; text that already
-  holds such a character is left unrewritten.
-- Escaping: the link text escapes `\`, `[`, `]` and backtick; the match is percent-encoded
-  (`encodeURIComponent`) where `{0}` stands in the url.
-- Invalid rule: a pattern that is not a valid regular expression, or a url template with no `{0}`
-  or that is not a valid URL once `{0}` is filled, skips that rule only; a `warn` line naming the
-  rule is written to the log.
-- Default list: empty.
-- Counters: `pgd_links_resolved_total{kind,rule}` and `pgd_links_declined_total{kind,rule,reason}`
-  (reason is one of `no-context`, `no-repo`, `unknown-repo`, `adjacent`, `unsafe`; `rule` is the
-  rule name, so the label set is bounded by configuration). They count resolutions on memo cache
-  misses, an approximation and not a count of unique links: a streaming message is a miss on every
-  chunk, an evicted message is counted again when it is redrawn, and a `no-context` decline later
-  followed by a link counts once in each.
-- Debug log: the first decline per (kind, reason) in a session writes one `debug` line carrying the
-  kind and the reason and no message text; there is no per-link line.
+  length), existing markdown links, `<https://...>` autolinks, bare `http(s)` URLs, and any span an
+  earlier rule rewrote. Each is replaced by one private-use character (U+E000 to U+F8FF) during the
+  pass, so a later rule cannot match inside it; text that already holds such a character is left
+  unrewritten.
+- Escaping: the link text escapes `\`, `[`, `]`, backtick, `_`, `*` and `<`; the URL takes the
+  match percent-encoded.
+- Memo: the last 64 distinct messages are remembered per rule set, so a redraw of an unchanged
+  message costs a lookup. A message holding a `no-context` decline is not remembered, so it links
+  once the snapshot fills in. A link that was resolved is final: the memo ignores later snapshot
+  changes.
+- Streaming: a message that grows while it streams is a new text on every chunk, so it is a miss
+  and is rewritten again each time.
+- Invalid rule: a rule that fails validation is skipped alone, with a message naming it; the other
+  rules still apply. Unknown option fields are ignored.
+
+### Counters and debug log
+
+`pgd_links_resolved_total{kind,rule}` and `pgd_links_declined_total{kind,rule,reason}` (`rule` is
+the rule name, so the label set is bounded by configuration). They count resolutions on memo
+misses, an approximation and not a count of unique links: a streaming message is a miss on every
+chunk, an evicted message is counted again when it is redrawn, and a `no-context` decline later
+followed by a link counts once in each. The first decline per (kind, reason) in a session writes
+one `debug` line carrying the kind and the reason and no message text; there is no per-link line.
+
+### Recommended order
+
+A token can fit two kinds (`src/ABC-12.go:5` holds a key and a path); the rule earlier in the list
+claims it, and the adjacency declines protect against a wrong order. Put `file-ref` first, then
+`github-pr`, then `jira`. List order is the only ordering rule.
+
+### Worked example
+
+```nix
+phillipgreenii.programs.pgd = {
+  github.host = "github.com";
+  github.repos = [
+    "acme/widgets"
+    "acme/gadgets"
+  ];
+  links = [
+    {
+      name = "files";
+      kind = "file-ref";
+    }
+    {
+      name = "prs";
+      kind = "github-pr";
+      settings.sessionRepoFallback = true;
+    }
+    {
+      name = "tickets";
+      kind = "jira";
+      settings = {
+        baseUrl = "https://jira.example.com/browse";
+        keys = [
+          "ABC"
+          "OPS"
+        ];
+      };
+    }
+  ];
+};
+```
+
+With the session in `/work/widgets` (repository `acme/widgets`):
+
+| Text                                   | Drawn as a link to                                           |
+| -------------------------------------- | ------------------------------------------------------------ |
+| `src/main.go:42`                       | `file:///work/widgets/src/main.go:42`                        |
+| `acme/gadgets:lib/x.go:7`              | `https://github.com/acme/gadgets/blob/HEAD/lib/x.go#L7`      |
+| `acme/gadgets#9`                       | `https://github.com/acme/gadgets/pull/9`                     |
+| `PR 12` (no repository in the message) | `https://github.com/acme/widgets/pull/12` (session fallback) |
+| `ABC-34`                               | `https://jira.example.com/browse/ABC-34`                     |
+| `#12`, `pr 12`, `UTF-8`                | not linked                                                   |
+
+### Calls
+
+These were decisions of the design, open to correction.
+
+- Bare `#N` is never linked: it appears in headings, step numbers and issue lists too often.
+- `sessionRepoFallback` defaults to off: a wrong repository is the worst outcome. With it on and no
+  session repository the reference stays plain (`no-repo`).
+- Remote file links use `HEAD` (GitHub resolves it to the default branch), not the local commit,
+  because the local commit may be unpushed.
+- A local `path:line` is linked with no existence check, and a token without enough context to
+  say it is remote is treated as local; a relative or `~/` path with no context declines rather
+  than guess a base.
+- `file://{path}:{line}` is the first local form, an experiment: the template is data, so the
+  default can change without code.
+- The `file` scheme declines launchable file types, and the template scheme is allowlisted.
+- The keyword forms link the whole token, not just the number.
+- Existing links, autolinks and bare URLs are protected from rewriting.
+- One top-level `github` object, not per-rule repository lists.
+- The shipped list is empty.
+- Registration: the engine takes hooks at module load, before the options are known, so the render
+  hook is registered at load and gated on every draw: with `components.links` (or `enable`) false it
+  hands the event on untouched.
 
 ## Focus pane (`components.focus`)
 
