@@ -1,5 +1,9 @@
-import { tmpdir } from 'node:os'
 import { FENCE_CLOSED } from './links'
+
+// A hooks module may import only its own files by relative path and "claude-code": the engine
+// refuses the whole module otherwise (a `node:os` import here once removed the band and every
+// link rule from every session). So no `tmpdir()`: the expected directory is a fixed path.
+const MERMAID_DIR = '/tmp/pgd-mermaid'
 
 // Mermaid fences in the transcript: a render pass claims CLOSED mermaid fences only, keeps the
 // source visible and appends a link to an out-of-band rendered file (the renderer is separate;
@@ -20,7 +24,7 @@ export function mermaidHash(source: string): string {
 }
 
 // Where the renderer is expected to put the file for one fence source.
-export function mermaidFileUrl(source: string, dir: string = `${tmpdir()}/pgd-mermaid`): string {
+export function mermaidFileUrl(source: string, dir: string = MERMAID_DIR): string {
   return `file://${encodeURI(dir)}/${mermaidHash(source)}.svg`
 }
 
