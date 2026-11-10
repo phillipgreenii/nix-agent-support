@@ -312,6 +312,43 @@ Shutdown overrun: when a stop does not finish before its deadline the daemon log
 (fields `phase`, `phase_elapsed_ms`, `in_flight`) and exits non-zero, and the launch agent restarts it. The Grafana rule
 `pg-ccrec-shutdown-overrun` (warning, `noDataState` OK) fires on any such event in the last 24 hours.
 
+## Shutdown
+
+The contract: a stop (SIGTERM or SIGINT) finishes within 8 seconds or the daemon hard-exits. A sweep in flight aborts
+rather than running to its end, the stores close, the lock is released and `serve` exits 0. The launchd job gets
+`ExitTimeOut = 15` (the 8 s deadline plus a 7 s margin, under launchd's silent 60 s clamp), so launchd's SIGKILL never
+races a normal shutdown.
+
+Events in the log, in order:
+
+- `shutdown_started` (field `reason`): the stop began.
+- `shutdown_phase` (fields `phase`, `duration_ms`): one per finished step. A slow stop shows as a phase with a large
+  `duration_ms`.
+- `shutdown_done` (field `total_ms`): a clean stop; `serve` exits 0.
+- `shutdown_overrun` (error; fields `phase`, `phase_elapsed_ms`, `in_flight`, `total_ms`): the deadline passed first.
+  `phase` is the step in progress and `in_flight` names the goroutines still running with their age. `serve` exits 10
+  and the launch agent restarts it (the launcher turns only exit 8 into success).
+- `sweep_aborted`: a sweep was cut short by the stop (counters `walked`, `skipped`). Expected on a stop during a sweep.
+
+Reading a slow shutdown: find the last `shutdown_started`, then list the `shutdown_phase` lines after it; the largest
+`duration_ms` is the slow step. With `shutdown_overrun` the `phase` field is the step that did not finish.
+
+Unclean previous run: a `startup_complete` with no preceding `shutdown_done` or `shutdown_overrun` in the log marks
+an unclean previous run. SIGKILL, OOM and panic leave no shutdown line.
+
+Is `serve --rebuild` resumable after a hard exit? Yes. A non-bulk rebuild renames the old `index.db` to
+`index.db.pre-rebuild` and replays the journal into a fresh `index.db`, recording `last_seq` as it goes. A hard exit
+during the replay leaves a partial index. The next start finds an existing `index.db`, replays the journal records past
+`last_seq` idempotently and carries on. If nothing had committed yet (`last_seq` 0 with a non-empty journal), the start
+treats it as an interrupted rebuild and bumps the feed epoch so clients resync. The separate bulk rebuild (the
+`rebuild` command) marks `index.db` unfinished, and a normal open refuses it with `UnfinishedRebuildError` until the
+operator reruns the rebuild; `serve` does not use it.
+
+One-time rollout step: the first apply after this lands still stops the OLD binary, whose shutdown takes about 169 s,
+under the OLD 5 s `ExitTimeOut`, so that apply shows the same final `state=spawn` failure once. The operator MAY end the
+orphan (`ps` for the process with parent 1 and the old store path) or run `launchctl kickstart -k
+gui/$(id -u)/com.phillipg.pg-claude-code-recorder`. The next apply is clean, and the hard exit is crash-safe.
+
 ## Conventions for later packets
 
 - External commands go through `github.com/phillipgreenii/x`'s `cmdrun`, as `pg-router-probe` does.

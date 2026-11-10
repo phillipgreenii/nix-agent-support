@@ -295,9 +295,12 @@ let
     serviceConfigKeys =
       builtins.attrNames e.serviceConfig == [
         "EnvironmentVariables"
+        "ExitTimeOut"
         "StandardErrorPath"
         "StandardOutPath"
       ];
+    # 15 = the daemon's 8 s shutdown deadline plus a 7 s margin, under launchd's 60 s clamp
+    exitTimeOutIsFifteen = e.serviceConfig.ExitTimeOut == 15;
     logsOutsideStateDir =
       e.serviceConfig.StandardOutPath
       == "${stateHome}/pg-claude-code-recorder-launchd/launchd-stdout.log";

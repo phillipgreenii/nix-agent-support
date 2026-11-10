@@ -297,6 +297,8 @@ supervisor: no entry, one warning (raise `fs.inotify.max_user_watches`). Check:
 `test-pg-claude-code-recorder-hm-launchd` (`tests/pg-claude-code-recorder-hm-launchd.nix`), which also runs the
 rendered command under `env -i` against throwaway directories.
 
+The module sets `ExitTimeOut = 15` (a literal: the daemon's 8 s shutdown deadline plus a 7 s margin, under launchd's 60 s clamp); see the README "Shutdown" section.
+
 ### pg-repo-runner alerts and dashboard
 
 `darwin/modules/pg-repo-runner` registers `packages/pg-repo-runner/grafana/alerting/alerts.yaml` (six rules over

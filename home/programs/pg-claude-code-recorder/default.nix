@@ -522,6 +522,13 @@ in
               SuccessfulExit = false;
             };
             serviceConfig = {
+              # launchd waits this long after SIGTERM before SIGKILL. The daemon
+              # hard-exits (exit 10) 8 s after a stop begins, so 15 is that
+              # deadline plus a 7 s margin, and stays below launchd's silent
+              # 60 s clamp (darwin/modules/pg-router sets 60 for the same
+              # reason). A literal: no option and no arithmetic against the
+              # daemon's deadline, which is a constant in the daemon.
+              ExitTimeOut = 15;
               StandardOutPath = "${logDir}/launchd-stdout.log";
               StandardErrorPath = "${logDir}/launchd-stderr.log";
               EnvironmentVariables = {
