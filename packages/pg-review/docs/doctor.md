@@ -77,7 +77,25 @@ check passes.
 
 ### Result of the live run
 
-Not yet recorded: the live check starts a real ccpool session and was not run
-from the isolated implementation environment. Record here, after running it
-once on the real machine, the date, the pass or fail line of each check, and
-(when `session` failed) the reply text the session gave.
+Run on 2026-11-10 on the real machine with `pg-review job doctor` (one run, one
+real ccpool session; `ccpool capacity` beforehand: `free=6 counted=0
+preserved=0 live=0 max=6`, no usage limit active).
+
+```text
+PASS config
+PASS ledger
+PASS providers
+PASS recorder
+PASS ccpool
+PASS hook
+PASS session
+```
+
+Every check passed, including `session`: `pg-review` resolved on PATH inside
+the analyst session and `PG_REVIEW_RUN` was visible there.
+
+Model names: the doctor session does not exercise the built-in profile models,
+so `claude-sonnet-5-5` and `claude-opus-5-5` were not separately launched
+through ccpool. Nothing showed them to be wrong, so the profile defaults are
+unchanged; a rejected model would surface as a failed analyst session on the
+first real run of that profile.
