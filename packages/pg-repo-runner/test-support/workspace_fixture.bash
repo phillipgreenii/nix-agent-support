@@ -40,7 +40,6 @@ ws_write_toml() {
   {
     printf "[workspace]\nid = 'rr-fixture'\nterminal = 'nix-gamma'\n"
     printf "build_command = '%s/build.sh'\n" "$TEST_DIR"
-    printf "apply_command = 'sudo darwin-rebuild switch --flake {terminal_nix_dir}#{hostname}'\n"
     printf "activate_command = 'sudo {out}/sw/bin/darwin-rebuild activate'\n\n[repos]\n"
     for k in "${WS_REPOS[@]}"; do
       printf "[repos.%s]\nurl = '%s/remotes/%s.git'\nbranch = 'main'\n" "$k" "$TEST_DIR" "${k#nix-}"

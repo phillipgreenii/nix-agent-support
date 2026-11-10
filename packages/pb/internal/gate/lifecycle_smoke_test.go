@@ -3,7 +3,9 @@
 package gate_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,8 +57,8 @@ func mustModuleRoot(t *testing.T) string {
 }
 
 // setupSmokeWorkspace stands up a real pn workspace with two repos (a producer
-// holding the gated change, and a terminal whose trivial apply.sh records
-// applied-state) using bare remotes + pn init/clone/lock. It returns the
+// holding the gated change, and a trivial-flake terminal; tests record
+// applied-state via recordApplied) using bare remotes + pn init/clone/lock. It returns the
 // workspace root. PATH-resolved real pn/bd/git are required (test skips if not).
 func setupSmokeWorkspace(t *testing.T) string {
 	t.Helper()
@@ -74,15 +76,11 @@ func setupSmokeWorkspace(t *testing.T) string {
 	}
 	pushMain(t, producer)
 
-	// terminal (consumer): trivial flake + apply.sh.
+	// terminal (consumer): trivial flake.
 	consumer := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-smoke-consumer"})
 	consumerBare := newBareOrigin(t, consumer)
 	writeFile(t, filepath.Join(consumer.Dir, "flake.nix"), "{ inputs = {}; outputs = { self, ... }: {}; }\n")
-	writeFile(t, filepath.Join(consumer.Dir, "apply.sh"), "#!/bin/sh\nset -e\ntouch applied.txt\n")
-	if err := os.Chmod(filepath.Join(consumer.Dir, "apply.sh"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := consumer.Client.Run(t.Context(), "add", "--", "flake.nix", "apply.sh"); err != nil {
+	if _, err := consumer.Client.Run(t.Context(), "add", "--", "flake.nix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := consumer.Client.Run(t.Context(), "commit", "-m", "init terminal"); err != nil {
@@ -90,13 +88,12 @@ func setupSmokeWorkspace(t *testing.T) string {
 	}
 	pushMain(t, consumer)
 
-	// workspace config: wsid set, consumer is the terminal, trivial apply.
+	// workspace config: wsid set, consumer is the terminal.
 	writeFile(t, filepath.Join(ws, "pn-workspace.toml"), ""+
 		"[workspace]\n"+
 		"name = \"smoke-pb\"\n"+
 		"id = \"smoke-pb\"\n"+
-		"terminal = \"consumer\"\n"+
-		"apply_command = \"./apply.sh\"\n\n"+
+		"terminal = \"consumer\"\n\n"+
 		"[repos.consumer]\n"+
 		"url = \"file://"+consumerBare+"\"\n\n"+
 		"[repos.producer]\n"+
@@ -105,13 +102,6 @@ func setupSmokeWorkspace(t *testing.T) string {
 	runTool(t, ws, "pn", "workspace", "init")
 	runTool(t, ws, "pn", "workspace", "clone")
 	runTool(t, ws, "pn", "workspace", "lock")
-	// `workspace allow` is REQUIRED before apply: apply_command is config-sourced
-	// argv, so pn's Apply is TOFU trust-gated (repo-base ADR 0019, beads pg2-oymai /
-	// pg2-x2q6o) and aborts with "workspace hooks not trusted" without it. Missing
-	// this, no applied-state is ever recorded and TestSmoke_GateLifecycle_HappyPath
-	// fails at the apply step — repo-base's own s36 smoke scenario carries the same
-	// step for the same reason.
-	runTool(t, ws, "pn", "workspace", "allow")
 
 	// isolated embedded-Dolt beads workspace at the root.
 	runTool(t, ws, "bd", "init", "--prefix", "pbsm")
@@ -194,8 +184,9 @@ func TestSmoke_GateLifecycle_HappyPath(t *testing.T) {
 		t.Fatalf("bead %s must still be blocked after a no-op pre-apply check", bead)
 	}
 
-	// 5. apply (records applied_ref=HEAD for every repo).
-	runTool(t, ws, "pn", "workspace", "apply")
+	// 5. record an apply (applied_ref=HEAD for every repo). See recordApplied
+	// for why the test writes the record instead of running `pn workspace apply`.
+	recordApplied(t, ws)
 
 	// 6. pb gate check now resolves the gate.
 	out2, _ := runToolAllow(t, ws, pb, "gate", "check", "--json")
@@ -212,6 +203,66 @@ func TestSmoke_GateLifecycle_HappyPath(t *testing.T) {
 	// 7. the bead is now ready.
 	if !inReady(t, ws, bead) {
 		t.Fatalf("bead %s must be ready after apply + gate check resolves the gate", bead)
+	}
+}
+
+// recordApplied records, for every repo of the workspace at ws, the applied-state
+// that a successful `pn workspace apply` leaves behind, using pn's on-disk store
+// (repo-base appliedstate.go: $XDG_DATA_HOME/pn-workspace/applied/<sha256 of the
+// cleaned repo path>, JSON). This test proves pb's gate lifecycle, not apply.
+// Apply now builds as the user and activates through two sudo steps, so running
+// it for real needs root or pn's smokeseams-tagged stand-in build, which this
+// module cannot obtain without a cross-repo build dependency. The record is
+// shaped like the one a real apply writes (schema 3, the terminal consuming no
+// flake inputs, so no locked_revs/overridden_inputs). Repo paths come from
+// `pn workspace info --json` so the store key is the one pn itself derives, and
+// the readback below fails the test if the written record is not the one
+// `pn workspace info` reads.
+func recordApplied(t *testing.T, ws string) {
+	t.Helper()
+	type infoRepo struct {
+		Name       string `json:"name"`
+		Path       string `json:"path"`
+		AppliedRef string `json:"applied_ref"`
+	}
+	readInfo := func() []infoRepo {
+		out := runTool(t, ws, "pn", "workspace", "info", "--json")
+		var info struct {
+			Repos []infoRepo `json:"repos"`
+		}
+		if err := json.Unmarshal([]byte(out), &info); err != nil {
+			t.Fatalf("parse pn workspace info json: %v\n%s", err, out)
+		}
+		return info.Repos
+	}
+	dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "pn-workspace", "applied")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repos := readInfo()
+	if len(repos) == 0 {
+		t.Fatal("pn workspace info listed no repos")
+	}
+	for _, r := range repos {
+		head := strings.TrimSpace(runTool(t, r.Path, "git", "rev-parse", "HEAD"))
+		rec, err := json.Marshal(map[string]any{
+			"schema":      3,
+			"applied_ref": head,
+			"dirty":       false,
+			"applied_at":  time.Now().UTC().Format(time.RFC3339),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256([]byte(filepath.Clean(r.Path)))
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%x", sum)), rec, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, r := range readInfo() {
+		if r.AppliedRef == "" {
+			t.Fatalf("pn workspace info does not see the recorded applied state for %s (store key mismatch?)", r.Name)
+		}
 	}
 }
 
