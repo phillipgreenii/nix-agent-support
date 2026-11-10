@@ -215,6 +215,10 @@ in
         };
         serviceConfig = {
           ProcessType = "Background";
+          # serve bounds the HTTP drain at 5 s and the pass-loop join at 5 s
+          # (cmd/beads-exporter/main.go), about 10 s in all, and launchd's
+          # default ExitTimeOut is 5 s. Keep this above that, under the 60 s cap.
+          ExitTimeOut = 15;
           StandardOutPath = stdoutLog;
           StandardErrorPath = stderrLog;
         }

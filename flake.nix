@@ -8362,6 +8362,8 @@
                 assert ua.label == "com.phillipg.beads-exporter";
                 assert ua.manageLogs.enable;
                 assert ua.serviceConfig.ProcessType == "Background";
+                # the 5 s HTTP drain plus 5 s pass-loop join, under launchd's 60 s clamp
+                assert ua.serviceConfig.ExitTimeOut == 15;
                 assert ua.keepAlive == true;
                 assert ua.runAtLoad;
                 assert

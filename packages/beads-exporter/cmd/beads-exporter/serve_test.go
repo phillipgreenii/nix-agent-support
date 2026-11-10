@@ -146,3 +146,40 @@ func TestServeRunsTheStrandedPassOnItsInterval(t *testing.T) {
 		t.Fatal("serve did not stop after cancel")
 	}
 }
+
+func TestJoinLoopsReturnsWhenAllLoopsReport(t *testing.T) {
+	done := make(chan string, 3)
+	done <- "main"
+	done <- "throughput"
+	done <- "stranded"
+	var buf syncBuffer
+	log := logx.New(&buf, slog.LevelInfo)
+	if err := joinLoops(done, []string{"main", "throughput", "stranded"}, time.Second, log); err != nil {
+		t.Fatalf("joinLoops = %v, want nil", err)
+	}
+}
+
+// A loop stuck in a child that ignores cancellation must not hang shutdown: the
+// join gives up at its deadline, names the stuck loop and reports an error.
+func TestJoinLoopsBoundsAStuckLoop(t *testing.T) {
+	done := make(chan string, 3)
+	done <- "main"
+	done <- "throughput"
+	var buf syncBuffer
+	log := logx.New(&buf, slog.LevelInfo)
+	start := time.Now()
+	err := joinLoops(done, []string{"main", "throughput", "stranded"}, 50*time.Millisecond, log)
+	if err == nil {
+		t.Fatal("joinLoops = nil, want an overrun error")
+	}
+	if el := time.Since(start); el > 2*time.Second {
+		t.Fatalf("joinLoops took %s, want it bounded near 50ms", el)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "shutdown_overrun") || !strings.Contains(out, "stranded") {
+		t.Fatalf("log = %q, want shutdown_overrun naming stranded", out)
+	}
+	if strings.Contains(out, `"in_flight":["main`) {
+		t.Fatalf("log = %q, finished loops must not be listed in flight", out)
+	}
+}

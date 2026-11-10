@@ -125,21 +125,21 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 	srv := &http.Server{Handler: server.Handler(collector, reg, log), ReadHeaderTimeout: 10 * time.Second}
 
-	done := make(chan struct{}, 3)
+	done := make(chan string, 3)
 	go func() {
 		sched.Run(ctx, sched.RealClock{}, cfg.PollInterval(), func(c context.Context) { collector.RunPass(c, collect.PassMain) },
 			func() { log.Warn("main pass overran its interval; skipping a tick") })
-		done <- struct{}{}
+		done <- "main"
 	}()
 	go func() {
 		sched.Run(ctx, sched.RealClock{}, cfg.StrandedInterval(), func(c context.Context) { collector.RunPass(c, collect.PassThroughput) },
 			func() { log.Warn("throughput pass overran its interval; skipping a tick") })
-		done <- struct{}{}
+		done <- "throughput"
 	}()
 	go func() {
 		sched.Run(ctx, sched.RealClock{}, cfg.StrandedInterval(), func(c context.Context) { collector.RunPass(c, collect.PassStranded) },
 			func() { log.Warn("stranded pass overran its interval; skipping a tick") })
-		done <- struct{}{}
+		done <- "stranded"
 	}()
 
 	log.Info("beads-exporter started", "version", Version, "port", cfg.Port, "databases", len(dbs))
@@ -158,8 +158,43 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
-	<-done
-	<-done
-	<-done
+	if err := joinLoops(done, []string{"main", "throughput", "stranded"}, joinTimeout, log); err != nil {
+		return err
+	}
 	return serveErr
+}
+
+// joinTimeout bounds the wait for the pass loops after cancellation. With the
+// 5 s HTTP drain it keeps shutdown near 10 s, inside the launchd ExitTimeOut
+// of 15 s set by the module.
+const joinTimeout = 5 * time.Second
+
+// joinLoops waits for every named loop to report on done, but no longer than
+// timeout. On overrun it logs the loops still in flight and returns an error so
+// the process exits non-zero instead of hanging until launchd kills it. A
+// pass interrupted this way loses only its in-memory work: snapshots are
+// swapped in atomically, so the next start recovers by collecting again.
+func joinLoops(done <-chan string, names []string, timeout time.Duration, log *slog.Logger) error {
+	pending := make(map[string]bool, len(names))
+	for _, n := range names {
+		pending[n] = true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for len(pending) > 0 {
+		select {
+		case n := <-done:
+			delete(pending, n)
+		case <-timer.C:
+			inFlight := make([]string, 0, len(pending))
+			for _, n := range names {
+				if pending[n] {
+					inFlight = append(inFlight, n)
+				}
+			}
+			log.Error("shutdown_overrun", "phase", "join_passes", "in_flight", inFlight, "timeout", timeout.String())
+			return fmt.Errorf("shutdown overran %s waiting for pass loops: %v", timeout, inFlight)
+		}
+	}
+	return nil
 }
