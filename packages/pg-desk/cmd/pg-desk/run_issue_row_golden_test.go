@@ -15,11 +15,11 @@ import (
 )
 
 // The `run issue` cases in which hydrateJiraIssue reaches
-// pipeline.RunGenericEntity write an interpretation row; each is pinned
+// pipeline.RunEntityChange write an interpretation row; each is pinned
 // byte-exact over the same issue, so the cases and the corpus path agree and
 // only a task that names them may change a byte. The schema-1 case is gone:
 // the interpretation write requires schema 2 (it is refused with the cutover
-// message, pinned in TestRunGenericEntity_OldSchemaStoreIsRefusedAndWritesNothing).
+// message, pinned in TestRunEntityChange_OldSchemaStoreRefused).
 func TestRunIssueHydrationRowGoldens(t *testing.T) {
 	const id = "PROJ-31"
 	body := fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":4,"result":{"id":%q,"title":"t","owner":"me","assignee":"x","issue_type":"task","state":"open","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`, id)

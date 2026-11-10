@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -41,8 +40,8 @@ func issueWith(t *testing.T, show string) gather.GatherResult {
 func hydrate(t *testing.T, p *Pipeline, typ, id string, r gather.GatherResult) {
 	t.Helper()
 	p.entityGatherers = map[string]gather.EntityGatherer{typ: fakeEntityGatherer{result: r}}
-	if err := p.RunGenericEntity(context.Background(), typ, id, gather.ChangeChanged); err != nil {
-		t.Fatalf("RunGenericEntity %s %s: %v", typ, id, err)
+	if err := runEntity(p, typ, id, gather.ChangeChanged); err != nil {
+		t.Fatalf("RunEntityChange %s %s: %v", typ, id, err)
 	}
 }
 

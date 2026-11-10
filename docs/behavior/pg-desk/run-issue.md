@@ -76,6 +76,20 @@ paragraphs above hold unchanged.
 - `--change removed` re-reads an issue the store already holds, so its row reflects what took it
   out of the watched set, and is a no-op for one it does not hold.
 - The deployment's trigger decides which keys arrive here; this command never runs a query of its own.
+- Every case stores the issue the same way: one snapshot hydration (the entity row, the
+  interpretation, the derived links) that appends no change record and no record for another
+  entity, whether an owning backend, a backend that keeps no store, or no backend at all holds the
+  issue. The cases differ only in the read: an owning backend pins it; the others read unpinned and
+  then write the backend column.
+- The first hydration of a held issue is an observation: the entity row gets a version and a
+  hydration time, so the next hydration compares against it instead of treating it as new.
+- A deactivated issue stays deactivated: an event for an issue does not bring it back (only an
+  owning backend's pinned read still does, as before).
+- A degraded read (a stale answer served from a cache) writes nothing and is reported as an error;
+  the next event retries it.
+- A removal whose read finds the issue gone writes nothing: the held snapshot and its links stay,
+  and the changes engine's own removal path deactivates the issue.
+- A watched or unwatched statement in the answer is stored with the snapshot.
 
 ## Resolution (bead -> PR)
 

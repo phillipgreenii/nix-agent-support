@@ -35,6 +35,12 @@ func newGenericPipeline(t *testing.T, out *bytes.Buffer, gs map[string]gather.En
 	return p
 }
 
+// runEntity hydrates one entity through RunEntityChange with no options.
+func runEntity(p *Pipeline, entityType, id string, change gather.ChangeKind) error {
+	_, err := p.RunEntityChange(context.Background(), entityType, id, change, EntityChangeOptions{})
+	return err
+}
+
 func issueResult(t *testing.T) gather.GatherResult {
 	t.Helper()
 	payload, err := json.Marshal(gather.IssueFacts{IssueShow: json.RawMessage(`{"id":"i-1","owner":"me","issue_type":"task"}`)})
@@ -44,30 +50,30 @@ func issueResult(t *testing.T) gather.GatherResult {
 	return gather.GatherResult{Payload: payload, AsOf: "2026-09-16T00:00:00Z"}
 }
 
-func TestRunGenericEntity_UnregisteredType(t *testing.T) {
+func TestHydrateEntity_UnregisteredType(t *testing.T) {
 	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{})
-	err := p.RunGenericEntity(context.Background(), "widget", "w1", gather.ChangeAdded)
+	err := runEntity(p, "widget", "w1", gather.ChangeAdded)
 	if err == nil || !strings.Contains(err.Error(), "no gather adapter registered") {
 		t.Fatalf("err = %v, want no gather adapter registered", err)
 	}
 }
 
-func TestRunGenericEntity_GatherWithoutInterpreter(t *testing.T) {
+func TestHydrateEntity_GatherWithoutInterpreter(t *testing.T) {
 	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
 		"widget": fakeEntityGatherer{result: gather.GatherResult{Payload: json.RawMessage(`{}`)}},
 	})
-	err := p.RunGenericEntity(context.Background(), "widget", "w1", gather.ChangeAdded)
+	err := runEntity(p, "widget", "w1", gather.ChangeAdded)
 	if err == nil || !strings.Contains(err.Error(), "no interpret adapter registered") {
 		t.Fatalf("err = %v, want no interpret adapter registered", err)
 	}
 }
 
-func TestRunGenericEntity_IssueSuccessWritesRows(t *testing.T) {
+func TestHydrateEntity_IssueSuccessWritesRows(t *testing.T) {
 	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
 		"issue": fakeEntityGatherer{result: issueResult(t)},
 	})
-	if err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeAdded); err != nil {
-		t.Fatalf("RunGenericEntity: %v", err)
+	if err := runEntity(p, "issue", "i-1", gather.ChangeAdded); err != nil {
+		t.Fatalf("RunEntityChange: %v", err)
 	}
 	e, found, err := p.store.GetEntity("acme/widgets", "issue", "i-1")
 	if err != nil || !found {
@@ -81,11 +87,11 @@ func TestRunGenericEntity_IssueSuccessWritesRows(t *testing.T) {
 	}
 }
 
-func TestRunGenericEntity_NotFoundGate(t *testing.T) {
+func TestHydrateEntity_NotFoundGate(t *testing.T) {
 	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
 		"issue": fakeEntityGatherer{result: gather.GatherResult{RemovedState: "not_found"}},
 	})
-	err := p.RunGenericEntity(context.Background(), "issue", "i-9", gather.ChangeChanged)
+	err := runEntity(p, "issue", "i-9", gather.ChangeChanged)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want not found", err)
 	}
@@ -93,12 +99,13 @@ func TestRunGenericEntity_NotFoundGate(t *testing.T) {
 		t.Fatal("not-found run must not write an entity row")
 	}
 
-	// Explicit removal is exempt and persists gracefully.
-	if err := p.RunGenericEntity(context.Background(), "issue", "i-9", gather.ChangeRemoved); err != nil {
+	// An explicit removal is exempt from the error and writes nothing: the
+	// held snapshot, if any, stays and the changes engine deactivates it.
+	if err := runEntity(p, "issue", "i-9", gather.ChangeRemoved); err != nil {
 		t.Fatalf("removal: %v", err)
 	}
-	if _, found, _ := p.store.GetEntity("acme/widgets", "issue", "i-9"); !found {
-		t.Fatal("removal path should persist an entity row")
+	if _, found, _ := p.store.GetEntity("acme/widgets", "issue", "i-9"); found {
+		t.Fatal("a not_found removal must not write an entity row")
 	}
 }
 
@@ -107,7 +114,7 @@ func TestFailedDetailReadKeepsPreviousSnapshot(t *testing.T) {
 	p := newGenericPipeline(t, &out, map[string]gather.EntityGatherer{
 		"issue": fakeEntityGatherer{result: issueResult(t)},
 	})
-	if err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeAdded); err != nil {
+	if err := runEntity(p, "issue", "i-1", gather.ChangeAdded); err != nil {
 		t.Fatal(err)
 	}
 	e1, _, _ := p.store.GetEntity("acme/widgets", "issue", "i-1")
@@ -115,7 +122,7 @@ func TestFailedDetailReadKeepsPreviousSnapshot(t *testing.T) {
 	out.Reset()
 
 	p.entityGatherers["issue"] = fakeEntityGatherer{err: errors.New("boom")}
-	err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeChanged)
+	err := runEntity(p, "issue", "i-1", gather.ChangeChanged)
 	if err == nil || !strings.Contains(err.Error(), "pipeline: gather issue i-1") {
 		t.Fatalf("err = %v", err)
 	}
@@ -132,10 +139,10 @@ func TestFailedDetailReadKeepsPreviousSnapshot(t *testing.T) {
 	}
 }
 
-// TestRunGenericEntity_PRHeadSHAMatchesPRPath pins the HeadSHA reconciliation:
-// a pr row written through RunGenericEntity carries the same head_sha the PR
+// TestHydrateEntity_PRHeadSHAMatchesPRPath pins the HeadSHA reconciliation:
+// a pr row written through RunEntityChange carries the same head_sha the PR
 // path stores.
-func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
+func TestHydrateEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	facts := minimalFacts(t, map[string]any{"author": "me", "title": "fix: x", "repo": "acme/widgets", "number": 1})
 	payload, err := json.Marshal(facts)
 	if err != nil {
@@ -145,8 +152,8 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 		"pr": fakeEntityGatherer{result: gather.GatherResult{Payload: payload, AsOf: facts.AsOf}},
 	})
 	p.clock = interpret.FixedClock(time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC))
-	if err := p.RunGenericEntity(context.Background(), "pr", "1", gather.ChangeAdded); err != nil {
-		t.Fatalf("RunGenericEntity: %v", err)
+	if err := runEntity(p, "pr", "1", gather.ChangeAdded); err != nil {
+		t.Fatalf("RunEntityChange: %v", err)
 	}
 	generic, found, err := p.store.GetEntity("acme/widgets", "pr", "1")
 	if err != nil || !found {
@@ -180,28 +187,5 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	viaPR, _, _ := st.GetEntity("acme/widgets", "pr", "1")
 	if viaPR.HeadSHA != generic.HeadSHA || viaPR.ContentHash != generic.ContentHash {
 		t.Fatalf("PR path %+v vs generic %+v", viaPR, generic)
-	}
-}
-
-// A store that has not been cut over is refused with the cutover message and
-// nothing is written (INV-REINTERPRET-12): schema 1 is removed from every
-// interpretation write path.
-func TestRunGenericEntity_OldSchemaStoreIsRefusedAndWritesNothing(t *testing.T) {
-	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
-		"issue": fakeEntityGatherer{result: issueResult(t)},
-	})
-	p.store = store.OpenForTest(t) // version 1
-	if err := p.store.RequireNewSchema(); !errors.Is(err, store.ErrOldSchema) {
-		t.Fatalf("precondition: want an old-schema store, got %v", err)
-	}
-	err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeAdded)
-	if !errors.Is(err, store.ErrOldSchema) || !strings.Contains(err.Error(), "pg-desk migrate --cutover") {
-		t.Fatalf("RunGenericEntity on an old-schema store: %v, want the cutover refusal", err)
-	}
-	if _, found, err := p.store.GetEntity("acme/widgets", "issue", "i-1"); err != nil || found {
-		t.Fatalf("GetEntity found=%v err=%v, want nothing written", found, err)
-	}
-	if _, found, err := p.store.GetInterpretation("acme/widgets", "issue", "i-1"); err != nil || found {
-		t.Fatalf("GetInterpretation found=%v err=%v, want nothing written", found, err)
 	}
 }

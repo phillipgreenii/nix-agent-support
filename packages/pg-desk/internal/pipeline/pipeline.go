@@ -1,6 +1,6 @@
 // Package pipeline implements pg-desk's interpret-only run path
 // (RunInterpretOnly, used by `pg-desk run issue` and `run thread`), the
-// generic per-entity hydration pipeline (RunGenericEntity, RunEntityChange)
+// generic per-entity hydration pipeline (RunEntityChange)
 // and pg-desk's structured JSON run records [design doc "7.9 Failure
 // handling and logging"]. The legacy gather -> interpret -> store -> sync run
 // for a pull request, its Reconcile and Sweep passes and the sync_error retry
@@ -62,7 +62,7 @@ type Pipeline struct {
 	store    *store.Store
 	gatherer gatherer
 	// entityGatherers is the generic per-entity-type gather registry used
-	// by RunGenericEntity; populated once in New() from the real Gatherer.
+	// by RunEntityChange; populated once in New() from the real Gatherer.
 	entityGatherers map[string]gather.EntityGatherer
 	// extractors is the per-type link-extractor registry run after persist.
 	extractors ExtractorRegistry
