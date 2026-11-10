@@ -6588,6 +6588,24 @@
               # on its preceding line). See
               # cmd/plugin-conformance-check/main.go's doc comment for
               # exactly what the extractor does and does not join.
+              #
+              # Four further entries cover commands the engine cannot see
+              # through, each narrowed to the exact prescribed command (not
+              # the bare command name) so any other use still fails the gate:
+              #   - `bd -C "$TRACKER_ROOT" ready` (process-handoff): the
+              #     pipeline's `jq -r "$SEL"` takes its jq program from a
+              #     shell variable, which safe-commands cannot prove is not a
+              #     path, so it defers to claude-code by design.
+              #   - `jq -s --slurpfile specs` (identify-hook-misses): a long
+              #     multi-line jq program the engine defers on for the same
+              #     reason.
+              #   - `claude-tool-tracker timing` (identify-slow-tools): the
+              #     tracker plugin's own read-only reporting CLI; no rule
+              #     models it.
+              #   - `bgrun "pre-land-eval-` (ff-merge-to-main): bgrun wraps
+              #     `pre-land-eval`, which no rule classifies.
+              # `--type=task` (identify-slow-tools) is an extraction artifact:
+              # the continuation fragment of a multi-line `bd create`.
               plugin-conformance = pkgs.runCommand "check-plugin-conformance" { } ''
                 ${pkgs.plugin-conformance-check}/bin/plugin-conformance-check \
                   --allow-reason "env assignments only" \
@@ -6602,6 +6620,11 @@
                   --allow "phillipgreenii-nix-agent-support" \
                   --allow "some_command" \
                   --allow "--body-stdin" \
+                  --allow "bd -C \"\$TRACKER_ROOT\" ready" \
+                  --allow "jq -s --slurpfile specs" \
+                  --allow "claude-tool-tracker timing" \
+                  --allow "bgrun \"pre-land-eval-" \
+                  --allow "--type=task" \
                   ${./claude-marketplace}
                 touch $out
               '';
