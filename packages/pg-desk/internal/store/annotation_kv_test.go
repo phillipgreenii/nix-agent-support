@@ -163,35 +163,9 @@ func TestReservedKeysRoundTrip(t *testing.T) {
 	}
 }
 
-func TestMigratedSyntheticDBRoundTripsThroughNewAPI(t *testing.T) {
-	s, _ := openSyntheticCopy(t)
-	if err := s.Cutover(); err != nil {
-		t.Fatalf("Cutover: %v", err)
-	}
-	for _, c := range []struct{ id, key, value string }{
-		{"acme/widgets#1", AnnotationHidden, `{"value":true,"reason":"waiting on upstream"}`},
-		{"acme/widgets#1", AnnotationWIP, "true"},
-		{"acme/widgets#1", KeyDisposition("c100"), "will-fix"},
-		{"acme/widgets#1", KeyDisposition("c200"), "wont-fix"},
-		{"acme/widgets#2", AnnotationHidden, `{"value":false,"reason":null}`},
-	} {
-		a, found, err := s.GetKVAnnotation("acme/widgets", "pr", c.id, c.key)
-		if err != nil || !found || a.Value != c.value {
-			t.Fatalf("%s %s = (%+v, %v, %v), want value %s", c.id, c.key, a, found, err, c.value)
-		}
-	}
-	// Writing through the new API onto a migrated (version 0) entity works.
-	if err := s.SetAnnotation(KVAnnotation{
-		Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#1",
-		Key: AnnotationWIP, Value: "false", Origin: "pg-desk", SetBy: "operator", SetAt: "2026-09-20T00:00:00Z",
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestKVAnnotationAPIRefusesOldSchema(t *testing.T) {
-	s := OpenForTest(t)
-	if err := s.SetAnnotation(kvAnn(AnnotationWIP, "true")); err == nil {
-		t.Fatal("SetAnnotation on an old-schema store must error")
+	s := OpenRetiredSchemaForTest(t)
+	if err := s.SetAnnotation(kvAnn(AnnotationWIP, "true")); !errors.Is(err, ErrOldSchema) {
+		t.Fatalf("SetAnnotation on a retired-schema store = %v, want ErrOldSchema", err)
 	}
 }

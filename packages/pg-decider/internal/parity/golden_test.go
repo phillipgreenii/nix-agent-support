@@ -266,10 +266,10 @@ func TestGateFailsOnAnEditedGoldenAgainstTheRealDecider(t *testing.T) {
 	}
 }
 
-// TestLegacyRowStoreHelperRefusesANonLegacyStore: the helper writes only into a
-// version-1 store (before the cutover). Against a cut-over store it must refuse
-// rather than write a row the cutover never produced.
-func TestLegacyRowStoreHelperRefusesANonLegacyStore(t *testing.T) {
+// TestLegacyRowStoreHelperWritesANeverHydratedRow: the helper writes a version-0,
+// never-hydrated row into the schema-2 store the heartbeat created, refuses a
+// store that has no schema yet, and a refresh then hydrates the row.
+func TestLegacyRowStoreHelperWritesANeverHydratedRow(t *testing.T) {
 	env := realEnv(t)
 	sc := scenarioByPrefix(t, "19-")
 	fx, err := LoadFixture(sc)
@@ -286,21 +286,18 @@ func TestLegacyRowStoreHelperRefusesANonLegacyStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
+	if err := sb.seedLegacyRow(ctx, sqlite3, fx.LegacySeeded[0]); err == nil {
+		t.Error("the helper wrote a legacy row into a store with no schema")
+	}
 	if _, err := sb.step(ctx, sb.deskExec, "heartbeat"); err != nil {
 		t.Fatal(err)
 	}
 	if err := sb.seedLegacyRow(ctx, sqlite3, fx.LegacySeeded[0]); err != nil {
-		t.Fatalf("a version-1 store takes the legacy row: %v", err)
-	}
-	if _, err := sb.step(ctx, sb.deskExec, "migrate", "--cutover"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("a schema-2 store takes the legacy row: %v", err)
 	}
 	version, hydrated, err := sb.readEntityRow(ctx, sqlite3, fx.LegacySeeded[0])
 	if err != nil || version != 0 || hydrated != "<null>" {
-		t.Fatalf("after the cutover the row is version %d hydrated_at %q (%v), want version 0, never hydrated", version, hydrated, err)
-	}
-	if err := sb.seedLegacyRow(ctx, sqlite3, "acme/api#120"); err == nil {
-		t.Error("the helper wrote a legacy row into a cut-over store")
+		t.Fatalf("the row is version %d hydrated_at %q (%v), want version 0, never hydrated", version, hydrated, err)
 	}
 	if _, err := sb.step(ctx, sb.deskExec, "pr", "refresh", fx.LegacySeeded[0]); err != nil {
 		t.Fatal(err)

@@ -49,7 +49,7 @@ it as any particular outcome.
 | ---- | --------------------------------------------------------------------------------------------- |
 | `0`  | The verb did what was asked; routine skips are reported on stderr and are not a failure.      |
 | `1`  | An unexpected error: none of the outcomes below. Read the stderr line.                        |
-| `2`  | Usage error, malformed reply or stdin, a store that is not migrated for the focus tables.     |
+| `2`  | Usage error, malformed reply or stdin, a store on the retired schema 1.                       |
 | `3`  | Total failure.                                                                                |
 | `6`  | The addressed period is closed. Used only by `focus`.                                         |
 | `8`  | Partial: part of the work applied or part of the data was missing; what was applied is valid. |
@@ -69,11 +69,11 @@ stored draft, then parsing of the reply, then the write. A run doomed by an earl
 reaches a later one. Every non-zero exit prints ONE line on stderr that names the problem and the way
 out, for example `period 2026-10-09 is closed; use --date <tomorrow>`.
 
-## Unmigrated store
+## Retired-schema store
 
-A store that has not been cut over to the schema that carries the focus tables is refused: the verb
-exits `2`, the message names the problem (the store is not migrated for the focus tables) and the
-remedy (`pg-desk migrate --cutover`), and nothing is applied. This is the refusal every other typed
+A store left on the retired schema 1, which has no focus tables, is refused: the verb exits `2`, the
+message names the problem (the store is on a retired schema) and the remedy (migrate the store with
+a release that still has `pg-desk migrate --cutover`), and nothing is applied. This is the refusal every other typed
 verb gives.
 
 ## JSON envelope
@@ -131,7 +131,7 @@ in force before the migration (`1` usage, `2` partial).
   and `6`. A run record row MUST carry the `exit_scheme` its `exit_code` was written under.
 - **INV-FOCUS-4.** <!-- uuid: dacb232e-6a48-4648-b12e-d75700101a11 --> Every non-zero exit MUST print one line on stderr naming the problem and the way
   out.
-- **INV-FOCUS-5.** <!-- uuid: fafebdc0-9aab-402f-84e8-d9f4857627b3 --> A focus verb MUST refuse a store that is not migrated for the focus tables with exit
+- **INV-FOCUS-5.** <!-- uuid: fafebdc0-9aab-402f-84e8-d9f4857627b3 --> A focus verb MUST refuse a store on the retired schema 1 (it has no focus tables) with exit
   `2`, name the problem and apply nothing.
 - **INV-FOCUS-6.** <!-- uuid: e6541cf4-346b-4947-aa18-3e063a6410ff --> A verb that writes and addresses a day other than today MUST print
   `NOTE: writing into period <date>, not today`.
@@ -346,7 +346,7 @@ what separates them for a human.
   single draft row.
 - **INV-FOCUS-17.** <!-- uuid: 13de1564-59de-4dfb-b6c5-50e2faf0e858 --> `show` and `replan` MUST exit `0` for complete coverage (an empty candidate set
   and an empty identity list included), `8` for incomplete coverage, `3` for no computable
-  candidates and `2` for a usage error or an unmigrated store, and MUST NOT exit `6`.
+  candidates and `2` for a usage error or a store on the retired schema 1, and MUST NOT exit `6`.
 - **INV-FOCUS-18.** <!-- uuid: 60cf3c5e-6bad-43d8-b2ef-cef67ce171c1 --> The bead column MUST use only the "Shown as" words of the state-by-outcome table,
   defined once in code.
 
@@ -768,7 +768,7 @@ the period as for every verb: it selects the plan rows to read and the day the r
 
 **An unknown key** (no stored entity) prints `<key>: not held by pg-desk` and `run_id: null` and
 exits `0`, the house convention of `attention explain`; its `--json` has `candidate` false and the
-reason `not-in-store`. **An unmigrated store** exits `2` with the usual refusal. A malformed key or a
+reason `not-in-store`. **A store on the retired schema 1** exits `2` with the usual refusal. A malformed key or a
 repository other than the configured one is a usage error, exit `2`.
 
 **`--json`** prints `contract` `pg-desk.focus/v1`, `verb` `explain`, and the members the text shows:
@@ -786,7 +786,7 @@ nothing; its output is the whole of what it leaves behind.
 - **INV-FOCUS-43.** <!-- uuid: 4a963197-7c76-4297-a218-5a999134e3c0 --> `explain` MUST compute from the live rows only, MUST carry no flip-history member
   in text or `--json`, and MUST label the decider's skip reasons as recomputed now.
 - **INV-FOCUS-44.** <!-- uuid: c517a931-b234-46ad-998d-c46ad260c4c3 --> `explain` MUST accept the key forms `select` accepts; an unknown key MUST print
-  that it is not held and exit `0`, and an unmigrated store MUST exit `2`.
+  that it is not held and exit `0`, and a store on the retired schema 1 MUST exit `2`.
 
 ## Help, the tldr page and shell completions
 
@@ -819,7 +819,7 @@ and `close`, then `explain`, the label command, and the `--date` and `--json` fl
 its key, each with a short description. `pull` offers only candidates not already in the plan and not
 already typed, and nothing with `--top`; `explain` takes one key. A completion is a read: it opens the
 store read-only, calls no tracker and no network, writes nothing, is cut off after two seconds, and on
-ANY failure (an unreadable config, a store that cannot be opened or is not migrated) it offers
+ANY failure (an unreadable config, a store that cannot be opened or is on the retired schema 1) it offers
 nothing and prints nothing, because a shell shows everything a completion writes. Ranking order is not
 promised: the candidates come in the candidate order (PRs, Jira issues, beads, then key).
 

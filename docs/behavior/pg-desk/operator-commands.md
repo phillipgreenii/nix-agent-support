@@ -73,13 +73,13 @@ issue, and the members of a watched query whose entity carries no watched mark (
 `pg_desk_watched_entities`, `pg_desk_ingest_failed`, `pg_desk_oldest_orphan_read_age_seconds`,
 `pg_desk_watched_source_observed_age_seconds` and `pg_desk_issue_unflagged_members` series carry, which
 the CLI persists in `meta` and the metrics endpoint reads at scrape time). `status` never judges them:
-the gates and reports are `doctor`'s. On a store that has not been cut over, the section reads
-`unmigrated` instead of failing.
+the gates and reports are `doctor`'s. On a store that has no schema yet, the section reads
+`uninitialized` instead of failing.
 
 `status` also prints the `focus:` block described under `doctor` below, from the same shared
 health model, with every tripped gate marked `FAIL` (`status` itself never fails on one: its exit
 code is unchanged). It has no `--router-config`, so the consumer lag line reads `n/a`.
-On a store without the focus tables the block is the single line `focus: unmigrated`.
+On a store with no schema yet the block is the single line `focus: no data (the store has no schema yet)`.
 
 `status` also prints the interpretation catch-up state (see [`reinterpret.md`](reinterpret.md)), as
 counts only with no verdict: `interpretations behind: N (stamp differs from <stamp>)`, the number of
@@ -101,8 +101,8 @@ and stamps the rest, with no connector or network call. The command, its options
 `--verbose`), the summary line and the invariants are in [`reinterpret.md`](reinterpret.md). It is
 the unbounded path that finishes the job the heartbeat does a slice at a time ("heartbeat" below).
 
-Exit codes: `0` when nothing failed; `1` otherwise, including a store on schema 1 (the cutover
-message), an unresolvable `<pr>`, both or neither of `<pr>` and `--open`, a store or configuration
+Exit codes: `0` when nothing failed; `1` otherwise, including a store on the retired schema 1 (the
+store's retired-schema error), an unresolvable `<pr>`, both or neither of `<pr>` and `--open`, a store or configuration
 error, and any row that failed.
 
 ## pr head-check
@@ -119,7 +119,7 @@ compares it with `--head-sha` (the commit the review started on), and exits:
   head and the caller decides whether to continue.
 
 An abbreviated `--head-sha` of at least 7 characters matches by prefix. The verb reads and writes
-nothing in the store, needs no schema cutover, and issues the one `pg-connector` call named above.
+nothing in the store, and issues the one `pg-connector` call named above.
 A review prompt SHOULD run it at the review's mid-point (about 10 minutes in) and again immediately
 before it submits, and stop early on exit `4`; the next review request, for the new head, is
 created by the PR lane once that head settles. The prompt belongs to the
@@ -185,7 +185,7 @@ receiving the replay) are in [`changes.md`](changes.md), "Behavior".
 These two verbs are pg-desk's write path for the PR lane's persisted state (see
 [`store-schema.md`](store-schema.md), "PR lane state in `meta`"). The composed command is another binary
 and never touches the store itself: it calls them. Both need a store at schema 2 and refuse an older one
-with the cutover message (exit `1`); neither calls the tracker or the connector.
+with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version") (exit `1`); neither calls the tracker or the connector.
 
 `pg-desk pr lane-record [--input FILE]` records one run. It reads one JSON document from standard input
 (or `--input FILE`) with these members: `pr` (any reference `pr show` accepts, stored normalized), `mode`
@@ -383,8 +383,8 @@ set until a bead carries `pg-focus-planable`); a stored draft older than its per
 issues lacking a status category, which refers to the `jira status category:` line of the
 `change_flow:` section rather than repeating it.
 
-On a store not migrated for the focus tables the block is the single line `focus: unmigrated` and
-the focus checks are skipped. `doctor`'s exit code is non-zero exactly when a gate trips (or another
+On a store with no schema yet the block is the single line `focus: no data (the store has no schema yet)`
+and the focus checks are skipped; on a store left on the retired schema 1 it is a `focus: FAIL` line. `doctor`'s exit code is non-zero exactly when a gate trips (or another
 check fails).
 
 `--router-config <path>` points `doctor` at the pg-router config, read as a file (no dependency on
@@ -392,10 +392,11 @@ pg-router). `doctor` reads only: each `[[query]]`'s `trigger = { kind = "period"
 and command `argv`, and each `[[role]]`'s `name`, `enabled` and `binds`. A config that cannot be read
 or parsed fails `doctor` as a `router config` check; the checks that need no router config still run.
 
-On a store that has NOT been cut over (old schema, or none at all), `doctor` does not refuse and does
-not crash: it reports that the store is unmigrated, points at `pg-desk migrate --cutover`, skips the
-change-flow checks above, and still prints the `stranded cycles` line it
-always prints.
+On a store with no schema yet, `doctor` does not refuse and does not crash: it reports the store as
+`uninitialized`, skips the change-flow checks above, and still prints the `stranded cycles` line it
+always prints. On a store left on the retired schema 1 it reports a failure in the `change_flow` and
+`focus` sections (the store's retired-schema error) and exits non-zero; it never creates or changes the
+store.
 
 "The config resolves" includes every configured `repos[].beads_dir`: config load MUST fail —
 so every command, `serve` startup, and `doctor` exit non-zero — when a `beads_dir` does not
@@ -446,9 +447,8 @@ Exit codes: `0` whenever the store is readable; `1` when it is not.
 
 ## Verbs on a schema-2 store: the safe-verb list
 
-The cutover to store schema 2 drops the ledger and replaces the old per-column annotation table, so
-a verb written against schema 1 can fail on a migrated store, and a deployed role that runs it fails
-with it. Every leaf verb of the command tree is therefore classified, in a hand-written table beside
+Schema 2 has no ledger and no per-column annotation table, so a verb written against schema 1 can
+fail on a store, and a deployed role that runs it fails with it. Every leaf verb of the command tree is therefore classified, in a hand-written table beside
 the verb tree's test, as `safe` (it runs on a migrated store) or `unsafe` with the reason. The table
 and the tree MUST agree: a verb added without a classification fails the test, and so does a
 classification naming a verb that does not exist. Every safe verb is run, in its own process, against
@@ -456,9 +456,8 @@ a real store migrated to schema 2 under a deployment-style configuration; it pas
 without a schema or ledger error (it MAY still exit non-zero for another reason, such as a missing
 entity or no reachable connector). The unsafe verbs today are the legacy top-level `show` (replaced by
 `pr show`) and
-`migrate` (a one-shot cutover verb), and the `open` verbs (they exec the configured browser opener). The
-top-level `hide`, `unhide`, `wip` and `feedback list|set` are safe: they dispatch on the store schema
-like the typed `pr` forms. `run` (issue and thread only) is safe: it reads no ledger. `pr reinterpret` is safe: it needs only
+the `open` verbs (they exec the configured browser opener). The
+top-level `hide`, `unhide`, `wip` and `feedback list|set` are safe: they are the `pr` forms of the typed verbs. `run` (issue and thread only) is safe: it reads no ledger. `pr reinterpret` is safe: it needs only
 the version-2 tables and refuses a version-1 store before writing.
 
 The list of safe verbs is written into the package output as `share/pg-desk/safe-verbs.txt`, one verb

@@ -230,7 +230,7 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 
 // doctorPRLaneLine renders the live pr lane line with a raw store handle that
 // it closes before returning (doctor opens the store raw so it works on a store
-// in any schema state).
+// that has no schema yet).
 func doctorPRLaneLine(cfg *config.Config) string {
 	st, err := deskStoreOpenRaw()
 	if err != nil {
@@ -316,10 +316,10 @@ func runDoctor(cmd *cobra.Command) error {
 	// finding stranded cycles is not itself a failure (this is an
 	// observability report, not a gate).
 	//
-	// doctor opens the store RAW (no migrations, no version gate) so it can
-	// inspect a store in any schema state — including one that has not been
-	// cut over yet, or has no schema at all — instead of failing to open it.
-	// An unmigrated store is reported by the change_flow section below.
+	// doctor opens the store RAW (no schema creation, no version gate) so it can
+	// inspect a store that has no schema yet instead of creating it. A store
+	// left on the retired schema 1 is reported by the change_flow section
+	// below.
 	if st, err := deskStoreOpenRaw(); err != nil {
 		fmt.Fprintf(w, "stranded cycles: FAIL (open store: %v)\n", err)
 		failures = append(failures, "stranded cycles")

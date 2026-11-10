@@ -70,10 +70,10 @@ flowchart LR
 - **INV-CONSUMER-5.** <!-- uuid: cc386b66-fdc6-4aa0-9112-972655beaae0 --> For `issue`, pg-desk MUST keep the change log and its consumers' cursors for every
   backend, and the consumer named `pg-desk` MUST be serialised across the feed fetch AND the commit.
 
-## Old-schema refusal
+## Retired-schema refusal
 
-The consumer table exists only on the migrated store, so both verbs refuse an old-schema store with
-the store's error, which says to run `pg-desk migrate --cutover`, and exit `1`.
+The consumer table exists only on schema 2, so both verbs refuse a store left on the retired schema
+1 with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exit `1`.
 
 ## Exit codes
 

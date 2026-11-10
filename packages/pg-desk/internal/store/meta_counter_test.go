@@ -130,7 +130,7 @@ func TestMarkEntityInactiveCountsOnlyARealChange(t *testing.T) {
 }
 
 func TestMarkEntityInactiveRefusesAnOldSchemaStore(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+	s := OpenRetiredSchemaForTest(t)
 	if _, err := s.MarkEntityInactive("o/r", "pr", "o/r#1", "n"); err == nil {
 		t.Error("marking on a schema-1 store must fail, never silently do nothing")
 	}

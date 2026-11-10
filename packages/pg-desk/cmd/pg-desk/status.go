@@ -29,8 +29,9 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command) error {
-	// status must work on a store in ANY schema state (old, cut over, or not
-	// yet initialized), so it opens raw: no migrations, no version gate.
+	// status must work on a store that has not been initialized yet, so it
+	// opens raw (no schema creation, no version gate) rather than creating the
+	// file. A store left on the retired schema 1 is refused below.
 	st, err := deskStoreOpenRaw()
 	if err != nil {
 		return fmt.Errorf("status: open store: %w", err)
@@ -45,6 +46,9 @@ func runStatus(cmd *cobra.Command) error {
 	version, err := st.SchemaVersion()
 	if err != nil {
 		return fmt.Errorf("status: read schema version: %w", err)
+	}
+	if version > 0 && version < store.NewSchemaVersion {
+		return fmt.Errorf("status: %w", st.RequireNewSchema())
 	}
 	initialized := version > 0
 
@@ -124,12 +128,12 @@ func runStatus(cmd *cobra.Command) error {
 // interpretations are behind the running stamp, how many are marked failed
 // under it, and the counts and time of the last catch-up pass. Counts only, no
 // verdict. It reads stored state only, so it works on the raw handle status
-// opens; a store that cannot answer (schema 1, no stamp column yet, no
+// opens; a store that cannot answer (not initialized, no stamp column yet, no
 // configuration to name the repo and the stamp) reports "unknown", never 0.
 func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *config.Config) error {
 	switch {
 	case version < store.NewSchemaVersion:
-		fmt.Fprintln(w, "interpretations behind: unknown (store not on schema 2)")
+		fmt.Fprintln(w, "interpretations behind: unknown (store not initialized)")
 	case cfg == nil || len(cfg.Repos) == 0:
 		fmt.Fprintln(w, "interpretations behind: unknown (configuration unavailable)")
 	default:
@@ -171,9 +175,9 @@ func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *
 // records logged by kind and origin, hydrations, hydration failures, due
 // backlog, optimistic-concurrency retries, repeated degraded hydrations and
 // the sweep bound's inputs; and per consumer, its cursor, lag and liveness
-// (seen_at, which replaces the retired heartbeat). A store that is not on the
-// new schema has none of this data, so the section reports "unmigrated"
-// instead of failing.
+// (seen_at, which replaces the retired heartbeat). A store that has no schema
+// yet has none of this data, so the section reports "uninitialized" instead of
+// failing.
 //
 // The sweep bound active_count / N x poll_interval <= D needs the router's
 // poll interval, which pg-desk does not own and status has no router-config
@@ -182,7 +186,7 @@ func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *
 func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version int) error {
 	fmt.Fprintln(w, "change_flow:")
 	if version < store.NewSchemaVersion {
-		fmt.Fprintln(w, "  unmigrated: run pg-desk migrate --cutover")
+		fmt.Fprintln(w, "  uninitialized: the store has no schema yet")
 		return nil
 	}
 	// A config-load failure degrades to the documented defaults rather than

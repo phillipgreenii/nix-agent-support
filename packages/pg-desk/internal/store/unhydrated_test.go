@@ -27,9 +27,6 @@ func TestCountPRUnhydrated(t *testing.T) {
 	seed("pr", "o/r#7", `{"pr_show":{"state":"open"}}`, "2026-09-01T00:00:00Z") // made inactive below
 	seed("pr", "o/r#8", `{"pr_show":{"state":"open"}}`, "2026-09-01T00:00:00Z") // hidden: false below, counted
 	seed("issue", "i-1", `{}`, "2026-09-01T00:00:00Z")                          // not a pr
-	if err := s.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	mustExec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := s.sql.Exec(q, args...); err != nil {
@@ -61,7 +58,7 @@ func TestCountPRUnhydratedEmptySetAndReadFailure(t *testing.T) {
 	}
 	// A schema-1 store has no version or active column: the read fails and
 	// the failure is returned, never folded into a zero count.
-	old := OpenSchema1ForTest(t)
+	old := OpenRetiredSchemaForTest(t)
 	if got, err := old.CountPRUnhydrated(time.Now()); err == nil {
 		t.Errorf("schema-1 store: got %+v with no error; a failed read must be an error", got)
 	}

@@ -43,27 +43,12 @@ func TestHideUnhideRoundTrip(t *testing.T) {
 	if err := runCmdArgs(t, "hide", []string{"42", "noisy PR"}); err != nil {
 		t.Fatalf("hide: %v", err)
 	}
-	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
-	if err != nil || !found {
-		t.Fatalf("GetPRAnnotation after hide: found=%v err=%v", found, err)
-	}
-	if ann.Hidden == nil || !*ann.Hidden {
-		t.Fatalf("hidden = %v, want true", ann.Hidden)
-	}
-	if ann.HiddenReason != "noisy PR" {
-		t.Fatalf("hidden_reason = %q, want %q", ann.HiddenReason, "noisy PR")
-	}
+	wantKV(t, st, "o/r", "o/r#42", store.AnnotationHidden, `{"value":true,"reason":"noisy PR"}`)
 
 	if err := runCmdArgs(t, "unhide", []string{"42"}); err != nil {
 		t.Fatalf("unhide: %v", err)
 	}
-	ann, found, err = st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
-	if err != nil || !found {
-		t.Fatalf("GetPRAnnotation after unhide: found=%v err=%v", found, err)
-	}
-	if ann.Hidden == nil || *ann.Hidden {
-		t.Fatalf("hidden after unhide = %v, want false", ann.Hidden)
-	}
+	wantKV(t, st, "o/r", "o/r#42", store.AnnotationHidden, `{"value":false,"reason":null}`)
 }
 
 func TestHideUnknownPRFails(t *testing.T) {
@@ -112,18 +97,12 @@ func TestWIPOnOffRoundTrip(t *testing.T) {
 	if err := runCmdArgs(t, "wip", []string{"on", "42"}); err != nil {
 		t.Fatalf("wip on: %v", err)
 	}
-	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
-	if err != nil || !found || ann.WIP == nil || !*ann.WIP {
-		t.Fatalf("after wip on: found=%v ann=%+v err=%v", found, ann, err)
-	}
+	wantKV(t, st, "o/r", "o/r#42", store.AnnotationWIP, "true")
 
 	if err := runCmdArgs(t, "wip", []string{"off", "42"}); err != nil {
 		t.Fatalf("wip off: %v", err)
 	}
-	ann, found, err = st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
-	if err != nil || !found || ann.WIP == nil || *ann.WIP {
-		t.Fatalf("after wip off: found=%v ann=%+v err=%v", found, ann, err)
-	}
+	wantKV(t, st, "o/r", "o/r#42", store.AnnotationWIP, "false")
 }
 
 func TestWIPRejectsInvalidState(t *testing.T) {
@@ -137,9 +116,8 @@ func TestWIPRejectsInvalidState(t *testing.T) {
 	}
 }
 
-// TestHideDoesNotClobberWIP proves setHiddenAnnotation preserves an
-// existing wip flag (store-schema.md: annotation rows carry both fields
-// independently, and a hide/unhide write must not clobber wip).
+// TestHideDoesNotClobberWIP proves hide leaves an existing wip annotation
+// alone (store-schema.md: hidden and wip are independent annotation keys).
 func TestHideDoesNotClobberWIP(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
@@ -152,16 +130,8 @@ func TestHideDoesNotClobberWIP(t *testing.T) {
 	if err := runCmdArgs(t, "hide", []string{"42"}); err != nil {
 		t.Fatalf("hide: %v", err)
 	}
-	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
-	if err != nil || !found {
-		t.Fatalf("GetPRAnnotation: found=%v err=%v", found, err)
-	}
-	if ann.WIP == nil || !*ann.WIP {
-		t.Errorf("hide clobbered wip: %+v", ann)
-	}
-	if ann.Hidden == nil || !*ann.Hidden {
-		t.Errorf("hide did not set hidden: %+v", ann)
-	}
+	wantKV(t, st, "o/r", "o/r#42", store.AnnotationWIP, "true")
+	wantKV(t, st, "o/r", "o/r#42", store.AnnotationHidden, `{"value":true,"reason":null}`)
 }
 
 // pg2-ifsje: the top-level hide/unhide/wip verbs used to read the old

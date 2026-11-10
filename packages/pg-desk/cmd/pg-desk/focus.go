@@ -273,8 +273,8 @@ func openFocusEnv(cmd *cobra.Command, writing bool) (*focusEnv, error) {
 	if err != nil {
 		if errors.Is(err, store.ErrOldSchema) {
 			return nil, focusUsageError(
-				"focus: the store is not migrated for the focus tables ("+err.Error()+"); nothing was applied",
-				"run pg-desk migrate --cutover, then re-run",
+				"focus: the store is on a retired schema ("+err.Error()+"); nothing was applied",
+				"migrate the store with a release that still has pg-desk migrate --cutover, then re-run",
 			)
 		}
 		return nil, focusUsageError(err.Error(), "check the pg-desk store path and permissions, then re-run")

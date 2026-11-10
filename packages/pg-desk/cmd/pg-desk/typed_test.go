@@ -116,7 +116,7 @@ func TestMainExitsWithTypedVerbCode(t *testing.T) {
 }
 
 func TestRequireNewSchemaForTypedVerbRefusesOldSchema(t *testing.T) {
-	old, err := store.Open(storeAtVersion(t, "old"))
+	old, err := store.OpenRaw(storeAtVersion(t, "old"))
 	if err != nil {
 		t.Fatal(err)
 	}

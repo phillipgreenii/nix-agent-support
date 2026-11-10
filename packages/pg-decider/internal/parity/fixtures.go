@@ -6,7 +6,7 @@
 // This package never imports another Go module's internal packages. It EXECS the
 // built binaries:
 //
-//   - RunNew loads a fixture into a fresh store (pg-desk migrate --cutover, then
+//   - RunNew loads a fixture into a fresh store (a fresh schema-2 store, then
 //     pg-desk pr refresh) and runs pg-decider plan. The gate uses only this side.
 //
 // The old-side runner (the pre-cutover pg-desk run with sync.mode = plan) and
@@ -103,9 +103,8 @@ type Fixture struct {
 	// old side has no such notion and ignores it.
 	FocusSelected map[string]string `json:"focus_selected,omitempty"`
 	// LegacySeeded lists evaluated entities whose store row is written the
-	// legacy way by the store helper (SeedLegacyRow): the row an old-schema
-	// store held when the cutover ran, which the cutover leaves at version 0
-	// and never hydrated. The new side checks the decider REFUSES such an
+	// legacy way by the store helper (seedLegacyRow): a row at version 0 that
+	// was never hydrated. The new side checks the decider REFUSES such an
 	// entity before the refresh and plans it correctly after it. The old side
 	// ignores the field (`run pr` builds its own rows).
 	LegacySeeded []string `json:"legacy_seeded,omitempty"`

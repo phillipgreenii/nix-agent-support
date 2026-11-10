@@ -25,6 +25,7 @@ func seedFeedbackPR(t *testing.T, st *store.Store, repo, id string, dispositions
 	if err != nil {
 		t.Fatalf("marshal dispositions: %v", err)
 	}
+	seedBareEntity(t, st, repo, id)
 	if err := st.UpsertInterpretation(store.Interpretation{
 		Repo: repo, EntityType: entityTypePR, EntityID: id,
 		Dispositions: string(b), AsOf: "2026-09-16T00:00:00Z",
@@ -96,13 +97,7 @@ func TestFeedbackSetOverridesSurviveList(t *testing.T) {
 		t.Fatalf("feedback set: %v", err)
 	}
 
-	ann, found, err := st.GetAnnotation("o/r", entityTypePR, "o/r#42", "c1")
-	if err != nil || !found {
-		t.Fatalf("GetAnnotation: found=%v err=%v", found, err)
-	}
-	if ann.Disposition != dispositionWillFix {
-		t.Fatalf("disposition = %q, want %q", ann.Disposition, dispositionWillFix)
-	}
+	ann := wantKV(t, st, "o/r", "o/r#42", store.KeyDisposition("c1"), dispositionWillFix)
 	if ann.SetBy != "pg-desk" {
 		t.Fatalf("set_by = %q, want the configured actor", ann.SetBy)
 	}
@@ -155,10 +150,7 @@ func TestFeedbackSetExplicitActorOverridesConfig(t *testing.T) {
 	if err := runFeedbackSetCmd(t, "42", "c1", dispositionWontFix, "operator"); err != nil {
 		t.Fatalf("feedback set: %v", err)
 	}
-	ann, found, err := st.GetAnnotation("o/r", entityTypePR, "o/r#42", "c1")
-	if err != nil || !found {
-		t.Fatalf("GetAnnotation: found=%v err=%v", found, err)
-	}
+	ann := wantKV(t, st, "o/r", "o/r#42", store.KeyDisposition("c1"), dispositionWontFix)
 	if ann.SetBy != "operator" {
 		t.Fatalf("set_by = %q, want the explicit --actor", ann.SetBy)
 	}

@@ -62,13 +62,7 @@ func TestShowJSONIncludesWIP(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}
-	w := true
-	if err := st.UpsertAnnotation(store.Annotation{
-		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
-		WIP: &w, SetBy: "operator", SetAt: "2026-09-16T00:00:00Z",
-	}); err != nil {
-		t.Fatalf("seed annotation: %v", err)
-	}
+	seedKVAnnotation(t, st, "o/r", "o/r#42", store.AnnotationWIP, "true")
 
 	stdout, err := runShowCmd(t, "42", showCmdFlags{jsonOut: true})
 	if err != nil {

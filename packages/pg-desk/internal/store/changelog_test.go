@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -88,17 +87,9 @@ func TestWriteEntityWithLog_StaleVersionConflicts(t *testing.T) {
 	}
 }
 
-func TestWriteEntityWithLog_AdoptsCutoverRowAtVersionZero(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pre.db")
-	buildSyntheticPreMigrationDB(t, path)
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = s.Close() }()
-	if err := s.Cutover(); err != nil {
-		t.Fatal(err)
-	}
+func TestWriteEntityWithLog_AdoptsRowAtVersionZero(t *testing.T) {
+	s := OpenForTest(t)
+	s.SeedEntityForTest(t, Entity{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#1", Facts: `{}`, AsOf: "2026-09-20T00:00:00Z", ContentHash: "h"})
 	e, found, err := s.GetEntity("acme/widgets", "pr", "acme/widgets#1")
 	if err != nil || !found || e.Version != 0 {
 		t.Fatalf("migrated entity = (%+v, %v, %v)", e, found, err)
@@ -111,7 +102,7 @@ func TestWriteEntityWithLog_AdoptsCutoverRowAtVersionZero(t *testing.T) {
 }
 
 func TestWriteEntityWithLog_RefusesOldSchema(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+	s := OpenRetiredSchemaForTest(t)
 	_, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"x"}, "sync", "t")
 	if !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
@@ -377,7 +368,7 @@ func TestLatestChangeAt_PerEntityMaxTypeScopedAndAbsentWhenNoRows(t *testing.T) 
 }
 
 func TestLatestChangeAt_RefusesOldSchema(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+	s := OpenRetiredSchemaForTest(t)
 	if _, err := s.LatestChangeAt("pr"); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
 	}

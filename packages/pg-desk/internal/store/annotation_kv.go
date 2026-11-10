@@ -2,13 +2,13 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 )
 
-// The key/value annotation API (schema version 2 only). It sits beside the
-// old per-column API in annotation.go, which keeps working on version 1.
+// The key/value annotation API: the only annotation shape the store has.
 //
 // Every write appends an annotation_changed change_log record in the same
 // transaction, so a failed append rolls the annotation write back. An
@@ -272,4 +272,33 @@ func (s *Store) ListKVAnnotations(repo, entityType, entityID string) ([]KVAnnota
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+// PRHiddenWIP returns an entity's hidden flag, hidden reason and wip flag from
+// the hidden and wip key/value annotations. An entity with no annotation is
+// not hidden and not wip. Callers that only need these three facts use it
+// instead of reading the annotations directly.
+func (s *Store) PRHiddenWIP(repo, entityType, entityID string) (hidden bool, reason string, wip bool, err error) {
+	h, found, err := s.GetKVAnnotation(repo, entityType, entityID, AnnotationHidden)
+	if err != nil {
+		return false, "", false, err
+	}
+	if found {
+		var v struct {
+			Value  bool    `json:"value"`
+			Reason *string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(h.Value), &v); err != nil {
+			return false, "", false, fmt.Errorf("store: decode hidden annotation (%s,%s,%s): %w", repo, entityType, entityID, err)
+		}
+		hidden = v.Value
+		if v.Reason != nil {
+			reason = *v.Reason
+		}
+	}
+	w, found, err := s.GetKVAnnotation(repo, entityType, entityID, AnnotationWIP)
+	if err != nil {
+		return false, "", false, err
+	}
+	return hidden, reason, found && w.Value == "true", nil
 }

@@ -2,7 +2,6 @@ package links
 
 import (
 	"encoding/json"
-	"errors"
 	"sort"
 	"strings"
 	"unicode"
@@ -75,35 +74,29 @@ type LinkedReader interface {
 // On a migrated store (schema version 2) it reads the origin/relation xref
 // API; legacy pr-to-issue rows (relation "references") are folded into the
 // "jira" relation so they merge with the derived jira-key claim for the same
-// edge. On an unmigrated store it degrades: degraded is true and only the
-// legacy pr-to-issue rows are returned (a pr's issues, an issue's prs), all
-// as relation "jira". Callers wanting a different shape (the Phase 6 `show`
+// edge. A store that is not on schema 2 is refused with the store's error.
+// Callers wanting a different shape (the Phase 6 `show`
 // composite view) add fields on top of Linked rather than re-reading the
 // xref table.
-func ReadLinked(st LinkedReader, repo, entityType, id string) (linked []Linked, degraded bool, err error) {
-	linked, _, degraded, err = readLinkedAsOf(st, repo, entityType, id)
-	return linked, degraded, err
+func ReadLinked(st LinkedReader, repo, entityType, id string) ([]Linked, error) {
+	linked, _, err := readLinkedAsOf(st, repo, entityType, id)
+	return linked, err
 }
 
 // readLinkedAsOf is ReadLinked plus linksAsOf: the newest last_confirmed among
-// the stored edge rows read ("" when there are none, or on a degraded read,
-// where the legacy rows carry no such time). It is the one linked-entity read
+// the stored edge rows read ("" when there are none). It is the one linked-entity read
 // both ReadLinked and ReadDetailed use.
-func readLinkedAsOf(st LinkedReader, repo, entityType, id string) (linked []Linked, linksAsOf string, degraded bool, err error) {
+func readLinkedAsOf(st LinkedReader, repo, entityType, id string) (linked []Linked, linksAsOf string, err error) {
 	if err := st.RequireNewSchema(); err != nil {
-		if !errors.Is(err, store.ErrOldSchema) {
-			return nil, "", false, err
-		}
-		l, derr := readLinkedLegacy(st, repo, entityType, id)
-		return l, "", true, derr
+		return nil, "", err
 	}
 	out, err := st.ListXrefLinksFrom(repo, entityType, id)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", err
 	}
 	in, err := st.ListXrefLinksTo(repo, entityType, id)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", err
 	}
 	for _, l := range append(append([]store.XrefLink(nil), out...), in...) {
 		if l.LastConfirmed > linksAsOf {
@@ -163,36 +156,7 @@ func readLinkedAsOf(st LinkedReader, repo, entityType, id string) (linked []Link
 		sort.SliceStable(e.Origins, func(i, j int) bool { return e.Origins[i].Origin < e.Origins[j].Origin })
 		linked = append(linked, *e)
 	}
-	return linked, linksAsOf, false, nil
-}
-
-// readLinkedLegacy serves an unmigrated store: only the legacy pr-to-issue
-// ticket-key rows exist there.
-func readLinkedLegacy(st LinkedReader, repo, entityType, id string) ([]Linked, error) {
-	var out []Linked
-	switch entityType {
-	case entityTypePR:
-		rows, err := st.ListXrefsByFrom(repo, entityTypePR, id, entityTypeIssue)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range rows {
-			out = append(out, Linked{Direction: DirOut, Type: entityTypeIssue, ID: r.ToID, Relation: relationJira, Origins: []Origin{{Origin: legacyOrigin}}})
-		}
-	case entityTypeIssue:
-		rows, err := st.ListXrefsByTo(repo, entityTypeIssue, id)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range rows {
-			if r.FromType != entityTypePR {
-				continue
-			}
-			out = append(out, Linked{Direction: DirIn, Type: entityTypePR, ID: r.FromID, Relation: relationJira, Origins: []Origin{{Origin: legacyOrigin}}})
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return linked, linksAsOf, nil
 }
 
 // SnapshotURL returns the web URL stored in an entity's gathered facts JSON,

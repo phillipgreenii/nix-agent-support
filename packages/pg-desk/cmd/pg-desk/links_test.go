@@ -36,9 +36,6 @@ func linksFixture(t *testing.T, cutover bool) (string, *config.Config) {
 		t.Fatal(err)
 	}
 	if cutover {
-		if err := st.Cutover(); err != nil {
-			t.Fatal(err)
-		}
 		if err := st.ReplaceDerivedXrefs("acme/api", "pr", "acme/api#123", []store.XrefLink{{
 			Repo: "acme/api", FromType: "pr", FromID: "acme/api#123", ToType: "issue", ToID: "ABC-42",
 			Relation: "jira", Origin: "derived:jira-key", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
@@ -121,7 +118,7 @@ func TestLinksVerbArgsAndStdinProduceSchemaV1(t *testing.T) {
 				t.Fatalf("links: %v", err)
 			}
 			r := decodeLinks(t, out)
-			if r.SchemaVersion != 1 || r.AsOf != "2026-10-01T10:00:00Z" || r.Degraded {
+			if r.SchemaVersion != 1 || r.AsOf != "2026-10-01T10:00:00Z" {
 				t.Errorf("envelope = %+v", r)
 			}
 			pr := r.Items["pr:acme/api#123"]
@@ -161,25 +158,12 @@ func TestLinksVerbDoesNotWriteTheStore(t *testing.T) {
 	}
 }
 
-func TestLinksVerbDegradesOnUnmigratedStore(t *testing.T) {
-	path, cfg := linksFixture(t, false)
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.UpsertXref(store.Xref{Repo: "acme/api", FromType: "pr", FromID: "acme/api#123", ToType: "issue", ToID: "ABC-42", Evidence: "title", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"}); err != nil {
-		t.Fatal(err)
-	}
-	_ = st.Close()
-	withLinksSeams(t, cfg, func() (*store.Store, error) { return store.OpenReadOnly(path) })
-
-	out, err := runLinks(t, "", []string{"json"}, "pr:acme/api#123")
-	if err != nil {
-		t.Fatalf("links on an unmigrated store must not fail: %v", err)
-	}
-	r := decodeLinks(t, out)
-	if !r.Degraded || len(r.Items["pr:acme/api#123"].Links) != 2 {
-		t.Errorf("result = %+v; want degraded with self + Jira link", r)
+// A store that is not on schema 2 is refused with the store's error.
+func TestLinksVerbRefusesRetiredSchemaStore(t *testing.T) {
+	_, cfg := linksFixture(t, true)
+	withLinksSeams(t, cfg, func() (*store.Store, error) { return store.OpenRetiredSchemaForTest(t), nil })
+	if _, err := runLinks(t, "", []string{"json"}, "pr:acme/api#123"); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("links on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }
 
@@ -253,9 +237,6 @@ func TestLinksVerbBuildLinksHonorConfigCheckInterpreters(t *testing.T) {
 			`{"id":"1","name":"policy-bot: approvals","status":"completed","conclusion":"failure","head_sha":"h","attempt":1,"url":"https://ci.example.invalid/run/1"},` +
 			`{"id":"2","name":"unit-tests","status":"completed","conclusion":"failure","head_sha":"h","attempt":1,"url":"https://ci.example.invalid/run/2"}]}}`,
 	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Cutover(); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {

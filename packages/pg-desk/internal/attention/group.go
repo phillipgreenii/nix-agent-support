@@ -63,7 +63,7 @@ func groupOf(in Inputs, v *View) (groupAnchor, error) {
 	if v.Type != typePR {
 		return own, nil
 	}
-	linked, _, err := links.ReadLinked(in.Store, v.Repo, v.Type, v.ID)
+	linked, err := links.ReadLinked(in.Store, v.Repo, v.Type, v.ID)
 	if err != nil {
 		return groupAnchor{}, err
 	}

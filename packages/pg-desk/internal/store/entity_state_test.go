@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -154,17 +153,9 @@ func TestWriteEntityStateWithLog_StaleVersionConflicts(t *testing.T) {
 	}
 }
 
-func TestWriteEntityStateWithLog_AdoptsCutoverRowAtVersionZero(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pre.db")
-	buildSyntheticPreMigrationDB(t, path)
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = s.Close() }()
-	if err := s.Cutover(); err != nil {
-		t.Fatal(err)
-	}
+func TestWriteEntityStateWithLog_AdoptsRowAtVersionZero(t *testing.T) {
+	s := OpenForTest(t)
+	s.SeedEntityForTest(t, Entity{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#1", Facts: `{}`, AsOf: "2026-09-20T00:00:00Z", ContentHash: "h"})
 	e, found, err := s.GetEntity("acme/widgets", "pr", "acme/widgets#1")
 	if err != nil || !found || e.Version != 0 || e.HydratedAt != "" || e.Inactive {
 		t.Fatalf("migrated entity = (%+v, %v, %v)", e, found, err)
@@ -237,7 +228,7 @@ func TestWriteEntityStateWithLog_RacingWritersExactlyOneWins(t *testing.T) {
 }
 
 func TestWriteEntityStateWithLog_RefusesOldSchema(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+	s := OpenRetiredSchemaForTest(t)
 	_, err := s.WriteEntityStateWithLog(clEntity("a"), 0, hydratedStamp, true, []string{"x"}, "sync", "t")
 	if !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
@@ -278,7 +269,7 @@ func TestAppendEntityChange_AbsentEntityAndOldSchema(t *testing.T) {
 	if n := changeCount(t, s); n != 0 {
 		t.Fatalf("change_log rows = %d, want 0", n)
 	}
-	old := OpenSchema1ForTest(t)
+	old := OpenRetiredSchemaForTest(t)
 	if _, err := old.AppendEntityChange(clRepo, clType, clID, []string{"x"}, "o", "t"); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("old-schema err = %v, want ErrOldSchema", err)
 	}
@@ -403,12 +394,12 @@ func TestWriteEntityStateWithLogFP_NilListFPPreservesStoredValue(t *testing.T) {
 }
 
 func TestWriteEntityStateWithLogFP_RefusesOldSchema(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+	s := OpenRetiredSchemaForTest(t)
 	if _, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, hydratedStamp, true, strp("fp"), []string{"x"}, "sync", "t1"); err == nil {
 		t.Fatal("old-schema FP write succeeded, want refusal")
 	}
 	got, found, err := s.GetEntity(clRepo, clType, clID)
-	if err != nil || found || got.ListFP != "" {
-		t.Fatalf("old-schema read = (%+v, %v, %v)", got, found, err)
+	if err == nil || found || got.ListFP != "" {
+		t.Fatalf("old-schema read = (%+v, %v, %v), want no row and an error (no entity table)", got, found, err)
 	}
 }

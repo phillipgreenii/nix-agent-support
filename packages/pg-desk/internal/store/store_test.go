@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,13 +72,13 @@ func TestDefaultPathHonoursXDGStateHomeAndCreatesOnFirstRun(t *testing.T) {
 	}
 }
 
-// TestMigrateCreatesAllSixTables asserts the acceptance criterion "All six
-// tables exist per migration; xref exists but is never written by this
-// packet."
-func TestMigrateCreatesAllSixTables(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+// TestOpenCreatesEveryTable asserts that a fresh store has every table of
+// schema 2 (the full column shape is compared with a golden by
+// TestFreshStoreShape).
+func TestOpenCreatesEveryTable(t *testing.T) {
+	s := OpenForTest(t)
 
-	want := []string{"entity", "interpretation", "xref", "annotation", "ledger", "meta"}
+	want := []string{"entity", "interpretation", "xref", "annotation", "meta", "change_log", "consumer", "ingest_failed", "focus_period", "focus_selection", "focus_draft", "focus_run"}
 	for _, table := range want {
 		var name string
 		err := s.sql.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name)
@@ -89,11 +88,10 @@ func TestMigrateCreatesAllSixTables(t *testing.T) {
 	}
 }
 
-// TestMigrateIsIdempotentAndMirrorsSchemaVersion re-opens an already
-// migrated database (the "migration ladder" case: a store opened when
-// user_version already equals schemaVersion must not re-apply migrations
-// or error) and checks that migrate mirrors schemaVersion into meta.
-func TestMigrateIsIdempotentAndMirrorsSchemaVersion(t *testing.T) {
+// TestReopenIsIdempotentAndKeepsSchemaVersion re-opens an already created
+// database (a store opened when user_version already equals schemaVersion must
+// not re-create anything or error) and checks that meta carries the version.
+func TestReopenIsIdempotentAndKeepsSchemaVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	s1, err := Open(dbPath)
@@ -125,13 +123,13 @@ func TestMigrateIsIdempotentAndMirrorsSchemaVersion(t *testing.T) {
 	if !found {
 		t.Fatalf("meta.schema_version not set")
 	}
-	if value != "1" {
-		t.Fatalf("meta.schema_version = %q, want %q", value, "1")
+	if value != "2" {
+		t.Fatalf("meta.schema_version = %q, want %q", value, "2")
 	}
 }
 
 func TestEntityRoundTrip(t *testing.T) {
-	s := OpenSchema1ForTest(t)
+	s := OpenForTest(t)
 
 	e := Entity{
 		Repo:        "owner/repo",
@@ -154,6 +152,8 @@ func TestEntityRoundTrip(t *testing.T) {
 	if !found {
 		t.Fatalf("GetEntity: not found")
 	}
+	// first_seen_at is stamped once, from as_of, by the first insert.
+	e.FirstSeenAt = e.AsOf
 	if got != e {
 		t.Fatalf("GetEntity round-trip = %+v, want %+v", got, e)
 	}
@@ -295,148 +295,6 @@ func TestXrefRoundTrip(t *testing.T) {
 	}
 	if got != x {
 		t.Fatalf("GetXref round-trip = %+v, want %+v", got, x)
-	}
-}
-
-func TestAnnotationRoundTripPRLevelAndCommentLevel(t *testing.T) {
-	s := OpenSchema1ForTest(t)
-
-	hidden := true
-	prLevel := Annotation{
-		Repo:         "owner/repo",
-		EntityType:   "pull_request",
-		EntityID:     "42",
-		CommentID:    "",
-		Hidden:       &hidden,
-		HiddenReason: "not ready",
-		SetBy:        "phillipgreenii",
-		SetAt:        "2026-09-16T00:00:00Z",
-	}
-	if err := s.UpsertAnnotation(prLevel); err != nil {
-		t.Fatalf("UpsertAnnotation (PR-level): %v", err)
-	}
-
-	got, found, err := s.GetPRAnnotation(prLevel.Repo, prLevel.EntityType, prLevel.EntityID)
-	if err != nil {
-		t.Fatalf("GetPRAnnotation: %v", err)
-	}
-	if !found {
-		t.Fatalf("GetPRAnnotation: not found")
-	}
-	if got.Repo != prLevel.Repo || got.HiddenReason != prLevel.HiddenReason ||
-		got.Hidden == nil || *got.Hidden != true || got.WIP != nil {
-		t.Fatalf("GetPRAnnotation round-trip = %+v, want %+v", got, prLevel)
-	}
-
-	commentLevel := Annotation{
-		Repo:        "owner/repo",
-		EntityType:  "pull_request",
-		EntityID:    "42",
-		CommentID:   "c-123",
-		Disposition: "will-fix",
-		SetBy:       "phillipgreenii",
-		SetAt:       "2026-09-16T00:05:00Z",
-	}
-	if err := s.UpsertAnnotation(commentLevel); err != nil {
-		t.Fatalf("UpsertAnnotation (comment-level): %v", err)
-	}
-
-	got2, found2, err := s.GetAnnotation(commentLevel.Repo, commentLevel.EntityType, commentLevel.EntityID, commentLevel.CommentID)
-	if err != nil {
-		t.Fatalf("GetAnnotation: %v", err)
-	}
-	if !found2 {
-		t.Fatalf("GetAnnotation: not found")
-	}
-	if got2.Disposition != commentLevel.Disposition || got2.Hidden != nil || got2.WIP != nil {
-		t.Fatalf("GetAnnotation round-trip = %+v, want %+v", got2, commentLevel)
-	}
-
-	// The PR-level and comment-level rows must be independent.
-	prAgain, found3, err := s.GetPRAnnotation(prLevel.Repo, prLevel.EntityType, prLevel.EntityID)
-	if err != nil || !found3 {
-		t.Fatalf("GetPRAnnotation after comment-level write: found=%v err=%v", found3, err)
-	}
-	if prAgain.HiddenReason != prLevel.HiddenReason {
-		t.Fatalf("PR-level annotation mutated by comment-level write: %+v", prAgain)
-	}
-}
-
-// ledgerRowForTest is one row of the version-1 ledger table, written by raw
-// SQL: the Go accessors went with the sync stage (PR lane refactor, packet
-// P9a-2), but the table stays in the schema ladder until the schema-2 cutover
-// drops it, and the cutover and column-ensure tests still need rows in it.
-type ledgerRowForTest struct {
-	Repo, EntityType, EntityID, Kind, BeadID string
-	LastSyncedContentHash, LastSyncedAt      string
-	LastReviewedHeadSHA                      string
-}
-
-// seedLedgerRowForTest inserts r into s's ledger table (a version-1 store).
-func seedLedgerRowForTest(t *testing.T, s *Store, r ledgerRowForTest) {
-	t.Helper()
-	if _, err := s.sql.Exec(
-		`INSERT INTO ledger (repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.Repo, r.EntityType, r.EntityID, r.Kind, r.BeadID,
-		nullableString(r.LastSyncedContentHash), nullableString(r.LastSyncedAt), nullableString(r.LastReviewedHeadSHA),
-	); err != nil {
-		t.Fatalf("seed ledger row: %v", err)
-	}
-}
-
-// TestOpenAddsLedgerSettleColumnsToOldStore: a version-1 store written before
-// bead pg2-a9yhn has a ledger table without the review-settle columns; Open
-// adds them (keeping existing rows, readable as empty settle state), stays at
-// user_version 1, and a second Open is a no-op.
-func TestOpenAddsLedgerSettleColumnsToOldStore(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	old := ledgerRowForTest{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Kind: "review-request", BeadID: "b-1", LastReviewedHeadSHA: "aaaa"}
-	seedLedgerRowForTest(t, s, old)
-	for _, col := range []string{"first_seen_head_sha", "first_seen_head_at"} {
-		if _, err := s.sql.Exec(`ALTER TABLE ledger DROP COLUMN ` + col); err != nil {
-			t.Fatalf("simulate old store: drop %s: %v", col, err)
-		}
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	for i := 0; i < 2; i++ {
-		s2, err := Open(path)
-		if err != nil {
-			t.Fatalf("Open #%d: %v", i, err)
-		}
-		cols := tableColumns(t, s2, "ledger")
-		for _, want := range []string{"first_seen_head_sha", "first_seen_head_at"} {
-			found := false
-			for _, c := range cols {
-				found = found || c == want
-			}
-			if !found {
-				t.Errorf("Open #%d: ledger columns %v lack %s", i, cols, want)
-			}
-		}
-		if v, err := s2.SchemaVersion(); err != nil || v != 1 {
-			t.Errorf("Open #%d: SchemaVersion = %d, %v; want 1 (the column ensure is not a ladder rung)", i, v, err)
-		}
-		var beadID, headSHA string
-		var firstSeen sql.NullString
-		if err := s2.sql.QueryRow(
-			`SELECT bead_id, last_reviewed_head_sha, first_seen_head_sha FROM ledger WHERE repo = ? AND entity_type = ? AND entity_id = ? AND kind = ?`,
-			old.Repo, old.EntityType, old.EntityID, old.Kind,
-		).Scan(&beadID, &headSHA, &firstSeen); err != nil {
-			t.Errorf("Open #%d: read the old ledger row: %v", i, err)
-		} else if beadID != old.BeadID || headSHA != old.LastReviewedHeadSHA || firstSeen.Valid {
-			t.Errorf("Open #%d: ledger row = (%q, %q, %v); want (%q, %q, empty settle state)", i, beadID, headSHA, firstSeen, old.BeadID, old.LastReviewedHeadSHA)
-		}
-		if err := s2.Close(); err != nil {
-			t.Fatalf("Close #%d: %v", i, err)
-		}
 	}
 }
 

@@ -27,7 +27,7 @@ flowchart LR
 ## Behavior
 
 - **Local store only.** The verb reads pg-desk's own store. It does not call pg-connector, does not
-  hydrate, and refuses an old-schema store with the same cutover message as `<type> changes`.
+  hydrate, and refuses a store left on the retired schema 1 with the same error as `<type> changes`.
 - **What is scanned and what is printed.** The verb reads the change-log rows of `<type>` past the
   consumer's cursor, in ascending sequence, and prints an item only for a row whose kind is
   `annotation_changed`; a row of another kind, among them a `pr`'s history-only
@@ -92,7 +92,7 @@ grows on purpose then.
 - **INV-ANNITEMS-4.** <!-- uuid: d6d81434-92d2-4ede-abf7-06565a90a0ae --> A consumer of this verb MUST be named with the `annotations:` prefix, `<type> changes` MUST
   refuse that prefix, and a consumer's first registration through this verb MUST start at the type's
   current maximum sequence, while `<type> changes` consumers keep starting at `0`.
-- **INV-ANNITEMS-5.** <!-- uuid: 6452f2dc-9023-4343-848e-62977f235dc2 --> The verb MUST read the local store only (no pg-connector call, no hydration), MUST refuse an
-  old-schema store, and MUST exist for every entity type.
+- **INV-ANNITEMS-5.** <!-- uuid: 6452f2dc-9023-4343-848e-62977f235dc2 --> The verb MUST read the local store only (no pg-connector call, no hydration), MUST refuse a
+  store left on the retired schema 1, and MUST exist for every entity type.
 - **INV-ANNITEMS-6.** <!-- uuid: 9fc417f5-6d2a-46b3-bba1-3c065fbf9e2a --> `expiresAt` MUST be present on an item if and only if `--retry-window` was given, and then
   MUST be the time of the call plus the window.

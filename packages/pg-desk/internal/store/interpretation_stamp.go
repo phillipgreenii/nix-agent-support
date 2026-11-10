@@ -49,21 +49,6 @@ func ensureInterpretationStamp(s *Store) error {
 	return nil
 }
 
-// interpShape reports the two facts every interpretation query decides from
-// before it is issued: whether the store is on schema 2 and whether the table
-// has the stamp column.
-func (s *Store) interpShape() (newSchema, haveStamp bool, err error) {
-	newSchema, err = s.isNewSchema()
-	if err != nil {
-		return false, false, err
-	}
-	haveStamp, err = s.hasInterpStampColumn()
-	if err != nil {
-		return false, false, err
-	}
-	return newSchema, haveStamp, nil
-}
-
 // hasInterpStampColumn reports whether the interpretation table has the stamp
 // column: false for a store a read-only or raw open reached before any Open of
 // the binary that adds it. Called before a query is issued, never while a
@@ -109,9 +94,8 @@ type InterpretationKey struct {
 // (stamp + FailedStampSuffix). At most limit keys are returned (limit <= 0
 // means no limit).
 //
-// known is false, with no error, when the answer cannot be given: the store is
-// not on schema 2, or its interpretation table has no stamp column yet (a
-// reader that never ran Open). "Unknown" is never "none behind": callers (the
+// known is false, with no error, when the answer cannot be given: the
+// interpretation table has no stamp column yet (a reader that never ran Open). "Unknown" is never "none behind": callers (the
 // status line) report it as unknown. The handle must carry a stamp, else
 // ErrNoInterpStamp.
 //
@@ -125,11 +109,11 @@ func (s *Store) InterpretationsBehind(repo string, limit int) (keys []Interpreta
 	if stamp == "" {
 		return nil, false, ErrNoInterpStamp
 	}
-	newSchema, haveStamp, err := s.interpShape()
+	haveStamp, err := s.hasInterpStampColumn()
 	if err != nil {
 		return nil, false, fmt.Errorf("store: interpretations behind: %w", err)
 	}
-	if !newSchema || !haveStamp {
+	if !haveStamp {
 		return nil, false, nil
 	}
 	q := `SELECT i.repo, i.entity_type, i.entity_id

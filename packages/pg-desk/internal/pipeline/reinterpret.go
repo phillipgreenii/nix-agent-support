@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,6 +65,12 @@ func ReinterpretStored(ctx context.Context, st *store.Store, cfg *config.Config,
 	repo := repoOf(cfg)
 	if err := ctx.Err(); err != nil {
 		return ReinterpretResult{}, TagStage(StageLoadFacts, fmt.Errorf("pipeline: reinterpret %s %s: %w", entityType, entityID, err))
+	}
+	// A retired schema is refused up front; any other failure of the check
+	// (an unreadable handle) surfaces from the entity read below, tagged as
+	// the load it is.
+	if err := st.RequireNewSchema(); errors.Is(err, store.ErrOldSchema) {
+		return ReinterpretResult{}, TagStage(StageStore, fmt.Errorf("pipeline: reinterpret %s %s: %w", entityType, entityID, err))
 	}
 	entity, found, err := st.GetEntity(repo, entityType, entityID)
 	if err != nil {

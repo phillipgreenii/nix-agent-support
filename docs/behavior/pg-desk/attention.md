@@ -46,7 +46,7 @@ clock, and returns the surviving items and their groups. It runs four stages in 
    with a rule kind, severity, reason and the time it began. Rule kinds are independent of one
    another.
 3. **Suppress.** A candidate is dropped, with its reason recorded, by the first applicable of:
-   1. the entity is hidden (on an unmigrated store, through the old annotation column), and a
+   1. the entity is hidden, and a
       `wip` own PR SHOULD also suppress the `pr.own-*` rules;
    2. the entity carries `suppress.attention`, or `suppress.<rule kind>` for the candidate's own
       kind (steps 1 and 2 of every PR rule's precedence order in [`annotate.md`](annotate.md));
@@ -223,14 +223,6 @@ read at evaluation time, a stack regroups on the very next read after one of its
 base changes. A stack level that cannot be read is an error, never an ungrouped result. The
 dashboard, `attention list` and the plugin all use this same source, so they cannot disagree.
 
-On the unmigrated store the grouping levels are limited:
-
-| Level                        | Unmigrated store                                                                   | Migrated store |
-| ---------------------------- | ---------------------------------------------------------------------------------- | -------------- |
-| Jira issue (relation `jira`) | Available: the legacy PR-to-issue rows, read as `links.md` reads them (degraded).  | Available.     |
-| PR stack                     | Available: the `stack` dependency source reads only stored base and head branches. | Available.     |
-| Work item (relation `work`)  | Not available: falls through to the singleton group.                               | Available.     |
-
 ## Verbs
 
 ### `pg-desk attention list`
@@ -238,7 +230,7 @@ On the unmigrated store the grouping levels are limited:
 `pg-desk attention list [--json]` prints the evaluator's full result and is read-only and offline.
 
 - **Output.** With `--json` (or `PG_DESK_OUTPUT=json`), one JSON document, `schemaVersion` 1,
-  evolving additively only: `now`, an optional `degraded`, `items`, and `groups`. Each item has
+  evolving additively only: `now`, `items`, and `groups`. Each item has
   `type`, `id`, `summary`, `severity`, the primary rule kind, and its group key. Each group has
   `key`, `label` and its items in canonical order. Without `--json` it prints one line per item in
   canonical order, with the group label.
@@ -278,7 +270,7 @@ protocol (one request on stdin, one response on stdout) and answers `list_attent
   open a network connection, so `pg-desk`'s composition rule (README) is unchanged by it.
 - **Failure.** An unreadable store, or a configuration that cannot be loaded, is an error response,
   so the umbrella reports the source degraded. It is never an empty list.
-- **Schema versions.** The plugin answers on an unmigrated store (INV-ATTNEVAL-5).
+- **Schema versions.** The plugin refuses a store left on the retired schema 1 (INV-ATTNEVAL-5).
 
 ## The dashboard payload
 
@@ -296,9 +288,9 @@ evaluation is reported (`attention` is `null` with an `attention_error`, never `
 - **INV-ATTNEVAL-3.** <!-- uuid: 8822ff89-eaa1-4fd2-8bff-924533882714 --> An entity MUST yield at most one item per evaluation.
 - **INV-ATTNEVAL-4.** <!-- uuid: ffadf115-633d-4cb8-86f6-a1e3c265251f --> A suppressed candidate MUST be explainable: the result MUST retain the
   suppressing rule or annotation so that `pg-desk attention explain` can print it.
-- **INV-ATTNEVAL-5.** <!-- uuid: 2a9a8daf-d263-4fd0-bc89-8ac57458ee13 --> On an unmigrated store the evaluator MUST still run, honoring the old
-  `hidden` and `wip` annotations, and MUST report that `suppress.*` overrides are unavailable
-  (`degraded: true` in `attention list --json`, and in the `explain` output).
+- **INV-ATTNEVAL-5.** <!-- uuid: 2a9a8daf-d263-4fd0-bc89-8ac57458ee13 --> On a store that is not on schema 2 the evaluator MUST refuse with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version") and MUST NOT
+  evaluate: there is no degraded mode (`attention list` and `attention explain` carry no `degraded`
+  field), because the `hidden`, `wip` and `suppress.*` annotations it reads exist only on schema 2.
 - **INV-ATTNEVAL-6.** <!-- uuid: c4697087-ef2a-4d07-8d80-dcc24cc58ce8 --> A rule that cannot be evaluated because its facts are missing or degraded
   MUST NOT raise a candidate. An unreadable store MUST be an error, never an empty list that reads
   as "all clear".
@@ -310,7 +302,7 @@ entity ITSELF is broken while any pull request the entity depends on is still op
 stacked on an open PR is not actionable yet, and its breakage usually clears when the base merges.
 The suppressor is the PR-to-PR dependency data's consumer (see "PR dependencies" in
 [`links.md`](links.md)): the stack, derived at read time from the stored base and head branches, and
-the external `depends_on` link an operator records, which exists on the migrated store only. A
+the external `depends_on` link an operator records, which is read from the cross-reference rows. A
 shared issue is a group, never a dependency: three PRs on one issue are siblings.
 
 - A candidate is "broken itself" when its cause is the entity's own state rather than someone
@@ -325,8 +317,8 @@ shared issue is a group, never a dependency: three PRs on one issue are siblings
 - The suppressor runs after `hidden` and the `suppress.*` annotations, so an explicit annotation is
   the recorded reason when both apply. The dropped candidate is recorded as suppressed by
   `blocked-by-open-dependency` (`attention explain` prints it, INV-ATTNEVAL-4).
-- It works on an unmigrated store for the stack source (that source reads entity rows); the
-  external source yields nothing there, so only the stack holds candidates back.
+- The stack source reads entity rows; the external source reads the `depends_on` cross-reference
+  rows. Both are read at evaluation time.
 - A dependency read that fails is an error, never an empty result that reads as "all clear"
   (INV-ATTNEVAL-6).
 

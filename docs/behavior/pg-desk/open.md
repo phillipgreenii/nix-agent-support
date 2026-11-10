@@ -43,10 +43,8 @@ repositories is out of scope.
 ## Typed `pg-desk <type> open [<id>]`
 
 `pg-desk pr open`, `pg-desk issue open` and `pg-desk thread open` are the typed form of this verb
-(entity-change-flow design 6.9). They sit beside the top-level `open`, which keeps serving the old
-schema unchanged until the cutover phase removes it. The typed forms read the new schema and refuse
-a store not yet cut over: they print the store's error, which says to run `pg-desk migrate
---cutover`, and exit `1`.
+(entity-change-flow design 6.9). They sit beside the top-level `open`. Both read the key/value annotations for the hidden state, and
+both refuse a store left on the retired schema 1: they print the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exit `1`.
 
 - With an `<id>` (`pr`: `OWNER/REPO#N`, a PR URL or a bare number; `issue` and `thread`: verbatim)
   the verb handles exactly that one entity. The selection flags and the hidden state do not apply:

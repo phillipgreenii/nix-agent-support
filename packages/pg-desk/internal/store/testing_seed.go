@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // Test-only seeding helpers. Production code writes an interpretation only
 // through WriteInterpretation, which needs an entity row and a schema-2 store;
@@ -28,32 +31,21 @@ func (s *Store) SeedEntityForTest(t seedT, e Entity) {
 }
 
 // UpsertEntityForTest is SeedEntityForTest for a caller that wants the error
-// back and for a store on either schema (the tests of the old schema and of
-// the cutover seed with it): it inserts or replaces the entity row keyed by
+// back: it inserts or replaces the entity row keyed by
 // (Repo, EntityType, EntityID) without touching version, hydrated_at or
-// active. On schema 2 a first insert stamps first_seen_at with e.AsOf and the
+// active. A first insert stamps first_seen_at with e.AsOf and the
 // update branch never rewrites it.
 func (s *Store) UpsertEntityForTest(e Entity) error {
-	isNew, err := s.isNewSchema()
-	if err != nil {
-		return err
-	}
-	cols, marks := `repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha`, `?, ?, ?, ?, ?, ?, ?, ?`
-	args := []any{e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA)}
-	if isNew {
-		cols += `, first_seen_at`
-		marks += `, ?`
-		args = append(args, nullableString(e.AsOf))
-	}
-	_, err = s.sql.Exec(
-		`INSERT INTO entity (`+cols+`) VALUES (`+marks+`)
+	_, err := s.sql.Exec(
+		`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, first_seen_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
 		   facts = excluded.facts,
 		   as_of = excluded.as_of,
 		   stale = excluded.stale,
 		   content_hash = excluded.content_hash,
 		   head_sha = excluded.head_sha`,
-		args...,
+		e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), nullableString(e.AsOf),
 	)
 	if err != nil {
 		return fmt.Errorf("store: seed entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
@@ -79,4 +71,47 @@ func (s *Store) SeedEntityAndInterpretationForTest(t seedT, e Entity, i Interpre
 	t.Helper()
 	s.SeedEntityForTest(t, e)
 	s.SeedInterpretationForTest(t, i)
+}
+
+// OpenRetiredSchemaForTest opens, with OpenRaw, an in-temp-dir store that
+// reports the retired schema version 1 and holds only meta and a version-1
+// interpretation table (no stamp column, so a test can seed a row and watch a
+// reader degrade). It is
+// for the tests that prove a command refuses a store that has not been brought
+// to schema 2 (RequireNewSchema, ErrOldSchema); Open itself refuses such a
+// store, so only a raw handle can reach it.
+func OpenRetiredSchemaForTest(t testT) *Store {
+	s, err := OpenRaw(filepath.Join(t.TempDir(), "retired.db"))
+	if err != nil {
+		t.Fatalf("OpenRetiredSchemaForTest: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE interpretation (
+    repo             TEXT NOT NULL,
+    entity_type      TEXT NOT NULL,
+    entity_id        TEXT NOT NULL,
+    ownership        TEXT,
+    enrichment       TEXT,
+    urgency          TEXT,
+    category         TEXT,
+    dispositions     TEXT,
+    approvals        TEXT,
+    gate_state       TEXT,
+    match_reasons    TEXT,
+    panel            TEXT,
+    ready_to_promote INTEGER NOT NULL DEFAULT 0,
+    degraded         INTEGER NOT NULL DEFAULT 0,
+    as_of            TEXT NOT NULL,
+    PRIMARY KEY (repo, entity_type, entity_id)
+)`,
+		`INSERT INTO meta (key, value) VALUES ('schema_version', '1')`,
+		`PRAGMA user_version = 1`,
+	} {
+		if _, err := s.sql.Exec(stmt); err != nil {
+			t.Fatalf("OpenRetiredSchemaForTest: %v", err)
+		}
+	}
+	return s
 }

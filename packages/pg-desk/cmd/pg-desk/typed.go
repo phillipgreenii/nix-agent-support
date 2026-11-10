@@ -84,10 +84,9 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
-// requireNewSchemaForTypedVerb is the refusal every typed verb with no
-// old-schema counterpart applies right after opening the store. It returns
-// the store's own error unchanged (it wraps store.ErrOldSchema and says to
-// run pg-desk migrate --cutover).
+// requireNewSchemaForTypedVerb is the refusal every typed verb applies right
+// after opening the store. It returns
+// the store's own error unchanged (it wraps store.ErrOldSchema).
 func requireNewSchemaForTypedVerb(st *store.Store) error {
 	return st.RequireNewSchema()
 }

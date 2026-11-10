@@ -14,7 +14,6 @@ package links
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -62,11 +61,8 @@ type Result struct {
 	SchemaVersion int `json:"schemaVersion"`
 	// AsOf is the oldest as_of among the refs' stored entities; absent when
 	// no ref has a stored entity. The consumer decides what staleness means.
-	AsOf string `json:"as_of,omitempty"`
-	// Degraded is true when the store is not yet on the migrated schema, so
-	// only the legacy pr-to-issue links could be read.
-	Degraded bool            `json:"degraded,omitempty"`
-	Items    map[string]Item `json:"items"`
+	AsOf  string          `json:"as_of,omitempty"`
+	Items map[string]Item `json:"items"`
 }
 
 // Deps is what Resolve reads. Store MUST be opened read-only by the caller
@@ -144,10 +140,7 @@ func Resolve(d Deps, refs []string) (Result, error) {
 	d.dependencies() // one resolver (one entity-table read) for the whole batch
 	res := Result{SchemaVersion: SchemaVersion, Items: map[string]Item{}}
 	if err := d.Store.RequireNewSchema(); err != nil {
-		if !errors.Is(err, store.ErrOldSchema) {
-			return Result{}, fmt.Errorf("links: read schema version: %w", err)
-		}
-		res.Degraded = true
+		return Result{}, fmt.Errorf("links: read schema version: %w", err)
 	}
 	var oldest time.Time
 	var oldestRaw string
@@ -170,7 +163,7 @@ func Resolve(d Deps, refs []string) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("links: read entity %s: %w", ref, err)
 		}
-		linked, _, err := ReadLinked(d.Store, d.Repo, typ, id)
+		linked, err := ReadLinked(d.Store, d.Repo, typ, id)
 		if err != nil {
 			return Result{}, fmt.Errorf("links: read links of %s: %w", ref, err)
 		}

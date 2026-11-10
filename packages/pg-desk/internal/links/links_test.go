@@ -2,6 +2,7 @@ package links
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -69,8 +70,8 @@ func TestPRLinks_SelfIssueAndThread(t *testing.T) {
 	if !reflect.DeepEqual(item.Links, want) {
 		t.Fatalf("links =\n%+v\nwant\n%+v", item.Links, want)
 	}
-	if r.SchemaVersion != 1 || r.Degraded {
-		t.Errorf("schemaVersion=%d degraded=%v; want 1,false", r.SchemaVersion, r.Degraded)
+	if r.SchemaVersion != 1 {
+		t.Errorf("schemaVersion=%d; want 1", r.SchemaVersion)
 	}
 	// as_of is the oldest as_of among the known entities of the refs: only the PR here.
 	if r.AsOf != "2026-10-01T10:00:00Z" {
@@ -222,9 +223,6 @@ func TestLegacyAndDerivedJiraEdgesDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", `{}`)
-	if err := st.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	putDerived(t, st, "pr", testPR, "issue", "ABC-42", "jira", "jira-key")
 
 	r := resolve(t, deps(st), "pr:"+testPR)
@@ -237,37 +235,13 @@ func TestLegacyAndDerivedJiraEdgesDedup(t *testing.T) {
 	if issues != 1 {
 		t.Errorf("issue links = %d; want 1: %+v", issues, r.Items["pr:"+testPR].Links)
 	}
-	if r.Degraded {
-		t.Error("a migrated store must not report degraded")
-	}
 }
 
-// On an unmigrated store the verb degrades to the legacy pr-to-issue rows and
-// says so (design: links exist only on the migrated schema).
-func TestUnmigratedStoreDegradesToLegacyJiraLinks(t *testing.T) {
-	st := store.OpenSchema1ForTest(t) // schema version 1
-	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123"}}`)
-	if err := st.UpsertXref(store.Xref{Repo: testRepo, FromType: "pr", FromID: testPR, ToType: "issue", ToID: "ABC-42", Evidence: "title", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"}); err != nil {
-		t.Fatal(err)
-	}
-
-	r := resolve(t, deps(st), "pr:"+testPR, "issue:ABC-42")
-	if !r.Degraded {
-		t.Fatal("degraded = false on an unmigrated store")
-	}
-	wantPR := []Link{
-		{Kind: KindPR, Relation: "self", Label: "PR #123", URL: "https://scm.example.invalid/acme/api/pull/123"},
-		{Kind: KindIssue, Relation: "jira", Label: "ABC-42", URL: "https://tracker.example.invalid/browse/ABC-42"},
-	}
-	if got := r.Items["pr:"+testPR]; !got.Known || !reflect.DeepEqual(got.Links, wantPR) {
-		t.Fatalf("pr = %+v\nwant links %+v", got, wantPR)
-	}
-	wantIssue := []Link{
-		{Kind: KindIssue, Relation: "self", Label: "ABC-42", URL: "https://tracker.example.invalid/browse/ABC-42"},
-		{Kind: KindPR, Relation: "jira", Label: "PR #123", URL: "https://scm.example.invalid/acme/api/pull/123"},
-	}
-	if got := r.Items["issue:ABC-42"]; !got.Known || !reflect.DeepEqual(got.Links, wantIssue) {
-		t.Fatalf("issue = %+v\nwant links %+v", got, wantIssue)
+// A store that is not on schema 2 is refused with the store's error.
+func TestRetiredSchemaStoreIsRefused(t *testing.T) {
+	st := store.OpenRetiredSchemaForTest(t)
+	if _, err := Resolve(deps(st), []string{"pr:" + testPR}); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("Resolve on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }
 
@@ -309,11 +283,10 @@ func TestParseRef(t *testing.T) {
 	}
 }
 
-func TestUnmigratedStoreIsDegradedEvenWhenNoRefIsSupported(t *testing.T) {
-	st := store.OpenSchema1ForTest(t)
-	r := resolve(t, deps(st), "alert:grafana:abc")
-	if !r.Degraded || r.Items["alert:grafana:abc"].Known {
-		t.Errorf("result = %+v; want degraded and unknown", r)
+func TestRetiredSchemaStoreIsRefusedEvenWhenNoRefIsSupported(t *testing.T) {
+	st := store.OpenRetiredSchemaForTest(t)
+	if _, err := Resolve(deps(st), []string{"alert:grafana:abc"}); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("Resolve = %v, want store.ErrOldSchema", err)
 	}
 }
 

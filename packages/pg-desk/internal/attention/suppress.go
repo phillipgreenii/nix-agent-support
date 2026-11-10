@@ -2,7 +2,6 @@ package attention
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -74,44 +73,27 @@ type annotationState struct {
 	hidden bool
 	wip    bool
 	// suppressed holds the suppress.<x> keys set to true, by x ("attention" or
-	// a rule kind). Always empty on an unmigrated store.
+	// a rule kind).
 	suppressed map[string]bool
 }
 
-// annotationReader reads annotation state through the schema the store is on.
+// annotationReader reads annotation state from the key/value annotations.
 type annotationReader struct {
-	r        Reader
-	migrated bool
+	r Reader
 }
 
-// newAnnotationReader probes the schema once. degraded is true on an
-// unmigrated store, where suppress.* overrides do not exist
-// (INV-ATTNEVAL-5). Any other error is returned: an unreadable store is never
-// an all-clear.
-func newAnnotationReader(r Reader) (a *annotationReader, degraded bool, err error) {
-	switch e := r.RequireNewSchema(); {
-	case e == nil:
-		return &annotationReader{r: r, migrated: true}, false, nil
-	case errors.Is(e, store.ErrOldSchema):
-		return &annotationReader{r: r}, true, nil
-	default:
-		return nil, false, fmt.Errorf("attention: read schema version: %w", e)
+// newAnnotationReader checks the schema once: a store that is not on schema 2
+// has no suppress.* overrides and no key/value annotations, and is refused
+// rather than read as an all-clear.
+func newAnnotationReader(r Reader) (*annotationReader, error) {
+	if err := r.RequireNewSchema(); err != nil {
+		return nil, fmt.Errorf("attention: read schema version: %w", err)
 	}
+	return &annotationReader{r: r}, nil
 }
 
 func (a *annotationReader) read(repo, entityType, id string) (annotationState, error) {
 	st := annotationState{suppressed: map[string]bool{}}
-	if !a.migrated {
-		ann, found, err := a.r.GetPRAnnotation(repo, entityType, id)
-		if err != nil {
-			return st, fmt.Errorf("attention: read annotation of %s:%s: %w", entityType, id, err)
-		}
-		if found {
-			st.hidden = ann.Hidden != nil && *ann.Hidden
-			st.wip = ann.WIP != nil && *ann.WIP
-		}
-		return st, nil
-	}
 	anns, err := a.r.ListKVAnnotations(repo, entityType, id)
 	if err != nil {
 		return st, fmt.Errorf("attention: read annotations of %s:%s: %w", entityType, id, err)

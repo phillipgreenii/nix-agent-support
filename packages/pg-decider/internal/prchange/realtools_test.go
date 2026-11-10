@@ -243,7 +243,7 @@ func TestPRChangeRealTools(t *testing.T) {
 	})
 
 	run("a-refresh-exit-1-is-hydrate_error-is-not-retryable-and-runs-no-decide", func(t *testing.T) {
-		// A store that was never cut over to schema 2: refresh refuses with exit 1.
+		// A store left on the retired schema 1: refresh refuses with exit 1.
 		r := newRig(t, fxMerged, false)
 		res := r.change("apply", id8)
 		if res.code != ExitHydrateError {

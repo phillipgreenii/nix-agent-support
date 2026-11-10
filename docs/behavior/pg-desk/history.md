@@ -30,11 +30,9 @@ origin=<origin>`, with `<at>` exactly as stored (RFC3339 UTC). Example:
   It is printed like any other kind.
 - `history` is read-only: it writes nothing and moves no consumer cursor.
 
-## Old-schema refusal
+## Retired-schema refusal
 
-`history` has no old-schema counterpart, so on a store not yet cut over it refuses with the
-store's error, which says to run `pg-desk migrate --cutover`, and exits `1`. The existing
-top-level verbs, `serve`, `status` and `doctor` keep working on the old schema until the cutover.
+On a store left on the retired schema 1 `history` refuses with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exits `1`.
 
 ## Exit codes
 

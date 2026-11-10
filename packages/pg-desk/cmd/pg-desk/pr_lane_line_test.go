@@ -24,7 +24,7 @@ var laneLineNow = time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
 // not a stub.
 func laneLineStore(t *testing.T, kind string, record func(t *testing.T, st *store.Store)) *store.Store {
 	t.Helper()
-	st, err := store.Open(storeAtVersion(t, kind))
+	st, err := openStoreFile(storeAtVersion(t, kind))
 	if err != nil {
 		t.Fatalf("open %s store: %v", kind, err)
 	}

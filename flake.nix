@@ -7451,8 +7451,8 @@
 
               # pg-decider parity gate (bead pg2-v3cti, follow-up of pg2-pyh1i;
               # frozen by pg2-6mo45.3.3, design 6.7). TestParityGate loads every
-              # synthetic scenario into a schema-2 store (pg-desk migrate --cutover,
-              # then pg-desk pr refresh), runs the decider, and compares its plan
+              # synthetic scenario into a schema-2 store (created by pg-desk
+              # heartbeat, then pg-desk pr refresh), runs the decider, and compares its plan
               # with the scenario's FROZEN golden, internal/parity/testdata/<scenario>/
               # expected-plan.json (the old sync stage's plans, recorded once from a
               # pinned pre-removal pg-desk, plus the explained differences and the

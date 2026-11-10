@@ -133,7 +133,6 @@ func verbClasses() map[string]verbClass {
 		"heartbeat-item":    safe(),
 		"hide":              safe("1", "test"),
 		"links":             safe(testPR),
-		"migrate":           unsafe("the one-way schema cutover itself: it refuses a store that is already at schema 2"),
 		"open":              unsafe("execs the operator-configured browser opener"),
 		"run":               safe("issue", "1"),
 		"serve":             {Safe: true, Args: []string{"--addr", "127.0.0.1:0"}, Daemon: true},
@@ -317,7 +316,7 @@ func TestClassificationRejectsAnUnclassifiedVerb(t *testing.T) {
 	for k, v := range classes {
 		noReason[k] = v
 	}
-	noReason["migrate"] = verbClass{}
+	noReason["open"] = verbClass{}
 	if got := classificationProblems(tree, noReason); len(got) != 1 || !strings.Contains(got[0], "without a reason") {
 		t.Errorf("an unsafe entry without a reason must fail, got %v", got)
 	}
@@ -441,9 +440,6 @@ func newVerbFixture(t *testing.T) *verbFixture {
 	}
 	if err := st.UpsertInterpretation(store.Interpretation{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
-	}
-	if err := st.Cutover(); err != nil {
-		t.Fatalf("cutover: %v", err)
 	}
 	if v, err := st.SchemaVersion(); err != nil || v != store.NewSchemaVersion {
 		t.Fatalf("fixture store is at schema %d (err %v), want %d", v, err, store.NewSchemaVersion)

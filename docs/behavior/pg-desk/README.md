@@ -58,7 +58,7 @@ back here — not the full list.
 
 | Doc                                            | Covers                                                                                                                                  |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| [`store-schema.md`](store-schema.md)           | The SQLite store, its version ladder, schema cutover and tables                                                                         |
+| [`store-schema.md`](store-schema.md)           | The SQLite store, its schema and tables                                                                                                 |
 | [`gather.md`](gather.md)                       | Pipeline stage 1 — facts, only through `pg-connector`                                                                                   |
 | [`interpret.md`](interpret.md)                 | Pipeline stage 2 — pure, deterministic derivation                                                                                       |
 | [`pipeline-run.md`](pipeline-run.md)           | `pg-desk run issue`/`run thread`, the run record and failure diagnosis                                                                  |

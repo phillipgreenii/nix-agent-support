@@ -9,9 +9,7 @@ import (
 // Interpretation is one row of the interpretation table: ownership,
 // enrichment, urgency, category, dispositions, approvals, gate state, match
 // reasons, panel, ready-to-promote and degraded for a single
-// (repo, entity_type, entity_id), per the design doc's section 7.6. A store
-// still on schema 1 has a sync_error column the cutover drops; nothing reads
-// or writes it any more.
+// (repo, entity_type, entity_id), per the design doc's section 7.6.
 type Interpretation struct {
 	Repo       string
 	EntityType string
@@ -55,7 +53,7 @@ func interpretationSelectList(haveStamp bool) string {
 // selectListFor decides the guard from the table's current shape, before any
 // query is issued (never while a result set is open).
 func (s *Store) selectListFor() (string, error) {
-	_, haveStamp, err := s.interpShape()
+	haveStamp, err := s.hasInterpStampColumn()
 	if err != nil {
 		return "", err
 	}
@@ -64,14 +62,13 @@ func (s *Store) selectListFor() (string, error) {
 
 // UpsertInterpretation inserts or replaces the interpretation row keyed by
 // (Repo, EntityType, EntityID). It is the seeding writer of tests (production
-// code writes through WriteInterpretation) and runs the one statement both
-// schema versions accept: it never names sync_error.
+// code writes through WriteInterpretation) and runs one statement.
 //
 // It writes the handle's stamp (SetInterpStamp) into interp_version: a handle
 // with no stamp writes NULL. On a store whose table has no interp_version
 // column (a raw open that never ran the ensure step) the stamp is not written.
 func (s *Store) UpsertInterpretation(i Interpretation) error {
-	_, haveStamp, err := s.interpShape()
+	haveStamp, err := s.hasInterpStampColumn()
 	if err == nil {
 		err = upsertInterpretationNew(s.sql, i, haveStamp, s.InterpStamp())
 	}

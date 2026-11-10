@@ -159,21 +159,6 @@ func TestDependencySuppression_ConflictIsSelfBroken(t *testing.T) {
 	}
 }
 
-// Stack suppression needs no migration (the stack source reads entity rows), so
-// it runs on the version 1 store too. A PR with no stored dependencies is
-// unaffected.
-func TestDependencySuppression_OldSchemaStore(t *testing.T) {
-	st := store.OpenSchema1ForTest(t)
-	put(t, st, stackPR(1, "feat-a", "main", "open"))
-	put(t, st, stackPR(2, "feat-b", "feat-a", "open"))
-	put(t, st, stackPR(5, "solo", "main", "open"))
-	res := evaluate(t, st, baseConfig())
-	if !res.Degraded {
-		t.Error("an unmigrated store must still report degraded")
-	}
-	assertListed(t, res, map[int]bool{1: true, 2: false, 5: true})
-}
-
 // An explicit suppress annotation and the hidden flag are checked BEFORE the
 // context suppressor, so the recorded reason is the annotation's.
 func TestDependencySuppression_AnnotationsComeFirst(t *testing.T) {

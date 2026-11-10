@@ -1,0 +1,145 @@
+user_version=2
+meta.schema_version=2
+
+table annotation
+  col entity_id TEXT notnull=1 default=<none> pk=3
+  col entity_type TEXT notnull=1 default=<none> pk=2
+  col key TEXT notnull=1 default=<none> pk=4
+  col origin TEXT notnull=1 default=<none> pk=0
+  col repo TEXT notnull=1 default=<none> pk=1
+  col set_at TEXT notnull=1 default=<none> pk=0
+  col set_by TEXT notnull=1 default=<none> pk=0
+  col value TEXT notnull=1 default=<none> pk=0
+  index <auto> unique=1 origin=pk (repo,entity_type,entity_id,key)
+
+table change_log
+  col at TEXT notnull=1 default=<none> pk=0
+  col entity_id TEXT notnull=1 default=<none> pk=0
+  col entity_type TEXT notnull=1 default=<none> pk=0
+  col kinds TEXT notnull=1 default=<none> pk=0
+  col origin TEXT notnull=1 default=<none> pk=0
+  col repo TEXT notnull=1 default=<none> pk=0
+  col seq INTEGER notnull=0 default=<none> pk=1
+  col version INTEGER notnull=1 default=<none> pk=0
+  index change_log_entity unique=0 origin=c (repo,entity_type,entity_id,seq)
+
+table consumer
+  col cursor INTEGER notnull=1 default=0 pk=0
+  col name TEXT notnull=1 default=<none> pk=1
+  col seen_at TEXT notnull=0 default=<none> pk=0
+  col type TEXT notnull=1 default=<none> pk=2
+  index <auto> unique=1 origin=pk (name,type)
+
+table entity
+  col active INTEGER notnull=1 default=1 pk=0
+  col as_of TEXT notnull=1 default=<none> pk=0
+  col backend TEXT notnull=0 default=<none> pk=0
+  col content_hash TEXT notnull=1 default=<none> pk=0
+  col entity_id TEXT notnull=1 default=<none> pk=3
+  col entity_type TEXT notnull=1 default=<none> pk=2
+  col facts TEXT notnull=1 default=<none> pk=0
+  col first_seen_at TEXT notnull=0 default=<none> pk=0
+  col head_sha TEXT notnull=0 default=<none> pk=0
+  col hydrated_at TEXT notnull=0 default=<none> pk=0
+  col list_fp TEXT notnull=0 default=<none> pk=0
+  col read_attempt_at TEXT notnull=0 default=<none> pk=0
+  col read_ok_at TEXT notnull=0 default=<none> pk=0
+  col repo TEXT notnull=1 default=<none> pk=1
+  col stale INTEGER notnull=1 default=0 pk=0
+  col version INTEGER notnull=1 default=0 pk=0
+  col watched INTEGER notnull=0 default=<none> pk=0
+  index <auto> unique=1 origin=pk (repo,entity_type,entity_id)
+
+table focus_draft
+  col body_json TEXT notnull=1 default=<none> pk=0
+  col cap INTEGER notnull=1 default=<none> pk=0
+  col id INTEGER notnull=0 default=<none> pk=1
+  col made_at TEXT notnull=1 default=<none> pk=0
+  col period_key TEXT notnull=1 default=<none> pk=0
+  col period_type TEXT notnull=1 default=<none> pk=0
+
+table focus_period
+  col cap INTEGER notnull=0 default=<none> pk=0
+  col close_note TEXT notnull=0 default=<none> pk=0
+  col closed_at TEXT notnull=0 default=<none> pk=0
+  col id INTEGER notnull=0 default=<none> pk=1
+  col period_key TEXT notnull=1 default=<none> pk=0
+  col period_type TEXT notnull=1 default=<none> pk=0
+  index <auto> unique=1 origin=u (period_type,period_key)
+
+table focus_run
+  col actor TEXT notnull=1 default=<none> pk=0
+  col counts_json TEXT notnull=1 default=<none> pk=0
+  col exit_code INTEGER notnull=0 default=<none> pk=0
+  col focus_period_id INTEGER notnull=0 default=<none> pk=0
+  col id INTEGER notnull=0 default=<none> pk=1
+  col run_id TEXT notnull=1 default=<none> pk=0
+  col started_at TEXT notnull=1 default=<none> pk=0
+  col verb TEXT notnull=1 default=<none> pk=0
+  fk focus_period_id -> focus_period.id
+  index <auto> unique=1 origin=u (run_id)
+
+table focus_selection
+  col entity_id TEXT notnull=1 default=<none> pk=0
+  col entity_type TEXT notnull=1 default=<none> pk=0
+  col focus_period_id INTEGER notnull=1 default=<none> pk=0
+  col id INTEGER notnull=0 default=<none> pk=1
+  col rank_position INTEGER notnull=1 default=<none> pk=0
+  col repo TEXT notnull=1 default=<none> pk=0
+  col selected_at TEXT notnull=1 default=<none> pk=0
+  col tier TEXT notnull=0 default=<none> pk=0
+  fk repo -> entity.repo
+  fk entity_type -> entity.entity_type
+  fk entity_id -> entity.entity_id
+  fk focus_period_id -> focus_period.id
+  index <auto> unique=1 origin=u (focus_period_id,repo,entity_type,entity_id)
+
+table ingest_failed
+  col entity_id TEXT notnull=1 default=<none> pk=2
+  col first_failed_at TEXT notnull=1 default=<none> pk=0
+  col instance TEXT notnull=1 default=<none> pk=1
+  col kinds TEXT notnull=1 default='[]' pk=0
+  col last_error TEXT notnull=1 default='' pk=0
+  col seq INTEGER notnull=1 default=<none> pk=3
+  col store_identity TEXT notnull=1 default='' pk=0
+  index <auto> unique=1 origin=pk (instance,entity_id,seq)
+
+table interpretation
+  col approvals TEXT notnull=0 default=<none> pk=0
+  col as_of TEXT notnull=1 default=<none> pk=0
+  col category TEXT notnull=0 default=<none> pk=0
+  col degraded INTEGER notnull=1 default=0 pk=0
+  col dispositions TEXT notnull=0 default=<none> pk=0
+  col enrichment TEXT notnull=0 default=<none> pk=0
+  col entity_id TEXT notnull=1 default=<none> pk=3
+  col entity_type TEXT notnull=1 default=<none> pk=2
+  col gate_state TEXT notnull=0 default=<none> pk=0
+  col interp_version TEXT notnull=0 default=<none> pk=0
+  col match_reasons TEXT notnull=0 default=<none> pk=0
+  col ownership TEXT notnull=0 default=<none> pk=0
+  col panel TEXT notnull=0 default=<none> pk=0
+  col ready_to_promote INTEGER notnull=1 default=0 pk=0
+  col repo TEXT notnull=1 default=<none> pk=1
+  col urgency TEXT notnull=0 default=<none> pk=0
+  index <auto> unique=1 origin=pk (repo,entity_type,entity_id)
+
+table meta
+  col key TEXT notnull=0 default=<none> pk=1
+  col value TEXT notnull=1 default=<none> pk=0
+  index <auto> unique=1 origin=pk (key)
+
+table xref
+  col acted_at TEXT notnull=0 default=<none> pk=0
+  col actor TEXT notnull=0 default=<none> pk=0
+  col evidence TEXT notnull=0 default=<none> pk=0
+  col first_seen TEXT notnull=1 default=<none> pk=0
+  col from_id TEXT notnull=1 default=<none> pk=3
+  col from_type TEXT notnull=1 default=<none> pk=2
+  col last_confirmed TEXT notnull=1 default=<none> pk=0
+  col origin TEXT notnull=1 default=<none> pk=7
+  col reason TEXT notnull=0 default=<none> pk=0
+  col relation TEXT notnull=1 default=<none> pk=6
+  col repo TEXT notnull=1 default=<none> pk=1
+  col to_id TEXT notnull=1 default=<none> pk=5
+  col to_type TEXT notnull=1 default=<none> pk=4
+  index <auto> unique=1 origin=pk (repo,from_type,from_id,to_type,to_id,relation,origin)

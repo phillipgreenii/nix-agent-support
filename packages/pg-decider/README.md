@@ -101,7 +101,7 @@ this package's output beside `pg-pr-change`, with `pg-connector` and the sibling
 ## Parity gate
 
 `internal/parity` loads every synthetic scenario under `internal/parity/testdata/` into a schema-2
-store (`pg-desk migrate --cutover`, then `pg-desk pr refresh` per entity), runs the decider
+store (created at schema 2 by `pg-desk heartbeat`, then `pg-desk pr refresh` per entity), runs the decider
 (`pg-decider plan`), normalizes its plan into one vocabulary and compares it with the scenario's
 FROZEN golden, `testdata/<scenario>/expected-plan.json`. It makes no live contact: all state is
 temporary and the connector is a generated fake.

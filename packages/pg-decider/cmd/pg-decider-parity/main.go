@@ -1,5 +1,5 @@
 // Command pg-decider-parity runs the parity gate by hand: every synthetic
-// scenario is loaded into a schema-2 store (pg-desk migrate --cutover, then
+// scenario is loaded into a schema-2 store (a fresh store, then
 // pg-desk pr refresh), the decider plans it (pg-decider plan), and the plan is
 // compared with the scenario's frozen golden (testdata/<scenario>/
 // expected-plan.json). Every difference is printed: an entry the golden lists

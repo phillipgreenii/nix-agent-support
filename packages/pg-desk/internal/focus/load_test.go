@@ -17,9 +17,6 @@ func TestLoadAndCandidatesWriteNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	f := &fixture{t: t, st: st, cfg: fixtureConfig(), derived: map[Key][]store.XrefLink{}}
 	pr := f.pr("7", prSpec{ownership: "mine"})
 	bead := f.labelledBead("bd-1")
@@ -107,7 +104,7 @@ func TestLoadScopesToTheRepo(t *testing.T) {
 }
 
 func TestLoadRejectsAnOldSchemaStore(t *testing.T) {
-	st := store.OpenSchema1ForTest(t)
+	st := store.OpenRetiredSchemaForTest(t)
 	if _, err := Load(st, fixtureConfig(), testRepo, fixtureNow); err == nil {
 		t.Fatal("Load over an old-schema store: want an error, never an empty set")
 	}

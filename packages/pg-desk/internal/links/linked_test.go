@@ -23,9 +23,9 @@ func TestReadLinkedMergesOriginsAndBothDirections(t *testing.T) {
 	}
 	putDerived(t, st, "thread", "C1/100.1", "pr", testPR, "mentions", "thread-refs")
 
-	got, degraded, err := ReadLinked(st, testRepo, "pr", testPR)
-	if err != nil || degraded {
-		t.Fatalf("ReadLinked: degraded=%v err=%v", degraded, err)
+	got, err := ReadLinked(st, testRepo, "pr", testPR)
+	if err != nil {
+		t.Fatalf("ReadLinked: %v", err)
 	}
 	want := []Linked{
 		{Direction: DirOut, Type: "issue", ID: "ABC-42", Relation: "jira", Origins: []Origin{
@@ -82,7 +82,7 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 	}
 	d := Deps{Store: st, Repo: testRepo, Patterns: []string{`[A-Z]+-\d+`}, IssueURLTemplate: "https://tracker.example.invalid/browse/%s"}
 	got, err := ReadDetailed(d, "pr", testPR)
-	if err != nil || got.Degraded || len(got.Links) != 2 || got.LinksAsOf == "" {
+	if err != nil || len(got.Links) != 2 || got.LinksAsOf == "" {
 		t.Fatalf("ReadDetailed = %+v, %v", got, err)
 	}
 	unstored, stored := got.Links[0], got.Links[1]

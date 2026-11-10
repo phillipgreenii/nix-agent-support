@@ -295,16 +295,16 @@ func TestExplainUnknownKeyIsNotHeldAndExitsZero(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-44: an unmigrated store is exit 2 (usage).
-func TestExplainUnmigratedStoreIsUsage(t *testing.T) {
+// Traces INV-FOCUS-44: a store on a retired schema is exit 2 (usage).
+func TestExplainRetiredSchemaStoreIsUsage(t *testing.T) {
 	newFocusFixture(t, "old")
 	_, _, err := explain(t, "o/r#1")
 	if err == nil || focusExitCode(err) != 2 {
 		t.Fatalf("err = %v, want exit 2 (usage)", err)
 	}
 	var fe *focusError
-	if !errors.As(err, &fe) || !strings.Contains(fe.msg, "not migrated") || !strings.Contains(fe.Remedy(), "migrate --cutover") {
-		t.Errorf("error = %v, want the unmigrated refusal with its remedy", err)
+	if !errors.As(err, &fe) || !strings.Contains(fe.msg, "retired schema") || !strings.Contains(fe.Remedy(), "migrate --cutover") {
+		t.Errorf("error = %v, want the retired-schema refusal with its remedy", err)
 	}
 }
 

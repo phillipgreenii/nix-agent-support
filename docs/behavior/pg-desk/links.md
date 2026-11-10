@@ -73,10 +73,10 @@ A PR waits for another PR in one of two ways, and `pg-desk` reads both from the 
   and B is open. It is derived each time it is read from the stored PR rows, so it is never older
   than the store: a base PR that was stored after its dependent is found, and the edge ends the
   moment B merges or closes. A PR whose head branch is its own base branch (a fork's default branch
-  proposed upstream) is never a stack base. It needs no migrated store.
+  proposed upstream) is never a stack base. It reads only the stored PR rows.
 - **External.** An operator records `pg-desk pr link add <id> pr:<id> --relation depends_on`
-  (see "External links" below): the PR named first depends on the one named second. It exists only
-  on the migrated store; on an unmigrated store it contributes nothing and is not an error.
+  (see "External links" below): the PR named first depends on the one named second. It is
+  stored as a cross-reference row with an `external:<actor>` origin.
 
 Both feed one read, which merges the sources that claim the same edge. Each `depends_on` link of a
 `pr` ref points at a PR it depends on, and its `state` is that PR's stored state (`open`, `merged`
@@ -121,21 +121,18 @@ of the registered entity types (`pr`, `issue`, `thread`); any other value, or a 
   shows, so a menu and the dashboard never disagree about whether a build is failing. A `build` link
   is emitted for exactly the CI runs the rollup counts as failed, and for no others.
 
-## Unmigrated store
+## Retired-schema store
 
-Cross-reference links with relations exist only on the migrated store. On an unmigrated store the
-verb MUST NOT fail: it degrades to the legacy PR-to-issue ticket-key links, answers them as
-relation `jira`, and reports `"degraded": true` at the top level. Every other link kind is absent
-until the store is migrated, except the build links and the stack `depends_on` links, which are
-read from the stored PR rows and so work on either schema.
+Cross-reference links with relations exist only on schema 2. The verb has no degraded mode and
+reports no `degraded` field: on a store left on the retired schema 1 it exits `1` with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version").
 
 ## External links: `link add` and `link remove`
 
 `pg-desk <type> link add <id> <type>:<id> [--relation R] [--reason TEXT] [--actor A]` and
 `pg-desk <type> link remove <id> <type>:<id> [--actor A]` (for `<type>` one of `pr`, `issue`,
 `thread`) let an operator record and retract a link the extractors do not derive (entity-change-flow
-design 6.3). Unlike the read-only `links` verb above, these write the store, and they refuse an
-old-schema store with the store's error (run `pg-desk migrate --cutover`), exit `1`.
+design 6.3). Unlike the read-only `links` verb above, these write the store, and they refuse a
+store left on the retired schema 1 with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), exit `1`.
 
 Every link records whether it is internal (derived) or external: the stored origin is
 `derived:<extractor>` or `external:<actor>`, one row per link, relation and origin.

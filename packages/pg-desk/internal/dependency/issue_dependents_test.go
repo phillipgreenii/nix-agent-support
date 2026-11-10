@@ -176,7 +176,7 @@ func TestIssueDependents_ReturnsCopy(t *testing.T) {
 
 // The unmigrated store records no activity, so the index refuses it.
 func TestIssueDependents_RefusesOldSchema(t *testing.T) {
-	st := store.OpenSchema1ForTest(t)
+	st := store.OpenRetiredSchemaForTest(t)
 	if _, err := NewIssueDependents(st, nil); !errors.Is(err, store.ErrOldSchema) {
 		t.Errorf("err = %v, want store.ErrOldSchema", err)
 	}

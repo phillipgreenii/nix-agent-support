@@ -26,17 +26,17 @@ var deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return 
 var deskStoreOpen = func() (*store.Store, error) { return store.Open(store.DefaultPath()) }
 
 // deskStoreOpenRaw is the store seam for the commands that must work on a
-// store in ANY schema state: `migrate --cutover` (which changes it),
-// `status` and `doctor` (which report on it). It opens with store.OpenRaw —
-// no migrations and no schema-version gate — so it neither upgrades an
-// old-schema store behind the operator's back nor refuses one. It is
-// deliberately a SEPARATE seam from deskStoreOpen: deskStoreOpen is shared
-// by hide, wip, feedback, show, open, heartbeat and others, which must keep
-// opening through the migrating, version-gated store.Open.
+// store that has no schema yet: `status` and `doctor` (which report on it).
+// It opens with store.OpenRaw, which creates no schema and has no
+// schema-version gate, so it does not create a store behind the operator's
+// back. It is deliberately a SEPARATE seam from deskStoreOpen: deskStoreOpen
+// is shared by hide, wip, feedback, show, open, heartbeat and others, which
+// open through store.Open (it creates a new store at schema 2 and refuses a
+// retired one).
 var deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(store.DefaultPath()) }
 
 // deskStoreOpenReadOnly is the store seam for the read-only verbs (`links`):
-// it opens the existing store file without creating, migrating or writing
+// it opens the existing store file without creating or writing
 // anything, in any schema state. Deliberately separate from deskStoreOpen,
 // whose store.Open creates the file and runs the migration ladder.
 var deskStoreOpenReadOnly = func() (*store.Store, error) { return store.OpenReadOnly(store.DefaultPath()) }

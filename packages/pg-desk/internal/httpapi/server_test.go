@@ -148,20 +148,13 @@ func TestStaleFlag(t *testing.T) {
 // leaves its would-be panel entirely and appears only in Hidden, still
 // carrying the three new per-row fields.
 func TestHiddenArrayExcludesFromPanel(t *testing.T) {
-	s := store.OpenSchema1ForTest(t)
+	s := store.OpenForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "9",
 		Panel: PanelMineAwaitingTeam, ReadyToPromote: true, Degraded: true,
 		AsOf: "2026-09-16T10:00:00Z",
 	})
-	hidden := true
-	if err := s.UpsertAnnotation(store.Annotation{
-		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "9",
-		Hidden: &hidden, HiddenReason: "waiting on design review",
-		SetBy: "operator", SetAt: "2026-09-16T09:00:00Z",
-	}); err != nil {
-		t.Fatalf("UpsertAnnotation: %v", err)
-	}
+	hideForTest(t, s, "9", "waiting on design review", "2026-09-16T09:00:00Z")
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T10:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
 
@@ -310,7 +303,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		}
 	}
 
-	s := store.OpenSchema1ForTest(t)
+	s := store.OpenForTest(t)
 
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "101",
@@ -337,14 +330,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		Panel: PanelMineAwaitingTeam, ReadyToPromote: false, Degraded: false,
 		AsOf: "2026-09-16T10:00:00Z",
 	})
-	hidden := true
-	if err := s.UpsertAnnotation(store.Annotation{
-		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "303",
-		Hidden: &hidden, HiddenReason: "not ready",
-		SetBy: "operator", SetAt: "2026-09-16T09:55:00Z",
-	}); err != nil {
-		t.Fatalf("UpsertAnnotation: %v", err)
-	}
+	hideForTest(t, s, "303", "not ready", "2026-09-16T09:55:00Z")
 
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	mustSetMeta(t, s, store.MetaKeyLastRun, "2026-09-16T11:59:00Z")
@@ -641,5 +627,22 @@ func TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel(t *testing.T) {
 	}
 	if len(payload.MineAwaitingTeam) != 1 || payload.MineAwaitingTeam[0]["entity_id"] != "10" {
 		t.Fatalf("MineAwaitingTeam = %+v, want exactly PR 10", payload.MineAwaitingTeam)
+	}
+}
+
+// hideForTest records a hidden annotation on the acme/widgets pull_request id
+// the way `pg-desk hide` does: a key/value annotation on a stored entity.
+func hideForTest(t *testing.T, s *store.Store, id, reason, at string) {
+	t.Helper()
+	s.SeedEntityForTest(t, store.Entity{Repo: "acme/widgets", EntityType: "pull_request", EntityID: id, Facts: "{}", AsOf: at, ContentHash: "h" + id})
+	value, err := json.Marshal(map[string]any{"value": true, "reason": reason})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAnnotation(store.KVAnnotation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: id,
+		Key: store.AnnotationHidden, Value: string(value), Origin: "pg-desk", SetBy: "operator", SetAt: at,
+	}); err != nil {
+		t.Fatalf("SetAnnotation: %v", err)
 	}
 }

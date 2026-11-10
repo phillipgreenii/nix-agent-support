@@ -1,150 +1,114 @@
 # pg-desk — store and schema
 
-`pg-desk` keeps one SQLite store at `$XDG_STATE_HOME/pg-desk/store.db`, migrated with a version
-ladder the same way the retired PR tool's store is, plus one explicit schema cutover (see "Schema versions and
-the cutover" below). It MUST be opened in WAL mode with a busy timeout, so
-`serve`, the CLI, and `run` can overlap safely. Every pipeline run MUST take a per-`(type, id)`
-lock (the same per-entity locking discipline the retired PR tool uses today) so a cascaded re-run and a direct
-run for the same entity serialize rather than race — this will matter once `pr-pool` dispatches
-handlers in parallel. Rows are keyed by `repo`, so a second repository is additive to the schema
-even though Phase 9 supports exactly one (see "Out of scope" below).
+`pg-desk` keeps one SQLite store at `$XDG_STATE_HOME/pg-desk/store.db`. A new store is created
+directly at schema version 2 (see "The schema version" below). It MUST be opened in WAL mode with a
+busy timeout, so `serve`, the CLI, and `run` can overlap safely. Every pipeline run MUST take a
+per-`(type, id)` lock (the same per-entity locking discipline the retired PR tool uses today) so a
+cascaded re-run and a direct run for the same entity serialize rather than race — this will matter
+once `pr-pool` dispatches handlers in parallel. Rows are keyed by `repo`, so a second repository is
+additive to the schema even though Phase 9 supports exactly one (see "Out of scope" below).
 
-## The six tables (schema version 1)
+## The schema version
 
-These are the tables the migration ladder builds, and the shape of every store until the cutover
-below. "Schema version 2 tables" describes what the cutover changes.
+The store has one schema, **version 2**: the schema the entity change flow needs. The version is
+SQLite's `user_version`; `meta.schema_version` mirrors it so that `pg-desk status` can print it.
+
+An earlier **version 1** schema, a migration ladder that built it and an explicit cutover verb
+(`pg-desk migrate --cutover`) that moved a store from version 1 to version 2 have all been retired,
+because every store had been cut over. There is no version-1 code path left.
+
+- Creating a store (opening a path that holds no schema at all) MUST create the whole version-2
+  schema as ONE transaction and set `user_version` and `meta.schema_version` to 2 inside it. Either
+  every table is created and the store reports version 2, or the file is left empty (version 0, no
+  tables). Two openers racing on a new file MUST end with exactly one schema: the one that loses
+  finds version 2 under the write lock and does nothing.
+- Opening an existing store for ordinary use MUST accept version 2 and MUST NOT rewrite
+  `meta.schema_version`. It MUST refuse a store newer than version 2 (it reports the store as newer
+  than the binary supports; that refusal is what makes rolling back safe). It MUST refuse a store
+  still on version 1 with an error that wraps the store's retired-schema error and says this release
+  no longer migrates version 1 (a release that still has `pg-desk migrate --cutover` must bring it
+  forward first). The refusal changes nothing in the file.
+- `status` and `doctor` MUST open the store without creating a schema and without the version gate,
+  so they can report on a store that has no schema yet and do not create one behind the operator's
+  back. On a store on version 1 `status` MUST fail with the retired-schema error and `doctor` MUST
+  report the failure in its `change_flow` and `focus` sections (and fail). A store with no schema
+  yet is reported as such by both, never as an error.
+- Read-only opens (`links`, `attention`, the attention plugin) open a store of any version without
+  writing. Every command that needs the version-2 schema MUST check for it right after opening the
+  store and MUST refuse, with the same retired-schema error, a store that is not on version 2.
+- The `entity`, `interpretation` and `xref` accessors have a single shape: there is no version-1 read
+  mode. Writing an interpretation also needs version 2: see "Interpretation writes need schema 2".
+
+A test pins the creation script to a golden description (tables, columns, types, defaults, keys,
+indexes and the version stamps) that was captured from the retired ladder plus cutover, so the
+single creation script and the two steps it replaced describe the same schema.
+
+## Tables (schema version 2)
 
 - **`entity`** — the last-gathered facts per `(type, id)`, as of the time `pg-connector` reported
-  them, with a staleness flag and a content hash (`head_sha` too, for files/commits). Written only
-  by gather.
+  them, with a staleness flag, a content hash (`head_sha` too, for files/commits), and the
+  change-flow bookkeeping columns: `version` (integer, not null, default 0), `hydrated_at`
+  (nullable text), `active` (integer, not null, default 1) and `list_fp` (nullable text). `list_fp`
+  is the list fingerprint the caller observed at the entity's last SUCCESSFUL hydration, the baseline
+  against which a later list fingerprint is compared. A row with no `list_fp` (NULL, which reads
+  back as the empty string: a row created by `--reset`) has no baseline and is therefore treated as
+  changed once. The store only stores the value; it never computes or recomputes a fingerprint. It
+  also carries `first_seen_at` (nullable text): when pg-desk first inserted the row, stamped exactly
+  ONCE by the insert (the write's own time; `as_of` for the plain upsert) and never rewritten by any
+  update. It is the daily-focus rank's age fallback (the change log is pruned and cannot supply it).
+  It reads back as the empty string when NULL. A row whose `version` is 0 (inserted by a plain
+  upsert, never hydrated) is updated in place by the first versioned write.
 - **`interpretation`** — ownership, enrichment, urgency, category, feedback dispositions,
-  approvals, gate state, match reasons, panel placement, `ready_to_promote`, `degraded`, and
-  `sync_error`, and the stamp (see "The interpretation stamp" below). Written by interpret, through
-  the one interpretation writer (see [`reinterpret.md`](reinterpret.md)). The `sync_error` column is no longer written by anything (the sync stage was deleted, packet P9a-2); a version-1 row may still carry an old value.
-- **`xref`** — cross-reference edges (`from`/`to` type and id, the evidence that produced the
-  link, first-seen and last-confirmed times). This table's schema exists in Phase 9's ladder;
-  starting Phase 13 (docket `pg2-2j5ac.40`) it is written by gather's own ticket-key scan (see
-  [`gather.md`](gather.md)) — one row per `(ticket key, evidence field)` pair for the Jira half —
-  and read back by `run issue <jira-ticket-key>`'s reverse lookup (see
-  [`run-issue.md`](run-issue.md)) and this docket's Slack-half sibling packet.
-- **`annotation`** — hidden state and reason, WIP state, and per-`(PR, comment)` disposition
-  overrides with who set them. Written only by the CLI — an operator or an agent, through `hide`,
-  `unhide`, `wip`, or `feedback set` — and MUST NEVER be written by the
-  pipeline. Human and agent annotations therefore survive every pipeline run by construction: no
-  pipeline stage writes this table.
-- **`ledger`** — entity-to-bead-id mapping by kind, the last-synced content hash, the row's last-checked
-  time (`last_synced_at`, advanced on every sync of the entity even when nothing changed, so an
-  unchanged anchor check was recorded here and never on the bead), and the
-  last-reviewed head SHA. No code writes or reads the table any more (the accessors went with the sync stage, packet P9a-2); it stays in the version-1 ladder until the cutover drops it. It was written by the deleted sync stage: a `plan`-mode row
-  carries an empty `bead_id` (nothing was actually created) and a content hash of the fields the
-  write WOULD set; an `apply`-mode row carries the real `bead_id` and a content hash of the fields
-  the write DID set — the same hash for the same input regardless of mode, which is what makes the
-  plan/apply parity check mechanical. `last_reviewed_head_sha` is meaningful only for the
-  `review-request` kind row, where it is the head of the last review REQUEST sync made (not of a
-  completed review). The `review-request` row also carries `first_seen_head_sha` and
-  `first_seen_head_at`, the head sync is waiting out and when it first saw it (both empty when no
-  head is pending). On a version-1 store those
-  two columns are added to `ledger` by an idempotent column ensure on open (not a rung of the
-  version ladder, so `user_version` stays `1`); the cutover drops the whole table.
-- **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
-  migrations and `heartbeat` (the `last_sweep` key, written by the deleted `pg-desk sweep`, is no longer written) — `last_run` is reserved in
-  this same table but not yet written by any command (a separate, pre-existing gap). The
-  `reinterpret.last_run` key holds the counts of the last interpretation catch-up pass as one JSON
-  document (finish time, source `heartbeat` or `pr reinterpret --open`, selected, changed, unchanged,
-  stamped only, skipped, failed and remaining); it is written only by a pass that selected at least
-  one row and is read by `status`. The per-entity keys of the deleted `reconcile` (its stamps and deferral counters) and of the `sync_error` retry state (`sync_retry.<entity id>`) are no longer written; a store may still hold old ones, which nothing reads.
+  approvals, gate state, match reasons, panel placement, `ready_to_promote`, `degraded`, and the
+  stamp (see "The interpretation stamp" below). Written by interpret, through the one interpretation
+  writer (see [`reinterpret.md`](reinterpret.md)). No write carries a sync error: the old
+  `sync_error` column does not exist.
+- **`xref`** — cross-reference edges (`from`/`to` type and id, the evidence that produced the link,
+  first-seen and last-confirmed times) and, for where a link came from and what it means: `origin`
+  (`derived:<extractor>` or `external:<actor>`), `relation`, `actor`, `acted_at` and `reason`. Its
+  primary key is `(repo, from_type, from_id, to_type, to_id, relation, origin)`. Derived rows for an
+  entity are replaced on each of that entity's hydrations; external rows persist until removed; no
+  suppression state is stored. The original cross-reference accessors (written by gather's own
+  ticket-key scan, read back by `run issue <jira-ticket-key>`'s reverse lookup and the Slack half;
+  see [`gather.md`](gather.md) and [`run-issue.md`](run-issue.md)) read and write exactly the rows
+  marked `origin` `derived:legacy`, `relation` `references` (the legacy marker).
+- **`annotation`** — key/value: `repo`, `entity_type`, `entity_id`, `key`, `value`, `origin`,
+  `set_by`, `set_at`, keyed by `(repo, entity_type, entity_id, key)`. Hidden state and reason, WIP
+  state and per-`(PR, comment)` disposition overrides are reserved keys, each with its own value
+  shape:
+  - key `hidden`, whose value is the JSON object `{"value": <true|false>, "reason": <text|null>}`
+    (a JSON boolean, not a number);
+  - key `wip`, whose value is the text `true` or `false`;
+  - key `disposition.<comment_id>`, whose value is the disposition text.
 
-## Schema versions and the cutover
+  Written only by the CLI — an operator or an agent, through `hide`, `unhide`, `wip`, `annotate`,
+  `suppress` or `feedback set` — and MUST NEVER be written by the pipeline. Human and agent
+  annotations therefore survive every pipeline run by construction: no pipeline stage writes this
+  table.
 
-The store exists in two schema versions. **Version 1** is the six tables above and is what the
-migration ladder builds and maintains. **Version 2** is the schema the entity change flow needs:
-it reshapes some of those tables and adds two. A store moves from version 1 to version 2 only
-through one explicit operator command, never as a side effect of opening the store.
-
-The version is SQLite's `user_version`; `meta.schema_version` mirrors it so that `pg-desk status`
-can print it.
-
-### `pg-desk migrate --cutover`
-
-- It MUST apply the whole version-2 change as ONE transaction. Either every part lands and the
-  store reports version 2, or the store is left exactly as it was (same schema, same rows, same
-  version).
-- It MUST set `user_version` and `meta.schema_version` to 2 inside that same transaction.
-- It MUST be idempotent: on a store already at version 2 it does nothing and exits 0.
-- It MUST refuse a store that is neither at version 1 nor at version 2. A file with no schema at
-  all has nothing to cut over.
-- It is NOT a rung of the migration ladder, so no other command ever runs it. It is meant to run
-  in a maintenance window in which sync is stopped: nothing runs against the old and new schema at
-  the same time.
-
-### Opening the store across the two versions
-
-- Opening the store for ordinary use MUST run the migration ladder (which stops at version 1) and
-  MUST NOT run the cutover.
-- Until the old code paths are retired, that ordinary open MUST accept a store at version 1 or 2.
-  It MUST refuse a store newer than version 2, and it MUST NOT rewrite `meta.schema_version` on a
-  version-2 store. Schema 2 is the only schema a writing command supports: opening a version-1 store
-  is for inspection and for `migrate --cutover` only (see the next bullet group and "Interpretation
-  writes need schema 2").
-- `migrate --cutover`, `status` and `doctor` MUST open the store without running migrations and
-  without the version gate, so they can inspect or change a store in any state, including one that
-  has not been cut over yet and one that has no schema at all. `status` and `doctor` MUST NOT fail
-  merely because the store is on the old schema.
-- A binary built before the cutover MUST refuse a version-2 store loudly (its own version gate
-  reports the store as newer than it supports). That refusal is what makes rolling back after the
-  cutover safe.
-- Every command that needs the version-2 schema MUST check for it right after opening the store,
-  and on a version-1 store MUST refuse with an error that says to run
-  `pg-desk migrate --cutover`.
-- Until the old code paths are retired, READ access to `entity`, `interpretation` and `xref` MUST
-  work on both versions, because the cutover adds columns to `entity`, drops `interpretation.sync_error`
-  and rebuilds `xref`. The old `annotation` and `ledger` access is available on version 1 only.
-  Writing an interpretation is not part of that dual access: see "Interpretation writes need schema 2".
-
-## Schema version 2 tables
-
-The cutover makes these changes, and no others:
-
-- **`entity`** gains `version` (integer, not null, default 0), `hydrated_at` (nullable text),
-  `active` (integer, not null, default 1) and `list_fp` (nullable text). Existing rows take the
-  defaults; `list_fp` is NULL. `list_fp` is the list fingerprint the caller observed at the entity's
-  last SUCCESSFUL hydration, the baseline against which a later list fingerprint is compared. A row
-  with no `list_fp` (NULL, which reads back as the empty string: a migrated row, or a row created
-  by `--reset`) has no baseline and is therefore treated as changed once. The store only stores the
-  value; it never computes or recomputes a fingerprint.
-  It also gains `first_seen_at` (nullable text): when pg-desk first inserted the row, stamped
-  exactly ONCE by the insert (the write's own time; `as_of` for the plain upsert) and never
-  rewritten by any update. The cutover backfills every existing row with its `as_of`. It is the
-  daily-focus rank's age fallback (the change log is pruned and cannot supply it). It reads back as
-  the empty string when NULL and on a version-1 store.
-- **`interpretation`** loses `sync_error`. No write carries a sync error any more.
-- **`change_log`** is new and append-only: `seq` (integer, autoincrementing primary key), `repo`,
+- **`change_log`** is append-only: `seq` (integer, autoincrementing primary key), `repo`,
   `entity_type`, `entity_id`, `version` (integer), `kinds` (a JSON array), `origin` and `at`, all
-  not null, with an index on `(repo, entity_type, entity_id, seq)`. The cutover creates it empty.
-- **`consumer`** is new: `name`, `type`, `cursor` (integer, not null, default 0) and `seen_at`
-  (nullable), keyed by `(name, type)`. The cutover creates it empty.
-- **`annotation`** becomes key/value: `repo`, `entity_type`, `entity_id`, `key`, `value`, `origin`,
-  `set_by`, `set_at`, keyed by `(repo, entity_type, entity_id, key)`. The cutover copies existing
-  state onto reserved keys, each with `origin` `pg-desk` and the original `set_by` and `set_at`:
-  - a PR-level row with a `hidden` value becomes key `hidden`, whose value is the JSON object
-    `{"value": <true|false>, "reason": <text|null>}` (a JSON boolean, not a number);
-  - a PR-level row with a `wip` value becomes key `wip`, whose value is the text `true` or `false`;
-  - a per-comment row with a `disposition` becomes key `disposition.<comment_id>`, whose value is
-    the disposition text;
-  - a row carrying none of those produces no key.
-- **`xref`** records where a link came from and what it means: it gains `origin` (`derived:<extractor>`
-  or `external:<actor>`), `relation`, `actor`, `acted_at` and `reason`, and its first-seen and
-  last-confirmed times are kept. Its primary key becomes
-  `(repo, from_type, from_id, to_type, to_id, relation, origin)`. Derived rows for an entity are
-  replaced on each of that entity's hydrations; external rows persist until removed; no suppression
-  state is stored. Every row that exists at the cutover becomes `origin` `derived:legacy`,
-  `relation` `references` (the legacy marker), and the old cross-reference accessors read and write
-  exactly those rows on a version-2 store.
-- **`ledger`** is dropped. Its sync state is not carried over.
-- **The four focus tables** are new, created empty, and join the same one-transaction cutover (not a
-  later version step, because the cutover has not shipped). They use an internal surrogate key with
-  the natural key as a `UNIQUE` constraint, a deliberate divergence from the other tables. The
-  foreign keys are enforced (every store connection turns them on):
+  not null, with an index on `(repo, entity_type, entity_id, seq)`.
+- **`consumer`**: `name`, `type`, `cursor` (integer, not null, default 0) and `seen_at` (nullable),
+  keyed by `(name, type)`.
+- **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by store
+  creation and `heartbeat` (the `last_sweep` key, written by the deleted `pg-desk sweep`, is no
+  longer written) — `last_run` is reserved in this same table but not yet written by any command (a
+  separate, pre-existing gap). The `reinterpret.last_run` key holds the counts of the last
+  interpretation catch-up pass as one JSON document (finish time, source `heartbeat` or `pr
+reinterpret --open`, selected, changed, unchanged, stamped only, skipped, failed and remaining); it
+  is written only by a pass that selected at least one row and is read by `status`. The per-entity
+  keys of the deleted `reconcile` (its stamps and deferral counters) and of the `sync_error` retry
+  state (`sync_retry.<entity id>`) are no longer written; a store may still hold old ones, which
+  nothing reads. The change flow's `changes` call keeps, per type and watched query, its last
+  listing status in the key `change_flow.listing.<type>.<query>` (value: JSON `{"status":
+"ok"|"degraded"|"failed", "reason": <the envelope sources[] reason, empty for ok>, "at": <RFC3339
+time of the call>}`). It is written after every non-`--cached` call for each consulted query, so
+  that read-only consumers (`focus show`'s coverage header, the `/metrics` listing gauge, `doctor`)
+  can tell a failed or truncated category without a tracker call; see [`changes.md`](changes.md).
+- **The four focus tables** are created empty. They use an internal surrogate key with the natural
+  key as a `UNIQUE` constraint, a deliberate divergence from the other tables. The foreign keys are
+  enforced (every store connection turns them on):
   - **`focus_period`** is one row per focus period: `id` (autoincrementing key), `period_type` (`day`,
     `week` or `sprint`; only `day` is used so far), `period_key` (the period's canonical text, for
     example `2026-09-23`), `cap` (the cap in force for the period, NULL until a run sets one),
@@ -164,23 +128,13 @@ entity_id)` is unique, and `(repo, entity_type, entity_id)` is a foreign key to 
     `counts_json`. It is run telemetry, not plan history.
 
   The focus tables are SQLite rows: they emit nothing over OpenTelemetry or Prometheus and write no
-  logs of their own. They are part of the irreversible half of the cutover, so rolling back to a
-  pre-cutover binary does not remove them. The code that reads and writes them belongs to the
-  `focus` command group, not to the cutover.
+  logs of their own. The code that reads and writes them belongs to the `focus` command group.
 
-- **`meta`** is unchanged in shape; `schema_version` becomes `2`. The change flow's `changes` call
-  keeps, per type and watched query, its last listing status in the key
-  `change_flow.listing.<type>.<query>` (value: JSON `{"status": "ok"|"degraded"|"failed",
-"reason": <the envelope sources[] reason, empty for ok>, "at": <RFC3339 time of the call>}`).
-  It is written after every non-`--cached` call for each consulted query, so that read-only
-  consumers (`focus show`'s coverage header, the `/metrics` listing gauge, `doctor`) can tell a
-  failed or truncated category without a tracker call; see [`changes.md`](changes.md).
-
-The cutover does not append to `change_log`, register any consumer, write any row of the focus
-tables, or write any key other than the reserved keys above; those belong to the work that uses these tables.
+Store creation appends nothing to `change_log`, registers no consumer, writes no row of the focus
+tables and writes no `meta` key other than `schema_version`.
 
 The columns, the table and the `meta` keys that the watched-only `issue` change flow adds on top of
-this schema are NOT part of the cutover and are not a new schema version: see "Watched-entity columns,
+this schema are not a new schema version: see "Watched-entity columns,
 the failed-ingest table and the feed markers (schema version 2)" below.
 
 ## The interpretation stamp
@@ -190,9 +144,9 @@ interpretation-relevant configuration that computed the row (see [`reinterpret.m
 "The stamp"). A NULL stamp means the row was written before stamping and differs from every stamp.
 
 - The column is added by an idempotent ensure step run when the store is opened for ordinary use,
-  guarded by a check of the table's columns. It is NOT a rung of the version ladder (a rung would
-  mis-stamp `user_version`), so `user_version` and `meta.schema_version` are unchanged. The cutover
-  only drops `sync_error` from `interpretation` and does not rebuild it, so the column survives it.
+  guarded by a check of the table's columns, and a freshly created store already has it. It does not
+  change the schema version, so `user_version` and `meta.schema_version` are unchanged; a store
+  created by an earlier release gains the column on its first ordinary open.
 - Readers that never run the ensure step (the read-only and raw opens that `status`, `doctor`,
   `freshness`, `links`, `attention` and the focus verbs use) MUST select the stamp as NULL when the
   column is absent, decided from the table's columns before the query. Any query that counts or
@@ -217,10 +171,9 @@ interpretation-relevant configuration that computed the row (see [`reinterpret.m
 
 Every command that writes an interpretation (hydration, `refresh`, `changes`, `run issue`, `run
 thread`, `pr reinterpret`, the heartbeat catch-up) MUST require schema 2 before it writes
-anything, and on a version-1 store MUST refuse with the error that says to run `pg-desk migrate
---cutover`. There is no version-1 write mode and no unconditional write mode: the `sync_error`
-fallback and the "write whatever is there" interpretation write of the old schema are removed.
-`status`, `doctor` and `migrate --cutover` keep opening a version-1 store.
+anything, and on a store that is not on version 2 MUST refuse with the retired-schema error. There
+is no version-1 write mode and no unconditional write mode: the `sync_error` fallback and the "write
+whatever is there" interpretation write of the old schema are removed.
 
 The interpretation write is one transaction that takes the write lock first, so a competing writer
 waits rather than failing with a busy error; it reads the old row inside that transaction; and it
@@ -239,20 +192,19 @@ derived from (see [`reinterpret.md`](reinterpret.md), "The write").
   row is absent and the writer expected a nonzero version), the write MUST change nothing and MUST
   report a typed version conflict. An older snapshot MUST NOT overwrite a newer one. Retrying (re-read,
   re-classify, write again) is the caller's policy, not the store's.
-- A first write (expected version 0) inserts the row with version 1. A row the cutover left at
-  version 0 is updated in place. When two first writers race for an absent entity, exactly one
+- A first write (expected version 0) inserts the row with version 1. A row at
+  version 0 (never hydrated) is updated in place. When two first writers race for an absent entity, exactly one
   wins and the other gets the version conflict.
 - A hydration write MAY carry the observed list fingerprint. When it does, `list_fp` is set in the
   same statement and transaction as the snapshot, the version bump, `hydrated_at`, `active` and the
   `change_log` row, so a failed write or a lost version race leaves `list_fp` unchanged along with
   everything else. When the write carries no fingerprint, the stored `list_fp` MUST be preserved.
 - Every lost race is counted; the count is exposed for the observability metric.
-- Reads return the entity with its version and its `list_fp` (the empty string when NULL and on a
-  version-1 store). On a version-1 store the version reads as 0.
+- Reads return the entity with its version and its `list_fp` (the empty string when NULL).
 - `change_log` is append-only. Helpers read it after a given `seq` for one entity type (ascending
   by `seq`, limited) and per entity (newest first, limited). A caller that must append inside its
   own transaction uses the same append primitive.
-- These operations need the version-2 schema and refuse a version-1 store.
+- These operations need the version-2 schema and refuse a store that is not on it.
 - For an `issue` entity the append that this primitive performs is subject to the delivery gate, and
   the entity row carries two further kinds of write that bump no version; both are described in
   "Watched-entity columns, the failed-ingest table and the feed markers (schema version 2)" below.
@@ -274,7 +226,7 @@ or a `thread` no such record is ever appended.
   `annotation_changed` in the SAME transaction as the write; if the append fails the annotation
   write is rolled back. A set of the value the key already holds MUST write nothing and append no
   record: the stored `origin`, `set_by` and `set_at` keep their earlier values (the read of the stored
-  value and the write share one transaction, so two concurrent writes of one value append one record). The record carries the entity's CURRENT version (a version of 0, a migrated
+  value and the write share one transaction, so two concurrent writes of one value append one record). The record carries the entity's CURRENT version (a version of 0, a
   never-rehydrated entity, is valid) and the annotation's `origin` and time. An annotation write
   MUST NOT bump `entity.version`. For an `issue` entity that is not watched the delivery gate
   withholds that record (the annotation itself is still written), and the write MUST report that it
@@ -286,8 +238,8 @@ or a `thread` no such record is ever appended.
   (`true`/`false`), `disposition.<comment_id>` (`will-fix`, `wont-fix` or `no-action`),
   `suppress.<kind>`, `force_review`, `ready_to_land`, `focus_selected` and `decider.<name>.<k>`. Each row records
   `origin`, `set_by` and `set_at`.
-- The key/value annotation API is separate from the old per-column annotation API, which keeps
-  working on a version-1 store only; the key/value API refuses a version-1 store.
+- The key/value annotation API is the only annotation API; it refuses a store that is not on
+  version 2.
 - Cross-reference links are read and written with `origin` and `relation`. Derived links (origin
   `derived:<extractor>`, any entity type) for an entity are replaced as a set each time that entity
   is hydrated: links still present keep their first-seen time and refresh last-confirmed, links no
@@ -341,7 +293,7 @@ new schema version.
 
 ### Columns, and the one additive mechanism
 
-`entity` carries four further nullable columns, none of them part of the cutover:
+`entity` carries four further nullable columns:
 
 - **`backend`** is the name of the backend instance that serves the entity, so a per-backend rule is
   applied per entity and never per type. NULL means the backend is not known yet.
@@ -356,14 +308,13 @@ no other:
 
 - A table is created only if it does not already exist, and a column is added only when the table's own
   declared columns show it absent, because SQLite has no add-column-if-absent. The check and the add
-  run on every ordinary open of the store, in a separate function that runs after the migration step
-  returns (the migration step itself returns early for a store already at version 2), so a version-1
-  store and a version-2 store both gain them. The function is idempotent, and it tolerates a second
+  run on every ordinary open of the store, in a separate function that runs after the schema check, so
+  a store created by an earlier release gains them and a freshly created store already has them. The function is idempotent, and it tolerates a second
   process that added a column between its check and its add.
 - `user_version` and `meta.schema_version` MUST NOT change: a newer version would make a binary built
   before the additions refuse the store, and an older binary MUST still open it (it neither reads nor
   writes the additions).
-- A read-only open never migrates, so every read-only verb MUST tolerate a store that lacks a column or
+- A read-only open never changes the store, so every read-only verb MUST tolerate a store that lacks a column or
   the table: the column reads as NULL (an unwatched entity with no known backend and no read times) and
   the table reads as empty.
 
@@ -426,7 +377,7 @@ failing issue never blocks every other issue's feed.
 
 ### Feed and baseline markers in `meta`
 
-`meta` keeps four more families of keys for the issue flow, none written by the cutover:
+`meta` keeps four more families of keys for the issue flow:
 
 - **`change_flow.feed_seq.<instance>`** holds, for one backend instance's change feed, the identity of
   that backend's own store and the highest feed `seq` pg-desk has committed from it. It is written in
@@ -460,10 +411,8 @@ failing issue never blocks every other issue's feed.
 ### PR lane state in `meta`
 
 The PR lane's persisted state lives in `meta` too, written by `pg-desk pr lane-record` and
-`pg-desk pr mark-inactive` and read by `serve` at scrape time. It adds no table, no column, no ladder
-rung and no schema version: `user_version` and `meta.schema_version` do not change. (An additive table
-created idempotently was the alternative and is not chosen, because every reader of the store would then
-have to know a table that is outside the ladder.) Every key starts with `pr_lane.`, and none of them is the
+`pg-desk pr mark-inactive` and read by `serve` at scrape time. It adds no table, no column and no schema version: `user_version` and `meta.schema_version` do
+not change. Every key starts with `pr_lane.`, and none of them is the
 configuration key `pr_lane.mode`, which keeps the rendered configuration as its one source:
 
 - **`pr_lane.runs.<stage>.<class>`** — one counter per lane-run series (see [`serve.md`](serve.md)).
@@ -536,13 +485,13 @@ the rollback listing is bounded by the backfill driver's flip marker, not by thi
 
 ## Exit codes, telemetry, and logs
 
-The store has no CLI surface of its own beyond `pg-desk migrate --cutover` above — it is a shared
-data layer every other `pg-desk` command opens. A failure to open or migrate it surfaces as the _calling_ command's own failure: for `run`,
+The store has no CLI surface of its own — it is a shared data layer every other `pg-desk` command
+opens. A failure to open or create it surfaces as the _calling_ command's own failure: for `run`,
 that is exit `1` (a store error, per [`pipeline-run.md`](pipeline-run.md)); every other command's
 floor is `0` on success and non-zero when the store cannot be opened.
 
 The store emits nothing over OpenTelemetry or Prometheus on its own (D24) and writes no logs of
-its own — a store-open or migration failure is logged by whichever command tried to open it
+its own — a store-open or creation failure is logged by whichever command tried to open it
 (structured JSON on stderr for `run`; plain CLI error text otherwise).
 
 ## Out of scope

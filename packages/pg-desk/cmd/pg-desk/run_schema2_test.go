@@ -33,9 +33,6 @@ func newSchema2RunStore(t *testing.T, cfg *config.Config) (st *store.Store, reop
 		t.Fatalf("open test store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.Cutover(); err != nil {
-		t.Fatalf("Cutover: %v", err)
-	}
 	if v, err := st.SchemaVersion(); err != nil || v < store.NewSchemaVersion {
 		t.Fatalf("schema version = %d, %v; want a cut-over store", v, err)
 	}

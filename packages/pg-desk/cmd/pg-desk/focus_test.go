@@ -104,7 +104,7 @@ func newFocusFixture(t *testing.T, kind string) *focusFixture {
 	cfg := openTestConfig("o/r")
 	cfg.Actor = "tester"
 	cfg.Focus.TimeZone = "UTC"
-	withOpenSeams(t, cfg, func() (*store.Store, error) { return store.Open(path) })
+	withOpenSeams(t, cfg, func() (*store.Store, error) { return openStoreFile(path) })
 	orig := focusNow
 	t.Cleanup(func() { focusNow = orig })
 	focusNow = func() time.Time { return focusFixedNow }
@@ -115,7 +115,7 @@ func newFocusFixture(t *testing.T, kind string) *focusFixture {
 // open returns a fresh handle on the fixture store (caller closes).
 func (f *focusFixture) open(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(f.path)
+	st, err := openStoreFile(f.path)
 	if err != nil {
 		t.Fatalf("open fixture store: %v", err)
 	}
@@ -223,11 +223,11 @@ func assertFocusExit(t *testing.T, err error, code int, want string) {
 	}
 }
 
-// Traces INV-FOCUS-5: an unmigrated store is refused with exit 2 (usage) and nothing applied.
-func TestFocusUnmigratedStoreRefusal(t *testing.T) {
+// Traces INV-FOCUS-5: a store on a retired schema is refused with exit 2 (usage) and nothing applied.
+func TestFocusRetiredSchemaStoreRefusal(t *testing.T) {
 	f := newFocusFixture(t, "old")
 	_, stderr, err := runFocusVerb(t)
-	assertFocusExit(t, err, 2, "not migrated for the focus tables")
+	assertFocusExit(t, err, 2, "on a retired schema")
 	if !strings.Contains(err.Error(), "pg-desk migrate --cutover") {
 		t.Errorf("refusal must name the way out, got %q", err)
 	}
@@ -441,7 +441,7 @@ func TestFocusExitCodes(t *testing.T) {
 		{name: "usage: period week", kind: "new", args: []string{"--period", "week"}, wantCode: 2, wantRemedy: "pass --period day"},
 		{name: "usage: bad date", kind: "new", args: []string{"--date", "x"}, wantCode: 2, wantRemedy: "pass --date YYYY-MM-DD"},
 		{name: "usage: unexpected argument", kind: "new", args: []string{"extra"}, wantCode: 2, wantRemedy: "see pg-desk focus stubverb --help"},
-		{name: "usage: unmigrated store", kind: "old", wantCode: 2, wantRemedy: "pg-desk migrate --cutover"},
+		{name: "usage: retired-schema store", kind: "old", wantCode: 2, wantRemedy: "pg-desk migrate --cutover"},
 		{name: "partial", kind: "new", args: []string{"--exit", "8"}, wantCode: 8, wantTable: true, wantRemedy: "re-run"},
 		{name: "total failure", kind: "new", args: []string{"--exit", "3"}, wantCode: 3, wantRemedy: "check the stub store"},
 		{

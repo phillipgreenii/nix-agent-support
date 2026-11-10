@@ -155,13 +155,6 @@ pg-desk never converts a draft to ready automatically).`,
 // joined at read time" rule [docs/behavior/pg-desk/hide-unhide-wip.md] for
 // this packet's own read path.
 func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, err error) {
-	return buildOpenRowsFor(st, cfg, false)
-}
-
-// buildOpenRowsFor is buildOpenRows with the annotation source chosen:
-// kvAnnotations reads the hidden state through the new schema's key/value
-// annotation API (the typed `pr open`).
-func buildOpenRowsFor(st *store.Store, cfg *config.Config, kvAnnotations bool) (mine, team []openRow, err error) {
 	interps, err := st.ListInterpretations()
 	if err != nil {
 		return nil, nil, fmt.Errorf("list interpretations: %w", err)
@@ -191,7 +184,7 @@ func buildOpenRowsFor(st *store.Store, cfg *config.Config, kvAnnotations bool) (
 			actNowPanel = panelTeamAwaitingMe
 		}
 
-		row, rerr := openRowFrom(st, interp, kvAnnotations)
+		row, rerr := openRowFrom(st, interp)
 		if rerr != nil {
 			return nil, nil, rerr
 		}
@@ -211,9 +204,8 @@ func buildOpenRowsFor(st *store.Store, cfg *config.Config, kvAnnotations bool) (
 // entity table (display facts) and the annotation table (hidden state) at
 // read time. Owner is always the PR author and NeedsAttention is left for
 // the caller, which knows which half of the review set the row belongs to.
-// kvAnnotations selects the new schema's key/value annotation API for the
-// hidden state instead of the old per-PR annotation row.
-func openRowFrom(st *store.Store, interp store.Interpretation, kvAnnotations bool) (openRow, error) {
+// The hidden state comes from the key/value annotation API.
+func openRowFrom(st *store.Store, interp store.Interpretation) (openRow, error) {
 	entity, found, gerr := st.GetEntity(interp.Repo, interp.EntityType, interp.EntityID)
 	if gerr != nil {
 		return openRow{}, fmt.Errorf("get entity (%s,%s,%s): %w", interp.Repo, interp.EntityType, interp.EntityID, gerr)
@@ -238,15 +230,8 @@ func openRowFrom(st *store.Store, interp store.Interpretation, kvAnnotations boo
 
 	hidden := false
 	hiddenReason := ""
-	if kvAnnotations {
-		if h, aerr := readHiddenAnnotation(st, interp.Repo, interp.EntityType, interp.EntityID); aerr == nil {
-			hidden, hiddenReason = h.Value, h.Reason
-		}
-	} else if ann, found, aerr := st.GetPRAnnotation(interp.Repo, interp.EntityType, interp.EntityID); aerr == nil && found {
-		if ann.Hidden != nil {
-			hidden = *ann.Hidden
-		}
-		hiddenReason = ann.HiddenReason
+	if h, aerr := readHiddenAnnotation(st, interp.Repo, interp.EntityType, interp.EntityID); aerr == nil {
+		hidden, hiddenReason = h.Value, h.Reason
 	}
 
 	asOf := interp.AsOf

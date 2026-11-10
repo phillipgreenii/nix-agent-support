@@ -262,7 +262,7 @@ func TestRunEntityChange_RemovedObservedStateWritesAndClearsLinks(t *testing.T) 
 
 func TestRunEntityChange_OldSchemaStoreRefused(t *testing.T) {
 	p := newTestPipeline(t, nil, nil)
-	p.store = store.OpenSchema1ForTest(t) // version 1: newTestPipeline's store is cut over
+	p.store = store.OpenRetiredSchemaForTest(t) // version 1: newTestPipeline's store is cut over
 	p.entityGatherers = map[string]gather.EntityGatherer{
 		"issue": funcEntityGatherer(func(gather.ChangeKind) (gather.GatherResult, error) {
 			t.Fatal("gather must not run on an old-schema store")
@@ -511,9 +511,6 @@ func TestRunEntityChange_ConcurrentCallsNeverRegressVersion(t *testing.T) {
 		return s
 	}
 	first := open()
-	if err := first.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 
 	const writers, rounds = 3, 8
 	pipes := make([]*Pipeline, writers)

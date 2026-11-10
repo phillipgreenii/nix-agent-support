@@ -7,8 +7,7 @@ transaction (entity-change-flow design 6.9, 9.12). For `issue` the appended reco
 delivery gate: the gate withholds the row of an entity that is not watched, and the rest of the write
 still happens (see [`store-schema.md`](store-schema.md), "The delivery gate"). It is the operator's targeted counterpart of the
 list-and-diff `changes` verb, which pg-desk still runs for the types whose backend does not own its
-changes. The old top-level `run` verb is unchanged and stays until the cutover
-phase deletes it.
+changes. The old top-level `run` verb is unchanged.
 
 `refresh` is the only verb that classifies a change. For `pr` and `ci` the daemon-backed backend owns
 change detection and supplies the upstream change kinds, and pg-desk's own PR change flow, which
@@ -61,12 +60,12 @@ entity.
 
 ## Failure semantics and exit codes
 
-| Exit | Meaning                                                                                                                                                                                       |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | The entity was hydrated.                                                                                                                                                                      |
-| `1`  | Any other error: bad arguments, an unresolvable reference, an `issue` id served by watched queries of two different backends (nothing is read), an old-schema store, a store or config error. |
-| `2`  | Hydration degraded for this entity: part of the detail read failed. The stale detail is kept.                                                                                                 |
-| `3`  | Hydration failed entirely, including an entity that is not found. The previous snapshot is kept.                                                                                              |
+| Exit | Meaning                                                                                                                                                                                                   |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | The entity was hydrated.                                                                                                                                                                                  |
+| `1`  | Any other error: bad arguments, an unresolvable reference, an `issue` id served by watched queries of two different backends (nothing is read), a store on the retired schema 1, a store or config error. |
+| `2`  | Hydration degraded for this entity: part of the detail read failed. The stale detail is kept.                                                                                                             |
+| `3`  | Hydration failed entirely, including an entity that is not found. The previous snapshot is kept.                                                                                                          |
 
 - On exit `2` and `3` the verb prints one line `class=<class>` on standard output (nothing else is
   written to standard output on those exits; the error text goes to standard error as before). The
@@ -101,10 +100,9 @@ entity.
   (reported as a removal) makes the entity inactive; only an explicit removal is a membership
   decision, and a targeted refresh never makes one.
 
-## Old-schema refusal
+## Retired-schema refusal
 
-`refresh` has no old-schema counterpart, so on a store not yet cut over it refuses with the store's
-error, which says to run `pg-desk migrate --cutover`, and exits `1`.
+On a store left on the retired schema 1 `refresh` refuses with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exits `1`.
 
 ## Invariants
 

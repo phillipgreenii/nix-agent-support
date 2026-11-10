@@ -170,9 +170,6 @@ func TestRunCmdIssue_ResolvesAndReinterprets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
-	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
-		t.Fatalf("cutover test store: %v", err)
-	}
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	seedPRFacts(t, st, "acme/widgets#7")
 
@@ -350,9 +347,6 @@ func TestRunCmdIssue_JiraTicketKey_ResolvesViaXrefAndReinterprets(t *testing.T) 
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
-	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
-		t.Fatalf("cutover test store: %v", err)
-	}
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	seedPRFacts(t, st, "acme/widgets#7")
 	seedXref(t, st, "acme/widgets#7", "PROJ-99")
@@ -481,9 +475,6 @@ func setupRunThreadTest(t *testing.T, cfg *config.Config, show threadShowResult,
 	st, err = store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
-	}
-	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
-		t.Fatalf("cutover test store: %v", err)
 	}
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	return st, dbPath

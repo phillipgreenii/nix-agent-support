@@ -335,13 +335,7 @@ func seedOpenPR(t *testing.T, st *store.Store, repo string, number int, title, u
 	}
 
 	if hidden {
-		h := true
-		if err := st.UpsertAnnotation(store.Annotation{
-			Repo: repo, EntityType: entityTypePR, EntityID: id,
-			Hidden: &h, HiddenReason: "duplicate work", SetBy: "operator", SetAt: "2026-09-16T00:00:00Z",
-		}); err != nil {
-			t.Fatalf("upsert annotation: %v", err)
-		}
+		seedKVAnnotation(t, st, repo, id, store.AnnotationHidden, `{"value":true,"reason":"duplicate work"}`)
 	}
 }
 

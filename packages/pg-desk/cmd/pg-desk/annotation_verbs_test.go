@@ -19,6 +19,11 @@ func newStoreAt(t *testing.T, kind string) (open func() (*store.Store, error), s
 	t.Helper()
 	path := storeAtVersion(t, kind)
 	open = func() (*store.Store, error) { return store.Open(path) }
+	if kind == "old" {
+		// store.Open refuses a retired store; a raw handle reaches the verbs'
+		// own refusal.
+		open = func() (*store.Store, error) { return store.OpenRaw(path) }
+	}
 	seed, err := open()
 	if err != nil {
 		t.Fatal(err)
@@ -57,8 +62,8 @@ func wantOldSchemaRefusal(t *testing.T, err error) {
 	if err == nil {
 		t.Fatal("error = nil, want the old-schema refusal")
 	}
-	if !errors.Is(err, store.ErrOldSchema) || !strings.Contains(err.Error(), "pg-desk migrate --cutover") {
-		t.Errorf("error = %v, want the pg-desk migrate --cutover refusal", err)
+	if !errors.Is(err, store.ErrOldSchema) || !strings.Contains(err.Error(), "no longer migrates schema version 1") {
+		t.Errorf("error = %v, want the retired-schema refusal", err)
 	}
 }
 

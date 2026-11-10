@@ -3,7 +3,7 @@
 `pg-desk <type> show <id> [--json] [--refresh]` (`type` is `pr`, `issue` or `thread`) prints the
 composite view of one stored entity: its snapshot, decorations, annotations and the entities it is
 linked to (entity-change-flow design 6.7, 6.9, 9.5). It sits beside the top-level `pg-desk show
-<pr>`, which keeps serving the old schema unchanged until the cutover phase removes it.
+<pr>`.
 
 ## Behavior
 
@@ -11,8 +11,7 @@ linked to (entity-change-flow design 6.7, 6.9, 9.5). It sits beside the top-leve
   number; for `issue` and `thread` verbatim.
 - The view is read from the local store only, except under `--refresh`.
 - An id with no stored entity fails with exit `1` and an error saying it does not resolve.
-- On a store not yet cut over the verb refuses with the store's error, which says to run `pg-desk
-migrate --cutover`, and exits `1`.
+- On a store left on the retired schema 1 the verb refuses with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exits `1`.
 
 ## JSON contract `pg-desk.view/v1`
 
@@ -84,8 +83,8 @@ For a `pr`, `links[]` also lists each PR it depends on (relation `depends_on`; s
 dependencies" in [`links.md`](links.md)). A stack dependency is derived at read time, so its
 `origins[]` is `derived:stack`; an operator-recorded one carries its `external:<actor>` origin, and
 the two merge into one entry when they name the same PR. `state`, `title` and `url` come from the
-stored snapshot as for any other link, so an open dependency is told from a merged one. On an
-unmigrated store only the stack dependencies appear.
+stored snapshot as for any other link, so an open dependency is told from a merged one. The
+stack and external dependencies are both read at call time.
 
 `show` and the read-only `pg-desk links` verb share the one linked-entity read; `pg-desk links`
 adds the `depends_on` links to its own output and otherwise keeps it unchanged.
@@ -203,12 +202,12 @@ reported on stderr and does not fail the command.
 If the entity's own hydration fails or degrades, the stored view is still printed, marked
 `stale: true`, and the command then exits with `refresh`'s codes:
 
-| Exit | Meaning                                                                                 |
-| ---- | --------------------------------------------------------------------------------------- |
-| `0`  | Printed (and, with `--refresh`, hydrated).                                              |
-| `1`  | Any other error: bad arguments, an unresolvable id, an old-schema store, a store error. |
-| `2`  | The entity's hydration degraded; the stale detail is printed.                           |
-| `3`  | The entity's hydration failed entirely; the stored view, if any, is printed.            |
+| Exit | Meaning                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------- |
+| `0`  | Printed (and, with `--refresh`, hydrated).                                                          |
+| `1`  | Any other error: bad arguments, an unresolvable id, a store on the retired schema 1, a store error. |
+| `2`  | The entity's hydration degraded; the stale detail is printed.                                       |
+| `3`  | The entity's hydration failed entirely; the stored view, if any, is printed.                        |
 
 ## Invariants
 

@@ -28,7 +28,6 @@ package dependency
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -376,9 +375,6 @@ func (externalSource) Name() string { return SourceExternal }
 
 // Dependencies: the PRs this PR has an external depends_on link to.
 func (externalSource) Dependencies(c *Context, id string) ([]Claim, error) {
-	if ok, err := newSchema(c); err != nil || !ok {
-		return nil, err
-	}
 	rows, err := c.Reader.ListXrefLinksFrom(c.Repo, TypePR, id)
 	if err != nil {
 		return nil, fmt.Errorf("read links from %s: %w", id, err)
@@ -388,27 +384,11 @@ func (externalSource) Dependencies(c *Context, id string) ([]Claim, error) {
 
 // Dependents: the PRs that have an external depends_on link to this PR.
 func (externalSource) Dependents(c *Context, id string) ([]Claim, error) {
-	if ok, err := newSchema(c); err != nil || !ok {
-		return nil, err
-	}
 	rows, err := c.Reader.ListXrefLinksTo(c.Repo, TypePR, id)
 	if err != nil {
 		return nil, fmt.Errorf("read links to %s: %w", id, err)
 	}
 	return externalClaims(rows, func(l store.XrefLink) (string, string) { return l.FromType, l.FromID }), nil
-}
-
-// newSchema reports whether the migrated schema (the only one with external
-// links) is present. An old-schema store is not an error: the external source
-// simply has nothing to say there.
-func newSchema(c *Context) (bool, error) {
-	if err := c.Reader.RequireNewSchema(); err != nil {
-		if errors.Is(err, store.ErrOldSchema) {
-			return false, nil
-		}
-		return false, fmt.Errorf("read schema version: %w", err)
-	}
-	return true, nil
 }
 
 // externalClaims keeps the external depends_on rows whose other end is a PR,

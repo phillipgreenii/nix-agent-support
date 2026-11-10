@@ -78,9 +78,6 @@ func TestStatusReportsCountsAgainstFixtureStore(t *testing.T) {
 // unknown and NO verdict (only `doctor --router-config` evaluates it).
 func TestStatusReportsChangeFlowPerTypeAndConsumer(t *testing.T) {
 	st, openFresh := openTestStore(t)
-	if err := st.Cutover(); err != nil {
-		t.Fatalf("Cutover: %v", err)
-	}
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)
 
@@ -139,12 +136,11 @@ func TestStatusReportsChangeFlowPerTypeAndConsumer(t *testing.T) {
 	}
 }
 
-// TestStatusChangeFlowDegradesOnAnOldSchemaStore pins that the new section
-// reports "unmigrated" on an old-schema (and an uninitialized) store instead
-// of refusing or crashing, alongside
-// TestStatusAndDoctorDoNotCrashOnOldSchemaStore.
-func TestStatusChangeFlowDegradesOnAnOldSchemaStore(t *testing.T) {
-	for _, kind := range []string{"old", "empty"} {
+// TestStatusChangeFlowOnAStoreWithNoSchema pins that the section reports
+// "uninitialized" on a store with no schema yet instead of refusing or
+// crashing, alongside TestStatusAndDoctorOnEveryStoreState.
+func TestStatusChangeFlowOnAStoreWithNoSchema(t *testing.T) {
+	for _, kind := range []string{"empty"} {
 		t.Run(kind, func(t *testing.T) {
 			withRawStoreAt(t, storeAtVersion(t, kind))
 
@@ -152,8 +148,8 @@ func TestStatusChangeFlowDegradesOnAnOldSchemaStore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("status on a %s store: %v", kind, err)
 			}
-			if !strings.Contains(stdout, "change_flow:\n  unmigrated: run pg-desk migrate --cutover\n") {
-				t.Errorf("status lacks the unmigrated change_flow note:\n%s", stdout)
+			if !strings.Contains(stdout, "change_flow:\n  uninitialized: the store has no schema yet\n") {
+				t.Errorf("status lacks the uninitialized change_flow note:\n%s", stdout)
 			}
 			if strings.Contains(stdout, "  type pr:") {
 				t.Errorf("status printed per-type change-flow data for a %s store:\n%s", kind, stdout)

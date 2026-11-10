@@ -484,9 +484,6 @@ func TestSuppressionChainOrderAndReasons(t *testing.T) {
 			if _, ok := itemFor(res, 2); ok != tc.wantTeam {
 				t.Errorf("team PR has item = %v, want %v (a rule of another kind is independent)", ok, tc.wantTeam)
 			}
-			if res.Degraded {
-				t.Error("a migrated store must not report degraded")
-			}
 		})
 	}
 }
@@ -498,41 +495,12 @@ func orEmpty(m map[string]string) map[string]string {
 	return m
 }
 
-func TestUnmigratedStoreStillRunsAndHonorsOldColumns(t *testing.T) {
-	st := store.OpenSchema1ForTest(t) // version 1
-	hide := true
-	wip := true
-	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	put(t, st, prSpec{number: 2, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	put(t, st, prSpec{number: 3, ownership: "mine", panel: interpret.PanelMineAwaitingMe, ci: "failure"})
-	put(t, st, prSpec{number: 4, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	for id, a := range map[string]store.Annotation{
-		pid(2): {Hidden: &hide},
-		pid(3): {WIP: &wip},
-	} {
-		a.Repo, a.EntityType, a.EntityID, a.SetBy, a.SetAt = testRepo, "pr", id, "test", "2026-10-06T00:00:00Z"
-		if err := st.UpsertAnnotation(a); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	res := evaluate(t, st, baseConfig())
-
-	if !res.Degraded {
-		t.Error("Degraded must be true on an unmigrated store: suppress.* overrides are unavailable (INV-ATTNEVAL-5)")
-	}
-	if _, ok := itemFor(res, 1); !ok {
-		t.Error("the evaluator must still run on an unmigrated store")
-	}
-	if _, ok := itemFor(res, 4); !ok {
-		t.Error("an unannotated PR must still raise")
-	}
-	if _, ok := itemFor(res, 2); ok {
-		t.Error("the old hidden column must be honored")
-	}
-	tr := res.Traces[Ref("pr", pid(3))]
-	if len(tr.Dropped) == 0 || tr.Dropped[0].By != "wip" {
-		t.Errorf("the old wip column must suppress pr.own-* rules, trace %+v", tr)
+// A store that is not on schema 2 is refused, never read as an all-clear.
+func TestRetiredSchemaStoreIsRefused(t *testing.T) {
+	st := store.OpenRetiredSchemaForTest(t)
+	_, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
+	if !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("Evaluate on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }
 
@@ -574,10 +542,6 @@ func (f failingReader) ListEntities() ([]store.Entity, error) { return nil, f.er
 
 func (f failingReader) GetEntity(string, string, string) (store.Entity, bool, error) {
 	return store.Entity{}, false, f.err
-}
-
-func (f failingReader) GetPRAnnotation(string, string, string) (store.Annotation, bool, error) {
-	return store.Annotation{}, false, f.err
 }
 
 func (f failingReader) ListKVAnnotations(string, string, string) ([]store.KVAnnotation, error) {

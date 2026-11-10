@@ -88,9 +88,6 @@ func fixtureStore(t *testing.T, prs ...fixturePR) string {
 			t.Fatal(err)
 		}
 	}
-	if err := st.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -66,46 +66,11 @@ func TestTypedWIPRejectsBadState(t *testing.T) {
 	}
 }
 
-// On an old-schema store the typed pr verbs behave exactly like the
-// top-level verbs: they write the old per-column annotation.
-func TestTypedPRVerbsMatchTopLevelVerbsOnOldSchema(t *testing.T) {
-	open, seed := newStoreAt(t, "old")
-	withOpenSeams(t, linkTestConfig(), open)
-
-	if _, err := runGroupCmd(t, typedHide, "pr", "1", "noisy"); err != nil {
-		t.Fatalf("pr hide: %v", err)
-	}
-	ann, found, err := seed.GetPRAnnotation("o/r", entityTypePR, "o/r#1")
-	if err != nil || !found || ann.Hidden == nil || !*ann.Hidden || ann.HiddenReason != "noisy" {
-		t.Fatalf("after pr hide: found=%v ann=%+v err=%v", found, ann, err)
-	}
-	if _, err := runGroupCmd(t, typedWIP, "pr", "on", "1"); err != nil {
-		t.Fatalf("pr wip on: %v", err)
-	}
-	ann, _, _ = seed.GetPRAnnotation("o/r", entityTypePR, "o/r#1")
-	if ann.WIP == nil || !*ann.WIP || ann.Hidden == nil || !*ann.Hidden {
-		t.Fatalf("after pr wip on: ann=%+v, want wip set and hidden preserved", ann)
-	}
-	if _, err := runGroupCmd(t, typedUnhide, "pr", "1"); err != nil {
-		t.Fatalf("pr unhide: %v", err)
-	}
-	ann, _, _ = seed.GetPRAnnotation("o/r", entityTypePR, "o/r#1")
-	if ann.Hidden == nil || *ann.Hidden || ann.HiddenReason != "" || ann.WIP == nil || !*ann.WIP {
-		t.Fatalf("after pr unhide: ann=%+v", ann)
-	}
-
-	// The old-schema error text of the top-level verb carries through.
-	_, err = runGroupCmd(t, typedHide, "pr", "999")
-	if err == nil || !strings.Contains(err.Error(), "does not resolve") {
-		t.Errorf("pr hide unknown: error = %v, want the top-level does-not-resolve error", err)
-	}
-}
-
-// issue and thread have no old-schema counterpart.
-func TestTypedIssueAndThreadVerbsRefuseOldSchema(t *testing.T) {
+// Every typed verb refuses a store left on the retired schema.
+func TestTypedVerbsRefuseRetiredSchema(t *testing.T) {
 	open, _ := newStoreAt(t, "old")
 	withOpenSeams(t, linkTestConfig(), open)
-	for _, typ := range []string{"issue", "thread"} {
+	for _, typ := range []string{"pr", "issue", "thread"} {
 		_, err := runGroupCmd(t, typedHide, typ, "X-1")
 		wantOldSchemaRefusal(t, err)
 		_, err = runGroupCmd(t, typedUnhide, typ, "X-1")
@@ -115,38 +80,7 @@ func TestTypedIssueAndThreadVerbsRefuseOldSchema(t *testing.T) {
 	}
 }
 
-func TestTypedFeedbackOnOldSchemaMatchesTopLevel(t *testing.T) {
-	open, seed := newStoreAt(t, "old")
-	seedFeedbackPR(t, seed, "o/r", "o/r#1", [][2]string{{"c1", dispositionOpen}, {"c2", dispositionNoAction}})
-	withOpenSeams(t, linkTestConfig(), open)
-
-	if _, err := runGroupCmd(t, typedFeedback, "pr", "set", "1", "c1", "--disposition", "will-fix", "--actor", "bob"); err != nil {
-		t.Fatalf("pr feedback set: %v", err)
-	}
-	ann, found, err := seed.GetAnnotation("o/r", entityTypePR, "o/r#1", "c1")
-	if err != nil || !found || ann.Disposition != "will-fix" || ann.SetBy != "bob" {
-		t.Fatalf("old annotation = %+v found=%v err=%v", ann, found, err)
-	}
-	typed, err := runGroupCmd(t, typedFeedback, "pr", "list", "1")
-	if err != nil {
-		t.Fatalf("pr feedback list: %v", err)
-	}
-	top, err := runFeedbackListCmd(t, "1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if typed != top || !strings.Contains(typed, "c1\twill-fix (overridden)") {
-		t.Errorf("typed list = %q, top-level list = %q", typed, top)
-	}
-	if _, err := runGroupCmd(t, typedFeedback, "pr", "set", "1", "nope", "--disposition", "will-fix"); err == nil {
-		t.Error("set on unknown comment: error = nil")
-	}
-	if _, err := runGroupCmd(t, typedFeedback, "pr", "set", "1", "c1", "--disposition", "bogus"); err == nil {
-		t.Error("set with bogus disposition: error = nil")
-	}
-}
-
-func TestTypedFeedbackOnNewSchemaWritesDispositionAnnotations(t *testing.T) {
+func TestTypedFeedbackWritesDispositionAnnotations(t *testing.T) {
 	open, seed := newStoreAt(t, "new")
 	seedFeedbackPR(t, seed, "o/r", "o/r#1", [][2]string{{"c1", dispositionOpen}, {"c2", dispositionNoAction}})
 	withOpenSeams(t, linkTestConfig(), open)
@@ -248,9 +182,9 @@ func TestIssueHideUnhidePrintNoComposedCommand(t *testing.T) {
 	}
 }
 
-// The pr hide and unhide forms (the top-level verbs share the code) print the same, on
-// an old-schema store too (the composed command exists whatever the schema).
-func TestPRHideUnhidePrintTheComposedCommandOnAnOldSchemaStore(t *testing.T) {
+// The pr hide and unhide forms (the top-level verbs share the code) print the
+// same on a freshly created store.
+func TestPRHideUnhidePrintTheComposedCommandOnAFreshStore(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := linkTestConfig()
 	cfg.PRLane.Mode = "plan"

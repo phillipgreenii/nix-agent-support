@@ -151,15 +151,17 @@ func TestReinterpretStored_RequiresAStamp(t *testing.T) {
 	}
 }
 
-// INV-REINTERPRET-12: a schema-1 store is refused with the cutover message.
+// INV-REINTERPRET-12: a schema-1 store is refused with the store's retired-schema error.
 func TestReinterpretStored_SchemaOneStoreIsRefused(t *testing.T) {
-	st := store.OpenSchema1ForTest(t)
+	st := store.OpenRetiredSchemaForTest(t)
 	st.SetInterpStamp("s")
 	p := New(testCfg(), st)
-	seedInterpretOnlyEntity(t, p, "43", minimalFacts(t, map[string]any{"author": "me", "title": "x"}))
 	_, err := ReinterpretStored(context.Background(), st, p.cfg, interpret.SystemClock{}, "pr", "43", ReinterpretOptions{})
 	if !errors.Is(err, store.ErrOldSchema) {
-		t.Fatalf("err = %v, want the cutover refusal", err)
+		t.Fatalf("err = %v, want the retired-schema refusal", err)
+	}
+	if stage, _ := StageOf(err); stage != StageStore {
+		t.Fatalf("stage = %q, want store", stage)
 	}
 	if _, found, _ := st.GetInterpretation(riRepo, "pr", "43"); found {
 		t.Fatal("a refused write left a row")

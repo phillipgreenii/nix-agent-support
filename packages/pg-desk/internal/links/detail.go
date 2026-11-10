@@ -47,9 +47,6 @@ type Detailed struct {
 	// LinksAsOf is the newest time any of the edges was last confirmed; ""
 	// when the entity has no edges.
 	LinksAsOf string
-	// Degraded is true on an unmigrated store (only the legacy pr-to-issue
-	// rows could be read).
-	Degraded bool
 }
 
 // ReadDetailed is the composite view's linked-entity read: ReadLinked's
@@ -57,7 +54,7 @@ type Detailed struct {
 // appears once per (type, id, relation) with the union of its origins, each
 // joined with the linked entity's stored snapshot. Read-only, no network.
 func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
-	linked, asOf, degraded, err := readLinkedAsOf(d.Store, d.Repo, entityType, id)
+	linked, asOf, err := readLinkedAsOf(d.Store, d.Repo, entityType, id)
 	if err != nil {
 		return Detailed{}, err
 	}
@@ -120,7 +117,7 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 		return a.rel < b.rel
 	})
 
-	out := Detailed{LinksAsOf: asOf, Degraded: degraded}
+	out := Detailed{LinksAsOf: asOf}
 	for _, k := range order {
 		det := merged[k]
 		sort.SliceStable(det.Origins, func(i, j int) bool { return det.Origins[i].Origin < det.Origins[j].Origin })

@@ -50,19 +50,13 @@ func dropStampColumn(t *testing.T, s *Store) {
 func TestOpen_EnsuresInterpretationStamp(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		cutover bool
 		version int
-	}{{"version 1", false, 1}, {"version 2", true, 2}} {
+	}{{"version 2", 2}} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "s.db")
 			s, err := Open(path)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if tc.cutover {
-				if err := s.Cutover(); err != nil {
-					t.Fatal(err)
-				}
 			}
 			if !hasInterpColumn(t, s) {
 				t.Fatal("Open did not add interpretation.interp_version")
@@ -92,9 +86,6 @@ func TestOpen_AddsStampColumnToExistingStoreKeepingRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.db")
 	s, err := Open(path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Cutover(); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
@@ -266,13 +257,13 @@ func TestUpsertInterpretation_ShapeErrorIsReturned(t *testing.T) {
 	}
 }
 
-func TestInterpShape_SchemaVersionError(t *testing.T) {
+func TestHasInterpStampColumn_ClosedHandleError(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.interpShape(); err == nil {
-		t.Fatal("interpShape on a closed handle returned no error")
+	if _, err := s.hasInterpStampColumn(); err == nil {
+		t.Fatal("hasInterpStampColumn on a closed handle returned no error")
 	}
 }
 
@@ -282,9 +273,6 @@ func TestReadersWithoutStampColumn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.db")
 	s, err := Open(path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Cutover(); err != nil {
 		t.Fatal(err)
 	}
 	s.SetInterpStamp("v1/aaaaaaaa")
@@ -344,7 +332,7 @@ func TestInterpretationsBehind_NeedsAStampAndSchema2(t *testing.T) {
 	if _, _, err := s.InterpretationsBehind("o/r", 0); !errors.Is(err, ErrNoInterpStamp) {
 		t.Fatalf("err = %v, want ErrNoInterpStamp", err)
 	}
-	v1 := OpenSchema1ForTest(t)
+	v1 := OpenRetiredSchemaForTest(t)
 	v1.SetInterpStamp("x")
 	keys, known, err := v1.InterpretationsBehind("o/r", 0)
 	if err != nil || known || keys != nil {

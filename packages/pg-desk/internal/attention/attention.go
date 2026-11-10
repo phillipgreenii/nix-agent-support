@@ -74,7 +74,6 @@ type Reader interface {
 	// has no interpretation row.
 	ListEntities() ([]store.Entity, error)
 	GetEntity(repo, entityType, entityID string) (store.Entity, bool, error)
-	GetPRAnnotation(repo, entityType, entityID string) (store.Annotation, bool, error)
 	ListKVAnnotations(repo, entityType, entityID string) ([]store.KVAnnotation, error)
 	// LinkedReader is the cross-reference read grouping uses (the same one
 	// `pg-desk links` uses, so the two cannot disagree on what is linked).
@@ -165,12 +164,9 @@ type Trace struct {
 // Result is Evaluate's answer. Items and Groups are in canonical order.
 type Result struct {
 	// Now is the injected clock's reading.
-	Now time.Time
-	// Degraded is true when the store is not on the migrated schema, so the
-	// suppress.* annotation overrides could not be read (INV-ATTNEVAL-5).
-	Degraded bool
-	Items    []Item
-	Groups   []Group
+	Now    time.Time
+	Items  []Item
+	Groups []Group
 	// Traces is keyed by "<type>:<id>" and covers every projected entity: one
 	// with a stored interpretation row, or a non-pr one with only a stored
 	// entity row.
@@ -182,7 +178,6 @@ type Result struct {
 type ListDocument struct {
 	SchemaVersion int     `json:"schemaVersion"`
 	Now           string  `json:"now"`
-	Degraded      bool    `json:"degraded,omitempty"`
 	Items         []Item  `json:"items"`
 	Groups        []Group `json:"groups"`
 }
@@ -193,7 +188,6 @@ func (r Result) Document() ListDocument {
 	d := ListDocument{
 		SchemaVersion: SchemaVersion,
 		Now:           r.Now.UTC().Format(time.RFC3339),
-		Degraded:      r.Degraded,
 		Items:         r.Items,
 		Groups:        r.Groups,
 	}
@@ -231,7 +225,7 @@ func Evaluate(in Inputs) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	ann, degraded, err := newAnnotationReader(in.Store)
+	ann, err := newAnnotationReader(in.Store)
 	if err != nil {
 		return Result{}, err
 	}
@@ -254,11 +248,10 @@ func Evaluate(in Inputs) (Result, error) {
 	env := &SuppressEnv{Views: byRef, Dependencies: dependency.NewResolver(in.Store, in.Repo)}
 
 	res := Result{
-		Now:      now,
-		Degraded: degraded,
-		Items:    []Item{},
-		Groups:   []Group{},
-		Traces:   make(map[string]Trace, len(views)),
+		Now:    now,
+		Items:  []Item{},
+		Groups: []Group{},
+		Traces: make(map[string]Trace, len(views)),
 	}
 	type survivor struct {
 		view  *View

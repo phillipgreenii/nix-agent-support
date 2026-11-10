@@ -12,18 +12,14 @@
 // stage in this docket calls the annotation writer — packet 8's CLI
 // commands (hide/unhide/wip/feedback set) are its only callers.
 //
-// # Two schema versions
+// # Schema version
 //
-// The store exists in two shapes. Version 1 is the six tables above and is
-// what Open builds. Version 2 is the entity-change-flow schema: entity gains
-// version/hydrated_at/active, change_log and consumer are added, annotation
-// becomes key/value, xref gains origin/relation, and interpretation.sync_error
-// and the ledger table are gone. A store moves from 1 to 2 only through the
-// explicit Cutover (cutover.go, `pg-desk migrate --cutover`), never through
-// Open. Until the old code paths are deleted, Open accepts either version,
-// the entity/interpretation/xref accessors work on both (schema-dual), and
-// commands that need version 2 call RequireNewSchema. OpenRaw opens a store
-// of any version for the commands that must inspect or repair it.
+// A fresh store is created directly at schema version 2, the entity-change-flow
+// schema (schema.go). The older version-1 shape, its migration ladder and the
+// cutover verb were retired once every store had been cut over: Open refuses a
+// store still at version 1 (ErrOldSchema) and a store newer than this binary.
+// OpenRaw and OpenReadOnly open a store of any version, for the commands that
+// must inspect one, and RequireNewSchema is the guard those handles use.
 package store
 
 import (
@@ -102,7 +98,7 @@ type Store struct {
 }
 
 // synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`
-// immediately after open, before the WAL conversion and before migrate, so
+// immediately after open, before the WAL conversion and before the schema check, so
 // it governs every fsync those steps would otherwise perform.
 //
 // Production leaves it EMPTY, so SQLite keeps its default (FULL) and every
@@ -148,17 +144,17 @@ func openDB(path string) (*Store, error) {
 }
 
 // Open opens (creating if absent) the SQLite database at path, applies the
-// connection pragmas, and runs the migration ladder (migrations.go). It
-// accepts a store at schema version 1 or 2 and NEVER runs the schema
-// cutover: that is an explicit, separate step (Cutover, cutover.go).
+// connection pragmas and checks the schema (schema.go): a new file is created
+// at schema version 2, a version-2 store is accepted, and a store at the
+// retired version 1 or at a version newer than this binary is refused.
 func Open(path string) (*Store, error) {
 	s, err := openDB(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(s); err != nil {
+	if err := checkSchema(s); err != nil {
 		_ = s.sql.Close()
-		return nil, fmt.Errorf("store: migrate %s: %w", path, err)
+		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
 	if err := ensureIssueFeedStorage(s); err != nil {
 		_ = s.sql.Close()
@@ -172,11 +168,11 @@ func Open(path string) (*Store, error) {
 }
 
 // OpenRaw opens the database at path with the connection pragmas but with
-// NO migrations and NO schema-version gate, so it opens a store of any
+// NO schema creation and NO schema-version gate, so it opens a store of any
 // version (including one Open would refuse, and a file with no schema at
-// all). It exists for the callers that must inspect or repair a store
-// whatever state it is in: `pg-desk migrate --cutover`, `doctor` and
-// `status`. Everything else opens through Open.
+// all, which it leaves empty). It exists for the callers that must inspect a
+// store whatever state it is in: `doctor` and `status`. Everything else opens
+// through Open.
 //
 // A caller of OpenRaw is responsible for tolerating the schema it finds:
 // SchemaVersion reports which one that is.
@@ -234,36 +230,23 @@ type testT interface {
 }
 
 // OpenForTest opens an in-temp-dir store for tests, registering cleanup. The
-// store has been cut over to the new schema (version 2), the only schema the
-// production write paths accept. A test of the old schema (the cutover
-// itself, the schema-dual readers, the refusal of an old store) opens one
-// with OpenSchema1ForTest.
+// store is created at schema version 2.
 func OpenForTest(t testT) *Store {
-	s := OpenSchema1ForTest(t)
-	if err := s.Cutover(); err != nil {
-		t.Fatalf("OpenForTest: cutover: %v", err)
+	SetSynchronousForTests("OFF")
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("OpenForTest: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
 // OpenNewSchemaForTest is OpenForTest, kept under its older name.
 func OpenNewSchemaForTest(t testT) *Store { return OpenForTest(t) }
 
-// OpenSchema1ForTest opens an in-temp-dir store at the OLD schema (version
-// 1), for the few tests that need it.
-func OpenSchema1ForTest(t testT) *Store {
-	SetSynchronousForTests("OFF")
-	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("OpenSchema1ForTest: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
-
-// ErrOldSchema is wrapped by RequireNewSchema's error, so a caller can
-// tell "this store has not been cut over yet" from any other failure.
-var ErrOldSchema = errors.New("store is on the old schema")
+// ErrOldSchema is wrapped by RequireNewSchema's and Open's error, so a caller
+// can tell "this store is on the retired schema" from any other failure.
+var ErrOldSchema = errors.New("store is on the retired schema")
 
 // SchemaVersion returns the store's schema version: SQLite's user_version,
 // which is the source of truth (meta.schema_version mirrors it for
@@ -276,31 +259,18 @@ func (s *Store) SchemaVersion() (int, error) {
 	return v, nil
 }
 
-// RequireNewSchema returns nil when the store has been cut over to the new
-// schema (version 2 or later), and otherwise an error wrapping ErrOldSchema
-// that says how to fix it ("run pg-desk migrate --cutover"). Every command
-// that needs the new schema calls it right after opening the store.
+// RequireNewSchema returns nil when the store is on schema version 2 (or
+// later), and otherwise an error wrapping ErrOldSchema. Open never returns a
+// handle on an older store, so the guard matters for the handles that do
+// (OpenRaw, OpenReadOnly): every command that needs the current schema calls
+// it right after opening the store.
 func (s *Store) RequireNewSchema() error {
 	v, err := s.SchemaVersion()
 	if err != nil {
 		return err
 	}
-	if v < NewSchemaVersion {
-		return fmt.Errorf("%w (schema version %d, need %d): run pg-desk migrate --cutover", ErrOldSchema, v, NewSchemaVersion)
+	if v < schemaVersion {
+		return fmt.Errorf("%w (schema version %d, need %d): %s", ErrOldSchema, v, schemaVersion, oldSchemaAdvice)
 	}
 	return nil
-}
-
-// isNewSchema reports whether the store is on the new schema. The
-// schema-dual accessors (entity, interpretation, xref) ask it on every call
-// rather than caching the answer at Open, so a handle that was opened
-// before a cutover follows the store to its new shape. It MUST be called
-// before a query is issued, never while a result set is still open: the
-// pool holds one connection.
-func (s *Store) isNewSchema() (bool, error) {
-	v, err := s.SchemaVersion()
-	if err != nil {
-		return false, err
-	}
-	return v >= NewSchemaVersion, nil
 }

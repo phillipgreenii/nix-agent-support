@@ -105,7 +105,7 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 // needs a schema-2 store; an older one has no series for it (never a 0 that
 // would read as healthy) and the scrape still succeeds.
 func TestMetricsOmitThePersistedLaneFamiliesOnAnOldSchemaStore(t *testing.T) {
-	s := store.OpenSchema1ForTest(t)
+	s := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",

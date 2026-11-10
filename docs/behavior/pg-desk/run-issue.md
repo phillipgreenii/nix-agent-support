@@ -131,8 +131,8 @@ The re-interpretation of a linked PR is the shared re-interpretation of stored f
   history-only `interpretation_changed` record to the PR's change log, so a Jira or bead event for a
   linked PR can leave that record in the PR's history. It wakes no decider.
 - `run issue` MUST require schema 2 before it does anything, right after it opens the store, for
-  both backends and every `--change` value. On a store on schema 1 it exits `1` with the cutover
-  message and writes nothing; there is no unversioned fallback hydration of a Jira issue any more.
+  both backends and every `--change` value. On a store on schema 1 it exits `1` with the store's
+  retired-schema error and writes nothing; there is no unversioned fallback hydration of a Jira issue any more.
 
 ## Exit codes
 

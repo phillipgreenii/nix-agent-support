@@ -39,22 +39,13 @@ func hasIngestFailedTable(t *testing.T, s *Store) bool {
 func TestOpen_EnsuresIssueFeedStorage(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		cutover bool
 		version int
-	}{
-		{"version 1", false, 1},
-		{"version 2", true, 2},
-	} {
+	}{{"version 2", 2}} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "s.db")
 			s, err := Open(path)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if tc.cutover {
-				if err := s.Cutover(); err != nil {
-					t.Fatal(err)
-				}
 			}
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
@@ -147,9 +138,6 @@ func TestOlderBinaryOpenStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	before := userVersion(t, s)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -159,8 +147,8 @@ func TestOlderBinaryOpenStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate(old); err != nil {
-		t.Fatalf("ensure-less migrate: %v", err)
+	if err := checkSchema(old); err != nil {
+		t.Fatalf("ensure-less schema check: %v", err)
 	}
 	if err := old.UpsertEntity(clEntity("a")); err != nil {
 		t.Fatalf("ensure-less write: %v", err)
@@ -193,9 +181,6 @@ func legacyCutoverStore(t *testing.T) (string, int) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if err := s.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.UpsertEntity(clEntity("a")); err != nil {
 		t.Fatal(err)
 	}

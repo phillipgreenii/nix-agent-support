@@ -47,9 +47,9 @@ const consumerStalledMultiple = 3
 //     hydrations, the active Jira issues stored without a status category,
 //     and (with --router-config) the decider roles bound per type.
 //
-// An unmigrated store is REPORTED as such and the new-schema checks are
-// skipped: doctor never refuses or crashes on it, and the old-schema lines
-// the caller already printed stay as they were. cfg is nil when config
+// A store with no schema yet is REPORTED as such and the checks are skipped;
+// a store left on the retired schema 1 fails the check with the store's
+// error. doctor never crashes on either. cfg is nil when config
 // resolution failed (the config check already failed); the checks that need
 // it are then skipped with a note.
 func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *routerConfig, failures *[]string) {
@@ -67,8 +67,13 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		*failures = append(*failures, "change_flow store")
 		return
 	}
-	if version < store.NewSchemaVersion {
-		fmt.Fprintln(w, "  unmigrated: the store is not on the change-flow schema; change-flow checks skipped; run pg-desk migrate --cutover")
+	if version == 0 {
+		fmt.Fprintln(w, "  uninitialized: the store has no schema yet; change-flow checks skipped")
+		return
+	}
+	if err := st.RequireNewSchema(); err != nil {
+		fmt.Fprintf(w, "  store: FAIL (%v)\n", err)
+		*failures = append(*failures, "change_flow store")
 		return
 	}
 

@@ -129,9 +129,11 @@ sync:
   mode: off
 %s`
 
-// newRig builds the sandbox for fixture JSON fxJSON. The store is created and
-// cut over to schema 2 only when cutover is true; legacy lists entities whose
-// old-schema row (version 0, never hydrated) is written before the cutover.
+// newRig builds the sandbox for fixture JSON fxJSON. The store is created at
+// schema 2; when cutover is false it is then stamped as the retired schema 1,
+// which every pg-desk verb that needs schema 2 refuses. legacy lists entities
+// whose never-hydrated row (version 0) is written right after the store is
+// created.
 func newRig(t *testing.T, fxJSON string, cutover bool, legacy ...string) *rig {
 	t.Helper()
 	return newRigWith(t, fxJSON, rigOpts{cutover: cutover, legacy: legacy})
@@ -238,8 +240,10 @@ func newRigWith(t *testing.T, fxJSON string, o rigOpts) *rig {
 	for _, e := range legacy {
 		r.legacyRow(e)
 	}
-	if cutover {
-		r.mustDesk("migrate", "--cutover")
+	if !cutover {
+		// pg-desk creates every store at schema 2 now. A rig that wants a store
+		// the commands must refuse stamps it as the retired schema 1.
+		r.sqlite("PRAGMA user_version = 1;")
 	}
 	return r
 }
@@ -563,9 +567,9 @@ func (r *rig) checkExit(res result) {
 	}
 }
 
-// legacyRow writes the old-schema row of entity (version 0, never hydrated)
-// into the version-1 store, exactly as the cutover leaves every pre-existing
-// row.
+// legacyRow writes a never-hydrated row of entity (version 0, hydrated_at
+// NULL) into the store, the shape a row had before the entity change flow
+// hydrated it.
 func (r *rig) legacyRow(entity string) {
 	r.t.Helper()
 	i := strings.LastIndex(entity, "#")

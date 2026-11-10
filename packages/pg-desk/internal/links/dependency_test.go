@@ -116,14 +116,3 @@ func TestReadDetailed_DependsOn(t *testing.T) {
 		t.Errorf("origins = %+v; want %+v", got.Links[0].Origins, wantOrigins)
 	}
 }
-
-// On the unmigrated store `show` still lists the stack dependency.
-func TestReadDetailed_DependsOnUnmigrated(t *testing.T) {
-	st := store.OpenSchema1ForTest(t)
-	putStackPR(t, st, 1, "open", "feat-a", "main", false)
-	top := putStackPR(t, st, 2, "open", "feat-b", "feat-a", false)
-	got, err := ReadDetailed(deps(st), "pr", top)
-	if err != nil || !got.Degraded || len(got.Links) != 1 || got.Links[0].Relation != "depends_on" {
-		t.Fatalf("ReadDetailed = %+v, %v", got, err)
-	}
-}

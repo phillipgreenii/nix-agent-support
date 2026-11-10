@@ -79,7 +79,7 @@ func TestMetricsExposeEveryChangeFlowFamilyForANewSchemaStore(t *testing.T) {
 // store that has not been cut over: the dashboard families stay, the
 // change-flow families are simply absent, and the scrape does not fail.
 func TestMetricsDegradeOnAnOldSchemaStore(t *testing.T) {
-	s := store.OpenSchema1ForTest(t)
+	s := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
@@ -192,7 +192,7 @@ func TestMetricsExposeTheFailedIngestSeriesFromTheTable(t *testing.T) {
 		}
 	}
 
-	old := store.OpenSchema1ForTest(t)
+	old := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
@@ -246,7 +246,7 @@ func TestMetricsExposeTheJiraOutcomeSeriesFromTheStore(t *testing.T) {
 		}
 	}
 
-	old := store.OpenSchema1ForTest(t)
+	old := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
@@ -302,7 +302,7 @@ func TestMetricsExposeTheWatchedEntityAndOrphanSeriesFromTheStore(t *testing.T) 
 		}
 	}
 
-	old := store.OpenSchema1ForTest(t)
+	old := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",

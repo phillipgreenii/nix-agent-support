@@ -25,9 +25,6 @@ func corpusAttentionStore(t *testing.T) (string, []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	p := pipeline.New(corpus.Config(), st, pipeline.WithStamp("corpus/stamp"), pipeline.WithClock(corpus.Clock()), pipeline.WithLogWriter(io.Discard))
 	fxs, err := corpus.Fixtures()
 	if err != nil {

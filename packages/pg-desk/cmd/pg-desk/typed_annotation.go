@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 
@@ -14,10 +13,8 @@ import (
 // The typed homes of the kept verbs: pg-desk <type> hide|unhide|wip and
 // pg-desk pr feedback list|set [design 6.9]. The top-level
 // hide/unhide/wip/feedback are the pr forms and share the same code, so every
-// verb is schema-dual: on an old-schema store a pr verb runs the old
-// per-column path; on a new-schema store it writes the key/value
-// annotation API (hidden, wip, disposition.<comment_id>). issue and thread
-// have no old-schema counterpart and refuse an old-schema store.
+// verb writes the key/value annotation API (hidden, wip,
+// disposition.<comment_id>).
 
 func init() {
 	for _, t := range typedEntityTypes {
@@ -26,34 +23,18 @@ func init() {
 	typeGroup(entityTypePR).AddCommand(newTypedFeedbackCmd())
 }
 
-// runSchemaDual opens the store and runs newPath against it when it is on
-// the new schema. On an old-schema store it closes the handle and runs
-// oldPath (the existing top-level verb, which opens its own); a nil oldPath
-// means the verb has no old-schema form, so the store's refusal is returned.
-func runSchemaDual(oldPath func() error, newPath func(st *store.Store) error) error {
+// withStore opens the store, refuses one that is not on schema 2 (the store's
+// own error, unchanged) and runs fn against it.
+func withStore(fn func(st *store.Store) error) error {
 	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	rerr := st.RequireNewSchema()
-	if rerr == nil {
-		defer func() { _ = st.Close() }()
-		return newPath(st)
+	defer func() { _ = st.Close() }()
+	if err := st.RequireNewSchema(); err != nil {
+		return err
 	}
-	_ = st.Close()
-	if oldPath != nil && errors.Is(rerr, store.ErrOldSchema) {
-		return oldPath()
-	}
-	return rerr
-}
-
-// oldPathFor is the old-schema form for entityType: the top-level pr verb
-// for pr, none for any other type.
-func oldPathFor(entityType string, f func() error) func() error {
-	if entityType != entityTypePR {
-		return nil
-	}
-	return f
+	return fn(st)
 }
 
 func newTypedHideCmd(entityType string) *cobra.Command {
@@ -105,8 +86,7 @@ func runTypedHidden(cmd *cobra.Command, cmdName, entityType, ref string, hidden 
 }
 
 func runTypedHiddenWrite(cmd *cobra.Command, cmdName, entityType, ref string, hidden bool, reason string) error {
-	return runSchemaDual(
-		oldPathFor(entityType, func() error { return setHiddenAnnotation(cmd, cmdName, ref, hidden, reason) }),
+	return withStore(
 		func(st *store.Store) error {
 			cfg, err := deskConfigLoad(cmd.Context())
 			if err != nil {
@@ -141,12 +121,10 @@ func newTypedWIPCmd(entityType string) *cobra.Command {
 	}
 }
 
-// runTypedWIP is wip on|off for entityType: the old-schema pr form on an
-// old-schema store, the key/value wip annotation on a migrated one. The
-// top-level `wip` verb calls it with the pr type.
+// runTypedWIP is wip on|off for entityType: it writes the key/value wip
+// annotation. The top-level `wip` verb calls it with the pr type.
 func runTypedWIP(cmd *cobra.Command, entityType, ref string, wip bool) error {
-	return runSchemaDual(
-		oldPathFor(entityType, func() error { return setWIPAnnotation(cmd, ref, wip) }),
+	return withStore(
 		func(st *store.Store) error {
 			cfg, err := deskConfigLoad(cmd.Context())
 			if err != nil {
@@ -173,7 +151,7 @@ func newTypedFeedbackCmd() *cobra.Command {
 		Short: "Print the PR's comments and threads with their current dispositions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFeedbackListDual(cmd, args[0])
+			return runFeedbackList(cmd, args[0])
 		},
 	})
 	var disposition, actor string
@@ -182,7 +160,7 @@ func newTypedFeedbackCmd() *cobra.Command {
 		Short: "Record a disposition override, attributed to the caller",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFeedbackSetDual(cmd, args[0], args[1], disposition, actor)
+			return runFeedbackSet(cmd, args[0], args[1], disposition, actor)
 		},
 	}
 	set.Flags().StringVar(&disposition, "disposition", "", "open|will-fix|wont-fix|no-action (required)")
@@ -191,28 +169,21 @@ func newTypedFeedbackCmd() *cobra.Command {
 	return g
 }
 
-// runFeedbackListDual is feedback list for pr: the old-schema reader on an
-// old-schema store, the key/value overlay on a migrated one. The top-level
-// `feedback list` and `pr feedback list` both call it.
-func runFeedbackListDual(cmd *cobra.Command, ref string) error {
-	return runSchemaDual(
-		func() error { return runFeedbackList(cmd, ref) },
-		func(st *store.Store) error { return runTypedFeedbackList(cmd, st, ref) },
-	)
+// runFeedbackList is feedback list for pr: the stored verdicts with the
+// disposition.<comment_id> overlay. The top-level `feedback list` and
+// `pr feedback list` both call it.
+func runFeedbackList(cmd *cobra.Command, ref string) error {
+	return withStore(func(st *store.Store) error { return runTypedFeedbackList(cmd, st, ref) })
 }
 
-// runFeedbackSetDual is feedback set for pr: the old per-column annotation on
-// an old-schema store, disposition.<comment_id> on a migrated one. The
-// top-level `feedback set` and `pr feedback set` both call it. The
+// runFeedbackSet is feedback set for pr: it writes disposition.<comment_id>.
+// The top-level `feedback set` and `pr feedback set` both call it. The
 // disposition is validated before the store is opened.
-func runFeedbackSetDual(cmd *cobra.Command, ref, commentID, disposition, actor string) error {
+func runFeedbackSet(cmd *cobra.Command, ref, commentID, disposition, actor string) error {
 	if !validDisposition(disposition) {
 		return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", disposition)
 	}
-	return runSchemaDual(
-		func() error { return runFeedbackSetWith(cmd, ref, commentID, disposition, actor) },
-		func(st *store.Store) error { return runTypedFeedbackSet(cmd, st, ref, commentID, disposition, actor) },
-	)
+	return withStore(func(st *store.Store) error { return runTypedFeedbackSet(cmd, st, ref, commentID, disposition, actor) })
 }
 
 // feedbackBase resolves ref and reads the PR's stored base dispositions.
@@ -235,7 +206,7 @@ func feedbackBase(cmd *cobra.Command, st *store.Store, cmdName, ref string) (cfg
 	return cfg, repo, id, dispositionsFromInterpretation(interp.Dispositions), nil
 }
 
-// runTypedFeedbackList is feedback list on a new-schema store: the stored
+// runTypedFeedbackList is feedback list: the stored
 // verdicts with the disposition.<comment_id> annotations laid over them.
 func runTypedFeedbackList(cmd *cobra.Command, st *store.Store, ref string) error {
 	_, repo, id, base, err := feedbackBase(cmd, st, "feedback list", ref)
@@ -257,7 +228,7 @@ func runTypedFeedbackList(cmd *cobra.Command, st *store.Store, ref string) error
 	return renderFeedbackList(cmd.OutOrStdout(), merged)
 }
 
-// runTypedFeedbackSet is feedback set on a new-schema store: it writes
+// runTypedFeedbackSet is feedback set: it writes
 // disposition.<comment_id>. The value is the disposition as given, including
 // open (an explicit override back to open), so what the user asked for is
 // what is stored.

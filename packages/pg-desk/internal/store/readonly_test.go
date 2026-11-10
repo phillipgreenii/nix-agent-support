@@ -31,8 +31,8 @@ func TestOpenReadOnlyReadsButNeverWrites(t *testing.T) {
 	if err != nil || !found || e.EntityID != "o/r#1" {
 		t.Fatalf("GetEntity = %+v, %v, %v", e, found, err)
 	}
-	if v, err := ro.SchemaVersion(); err != nil || v != 1 {
-		t.Fatalf("SchemaVersion = %d, %v; want 1", v, err)
+	if v, err := ro.SchemaVersion(); err != nil || v != 2 {
+		t.Fatalf("SchemaVersion = %d, %v; want 2", v, err)
 	}
 	if err := ro.UpsertEntity(Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#2", Facts: "{}", AsOf: "x"}); err == nil {
 		t.Fatal("write through a read-only handle succeeded")

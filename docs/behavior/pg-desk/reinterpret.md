@@ -152,7 +152,7 @@ call and writes no entity row.
   reinterpreted N open PRs: C changed, U unchanged; M not open (stamped only), S skipped, F failed
   ```
 
-- It requires schema 2 and refuses a store on schema 1 with the cutover message (see
+- It requires schema 2 and refuses a store on schema 1 with the store's retired-schema error (see
   [`store-schema.md`](store-schema.md)).
 - Exit `0` when nothing failed; `1` otherwise (bad arguments, an unresolvable `<pr>`, a refused
   store, a failed row).
@@ -249,7 +249,7 @@ documented, and `pg-desk pr reinterpret <pr>` is the fix for one PR.
   or `pr reinterpret <pr>` MUST make it eligible again, and one failing row MUST NOT stop the pass.
 - **INV-REINTERPRET-9.** <!-- uuid: 02114784-7e4f-4364-af2a-eed8dacf9486 --> `pr reinterpret` MUST accept exactly one of `<pr>` and `--open`, MUST make no network call,
   MUST write nothing under `--dry-run`, MUST exit `0` only when nothing failed, and MUST refuse a
-  store on schema 1 before writing anything.
+  store on the retired schema 1 before writing anything.
 - **INV-REINTERPRET-10.** <!-- uuid: 10c66814-62cf-4226-985b-24f519a4211a --> The heartbeat catch-up MUST NOT make a heartbeat late or missed: it MUST run after the
   liveness stamp, stop at a budget of at most 10 seconds (cut to what the period leaves, skipped when almost none is left) and a 25-row cap, hold no write lock across rows, skip
   when a previous catch-up is running, never fail the heartbeat, and skip on a `dev` build.
@@ -257,7 +257,7 @@ documented, and `pg-desk pr reinterpret <pr>` is the fix for one PR.
   facts and write nothing; a pass that stopped at a limit with rows remaining MUST record the
   remaining count.
 - **INV-REINTERPRET-12.** <!-- uuid: 3b9def65-86bf-43fb-b5c7-0b8d0675b037 --> Every command that writes an interpretation MUST require schema 2 and, on a store on schema 1,
-  MUST refuse with the cutover message before writing anything, including `run issue` and `run
+  MUST refuse with the store's retired-schema error before writing anything, including `run issue` and `run
 thread`.
 - **INV-REINTERPRET-13.** <!-- uuid: 88ff5153-bef3-485f-ab35-90681e8b060b --> A reader that does not migrate the store MUST work on a store that does not yet have the stamp
   column, reading the stamp as absent, and `status` MUST report the behind count as unknown rather

@@ -63,9 +63,6 @@ func openRunTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
-	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
-		t.Fatalf("cutover test store: %v", err)
-	}
 	return st
 }
 

@@ -150,7 +150,7 @@ func typedOpenOne(st *store.Store, entityType, repo, id string) (openRow, error)
 		if !found {
 			return openRow{}, fmt.Errorf("open: %s %s does not resolve to a stored entity", entityType, id)
 		}
-		row, err := openRowFrom(st, interp, true)
+		row, err := openRowFrom(st, interp)
 		if err != nil {
 			return openRow{}, fmt.Errorf("open: %w", err)
 		}
@@ -178,7 +178,7 @@ func typedOpenOne(st *store.Store, entityType, repo, id string) (openRow, error)
 // excluded unless --include-hidden.
 func typedOpenList(st *store.Store, cfg *config.Config, entityType string, f openFlags) ([]openRow, error) {
 	if entityType == entityTypePR {
-		mine, team, err := buildOpenRowsFor(st, cfg, true)
+		mine, team, err := buildOpenRows(st, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("open: %w", err)
 		}

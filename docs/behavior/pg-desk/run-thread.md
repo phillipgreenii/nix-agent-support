@@ -73,7 +73,7 @@ appends one history-only `interpretation_changed` record to the PR's change log.
 
 `run thread` MUST require schema 2 before it does anything, right after it opens the store: its
 cross-reference rows are written before the final re-interpretation, so a late refusal would leave
-rows behind. On a store on schema 1 it exits `1` with the cutover message and writes nothing.
+rows behind. On a store on schema 1 it exits `1` with the store's retired-schema error and writes nothing.
 
 ## Exit codes
 

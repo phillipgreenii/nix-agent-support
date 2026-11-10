@@ -94,7 +94,7 @@ func TestCountPRAnchorsEmptyStoreIsZeroAndAnOldSchemaIsAnError(t *testing.T) {
 	}
 	// A schema-1 store has no xref relation column: the read fails and the
 	// failure is returned, never folded into a zero view.
-	if got, err := OpenSchema1ForTest(t).CountPRAnchors(time.Now()); err == nil {
+	if got, err := OpenRetiredSchemaForTest(t).CountPRAnchors(time.Now()); err == nil {
 		t.Errorf("schema-1 store: got %+v with no error; a failed read must be an error", got)
 	}
 }

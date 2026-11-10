@@ -109,7 +109,7 @@ func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 }
 
 func TestObserveDegradesOnAnOldSchemaStore(t *testing.T) {
-	st := store.OpenSchema1ForTest(t) // schema 1: no change_log or consumer table
+	st := store.OpenRetiredSchemaForTest(t) // schema 1: no change_log or consumer table
 	flow, err := Observe(st, observeNow, 6*time.Hour)
 	if err != nil {
 		t.Fatalf("Observe on an old-schema store must degrade, not fail: %v", err)

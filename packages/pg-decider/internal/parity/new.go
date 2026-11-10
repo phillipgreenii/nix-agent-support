@@ -25,14 +25,13 @@ type NewResult struct {
 // RunNew loads a scenario into a schema-2 store and reads back what the
 // decider plans. In a hermetic sandbox it:
 //
-//  1. creates an empty store and cuts it over to schema 2: `pg-desk heartbeat`
-//     (which stays after the sync stage is removed) opens the fresh store and
-//     creates its schema-1 tables, then `pg-desk migrate --cutover` moves it to
-//     schema 2. No `pg-desk run pr` is involved, so the seeding does not depend
-//     on the sync stage;
-//  2. for a legacy-seeded entity (Fixture.LegacySeeded) the store helper writes
-//     the old-schema row BETWEEN those two steps, so the cutover leaves it at
-//     version 0, never hydrated, exactly as it leaves every pre-existing row;
+//  1. creates an empty store at schema 2: `pg-desk heartbeat` (which stays
+//     after the sync stage is removed) opens the fresh store and creates it
+//     directly at schema 2. No `pg-desk run pr` is involved, so the seeding
+//     does not depend on the sync stage;
+//  2. for a legacy-seeded entity (Fixture.LegacySeeded) the store helper then
+//     writes a row that was never hydrated (version 0, hydrated_at NULL), the
+//     shape a row had before the entity change flow hydrated it;
 //  3. checks the decider REFUSES each legacy-seeded entity before any refresh;
 //  4. hydrates every entity with `pg-desk pr refresh <id>`, hides the scenario's
 //     hidden entities, then hydrates every fixture bead with
@@ -75,9 +74,6 @@ func RunNew(ctx context.Context, env Env, sc Scenario) (NewResult, error) {
 				return fail("seed legacy row", err)
 			}
 		}
-	}
-	if _, err := sb.step(ctx, sb.deskExec, "migrate", "--cutover"); err != nil {
-		return fail("cutover", err)
 	}
 
 	out := NewResult{Plans: map[string]action.PlanResult{}, Refused: map[string]string{}}
@@ -148,7 +144,7 @@ func (sb *sandbox) legacyRefusal(ctx context.Context, env Env, id string) (strin
 		return "", err
 	}
 	if version != 0 || hydratedAt != "<null>" {
-		return "", fmt.Errorf("%s is not a legacy row after the cutover: version %d, hydrated_at %s (want version 0, never hydrated)", id, version, hydratedAt)
+		return "", fmt.Errorf("%s is not a legacy row: version %d, hydrated_at %s (want version 0, never hydrated)", id, version, hydratedAt)
 	}
 	res, err := sb.run(ctx, sb.deciderExec, "plan", "pr", id, "--json")
 	if err != nil {

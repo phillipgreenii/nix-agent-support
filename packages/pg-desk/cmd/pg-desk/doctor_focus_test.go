@@ -186,18 +186,18 @@ func TestDoctorFocusBlock(t *testing.T) {
 		}
 	})
 
-	t.Run("an unmigrated store prints focus: unmigrated and skips", func(t *testing.T) {
-		withDoctorStore(t, "o/r") // old schema
+	t.Run("a store with no schema yet prints focus: no data and skips", func(t *testing.T) {
+		withRawStoreAt(t, storeAtVersion(t, "empty"))
 		stubDoctorSeams(t, nil, nil, nil)
 		stdout, err := runDoctorCmd(t)
 		if err != nil {
 			t.Fatalf("doctor: %v\n%s", err, stdout)
 		}
-		if !hasLine(stdout, "focus: unmigrated") {
-			t.Errorf("stdout lacks 'focus: unmigrated':\n%s", stdout)
+		if !hasLine(stdout, "focus: no data (the store has no schema yet)") {
+			t.Errorf("stdout lacks the 'focus: no data' line:\n%s", stdout)
 		}
 		if strings.Contains(stdout, "[gate]") {
-			t.Errorf("an unmigrated store printed a gate line:\n%s", stdout)
+			t.Errorf("a store with no schema printed a gate line:\n%s", stdout)
 		}
 	})
 
@@ -540,14 +540,14 @@ func TestStatusPrintsTheFocusBlock(t *testing.T) {
 	}
 }
 
-func TestStatusFocusBlockOnAnUnmigratedStore(t *testing.T) {
-	withDoctorStore(t, "o/r")
+func TestStatusFocusBlockOnAStoreWithNoSchema(t *testing.T) {
+	withRawStoreAt(t, storeAtVersion(t, "empty"))
 	stdout, err := runStatusCmd(t)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if !hasLine(stdout, "focus: unmigrated") {
-		t.Errorf("status lacks 'focus: unmigrated':\n%s", stdout)
+	if !hasLine(stdout, "focus: no data (the store has no schema yet)") {
+		t.Errorf("status lacks 'focus: no data':\n%s", stdout)
 	}
 }
 

@@ -21,18 +21,13 @@ is already in a locked plan is reported as `no longer a candidate: hidden` and n
 The three verbs also exist under each entity type: `pg-desk <type> hide <id> [reason]`,
 `pg-desk <type> unhide <id>` and `pg-desk <type> wip on|off <id>`, for `<type>` one of `pr`,
 `issue`, `thread` (entity-change-flow design 6.9). The top-level verbs above are the `pr` forms:
-`pg-desk hide|unhide|wip` behave exactly like `pg-desk pr hide|unhide|wip` on both schemas. The
-verbs depend on the store's schema:
-
-- On an old-schema store, `pg-desk hide|unhide|wip` and `pg-desk pr hide|unhide|wip` write the old
-  per-column annotation. The `issue` and `thread` forms have no old-schema counterpart and refuse
-  with the store's error, which says to run `pg-desk migrate --cutover`.
-- On a migrated store they write the key/value annotations (see [`annotate.md`](annotate.md)):
-  `hide` sets `hidden` to `{"value": true, "reason": <reason or null>}`, `unhide` sets it to
-  `{"value": false, "reason": null}`, and `wip on|off` sets `wip` to `true`/`false`. `hidden` and
-  `wip` are independent keys. Each write appends one `annotation_changed` record. An id with no
-  stored entity exits `1`. The top-level verbs MUST NOT read or write the old per-column annotation
-  on a migrated store.
+`pg-desk hide|unhide|wip` behave exactly like `pg-desk pr hide|unhide|wip`. Every form writes the
+key/value annotations (see [`annotate.md`](annotate.md)), and on a store left on the retired schema 1
+refuses with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version") and exits `1`:
+`hide` sets `hidden` to `{"value": true, "reason": <reason or null>}`, `unhide` sets it to
+`{"value": false, "reason": null}`, and `wip on|off` sets `wip` to `true`/`false`. `hidden` and
+`wip` are independent keys. Each write appends one `annotation_changed` record. An id with no
+stored entity exits `1`. There is no per-column annotation any more.
 
 ## What the verbs print
 

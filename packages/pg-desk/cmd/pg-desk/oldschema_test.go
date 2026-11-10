@@ -13,19 +13,37 @@ import (
 )
 
 // storeAtVersion builds a store file in a temp dir at the requested state
-// and returns its path: "old" (schema 1, seeded), "new" (schema 2, seeded)
-// or "empty" (no schema at all).
+// and returns its path: "old" (the retired schema 1: user_version 1 and no
+// tables Open would recognise), "new" (schema 2, seeded) or "empty" (no schema
+// at all).
 func storeAtVersion(t *testing.T, kind string) string {
 	t.Helper()
 	store.SetSynchronousForTests("OFF")
 	path := filepath.Join(t.TempDir(), "store.db")
-	if kind == "empty" {
+	switch kind {
+	case "empty":
 		s, err := store.OpenRaw(path)
 		if err != nil {
 			t.Fatalf("OpenRaw: %v", err)
 		}
 		if err := s.Close(); err != nil {
 			t.Fatalf("close: %v", err)
+		}
+		return path
+	case "old":
+		db, err := sql.Open("sqlite", "file:"+path)
+		if err != nil {
+			t.Fatalf("sql.Open: %v", err)
+		}
+		defer func() { _ = db.Close() }()
+		for _, stmt := range []string{
+			`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+			`INSERT INTO meta (key, value) VALUES ('schema_version', '1')`,
+			`PRAGMA user_version = 1`,
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("retired store fixture: %v", err)
+			}
 		}
 		return path
 	}
@@ -39,15 +57,21 @@ func storeAtVersion(t *testing.T, kind string) string {
 	if err := s.UpsertInterpretation(store.Interpretation{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#1", Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}
-	if kind == "new" {
-		if err := s.Cutover(); err != nil {
-			t.Fatalf("Cutover: %v", err)
-		}
-	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	return path
+}
+
+// openStoreFile opens the store file at path the way a test fixture needs: with
+// store.Open, except that a store left on the retired schema (which Open
+// refuses) is opened raw so a test can show a command refusing it.
+func openStoreFile(path string) (*store.Store, error) {
+	st, err := store.Open(path)
+	if errors.Is(err, store.ErrOldSchema) {
+		return store.OpenRaw(path)
+	}
+	return st, err
 }
 
 // withRawStoreAt points the RAW store seam at path and makes the normal
@@ -63,18 +87,17 @@ func withRawStoreAt(t *testing.T, path string) {
 	deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(path) }
 }
 
-// TestStatusAndDoctorDoNotCrashOnOldSchemaStore proves status and doctor
-// open the store through the raw seam and report on an old-schema (1), a
-// cut-over (2) and an uninitialized store rather than crash or fail. doctor
-// additionally REPORTS an unmigrated (old or uninitialized) store as such,
-// pointing at the cutover, and runs its change-flow checks only on a cut-over one.
-func TestStatusAndDoctorDoNotCrashOnOldSchemaStore(t *testing.T) {
+// TestStatusAndDoctorOnEveryStoreState proves status and doctor open the store
+// through the raw seam and report on a current (2) and an uninitialized store;
+// on a store left on the retired schema 1, status refuses with the store's
+// error and doctor reports the failure in its change_flow section (it does not
+// crash).
+func TestStatusAndDoctorOnEveryStoreState(t *testing.T) {
 	for _, tc := range []struct {
 		kind        string
 		wantVersion string
 		wantEntity  string
 	}{
-		{"old", "schema_version: 1", "entities: 1"},
 		{"new", "schema_version: 2", "entities: 1"},
 		{"empty", "schema_version: -", "entities: 0"},
 	} {
@@ -97,15 +120,32 @@ func TestStatusAndDoctorDoNotCrashOnOldSchemaStore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("doctor on a %s store: %v\n%s", tc.kind, err, out)
 			}
-			for _, want := range []string{"stranded cycles: 0"} {
-				if !strings.Contains(out, want) {
-					t.Errorf("doctor output missing %q:\n%s", want, out)
-				}
+			if !strings.Contains(out, "stranded cycles: 0") {
+				t.Errorf("doctor output missing %q:\n%s", "stranded cycles: 0", out)
 			}
-			if unmigrated := strings.Contains(out, "pg-desk migrate --cutover"); unmigrated != (tc.kind != "new") {
-				t.Errorf("doctor on a %s store: reports unmigrated = %v\n%s", tc.kind, unmigrated, out)
+			if strings.Contains(out, "migrate --cutover") {
+				t.Errorf("doctor still mentions the retired cutover verb:\n%s", out)
 			}
 		})
+	}
+}
+
+func TestStatusAndDoctorOnRetiredSchemaStore(t *testing.T) {
+	withRawStoreAt(t, storeAtVersion(t, "old"))
+
+	if _, err := runStatusCmd(t); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("status on a retired-schema store = %v, want store.ErrOldSchema", err)
+	}
+
+	stubDoctorSeams(t, nil, nil, nil)
+	out, err := runDoctorCmd(t)
+	if err == nil {
+		t.Fatalf("doctor on a retired-schema store reported no failure:\n%s", out)
+	}
+	for _, want := range []string{"change_flow:", "store: FAIL", "focus: FAIL", "no longer migrates schema version 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor output missing %q:\n%s", want, out)
+		}
 	}
 }
 

@@ -27,8 +27,8 @@ flowchart LR
 `run issue` resolves the triggering bead (or Jira ticket key) to the PR(s) it is about and
 re-interprets each one, see [`run-issue.md`](run-issue.md). `run thread` cross-references a Slack
 thread to PRs and re-interprets them, see [`run-thread.md`](run-thread.md). Both are kept after the
-sync stage's removal and MUST require a schema-2 store: each refuses a schema-1 store with the
-cutover message, before anything is written, and exits `1`.
+sync stage's removal and MUST require a schema-2 store: each refuses a store on the retired
+schema 1 with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), before anything is written, and exits `1`.
 
 ## Exit codes
 

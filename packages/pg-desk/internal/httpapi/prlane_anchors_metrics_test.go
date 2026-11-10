@@ -79,7 +79,7 @@ func TestMetricsExposeTheOpenAnchorFamiliesFromTheStoresLinks(t *testing.T) {
 // schema-2 links, so an older store has no series for them (never a 0 that
 // would read as healthy) and the scrape still succeeds.
 func TestMetricsOmitTheOpenAnchorFamiliesOnAnOldSchemaStore(t *testing.T) {
-	old := store.OpenSchema1ForTest(t)
+	old := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{Repo: "o/r", EntityType: "pull_request", EntityID: "1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})
 	body := scrapeWithConfig(t, old, testConfig())
 	if strings.Contains(body, "pg_desk_pr_open_anchor") || strings.Contains(body, "pg_desk_pr_stale_anchor") {

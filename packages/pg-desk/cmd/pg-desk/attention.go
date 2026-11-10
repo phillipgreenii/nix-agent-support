@@ -40,7 +40,7 @@ var attentionListCmd = &cobra.Command{
 	Use:   "list [--json]",
 	Short: "Print every entity that needs the operator now, with its group",
 	Long: `Print the evaluator's full result. With --json (or PG_DESK_OUTPUT=json) one
-JSON document, schemaVersion 1: now, an optional degraded, items and groups.
+JSON document, schemaVersion 1: now, items and groups.
 Without it, one line per item in canonical order with the group label.
 Exit 0 whenever the store is readable, including when nothing needs the
 operator; exit 1 when the store cannot be read or the configuration cannot be
@@ -105,11 +105,6 @@ func execAttentionList(cmd *cobra.Command) error {
 	if resolveJSONOutput(attentionFlags.listJSON) {
 		return writeAttentionJSON(out, res.Document())
 	}
-	if res.Degraded {
-		if _, err := fmt.Fprintln(out, "degraded: the store is not migrated, so suppress.* overrides are unavailable"); err != nil {
-			return err
-		}
-	}
 	if len(res.Items) == 0 {
 		_, err := fmt.Fprintln(out, "nothing needs attention")
 		return err
@@ -130,7 +125,6 @@ func execAttentionList(cmd *cobra.Command) error {
 type explainDocument struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	Now           string `json:"now"`
-	Degraded      bool   `json:"degraded,omitempty"`
 	Ref           string `json:"ref"`
 	// Held is false for an entity pg-desk does not hold.
 	Held bool `json:"held"`
@@ -172,7 +166,6 @@ func execAttentionExplain(cmd *cobra.Command, ref string) error {
 	doc := explainDocument{
 		SchemaVersion: attention.SchemaVersion,
 		Now:           res.Now.UTC().Format(time.RFC3339),
-		Degraded:      res.Degraded,
 		Ref:           attention.Ref(typ, id),
 		Candidates:    []explainCandidate{},
 		NotRaised:     []explainNotRaised{},
@@ -229,9 +222,6 @@ func writeExplainText(out io.Writer, d explainDocument) error {
 		for _, n := range d.NotRaised {
 			fmt.Fprintf(&b, "  not raised:         %s: %s\n", n.Rule, n.Why)
 		}
-	}
-	if d.Degraded {
-		b.WriteString("  degraded: the store is not migrated, so suppress.* overrides are unavailable\n")
 	}
 	_, err := io.WriteString(out, b.String())
 	return err

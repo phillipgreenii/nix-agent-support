@@ -191,7 +191,7 @@ that does not own its changes, it says so.
   list, never against a hydrated payload: the list path lacks data the detail read has, and search
   results lag, so a cross-path comparison would report a change every tick. An entity the connector
   marks `stale` in a listing is ignored for change detection there. A row with an empty stored
-  fingerprint (written by the cutover backfill) is changed once, which costs one re-hydration and
+  fingerprint (a row never hydrated) is changed once, which costs one re-hydration and
   appends a row only when the normalised content differs. Every added or changed entity is hydrated
   through the entity pipeline with origin `pg-connector`, classified and logged; an entity listed by
   several queries is hydrated once per call. A fingerprint is the connector's hash of the whole list
@@ -635,7 +635,7 @@ edges of type `blocks` count, one hop only. For a chain A blocked by B and B blo
 `DependentsOf(C)` is `[B]` and `DependentsOf(B)` is `[A]`. A dependent is listed only while its
 entity is active and the caller's terminal predicate (the rank passes one built over
 `classify.SourceTerminal` and its injected clock) does not hold; the index itself reads no clock and
-refuses an unmigrated store. `Available(issueID)` is true when the issue's own stored facts carry
+refuses a store that is not on schema 2. `Available(issueID)` is true when the issue's own stored facts carry
 `issue_deps`. The index reads the store only: no connector call, no tracker call.
 
 ## Issue `comments_changed` is an `updated_at` proxy
@@ -654,7 +654,7 @@ the daemon's own kinds apply.
 | Exit | Meaning                                                                                                                                                                           |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Every watched query listed and every reported entity hydrated cleanly.                                                                                                            |
-| `1`  | Any other error: bad flags, an unknown `--query`, no watched query, an old-schema store, a store or config error.                                                                 |
+| `1`  | Any other error: bad flags, an unknown `--query`, no watched query, a store on the retired schema 1, a store or config error.                                                     |
 | `2`  | Partial: at least one watched query or hydration failed or degraded. The envelope still carries the records, and the cursor advanced past what was delivered.                     |
 | `3`  | Total failure: every watched query failed. The envelope is printed with `failed` sources and no records; nothing was logged and the cursor did not move (`seen_at` is still set). |
 
@@ -684,10 +684,9 @@ the daemon's own kinds apply.
   listing of a query is kept in its own key (`change_flow.listing_ok.<query>`). Telemetry: the write
   emits no OpenTelemetry or Prometheus output and logs only that warning.
 
-## Old-schema refusal
+## Retired-schema refusal
 
-`changes` has no old-schema counterpart, so on a store not yet cut over it refuses (including with
-`--cached`) with the store's error, which says to run `pg-desk migrate --cutover`, and exits `1`.
+On a store left on the retired schema 1 `changes` refuses (including with `--cached`) with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exits `1`.
 
 ## Invariants
 

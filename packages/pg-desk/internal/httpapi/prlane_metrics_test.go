@@ -36,9 +36,6 @@ func TestMetricsExposeThePRLaneFamiliesOnASchema2Store(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.Cutover(); err != nil {
-		t.Fatal(err)
-	}
 	// #3 was hydrated after the cutover: it leaves the set.
 	e, _, err := s.GetEntity("o/r", "pr", "o/r#3")
 	if err != nil {
@@ -82,7 +79,7 @@ func TestMetricsPRLaneEmitsZeroWhenHealthyAndNothingWhenUnmigrated(t *testing.T)
 		}
 	}
 
-	old := store.OpenSchema1ForTest(t)
+	old := store.OpenRetiredSchemaForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{Repo: "o/r", EntityType: "pull_request", EntityID: "1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})
 	cfg := testConfig()
 	cfg.PRLane.Mode = "bogus"

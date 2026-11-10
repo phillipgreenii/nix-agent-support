@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 )
 
@@ -111,11 +110,7 @@ func TestInterpretationsFailed_CountsOnlyRowsFailedUnderTheStamp(t *testing.T) {
 }
 
 func TestInterpretationsFailed_UnknownNeverZero(t *testing.T) {
-	s1, err := Open(filepath.Join(t.TempDir(), "v1.db")) // schema 1
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s1.Close() })
+	s1 := OpenRetiredSchemaForTest(t) // no interpretation table, so no stamp column
 	s1.SetInterpStamp("s1")
 	if n, known, err := s1.InterpretationsFailed("o/r"); err != nil || known || n != 0 {
 		t.Fatalf("schema 1: n=%d known=%v err=%v", n, known, err)

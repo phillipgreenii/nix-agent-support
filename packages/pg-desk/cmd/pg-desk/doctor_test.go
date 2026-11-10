@@ -310,9 +310,6 @@ const doctorRouterFixture = "testdata/doctor_router_config.toml"
 func newSchemaDoctor(t *testing.T, cfg *config.Config) *store.Store {
 	t.Helper()
 	seed, openFresh := openTestStore(t)
-	if err := seed.Cutover(); err != nil {
-		t.Fatalf("Cutover: %v", err)
-	}
 	withOpenSeams(t, cfg, openFresh)
 	stubDoctorSeams(t, nil, nil, nil)
 	origNow := changesNow
@@ -342,35 +339,22 @@ func watchCfg(queries ...string) *config.Config {
 	return cfg
 }
 
-func TestDoctorReportsUnmigratedStoreWithoutRefusing(t *testing.T) {
-	withDoctorStore(t, "o/r") // openTestStore is an old-schema (not cut over) store
-	stubDoctorSeams(t, nil, nil, nil)
-
-	stdout, err := runDoctorCmd(t)
-	if err != nil {
-		t.Fatalf("doctor on an unmigrated store: %v, want it to report, not refuse\n%s", err, stdout)
-	}
-	for _, want := range []string{"unmigrated", "pg-desk migrate --cutover", "stranded cycles: 0"} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("stdout lacks %q:\n%s", want, stdout)
-		}
-	}
-	for _, skipped := range []string{"watched queries:", "consumers:", "sweep bound:"} {
-		if strings.Contains(stdout, skipped) {
-			t.Errorf("stdout ran the new-schema-only check %q on an unmigrated store:\n%s", skipped, stdout)
-		}
-	}
-}
-
-func TestDoctorReportsUnmigratedStoreWithNoSchemaAtAll(t *testing.T) {
+func TestDoctorReportsAStoreWithNoSchemaWithoutRefusing(t *testing.T) {
 	withRawStoreAt(t, storeAtVersion(t, "empty"))
 	stubDoctorSeams(t, nil, nil, nil)
 	stdout, err := runDoctorCmd(t)
 	if err != nil {
 		t.Fatalf("doctor on an empty store: %v\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "unmigrated") {
-		t.Errorf("stdout does not report the store as unmigrated:\n%s", stdout)
+	for _, want := range []string{"uninitialized", "stranded cycles: 0"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	for _, skipped := range []string{"watched queries:", "consumers:", "sweep bound:"} {
+		if strings.Contains(stdout, skipped) {
+			t.Errorf("stdout ran the change-flow check %q on a store with no schema:\n%s", skipped, stdout)
+		}
 	}
 }
 

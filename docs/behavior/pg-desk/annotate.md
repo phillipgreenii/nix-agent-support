@@ -82,11 +82,10 @@ fourth disposition the feedback verbs accept) as `disposition.<comment>` too.
 - **INV-ANNOTATE-3.** <!-- uuid: b53b9bbd-87fc-4118-9429-ae3324d3326d --> The set path of `force-review` MUST NOT consume or clear a flag; the clear
   path (`force-review --clear`) is the only consumer of `force_review`.
 
-## Old-schema refusal
+## Retired-schema refusal
 
-`annotate`, `suppress`, `unsuppress` and `pr force-review` (set and `--clear`) have no old-schema
-counterpart. On an old-schema store each refuses with the store's error, which says to run
-`pg-desk migrate --cutover`, and exits `1`.
+`annotate`, `suppress`, `unsuppress` and `pr force-review` (set and `--clear`) need the key/value
+annotation schema. On a store left on the retired schema 1 each refuses with the store's retired-schema error (see [`store-schema.md`](store-schema.md), "The schema version"), and exits `1`.
 
 ## Exit codes
 

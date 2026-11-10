@@ -396,7 +396,7 @@ a series, so a recovery reads as a fall to `0`. The one gap against the design's
 is that the doctor cannot report "the audit comments written today": the stored issue snapshot
 carries no comments, so that figure is not available and is never exported.
 
-On a store that is not migrated for the focus tables, or a configuration with no repository, the
+On a configuration with no repository, the
 focus families MUST be absent from the scrape and the scrape MUST still succeed. A read failure of
 the store, by contrast, fails the collection (from the scrape after the computation that hit it)
 rather than reading as an all-clear.

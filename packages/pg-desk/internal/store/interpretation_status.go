@@ -63,7 +63,7 @@ func (s *Store) LastReinterpretRun() (r ReinterpretRun, found bool, err error) {
 
 // InterpretationsFailed counts the `pr` interpretation rows of repo marked
 // failed under the handle's stamp (stamp + FailedStampSuffix). known is false,
-// with no error, on a store that cannot answer (not on schema 2, or no stamp
+// with no error, on a store that cannot answer (no stamp
 // column yet): "unknown" is never "none". The handle must carry a stamp, else
 // ErrNoInterpStamp.
 func (s *Store) InterpretationsFailed(repo string) (n int, known bool, err error) {
@@ -71,11 +71,11 @@ func (s *Store) InterpretationsFailed(repo string) (n int, known bool, err error
 	if stamp == "" {
 		return 0, false, ErrNoInterpStamp
 	}
-	newSchema, haveStamp, err := s.interpShape()
+	haveStamp, err := s.hasInterpStampColumn()
 	if err != nil {
 		return 0, false, fmt.Errorf("store: interpretations failed: %w", err)
 	}
-	if !newSchema || !haveStamp {
+	if !haveStamp {
 		return 0, false, nil
 	}
 	err = s.sql.QueryRow(

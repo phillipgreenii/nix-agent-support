@@ -234,7 +234,7 @@ func unmintedExpected(cfg *config.Config, unminted, unmintedPR int) string {
 
 // focusLines computes the lines of the block from the shared health model.
 // Gates come first, then reports. h MUST be migrated (the caller prints
-// `focus: unmigrated` otherwise).
+// `focus: no data` otherwise).
 func focusLines(h focus.Health, cfg *config.Config, now time.Time, contract focusLine, lag focusLine) []focusLine {
 	gateAge := cfg.FocusPendingGateAge()
 	var lines []focusLine
@@ -367,7 +367,8 @@ func focusLines(h focus.Health, cfg *config.Config, now time.Time, contract focu
 }
 
 // printFocusBlock prints the `focus:` block of one store. It prints
-// `focus: unmigrated` and skips on a store without the focus tables. Every
+// `focus: no data` and skips on a store with no schema yet (a store on the retired
+// schema 1 fails). Every
 // tripped gate's name is appended to *failures when failures is non-nil.
 func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *config.Config, rc *routerConfig, failures *[]string) {
 	version, err := st.SchemaVersion()
@@ -376,8 +377,13 @@ func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *con
 		appendFailure(failures, "focus store")
 		return
 	}
-	if version < store.NewSchemaVersion {
-		fmt.Fprintln(w, "focus: unmigrated")
+	if version == 0 {
+		fmt.Fprintln(w, "focus: no data (the store has no schema yet)")
+		return
+	}
+	if err := st.RequireNewSchema(); err != nil {
+		fmt.Fprintf(w, "focus: FAIL (%v)\n", err)
+		appendFailure(failures, "focus store")
 		return
 	}
 	if cfg == nil {
@@ -391,8 +397,8 @@ func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *con
 		return
 	}
 	if !h.Migrated() {
-		// A migrated schema with no repository configured has no focus data.
-		fmt.Fprintln(w, "focus: unmigrated")
+		// A schema with no repository configured has no focus data.
+		fmt.Fprintln(w, "focus: no data (no repository configured)")
 		return
 	}
 	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
@@ -424,7 +430,7 @@ func appendFailure(failures *[]string, name string) {
 
 // doctorFocus runs the focus checks of doctor and prints the `focus:` block,
 // appending the name of every tripped gate to *failures. The store is opened
-// raw so an unmigrated store is reported, never refused.
+// raw so a store with no schema yet is reported, never refused.
 func doctorFocus(ctx context.Context, w io.Writer, cfg *config.Config, rc *routerConfig, failures *[]string) {
 	st, err := deskStoreOpenRaw()
 	if err != nil {

@@ -18,8 +18,8 @@ func init() {
 }
 
 // newHistoryCmd builds `pg-desk <type> history <id> [--limit N]`: the change
-// records of one entity, newest first [design 9.2]. It is a typed verb with
-// no old-schema counterpart, so it refuses an old-schema store.
+// records of one entity, newest first [design 9.2]. It refuses a store that is
+// not on schema 2.
 func newHistoryCmd(entityType string) *cobra.Command {
 	var limit int
 	var jsonOut bool

@@ -74,9 +74,6 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 		}
 	}
 	if cutover {
-		if err := st.Cutover(); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
@@ -141,8 +138,8 @@ func TestAttentionListJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := decodeAttnList(t, out)
-	if d.SchemaVersion != 1 || d.Now != "2026-10-06T12:00:00Z" || d.Degraded {
-		t.Errorf("document header = %+v, want schemaVersion 1, the fixed now, not degraded", d)
+	if d.SchemaVersion != 1 || d.Now != "2026-10-06T12:00:00Z" {
+		t.Errorf("document header = %+v, want schemaVersion 1 and the fixed now", d)
 	}
 	if len(d.Items) != 2 {
 		t.Fatalf("items = %+v, want the two PRs that need the operator", d.Items)
@@ -155,9 +152,6 @@ func TestAttentionListJSON(t *testing.T) {
 	}
 	if len(d.Groups) != 2 || d.Groups[0].Key != d.Items[0].Group || len(d.Groups[0].Items) != 1 {
 		t.Errorf("groups = %+v, want one group per item in canonical order", d.Groups)
-	}
-	if strings.Contains(out, `"degraded"`) {
-		t.Error("degraded is optional and must be absent on a migrated store")
 	}
 
 	again, err := runAttention(t, "list", true)
@@ -205,21 +199,14 @@ func TestAttentionListTextAndEnvJSON(t *testing.T) {
 	}
 }
 
-func TestAttentionListDegradedOnUnmigratedStore(t *testing.T) {
-	path := attnFixture(t, false, attnPR{n: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	withAttentionSeams(t, attnConfig(), openAttn(path))
-
-	out, err := runAttention(t, "list", true)
-	if err != nil {
-		t.Fatal(err)
+// A store that is not on schema 2 is refused, never read as an all-clear.
+func TestAttentionRefusesRetiredSchemaStore(t *testing.T) {
+	withAttentionSeams(t, attnConfig(), func() (*store.Store, error) { return store.OpenRetiredSchemaForTest(t), nil })
+	if _, err := runAttention(t, "list", true); !errors.Is(err, store.ErrOldSchema) {
+		t.Errorf("list on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
-	d := decodeAttnList(t, out)
-	if !d.Degraded || len(d.Items) != 1 {
-		t.Errorf("an unmigrated store must still evaluate and say degraded (INV-ATTNEVAL-5): %s", out)
-	}
-	text, err := runAttention(t, "list", false)
-	if err != nil || !strings.Contains(text, "degraded") {
-		t.Errorf("text output must mention degraded: %q err=%v", text, err)
+	if _, err := runAttention(t, "explain", true, "pr:acme/api#1"); !errors.Is(err, store.ErrOldSchema) {
+		t.Errorf("explain on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }
 
@@ -346,20 +333,6 @@ func TestAttentionExplain(t *testing.T) {
 	text, _ = runAttention(t, "explain", false, "pr:acme/api#99")
 	if !strings.Contains(text, "not held") {
 		t.Errorf("text = %q", text)
-	}
-}
-
-func TestAttentionExplainDegradedOnUnmigratedStore(t *testing.T) {
-	path := attnFixture(t, false, attnPR{n: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	withAttentionSeams(t, attnConfig(), openAttn(path))
-
-	out, err := runAttention(t, "explain", true, "pr:acme/api#1")
-	if err != nil || !strings.Contains(out, `"degraded": true`) {
-		t.Errorf("explain must report degraded on an unmigrated store (INV-ATTNEVAL-5): err=%v\n%s", err, out)
-	}
-	text, _ := runAttention(t, "explain", false, "pr:acme/api#1")
-	if !strings.Contains(text, "degraded") {
-		t.Errorf("text must report degraded: %q", text)
 	}
 }
 

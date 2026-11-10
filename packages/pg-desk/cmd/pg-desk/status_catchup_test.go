@@ -145,12 +145,12 @@ func TestStatusBehindIsUnknownWithoutTheStampColumn(t *testing.T) {
 	}
 }
 
-func TestStatusBehindIsUnknownOnSchema1AndWithoutConfig(t *testing.T) {
-	path := storeAtVersion(t, "old")
+func TestStatusBehindIsUnknownWithNoSchemaAndWithoutConfig(t *testing.T) {
+	path := storeAtVersion(t, "empty")
 	withOpenSeams(t, openTestConfig(riRepo), func() (*store.Store, error) { return store.OpenRaw(path) })
 	out := statusOut(t)
-	if !strings.Contains(out, "interpretations behind: unknown (store not on schema 2)\n") || strings.Contains(out, "last catch-up") {
-		t.Errorf("schema 1:\n%s", out)
+	if !strings.Contains(out, "interpretations behind: unknown (store not initialized)\n") || strings.Contains(out, "last catch-up") {
+		t.Errorf("no schema:\n%s", out)
 	}
 
 	rs := newRIStore(t)

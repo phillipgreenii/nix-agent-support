@@ -9,13 +9,6 @@ import (
 // single (repo, entity_type, entity_id), as JSON, per the design doc's
 // section 7.6. Written by the gather stage (a later packet in this
 // docket); this packet exposes the writer/reader only.
-//
-// Schema-dual: the cutover adds version, hydrated_at and active to the
-// entity table, all with defaults. SeedEntityForTest names only the original
-// columns, so it works unchanged on both schema versions: on the new schema
-// it leaves the new columns at their defaults (or at whatever the new-schema
-// API last set). Reads return the new columns on the new schema and their
-// defaults (0, "", active) on the old one.
 type Entity struct {
 	Repo        string
 	EntityType  string
@@ -26,8 +19,7 @@ type Entity struct {
 	ContentHash string
 	HeadSHA     string // set for files/commits only; empty otherwise
 
-	// Version is the optimistic-concurrency version of the row (new schema
-	// only; always 0 when read from an old-schema store). Populated by
+	// Version is the optimistic-concurrency version of the row . Populated by
 	// reads; SeedEntityForTest ignores it. WriteEntityWithLog takes the version
 	// the caller read as its expectedVersion and ignores this field.
 	Version int64
@@ -84,10 +76,6 @@ type Entity struct {
 // GetEntity returns the entity row for (repo, entityType, entityID), or
 // found=false if no such row exists.
 func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, found bool, err error) {
-	cols, err := s.entityNewColumns()
-	if err != nil {
-		return Entity{}, false, err
-	}
 	feedCols, err := s.issueFeedSelect()
 	if err != nil {
 		return Entity{}, false, err
@@ -96,7 +84,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	var watched sql.NullInt64
 	var active int
 	row := s.sql.QueryRow(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+cols+`, `+feedCols+`
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
 		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
@@ -137,16 +125,12 @@ func (s *Store) CountEntities() (int, error) {
 // own "iterate every entity currently in the store" driver reads this list
 // rather than requiring a caller to invent its own full-table scan.
 func (s *Store) ListEntities() ([]Entity, error) {
-	cols, err := s.entityNewColumns()
-	if err != nil {
-		return nil, err
-	}
 	feedCols, err := s.issueFeedSelect()
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, ` + cols + `, ` + feedCols + `
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, ` + feedCols + `
 		 FROM entity ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -175,21 +159,6 @@ func (s *Store) ListEntities() ([]Entity, error) {
 		return nil, fmt.Errorf("store: list entities: %w", err)
 	}
 	return out, nil
-}
-
-// entityNewColumns returns the SELECT expressions for the new-schema entity
-// columns, in the order version, hydrated_at, active, list_fp, first_seen_at:
-// the real columns on the new schema, the constants 0, NULL, 1, NULL, NULL on the old one
-// (which has none of them). Called before the query is issued, never while a result set is open.
-func (s *Store) entityNewColumns() (string, error) {
-	isNew, err := s.isNewSchema()
-	if err != nil {
-		return "", err
-	}
-	if isNew {
-		return "version, hydrated_at, active, list_fp, first_seen_at", nil
-	}
-	return "0, NULL, 1, NULL, NULL", nil
 }
 
 // nullableString maps an empty Go string to a SQL NULL, so optional

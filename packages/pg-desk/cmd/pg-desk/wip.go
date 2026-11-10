@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // wipCmd implements `pg-desk wip on|off <pr>`: writes the annotation
@@ -34,49 +32,4 @@ var wipCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(wipCmd)
-}
-
-// setWIPAnnotation mirrors setHiddenAnnotation (hide.go) but writes the
-// wip field instead, preserving any existing hidden/hidden_reason.
-func setWIPAnnotation(cmd *cobra.Command, ref string, wip bool) error {
-	cfg, err := deskConfigLoad(cmd.Context())
-	if err != nil {
-		return fmt.Errorf("wip: load config: %w", err)
-	}
-	st, err := openDeskStore()
-	if err != nil {
-		return fmt.Errorf("wip: open store: %w", err)
-	}
-	defer func() { _ = st.Close() }()
-
-	repo, id, err := resolvePRRef(cfg, ref)
-	if err != nil {
-		return fmt.Errorf("wip: %w", err)
-	}
-	if _, found, gerr := st.GetEntity(repo, entityTypePR, id); gerr != nil {
-		return fmt.Errorf("wip: %w", gerr)
-	} else if !found {
-		return fmt.Errorf("wip: %s does not resolve to a stored entity", ref)
-	}
-
-	existing, _, gerr := st.GetPRAnnotation(repo, entityTypePR, id)
-	if gerr != nil {
-		return fmt.Errorf("wip: read existing annotation: %w", gerr)
-	}
-
-	w := wip
-	a := store.Annotation{
-		Repo:         repo,
-		EntityType:   entityTypePR,
-		EntityID:     id,
-		Hidden:       existing.Hidden,
-		HiddenReason: existing.HiddenReason,
-		WIP:          &w,
-		SetBy:        actorFor(cfg, ""),
-		SetAt:        annotationNow(),
-	}
-	if err := st.UpsertAnnotation(a); err != nil {
-		return fmt.Errorf("wip: %w", err)
-	}
-	return nil
 }

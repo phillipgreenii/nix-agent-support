@@ -398,31 +398,6 @@ func TestGroupingIsIndependentOfStoreInsertionOrder(t *testing.T) {
 	}
 }
 
-func TestUnmigratedStoreGroupsByLegacyJiraAndSkipsBeads(t *testing.T) {
-	st := store.OpenSchema1ForTest(t) // version 1
-	teamPR(t, st, 1)
-	teamPR(t, st, 2)
-	teamPR(t, st, 3)
-	for _, n := range []int{1, 2} {
-		if err := st.UpsertXref(store.Xref{Repo: testRepo, FromType: "pr", FromID: pid(n), ToType: "issue", ToID: "ABC-5", Evidence: "title", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	res := evaluate(t, st, baseConfig())
-	if !res.Degraded {
-		t.Error("an unmigrated store must still report Degraded")
-	}
-	if it := mustItem(t, res, 1); it.Group != "issue:ABC-5" {
-		t.Errorf("PR 1 group = %q, want the legacy jira link to group on an unmigrated store", it.Group)
-	}
-	if it := mustItem(t, res, 3); it.Group != "pr:"+pid(3) {
-		t.Errorf("PR 3 group = %q, want the singleton", it.Group)
-	}
-	if res.Groups[0].Key != "issue:ABC-5" || len(res.Groups[0].Items) != 2 {
-		t.Errorf("first group = %+v, want the 2-item jira group", res.Groups[0])
-	}
-}
-
 func TestSuppressedEntitiesDoNotFormGroupsOrCountTowardSize(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	teamPR(t, st, 1)

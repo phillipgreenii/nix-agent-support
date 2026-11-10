@@ -31,17 +31,16 @@ func (e Env) sqlite3Bin() (string, error) {
 
 // seedLegacyRow is the store helper that replaces `pg-desk run pr` for the
 // one scenario seeded the legacy way (design 6.7): it writes the entity row an
-// old-schema store held, directly into the sandbox's version-1 store with the
-// sqlite3 command line. The cutover that follows leaves the row exactly as the
-// real cutover leaves every pre-existing row: version 0, never hydrated
-// (hydrated_at NULL), active. The helper touches only the sandbox's own store
-// (the caller has already verified it lies under the run directory) and runs
-// BEFORE the cutover, so it never writes a version-2 table.
+// store held before the entity change flow hydrated it, directly into the
+// sandbox's schema-2 store with the sqlite3 command line: version 0, never
+// hydrated (hydrated_at NULL), active, which is what the column defaults give
+// a row inserted without those columns. The helper touches only the sandbox's
+// own store (the caller has already verified it lies under the run directory).
 func (sb *sandbox) seedLegacyRow(ctx context.Context, sqlite3, entity string) error {
 	if v, err := sb.schemaVersion(ctx, sqlite3); err != nil {
 		return err
-	} else if v != 1 {
-		return fmt.Errorf("parity: the legacy row is written into a version-1 store, but the sandbox store is at version %d", v)
+	} else if v != 2 {
+		return fmt.Errorf("parity: the legacy row is written into a schema-2 store, but the sandbox store is at version %d", v)
 	}
 	i := strings.LastIndex(entity, "#")
 	if i <= 0 {
