@@ -29,6 +29,9 @@ type RealmState struct {
 	// LastReason is the reason of the last recorded verdict. Empty means no
 	// verdict was ever recorded, which counts as available.
 	LastReason string `json:"last_reason,omitempty"`
+	// TrialAt is when the one trial caller of the current open-breaker
+	// window was let through. Zero means no trial yet in this window.
+	TrialAt time.Time `json:"trial_at,omitzero"`
 }
 
 // Available reports whether the last recorded verdict was available.
@@ -304,6 +307,10 @@ func (s *RealmState) ApplyOK(now time.Time) {
 	s.NextAttemptAt = time.Time{}
 	s.LastSuccessAt = now
 	s.LastError = ""
+	s.TrialAt = time.Time{}
+	s.AttemptStartedAt = time.Time{}
+	s.HolderPID = 0
+	s.HolderToken = ""
 }
 
 // ApplyStartupFailure records a startup failure with a valid cert. An
