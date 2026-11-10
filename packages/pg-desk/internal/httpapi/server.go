@@ -186,17 +186,6 @@ func hasWatchLabelReason(reasons []string) bool {
 	return false
 }
 
-// PayloadError is one entry of Payload.Errors. Nothing writes sync_error any
-// more, so Errors is always empty and RunsFailed24h always 0; the two keys
-// stay in the payload only so the dashboard that selects them keeps working
-// until its panel is removed.
-type PayloadError struct {
-	Repo       string `json:"repo"`
-	EntityType string `json:"entity_type"`
-	EntityID   string `json:"entity_id"`
-	Error      string `json:"error"`
-}
-
 // Payload is the GET /api/v1/dashboard response body: the five named panel
 // arrays, the hidden array, and root freshness/counter fields — see
 // docs/behavior/pg-desk/interpret.md's "Panel placement" section and
@@ -237,10 +226,8 @@ type Payload struct {
 	// meaning and polarity (INV-FRESH-5).
 	Sources []freshness.Row `json:"sources"`
 
-	LastRunAt     string         `json:"last_run_at,omitempty"`
-	LastSweepAt   string         `json:"last_sweep_at,omitempty"`
-	RunsFailed24h int            `json:"runs_failed_24h"`
-	Errors        []PayloadError `json:"errors"`
+	LastRunAt   string `json:"last_run_at,omitempty"`
+	LastSweepAt string `json:"last_sweep_at,omitempty"`
 
 	// Attention is the attention evaluator's groups (docs/behavior/pg-desk/
 	// attention.md, "The dashboard payload"): exactly Result.Groups of the
@@ -278,7 +265,6 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 		MineAwaitingMe:    []Row{},
 		MineAwaitingTeam:  []Row{},
 		Hidden:            []Row{},
-		Errors:            []PayloadError{},
 		Sources:           []freshness.Row{},
 	}
 

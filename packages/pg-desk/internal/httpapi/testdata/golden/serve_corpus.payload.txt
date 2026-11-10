@@ -950,8 +950,6 @@
  ],
  "hidden": [],
  "sources": [],
- "runs_failed_24h": 0,
- "errors": [],
  "attention": [
   {
    "key": "pr:acme/widgets#101",

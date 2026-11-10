@@ -62,8 +62,6 @@
   ],
   "last_run_at": "2026-09-16T11:59:00Z",
   "last_sweep_at": "2026-09-16T11:00:00Z",
-  "runs_failed_24h": 0,
-  "errors": [],
   "attention": null,
   "attention_error": "no repository configured",
   "sources": []

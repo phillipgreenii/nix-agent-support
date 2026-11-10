@@ -481,9 +481,15 @@ func TestDashboardSourcesAreAdditiveAndSeparateFromLiveness(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Existing fields are unchanged.
-	for _, k := range []string{"generated_at", "age_seconds", "stale", "stale_after_seconds", "sync_interval_seconds", "dropped_count", "hidden", "errors"} {
+	for _, k := range []string{"generated_at", "age_seconds", "stale", "stale_after_seconds", "sync_interval_seconds", "dropped_count", "hidden"} {
 		if _, ok := raw[k]; !ok {
 			t.Errorf("existing field %q vanished from the payload", k)
+		}
+	}
+	// The retired always-empty keys are gone from the payload.
+	for _, k := range []string{"errors", "runs_failed_24h"} {
+		if _, ok := raw[k]; ok {
+			t.Errorf("retired field %q is still in the payload", k)
 		}
 	}
 	if raw["stale"] != false || raw["age_seconds"] != float64(30) {
