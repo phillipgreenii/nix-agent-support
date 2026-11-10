@@ -75,108 +75,119 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 	turns := client.Filter{Any: []client.Filter{typeIs("user"), typeIs("assistant")}}
 	base := []client.Filter{transcriptSource(), turns, main}
 
-	// A session whose first record is in [since, before) has a record in that
-	// window, so a bounded window first narrows the scan to the sessions active
-	// in it; the span below then covers only those sessions (one that began
-	// before since still reports its true first record and is dropped by the
-	// start-time check). With an open window the span stays the full scan.
-	spanWhere := base
-	if win := windowFilter(since, before); win != nil {
-		act, ok, err := f.activeSessions(ctx, c, since)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			// No usable inventory (degraded, or no lower bound): count records.
-			active, err := run(client.QueryRequest{
-				Where: &client.Filter{All: append(append([]client.Filter{}, base...), *win)},
-				Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000,
-			})
-			if err != nil {
-				return nil, err
-			}
-			act = nil
-			for _, r := range active.Rows {
-				if sid := str(r[0]); sid != "" {
-					act = append(act, sid)
-				}
-			}
-		}
-		if len(act) == 0 {
-			return nil, nil
-		}
-		spanWhere = append(append([]client.Filter{}, base...), client.Filter{Field: "session", In: act})
-	}
-
-	// First and last record time per session.
-	span, err := run(client.QueryRequest{
-		Where:     &client.Filter{All: spanWhere},
-		Group:     []string{"session"},
-		Aggregate: []client.Agg{{Fn: "min", Field: "time", As: "first"}, {Fn: "max", Field: "time", As: "last"}},
-		Limit:     10000,
-	})
+	// The sessions to consider come from the recorder's per-file inventory, not
+	// from a scan of records (which timed out on a real tree). A session whose
+	// first record is in [since, before) has a record in that window, so with a
+	// lower bound the inventory narrows to the sessions active in it (one that
+	// began before since still reports its true first record and is dropped by
+	// the start-time check below).
+	act, ok, err := f.activeSessions(ctx, c, since)
 	if err != nil {
 		return nil, err
 	}
+	if !ok {
+		// The inventory cannot be trusted (the recorder reports it degraded):
+		// count records, in the window when there is one.
+		where := base
+		if win := windowFilter(since, before); win != nil {
+			where = append(append([]client.Filter{}, base...), *win)
+		}
+		active, err := run(client.QueryRequest{
+			Where: &client.Filter{All: where},
+			Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000,
+		})
+		if err != nil {
+			return nil, err
+		}
+		act = nil
+		for _, r := range active.Rows {
+			if sid := str(r[0]); sid != "" {
+				act = append(act, sid)
+			}
+		}
+	}
+
+	// First and last record time per session: one ordered single-row read per
+	// session (the recorder serves a query pinned to a session by its index),
+	// never a min/max group over records, which scanned every record of every
+	// listed session and timed out.
+	timeOf := func(sid any, dir string) (time.Time, error) {
+		one, err := run(client.QueryRequest{
+			Where:  &client.Filter{All: append(append([]client.Filter{}, base...), client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sid))})},
+			Select: []string{"time"}, Order: []client.Order{{By: "time", Dir: dir}}, Limit: 1,
+		})
+		if err != nil || len(one.Rows) != 1 {
+			return time.Time{}, err
+		}
+		return parseTime(one.Rows[0][0]), nil
+	}
 	byID := map[string]*SessionSummary{}
 	var ids []any
-	for _, r := range span.Rows {
-		sid, _ := r[0].(string)
-		first, last := parseTime(r[1]), parseTime(r[2])
-		if sid == "" || first.IsZero() || (!since.IsZero() && first.Before(since)) || (!before.IsZero() && !first.Before(before)) {
+	for _, sid := range act {
+		first, err := timeOf(sid, "asc")
+		if err != nil {
+			return nil, err
+		}
+		if first.IsZero() || (!since.IsZero() && first.Before(since)) || (!before.IsZero() && !first.Before(before)) {
 			continue
 		}
-		byID[sid] = &SessionSummary{SessionID: sid, StartedAt: first, EndedAt: last, ModelTokens: map[string]Tokens{}}
+		last, err := timeOf(sid, "desc")
+		if err != nil {
+			return nil, err
+		}
+		id := sid.(string)
+		byID[id] = &SessionSummary{SessionID: id, StartedAt: first, EndedAt: last, ModelTokens: map[string]Tokens{}}
 		ids = append(ids, sid)
 	}
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	inSessions := client.Filter{Field: "session", In: ids}
-	where := func(extra ...client.Filter) *client.Filter {
-		return &client.Filter{All: append([]client.Filter{transcriptSource(), main, inSessions}, extra...)}
+	// Each session's counts are read by a query pinned to that one session (the
+	// recorder serves those by its session index), not by one group over every
+	// listed session, which read all their records at once and timed out.
+	pinned := func(sid string) client.Filter {
+		return client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sid))}
 	}
-
-	// User turns are the user lines of the main thread (tool results arrive as
-	// user lines too, so this counts them as well).
-	uc, err := run(client.QueryRequest{Where: where(typeIs("user"), lineRecord), Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000})
-	if err != nil {
-		return nil, err
+	where := func(sid string, extra ...client.Filter) *client.Filter {
+		return &client.Filter{All: append([]client.Filter{transcriptSource(), main, pinned(sid)}, extra...)}
 	}
-	for _, r := range uc.Rows {
-		if s := byID[str(r[0])]; s != nil {
-			s.UserTurns = int(num(r[1]))
+	for _, id := range ids {
+		s := byID[id.(string)]
+		// User turns are the user lines of the main thread (tool results arrive
+		// as user lines too, so this counts them as well).
+		uc, err := run(client.QueryRequest{Where: where(s.SessionID, typeIs("user"), lineRecord), Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000})
+		if err != nil {
+			return nil, err
 		}
-	}
-	// Assistant turns, models and tokens, de-duplicated by message id.
-	ac, err := run(client.QueryRequest{
-		Where: where(typeIs("assistant")),
-		Group: []string{"session", "model"},
-		Aggregate: []client.Agg{
-			{Fn: "count", Field: "message.id", Distinct: "message.id", As: "turns"},
-			{Fn: "sum", Field: "usage.input_tokens", Distinct: "message.id", As: "in"},
-			{Fn: "sum", Field: "usage.output_tokens", Distinct: "message.id", As: "out"},
-			{Fn: "sum", Field: "usage.cache_read_input_tokens", Distinct: "message.id", As: "cr"},
-			{Fn: "sum", Field: "usage.cache_creation_input_tokens", Distinct: "message.id", As: "cw"},
-		},
-		Limit: 10000,
-	})
-	if err != nil {
-		return nil, err
-	}
-	bestTurns := map[string]int64{}
-	for _, r := range ac.Rows {
-		s := byID[str(r[0])]
-		if s == nil {
-			continue
+		for _, r := range uc.Rows {
+			s.UserTurns = int(num(r[0]))
 		}
-		model := str(r[1])
-		turns := num(r[2])
-		s.AssistantTurns += int(turns)
-		if model != "" {
-			s.ModelTokens[model] = Tokens{Input: num(r[3]), Output: num(r[4]), CacheRead: num(r[5]), CacheWrite: num(r[6])}
-			if turns > bestTurns[s.SessionID] {
-				bestTurns[s.SessionID], s.Model = turns, model
+		// Assistant turns, models and tokens, de-duplicated by message id.
+		ac, err := run(client.QueryRequest{
+			Where: where(s.SessionID, typeIs("assistant")),
+			Group: []string{"model"},
+			Aggregate: []client.Agg{
+				{Fn: "count", Field: "message.id", Distinct: "message.id", As: "turns"},
+				{Fn: "sum", Field: "usage.input_tokens", Distinct: "message.id", As: "in"},
+				{Fn: "sum", Field: "usage.output_tokens", Distinct: "message.id", As: "out"},
+				{Fn: "sum", Field: "usage.cache_read_input_tokens", Distinct: "message.id", As: "cr"},
+				{Fn: "sum", Field: "usage.cache_creation_input_tokens", Distinct: "message.id", As: "cw"},
+			},
+			Limit: 10000,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var best int64
+		for _, r := range ac.Rows {
+			model := str(r[0])
+			turns := num(r[1])
+			s.AssistantTurns += int(turns)
+			if model != "" {
+				s.ModelTokens[model] = Tokens{Input: num(r[2]), Output: num(r[3]), CacheRead: num(r[4]), CacheWrite: num(r[5])}
+				if turns > best {
+					best, s.Model = turns, model
+				}
 			}
 		}
 	}
@@ -221,16 +232,17 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 const inventoryPage = 10000
 
 // activeSessions lists the sessions with a transcript file whose newest record
-// is at or after since, from the recorder's per-file table (no scan of
-// records, which timed out on a real tree). ok is false when the answer cannot
-// be trusted (no lower bound, or the recorder reports it degraded); the caller
+// is at or after since (every transcript file when since is zero), from the
+// recorder's per-file table (no scan of records, which timed out on a real
+// tree). ok is false when the answer cannot be trusted (the recorder reports it
+// degraded); the caller
 // then counts records. The list is a superset of the sessions active in the
 // window; the caller checks each session's true first record.
 func (f *Facts) activeSessions(ctx context.Context, c *client.Client, since time.Time) (ids []any, ok bool, err error) {
-	if since.IsZero() {
-		return nil, false, nil
+	req := client.InventoryRequest{Sources: []string{"claude-transcript"}, Limit: inventoryPage}
+	if !since.IsZero() {
+		req.Since = since.UTC().Format(time.RFC3339)
 	}
-	req := client.InventoryRequest{Sources: []string{"claude-transcript"}, Since: since.UTC().Format(time.RFC3339), Limit: inventoryPage}
 	seen := map[string]bool{}
 	for {
 		ans, err := c.FilesInventory(ctx, req)

@@ -1,9 +1,15 @@
 package recorderfacts
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,9 +107,9 @@ func TestSessionsWindowKeepsTrueStartAndExcludesEarlierSessions(t *testing.T) {
 	}
 }
 
-// TestSessionsBeforeOnlyWindowFallsBackToRecordCount: with no lower bound the
-// per-file inventory cannot narrow the scan, so the record-count path answers.
-func TestSessionsBeforeOnlyWindowFallsBackToRecordCount(t *testing.T) {
+// TestSessionsBeforeOnlyWindow: with no lower bound the inventory lists every
+// transcript file and the start-time check applies the upper bound.
+func TestSessionsBeforeOnlyWindow(t *testing.T) {
 	_, f := recorderWithTranscript(t)
 	ctx := context.Background()
 	day := func(d int) time.Time { return time.Date(2026, 10, d, 0, 0, 0, 0, time.UTC) }
@@ -114,5 +120,80 @@ func TestSessionsBeforeOnlyWindowFallsBackToRecordCount(t *testing.T) {
 	none, err := f.Sessions(ctx, time.Time{}, day(29))
 	if err != nil || len(none) != 0 {
 		t.Errorf("window before the session: %v %v", none, err)
+	}
+}
+
+// recordingProxy forwards a unix socket to the real recorder socket and keeps
+// every byte the client sent, so a test sees the requests on the wire.
+func recordingProxy(t *testing.T, target string) (socket string, sent func() string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket = filepath.Join(dir, "p.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	go func() {
+		for {
+			cl, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = cl.Close() }()
+				up, err := net.Dial("unix", target)
+				if err != nil {
+					return
+				}
+				defer func() { _ = up.Close() }()
+				go func() { _, _ = io.Copy(cl, up) }()
+				_, _ = io.Copy(io.MultiWriter(up, writerFunc(func(b []byte) {
+					mu.Lock()
+					buf.Write(b)
+					mu.Unlock()
+				})), cl)
+			}()
+		}
+	}()
+	return socket, func() string { mu.Lock(); defer mu.Unlock(); return buf.String() }
+}
+
+type writerFunc func([]byte)
+
+func (w writerFunc) Write(b []byte) (int, error) { w(b); return len(b), nil }
+
+// TestSessionsListingIssuesNoSessionGroupAggregateOverRecords: against the real
+// recorder, the listing (bounded and open window) reads first and last record
+// time per session without any query that groups records by session, which
+// scanned every record of every listed session and exceeded the query deadline
+// on a real tree.
+func TestSessionsListingIssuesNoSessionGroupAggregateOverRecords(t *testing.T) {
+	e, _ := recorderWithTranscript(t)
+	socket, sent := recordingProxy(t, e.Socket)
+	f := New(client.Options{Socket: socket})
+	ctx := context.Background()
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 0, 0, 0, 0, time.UTC) }
+	for name, w := range map[string][2]time.Time{"bounded": {day(29), day(30)}, "since only": {day(29), {}}, "open": {{}, {}}} {
+		got, err := f.Sessions(ctx, w[0], w[1])
+		if err != nil || len(got) != 1 {
+			t.Fatalf("%s: %v %v", name, got, err)
+		}
+		if want := time.Date(2026, 10, 29, 10, 0, 6, 0, time.UTC); !got[0].EndedAt.Equal(want) {
+			t.Errorf("%s: EndedAt = %v, want the last record %v", name, got[0].EndedAt, want)
+		}
+	}
+	wire := sent()
+	if !strings.Contains(wire, `"records"`) {
+		t.Fatalf("proxy saw no records query, so the check below is vacuous: %q", wire)
+	}
+	if strings.Contains(wire, `"group":["session"`) {
+		t.Errorf("a query groups records by session: %s", wire)
 	}
 }
