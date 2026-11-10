@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/corpus"
@@ -133,9 +132,9 @@ func TestCorpusDifferentialAgainstReference(t *testing.T) {
 	}
 }
 
-// Arbitrary bytes as stored facts: RunInterpretOnly never panics, and on an
-// error it writes no interpretation row. (After the extraction this targets
-// interpretEntity directly; the seed corpus runs as ordinary unit tests.)
+// Arbitrary bytes as stored facts: interpretEntity never panics, and on an
+// error it returns the zero row (nothing for a caller to write). The seed corpus
+// runs as ordinary unit tests.
 func FuzzInterpretEntityFacts(f *testing.F) {
 	fxs, err := corpus.Fixtures()
 	if err != nil {
@@ -150,22 +149,10 @@ func FuzzInterpretEntityFacts(f *testing.F) {
 	f.Add([]byte("not json"))
 	f.Add([]byte(`{"pr_show":"x"}`))
 	f.Add([]byte(`{"pr_show":{"reviews":[{"commit_oid":null}],"comments":[{}]}}`))
-	st := store.OpenNewSchemaForTest(f)
-	p := New(corpus.Config(), st, WithClock(corpus.Clock()), WithLogWriter(io.Discard))
-	n := 0
 	f.Fuzz(func(t *testing.T, facts []byte) {
-		n++
-		id := fmt.Sprintf("%s#%d", corpus.Repo, 1000+n)
-		if err := st.UpsertEntity(store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: id, Facts: string(facts), AsOf: corpusAsOf, ContentHash: "seed"}); err != nil {
-			t.Skip()
-		}
-		err := p.RunInterpretOnly(context.Background(), "pr", id, gather.ChangeChanged)
-		_, found, gerr := st.GetInterpretation(corpus.Repo, "pr", id)
-		if gerr != nil {
-			t.Fatal(gerr)
-		}
-		if err != nil && found {
-			t.Fatalf("an error (%v) must write no interpretation row", err)
+		row, _, err := interpretEntity(corpus.Repo, corpus.Config(), corpus.Clock(), "pr", "1", gather.GatherResult{Payload: facts, AsOf: corpusAsOf})
+		if err != nil && row != (store.Interpretation{}) {
+			t.Fatalf("an error (%v) must return the zero row, got %+v", err, row)
 		}
 	})
 }

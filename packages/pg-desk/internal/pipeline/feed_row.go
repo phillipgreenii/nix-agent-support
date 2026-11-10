@@ -197,8 +197,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	if !ok {
 		return feedOutcome{}, fmt.Errorf("pipeline: no gather adapter registered for entity type %q", issueEntityType)
 	}
-	ie, ok := interpret.EntityInterpreters()[issueEntityType]
-	if !ok {
+	if _, ok := interpret.EntityInterpreters()[issueEntityType]; !ok {
 		return feedOutcome{}, fmt.Errorf("pipeline: no interpret adapter registered for entity type %q", issueEntityType)
 	}
 	repo := p.repo()
@@ -248,11 +247,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 		opts.ClearWatchedAfterAppend = true
 	}
 
-	interp, err := ie(result, p.clock, p.cfg)
-	if err != nil {
-		return feedOutcome{failure: "interpret failed: " + err.Error()}, nil
-	}
-	interpRow, err := p.interpretationRow(issueEntityType, c.entityID, interp)
+	interpRow, interp, err := interpretEntity(repo, p.cfg, p.clock, issueEntityType, c.entityID, result)
 	if err != nil {
 		return feedOutcome{failure: "interpret failed: " + err.Error()}, nil
 	}

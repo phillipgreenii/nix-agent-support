@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -36,15 +37,14 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 	if result.RemovedState == "not_found" && change != gather.ChangeRemoved {
 		return fmt.Errorf("pipeline: %s %s: not found", entityType, entityID)
 	}
-	ie, ok := interpret.EntityInterpreters()[entityType]
-	if !ok {
+	if _, ok := interpret.EntityInterpreters()[entityType]; !ok {
 		return fmt.Errorf("pipeline: no interpret adapter registered for entity type %q", entityType)
 	}
-	interp, err := ie(result, p.clock, p.cfg)
+	row, _, err := interpretEntity(p.repo(), p.cfg, p.clock, entityType, entityID, result)
 	if err != nil {
 		return fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
 	}
-	if _, err := p.persistRaw(entityType, entityID, result.Payload, result.AsOf, interp); err != nil {
+	if _, err := p.persistRaw(entityType, entityID, result.Payload, result.AsOf, row); err != nil {
 		return fmt.Errorf("pipeline: persist %s %s: %w", entityType, entityID, err)
 	}
 	// Derived links live only on the migrated schema, so a store that has not
@@ -76,11 +76,11 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 // Facts value marshaled, so persistRaw decodes the payload's top-level
 // "head_sha" key and stores it, for any entity type (types without the key
 // get ""). This keeps a pr row written here identical to the PR path's.
-func (p *Pipeline) persistRaw(entityType, entityID string, payload json.RawMessage, asOf string, interp interpret.Interpretation) (store.Interpretation, error) {
+func (p *Pipeline) persistRaw(entityType, entityID string, payload json.RawMessage, asOf string, row store.Interpretation) (store.Interpretation, error) {
 	factsJSON, headSHA := factsAndHead(payload)
 
 	if asOf == "" {
-		asOf = interp.AsOf
+		asOf = row.AsOf
 	}
 	if err := p.store.UpsertEntity(store.Entity{
 		Repo:        p.repo(),
@@ -94,10 +94,6 @@ func (p *Pipeline) persistRaw(entityType, entityID string, payload json.RawMessa
 		return store.Interpretation{}, fmt.Errorf("upsert entity: %w", err)
 	}
 
-	row, err := p.interpretationRow(entityType, entityID, interp)
-	if err != nil {
-		return store.Interpretation{}, err
-	}
 	if err := p.store.UpsertInterpretation(row); err != nil {
 		return store.Interpretation{}, fmt.Errorf("upsert interpretation: %w", err)
 	}
@@ -119,10 +115,30 @@ func factsAndHead(payload json.RawMessage) (factsJSON []byte, headSHA string) {
 	return factsJSON, head.HeadSHA
 }
 
-// interpretationRow builds the store row for one interpretation (the JSON
-// columns marshaled), without writing it.
-func (p *Pipeline) interpretationRow(entityType, entityID string, interp interpret.Interpretation) (store.Interpretation, error) {
-	repo := p.repo()
+// interpretEntity runs the registry interpreter for entityType over result and
+// builds the store row (the JSON columns marshaled), without writing it. It is
+// the only caller of the registry interpreters and the only builder of an
+// interpretation row; every flow that writes an interpretation goes through it.
+// It returns the row and the interpreter's own result (callers read Degraded
+// and AsOf from it).
+func interpretEntity(repo string, cfg *config.Config, clock interpret.Clock, entityType, entityID string, result gather.GatherResult) (store.Interpretation, interpret.Interpretation, error) {
+	ie, ok := interpret.EntityInterpreters()[entityType]
+	if !ok {
+		return store.Interpretation{}, interpret.Interpretation{}, fmt.Errorf("pipeline: no interpret adapter registered for entity type %q", entityType)
+	}
+	interp, err := ie(result, clock, cfg)
+	if err != nil {
+		return store.Interpretation{}, interpret.Interpretation{}, err
+	}
+	row, err := interpretationRow(repo, entityType, entityID, interp)
+	if err != nil {
+		return store.Interpretation{}, interpret.Interpretation{}, err
+	}
+	return row, interp, nil
+}
+
+// interpretationRow is interpretEntity's row builder.
+func interpretationRow(repo, entityType, entityID string, interp interpret.Interpretation) (store.Interpretation, error) {
 	marshal := func(name string, v any) (string, error) {
 		b, err := json.Marshal(v)
 		if err != nil {

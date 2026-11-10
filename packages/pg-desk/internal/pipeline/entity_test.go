@@ -160,11 +160,11 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	st := store.OpenForTest(t)
 	q := New(&config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "acme/widgets"}}}, st)
 	q.clock = p.clock
-	interp, err := interpret.Interpret(facts, q.clock, q.cfg)
+	row, _, err := interpretEntity(q.repo(), q.cfg, q.clock, "pr", "1", gather.GatherResult{Payload: payload, AsOf: facts.AsOf})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := q.persist("pr", "1", facts, interp); err != nil {
+	if err := q.persist("pr", "1", facts, row); err != nil {
 		t.Fatal(err)
 	}
 	viaPR, _, _ := st.GetEntity("acme/widgets", "pr", "1")

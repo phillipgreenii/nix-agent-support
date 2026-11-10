@@ -258,14 +258,14 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 		return fmt.Errorf("pipeline: interpret-only decode stored facts %s %s: %w", entityType, entityID, err)
 	}
 
-	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
+	row, interp, err := interpretEntity(p.repo(), p.cfg, p.clock, entityType, entityID, gather.GatherResult{Payload: json.RawMessage(entity.Facts), AsOf: entity.AsOf})
 	if err != nil {
 		err = TagStage(StageInterpret, err)
 		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
 	}
 
-	err = p.persistInterpretOnly(entityType, entityID, facts, interp)
+	err = p.persistInterpretOnly(entityType, entityID, facts, row)
 	if err != nil {
 		err = TagStage(StageStore, err)
 		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
@@ -300,18 +300,18 @@ func (p *Pipeline) repo() string {
 
 // persistInterpretOnly is RunInterpretOnly's store write: persist, behind the
 // interpretOnlyWrite test seam.
-func (p *Pipeline) persistInterpretOnly(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) error {
+func (p *Pipeline) persistInterpretOnly(entityType, entityID string, facts gather.Facts, row store.Interpretation) error {
 	if h := p.seams.interpretOnlyWrite; h != nil {
 		if err := h(); err != nil {
 			return err
 		}
 	}
-	return p.persist(entityType, entityID, facts, interp)
+	return p.persist(entityType, entityID, facts, row)
 }
 
 // persist writes facts and interp to the entity and interpretation
 // tables. Never touches the annotation table — see the package doc comment.
-func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) error {
+func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, row store.Interpretation) error {
 	repo := p.repo()
 
 	factsJSON, err := json.Marshal(facts)
@@ -325,7 +325,7 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, inte
 	// must always carry a value.
 	asOf := facts.AsOf
 	if asOf == "" {
-		asOf = interp.AsOf
+		asOf = row.AsOf
 	}
 	if err := p.store.UpsertEntity(store.Entity{
 		Repo:       repo,
@@ -344,45 +344,7 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, inte
 		return fmt.Errorf("upsert entity: %w", err)
 	}
 
-	enrichmentJSON, err := json.Marshal(interp.Enrichment)
-	if err != nil {
-		return fmt.Errorf("marshal enrichment: %w", err)
-	}
-	urgencyJSON, err := json.Marshal(interp.Urgency)
-	if err != nil {
-		return fmt.Errorf("marshal urgency: %w", err)
-	}
-	dispositionsJSON, err := json.Marshal(interp.Dispositions)
-	if err != nil {
-		return fmt.Errorf("marshal dispositions: %w", err)
-	}
-	approvalsJSON, err := json.Marshal(interp.Approvals)
-	if err != nil {
-		return fmt.Errorf("marshal approvals: %w", err)
-	}
-	matchReasonsJSON, err := json.Marshal(interp.MatchReasons)
-	if err != nil {
-		return fmt.Errorf("marshal match reasons: %w", err)
-	}
-
-	interpRow := store.Interpretation{
-		Repo:           repo,
-		EntityType:     entityType,
-		EntityID:       entityID,
-		Ownership:      interp.Ownership,
-		Enrichment:     string(enrichmentJSON),
-		Urgency:        string(urgencyJSON),
-		Category:       interp.Category,
-		Dispositions:   string(dispositionsJSON),
-		Approvals:      string(approvalsJSON),
-		GateState:      interp.GateState,
-		MatchReasons:   string(matchReasonsJSON),
-		Panel:          interp.Panel,
-		ReadyToPromote: interp.ReadyToPromote,
-		Degraded:       interp.Degraded != "",
-		AsOf:           interp.AsOf,
-	}
-	if err := p.store.UpsertInterpretation(interpRow); err != nil {
+	if err := p.store.UpsertInterpretation(row); err != nil {
 		return fmt.Errorf("upsert interpretation: %w", err)
 	}
 	return nil

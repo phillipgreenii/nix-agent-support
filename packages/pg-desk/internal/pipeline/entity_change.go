@@ -162,8 +162,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 	if !ok {
 		return EntityChangeResult{}, fmt.Errorf("pipeline: no gather adapter registered for entity type %q", entityType)
 	}
-	ie, ok := interpret.EntityInterpreters()[entityType]
-	if !ok {
+	if _, ok := interpret.EntityInterpreters()[entityType]; !ok {
 		return EntityChangeResult{}, fmt.Errorf("pipeline: no interpret adapter registered for entity type %q", entityType)
 	}
 
@@ -197,11 +196,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 	if result.Degraded != "" {
 		return EntityChangeResult{Degraded: result.Degraded}, nil
 	}
-	interp, err := ie(result, p.clock, p.cfg)
-	if err != nil {
-		return EntityChangeResult{}, fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
-	}
-	interpRow, err := p.interpretationRow(entityType, entityID, interp)
+	interpRow, interp, err := interpretEntity(p.repo(), p.cfg, p.clock, entityType, entityID, result)
 	if err != nil {
 		return EntityChangeResult{}, fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
 	}
