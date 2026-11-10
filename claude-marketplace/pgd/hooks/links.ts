@@ -1,6 +1,7 @@
 import { getOptions } from './options'
 import { log } from './log'
 import { linkContext } from './linkContext'
+import { appendMermaidLinks } from './mermaid'
 import type { PgdLink, PgdOptions } from './types'
 
 // Transcript links: a render hook on assistant-message text rewrites matches of the configured
@@ -21,7 +22,11 @@ const PLACEHOLDER = /[-]/g
 // Fenced code blocks (CommonMark: a line of at least three backticks or tildes, indented at most
 // three spaces, up to a closing fence of the same character and at least the same length, or the
 // end of the text), then inline code spans (a backtick run closed by a run of equal length).
-const FENCE = /^( {0,3})(`{3,}|~{3,})[^\n]*\n(?:[\s\S]*?^ {0,3}\2[`~]*[ \t]*$|[\s\S]*)/gm
+const FENCE_HEAD = '^( {0,3})(`{3,}|~{3,})[^\\n]*\\n'
+const FENCE_CLOSED_BODY = '[\\s\\S]*?^ {0,3}\\2[`~]*[ \\t]*$'
+const FENCE = new RegExp(`${FENCE_HEAD}(?:${FENCE_CLOSED_BODY}|[\\s\\S]*)`, 'gm')
+// The same definition restricted to fences that have a closing line (the mermaid pass uses it).
+export const FENCE_CLOSED = new RegExp(`${FENCE_HEAD}${FENCE_CLOSED_BODY}`, 'gm')
 const CODE_SPAN = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)|(`+)(?!`)[\s\S]*?\2(?!`)/g
 
 // Protected spans besides fences and code spans: existing markdown links, autolinks and bare URLs,
@@ -224,8 +229,9 @@ export function linksActive(options: PgdOptions | undefined): options is PgdOpti
 export function linkHook(_$: unknown, e: any, next: (e: any) => unknown): unknown {
   const options = getOptions()
   const text = e?.props?.text
-  if (!linksActive(options) || typeof text !== 'string' || options.links.length === 0) return next(e)
-  const rewritten = rewriteLinks(text, options.links, linkContext())
+  if (!linksActive(options) || typeof text !== 'string') return next(e)
+  const linked = options.links.length === 0 ? text : rewriteLinks(text, options.links, linkContext())
+  const rewritten = appendMermaidLinks(linked)
   return next(rewritten === text ? e : { ...e, props: { ...e.props, text: rewritten } })
 }
 
