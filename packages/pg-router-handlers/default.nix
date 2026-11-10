@@ -30,6 +30,7 @@ mkGoApp {
       ../ccpool
       ../pg-claude-code-recorder
       ../claude-transcript
+      ../pg-failsig
     ];
   };
   modRoot = "pg-router-handlers";

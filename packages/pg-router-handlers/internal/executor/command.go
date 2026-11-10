@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 	"github.com/phillipgreenii/pg-router-handlers/internal/prompt"
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"

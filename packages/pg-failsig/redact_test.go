@@ -31,6 +31,20 @@ var redactCases = []struct {
 	secrets []string
 }{
 	{
+		name:    "step login url with state, code_challenge and code",
+		pass:    "url-query-secret",
+		in:      "Open https://idp.example.com/auth?client_id=step&state=abc123&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw&code=xyz789&redirect_uri=http%3A%2F%2Flocalhost",
+		want:    "Open https://idp.example.com/auth?client_id=step&state=[REDACTED]&code_challenge=[REDACTED]&code=[REDACTED]&redirect_uri=http%3A%2F%2Flocalhost",
+		secrets: []string{"abc123", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw", "xyz789"},
+	},
+	{
+		name:    "cert principal",
+		pass:    "cert-principal",
+		in:      "certificate for principal: jane.doe@example.com is expired",
+		want:    "certificate for principal: [REDACTED] is expired",
+		secrets: []string{"jane.doe"},
+	},
+	{
 		name:    "userinfo user and password",
 		pass:    "url-userinfo",
 		in:      "fatal: unable to access 'https://oauth2:s3cretT0ken@gitlab.example.com/g/r.git/': error: 403",

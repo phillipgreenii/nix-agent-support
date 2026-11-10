@@ -6,11 +6,15 @@
 //
 // A failed handler session, or a check the handler runs before launching one,
 // leaves only text behind: a git stderr, the tail of a session transcript.
-// More than one caller in this module needs to turn that text into a cause.
+// More than one caller needs to turn that text into a cause.
 // One records why a dispatched session failed. Another decides whether a
 // route's git origin is reachable. Those callers MUST agree on what a given
 // text means, so the patterns live in ONE table (table.go) and every caller
 // goes through [Classify]. A caller MUST NOT keep a second table of its own.
+//
+// This is a shared module: the pg-router-handlers module and the
+// pg-origin-guard module both import it, so both classify the same text the
+// same way.
 //
 // Naming a failure's cause is a judgment about the work, not an observed
 // session fact, so it lives here on the handler side and never in ccpool
@@ -45,7 +49,7 @@
 //  3. In failsig_test.go, add at least one positive case and one negative
 //     (near-miss) case for EACH new row, keyed by the row's name.
 //     TestEveryRowHasPositiveAndNegativeCases fails if a row lacks either.
-//  4. Update the closed set named in docs/behavior/invariants.md's INV-CCH-9.
+//  4. Update the closed set named in packages/pg-router-handlers/docs/behavior/invariants.md's INV-CCH-9.
 //
 // Adding a row to an existing signature is steps 2 and 3 only.
 //

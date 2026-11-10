@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/watchdog"
 )
 

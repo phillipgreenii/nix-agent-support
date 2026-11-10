@@ -1927,6 +1927,7 @@
                 "claude-extended-tool-approver"
                 "pa-monitor-decorator-scope"
                 "claude-transcript"
+                "pg-failsig"
                 "pg-connector"
                 "pg-router-source-pg-connector"
                 "pg-router-source-pg-desk"
@@ -6290,6 +6291,7 @@
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
+                      ./packages/pg-failsig
                     ];
                   };
                   modRoot = "pg-router-handlers";
@@ -6353,6 +6355,16 @@
                 pname = "claude-transcript-go-tests";
                 src = ./packages/claude-transcript;
                 gomod2nixToml = ./packages/claude-transcript/gomod2nix.toml;
+              };
+
+              # pg-failsig: shared failure-signature table and credential redaction,
+              # imported by pg-router-handlers (and, later, pg-origin-guard) via local
+              # replace. Stdlib-only Pattern-A library, no binary, same shape as
+              # claude-transcript-go-tests above.
+              pg-failsig-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-failsig-go-tests";
+                src = ./packages/pg-failsig;
+                gomod2nixToml = ./packages/pg-failsig/gomod2nix.toml;
               };
 
               # ceta integration suite — the `//go:build integration` tests in

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"unicode/utf8"
 
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
 )
 
 // The event-log kinds of the dispatch records (INV-CCH-35). dispatch_start is

@@ -15,13 +15,13 @@ import (
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
 
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/checkoutpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/complete"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 	"github.com/phillipgreenii/pg-router-handlers/internal/prompt"
 	"github.com/phillipgreenii/pg-router-handlers/internal/report"

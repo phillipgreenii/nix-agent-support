@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"
 )

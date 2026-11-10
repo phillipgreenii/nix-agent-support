@@ -7,6 +7,7 @@ cachePackages = [
   'github.com/mattn/go-isatty',
   'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/claude-transcript',
+  'github.com/phillipgreenii/pg-failsig',
   'github.com/phillipgreenii/pg-router/conformance',
   'github.com/phillipgreenii/pg-router/conformance/driver',
   'github.com/phillipgreenii/pg-router/procenv',

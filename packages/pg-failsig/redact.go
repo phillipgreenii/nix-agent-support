@@ -57,6 +57,24 @@ var redactions = []redaction{
 		re:   regexp.MustCompile(`(?i)\b(bearer)[ \t]+[A-Za-z0-9._~+/=-]{8,}`),
 		repl: "${1} " + Marker,
 	},
+	// Sensitive URL query parameters, as in a step SSO login URL
+	// ("https://idp.example/auth?state=...&code_challenge=...&code=..."). The
+	// parameter name is kept and its value masked, whatever its length: a
+	// short one-time code or state value is too short for the generic run
+	// pass below.
+	{
+		name: "url-query-secret",
+		re:   regexp.MustCompile(`(?i)([?&](?:state|code|code_challenge|code_verifier|nonce|id_token|access_token|refresh_token|token|client_secret|assertion)=)[^&\s#"'<>]+`),
+		repl: "${1}" + Marker,
+	},
+	// A certificate principal printed as "principal: <name>", "principals=<name>",
+	// and the like. The principal names the signed-in identity, so it never
+	// goes into recorded text. The label is kept.
+	{
+		name: "cert-principal",
+		re:   regexp.MustCompile(`(?i)\b(principals?[ \t]*[=:][ \t]*)[^\s,;"'<>]+`),
+		repl: "${1}" + Marker,
+	},
 	// Provider-prefixed tokens: GitHub (ghp_/gho_/ghu_/ghs_/ghr_ and
 	// github_pat_), GitLab (glpat-), AWS access key ids (AKIA/ASIA), and
 	// sk- API keys. Each prefix is anchored on a word boundary, so "sk-"

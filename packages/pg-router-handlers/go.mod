@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/phillipgreenii/ccpool v0.0.0
+	github.com/phillipgreenii/pg-failsig v0.0.0
 	github.com/phillipgreenii/pg-router v0.0.0
 	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 )
@@ -31,6 +32,7 @@ require (
 replace (
 	github.com/phillipgreenii/ccpool => ../ccpool
 	github.com/phillipgreenii/claude-transcript => ../claude-transcript
+	github.com/phillipgreenii/pg-failsig => ../pg-failsig
 	github.com/phillipgreenii/pg-router => ../pg-router
 )
 

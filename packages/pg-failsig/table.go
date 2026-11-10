@@ -82,6 +82,12 @@ var table = []rule{
 	{GitAuth, "oidc-token-error", regexp.MustCompile(`(?i)\berror generating OIDC token\b`)},
 	{GitAuth, "step-oauth-exec-failed", regexp.MustCompile(`(?i)\bexec "?step oauth"? failed\b`)},
 	{GitAuth, "ssh-publickey-denied", regexp.MustCompile(`(?i)\bpermission denied \(publickey\b`)},
+	// The origin guard's own refusal line on stderr: "pg-origin-guard: refused
+	// (<reason>)". It is a deliberate refusal to open a login window, so it is
+	// an auth outcome. It sits ABOVE git-network because the same stderr may
+	// also carry network text (ssh and git print their transport errors around
+	// it), and a refusal must never be recorded as a network failure.
+	{GitAuth, "origin-guard-refused", regexp.MustCompile(`(?i)\bpg-origin-guard: refused \(`)},
 
 	{GitNetwork, "could-not-resolve-host", regexp.MustCompile(`(?i)\bcould not resolve host`)},
 	{GitNetwork, "connection-timed-out", regexp.MustCompile(`(?i)\bconnection timed out\b`)},

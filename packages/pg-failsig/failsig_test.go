@@ -35,6 +35,15 @@ var positives = map[string][]string{
 			"Please make sure you have the correct access rights\nand the repository exists.",
 		"user@host: Permission denied (publickey,keyboard-interactive).",
 	},
+	"origin-guard-refused": {
+		"pg-origin-guard: refused (no-human)",
+		"pg-origin-guard: refused (backoff)\nfatal: Could not read from remote repository.",
+		// Precedence over git-network: the same stderr may also carry
+		// transport text, and a refusal must never classify as network.
+		"ssh: Could not resolve hostname github.com: nodename nor servname provided\npg-origin-guard: refused (network)",
+		"ssh: connect to host github.com port 22: Connection timed out\npg-origin-guard: refused (timeout)",
+		"ssh: connect to host github.com port 22: Connection refused\npg-origin-guard: refused (attempting)",
+	},
 	"could-not-resolve-host": {
 		"Could not resolve host",
 		"fatal: unable to access 'https://github.com/org/repo.git/': Could not resolve host: github.com",
@@ -149,6 +158,11 @@ var negatives = map[string][]string{
 	"ssh-publickey-denied": {
 		`Authenticated to github.com using "publickey".`,
 		"Hi there! You've successfully authenticated, but GitHub does not provide shell access.",
+	},
+	"origin-guard-refused": {
+		"pg-origin-guard: check ok",
+		"the guard refused nothing",
+		"pg-origin-guard refused to start",
 	},
 	"could-not-resolve-host": {
 		"Resolved host github.com to 192.0.2.10",
@@ -523,5 +537,47 @@ func TestCutKeepsRuneBoundaries(t *testing.T) {
 		if got != c.want || !utf8.ValidString(got) {
 			t.Errorf("cut(%q, %d, %d) = %q, want %q", s, c.start, c.maxLen, got, c.want)
 		}
+	}
+}
+
+// A refusal line is git-auth even when the same stderr carries every kind of
+// network text, in either order, and its evidence is the refusal line.
+func TestRefusalOutranksNetworkText(t *testing.T) {
+	netTexts := []string{
+		"Could not resolve host: github.com",
+		"ssh: connect to host github.com port 22: Connection timed out",
+		"ssh: connect to host github.com port 22: Connection refused",
+	}
+	const refusal = "pg-origin-guard: refused (network)"
+	for _, n := range netTexts {
+		for _, text := range []string{n + "\n" + refusal, refusal + "\n" + n} {
+			got := Classify(text)
+			if got.Signature != GitAuth {
+				t.Errorf("Classify(%q).Signature = %q, want git-auth", text, got.Signature)
+			}
+		}
+	}
+	if got := Classify("x\n" + refusal + "\n").Evidence; got != refusal {
+		t.Errorf("Evidence = %q, want %q", got, refusal)
+	}
+}
+
+// Redaction runs before the 300-byte cut: a login URL whose secret
+// parameters straddle the cut never leaks a fragment, and the principal is
+// masked in the kept evidence.
+func TestLoginURLAndPrincipalAreRedactedInEvidence(t *testing.T) {
+	url := "https://idp.example.com/auth?state=STATEVALUE123&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw&code=ONETIMECODE9"
+	text := "pg-origin-guard: refused (backoff) principal: jane.doe@example.com " + url
+	got := Classify(text)
+	if got.Signature != GitAuth {
+		t.Fatalf("Signature = %q, want git-auth", got.Signature)
+	}
+	for _, s := range []string{"STATEVALUE123", "E9Melhoa2", "ONETIMECODE9", "jane.doe"} {
+		if strings.Contains(got.Evidence, s) {
+			t.Errorf("Evidence %q leaks %q", got.Evidence, s)
+		}
+	}
+	if len(got.Evidence) > MaxEvidenceLen {
+		t.Errorf("len(Evidence) = %d, want <= %d", len(got.Evidence), MaxEvidenceLen)
 	}
 }

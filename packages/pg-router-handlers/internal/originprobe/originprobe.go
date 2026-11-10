@@ -82,8 +82,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
 )
 

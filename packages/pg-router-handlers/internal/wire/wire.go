@@ -22,10 +22,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
-	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/report"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router/schemas"
