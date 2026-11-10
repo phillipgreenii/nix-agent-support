@@ -322,6 +322,11 @@ in
             runAtLoad = true;
             keepAlive = true;
             serviceConfig = {
+              # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5). The
+              # daemon bounds its own shutdown at 8 s (internal/shutdown.Deadline, hard
+              # exit 10 with a shutdown_overrun log); 15 is that plus a 7 s margin, under
+              # launchd's silent 60 s clamp. Keep the two in step.
+              ExitTimeOut = 15;
               StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
               StandardOutPath = "${config.xdg.stateHome}/pa-monitor/launchd-stdout.log";
               # pg2-klusl (from pg2-r9ly8's host-load attribution): the daemon showed

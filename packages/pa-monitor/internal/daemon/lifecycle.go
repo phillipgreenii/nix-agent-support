@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/shutdown"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
@@ -148,8 +149,11 @@ type SessionLabeler interface {
 // into the shared state visible to gRPC handlers, and feeds the block
 // and week trackers (if provided).
 type RunOptions struct {
-	Paths        Paths
-	Emitter      *otel.Emitter
+	Paths   Paths
+	Emitter *otel.Emitter
+	// Shutdown, when non-nil, records the shutdown phase in progress so the
+	// hard-deadline watchdog can name it. A nil Tracker is a no-op.
+	Shutdown     *shutdown.Tracker
 	Tick         time.Duration
 	Poller       PollerInterface
 	BlockTracker *block.Tracker
@@ -268,6 +272,22 @@ type RunOptions struct {
 	BeadsWatchInterval time.Duration
 }
 
+// EmitterFlushTimeout bounds the final OTLP flush on shutdown: an unreachable
+// collector would otherwise hold the pidfile lock until launchd's SIGKILL.
+const EmitterFlushTimeout = 3 * time.Second
+
+type emitterShutdowner interface {
+	Shutdown(ctx context.Context) error
+}
+
+// flushEmitter shuts the emitter down within timeout; the flush error is
+// dropped (best effort, and the telemetry path is the thing that failed).
+func flushEmitter(e emitterShutdowner, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_ = e.Shutdown(ctx)
+}
+
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
 // socket, starts the gRPC server, and blocks until ctx is done.
 func RunWith(ctx context.Context, opts RunOptions) error {
@@ -354,7 +374,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// instance the gRPC server and delivery path use.
 	go RunReaper(ctx, bridgeReg, 30*time.Second, pidAlive)
 
-	defer func() { _ = opts.Emitter.Shutdown(context.Background()) }()
+	defer func() {
+		opts.Shutdown.Phase("emitter_flush")
+		flushEmitter(opts.Emitter, EmitterFlushTimeout)
+		opts.Shutdown.Phase("release_lock")
+	}()
 
 	// One-shot migration: copy runtime.json toggles into the DB, then delete
 	// the file. Runs before NewWatermarkStore so that, on first startup after

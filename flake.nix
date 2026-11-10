@@ -17153,6 +17153,8 @@
                 assert e.logCollection.enable == false;
                 # pg2-klusl: the daemon yields CPU/IO to builds and tests under host load
                 assert e.serviceConfig.ProcessType == "Background";
+                # the daemon's 8 s shutdown deadline plus a 7 s margin, under launchd's 60 s clamp
+                assert e.serviceConfig.ExitTimeOut == 15;
                 # profiling endpoint: an absolute unix-socket path (never a TCP address),
                 # opt-out via pprof.enable
                 assert

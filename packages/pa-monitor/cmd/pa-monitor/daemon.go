@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -29,6 +30,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/shutdown"
 	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
@@ -67,6 +69,19 @@ func runDaemon(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
+	// S5: once ctx ends, the process has shutdown.Deadline to finish before the
+	// watchdog logs shutdown_overrun and exits non-zero. Raw stderr logger: the
+	// OTLP emitter's flush is one of the steps that can hang. Registered first so
+	// its Disarm runs last, after every other deferred cleanup.
+	shutLog := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	shutTracker := shutdown.NewTracker(shutLog)
+	watchdog := shutdown.Watch(ctx, shutdown.Options{Log: shutLog, Tracker: shutTracker})
+	defer func() {
+		if watchdog.Disarm() {
+			shutTracker.Done()
+		}
+	}()
+
 	stopPprof := pprofserver.StartFromEnv(pprofEnv, os.Getenv, os.Stderr)
 	defer stopPprof()
 
@@ -77,6 +92,7 @@ func runDaemon(args []string) {
 		os.Exit(1)
 	}
 	defer cleanup()
+	opts.Shutdown = shutTracker
 
 	// Startup health check: tmux/cmux are required, not optional. Each
 	// signaler shells out to its multiplexer's CLI; a missing binary (e.g.
