@@ -145,9 +145,11 @@ flowchart TD
    itself. `status`, `doctor` and `migrate --cutover` keep opening a schema-1 store. Collapsing
    the ladder is follow-up C.
 
-Proposed by this plan, not yet confirmed by the operator:
-
-- The catch-up runs inside `pg-desk heartbeat`.
+10. **The catch-up runs inside `pg-desk heartbeat`, as a trial, bounded so it cannot cause a
+    missed heartbeat.** (Operator, 2026-11-10: "we can try it as part of the heartbeat, but it
+    think we need to ensure there is some kind of limit so that heartbeats aren't missed.") The
+    limits are in "Catch-up in the heartbeat". The manual `pg-desk pr reinterpret --open` stays
+    the unbounded path.
 
 ## Non-goals
 
@@ -449,8 +451,27 @@ pass. Rules:
   a schema-1 store skips the catch-up silently or with one stderr line, and never fails the
   heartbeat.
 - It skips when the version is `dev`.
-- It runs under a context timeout so a slow store cannot hold the heartbeat open, and it runs
-  before the final `return recordSourceFetches(...)`, with its own error swallowed.
+- **The catch-up MUST NOT make a heartbeat late or missed** (operator, 2026-11-10: "we can try it
+  as part of the heartbeat, but it think we need to ensure there is some kind of limit so that
+  heartbeats aren't missed"). Three limits enforce it, and each is a named constant with a test:
+  - **Time budget.** The catch-up runs under a context deadline, `CatchUpBudget`, that MUST be
+    well under the `desk-heartbeat` role's cadence (the implementer reads the cadence from the
+    deployment repo and sets the default to at most a third of it, recording both numbers in the
+    constant's comment). The loop checks the context between rows and stops at the deadline; a
+    row in flight finishes or rolls back, never half-writes.
+  - **Row cap.** At most `CatchUpMaxRows` rows per pass, open PRs first, so one pass has a known
+    ceiling even when the clock is fast. Later heartbeats continue from where it stopped, because
+    each committed row carries the new stamp and drops out of the "behind" set.
+  - **Order of steps.** Liveness is stamped BEFORE the catch-up and the source-fetch record is
+    written AFTER it with the catch-up's error swallowed, so a slow or failing catch-up cannot
+    prevent either. The catch-up holds no write lock across rows (one short transaction per row),
+    so a concurrent heartbeat or command is not blocked behind it.
+  - **Overlap.** If a previous catch-up is still running (a second heartbeat starts while the
+    first has not returned), the new one skips the catch-up rather than queueing behind it.
+  - **Visibility.** When a pass stops at a limit with rows still behind, it writes the last-run
+    counts (including `remaining`) so `pg-desk status` shows the backlog draining.
+    The manual `pg-desk pr reinterpret --open` has no row cap and no budget, so it always finishes
+    the job.
 - When nothing is behind, it costs one query over the small `interpretation` table and reads no
   facts; after one pass at a new stamp, closed and merged rows carry the stamp too, so the
   steady state stays empty.
@@ -592,7 +613,8 @@ result.Watched}` (a no-op for backends that state nothing; pin it) and hashes th
      and stays until follow-up C: `UpsertXref`, `pr_annotation_state.go`, `typed_annotation.go`,
      `GetEntity`.
 7. **`pr reinterpret` command (S, after 5).** With the safe-verbs classification and file.
-8. **Heartbeat catch-up (S, after 5).**
+8. **Heartbeat catch-up (S, after 5).** With the time budget, row cap, overlap skip and
+   `remaining` count of decision 10, each with its test.
 9. **Status line and persisted last-run counts (S, after 3; parallel with 7 and 8).**
 10. **File the follow-ups (S).** Beads for follow-ups B and C in the `agent-support` tracker.
 11. **Operator precondition, before the apply (S, operator-only).** Confirm every pg-desk store
@@ -686,6 +708,10 @@ fuzz seeds and the negative-control table are in "Regression protection and cove
 - **Open PRs first, bounded passes:** with many closed rows and a few open ones all behind, one
   capped pass reaches the open PRs first, rows are streamed one at a time, and repeated passes
   converge.
+- **Heartbeat limits (decision 10):** with a backlog larger than `CatchUpMaxRows` the pass stops at
+  the cap; with an injected slow row the pass stops at `CatchUpBudget` and the heartbeat still
+  stamps liveness and records source fetches; a second concurrent catch-up skips; the manual
+  command ignores both limits.
 - **Empty stamp:** with `RequireStamp` (the catch-up loop, `ReinterpretStored`)
   `WriteInterpretation` returns an error on a handle with no stamp; a hydration through such a
   handle still writes (a NULL stamp) and warns once per process.
