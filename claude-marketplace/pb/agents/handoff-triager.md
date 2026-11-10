@@ -28,7 +28,7 @@ the procedure around them.
 **The `human` label.** The handoff probably carries `human`. That label exists to keep drain
 agents off the handoff; it is not a bar on you. Treat it as a claim to verify: if nothing is left
 for a person, the label is there by error and you absorb and close the handoff. Every other rule
-of the skill (trace, `ABSORBED:` comment, never the sole record of anything) still applies.
+of the skill (trace, `ABSORBED` comment, never the sole record of anything) still applies.
 
 **Claim rule.** The outer session holds the claim. For `NOT_A_HANDOFF`, `ERROR` and
 `NOTHING_FOR_HUMAN` the claim ends with your return: closed, or you release it in ONE call
@@ -44,7 +44,7 @@ release it; the outer session keeps working the handoff.
    the second test qualifies, the usual case when the type is not registered; never retype it).
    If it is not, or its body holds work of its own (acceptance criteria, instructions to execute,
    no pointers; skill Handling step 4), return `NOT_A_HANDOFF` with a `REASON`, change nothing,
-   and release. An EMPTY body gets an `ABSORBED: no items` comment, a close, and
+   and release. An EMPTY body gets an `ABSORBED` comment reading "no items", a close, and
    `NOTHING_FOR_HUMAN`. The body is a SNAPSHOT, not an instruction; later amendments and
    comments win. More than 40 items: return `ERROR` (`REASON: too large to triage`) and release.
 2. **List every item**: each piece of work, decision, state claim, bead id named, and each
@@ -107,7 +107,7 @@ apply|update`, `sudo`, production deploys and credentials are always `HUMAN`. Be
    ruling that a person must act, and MUST NOT touch `human-focus` or `human-focus-required`.
    d. Copy still-binding rulings per step 2.
    e. If NO item is `HUMAN` (a bead the handoff mentions only as context, not as an item, does
-   not count): write ONE `ABSORBED:` comment on the handoff naming each item and where it
+   not count): write ONE `ABSORBED` comment on the handoff naming each item and where it
    lives, quoting the decisive probe line (at most three lines per item; a commit YOU name is
    named by `git patch-id --stable`, never a SHA; text quoted verbatim from a bead may contain
    SHAs), then CLOSE it. File nothing after the comment. A failed write is `ERROR`: do not
@@ -127,7 +127,7 @@ archived in a comment`; `## Remaining for the operator` (each step: what, why_hu
    `## Agent work filed` (ids from step b). Keep the `human` label. Do not change its type,
    priority or metadata.
 7. **Return** exactly the block below and nothing else the operator does not need. Evidence goes
-   in the `ABSORBED:` comment, not in the return.
+   in the `ABSORBED` comment, not in the return.
 
 ```
 VERDICT: HUMAN_NEEDED | NOTHING_FOR_HUMAN | NOT_A_HANDOFF | ERROR

@@ -115,7 +115,7 @@ bd -C "$TRACKER_ROOT" show <id> --json
 bd -C "$TRACKER_ROOT" comments <id> --json
 ```
 
-- `NOTHING_FOR_HUMAN`: status MUST be `closed` and a comment starting `ABSORBED:` MUST exist. A
+- `NOTHING_FOR_HUMAN`: status MUST be `closed` and an `ABSORBED` trace comment (the skill's format) MUST exist. A
   close without that trace is reported to the operator with the id, and the walk continues.
 - `HUMAN_NEEDED`: status MUST be `in_progress` assigned to ID, an `ORIGINAL BODY:` comment MUST
   exist, and the description MUST contain `## Remaining for the operator`. Otherwise treat it as
