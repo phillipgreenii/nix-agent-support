@@ -30,6 +30,8 @@ interface Compiled {
 }
 
 function compile(rule: LinkRule): Compiled | undefined {
+  // only regex rules are handled here; the other kinds have their own scanners
+  if (rule.kind !== undefined && rule.kind !== 'regex') return undefined
   try {
     if (!rule.url.includes('{0}')) throw new Error('url template has no {0}')
     new URL(rule.url.split('{0}').join('x')) // throws on a template that is not a valid URL

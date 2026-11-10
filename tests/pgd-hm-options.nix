@@ -52,7 +52,81 @@ let
     "focus"
   ];
 
+  # New-shape rules: a kind, settings rendered as options, and a top-level github object.
+  newShape = evaluate {
+    github = {
+      host = "git.example.invalid";
+      repos = [ "own/repo" ];
+    };
+    links = [
+      {
+        name = "old";
+        pattern = "EX-[0-9]+";
+        url = "https://example.invalid/EX";
+      }
+      {
+        name = "tk";
+        kind = "jira";
+        settings = {
+          baseUrl = "https://tracker.invalid/browse";
+          keys = [ "AB" ];
+        };
+      }
+      {
+        name = "pr";
+        kind = "github-pr";
+      }
+      {
+        name = "rx";
+        kind = "regex";
+        pattern = "X";
+        url = "https://example.invalid/{0}";
+        settings = { };
+      }
+    ];
+  };
+
   cases = {
+    # the exact JSON text an old kind-less entry rendered to before this change
+    oldEntryRendersByteIdentically =
+      builtins.toJSON (builtins.head (rendered custom).links)
+      == ''{"name":"example","pattern":"EX-[0-9]+","url":"https://example.invalid/EX"}'';
+    newShapeLinksRendered =
+      (rendered newShape).links == [
+        {
+          name = "old";
+          pattern = "EX-[0-9]+";
+          url = "https://example.invalid/EX";
+        }
+        {
+          name = "tk";
+          kind = "jira";
+          options = {
+            baseUrl = "https://tracker.invalid/browse";
+            keys = [ "AB" ];
+          };
+        }
+        {
+          name = "pr";
+          kind = "github-pr";
+        }
+        {
+          name = "rx";
+          kind = "regex";
+          pattern = "X";
+          url = "https://example.invalid/{0}";
+        }
+      ];
+    newShapeGithubRendered =
+      (rendered newShape).github == {
+        host = "git.example.invalid";
+        repos = [ "own/repo" ];
+      };
+    kindSettingsDefaultNull =
+      let
+        l = builtins.head (opts custom).links;
+      in
+      l.kind == null && l.settings == { };
     everyComponentDeclaredAndOn = lib.all (n: (opts defaults).components.${n} == true) componentNames;
     onlyTheNamedComponents =
       lib.sort lib.lessThan (builtins.attrNames (opts defaults).components)
@@ -70,6 +144,10 @@ let
         enable = true;
         components = lib.genAttrs componentNames (_: true);
         links = [ ];
+        github = {
+          host = "github.com";
+          repos = [ ];
+        };
         alerts.thresholds = {
           contextWarn = 60;
           contextAlert = 80;

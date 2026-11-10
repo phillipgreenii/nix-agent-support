@@ -20,8 +20,20 @@ let
       default = true;
       inherit description;
     };
+  # One link rule as the mod reads it: null pattern and url are dropped, and kind and settings
+  # (rendered as `options`) only when set, so a kind-less entry renders as it always did.
+  renderLink =
+    l:
+    {
+      inherit (l) name;
+    }
+    // lib.optionalAttrs (l.kind != null) { inherit (l) kind; }
+    // lib.optionalAttrs (l.pattern != null) { inherit (l) pattern; }
+    // lib.optionalAttrs (l.url != null) { inherit (l) url; }
+    // lib.optionalAttrs (l.settings != { }) { options = l.settings; };
   rendered = {
-    inherit (cfg) enable components links;
+    inherit (cfg) enable components github;
+    links = map renderLink cfg.links;
     alerts = { inherit (cfg.alerts) thresholds; };
     metrics = lib.optionalAttrs (cfg.metrics.endpoint != null) { inherit (cfg.metrics) endpoint; };
   };
@@ -62,19 +74,55 @@ in
               type = lib.types.str;
               description = "Link name.";
             };
+            kind = lib.mkOption {
+              type = lib.types.nullOr (
+                lib.types.enum [
+                  "regex"
+                  "github-pr"
+                  "jira"
+                  "file-ref"
+                ]
+              );
+              default = null;
+              description = "Rule kind. Null (the default) is a regex rule.";
+            };
             pattern = lib.mkOption {
-              type = lib.types.str;
-              description = "Pattern of the text to link.";
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Pattern of the text to link (regex rules).";
             };
             url = lib.mkOption {
-              type = lib.types.str;
-              description = "URL template the match links to.";
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "URL template the match links to (regex rules).";
+            };
+            settings = lib.mkOption {
+              type = lib.types.attrsOf lib.types.anything;
+              default = { };
+              description = ''
+                Kind-specific options, rendered as the rule's `options`: `github-pr` takes
+                `sessionRepoFallback`, `jira` takes `baseUrl` and `keys`, `file-ref` takes
+                `localTemplate`. Left out of the rendered rule when empty.
+              '';
             };
           };
         }
       );
       default = [ ];
       description = "Transcript link rules. The shipped list is empty.";
+    };
+
+    github = {
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = "github.com";
+        description = "GitHub host the github-pr and file-ref links point at.";
+      };
+      repos = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Known repositories, each written owner/repo.";
+      };
     };
 
     metrics.endpoint = lib.mkOption {

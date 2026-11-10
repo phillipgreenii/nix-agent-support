@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import { registerComponents } from './components'
-import { parseOptions, type ModApi } from './types'
+import { parseOptionsDetailed, type ModApi } from './types'
 import { setOptions } from './options'
 import { initSources, requestInvalidate } from './source'
 import { initContributions } from './contributions'
@@ -11,7 +11,7 @@ import { registerUsageHooks, startUsage } from './usage'
 import { registerBandHooks } from './band'
 import { registerAlertHooks } from './alerts'
 import { initLimitsCapture } from './limits-capture'
-import { initLog } from './log'
+import { initLog, log } from './log'
 import { exportMetrics, initExporter } from './exporter'
 import { hydrateToggles, setToggleStore } from './toggles'
 import { registerModalEventHooks } from './modals'
@@ -61,6 +61,11 @@ function startExportTimer(host: ModApi): void {
   host.clock.after(EXPORT_EVERY_MS, tick)
 }
 
+// One warn line per rule skipped while the options were parsed.
+export function logSkippedRules(skipped: string[]): void {
+  for (const m of skipped) log('warn', 'links', m)
+}
+
 export const register: Register = on => {
   registerUsageHooks(on)
   registerModelEffortHooks(on)
@@ -72,7 +77,7 @@ export const register: Register = on => {
   // The pgd noun: a plugin adds a noun to `$` only through an engine.create hook.
   registerPgdNoun(on)
   on('session.start', async ($, e, next) => {
-    const options = parseOptions(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
+    const { options, skipped } = parseOptionsDetailed(await $.env.get('PG_CLAUDE_DISPLAY_OPTIONS'))
     const host = {
       process: { run: (argv, init) => $.process.run(argv, init) },
       fs: { read: p => $.fs.read(p), list: p => $.fs.list(p), write: (p, t) => $.fs.write(p, t) },
@@ -118,6 +123,8 @@ export const register: Register = on => {
     setToggleStore({ save: state => void Promise.resolve(update($, togglesAtom, () => state)).catch(() => undefined) })
     if (options.enable) {
       initLog(host)
+      // parseOptions ran before the log had a host, so its skipped-rule messages are logged here
+      logSkippedRules(skipped)
       initLimitsCapture(host)
       initExporter(host)
       initSources(host, { setTimer: (fn, ms) => host.clock.after(ms, fn) })
