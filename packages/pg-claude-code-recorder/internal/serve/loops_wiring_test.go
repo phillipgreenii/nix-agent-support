@@ -67,11 +67,10 @@ func (f *fakeTicks) await(t *testing.T, recorded ...string) {
 	}
 }
 
-// goLoop starts one production loop goroutine (the entry point Start launches)
-// and registers it with the daemon's wait group, so Close waits for it.
-func goLoop(d *Daemon, loop func()) {
-	d.refreshing.Add(1)
-	go loop()
+// startLoop starts one production loop goroutine (the entry point Start launches)
+// through the daemon's goLoop, so Close waits for it.
+func startLoop(d *Daemon, loop func()) {
+	d.goLoop("test", loop)
 }
 
 func seamDaemon(t *testing.T, mod func(*env)) (*env, *Daemon, *fakeTicks) {
@@ -106,7 +105,7 @@ func TestEachProductionLoopRecordsExactlyOneRunPerTick(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, d, f := seamDaemon(t, c.mod)
-			goLoop(d, func() { c.run(d) })
+			startLoop(d, func() { c.run(d) })
 			f.fire(t, c.tick, c.passes...)
 			for _, l := range c.passes {
 				if got := loopRuns(d, l, "ok") + loopRuns(d, l, "error"); got != 1 {
@@ -122,7 +121,7 @@ func TestEachProductionLoopRecordsExactlyOneRunPerTick(t *testing.T) {
 
 func TestStatusLoopRecordsAPassPerTimer(t *testing.T) {
 	_, d, f := seamDaemon(t, nil)
-	goLoop(d, d.statusLoop)
+	startLoop(d, d.statusLoop)
 	f.await(t, obs.LoopStatusRefresh) // the first pass runs at once
 	if got := loopRuns(d, obs.LoopStatusRefresh, "ok"); got != 1 {
 		t.Fatalf("after start: %v runs, want 1", got)
@@ -136,7 +135,7 @@ func TestStatusLoopRecordsAPassPerTimer(t *testing.T) {
 func TestParserDrainAndSweepAndIngestAreRecordedThroughTheirEntryPoints(t *testing.T) {
 	e, d, f := seamDaemon(t, nil)
 	p := e.transcript("a.jsonl", "{\"type\":\"user\"}\n", time.Now().Add(-time.Hour))
-	goLoop(d, d.parseLoop)
+	startLoop(d, d.parseLoop)
 	// watcher_sweep: a forced sweep (the Rescan entry point) is one pass that
 	// includes the per-file ingest it triggers.
 	if err := d.Watcher().Rescan(); err != nil {

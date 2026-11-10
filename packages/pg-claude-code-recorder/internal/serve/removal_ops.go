@@ -156,7 +156,6 @@ func (d *Daemon) checkDoctorProjection() error {
 // external scheduler is needed. The first run comes one interval after start,
 // or sooner when the last result is older than the interval.
 func (d *Daemon) doctorLoop() {
-	defer d.refreshing.Done()
 	every := d.cfg.DoctorInterval
 	if every <= 0 {
 		return

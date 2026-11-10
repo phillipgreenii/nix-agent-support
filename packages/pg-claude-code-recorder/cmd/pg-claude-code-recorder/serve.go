@@ -69,6 +69,7 @@ func (a *app) serve(args []string) int {
 		log.Error("open_failed", "err", err.Error())
 		return a.emitError(false, wire.ErrUnavailable, fmt.Sprintf("cannot start: %v", err))
 	}
+	a.releaseSignalsOnFirst()
 	if err := d.Run(a.ctx); err != nil {
 		log.Error("serve_failed", "err", err.Error())
 		return a.emitError(false, wire.ErrUnavailable, fmt.Sprintf("serve: %v", err))

@@ -3,9 +3,25 @@
 package clock
 
 import (
+	"context"
 	"sync"
 	"time"
 )
+
+// SleepCtx waits d on clk and reports true, or returns false as soon as ctx is
+// done. It is the one cancellable wait: a loop that paces itself with it stops
+// at shutdown instead of finishing the sleep.
+func SleepCtx(ctx context.Context, clk Clock, d time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case <-clk.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 
 // Clock supplies the time and sleeping.
 type Clock interface {

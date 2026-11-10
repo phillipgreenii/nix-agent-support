@@ -27,10 +27,9 @@ const walCheckpointWarnEvery = time.Minute
 
 // walCheckpointLoop runs a passive WAL checkpoint every walCheckpointEvery, then
 // a guarded TRUNCATE attempt, until d.stop closes. Daemon.Close waits for it
-// (d.refreshing) before the store closes; a checkpoint already running is not
+// (goLoop) before the store closes; a checkpoint already running is not
 // cancelled.
 func (d *Daemon) walCheckpointLoop() {
-	defer d.refreshing.Done()
 	tick, stopTicker := d.ticker(obs.LoopWALCheckpoint, walCheckpointEvery)
 	defer stopTicker()
 	tickLoop(d.stop, tick, func() {

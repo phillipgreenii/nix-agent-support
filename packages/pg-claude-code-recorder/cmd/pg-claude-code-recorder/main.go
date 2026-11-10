@@ -27,6 +27,8 @@ type app struct {
 	// launchState reports the launch agent's state for the offline status.
 	launchState func(label string) string
 	ctx         context.Context
+	// stop releases the signal registration behind ctx (nil in tests: a no-op).
+	stop func()
 	// pollEvery is how often coverage --wait-caught-up polls (1s when zero).
 	pollEvery time.Duration
 	// recentBudget bounds how long status waits for the crash counts (500ms when zero).
@@ -87,8 +89,25 @@ func (a *app) run(args []string) int {
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	a := &app{out: os.Stdout, errw: os.Stderr, stdin: os.Stdin, getenv: os.Getenv, launchState: launchctlState, ctx: ctx}
-	os.Exit(a.run(os.Args[1:]))
+	ctx, stop := armSignals(signal.NotifyContext, os.Interrupt, syscall.SIGTERM)
+	a := &app{out: os.Stdout, errw: os.Stderr, stdin: os.Stdin, getenv: os.Getenv, launchState: launchctlState, ctx: ctx, stop: stop}
+	code := a.run(os.Args[1:])
+	stop()
+	os.Exit(code)
+}
+
+// armSignals is the one signal registration of the process: the returned
+// context ends on the first of sigs, and stop releases the registration (a
+// later signal then takes its default action). notify is signal.NotifyContext;
+// tests pass a fake.
+func armSignals(notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc), sigs ...os.Signal) (context.Context, context.CancelFunc) {
+	return notify(context.Background(), sigs...)
+}
+
+// releaseSignalsOnFirst calls a.stop once a.ctx ends, so a second SIGTERM kills
+// the process by default while the first one drives a graceful shutdown.
+func (a *app) releaseSignalsOnFirst() {
+	if a.stop != nil {
+		context.AfterFunc(a.ctx, a.stop)
+	}
 }

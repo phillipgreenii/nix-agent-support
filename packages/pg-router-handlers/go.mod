@@ -8,7 +8,10 @@ require (
 	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 )
 
-require github.com/cespare/xxhash/v2 v2.3.0 // indirect
+require (
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+)
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect

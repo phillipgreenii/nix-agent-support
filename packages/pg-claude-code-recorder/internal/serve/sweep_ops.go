@@ -36,10 +36,13 @@ func (d *Daemon) opSweep(_ context.Context, body []byte) (any, *wire.Error) {
 	defer d.forceMu.Unlock()
 	started := false
 	if req.Force && !d.forceRunning {
-		d.forceRunning, started = true, true
+		// Lock order: forceMu (held here), then the goLoop mutex.
 		d.forcePending.Store(true)
-		d.refreshing.Add(1)
-		go d.runForcedSweep()
+		if !d.goLoop("forced_sweep", d.runForcedSweep) {
+			d.forcePending.Store(false)
+			return nil, wire.Errf(wire.ErrUnavailable, "sweep refused: the daemon is shutting down")
+		}
+		d.forceRunning, started = true, true
 	}
 	return SweepAnswer{Started: started, Running: d.forceRunning, Completed: d.forceDone, Error: d.forceErr}, nil
 }
@@ -49,7 +52,6 @@ func (d *Daemon) opSweep(_ context.Context, body []byte) (any, *wire.Error) {
 // watcher's lock, so no other sweep can re-fill them between the clear and
 // this sweep's walk.
 func (d *Daemon) runForcedSweep() {
-	defer d.refreshing.Done()
 	err := d.w.Rescan()
 	d.forcePending.Store(false) // the sweep failed before its hook ran
 	d.forceMu.Lock()

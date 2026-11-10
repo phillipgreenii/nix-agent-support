@@ -10,6 +10,7 @@ cachePackages = [
   'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/pprofserver',
   'github.com/remyoudompheng/bigfft',
+  'golang.org/x/sync/errgroup',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'modernc.org/libc',
@@ -76,6 +77,14 @@ cachePackages = [
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
     hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
+
+  [mod.'go.uber.org/goleak']
+    version = 'v1.3.0'
+    hash = 'sha256-uuwtET8BZ4zjKgSV92DN47k/PM2zYdnWl+naP2CfO5M='
+
+  [mod.'golang.org/x/sync']
+    version = 'v0.24.0'
+    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='
 
   [mod.'golang.org/x/sys']
     version = 'v0.49.0'

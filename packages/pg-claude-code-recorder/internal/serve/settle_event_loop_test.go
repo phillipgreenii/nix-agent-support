@@ -33,7 +33,7 @@ func TestEventSettleLoopWakesOnItsTriggers(t *testing.T) {
 		e.cfg.SettleMinWake = time.Second // the fake clock never advances: every wake waits the coalesce timer
 	})
 	f := newFakeTicks(d)
-	goLoop(d, d.settleLoop)
+	startLoop(d, d.settleLoop)
 	// Before the first parse nothing runs.
 	select {
 	case l := <-f.done:

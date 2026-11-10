@@ -78,6 +78,7 @@ cachePackages = [
   'golang.org/x/net/http2/hpack',
   'golang.org/x/net/idna',
   'golang.org/x/net/trace',
+  'golang.org/x/sync/errgroup',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'golang.org/x/text/secure/bidirule',
@@ -343,6 +344,10 @@ cachePackages = [
   [mod.'golang.org/x/net']
     version = 'v0.62.0'
     hash = 'sha256-BX+i/MyhVigz/sDRJNGydfkimaeAHAFtrRN//eXuZFY='
+
+  [mod.'golang.org/x/sync']
+    version = 'v0.24.0'
+    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='
 
   [mod.'golang.org/x/sys']
     version = 'v0.49.0'

@@ -154,9 +154,13 @@ type Daemon struct {
 	truncate   func(time.Duration) (bool, error)
 	usedMu     sync.Mutex
 	usedBytes  int64
-	stop       chan struct{}
-	stopOnce   sync.Once
-	refreshing sync.WaitGroup
+	// ctx is the daemon root context, made in Open; Close cancels it. stop is a
+	// read-only alias of ctx.Done() (nil, which never fires, on a literal built
+	// without Open). gor tracks every goLoop goroutine.
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	stop   <-chan struct{}
+	gor    goroutines
 
 	// statusMu guards statusSnap, the cached figures opStatus serves.
 	statusMu     sync.Mutex
@@ -212,7 +216,9 @@ func Open(opt Options) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, sweepPace: newPacer(opt.Clock, cfg.MaxFilesPerSecond), stop: make(chan struct{}), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
+	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, sweepPace: newPacer(opt.Clock, cfg.MaxFilesPerSecond), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
+	d.ctx, d.cancel = context.WithCancelCause(context.Background())
+	d.stop = d.ctx.Done()
 	d.seenDB = newSeenStore(st, opt.Clock, func(err error) { o.Log.Warn("seen_write_failed", "err", err.Error()) })
 	d.loadSeen()
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
@@ -586,17 +592,16 @@ func (d *Daemon) Start() error {
 	d.tr.Startup()
 	endPhase()
 	d.startLagRebuild()
-	d.refreshing.Add(9)
-	go d.lagReconcileLoop()
-	go d.fileFactsLoop()
+	d.goLoop("lag_reconcile", d.lagReconcileLoop)
+	d.goLoop("file_facts", d.fileFactsLoop)
 	d.statusLoopOn.Store(true)
-	go d.statusLoop()
-	go d.walCheckpointLoop()
-	go d.settleLoop()
-	go d.doctorLoop()
-	go d.refreshLoop()
-	go d.parseLoop()
-	go d.trackLoop()
+	d.goLoop("status", d.statusLoop)
+	d.goLoop("wal_checkpoint", d.walCheckpointLoop)
+	d.goLoop("settle", d.settleLoop)
+	d.goLoop("doctor", d.doctorLoop)
+	d.goLoop("refresh_gauges", d.refreshLoop)
+	d.goLoop("parse", d.parseLoop)
+	d.goLoop("tracker", d.trackLoop)
 	d.obs.Event("serving", "socket", d.cfg.Socket, "claude_dir", d.cfg.ClaudeDir, "state_dir", d.cfg.StateDir,
 		"version", d.opt.Version)
 	d.su.complete()
@@ -606,7 +611,6 @@ func (d *Daemon) Start() error {
 // parseLoop catches up every copy on start (and re-parses what an older parser
 // version stored), then parses each file as the copier reports new bytes.
 func (d *Daemon) parseLoop() {
-	defer d.refreshing.Done()
 	if err := d.prs.ParseAllUntil(d.stop); err != nil && !errors.Is(err, parser.ErrParseStopped) {
 		d.obs.Log.Warn("parse_all_failed", "err", err.Error())
 		d.noteNoSpace(obs.OpParseIndex, err)
@@ -642,7 +646,6 @@ func (d *Daemon) settleLoop() {
 		d.settleLoopEvent()
 		return
 	}
-	defer d.refreshing.Done()
 	tick, stopTicker := d.ticker(obs.LoopSettleTick, d.settleTickEvery())
 	defer stopTicker()
 	for {
@@ -679,7 +682,6 @@ const (
 // never starts sooner than settle.min_wake after the previous one, so a burst of
 // writes coalesces into one pass.
 func (d *Daemon) settleLoopEvent() {
-	defer d.refreshing.Done()
 	select {
 	case <-d.stop:
 		return
@@ -830,7 +832,6 @@ func (d *Daemon) logStuckTick() {
 // trackLoop refreshes last-seen-alive and does the control state directory's
 // periodic work.
 func (d *Daemon) trackLoop() {
-	defer d.refreshing.Done()
 	every := d.cfg.LivenessInterval
 	if every <= 0 {
 		every = 5 * time.Second
@@ -849,7 +850,6 @@ func (d *Daemon) trackLoop() {
 }
 
 func (d *Daemon) refreshLoop() {
-	defer d.refreshing.Done()
 	tick, stopTicker := d.ticker(obs.LoopRefreshGauges, 5*time.Second)
 	defer stopTicker()
 	for {
@@ -913,7 +913,6 @@ const (
 // lagReconcileLoop re-runs the whole-table rebuild on the reconcile cadence and
 // compares it with the maintained values.
 func (d *Daemon) lagReconcileLoop() {
-	defer d.refreshing.Done()
 	wait := lagReconcileFirst
 	for {
 		tick, stop := d.timer("lag_reconcile", wait)
@@ -964,7 +963,6 @@ const (
 )
 
 func (d *Daemon) fileFactsLoop() {
-	defer d.refreshing.Done()
 	wait := fileFactsStart
 	var after int64
 	for {
@@ -976,14 +974,7 @@ func (d *Daemon) fileFactsLoop() {
 		case <-tick:
 		}
 		stop()
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			select {
-			case <-d.stop:
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
+		ctx, cancel := context.WithCancel(d.rootCtx())
 		wait = d.fileFactsPass(ctx, &after)
 		cancel()
 	}
@@ -1042,7 +1033,10 @@ func (d *Daemon) refreshGaugesPass() {
 
 // Close stops everything and flushes the checkpoint.
 func (d *Daemon) Close() error {
-	d.stopOnce.Do(func() { close(d.stop) })
+	d.beginClosing()
+	if d.cancel != nil {
+		d.cancel(errDaemonClosing)
+	}
 	if d.srv != nil {
 		d.srv.Close()
 	}
@@ -1051,7 +1045,7 @@ func (d *Daemon) Close() error {
 	}
 	var errs []error
 	errs = append(errs, d.w.Close())
-	d.refreshing.Wait()
+	d.waitLoops()
 	d.seenDB.flush()
 	d.tr.Close()
 	errs = append(errs, d.ckpt.Flush())
@@ -1061,6 +1055,9 @@ func (d *Daemon) Close() error {
 
 // Run starts the daemon and blocks until ctx ends, then closes it.
 func (d *Daemon) Run(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return d.Close() // stopped before start: nothing to serve
+	}
 	if err := d.Start(); err != nil {
 		_ = d.Close()
 		return err

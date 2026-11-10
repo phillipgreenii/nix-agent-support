@@ -86,7 +86,6 @@ func (d *Daemon) statusSnapshot() (*statusSnap, error) {
 }
 
 func (d *Daemon) statusLoop() {
-	defer d.refreshing.Done()
 	for {
 		if err := d.runLoop(obs.LoopStatusRefresh, d.refreshStatus); err != nil {
 			d.obs.Event("status_refresh_failed", "error", err.Error())
