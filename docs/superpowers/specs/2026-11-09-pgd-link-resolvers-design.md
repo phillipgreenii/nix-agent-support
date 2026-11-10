@@ -1,8 +1,10 @@
 # pgd link resolvers: context-aware transcript links
 
-Status: draft 2, 2026-11-09, for operator review. Draft 2 folds in an independent review of
-draft 1 (stale-link and refresh-trigger blockers, protected spans, `file-ref` safety, counters,
-test gaps). Nothing here is built.
+Status: draft 3, 2026-11-09, packets filed. Draft 2 folded in an independent review of draft 1
+(stale-link and refresh-trigger blockers, protected spans, `file-ref` safety, counters, test
+gaps). Draft 3 folds in a review of the packets against the code: uppercase `PR` only, the
+`ABC-1/ABC-2` exception to the path rule, snapshot seeding from the options before the first
+fetch, `{path}` including its leading slash, and `{col}` defaulting to 1. Nothing here is built.
 Package: `claude-marketplace/pgd` (hooks in `hooks/links.ts`, Home Manager module in
 `home/programs/pgd/default.nix`). Public repo: no employer-specific names, hosts or keys in
 code, tests, comments or docs; deployments supply them as data.
@@ -149,11 +151,15 @@ then invalidates `ui.render`.
 Where the GitHub data lives: one top-level options object `github` with `host` (default
 `github.com`) and `repos` (a list of `owner/repo`); it is not repeated per rule.
 
-Before the snapshot has loaded: forms that carry everything in the token still link (an explicit
-`owner/repo#123` whose owner is known, an issue key from the allowlist, an absolute file path, an
-explicit remote `owner/repo:path:line` whose repo is in `github.repos`). Everything else declines
-with the reason `no-context`, including a relative file path; the resolver never guesses a base
-directory.
+Before the first fetch has finished: the snapshot is seeded synchronously from the options at
+`session.start` (after the options are set), with `githubHost`, `githubOwners` and `knownRepos`
+taken from `github.repos`; the fetch then adds `cwd`, `repoSlug` and `home`. So forms that carry
+everything in the token still link before the fetch (an explicit `owner/repo#123` whose owner is
+known, an issue key from the allowlist, an absolute file path, an explicit remote
+`owner/repo:path:line` whose repo is in `github.repos`). Everything else declines with the
+reason `no-context`, including a relative file path; the resolver never guesses a base
+directory. Repo and owner comparisons are case-insensitive (GitHub names are), and the link keeps
+the case the text used.
 
 Resolved links are final. The memo (see "Cost and observability") is keyed by the message text
 and the rule set only, never by the snapshot version, and a message whose rewrite linked is never
@@ -168,8 +174,9 @@ arrives.
 Options: `sessionRepoFallback` (boolean, default `false`); the rest comes from the top-level
 `github` options through the context snapshot.
 
-Scanner (case-insensitive): `owner/repo#N`; `PR N`, `PR #N`, `pull request N`, `pull request #N`
-and `pull #N`. A bare `#N` is not scanned. The link text is the WHOLE token (`PR 12`, not just
+Scanner: `owner/repo#N`; `PR N` and `PR #N` with `PR` in UPPERCASE only (a lowercase `pr 5 times`
+is prose, not a reference); `pull request N`, `pull request #N` and `pull #N` in any case. A bare
+`#N` is not scanned. The link text is the WHOLE token (`PR 12`, not just
 `12`), which is a bigger click target and matches the explicit form and what a regex rule gives.
 
 Repo resolution, first hit wins:
@@ -193,7 +200,9 @@ case-sensitive, keys regex-escaped. An empty or missing `keys` makes the rule in
 `warn` at options load): it never guesses. A candidate is rejected (decline reason `adjacent`)
 when it sits in a path: directly preceded by `/` or `\`, or followed by `.` and a word character,
 or followed by `:` and a digit (so `src/ABC-12.go:5` is left to `file-ref` even when `jira` is
-listed first). `ZR-1/ZR-2` still links both keys. The `github-pr` scanner applies the same
+listed first). One exception keeps `ABC-1/ABC-2` linking both keys: a `/` that is itself
+immediately preceded by a complete allowlisted key-number token does not trigger the
+"preceded by `/`" rejection; `a/ABC-12` stays plain. The `github-pr` scanner applies the same
 rejection. URL: `<baseUrl>/<match>`. The kind name stays `jira` because that is the tracker the
 first deployment uses; nothing else in the code is tracker-specific.
 
@@ -214,8 +223,10 @@ joined onto `cwd` from the context snapshot (declined as `no-context` before it 
 and `..` segments normalized; `~/` expands from the snapshot's `home` and is declined as
 `no-context` when it is absent. No existence check. The URL comes from `options.localTemplate`,
 default `file://{path}:{line}` with `{path}`, `{line}` and `{col}` available, so the form can
-change to `file://{path}#L{line}` or an editor scheme (`vscode://file/{path}:{line}:{col}`) by
-data alone. The first deployment's job is to learn what the operator's terminal does with the
+change to `file://{path}#L{line}` or an editor scheme (`vscode://file{path}:{line}:{col}`) by
+data alone. `{path}` is the absolute path INCLUDING its leading `/`, so `file://{path}` gives
+`file:///abs/p` and an editor template writes `vscode://file{path}`. When the token has no column,
+`{col}` is `1` (a template never renders `undefined`). The first deployment's job is to learn what the operator's terminal does with the
 default.
 
 Safety of the template and the path. Assistant text can come from a prompt injection, and a
@@ -232,7 +243,8 @@ prefix, checked against `knownRepos`; a path that itself contains `:` is out of 
 `https://<host>/<owner>/<repo>/blob/HEAD/<path>#L<line>` with the path segments encoded as above
 (so a `#` in a path stays in the path, not the fragment); a `:col` is dropped silently (GitHub has
 no column anchor) and a range uses its first line. Any other prefix, including something that
-looks like `a/b/c.go:5`, makes the whole token a local relative path. A token with no `:digits`
+looks like `a/b/c.go:5` or a known owner with an unknown repo, makes the whole token a local
+relative path. A token with no `:digits`
 suffix, such as `owner/repo#123`, is never a `file-ref`. When `github-pr` and `file-ref` could
 both claim a token, the rule listed first wins; the two scanners do not overlap on the forms
 above, because `#N` has no `:digits` and `owner/repo:path:N` has no `#`.
