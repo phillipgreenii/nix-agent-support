@@ -12,4 +12,6 @@ require (
 	golang.org/x/sys v0.49.0
 )
 
+require github.com/creack/pty v1.1.24
+
 replace github.com/phillipgreenii/pg-failsig => ../pg-failsig
