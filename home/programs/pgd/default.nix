@@ -125,6 +125,17 @@ in
       };
     };
 
+    optionsJson = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      internal = true;
+      description = ''
+        The rendered options as plain JSON, before shell escaping. Consumers that inspect the
+        options (tests, assertions in a consuming flake) read this; PG_CLAUDE_DISPLAY_OPTIONS
+        holds the same document escaped for hm-session-vars.sh.
+      '';
+    };
+
     metrics.endpoint = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -150,6 +161,20 @@ in
     };
   };
 
+  config.phillipgreenii.programs.pgd.optionsJson = builtins.toJSON rendered;
+
   # Always rendered, so enable = false reaches the mod (absent, it would default to on).
-  config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS = builtins.toJSON rendered;
+  #
+  # home-manager writes a session variable into hm-session-vars.sh as `export NAME="VALUE"` with
+  # VALUE unescaped, so the JSON must be escaped for a double-quoted shell string: without it the
+  # inner quotes end the string early, the mod receives the JSON with its quotes stripped, and a
+  # `(`, `|` or ` #` in a link pattern is then parsed as shell syntax (a syntax error that skips
+  # every variable after it, or worse, a command). Escape the four characters that stay special
+  # inside double quotes.
+  config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS = lib.escape [
+    "\\"
+    "\""
+    "$"
+    "`"
+  ] config.phillipgreenii.programs.pgd.optionsJson;
 }

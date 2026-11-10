@@ -25,7 +25,7 @@ let
     };
 
   opts = c: c.config.phillipgreenii.programs.pgd;
-  rendered = c: builtins.fromJSON c.config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS;
+  rendered = c: builtins.fromJSON c.config.phillipgreenii.programs.pgd.optionsJson;
 
   defaults = evaluate { };
   custom = evaluate {
@@ -178,8 +178,28 @@ let
       && r.alerts.thresholds.contextWarn == 50
       && r.alerts.thresholds.contextAlert == 80;
   };
+  # A rule set whose patterns hold every character that is special to a shell inside or outside
+  # double quotes: parentheses, a pipe, a hash after a space, a dollar sign, a backtick, a backslash
+  # and a double quote. The flake check writes the escaped session variable the way home-manager does
+  # (`export NAME="VALUE"`), sources it with a real bash, and compares the result with `json`.
+  shellCase =
+    let
+      c = evaluate {
+        links = [
+          {
+            name = "hostile";
+            pattern = "(?<=\\b(?:PR|pull request) #?)[0-9]+\\b|$HOME|`id`|a\"b";
+            url = "https://example.invalid/{0}";
+          }
+        ];
+      };
+    in
+    {
+      json = c.config.phillipgreenii.programs.pgd.optionsJson;
+      escaped = c.config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS;
+    };
 in
 {
-  inherit cases;
+  inherit cases shellCase;
   failures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) cases);
 }

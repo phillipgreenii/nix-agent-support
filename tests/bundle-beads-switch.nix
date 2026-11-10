@@ -213,8 +213,7 @@ let
   pluginOn = c: name: (enabledPlugins c).${keyOf name};
   pbPluginOn = c: pluginOn c "pb";
   allOf = value: c: lib.all (n: pluginOn c n == value) beadsFamily;
-  pgdBeads =
-    c: (builtins.fromJSON c.config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS).components.beads;
+  pgdBeads = c: (builtins.fromJSON c.config.phillipgreenii.programs.pgd.optionsJson).components.beads;
 
   beadsOff = evaluate { };
   beadsOffExplicit = evaluate { beads = false; };
@@ -274,8 +273,7 @@ let
     # ---- the other pgd components keep their own default ------------------------
     otherComponentsStayOn =
       let
-        comps =
-          (builtins.fromJSON beadsOff.config.home.sessionVariables.PG_CLAUDE_DISPLAY_OPTIONS).components;
+        comps = (builtins.fromJSON beadsOff.config.phillipgreenii.programs.pgd.optionsJson).components;
       in
       lib.all (n: comps.${n}) (lib.filter (n: n != "beads") (builtins.attrNames comps));
 

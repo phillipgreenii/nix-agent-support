@@ -17684,13 +17684,29 @@
                 let
                   r = import ./tests/pgd-hm-options.nix { inherit lib; };
                 in
-                pkgs.runCommand "test-pgd-hm-options" { } ''
-                  ${lib.optionalString (r.failures != [ ]) ''
-                    echo "pgd module eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
-                    exit 1
-                  ''}
-                  touch $out
-                '';
+                pkgs.runCommand "test-pgd-hm-options"
+                  {
+                    nativeBuildInputs = [ pkgs.bash ];
+                    jsonText = r.shellCase.json;
+                    escapedText = r.shellCase.escaped;
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pgd module eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    # Real-bash regression guard: home-manager writes `export NAME="VALUE"` with VALUE
+                    # unescaped, so the module must escape the JSON. Source the line the way a login
+                    # shell does and require the variable to equal the JSON byte for byte, with no
+                    # shell syntax in it expanded (the hostile pattern holds parentheses, a pipe, a
+                    # hash after a space, a dollar, a backtick and quotes), and require the line after
+                    # it to still run (the failure seen live was a syntax error that skipped the rest).
+                    printf '%s' "$jsonText" > expected.json
+                    printf 'export PG_CLAUDE_DISPLAY_OPTIONS="%s"\nexport AFTER_LINE=still-set\n' "$escapedText" > vars.sh
+                    bash -c '. ./vars.sh; printf "%s" "$PG_CLAUDE_DISPLAY_OPTIONS" > actual.json; test "$AFTER_LINE" = still-set'
+                    cmp expected.json actual.json
+                    touch $out
+                  '';
 
               # Beads bundle switch: pb.enable and pgd components.beads follow
               # phillipgreenii.programs.beads.enable (eval cases in tests/bundle-beads-switch.nix).
