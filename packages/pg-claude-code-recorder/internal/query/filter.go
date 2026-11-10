@@ -182,6 +182,12 @@ func (b *builder) expr(name string) (string, source.Kind, *wire.Error) {
 	return a + ".s", kind, nil
 }
 
+// joinedExpr reports whether a field expression reads a LEFT JOINed table
+// (fields or a typed extension table) rather than a column of records.
+func joinedExpr(e string) bool {
+	return !strings.HasPrefix(e, "r.") && !strings.HasPrefix(e, "+r.") && !strings.HasPrefix(e, "(")
+}
+
 func (b *builder) alias(stored string) string {
 	if a, ok := b.aliases[stored]; ok {
 		return a
@@ -328,6 +334,16 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		}
 		if isTyped && !tf.ext {
 			return tf.idCol + "=(SELECT id FROM " + tf.table + " WHERE v=?)", []any{cv}, nil
+		}
+		if b.idWalk && joinedExpr(e) {
+			// A LEFT JOINed field compared with = rejects the unmatched rows, so
+			// the planner turns the join into an inner join and may drive the
+			// query from the fields index (fields_name_n), reading every row of
+			// that name (every main-thread record) to find the few of the pinned
+			// session. IS matches the same rows for a non-null value but does not
+			// reject the unmatched ones, so records stays the outer table and the
+			// session index drives.
+			return e + " IS ?", []any{cv}, nil
 		}
 		return e + "=?", []any{cv}, nil
 	case f.In != nil:
