@@ -224,3 +224,26 @@ Observed 2026-11-10 on Claude Code 2.1.318 (tmux 3.7b). Full note:
 - A hook can be run in isolation only through `--plugin-dir` headless, or the node harness of
   `test-pgd-mod` (a scratch copy with `.ts` import suffixes and a testing shim), which was used to
   call `rewriteLinks` directly. No documented isolated interactive mechanism exists.
+
+### Driving the real binary against a stub server (transcript links end-to-end)
+
+- result: works. `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` points the interactive binary at a local
+  stub; it sends `HEAD /api/hello` and a streaming `POST /v1/messages?beta=true`, and the stub's fixed
+  reply is drawn. Authentication is not an account login: a throwaway `ANTHROPIC_API_KEY` is enough
+  when the scratch `CLAUDE_CONFIG_DIR` holds a pre-seeded `.claude.json` (`hasCompletedOnboarding`,
+  `theme`, the last 20 characters of the key under `customApiKeyResponses.approved`, and
+  `hasTrustDialogAccepted` for the project directory keyed by its real path, `/private/tmp/...` on
+  macOS). Without the seed the binary stops at the theme, API-key and trust dialogs. Headless
+  `claude -p` needs none of it.
+- hyperlinks: under tmux the binary draws `text (url)` unless `FORCE_HYPERLINK=1` is set; with it the
+  pane holds `ESC ] 8 ; id=<id> ; <url> ESC \ <text> ESC ] 8 ; ; ESC \` (terminator ESC `\`), which
+  `tmux capture-pane -p -e -J` keeps.
+- side effects to avoid: the binary starts cloning its official plugin marketplace into the config
+  dir in the background (set `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`), and it writes a `tsconfig.json` into a
+  plugin directory given to `--plugin-dir` (load a scratch copy).
+- version: 2.1.318 (tmux 3.7b)
+- date: 2026-11-10
+- consequence: the opt-in script `scripts/run-pgd-links-e2e.sh` (`PGD_E2E=1`) asserts the OSC 8 urls
+  of the github-pr, jira, file-ref and regex kinds and that code spans carry none. It is not a flake
+  check and no hook runs it.
