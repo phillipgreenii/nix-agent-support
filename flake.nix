@@ -2963,6 +2963,8 @@
                 assert !(linux ? phillipgreenii.programs.launchdServices);
                 assert failedAssertions linux == [ ];
                 assert builtins.length (failedAssertions darwinNoRegistry) == 1;
+                # the ~8 s shutdown (5 s HTTP drain + 3 s telemetry flush) plus margin, under launchd's 60 s clamp
+                assert e.serviceConfig.ExitTimeOut == 15;
                 # label, command and the configuration by store path
                 assert e.label == "com.phillipg.pg-task-focus";
                 assert e.script == "exec ${pkgs.pg-task-focus}/bin/pg-task-focus serve --config ${cfgFile}\n";

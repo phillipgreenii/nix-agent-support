@@ -339,6 +339,10 @@ in
             runAtLoad = true;
             keepAlive = true;
             serviceConfig = {
+              # shutdown takes up to ~8 s (5 s HTTP drain, then 3 s telemetry
+              # flush), and launchd's default ExitTimeOut is 5 s; 15 s keeps
+              # SIGKILL off the drain, under launchd's 60 s clamp.
+              ExitTimeOut = 15;
               # The daemon logs JSON lines on stdout: the *.jsonl name matches the
               # log source's default glob ${XDG_STATE_HOME}/pg-task-focus/*.jsonl
               # (and not its rotated archive or the stderr file).
