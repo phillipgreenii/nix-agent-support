@@ -253,7 +253,7 @@ above, because `#N` has no `:digits` and `owner/repo:path:N` has no `#`.
 
 Before any rule runs, besides fences and code spans, the pass also protects existing markdown
 links (`[text](url)`), autolinks (`<https://...>`) and bare URLs (`https?://\S+`), so an
-assistant-written `[ZR-12](https://...)` or a URL with `#12` in it is never nested or rewritten.
+assistant-written `[ABC-12](https://...)` or a URL with `#12` in it is never nested or rewritten.
 The link-text escaping gains `_`, `*` and `<` (it escapes `\`, `[`, `]` and backtick today), so
 `__init__.py:12` shows as written and is not read as bold. This changes the text of regex rules
 too, which is a fix; a test pins it.
@@ -311,8 +311,8 @@ under "Rule format and compatibility".
   unchanged regex kind (the existing `links.test.ts` stays green; `rewriteLinks` keeps working
   with two arguments). Negative cases that MUST be plain text: `UTF-8`, `SHA-256`, `PRs 7`,
   `pr 5 times`, `a/b/c.go:5` (local, relative), `12:30`, `http://host:80`, `api.example.com:8080`,
-  `10.0.0.1:443`, `[ZR-1](https://h/x)`, `https://h/foo/bar#12`, `src/utils#3`, `../x:3` (links,
-  normalized), `ZR-1/ZR-2` (both link), `src/ABC-12.go:5` with `jira` listed before `file-ref`,
+  `10.0.0.1:443`, `[ABC-1](https://h/x)`, `https://h/foo/bar#12`, `src/utils#3`, `../x:3` (links,
+  normalized), `ABC-1/ABC-2` (both link), `src/ABC-12.go:5` with `jira` listed before `file-ref`,
   and a launchable file under the `file` scheme. Cases that must link: `foo.go:42.`,
   `(foo.go:42)`, `foo.go:42-50`, `__init__.py:3` (underscores escaped), `app/(g)/page.tsx:3`
   (parentheses encoded), `~/x.go:1` with and without `home`.
