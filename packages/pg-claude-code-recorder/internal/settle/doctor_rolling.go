@@ -138,6 +138,9 @@ func (s *Settler) DoctorRun() (DoctorAnswer, error) {
 // with nothing to do, run the idle step. It does nothing while a CLI run holds
 // the cursor, and when bytes_per_slice is 0.
 func (s *Settler) DoctorTick() error {
+	if s.stopping() {
+		return nil
+	}
 	if s.doctorBudget() <= 0 || !s.doctorMu.TryLock() {
 		return nil
 	}
@@ -335,7 +338,7 @@ func (s *Settler) runSlice(cur *DoctorCursor, budget int64) (finished bool, res 
 			if !ok {
 				break
 			}
-			if spent > 0 && spent >= budget {
+			if (spent > 0 && spent >= budget) || s.stopping() {
 				return false, res, s.sliceEnd(cur)
 			}
 			n, perr := s.doctorOne(cur, f, retried, add)
@@ -365,7 +368,7 @@ func (s *Settler) runSlice(cur *DoctorCursor, budget int64) (finished bool, res 
 		if session <= cur.ArchiveAfter {
 			continue
 		}
-		if spent > 0 && spent >= budget {
+		if (spent > 0 && spent >= budget) || s.stopping() {
 			return false, res, s.sliceEnd(cur)
 		}
 		checked, n := s.doctorArchive(session, add)

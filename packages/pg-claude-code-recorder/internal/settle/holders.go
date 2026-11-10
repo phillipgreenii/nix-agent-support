@@ -2,11 +2,20 @@ package settle
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+)
+
+// lsofTimeout bounds one lsof run; lsofWaitDelay is how long after the kill the
+// pipes are given up on (a child that kept them open would otherwise hold Wait).
+const (
+	lsofTimeout   = 30 * time.Second
+	lsofWaitDelay = time.Second
 )
 
 // lsofPaths are where lsof lives when the daemon's PATH (a launch agent has
@@ -16,7 +25,12 @@ var lsofPaths = []string{"/usr/sbin/lsof", "/usr/bin/lsof"}
 // LsofHolders lists the processes that hold path open, by asking lsof. A path no
 // process holds is an empty list; an lsof that cannot be run is an error, which
 // removal treats as "a holder may exist" and so restores the file.
-func LsofHolders(path string) ([]int, error) {
+func LsofHolders(path string) ([]int, error) { return LsofHoldersCtx(context.Background(), path) }
+
+// LsofHoldersCtx is LsofHolders under ctx and a 30 s limit: lsof is killed when
+// either ends, so shutdown does not wait on a stuck lsof. The error it returns
+// then is the "a holder may exist" kind, so removal restores the file.
+func LsofHoldersCtx(ctx context.Context, path string) ([]int, error) {
 	bin, err := exec.LookPath("lsof")
 	if err != nil {
 		bin = ""
@@ -30,7 +44,10 @@ func LsofHolders(path string) ([]int, error) {
 			return nil, errors.New("lsof not found")
 		}
 	}
-	cmd := exec.Command(bin, "-t", "--", path)
+	ctx, cancel := context.WithTimeout(ctx, lsofTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-t", "--", path)
+	cmd.WaitDelay = lsofWaitDelay
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

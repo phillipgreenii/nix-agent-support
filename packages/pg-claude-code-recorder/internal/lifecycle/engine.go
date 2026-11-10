@@ -31,6 +31,9 @@ type Engine struct {
 	Exists func(path string) bool
 	// Now is the time (time.Now when nil).
 	Now func() time.Time
+	// Ctx is the daemon root context (Background when nil): the registry load
+	// the settle stage asks for each pass ends with it.
+	Ctx context.Context
 }
 
 func (e *Engine) exists(p string) bool {
@@ -120,7 +123,12 @@ func viaSessionRef(q string) string { return strings.ReplaceAll(q, "r.session,",
 const endReasonQuery = `SELECT r.session, f.s FROM records r JOIN fields f ON f.rec_id=r.id AND f.name_id=(SELECT id FROM field_names WHERE name='reason')
 WHERE r.source='claude-control-end' ORDER BY r.time_ns, r.id`
 
-func (e *Engine) load() (*model, error) { return e.loadCtx(context.Background()) }
+func (e *Engine) load() (*model, error) {
+	if e.Ctx != nil {
+		return e.loadCtx(e.Ctx)
+	}
+	return e.loadCtx(context.Background())
+}
 
 // loadCtx is load with every statement under ctx, so a cancelled request ends
 // the read in flight.

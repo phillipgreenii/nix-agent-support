@@ -34,7 +34,7 @@ func (d *Daemon) refreshStatus() error {
 	d.statusRefreshMu.Lock()
 	defer d.statusRefreshMu.Unlock()
 	now := d.clock.Now()
-	cov, err := d.computeCoverageMode("summary", false, statLazy)
+	cov, err := d.computeCoverageModeCtx(d.rootCtx(), "summary", false, statLazy)
 	if err != nil {
 		return err
 	}

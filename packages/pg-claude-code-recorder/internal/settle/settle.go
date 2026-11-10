@@ -21,6 +21,7 @@
 package settle
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,6 +159,11 @@ type Config struct {
 	DueEvery time.Duration
 	// Holders lists the processes that hold path open (the real one asks lsof).
 	Holders func(path string) ([]int, error)
+	// Ctx is the daemon root context (default Background). Once it is done, a
+	// Tick, Wake or DoctorTick stops at the next candidate boundary (never inside
+	// a removal, whose state machine a restart completes or restores) and the
+	// default Holders stops its lsof.
+	Ctx context.Context
 	// FS is the file system removal and extract act on in the Claude directory
 	// (the store's when nil), so the recording wrapper sees the order.
 	FS fsx.FS
@@ -309,8 +315,12 @@ func New(cfg Config) *Settler {
 	if cfg.DueEvery <= 0 {
 		cfg.DueEvery = 30 * 24 * time.Hour
 	}
+	if cfg.Ctx == nil {
+		cfg.Ctx = context.Background()
+	}
 	if cfg.Holders == nil {
-		cfg.Holders = LsofHolders
+		ctx := cfg.Ctx
+		cfg.Holders = func(path string) ([]int, error) { return LsofHoldersCtx(ctx, path) }
 	}
 	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}, gauges: newGaugeState()}
 	if cfg.Copier != nil {
@@ -612,6 +622,10 @@ func (s *Settler) LastPhases() TickPhases {
 	return s.phases
 }
 
+// stopping reports whether the root context is done: the loops of a pass check
+// it between candidates and return with consistent state.
+func (s *Settler) stopping() bool { return s.cfg.Ctx.Err() != nil }
+
 // Tick runs one pass: it evaluates every Conversation that is not live, moves
 // the ones whose Process came back to Live, and refreshes the gauges.
 func (s *Settler) Tick() (TickStats, error) {
@@ -656,6 +670,9 @@ func (s *Settler) tickLocked() (TickStats, error) {
 	var first error
 	s.prefetchLastSeen(groups, live, unchanged)
 	for _, session := range sessions {
+		if s.stopping() {
+			break // between Conversations; the next start reconciles the rest
+		}
 		if unchanged[session] {
 			// Already settled, no live process, nothing written since: what
 			// evaluate would answer, without its per-Conversation reads.
@@ -670,6 +687,9 @@ func (s *Settler) tickLocked() (TickStats, error) {
 	}
 	s.seen = nil
 	lap(&ph.Evaluate)
+	if s.stopping() {
+		return stats, first
+	}
 	if s.cfg.RemoveEnable {
 		removal := func() error {
 			_, err := s.removeLocked(RemoveOptions{}, now)

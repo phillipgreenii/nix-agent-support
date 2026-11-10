@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -16,6 +17,27 @@ type Real struct {
 	kerr error
 	mu   sync.Mutex
 	cbs  map[int]func(time.Time)
+	// closed and loopDone are guarded by mu; loopDone is closed when the kqueue
+	// loop has returned and released the descriptor.
+	closed   bool
+	loopDone chan struct{}
+}
+
+// errClosed is what Watch reports after Close.
+var errClosed = errors.New("proc: table closed")
+
+// Close stops the kqueue loop and releases the descriptor, so no goroutine of
+// the table outlives the daemon. The loop wakes at least once a second, so this
+// returns within about that long. Watch fails after Close; Close is idempotent.
+func (r *Real) Close() error {
+	r.mu.Lock()
+	r.closed = true
+	done := r.loopDone
+	r.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	return nil
 }
 
 // NewReal returns the real process table.
@@ -49,17 +71,33 @@ func (r *Real) init() error {
 			return
 		}
 		r.kq = fd
+		r.mu.Lock()
+		r.loopDone = make(chan struct{})
+		r.mu.Unlock()
 		go r.loop()
 	})
 	return r.kerr
 }
 
 func (r *Real) loop() {
+	defer func() {
+		r.mu.Lock()
+		_ = unix.Close(r.kq)
+		done := r.loopDone
+		r.mu.Unlock()
+		close(done)
+	}()
 	events := make([]unix.Kevent_t, 16)
 	ts := unix.NsecToTimespec(int64(time.Second))
 	for {
 		n, err := unix.Kevent(r.kq, nil, events, &ts)
 		if err != nil && err != unix.EINTR {
+			return
+		}
+		r.mu.Lock()
+		closed := r.closed
+		r.mu.Unlock()
+		if closed {
 			return
 		}
 		now := time.Now()
@@ -85,6 +123,10 @@ func (r *Real) Watch(pid int, onExit func(time.Time)) (func(), error) {
 		return nil, err
 	}
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil, errClosed
+	}
 	r.cbs[pid] = onExit
 	r.mu.Unlock()
 	ev := unix.Kevent_t{Ident: uint64(pid), Filter: unix.EVFILT_PROC, Flags: unix.EV_ADD | unix.EV_ONESHOT, Fflags: unix.NOTE_EXIT}

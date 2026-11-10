@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path"
@@ -255,9 +256,10 @@ func Open(opt Options) (*Daemon, error) {
 	if opt.Procs == nil {
 		opt.Procs = proc.NewReal()
 	}
-	d.eng = &lifecycle.Engine{St: st, ControlDir: cfg.ControlStateDir, Now: opt.Clock.Now}
+	d.opt.Procs = opt.Procs
+	d.eng = &lifecycle.Engine{St: st, ControlDir: cfg.ControlStateDir, Now: opt.Clock.Now, Ctx: d.ctx}
 	d.tr = lifecycle.NewTracker(lifecycle.TrackerConfig{
-		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
+		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Ctx: d.ctx, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
 		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow, EndsSweepEvery: cfg.EndsSweepEvery, FifoSweepEvery: cfg.FifoSweepEvery,
 		OnChange: func() { d.sett.LiveChanged() },
 	})
@@ -268,7 +270,7 @@ func Open(opt Options) (*Daemon, error) {
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
 		DueShare: cfg.RemoveDueShare, DueEvery: cfg.RemoveDueEvery, Mode: cfg.SettleMode, Reconcile: cfg.SettleReconcile, MinWake: cfg.SettleMinWake,
 		DoctorInterval: cfg.DoctorInterval, DoctorBytesPerSlice: cfg.DoctorBytesPerSlice, DoctorSliceEvery: cfg.DoctorSliceEvery,
-		Timer: func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
+		Ctx: d.ctx, Timer: func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
 	})
 	d.tickPhases = d.sett.LastPhases
 	endPhase = su.begin("doctor_gauges", false)
@@ -1062,6 +1064,11 @@ func (d *Daemon) Close() error {
 	}
 	if d.exp != nil {
 		d.exp.Close()
+	}
+	if c, ok := d.opt.Procs.(io.Closer); ok {
+		// The kqueue loop stops now; the tracker's own watches are stopped by
+		// tr.Close below, and a closed table only refuses new ones.
+		defer func() { _ = c.Close() }()
 	}
 	var errs []error
 	errs = append(errs, d.w.Close())

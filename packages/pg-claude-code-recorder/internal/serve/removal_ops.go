@@ -49,13 +49,13 @@ func (d *Daemon) opHeld(ctx context.Context, body []byte) (any, *wire.Error) {
 	}
 	var ans HeldAnswer
 	if req.Retry {
-		before, _ := d.sett.Held()
+		before, _ := d.sett.HeldCtx(ctx)
 		outs, err := d.sett.RecheckHeld()
 		if err != nil {
 			return nil, wire.Errf(wire.ErrInternal, err.Error())
 		}
 		ans.Retried = len(outs)
-		after, _ := d.sett.Held()
+		after, _ := d.sett.HeldCtx(ctx)
 		ans.Cleared = len(before) - len(after)
 		if ans.Cleared < 0 {
 			ans.Cleared = 0

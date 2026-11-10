@@ -271,6 +271,9 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	var first error
 	touched := map[string]bool{}
 	for _, session := range sessions {
+		if s.stopping() {
+			break // between Conversations; the next start reconciles the rest
+		}
 		c := s.gcache[session]
 		if c == nil {
 			continue
@@ -293,7 +296,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		}
 		s.schedule(c, stage, err != nil, now, removal)
 	}
-	if s.cfg.RemoveEnable && len(removal) > 0 {
+	if s.cfg.RemoveEnable && len(removal) > 0 && !s.stopping() {
 		names := make([]string, 0, len(removal))
 		for session := range removal {
 			names = append(names, session)

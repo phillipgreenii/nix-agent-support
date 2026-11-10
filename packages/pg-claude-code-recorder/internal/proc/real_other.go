@@ -17,6 +17,9 @@ type Real struct{}
 // NewReal returns the real process table.
 func NewReal() *Real { return &Real{} }
 
+// Close is a no-op here: each watch's poller stops with its stop func.
+func (*Real) Close() error { return nil }
+
 // StartTime reads the start time from /proc/<pid>/stat and the boot time from
 // /proc/stat (USER_HZ is 100 on every supported kernel).
 func (*Real) StartTime(pid int) (time.Time, error) {

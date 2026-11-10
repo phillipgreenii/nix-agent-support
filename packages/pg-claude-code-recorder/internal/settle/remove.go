@@ -249,6 +249,9 @@ func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time) (RemoveRepo
 	runCount := 0
 	var first error
 	for _, c := range todo {
+		if s.stopping() {
+			break // between candidates, never inside one
+		}
 		switch {
 		case runCount >= s.cfg.MaxPerRun:
 			skip(c.session, BlockRunCap)

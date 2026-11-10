@@ -160,9 +160,14 @@ func Start(addr string, reg *obs.Registry, refresh func()) (*Server, error) {
 // Addr returns the bound address.
 func (s *Server) Addr() string { return s.ln.Addr().String() }
 
-// Close stops the exporter.
+// Close stops the exporter: a graceful Shutdown for up to a second, then a hard
+// Close of whatever is still open.
 func (s *Server) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_ = s.srv.Shutdown(ctx)
+	if err := s.srv.Shutdown(ctx); err != nil {
+		// A scrape that outlived the grace window: drop its connection now, so
+		// shutdown does not leave a connection goroutine behind.
+		_ = s.srv.Close()
+	}
 }

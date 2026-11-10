@@ -39,6 +39,10 @@ type TrackerConfig struct {
 	Sys   proc.System
 	Obs   *obs.Obs
 	Clock clock.Clock
+	// Ctx is the daemon root context (default Background): a cancelled one ends
+	// the grace-window waits and the evidence reads of the exit goroutines, so
+	// Close does not wait a full grace window.
+	Ctx context.Context
 	// Engine reads the Conversation evidence for the end counters (optional).
 	Engine *Engine
 	// Sync makes the parser catch up before an evidence read (optional).
@@ -122,6 +126,9 @@ func NewTracker(cfg TrackerConfig) *Tracker {
 	}
 	if cfg.Obs == nil {
 		cfg.Obs = obs.New(nil)
+	}
+	if cfg.Ctx == nil {
+		cfg.Ctx = context.Background()
 	}
 	return &Tracker{cfg: cfg, procs: map[pkey]*tracked{}, endDue: map[string]time.Time{}, reqSeen: map[string]bool{}}
 }
@@ -298,8 +305,10 @@ func (t *Tracker) onExit(tr *tracked, at time.Time) {
 	t.mu.Unlock()
 	val := t.presentVal(tr.key.pid)
 	if val == "present" && t.cfg.GraceEnable && t.cfg.GraceWindow > 0 {
-		t.cfg.Clock.Sleep(t.cfg.GraceWindow)
-		val = t.presentVal(tr.key.pid)
+		// Shutting down: keep the first reading rather than wait out the window.
+		if clock.SleepCtx(t.cfg.Ctx, t.cfg.Clock, t.cfg.GraceWindow) {
+			val = t.presentVal(tr.key.pid)
+		}
 	}
 	x := store.ProcRec("exit", tr.key.pid, tr.key.ps, at.UnixNano())
 	x.Reason, x.Val = store.ExitObserved, val
@@ -321,7 +330,7 @@ func (t *Tracker) countEnd(session string, present bool) {
 	}
 	ev := Evidence{ExitObserved: true, RegistryPresentAtExit: present}
 	if t.cfg.Engine != nil && session != "" {
-		if c, err := t.cfg.Engine.Show(context.Background(), session); err == nil {
+		if c, err := t.cfg.Engine.Show(t.cfg.Ctx, session); err == nil {
 			ev = c.Evidence
 		}
 	}
@@ -336,11 +345,19 @@ func (t *Tracker) addEnd(ev Evidence) {
 }
 
 func (t *Tracker) countEndAsync(old string) {
-	t.wg.Add(1)
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return
+	}
+	t.wg.Add(1) // under mu: Close sets closed under mu before wg.Wait
+	t.mu.Unlock()
 	go func() {
 		defer t.wg.Done()
 		if t.cfg.GraceEnable && t.cfg.GraceWindow > 0 {
-			t.cfg.Clock.Sleep(t.cfg.GraceWindow)
+			if !clock.SleepCtx(t.cfg.Ctx, t.cfg.Clock, t.cfg.GraceWindow) {
+				return // shutting down: the end count is not worth a late read
+			}
 		}
 		if t.cfg.Sync != nil {
 			t.cfg.Sync()
@@ -348,7 +365,7 @@ func (t *Tracker) countEndAsync(old string) {
 		if t.cfg.Engine == nil {
 			return
 		}
-		if c, err := t.cfg.Engine.Show(context.Background(), old); err == nil && c.Ended {
+		if c, err := t.cfg.Engine.Show(t.cfg.Ctx, old); err == nil && c.Ended {
 			t.addEnd(c.Evidence)
 		}
 	}()

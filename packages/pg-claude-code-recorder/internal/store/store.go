@@ -1197,9 +1197,49 @@ func (s *Store) replay(recs []Rec) error {
 	return s.applyAll(pending)
 }
 
+// Close bounds, so a stuck write or reader cannot hold shutdown past the
+// daemon's deadline: closeLockWait for the store lock, closeCheckpointWait for
+// the closing WAL truncate (skipped on timeout: the WAL replays on the next
+// open) and closeDBsWait for closing the connections (the last one checkpoints
+// implicitly). They are vars so a test can shorten them.
+var (
+	closeLockWait       = 2 * time.Second
+	closeCheckpointWait = 3 * time.Second
+	closeDBsWait        = 3 * time.Second
+)
+
+// errCloseBusy is Close's error when a bound ran out. The state directory lock
+// is then left to process exit (a lock released under a live write would let a
+// second instance start against it), and the journal and the WAL recover on
+// the next open.
+var errCloseBusy = errors.New("store close: timed out; the state lock is left to process exit")
+
+// lockWithin takes s.mu, giving up after d.
+func (s *Store) lockWithin(d time.Duration) bool {
+	if s.mu.TryLock() {
+		return true
+	}
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			return false
+		case <-tick.C:
+			if s.mu.TryLock() {
+				return true
+			}
+		}
+	}
+}
+
 // Close closes the store. It does not delete anything.
 func (s *Store) Close() error {
-	s.mu.Lock()
+	if !s.lockWithin(closeLockWait) {
+		return errCloseBusy
+	}
 	defer s.mu.Unlock()
 	var first error
 	if s.jf != nil {
@@ -1211,13 +1251,24 @@ func (s *Store) Close() error {
 		s.cdb = nil
 	}
 	if s.wdb != nil {
-		// Checkpoint so a reopen starts from a small WAL.
+		// Checkpoint so a reopen starts from a small WAL; a reader that pins the
+		// WAL makes this wait, so it runs under a deadline and is skipped on it.
 		start := time.Now()
 		s.obs.Event(obs.EvWALTruncateStart, "source", "close")
-		_, _ = s.wdb.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		ctx, cancel := context.WithTimeout(context.Background(), closeCheckpointWait)
+		_, _ = s.wdb.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+		cancel()
 		s.obs.Event(obs.EvWALTruncateDone, "source", "close", "duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 	}
-	s.closeDBs()
+	closed := make(chan struct{})
+	go func() { s.closeDBs(); close(closed) }()
+	t := time.NewTimer(closeDBsWait)
+	defer t.Stop()
+	select {
+	case <-closed:
+	case <-t.C:
+		return errors.Join(first, errCloseBusy)
+	}
 	if s.dirLock != nil {
 		_ = s.dirLock.Close()
 		s.dirLock = nil
