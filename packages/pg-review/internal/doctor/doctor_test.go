@@ -363,3 +363,24 @@ func TestHookCheckSendsSampleCommand(t *testing.T) {
 		t.Errorf("stdin %q", stdin)
 	}
 }
+
+func TestSessionEmptyReplyIsDiagnosed(t *testing.T) {
+	h := newHarness(t)
+	h.cp.reply = ""
+	r := byName(Run(context.Background(), h.d), CheckSession)
+	if r.Status != Fail || !strings.Contains(r.Reason, "empty reply") || !strings.Contains(r.Reason, "session state idle") {
+		t.Errorf("%+v", r)
+	}
+}
+
+func TestSessionAllowsProbeCommandsInBothForms(t *testing.T) {
+	h := newHarness(t)
+	h.answer(t, true, true)
+	Run(context.Background(), h.d)
+	got := strings.Join(h.cp.started[0].AllowedTools, ",")
+	for _, want := range []string{"Bash(printenv PG_REVIEW_RUN)", "Bash(printenv PG_REVIEW_RUN:*)", "Bash(command -v pg-review)", "Bash(command -v pg-review:*)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("allowed tools %q lack %q", got, want)
+		}
+	}
+}

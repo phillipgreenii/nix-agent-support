@@ -330,7 +330,7 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 	opts := ccpool.StartOpts{
 		ExternalID: extID, Cwd: neutral, Model: model, Effort: effort,
 		PermissionMode: "dontAsk",
-		AllowedTools:   []string{"Bash(printenv PG_REVIEW_RUN)", "Bash(command -v pg-review)"},
+		AllowedTools:   sessionAllowedTools,
 		Env: []string{
 			"PG_REVIEW_RUN=" + token,
 			"XDG_CONFIG_HOME=" + e.ConfigHome, "XDG_STATE_HOME=" + e.StateHome, "XDG_CACHE_HOME=" + e.CacheHome,
@@ -365,6 +365,9 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 			return fail(CheckSession, exitcode.Provider, "ccpool result: %v", err)
 		}
 		if st == ccpool.ResultDone {
+			if strings.TrimSpace(text) == "" {
+				return fail(CheckSession, exitcode.Provider, "the session finished with an empty reply (%s); its shell commands were probably denied or never ran", d.sessionState(ctx, extID))
+			}
 			return judgeSession(text, token)
 		}
 		if !d.Now().Before(deadline) {
@@ -377,8 +380,26 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 	}
 }
 
-const sessionPrompt = "Run exactly these two shell commands, one at a time, and then reply with only " +
-	"their output, one per line, and nothing else. Do not run anything else.\n" +
+// sessionAllowedTools lists each probe command in its exact form and in the
+// prefix form (`:*`), so a harmless variation the model makes (an extra
+// argument, a different spacing) is still approved under dontAsk instead of
+// being silently denied.
+var sessionAllowedTools = []string{
+	"Bash(printenv PG_REVIEW_RUN)", "Bash(printenv PG_REVIEW_RUN:*)",
+	"Bash(command -v pg-review)", "Bash(command -v pg-review:*)",
+}
+
+// sessionState describes the session's reconciled state for a diagnostic.
+func (d *Deps) sessionState(ctx context.Context, id string) string {
+	st, err := d.Ccpool.State(ctx, id)
+	if err != nil {
+		return "session state unknown: " + err.Error()
+	}
+	return "session state " + st
+}
+
+const sessionPrompt = "Run exactly these two shell commands with the Bash tool, one at a time (they are pre-approved), " +
+	"and then reply with only their output, one per line, and nothing else. Do not run anything else.\n" +
 	"printenv PG_REVIEW_RUN\ncommand -v pg-review"
 
 func judgeSession(text, token string) Result {
