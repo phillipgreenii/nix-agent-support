@@ -90,6 +90,12 @@ type EntityChangeOptions struct {
 	// other (nil kinds): the write of an attention-rule hydration, not of a
 	// change.
 	SnapshotOnly bool
+	// KeepActive writes the entity with the active flag it already has (a
+	// new row is active) instead of forcing it active: a snapshot refresh
+	// requested by an event for an entity must not bring a deactivated one
+	// back. The changes engine leaves it unset, because a return from
+	// inactive is its own change.
+	KeepActive bool
 	// SkipUnchangedWrite makes a hydration of an entity that exists and is
 	// active write nothing when its NORMALISED snapshot equals the stored one
 	// (the same comparison the classifier uses: issueCompareBytes for an
@@ -152,8 +158,6 @@ type EntityChangeResult struct {
 // records, the interpretation row and, LAST, the derived-link replacement. A
 // crash inside (4) MAY duplicate a link_changed on the next hydration (the
 // diff is recomputed against the unreplaced set) but never loses one.
-//
-// RunGenericEntity's non-CAS path is unchanged.
 func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID string, change gather.ChangeKind, opts EntityChangeOptions) (EntityChangeResult, error) {
 	if err := p.store.RequireNewSchema(); err != nil {
 		return EntityChangeResult{}, err
@@ -376,10 +380,14 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			on := true
 			wo.Watched = &on
 		}
+		active := true
+		if opts.KeepActive && found {
+			active = !row.Inactive
+		}
 		v, err := p.store.WriteEntityStateWithLogOpts(store.Entity{
 			Repo: repo, EntityType: entityType, EntityID: entityID,
 			Facts: string(factsJSON), AsOf: asOf, ContentHash: newSnap.ContentHash, HeadSHA: headSHA,
-		}, expected, at, true, opts.ListFP, kinds, origin, at, wo)
+		}, expected, at, active, opts.ListFP, kinds, origin, at, wo)
 		if err == nil {
 			res.Kinds, res.Version, res.Written = kinds, v, true
 			break

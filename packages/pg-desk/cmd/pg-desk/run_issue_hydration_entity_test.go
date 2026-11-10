@@ -193,10 +193,15 @@ func TestHydrateJiraIssueUnownedDerivedLinksAndBackendColumn(t *testing.T) {
 	}
 }
 
-// What the plain write does today; the move to RunEntityChange flips these.
+// Decided differences from the retired plain write, which the move to
+// RunEntityChange (SnapshotOnly) makes on purpose:
+//   - the first write is an observation: version 1 with hydrated_at, so the
+//     next hydration classifies a change instead of a first observation;
+//   - a degraded read writes nothing and is an error to retry;
+//   - an entity_meta.watched statement is stored.
 const (
-	firstWriteVersion      int64 = 0
-	firstWriteHydrated           = false
-	degradedWritesNothing        = false
-	hydrationStatesWatched       = false
+	firstWriteVersion      int64 = 1
+	firstWriteHydrated           = true
+	degradedWritesNothing        = true
+	hydrationStatesWatched       = true
 )

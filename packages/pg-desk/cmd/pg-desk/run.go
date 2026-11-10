@@ -282,14 +282,11 @@ func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Con
 	}
 	owning := cfg.OwningInstances(entityTypeIssue)
 	if len(owning) == 0 {
-		return p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change)
+		return hydrateIssueSnapshot(ctx, p, ticketKey, change, pipeline.EntityChangeOptions{
+			Origin: refreshOrigin, SnapshotOnly: true, KeepActive: true,
+		})
 	}
-	// An old-schema store has no backend column and no change-log write
-	// path: keep the unpinned hydration there.
 	if err := st.RequireNewSchema(); err != nil {
-		if errors.Is(err, store.ErrOldSchema) {
-			return p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change)
-		}
 		return err
 	}
 
@@ -305,9 +302,12 @@ func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Con
 		}
 	}
 	if !slices.Contains(owning, backend) {
-		// A backend that keeps no store (or none configured): today's
-		// unpinned hydration, then the column.
-		if err := p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change); err != nil {
+		// A backend that keeps no store (or none configured): an unpinned
+		// snapshot hydration that leaves a deactivated issue inactive, then
+		// the column.
+		if err := hydrateIssueSnapshot(ctx, p, ticketKey, change, pipeline.EntityChangeOptions{
+			Origin: refreshOrigin, SnapshotOnly: true, KeepActive: true,
+		}); err != nil {
 			return err
 		}
 		if backend == "" || (known && row.Backend == backend) {
@@ -321,16 +321,26 @@ func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Con
 
 	// An owning backend: one backend-pinned read, stored as a snapshot with
 	// the backend column in the same write and no change_log row.
-	res, err := p.RunEntityChange(ctx, entityTypeIssue, ticketKey, change, pipeline.EntityChangeOptions{
-		Origin:       refreshOrigin,
-		Backend:      backend,
-		SnapshotOnly: true,
+	return hydrateIssueSnapshot(ctx, p, ticketKey, change, pipeline.EntityChangeOptions{
+		Origin: refreshOrigin, Backend: backend, SnapshotOnly: true,
 	})
+}
+
+// hydrateIssueSnapshot is the one snapshot hydration of a Jira issue. A
+// degraded read is an error (nothing written, the next event retries). A
+// removal whose read is not_found writes nothing: the held snapshot and its
+// links stay, and the changes engine's own removal path deactivates it.
+func hydrateIssueSnapshot(ctx context.Context, p *pipeline.Pipeline, ticketKey string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) error {
+	res, err := p.RunEntityChange(ctx, entityTypeIssue, ticketKey, change, opts)
 	if err != nil {
 		return err
 	}
 	if res.Degraded != "" {
-		return fmt.Errorf("issue %s read from %s was degraded (%s): nothing written, retry", ticketKey, backend, res.Degraded)
+		from := ""
+		if opts.Backend != "" {
+			from = " from " + opts.Backend
+		}
+		return fmt.Errorf("issue %s read%s was degraded (%s): nothing written, retry", ticketKey, from, res.Degraded)
 	}
 	return nil
 }

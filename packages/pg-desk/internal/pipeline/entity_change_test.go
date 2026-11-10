@@ -873,3 +873,33 @@ func TestRunEntityChange_WatchLocal(t *testing.T) {
 		t.Errorf("a repeat late watch grew the rows to %d", got)
 	}
 }
+
+// KeepActive leaves a deactivated entity inactive and does not change a new
+// or active one; without it a hydration reactivates (the test above).
+func TestRunEntityChange_KeepActive(t *testing.T) {
+	var gerr error
+	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
+	p := ecPipeline(t, &res, &gerr)
+	opts := EntityChangeOptions{SnapshotOnly: true, KeepActive: true}
+
+	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, opts)
+	if e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); e.Inactive {
+		t.Fatal("a new row must be active")
+	}
+	mustRun(t, p, "issue", "i-1", gather.ChangeChanged, opts)
+	if e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); e.Inactive {
+		t.Fatal("an active row stayed active")
+	}
+	if _, err := p.store.MarkEntityInactive(ecRepo, "issue", "i-1", "k"); err != nil {
+		t.Fatal(err)
+	}
+	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", workMeta("7"))
+	mustRun(t, p, "issue", "i-1", gather.ChangeChanged, opts)
+	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	if !e.Inactive {
+		t.Fatal("KeepActive reactivated a deactivated entity")
+	}
+	if e.Facts == "" {
+		t.Fatal("snapshot not refreshed")
+	}
+}
