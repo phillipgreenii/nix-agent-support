@@ -778,6 +778,12 @@ repo that is not trusted:
   `max_conflict_rounds` and `max_race_retries`. An untrusted file MUST NOT replace hook lists, add conflict rules,
   change `run_git_hooks` or change any timeout.
 
+The default for `untrusted_repo_config` is `refuse` (operator ruling, 2026-11-09: "refuse sounds correct"). For now the
+allow process is that the operator adds a repo entry with `trust_repo_config = true` to the XDG config file, supplied by
+nix / Home Manager (the `phillipgreenii.programs.pg-git-lander` module of section 16). A trust or allow subcommand is
+NOT part of version 1; it is a deferred future option (section 21; operator, 2026-11-09: it "sounds good" but "i don't
+want to get bogged down with that now").
+
 `ignore_repo_config = true` in an XDG entry makes the tool skip the repo file entirely: the escape when a broken or
 too-new repo file on TARGET would otherwise block every landing, including the one that fixes it.
 
@@ -1216,13 +1222,17 @@ Still to verify before or during implementation:
   `flake-lock-keep-ours` driver is installed, the tool's own rebases would also drop a branch's `flake.lock` change, and
   a `flake.lock` conflict rule would never fire. The operator ruled that the driver goes once the tool works; it MUST be
   removed in the same rollout step in which agents start rebasing through the tool (step 3 below), not later. Until
-  then, no repo that tracks a `flake.lock` switches its rebases or landings to the tool. Section 20 asks whether to add a
-  narrow escape instead.
+  then, no repo that tracks a `flake.lock` switches its rebases or landings to the tool. The operator ruled on
+  2026-11-09: "drop the keep-ours merge drive[r] in a single commit so that [it] could be rolled back if lander doesn't
+  work as we hoped." The removal MUST therefore be ONE dedicated commit, separate from every other rollout change, so
+  that it can be reverted alone if the tool does not work as hoped. The narrow XDG `git_config` passthrough is not
+  adopted.
 - **Rollout order:**
   1. The tool with its tests.
   2. `config check` and `--dry-run` used against real repos with the intended configuration, changing nothing.
   3. In one step: agents rebase with `pg-git-lander rebase`, `ff-merge-to-main` delegates its FF-0 to FF-4 steps to
-     `land`, and the `flake-lock-keep-ours` driver is removed.
+     `land`, and the `flake-lock-keep-ours` driver is removed. The driver removal is its own commit, separate from the
+     other changes of this step.
   4. The beads queue step and the pg-router roles of the caller-side design call `land` (out of scope here).
   5. Once FF-1c is configured as a `before_move` hook, the `pgii-integrate-branch.preLandEval` git config key is
      retired.
@@ -1300,16 +1310,16 @@ Quoted from the tracker issue that opened this design (Phillip):
 
 ## 20. Open questions for the operator
 
-1. **The `flake.lock` transition.** Section 16 removes the `flake-lock-keep-ours` driver in the same step in which
-   agents start rebasing through the tool, so no repo with a `flake.lock` can adopt the tool before that step. The
-   alternative is a narrow, XDG-only `git_config` table whose entries the tool passes as `-c` options (for example to
-   disable that one driver for the tool's own rebases), which would let repos adopt the tool one at a time. This revives
-   a form of the override the operator ruled unnecessary on 2026-11-06, so it is not in the design. Recommendation: keep
-   the single combined step.
-2. **The default trust policy.** The design refuses an untrusted repo file that names commands
-   (`untrusted_repo_config = "refuse"`), because ignoring them silently drops a repo's land-time checks. The ruling of
-   2026-11-07 settled that such commands do not run; it did not settle refusing versus ignoring. Recommendation: keep
-   `refuse` as the default.
+None remain. Both questions this section held were decided by the operator on 2026-11-09 (Phillip; the answers were
+recorded from the session, quoted fragments are verbatim):
+
+1. **The `flake.lock` transition: decided.** The operator ruled: "drop the keep-ours merge drive[r] in a single commit
+   so that [it] could be rolled back if lander doesn't work as we hoped." The driver is removed in the combined rollout
+   step, in one dedicated commit (section 16). The narrow XDG-only `git_config` passthrough is not adopted.
+2. **The default trust policy: decided.** The operator ruled: "refuse sounds correct." `untrusted_repo_config` defaults
+   to `refuse` (section 12.3).
+
+Operator approval of the design as a whole is still pending.
 
 ## 21. Alternatives considered
 
@@ -1333,3 +1343,5 @@ Quoted from the tracker issue that opened this design (Phillip):
   re-runs them under heavy churn; deferred past version 1.
 - **A temporary worktree inside the git dir.** Works, but agents' tool approvers commonly refuse edits there.
 - **Merge commits instead of fast-forwards.** Out of scope: the workspace lands linear history.
+- **A trust or allow subcommand** (for example `pg-git-lander trust`) that writes `trust_repo_config = true` for a repo.
+  Deferred future option, not in version 1; the allow process is the Nix-managed XDG entry of section 12.3.
