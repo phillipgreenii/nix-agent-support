@@ -784,6 +784,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 }
 
 func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {
+	p.cfg.Store.NoteModelInput() // rows leave the store: a cached lifecycle model may hold them
 	// The sessions that lose rows get their stats recomputed once the rows are gone.
 	affected, err := p.sessionsOfGen(tx, file, gen)
 	if err != nil {
@@ -1051,8 +1052,11 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if err != nil {
 			return err
 		}
-		if src.Name() == "session-registry" {
+		switch src.Name() {
+		case "session-registry":
 			p.cfg.Store.NoteLiveInput() // moves the live-Process input counter at commit
+		case "claude-history", "claude-control-end":
+			p.cfg.Store.NoteModelInput() // moves the lifecycle model input counter at commit
 		}
 		tx.noteSession(ref, tns, f.ID, lk)
 		tx.noteFileFact(f.ID, tns, caps)

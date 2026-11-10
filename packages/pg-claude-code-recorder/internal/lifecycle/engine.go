@@ -38,6 +38,20 @@ type Engine struct {
 
 	// live is the last LiveSessions answer with the store state it was read at.
 	live atomic.Pointer[liveEntry]
+
+	// full is the last complete model with the store state it was read at.
+	full atomic.Pointer[modelEntry]
+}
+
+// modelEntry is a cached complete model. The model is a function of the
+// registry, history and end-reason records, the Process observations and the
+// stage rows alone, so it stays valid while the store has committed none of
+// them and rolled back no write since it was read. A cached model is shared by
+// every caller and MUST be treated as read-only.
+type modelEntry struct {
+	data, epoch uint64
+	ready       bool
+	m           *model
 }
 
 // liveEntry is a cached LiveSessions answer. The answer is a function of the
@@ -145,7 +159,28 @@ func (e *Engine) load() (*model, error) {
 
 // loadCtx is load with every statement under ctx, so a cancelled request ends
 // the read in flight.
-func (e *Engine) loadCtx(ctx context.Context) (*model, error) { return e.loadWith(ctx, false) }
+//
+// The complete model is kept while the store has committed no input of it (see
+// Store.ModelInputSeq), so a poll with nothing new reads nothing; the caller
+// MUST NOT modify the model it gets.
+func (e *Engine) loadCtx(ctx context.Context) (*model, error) {
+	// The counters are read BEFORE the load: a write that lands during it moves
+	// them, and the next call reloads.
+	data, epoch, ready := e.St.ModelInputSeq(), e.St.RollbackEpoch(), e.St.SessionRefReady()
+	if c := e.full.Load(); c != nil && c.data == data && c.epoch == epoch && c.ready == ready {
+		// A cancelled request ends as it would on a load.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return c.m, nil
+	}
+	m, err := e.loadWith(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	e.full.Store(&modelEntry{data: data, epoch: epoch, ready: ready, m: m})
+	return m, nil
+}
 
 // loadWith is loadCtx; liveOnly reads just what decides whether a Process holds
 // a session (the registry, its deletions and the processes) and leaves the

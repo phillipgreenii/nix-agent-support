@@ -211,6 +211,8 @@ type Store struct {
 	commitSeq   atomic.Uint64 // journal applies committed (see CommitSeq)
 	liveSeq     atomic.Uint64 // commits that may have changed the live-Process inputs (see LiveInputSeq)
 	livePend    atomic.Bool   // a write in flight stored a live-Process input (see NoteLiveInput)
+	modelSeq    atomic.Uint64 // commits that may have changed the lifecycle model inputs (see ModelInputSeq)
+	modelPend   atomic.Bool   // a write in flight stored a lifecycle model input (see NoteModelInput)
 	jf          fsx.File
 	nextSeq     int64
 	nextFile    int64
@@ -757,10 +759,27 @@ func (s *Store) LiveInputSeq() uint64 { return s.liveSeq.Load() }
 // called inside the WithWrite callback.
 func (s *Store) NoteLiveInput() { s.livePend.Store(true) }
 
-// bumpLive moves LiveInputSeq when a committed write was marked by NoteLiveInput.
+// ModelInputSeq counts the commits that may have changed any input of the
+// lifecycle model: everything LiveInputSeq covers, plus history and control-end
+// records, a rewritten generation's cleared rows and Conversation stage rows. It
+// follows the same read-before-query rule as LiveInputSeq and issues no query.
+func (s *Store) ModelInputSeq() uint64 { return s.modelSeq.Load() }
+
+// NoteModelInput marks the write in flight as storing a lifecycle model input
+// that is not a live-Process input (a history or control-end record, or rows
+// cleared from a generation); the commit of that write moves ModelInputSeq.
+func (s *Store) NoteModelInput() { s.modelPend.Store(true) }
+
+// bumpLive moves LiveInputSeq when a committed write was marked by NoteLiveInput
+// and ModelInputSeq when it was marked by either mark.
 func (s *Store) bumpLive() {
-	if s.livePend.Swap(false) {
+	l := s.livePend.Swap(false)
+	m := s.modelPend.Swap(false)
+	if l {
 		s.liveSeq.Add(1)
+	}
+	if l || m {
+		s.modelSeq.Add(1)
 	}
 }
 
@@ -1143,11 +1162,20 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 	}
 	s.lastSeq = last
 	s.commitSeq.Add(1)
+	var proc, model bool
 	for _, r := range recs {
-		if r.T == TProc {
-			s.liveSeq.Add(1)
-			break
+		switch r.T {
+		case TProc:
+			proc = true
+		case TStage, TSettle, TTorn:
+			model = true
 		}
+	}
+	if proc {
+		s.liveSeq.Add(1)
+	}
+	if proc || model {
+		s.modelSeq.Add(1)
 	}
 	s.noteFiles(recs)
 	s.fireOffsets(notes)

@@ -10,6 +10,11 @@
 # Phase 1 bounds (not derived, re-measure): the copier and watcher alone at or
 # below 5% of one core averaged over 10 minutes on the real tree with no client
 # attached, the whole daemon at or below 10% once the parser and feed run.
+#
+# Acceptance of the whole-daemon bound: a 900 second window
+# (profile-cpu.sh --seconds 900 --pid <daemon pid>) on a quiet host with the usual
+# clients attached (pa-monitor-daemon, ccpool) reports cpu_percent_of_one_core at
+# or below 10. The bound covers client query load; it is not restated to exclude it.
 set -euo pipefail
 
 usage() {
