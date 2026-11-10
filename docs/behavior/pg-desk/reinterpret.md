@@ -169,16 +169,23 @@ late or missed.
 - It runs after the liveness stamp, and the source-fetch record (see
   [`freshness.md`](freshness.md)) is written after it, with the catch-up's error swallowed, so a
   slow or failing catch-up prevents neither.
-- **Time budget: 10 seconds**, as a deadline on the catch-up alone. The loop checks it between
-  rows and stops at it; a row in flight finishes or rolls back, never half-writes. The budget is
-  small against the 60-second period of the deployed heartbeat trigger and the heartbeat's own
-  bounded source-fetch steps.
+- **Time budget: at most 10 seconds, and never more than the period leaves.** It is a deadline on
+  the catch-up alone. The steps around it are bounded only by their own timeouts: the connector
+  probe before it by 45 seconds and the ledger read after it by 30 seconds, so 45 + 30 = 75
+  seconds already exceeds the 60-second period of the deployed heartbeat trigger, and no fixed
+  budget is safe by itself. The catch-up therefore starts only when time remains and its deadline
+  is the smaller of 10 seconds and the period minus the 30-second ledger read minus a 5-second
+  margin (the store's busy timeout) minus the time already spent, that is, 25 seconds after the
+  heartbeat began. With under one second left it is skipped with one stderr line. The loop checks
+  the deadline between rows and stops at it; a row in flight finishes or rolls back, never
+  half-writes, and is never marked failed because of the deadline.
 - **Row cap: 25 rows per pass**, open PRs first, so a pass has a known ceiling even when the clock
   is fast. Later heartbeats continue where it stopped: each committed row carries the new stamp and
   drops out of the behind set.
 - It holds no write lock across rows (one short transaction per row), so a concurrent heartbeat or
   command is not blocked behind it.
-- If a previous catch-up is still running, a new one skips rather than queueing behind it.
+- If a previous catch-up is still running (in this or another process; a non-blocking per-store
+  file lock), a new one skips rather than queueing behind it.
 - It loads the configuration itself. A configuration that cannot be loaded, a store that cannot be
   read or a store on schema 1 skips the catch-up (silently, or with one stderr line) and never fails
   the heartbeat.
@@ -244,7 +251,7 @@ documented, and `pg-desk pr reinterpret <pr>` is the fix for one PR.
   MUST write nothing under `--dry-run`, MUST exit `0` only when nothing failed, and MUST refuse a
   store on schema 1 before writing anything.
 - **INV-REINTERPRET-10.** <!-- uuid: 10c66814-62cf-4226-985b-24f519a4211a --> The heartbeat catch-up MUST NOT make a heartbeat late or missed: it MUST run after the
-  liveness stamp, stop at a 10-second budget and a 25-row cap, hold no write lock across rows, skip
+  liveness stamp, stop at a budget of at most 10 seconds (cut to what the period leaves, skipped when almost none is left) and a 25-row cap, hold no write lock across rows, skip
   when a previous catch-up is running, never fail the heartbeat, and skip on a `dev` build.
 - **INV-REINTERPRET-11.** <!-- uuid: 4fb86cda-a3db-4ddc-9429-9d034a144b1c --> A pass that finds nothing behind MUST cost one query over the interpretation table, read no
   facts and write nothing; a pass that stopped at a limit with rows remaining MUST record the

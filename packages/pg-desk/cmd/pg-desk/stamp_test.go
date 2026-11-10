@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"testing"
 
@@ -14,7 +15,7 @@ import (
 // INV-REINTERPRET-4: every command that builds a Pipeline gives its store
 // handle the running stamp (build version plus the config digest), so every
 // interpretation row it writes carries it. The table builds the pipeline the way
-// each command does. The heartbeat catch-up joins this table when it lands.
+// each command does.
 func TestEveryCommandThatWritesInterpretationsStamps(t *testing.T) {
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "acme/widgets"}}}
 	want := interpret.Stamp(Version, cfg)
@@ -25,6 +26,15 @@ func TestEveryCommandThatWritesInterpretationsStamps(t *testing.T) {
 		"changes": func(st *store.Store) { newChangesPipeline(cfg, st, io.Discard) },
 		"run":     func(st *store.Store) { newRunPipeline(cfg, st, io.Discard, nil) },
 		"refresh": func(st *store.Store) { _ = newRefreshHydrator(cfg, st) },
+		// The heartbeat's catch-up builds its reinterpreter through catchUp.
+		"heartbeat": func(st *store.Store) {
+			orig := deskConfigLoad
+			t.Cleanup(func() { deskConfigLoad = orig })
+			deskConfigLoad = func(context.Context) (*config.Config, error) { return cfg, nil }
+			if _, err := catchUp(context.Background(), &cobra.Command{}, st, CatchUpMaxRows); err != nil {
+				t.Fatal(err)
+			}
+		},
 		"pr reinterpret": func(st *store.Store) {
 			newReinterpreter(&cobra.Command{}, cfg, st, "acme/widgets", false, false)
 		},

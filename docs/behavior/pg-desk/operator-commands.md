@@ -426,8 +426,8 @@ period lives in the deployment module, not in `pg-desk`.
 
 After the liveness stamp and before it records the source fetch times, `heartbeat` runs a bounded
 catch-up that re-interprets the open PRs whose interpretation is behind the running stamp (see
-[`reinterpret.md`](reinterpret.md), "The heartbeat catch-up"). It stops at a 10-second budget and at
-25 rows per pass, runs only on a non-`dev` build against a schema-2 store, skips when a previous
+[`reinterpret.md`](reinterpret.md), "The heartbeat catch-up"). It stops at a budget of at most 10 seconds (cut to what the 60-second period leaves, and skipped when
+almost none is left) and at 25 rows per pass, runs only on a non-`dev` build against a schema-2 store, skips when a previous
 catch-up is still running, and never changes the heartbeat's exit code: a configuration that cannot
 be loaded, an unreadable store or a catch-up error is at most one line on stderr. It writes nothing
 when nothing is behind. The liveness stamp and the source fetch record never depend on it.

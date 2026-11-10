@@ -41,6 +41,9 @@ var heartbeatRunLedgerShow = func(ctx context.Context) ([]byte, error) {
 // query (heartbeat_item.go) emits a fresh item — it consumes
 // meta.last_heartbeat's own staleness bound (packet 7's serve).
 //
+// After the probe and before the source fetch record it runs a bounded
+// interpretation catch-up (heartbeat_catchup.go) that never fails the heartbeat.
+//
 // The liveness stamp is written first and never depends on the connector:
 // a pg-connector that is absent, slow or answering garbage costs only the
 // source-age refresh (reported on stderr), never the heartbeat.
@@ -53,11 +56,13 @@ var heartbeatCmd = &cobra.Command{
 			return fmt.Errorf("heartbeat: open store: %w", err)
 		}
 		defer func() { _ = st.Close() }()
+		start := heartbeatClock()
 
 		if err := st.SetMeta(store.MetaKeyLastHeartbeat, heartbeatNow()); err != nil {
 			return fmt.Errorf("heartbeat: %w", err)
 		}
 		probeOwningSources(cmd)
+		runCatchUp(cmd, st, start)
 		return recordSourceFetches(cmd, st)
 	},
 }
