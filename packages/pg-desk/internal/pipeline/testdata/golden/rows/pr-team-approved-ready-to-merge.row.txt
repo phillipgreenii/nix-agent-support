@@ -1,0 +1,15 @@
+repo: acme/widgets
+entity_type: pr
+entity_id: acme/widgets#211
+ownership: team
+enrichment: {"kind":"other","size":"S","title":"Corpus change","url":"https://example.invalid/acme/widgets/pull/211","author":"teammate"}
+urgency: {"level":"low","score":0}
+category:
+dispositions: null
+approvals: {"human_approvers":1,"human_approved":true,"self_approved":false,"human_changes_requested":false,"bot_verdict":"no-decision","waiting_on_me":false,"human_approval_standing":true,"waiting_on":"author","reason":"approved-ready-to-merge"}
+gate_state:
+match_reasons: ["team-authored"]
+panel: team_awaiting_owner
+ready_to_promote: false
+degraded: false
+as_of: 2026-09-16T12:00:00Z

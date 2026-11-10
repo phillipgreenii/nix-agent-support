@@ -13,3 +13,9 @@ review-bot
 
 # synthetic developer handle used by the config example fixture.
 alice-dev
+
+# synthetic placeholder logins of the golden corpus (internal/corpus/testdata): a
+# second and a third teammate, so a fixture can carry reviewers distinct from the
+# PR author. Not real people.
+teammate-b
+teammate-c

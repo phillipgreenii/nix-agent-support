@@ -1,0 +1,7 @@
+{
+  "thread_show": {
+    "channel": "C1",
+    "id": "C1/1.5",
+    "participants": ["alice-dev", "teammate"]
+  }
+}

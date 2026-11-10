@@ -1,0 +1,15 @@
+repo: acme/widgets
+entity_type: issue
+entity_id: PROJ-3
+ownership: mine
+enrichment: {"kind":"","size":"","title":"","url":"","author":""}
+urgency: {"level":"","score":0}
+category: feature
+dispositions: null
+approvals: {"human_approvers":0,"human_approved":false,"self_approved":false,"human_changes_requested":false,"bot_verdict":"","waiting_on_me":false}
+gate_state:
+match_reasons: null
+panel:
+ready_to_promote: false
+degraded: false
+as_of: 2026-09-16T12:00:00Z

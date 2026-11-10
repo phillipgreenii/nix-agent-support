@@ -1,0 +1,15 @@
+repo: acme/widgets
+entity_type: pr
+entity_id: acme/widgets#105
+ownership: mine
+enrichment: {"kind":"other","size":"S","title":"Corpus change","url":"https://example.invalid/acme/widgets/pull/105","author":"alice-dev"}
+urgency: {"level":"low","score":0}
+category:
+dispositions: [{"comment_id":"c1","verdict":"open"}]
+approvals: {"human_approvers":0,"human_approved":false,"self_approved":false,"human_changes_requested":false,"bot_verdict":"no-decision","waiting_on_me":false,"waiting_on":"me","reason":"open-thread"}
+gate_state:
+match_reasons: null
+panel: mine_awaiting_me
+ready_to_promote: false
+degraded: false
+as_of: 2026-09-16T12:00:00Z

@@ -1,0 +1,13 @@
+{
+  "issue_deps": {
+    "entities": [],
+    "ids": ["PROJ-1"]
+  },
+  "issue_show": {
+    "assignee": "",
+    "id": "PROJ-3",
+    "issue_type": "feature",
+    "owner": "alice-dev",
+    "state": "in_progress"
+  }
+}

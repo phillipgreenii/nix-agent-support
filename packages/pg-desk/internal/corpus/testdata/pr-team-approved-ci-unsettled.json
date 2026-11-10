@@ -1,0 +1,43 @@
+{
+  "as_of": "2026-09-16T00:00:00Z",
+  "ci": {
+    "runs": [
+      {
+        "attempt": 1,
+        "head_sha": "h2",
+        "id": "1",
+        "name": "build",
+        "status": "in_progress"
+      }
+    ],
+    "sources": []
+  },
+  "head_sha": "h2",
+  "pr_show": {
+    "additions": 10,
+    "author": "teammate",
+    "base": "main",
+    "branch": "feature-209",
+    "checks_rollup": "success",
+    "deletions": 2,
+    "draft": false,
+    "head_sha": "h2",
+    "merge_state_status": "BLOCKED",
+    "mergeable": "MERGEABLE",
+    "merged": false,
+    "number": 209,
+    "repo": "acme/widgets",
+    "reviews": [
+      {
+        "author": "teammate-b",
+        "commit_oid": "h2",
+        "id": "r1",
+        "state": "APPROVED",
+        "submitted_at": "2026-09-15T10:00:00Z"
+      }
+    ],
+    "state": "open",
+    "title": "Corpus change",
+    "url": "https://example.invalid/acme/widgets/pull/209"
+  }
+}

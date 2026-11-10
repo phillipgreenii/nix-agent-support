@@ -1,0 +1,55 @@
+{
+  "as_of": "2026-09-16T00:00:00Z",
+  "ci": {
+    "runs": [
+      {
+        "attempt": 1,
+        "conclusion": "success",
+        "head_sha": "h2",
+        "id": "1",
+        "name": "build",
+        "status": "completed"
+      }
+    ],
+    "sources": []
+  },
+  "deps": {
+    "entities": [
+      {
+        "id": "bd-2",
+        "labels": ["human"],
+        "owner": "alice-dev",
+        "state": "open"
+      }
+    ],
+    "ids": ["bd-2"]
+  },
+  "head_sha": "h2",
+  "pr_show": {
+    "additions": 10,
+    "author": "alice-dev",
+    "base": "main",
+    "branch": "feature-360",
+    "checks_rollup": "success",
+    "deletions": 2,
+    "draft": false,
+    "head_sha": "h2",
+    "merge_state_status": "CLEAN",
+    "mergeable": "MERGEABLE",
+    "merged": false,
+    "number": 360,
+    "repo": "acme/widgets",
+    "state": "open",
+    "title": "Corpus change",
+    "url": "https://example.invalid/acme/widgets/pull/360"
+  },
+  "work_beads": {
+    "entities": [
+      {
+        "id": "bd-1"
+      }
+    ],
+    "present_ids": ["bd-1"],
+    "sources": []
+  }
+}

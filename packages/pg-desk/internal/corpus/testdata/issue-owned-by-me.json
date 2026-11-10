@@ -1,0 +1,9 @@
+{
+  "issue_show": {
+    "assignee": "alice-dev",
+    "id": "PROJ-1",
+    "issue_type": "task",
+    "owner": "alice-dev",
+    "state": "open"
+  }
+}

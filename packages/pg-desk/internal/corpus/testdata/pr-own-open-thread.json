@@ -1,0 +1,45 @@
+{
+  "as_of": "2026-09-16T00:00:00Z",
+  "ci": {
+    "runs": [
+      {
+        "attempt": 1,
+        "conclusion": "success",
+        "head_sha": "h2",
+        "id": "1",
+        "name": "build",
+        "status": "completed"
+      }
+    ],
+    "sources": []
+  },
+  "head_sha": "h2",
+  "pr_show": {
+    "additions": 10,
+    "author": "alice-dev",
+    "base": "main",
+    "branch": "feature-105",
+    "checks_rollup": "success",
+    "comments": [
+      {
+        "author": "teammate",
+        "body": "Please look",
+        "id": "c1",
+        "resolved": false,
+        "review_thread_id": "t1",
+        "thread_id": "c1"
+      }
+    ],
+    "deletions": 2,
+    "draft": false,
+    "head_sha": "h2",
+    "merge_state_status": "CLEAN",
+    "mergeable": "MERGEABLE",
+    "merged": false,
+    "number": 105,
+    "repo": "acme/widgets",
+    "state": "open",
+    "title": "Corpus change",
+    "url": "https://example.invalid/acme/widgets/pull/105"
+  }
+}

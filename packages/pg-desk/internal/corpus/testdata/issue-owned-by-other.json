@@ -1,0 +1,9 @@
+{
+  "issue_show": {
+    "assignee": "teammate-b",
+    "id": "PROJ-2",
+    "issue_type": "bug",
+    "owner": "teammate",
+    "state": "open"
+  }
+}
