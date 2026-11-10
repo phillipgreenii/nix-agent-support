@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -118,12 +119,16 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 		}
 		r.one(k, !open)
 	}
+	r.counts.Selected = len(keys)
 	if dryRun {
 		if _, err := fmt.Fprintln(r.out, "dry run: nothing written, nothing stamped"); err != nil {
 			return err
 		}
 	}
 	c := r.counts
+	if open && !dryRun {
+		recordLastRun(r.errOut, st, "pr reinterpret --open", changesNow(), c, 0)
+	}
 	if _, err := fmt.Fprintf(r.out, "reinterpreted %d open PRs: %d changed, %d unchanged; %d not open (stamped only), %d skipped, %d failed\n",
 		c.Changed+c.Unchanged, c.Changed, c.Unchanged, c.StampedOnly, c.Skipped, c.Failed); err != nil {
 		return err
@@ -132,6 +137,19 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 		return fmt.Errorf("reinterpret: %d PR(s) failed", c.Failed)
 	}
 	return nil
+}
+
+// recordLastRun persists a pass's counts for `status` (written only when the
+// pass selected a row). A failed write is one stderr line, never an error of
+// the pass: the counts are a report, not the work.
+func recordLastRun(errOut io.Writer, st *store.Store, source string, at time.Time, c reinterpretCounts, remaining int) {
+	_, err := st.RecordReinterpretRun(store.ReinterpretRun{
+		At: at.UTC().Format(time.RFC3339), Source: source, Selected: c.Selected, Changed: c.Changed,
+		Unchanged: c.Unchanged, StampedOnly: c.StampedOnly, Skipped: c.Skipped, Failed: c.Failed, Remaining: remaining,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "reinterpret: record last run: %v\n", err)
+	}
 }
 
 // newReinterpreter builds the pass over st and gives st the running stamp, so

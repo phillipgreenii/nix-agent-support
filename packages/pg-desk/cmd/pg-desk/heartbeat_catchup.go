@@ -146,6 +146,7 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 	if out.stoppedBy == "" && len(keys) == maxRows {
 		out.stoppedBy = "row cap"
 	}
+	r.counts.Selected = len(keys)
 	out.counts = r.counts
 	if out.stoppedBy != "" {
 		// Best effort: the count only feeds the stderr line, so a failed read
@@ -156,5 +157,8 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 			out.stoppedBy = ""
 		}
 	}
+	// Written only for a pass that selected a row (an idle heartbeat writes
+	// nothing); the remaining count lets status show the backlog draining.
+	recordLastRun(r.errOut, st, "heartbeat", heartbeatClock(), out.counts, out.remaining)
 	return out, nil
 }

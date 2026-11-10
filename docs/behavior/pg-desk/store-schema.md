@@ -48,8 +48,11 @@ below. "Schema version 2 tables" describes what the cutover changes.
   version ladder, so `user_version` stays `1`); the cutover drops the whole table.
 - **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
   migrations and `heartbeat` (the `last_sweep` key, written by the deleted `pg-desk sweep`, is no longer written) — `last_run` is reserved in
-  this same table but not yet written by any command (a separate, pre-existing gap; not this
-  bead's scope). The per-entity keys of the deleted `reconcile` (its stamps and deferral counters) and of the `sync_error` retry state (`sync_retry.<entity id>`) are no longer written; a store may still hold old ones, which nothing reads.
+  this same table but not yet written by any command (a separate, pre-existing gap). The
+  `reinterpret.last_run` key holds the counts of the last interpretation catch-up pass as one JSON
+  document (finish time, source `heartbeat` or `pr reinterpret --open`, selected, changed, unchanged,
+  stamped only, skipped, failed and remaining); it is written only by a pass that selected at least
+  one row and is read by `status`. The per-entity keys of the deleted `reconcile` (its stamps and deferral counters) and of the `sync_error` retry state (`sync_retry.<entity id>`) are no longer written; a store may still hold old ones, which nothing reads.
 
 ## Schema versions and the cutover
 

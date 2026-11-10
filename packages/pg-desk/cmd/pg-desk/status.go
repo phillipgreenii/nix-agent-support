@@ -100,6 +100,10 @@ func runStatus(cmd *cobra.Command) error {
 	laneCfg, _ := deskConfigLoad(cmd.Context())
 	fmt.Fprintln(w, prLaneLine(laneCfg, st, changesNow()))
 
+	if err := printInterpretationCatchUp(w, st, version, laneCfg); err != nil {
+		return fmt.Errorf("status: %w", err)
+	}
+
 	if err := printChangeFlow(cmd.Context(), w, st, version); err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
@@ -112,6 +116,54 @@ func runStatus(cmd *cobra.Command) error {
 	}
 	printFocusBlock(cmd.Context(), w, st, focusCfg, nil, nil)
 
+	return nil
+}
+
+// printInterpretationCatchUp prints the interpretation catch-up state
+// (docs/behavior/pg-desk/reinterpret.md, "Observability"): how many `pr`
+// interpretations are behind the running stamp, how many are marked failed
+// under it, and the counts and time of the last catch-up pass. Counts only, no
+// verdict. It reads stored state only, so it works on the raw handle status
+// opens; a store that cannot answer (schema 1, no stamp column yet, no
+// configuration to name the repo and the stamp) reports "unknown", never 0.
+func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *config.Config) error {
+	switch {
+	case version < store.NewSchemaVersion:
+		fmt.Fprintln(w, "interpretations behind: unknown (store not on schema 2)")
+	case cfg == nil || len(cfg.Repos) == 0:
+		fmt.Fprintln(w, "interpretations behind: unknown (configuration unavailable)")
+	default:
+		stamp := runningStamp(cfg)
+		repo := cfg.Repos[0].Remote
+		st.SetInterpStamp(stamp)
+		behind, known, err := st.InterpretationsBehind(repo, 0)
+		if err != nil {
+			return fmt.Errorf("count interpretations behind: %w", err)
+		}
+		if !known {
+			fmt.Fprintln(w, "interpretations behind: unknown (column not yet added)")
+			break
+		}
+		failed, _, err := st.InterpretationsFailed(repo)
+		if err != nil {
+			return fmt.Errorf("count interpretations failed: %w", err)
+		}
+		fmt.Fprintf(w, "interpretations behind: %d (stamp differs from %s)\n", len(behind), stamp)
+		fmt.Fprintf(w, "interpretations failed: %d\n", failed)
+	}
+	if version < store.NewSchemaVersion {
+		return nil
+	}
+	run, found, err := st.LastReinterpretRun()
+	if err != nil {
+		return fmt.Errorf("read last catch-up: %w", err)
+	}
+	if !found {
+		fmt.Fprintln(w, "last catch-up: never")
+		return nil
+	}
+	fmt.Fprintf(w, "last catch-up: %s via %s: selected %d, changed %d, unchanged %d, stamped only %d, skipped %d, failed %d, remaining %d\n",
+		orDash(run.At), orDash(run.Source), run.Selected, run.Changed, run.Unchanged, run.StampedOnly, run.Skipped, run.Failed, run.Remaining)
 	return nil
 }
 
