@@ -198,3 +198,29 @@ date.
 - consequence: the `pgd` alert hook calls `$.ui.status(undefined)` when no alert is true, and always
   sends one call on the first render after a load. Whether `undefined` really removes the row is an
   open item above.
+
+### Render hook: strings, images and mermaid fences
+
+Observed 2026-11-10 on Claude Code 2.1.318 (tmux 3.7b). Full note:
+`docs/investigations/2026-11-10-mod-render-hook-mermaid-and-images.md`.
+
+- An assistant-message render hook receives the raw markdown as a string (`e.props.text`) and hands
+  `next()` a rewritten copy: docs only (read from the mod source). The band hook returns element
+  trees (`Box`, `Text`, `Button`); no image or raw-escape component is known from the typings.
+  Whether the engine passes a terminal graphics sequence from a render hook through its markdown and
+  Ink layers: not observed (a headless `-p` run draws no transcript, so the documented isolated
+  mechanism cannot test it).
+- tmux and graphics sequences: verified live (tmux 3.7b, private socket, recorded client bytes). A raw
+  kitty APC or iTerm2 OSC is never forwarded, with or without `allow-passthrough`; a raw kitty APC
+  leaks into the status bar as the pane title. Only a `ESC P tmux; ... ESC \` wrapped sequence (inner
+  ESC doubled) is forwarded, and only with `allow-passthrough on`. tmux does not track the image.
+  Whether Ghostty (through cmux) draws it: not observed.
+- A fence labelled `mermaid` is already protected from link rules by the fence regex (closed, open,
+  and tilde fences): verified live through the pgd mod's `rewriteLinks`. A claimer MUST require a
+  closed fence before replacing anything, so a half-written fence is not replaced while streaming;
+  how often the engine calls the hook mid-stream: not observed.
+- nixpkgs `mermaid-cli` builds for darwin but bundles no browser there (`chromium` is Linux only):
+  verified live by `nix eval`; render cost not observed.
+- A hook can be run in isolation only through `--plugin-dir` headless, or the node harness of
+  `test-pgd-mod` (a scratch copy with `.ts` import suffixes and a testing shim), which was used to
+  call `rewriteLinks` directly. No documented isolated interactive mechanism exists.
