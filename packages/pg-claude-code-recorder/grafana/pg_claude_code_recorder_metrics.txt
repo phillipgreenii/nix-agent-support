@@ -23,6 +23,7 @@
 #                                  tracker_tick tracker_poll status_refresh doctor removal_pass (11 values; removal_pass is
 #                                  nested inside settle_tick, not additive; copier_ingest is per-event and has only the
 #                                  duration histogram)
+#   where (file_id_collisions_total)   write replay (both registered at zero at start)
 #   outcome (loop_runs_total)      ok error
 #   result (ingest_results_total)  copied new_generation unchanged skipped snapshot link missing tombstone raced error
 #                                  (the copier.Result.Action strings, hyphens mapped to underscores, plus error for an
@@ -67,6 +68,7 @@ pg_claude_code_recorder_caught_up gauge -
 pg_claude_code_recorder_feed_waiters gauge -
 pg_claude_code_recorder_index_rebuilds_total counter -
 pg_claude_code_recorder_rebuild_refused_total counter -
+pg_claude_code_recorder_file_id_collisions_total counter where
 pg_claude_code_recorder_blocked_no_space_total counter op
 pg_claude_code_recorder_conversation_end_total counter registry_present,exit_observed,clear_entry,exit_entry
 pg_claude_code_recorder_registry_stale_at_discovery_total counter -
