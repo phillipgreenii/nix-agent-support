@@ -100,7 +100,7 @@ func TestServeStartupLogsTheStartAndTheDrain(t *testing.T) {
 		t.Fatalf("exit = %d; output: %s", code, d.Stderr())
 	}
 	lines := d.DaemonLog(t)
-	for _, change := range []string{"lock_acquired", "shell_started", "daemon_started", "drain_started", "drain_done"} {
+	for _, change := range []string{"lock_acquired", "shell_started", "daemon_started", "shutdown_started", "shutdown_done"} {
 		if !servetest.HasChange(lines, change) {
 			t.Errorf("daemon.log.jsonl has no %s line", change)
 		}

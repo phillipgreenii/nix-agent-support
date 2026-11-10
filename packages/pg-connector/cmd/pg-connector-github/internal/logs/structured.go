@@ -77,7 +77,7 @@ func (l *StructuredLog) write(level, change, msg string, kv []any) {
 
 // levelForChange is warn for a change named like a fault and info otherwise.
 func levelForChange(change string) string {
-	for _, sfx := range []string{"_failed", "_rejected", "_timeout", "_held", "_gave_up", "_too_long", "_malformed", "_too_large", "_refused", "_moved_aside"} {
+	for _, sfx := range []string{"_failed", "_rejected", "_timeout", "_held", "_gave_up", "_overrun", "_too_long", "_malformed", "_too_large", "_refused", "_moved_aside"} {
 		if strings.HasSuffix(change, sfx) {
 			return evlog.LevelWarn
 		}

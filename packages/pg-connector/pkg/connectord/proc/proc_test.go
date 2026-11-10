@@ -534,3 +534,163 @@ func TestSupervisorStateStrings(t *testing.T) {
 		}
 	}
 }
+
+// kvLogger records every line with its key/values.
+type kvLogger struct {
+	mu    sync.Mutex
+	lines []kvLine
+}
+
+type kvLine struct {
+	change string
+	kv     map[string]any
+}
+
+func (r *kvLogger) Log(change string, kv ...any) {
+	m := map[string]any{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		if k, ok := kv[i].(string); ok {
+			m[k] = kv[i+1]
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, kvLine{change, m})
+}
+
+func (r *kvLogger) find(change string) (kvLine, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, l := range r.lines {
+		if l.change == change {
+			return l, true
+		}
+	}
+	return kvLine{}, false
+}
+
+func (r *kvLogger) names() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, l := range r.lines {
+		out = append(out, l.change)
+	}
+	return out
+}
+
+func TestCleanDrainLogsStartedPhasesDoneAndNoOverrun(t *testing.T) {
+	cfg, _ := testConfig(t)
+	log := &kvLogger{}
+	cfg.Logger = log
+	cfg.ShutdownDeadline = 5 * time.Second
+	cfg.Exit = func(int) { t.Error("the watchdog fired on a clean drain") }
+	s, err := Start(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks := &Hooks{}
+	hooks.Register("flush", func(context.Context) error { return nil })
+	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) {}, hooks)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	var phases []string
+	for _, l := range log.lines {
+		if l.change == "shutdown_phase" {
+			phases = append(phases, l.kv["phase"].(string))
+			if _, ok := l.kv["duration_ms"]; !ok {
+				t.Errorf("shutdown_phase without duration_ms: %v", l.kv)
+			}
+		}
+	}
+	want := []string{"stop_accepting", "handlers", "hook:flush", "release_lock"}
+	if strings.Join(phases, ",") != strings.Join(want, ",") {
+		t.Errorf("phases = %v, want %v", phases, want)
+	}
+	if _, ok := log.find("shutdown_started"); !ok {
+		t.Errorf("no shutdown_started in %v", log.names())
+	}
+	if _, ok := log.find("shutdown_done"); !ok {
+		t.Errorf("no shutdown_done in %v", log.names())
+	}
+	if _, ok := log.find("shutdown_overrun"); ok {
+		t.Error("shutdown_overrun on a clean drain")
+	}
+}
+
+// A hook that ignores its context must not hold the lock past the watchdog
+// deadline: the watchdog logs the phase and exits non-zero.
+func TestWatchdogExitsNonZeroAndNamesTheStuckHook(t *testing.T) {
+	cfg, _ := testConfig(t)
+	log := &kvLogger{}
+	cfg.Logger = log
+	cfg.ShutdownDeadline = 100 * time.Millisecond
+	exited := make(chan int, 1)
+	cfg.Exit = func(code int) { exited <- code }
+	s, err := Start(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	hooks := &Hooks{}
+	hooks.Register("stuck", func(context.Context) error { <-release; return nil })
+	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) {}, hooks)
+	go func() { _ = stop() }()
+	defer close(release)
+	select {
+	case code := <-exited:
+		if code == 0 {
+			t.Errorf("exit code = %d, want non-zero", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watchdog did not fire")
+	}
+	l, ok := log.find("shutdown_overrun")
+	if !ok {
+		t.Fatalf("no shutdown_overrun in %v", log.names())
+	}
+	if l.kv["phase"] != "hook:stuck" {
+		t.Errorf("overrun phase = %v, want hook:stuck", l.kv["phase"])
+	}
+}
+
+func TestWatchdogCountsInFlightHandlers(t *testing.T) {
+	cfg, _ := testConfig(t)
+	log := &kvLogger{}
+	cfg.Logger = log
+	cfg.DrainTimeout = time.Minute
+	cfg.ShutdownDeadline = 100 * time.Millisecond
+	exited := make(chan int, 1)
+	cfg.Exit = func(code int) { exited <- code }
+	s, err := Start(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) {
+		close(entered)
+		<-release
+	}, nil)
+	conn, err := net.Dial("unix", cfg.SocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	<-entered
+	go func() { _ = stop() }()
+	defer close(release)
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watchdog did not fire")
+	}
+	l, ok := log.find("shutdown_overrun")
+	if !ok {
+		t.Fatal("no shutdown_overrun")
+	}
+	if l.kv["phase"] != "handlers" || l.kv["in_flight_handlers"] != int64(1) {
+		t.Errorf("overrun = %v, want phase handlers with 1 in flight", l.kv)
+	}
+}

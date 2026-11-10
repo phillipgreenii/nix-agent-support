@@ -138,6 +138,7 @@ let
       e.serviceConfig == {
         StandardOutPath = "${stateDir}/launchd-stdout.log";
         StandardErrorPath = "${stateDir}/launchd-stderr.log";
+        ExitTimeOut = 55;
         EnvironmentVariables.PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR = "${stateDir}/pprof.sock";
       };
     pprofDisabledOmitsVariable =
@@ -147,6 +148,7 @@ let
         (entryOf launchdPprofOff).serviceConfig == {
           StandardOutPath = "${stateDir}/launchd-stdout.log";
           StandardErrorPath = "${stateDir}/launchd-stderr.log";
+          ExitTimeOut = 55;
         };
     pprofDisabledStillRegisters = (entryOf launchdPprofOff).label == e.label;
     pprofToggleKeepsConfigAndCommand =

@@ -149,7 +149,7 @@ func TestStructuredLogIsTheLibraryLogger(t *testing.T) {
 func TestGenericLogLevelsAndFieldHandling(t *testing.T) {
 	for change, level := range map[string]string{
 		"lock_held": "warn", "drain_hook_failed": "warn", "peer_uid_rejected": "warn", "drain_timeout": "warn",
-		"shell_started": "info", "drain_done": "info", "auth_state_changed": "info",
+		"shell_started": "info", "shutdown_done": "info", "shutdown_overrun": "warn", "auth_state_changed": "info",
 	} {
 		l, path := newStructured(t)
 		l.Log(change)

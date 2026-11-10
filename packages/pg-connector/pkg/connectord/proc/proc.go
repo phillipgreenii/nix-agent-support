@@ -11,7 +11,10 @@
 // connection to a Handler; when its context ends (the binary cancels it on
 // SIGTERM) it drains: it stops accepting, lets in-flight handlers finish,
 // runs the registered drain hooks in order, and releases the lock, so that a
-// second process starts cleanly. Run is Start followed by Serve.
+// second process starts cleanly. The drain logs shutdown_started, one
+// shutdown_phase per step with its duration, and shutdown_done; a watchdog
+// bounds it (see DefaultShutdownDeadline) and logs shutdown_overrun with the
+// phase in flight before exiting non-zero. Run is Start followed by Serve.
 //
 // Start and Serve are separate so the assembling daemon can do slow startup
 // work (open the store and apply migrations) while connections are already
@@ -41,6 +44,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -48,9 +52,25 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
 )
 
-// DefaultDrainTimeout bounds how long a drain waits for in-flight handlers
-// when Config.DrainTimeout is zero.
-const DefaultDrainTimeout = 30 * time.Second
+// Shutdown budget. A drain waits at most DefaultDrainTimeout for handlers and
+// DefaultHookTimeout for the drain hooks (35 s together), and a watchdog
+// hard-exits the process at DefaultShutdownDeadline if the drain is still
+// running. The deadline plus a 7 s margin stays under launchd's 60 s
+// ExitTimeOut cap; the module sets ExitTimeOut to 55 s.
+const (
+	// DefaultDrainTimeout bounds how long a drain waits for in-flight handlers
+	// when Config.DrainTimeout is zero.
+	DefaultDrainTimeout = 25 * time.Second
+	// DefaultHookTimeout bounds the drain hooks, as a whole, when
+	// Config.HookTimeout is zero.
+	DefaultHookTimeout = 10 * time.Second
+	// DefaultShutdownDeadline is the watchdog deadline, measured from the start
+	// of the drain, when Config.ShutdownDeadline is zero.
+	DefaultShutdownDeadline = 40 * time.Second
+)
+
+// ExitShutdownOverrun is the process exit status of a watchdog hard exit.
+const ExitShutdownOverrun = 10
 
 // DefaultLockFileName is the lock file inside the state directory when
 // Config.LockPath is empty.
@@ -80,6 +100,15 @@ type Config struct {
 	// means DefaultDrainTimeout. On expiry the remaining connections are
 	// closed and their handlers' contexts are cancelled.
 	DrainTimeout time.Duration
+	// HookTimeout bounds all drain hooks together; zero means
+	// DefaultHookTimeout.
+	HookTimeout time.Duration
+	// ShutdownDeadline is the watchdog deadline from the start of the drain;
+	// zero means DefaultShutdownDeadline. On expiry the shell logs
+	// shutdown_overrun with the phase in flight and exits non-zero.
+	ShutdownDeadline time.Duration
+	// Exit replaces os.Exit for the watchdog (tests). nil uses os.Exit.
+	Exit func(code int)
 
 	// PeerUID overrides the seam's PeerUID (tests). nil uses PeerUID.
 	PeerUID func(net.Conn) (uint32, error)
@@ -283,6 +312,7 @@ func (s *Server) releaseLocked() {
 func (s *Server) Serve(ctx context.Context, handler Handler, hooks *Hooks) error {
 	var (
 		wg       sync.WaitGroup
+		inFlight atomic.Int64
 		connsMu  sync.Mutex
 		conns    = map[net.Conn]struct{}{}
 		handlers = context.WithoutCancel(ctx)
@@ -313,8 +343,10 @@ func (s *Server) Serve(ctx context.Context, handler Handler, hooks *Hooks) error
 		conns[conn] = struct{}{}
 		connsMu.Unlock()
 		wg.Add(1)
+		inFlight.Add(1)
 		go func() {
 			defer wg.Done()
+			defer inFlight.Add(-1)
 			defer func() {
 				connsMu.Lock()
 				delete(conns, conn)
@@ -326,8 +358,12 @@ func (s *Server) Serve(ctx context.Context, handler Handler, hooks *Hooks) error
 	}
 
 	// Drain: no new connections now (the listener is closed).
-	s.log.Log("drain_started")
+	s.log.Log("shutdown_started")
+	sd := s.newShutdown(&inFlight)
+	defer sd.disarm()
+	sd.phase("stop_accepting")
 	_ = s.ln.Close()
+	sd.phase("handlers")
 	timeout := s.cfg.DrainTimeout
 	if timeout <= 0 {
 		timeout = DefaultDrainTimeout
@@ -350,20 +386,85 @@ func (s *Server) Serve(ctx context.Context, handler Handler, hooks *Hooks) error
 	}
 
 	// Hooks get a bounded context of their own: ctx is already cancelled.
-	hookCtx, cancelHooks := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	hookTimeout := s.cfg.HookTimeout
+	if hookTimeout <= 0 {
+		hookTimeout = DefaultHookTimeout
+	}
+	hookCtx, cancelHooks := context.WithTimeout(context.WithoutCancel(ctx), hookTimeout)
 	defer cancelHooks()
 	errs := []error{acceptErr}
 	for _, h := range hooks.snapshot() {
+		sd.phase("hook:" + h.Name)
 		if err := h.Run(hookCtx); err != nil {
 			s.log.Log("drain_hook_failed", "hook", h.Name, "error", err.Error())
 			errs = append(errs, fmt.Errorf("drain hook %s: %w", h.Name, err))
-			continue
 		}
-		s.log.Log("drain_hook_done", "hook", h.Name)
 	}
+	sd.phase("release_lock")
 	s.releaseLocked()
-	s.log.Log("drain_done")
+	sd.finish()
+	s.log.Log("shutdown_done", "duration_ms", time.Since(sd.began).Milliseconds())
 	return errors.Join(errs...)
+}
+
+// shutdown tracks the drain's current phase, logs one shutdown_phase line per
+// finished phase, and owns the watchdog that hard-exits an overrunning drain.
+type shutdown struct {
+	s        *Server
+	began    time.Time
+	inFlight *atomic.Int64
+	deadline time.Duration
+	timer    *time.Timer
+
+	mu      sync.Mutex
+	name    string
+	started time.Time
+}
+
+func (s *Server) newShutdown(inFlight *atomic.Int64) *shutdown {
+	d := s.cfg.ShutdownDeadline
+	if d <= 0 {
+		d = DefaultShutdownDeadline
+	}
+	now := time.Now()
+	sd := &shutdown{s: s, began: now, inFlight: inFlight, deadline: d, name: "start", started: now}
+	sd.timer = time.AfterFunc(d, sd.expire)
+	return sd
+}
+
+// phase ends the current phase (logging its duration) and starts name.
+func (sd *shutdown) phase(name string) {
+	sd.mu.Lock()
+	prev, began := sd.name, sd.started
+	sd.name, sd.started = name, time.Now()
+	sd.mu.Unlock()
+	if prev != "start" {
+		sd.s.log.Log("shutdown_phase", "phase", prev, "duration_ms", time.Since(began).Milliseconds())
+	}
+}
+
+// finish logs the last phase.
+func (sd *shutdown) finish() { sd.phase("done") }
+
+func (sd *shutdown) disarm() { sd.timer.Stop() }
+
+// expire is the watchdog: log what was in flight and exit non-zero. The lock
+// is released by the kernel when the process dies; the next start removes the
+// stale socket.
+func (sd *shutdown) expire() {
+	sd.mu.Lock()
+	name, began := sd.name, sd.started
+	sd.mu.Unlock()
+	sd.s.log.Log("shutdown_overrun",
+		"deadline_ms", sd.deadline.Milliseconds(),
+		"phase", name,
+		"phase_elapsed_ms", time.Since(began).Milliseconds(),
+		"in_flight_handlers", sd.inFlight.Load())
+	exit := sd.s.cfg.Exit
+	if exit == nil {
+		exit = os.Exit
+	}
+	exit(ExitShutdownOverrun)
 }
 
 // verify checks the peer's uid against the daemon's. A failed credential call

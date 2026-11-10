@@ -130,6 +130,7 @@ let
       e.serviceConfig == {
         StandardOutPath = "${stateDir}/launchd-stdout.log";
         StandardErrorPath = "${stateDir}/launchd-stderr.log";
+        ExitTimeOut = 55;
         EnvironmentVariables.PG_CONNECTOR_GITHUB_PPROF_ADDR = "${stateDir}/pprof.sock";
       };
     pprofDisabledOmitsVariable =
@@ -139,6 +140,7 @@ let
         (entryOf launchdPprofOff).serviceConfig == {
           StandardOutPath = "${stateDir}/launchd-stdout.log";
           StandardErrorPath = "${stateDir}/launchd-stderr.log";
+          ExitTimeOut = 55;
         };
     pprofDisabledStillRegisters = (entryOf launchdPprofOff).label == e.label;
     # the variable rides in the entry's serviceConfig, not the command, so

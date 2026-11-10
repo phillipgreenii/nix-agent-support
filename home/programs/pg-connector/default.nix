@@ -1340,6 +1340,11 @@ in
             serviceConfig = {
               StandardOutPath = "${stateDir}/launchd-stdout.log";
               StandardErrorPath = "${stateDir}/launchd-stderr.log";
+              # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5).
+              # The daemon bounds its own drain (handlers 25 s, hooks 10 s) and a
+              # watchdog hard-exits at 40 s, so 55 s is that deadline plus a margin,
+              # under launchd's 60 s cap.
+              ExitTimeOut = 55;
             }
             # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
             # unix socket under the daemon's own state dir (serve creates the
@@ -1368,6 +1373,11 @@ in
             serviceConfig = {
               StandardOutPath = "${jiraStateDir}/launchd-stdout.log";
               StandardErrorPath = "${jiraStateDir}/launchd-stderr.log";
+              # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5).
+              # The daemon bounds its own drain (handlers 25 s, hooks 10 s) and a
+              # watchdog hard-exits at 40 s, so 55 s is that deadline plus a margin,
+              # under launchd's 60 s cap.
+              ExitTimeOut = 55;
             }
             # Profiling endpoint: a 0600 unix socket under the daemon's state
             # dir; launchd does not expand $XDG_STATE_HOME, so the resolved

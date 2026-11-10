@@ -152,7 +152,7 @@ func TestRealServeLifecycle(t *testing.T) {
 	if code := third.wait(t); code != 0 {
 		t.Errorf("SIGTERM exit = %d, want 0; stderr: %s", code, third.stderr.String())
 	}
-	waitLogLine(t, state, "drain_done")
+	waitLogLine(t, state, "shutdown_done")
 	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the drained serve must remove its socket: %v", err)
 	}

@@ -59,9 +59,9 @@ func TestCancellingTheContextDrainsAppendsEveryPendingRowAndClosesTheStore(t *te
 		t.Errorf("pending rows after the drain = %d, want 0", n)
 	}
 	lines := r.daemonLog()
-	flushed, drained := indexOf(lines, "pending_changes_flushed"), indexOf(lines, "drain_done")
+	flushed, drained := indexOf(lines, "pending_changes_flushed"), indexOf(lines, "shutdown_done")
 	if flushed < 0 || drained < 0 || flushed > drained {
-		t.Errorf("want pending_changes_flushed before drain_done, got positions %d and %d in %v", flushed, drained, lines)
+		t.Errorf("want pending_changes_flushed before shutdown_done, got positions %d and %d in %v", flushed, drained, lines)
 	}
 	// The WAL was checkpointed and the store closed: nothing is left in the log.
 	if fi, err := os.Stat(r.storePath() + "-wal"); err == nil && fi.Size() != 0 {

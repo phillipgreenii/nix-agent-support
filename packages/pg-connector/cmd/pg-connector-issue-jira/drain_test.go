@@ -66,8 +66,8 @@ func TestDrainSIGTERMFinishesTheRequestInFlightAndExitsZero(t *testing.T) {
 	if code := d.Wait(t, 30*time.Second); code != 0 {
 		t.Errorf("exit = %d, want 0; output: %s", code, d.Stderr())
 	}
-	if !servetest.HasChange(d.DaemonLog(t), "drain_done") {
-		t.Errorf("the daemon log has no drain_done line: %v", d.DaemonLog(t))
+	if !servetest.HasChange(d.DaemonLog(t), "shutdown_done") {
+		t.Errorf("the daemon log has no shutdown_done line: %v", d.DaemonLog(t))
 	}
 }
 
