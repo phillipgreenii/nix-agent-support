@@ -454,14 +454,20 @@ pass. Rules:
 - **The catch-up MUST NOT make a heartbeat late or missed** (operator, 2026-11-10: "we can try it
   as part of the heartbeat, but it think we need to ensure there is some kind of limit so that
   heartbeats aren't missed"). Three limits enforce it, and each is a named constant with a test:
-  - **Time budget.** The catch-up runs under a context deadline, `CatchUpBudget`, that MUST be
-    well under the `desk-heartbeat` role's cadence (the implementer reads the cadence from the
-    deployment repo and sets the default to at most a third of it, recording both numbers in the
-    constant's comment). The loop checks the context between rows and stops at the deadline; a
-    row in flight finishes or rolls back, never half-writes.
-  - **Row cap.** At most `CatchUpMaxRows` rows per pass, open PRs first, so one pass has a known
-    ceiling even when the clock is fast. Later heartbeats continue from where it stopped, because
-    each committed row carries the new stamp and drops out of the "behind" set.
+  - **Time budget: `CatchUpBudget` = 10 seconds.** The deployed `desk-heartbeat` query is a
+    60-second period trigger (`operator-commands.md`, "heartbeat / heartbeat-item"), and the
+    heartbeat's existing source-fetch step can already take up to 30 seconds (`freshness.md`).
+    The budget is a context deadline on the catch-up alone, so the worst case is 30 s + 10 s =
+    40 s, which leaves 20 s of the 60 s period for startup and the store writes. (A third of the
+    period, 20 s, would make the worst case 50 s and leave too little margin.) The loop checks
+    the context between rows and stops at the deadline; a row in flight finishes or rolls back,
+    never half-writes. The constant's comment records the 60 s and 30 s figures.
+  - **Row cap: `CatchUpMaxRows` = 25.** At most 25 rows per pass, open PRs first, so one pass has
+    a known ceiling even when the clock is fast. On the 112 open PRs seen on 2026-11-09 that is
+    5 passes (112 / 25 rounded up), about 5 minutes at one pass per minute. Later heartbeats
+    continue from where it stopped, because each committed row carries the new stamp and drops
+    out of the "behind" set. The per-row cost is not measured yet: task 8 measures it on a real
+    store and MAY lower the cap, but MUST NOT raise the budget.
   - **Order of steps.** Liveness is stamped BEFORE the catch-up and the source-fetch record is
     written AFTER it with the catch-up's error swallowed, so a slow or failing catch-up cannot
     prevent either. The catch-up holds no write lock across rows (one short transaction per row),
