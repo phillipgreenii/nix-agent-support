@@ -25,6 +25,8 @@ type attnPR struct {
 	ownership string
 	panel     string
 	facts     string
+	// approvals overrides the stored decision the panel would imply.
+	approvals string
 }
 
 func (p attnPR) id() string { return fmt.Sprintf("%s#%d", attnRepo, p.n) }
@@ -60,6 +62,9 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 				// decision), so the one cause is the conflict.
 				approvals = `{"waiting_on":"me","reason":"conflict"}`
 			}
+		}
+		if p.approvals != "" {
+			approvals = p.approvals
 		}
 		if err := st.UpsertInterpretation(store.Interpretation{
 			Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Ownership: p.ownership, Panel: p.panel,
@@ -355,5 +360,31 @@ func TestAttentionExplainDegradedOnUnmigratedStore(t *testing.T) {
 	text, _ := runAttention(t, "explain", false, "pr:acme/api#1")
 	if !strings.Contains(text, "degraded") {
 		t.Errorf("text must report degraded: %q", text)
+	}
+}
+
+// A stored stale-review decision raises pr.review-requested with the
+// "new commits since my review" summary; a plain review request keeps its own.
+func TestAttentionListStaleReviewSummaryVariant(t *testing.T) {
+	path := attnFixture(
+		t, true,
+		attnPR{n: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe, approvals: `{"waiting_on":"me","reason":"stale-review"}`},
+		attnPR{n: 2, ownership: "team", panel: interpret.PanelTeamAwaitingMe},
+	)
+	withAttentionSeams(t, attnConfig(), openAttn(path))
+
+	out, err := runAttention(t, "list", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range decodeAttnList(t, out).Items {
+		if it.Rule != "pr.review-requested" {
+			t.Errorf("unexpected rule %q", it.Rule)
+		}
+		got[it.ID] = it.Summary
+	}
+	if got["acme/api#1"] != "new commits since my review" || got["acme/api#2"] != "review requested of me" {
+		t.Errorf("summaries = %v, want the stale-review variant on #1 only", got)
 	}
 }
