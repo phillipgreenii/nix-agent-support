@@ -23,54 +23,183 @@ const PLACEHOLDER = /[-]/g
 const FENCE = /^( {0,3})(`{3,}|~{3,})[^\n]*\n(?:[\s\S]*?^ {0,3}\2[`~]*[ \t]*$|[\s\S]*)/gm
 const CODE_SPAN = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)|(`+)(?!`)[\s\S]*?\2(?!`)/g
 
-// A rule compiled once: the regular expression (flags `g`; no `u`, `i` or `m`), the url template.
+// Protected spans besides fences and code spans: existing markdown links, autolinks and bare URLs,
+// so an assistant-written link or a URL holding `#12` is never nested or rewritten.
+const MD_LINK = /\[(?:[^\]\\]|\\.)*\]\([^)\s]*\)/g
+const AUTOLINK = /<https?:\/\/[^>\s]+>/g
+const BARE_URL = /https?:\/\/\S+/g
+
+// ---- the kind interface -------------------------------------------------------------------
+// A rule kind provides `scan` (find candidates in the text) and `resolve` (a URL for one
+// candidate, or a decline with a reason). Both are pure functions of their arguments.
+export type DeclineReason = 'no-context' | 'no-repo' | 'unknown-repo' | 'adjacent' | 'unsafe'
+export interface Decline {
+  decline: DeclineReason
+}
+export const isDecline = (r: string | Decline): r is Decline => typeof r !== 'string'
+
+// What a session knows, handed in by the caller; every field is optional (see the design).
+export interface LinkContext {
+  cwd?: string
+  repoSlug?: string
+  home?: string
+  githubHost?: string
+  githubOwners?: string[]
+  knownRepos?: string[]
+}
+
+// A candidate: `start`/`end` index the text handed to scan; `text` is the link text (the engine
+// restores protected spans inside it before resolve sees it); `data` is kind-private.
+export interface Candidate {
+  start: number
+  end: number
+  text: string
+  data?: unknown
+}
+
+export interface LinkKind {
+  scan(text: string): Candidate[]
+  resolve(candidate: Candidate, text: string, context?: LinkContext): string | Decline
+}
+
+// A kind factory compiles one rule once; it throws on a rule problem (the engine logs one warn).
+export type KindFactory = (rule: any) => LinkKind
+const KINDS = new Map<string, KindFactory>()
+export function registerKind(name: string, factory: KindFactory): void {
+  KINDS.set(name, factory)
+}
+
+// The regex kind: flags `g` only, the whole match percent-encoded into `{0}`, empty matches skipped.
+registerKind('regex', (rule: { pattern: string; url: string }) => {
+  if (!rule.url.includes('{0}')) throw new Error('url template has no {0}')
+  new URL(rule.url.split('{0}').join('x')) // throws on a template that is not a valid URL
+  const re = new RegExp(rule.pattern, 'g')
+  return {
+    scan(text) {
+      const out: Candidate[] = []
+      for (const m of text.matchAll(re)) {
+        if (m[0] === '') continue
+        out.push({ start: m.index!, end: m.index! + m[0].length, text: m[0] })
+      }
+      return out
+    },
+    resolve: c => rule.url.split('{0}').join(encodeURIComponent(c.text)),
+  }
+})
+
 interface Compiled {
-  rule: LinkRule
-  re: RegExp
+  name: string
+  kind: LinkKind
 }
 
 function compile(rule: LinkRule): Compiled | undefined {
-  // only regex rules are handled here; the other kinds have their own scanners
-  if (rule.kind !== undefined && rule.kind !== 'regex') return undefined
+  const kindName = rule.kind ?? 'regex'
   try {
-    if (!rule.url.includes('{0}')) throw new Error('url template has no {0}')
-    new URL(rule.url.split('{0}').join('x')) // throws on a template that is not a valid URL
-    return { rule, re: new RegExp(rule.pattern, 'g') }
+    const factory = KINDS.get(kindName)
+    if (!factory) throw new Error(`unknown kind "${kindName}"`)
+    return { name: rule.name, kind: factory(rule) }
   } catch (err) {
     log('warn', 'links', `link rule "${rule.name}" skipped: ${err instanceof Error ? err.message : String(err)}`)
     return undefined
   }
 }
 
-// Link text escapes the characters that would end or nest the markdown link; the url takes the
-// match percent-encoded (encodeURIComponent), so a match never breaks out of the url either.
-const escapeText = (s: string): string => s.replace(/[\\[\]`]/g, c => `\\${c}`)
+// Rules compile ONCE per rule set (by identity, then by content), so a rule problem logs once.
+interface RuleSet {
+  key: string
+  compiled: Compiled[]
+}
+let byIdentity = new WeakMap<LinkRule[], RuleSet>()
+let byContent = new Map<string, RuleSet>()
+const MAX_RULE_SETS = 8
 
-export function rewriteLinks(text: string, rules: LinkRule[]): string {
+function ruleSetOf(rules: LinkRule[]): RuleSet {
+  const known = byIdentity.get(rules)
+  if (known) return known
+  const key = JSON.stringify(rules)
+  let set = byContent.get(key)
+  if (!set) {
+    set = { key, compiled: rules.map(compile).filter((c): c is Compiled => c !== undefined) }
+    if (byContent.size >= MAX_RULE_SETS) byContent.delete(byContent.keys().next().value as string)
+    byContent.set(key, set)
+  }
+  byIdentity.set(rules, set)
+  return set
+}
+
+// ---- the memo: a bounded LRU keyed by (text, rule set), never by a snapshot -----------------
+const MEMO_SIZE = 64
+let memo = new Map<string, string>()
+
+// Forget every memoized message and compiled rule set (tests call this so order cannot matter).
+export function resetLinkMemo(): void {
+  memo = new Map()
+  byIdentity = new WeakMap()
+  byContent = new Map()
+}
+
+// Link text escapes the characters that would end, nest or restyle the markdown link; the url
+// takes the match percent-encoded (encodeURIComponent), so a match never breaks out of the url.
+const escapeText = (s: string): string => s.replace(/[\\[\]`_*<]/g, c => `\\${c}`)
+
+export function rewriteLinks(text: string, rules: LinkRule[], context?: LinkContext): string {
   if (typeof text !== 'string' || text === '' || !Array.isArray(rules) || rules.length === 0) return text
   if (/[-]/.test(text)) return text
-  const compiled = rules.map(compile).filter((c): c is Compiled => c !== undefined)
-  if (compiled.length === 0) return text
+  const set = ruleSetOf(rules)
+  if (set.compiled.length === 0) return text
 
+  const memoKey = `${set.key}\u0000${text}`
+  const hit = memo.get(memoKey)
+  if (hit !== undefined) {
+    memo.delete(memoKey)
+    memo.set(memoKey, hit)
+    return hit
+  }
+  const { result, noContext } = rewriteUncached(text, set.compiled, context)
+  if (!noContext) {
+    if (memo.size >= MEMO_SIZE) memo.delete(memo.keys().next().value as string)
+    memo.set(memoKey, result)
+  }
+  return result
+}
+
+function rewriteUncached(
+  text: string,
+  compiled: Compiled[],
+  context?: LinkContext,
+): { result: string; noContext: boolean } {
   const spans: string[] = []
   const protect = (original: string): string => {
     if (spans.length >= MAX_SPANS) return original
     spans.push(original)
     return String.fromCharCode(BASE + spans.length - 1)
   }
-  let work = text.replace(FENCE, m => protect(m)).replace(CODE_SPAN, m => protect(m))
+  let work = text
+    .replace(FENCE, m => protect(m))
+    .replace(CODE_SPAN, m => protect(m))
+    .replace(MD_LINK, m => protect(m))
+    .replace(AUTOLINK, m => protect(m))
+    .replace(BARE_URL, m => protect(m))
 
-  for (const { rule, re } of compiled) {
-    re.lastIndex = 0
-    work = work.replace(re, (m: string) => {
-      if (m === '') return m
+  let noContext = false
+  for (const { kind } of compiled) {
+    let out = ''
+    let at = 0
+    for (const c of kind.scan(work)) {
+      if (c.start < at || c.end <= c.start) continue
       // the match may span placeholders; the link text restores them first
-      const shown = restore(m, spans)
-      const url = rule.url.split('{0}').join(encodeURIComponent(shown))
-      return protect(`[${escapeText(shown)}](${url})`)
-    })
+      const shown = { ...c, text: restore(work.slice(c.start, c.end), spans) }
+      const r = kind.resolve(shown, work, context)
+      if (isDecline(r)) {
+        if (r.decline === 'no-context') noContext = true
+        continue
+      }
+      out += work.slice(at, c.start) + protect(`[${escapeText(shown.text)}](${r})`)
+      at = c.end
+    }
+    work = out + work.slice(at)
   }
-  return restore(work, spans)
+  return { result: restore(work, spans), noContext }
 }
 
 // Put every protected span back (a span may hold the placeholder of an earlier span).

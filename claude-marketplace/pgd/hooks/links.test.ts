@@ -1,6 +1,14 @@
 // Tests of the transcript links: the pure rewrite, the render hook and its registration.
 import { expect, test } from 'claude-code/testing'
-import { linkHook, registerLinkHooks, rewriteLinks, type LinkRule } from './links'
+import {
+  isDecline,
+  linkHook,
+  registerKind,
+  registerLinkHooks,
+  resetLinkMemo,
+  rewriteLinks,
+  type LinkRule,
+} from './links'
 import { setOptions } from './options'
 import { initLog, flushLog } from './log'
 import { stubHost } from './testkit'
@@ -121,4 +129,107 @@ test('a skipped rule is logged', async () => {
   rewriteLinks('ZR-1', [{ name: 'broken', pattern: '(', url: 'https://x.invalid/{0}' }])
   await flushLog()
   expect(stub.writes.some(w => w.text.includes('link rule \\"broken\\" skipped'))).toBe(true)
+})
+
+// ---- engine: protected spans, escaping, kind dispatch, memo --------------------------------
+
+const digits: LinkRule = { name: 'digits', pattern: '\\d+', url: 'https://example.com/{0}' }
+const key: LinkRule = { name: 'key', pattern: 'ABC-\\d+', url: 'https://example.com/browse/{0}' }
+
+test('existing markdown links, autolinks and bare urls are never rewritten', () => {
+  resetLinkMemo()
+  expect(rewriteLinks('[ABC-1](https://h/x)', [key])).toBe('[ABC-1](https://h/x)')
+  expect(rewriteLinks('see [the ABC-1 note](https://h/x) ok', [key])).toBe('see [the ABC-1 note](https://h/x) ok')
+  expect(rewriteLinks('https://h/foo/bar#12', [{ name: 'h', pattern: '#\\d+', url: 'https://example.com/{0}' }])).toBe(
+    'https://h/foo/bar#12',
+  )
+  expect(rewriteLinks('go <https://h/a/12> now', [digits])).toBe('go <https://h/a/12> now')
+  expect(rewriteLinks('ABC-1 https://h/x/ABC-2', [key])).toBe('[ABC-1](https://example.com/browse/ABC-1) https://h/x/ABC-2')
+})
+
+test('link text escapes underscore, star and angle bracket (regex rule only at this stage)', () => {
+  resetLinkMemo()
+  // only a regex rule exists in the engine at this stage, so the escaping is pinned through one
+  const r: LinkRule = { name: 'py', pattern: '\\*\\*init\\*\\*\\.py:\\d+', url: 'https://example.com/?q={0}' }
+  expect(rewriteLinks('x **init**.py:12 y', [r])).toBe('x [\\*\\*init\\*\\*.py:12](https://example.com/?q=**init**.py%3A12) y')
+  const u: LinkRule = { name: 'u', pattern: '__init__\\.py:\\d+', url: 'https://example.com/?q={0}' }
+  expect(rewriteLinks('__init__.py:3', [u])).toBe('[\\_\\_init\\_\\_.py:3](https://example.com/?q=__init__.py%3A3)')
+  const a: LinkRule = { name: 'a', pattern: '<x>', url: 'https://example.com/?q={0}' }
+  expect(rewriteLinks('a <x> b', [a])).toBe('a [\\<x>](https://example.com/?q=%3Cx%3E) b')
+})
+
+test('a kind registered with scan and resolve dispatches, and a decline leaves the text plain', () => {
+  resetLinkMemo()
+  registerKind('probe', (rule: { name: string }) => ({
+    scan: t => [...t.matchAll(/\bP\d\b/g)].map(m => ({ start: m.index!, end: m.index! + 2, text: m[0] })),
+    resolve: (c, _t, ctx) =>
+      c.text === 'P1' ? { decline: 'adjacent' as const } : ctx?.cwd ? `https://example.com/${ctx.cwd}/${c.text}` : { decline: 'no-context' as const },
+  }))
+  const rules = [{ kind: 'probe', name: 'p' }] as unknown as LinkRule[]
+  expect(isDecline({ decline: 'unsafe' })).toBe(true)
+  expect(isDecline('https://example.com/')).toBe(false)
+  expect(rewriteLinks('P1 P2', rules, { cwd: 'w' })).toBe('P1 [P2](https://example.com/w/P2)')
+  expect(rewriteLinks('P1 P3', rules)).toBe('P1 P3') // no context: declined, not stored
+})
+
+test('the memo: a linked message is never re-resolved, a no-context message is not stored', () => {
+  resetLinkMemo()
+  let calls = 0
+  registerKind('counting', () => ({
+    scan: t => [...t.matchAll(/\bC\d\b/g)].map(m => ({ start: m.index!, end: m.index! + 2, text: m[0] })),
+    resolve: (c, _t, ctx) => {
+      calls++
+      return c.text === 'C9' && !ctx?.cwd ? { decline: 'no-context' as const } : `https://example.com/${c.text}`
+    },
+  }))
+  const rules = [{ kind: 'counting', name: 'c' }] as unknown as LinkRule[]
+  expect(rewriteLinks('C1', rules, { cwd: 'a' })).toBe('[C1](https://example.com/C1)')
+  expect(rewriteLinks('C1', rules, { cwd: 'b' })).toBe('[C1](https://example.com/C1)')
+  expect(calls).toBe(1) // the second draw, with a different snapshot, came from the memo
+  // mixed outcome: one candidate declined with no-context, so nothing is stored
+  expect(rewriteLinks('C1 C9', rules)).toBe('[C1](https://example.com/C1) C9')
+  const before = calls
+  expect(rewriteLinks('C1 C9', rules, { cwd: 'a' })).toBe('[C1](https://example.com/C1) [C9](https://example.com/C9)')
+  expect(calls).toBe(before + 2) // re-resolved in full once the context arrived
+  expect(rewriteLinks('C1 C9', rules)).toBe('[C1](https://example.com/C1) [C9](https://example.com/C9)')
+  expect(calls).toBe(before + 2) // and now it is final
+})
+
+test('the memo holds 64 messages, least recently used goes first', () => {
+  resetLinkMemo()
+  let calls = 0
+  registerKind('lru', () => ({
+    scan: t => [...t.matchAll(/L\d+/g)].map(m => ({ start: m.index!, end: m.index! + m[0].length, text: m[0] })),
+    resolve: c => {
+      calls++
+      return `https://example.com/${c.text}`
+    },
+  }))
+  const rules = [{ kind: 'lru', name: 'l' }] as unknown as LinkRule[]
+  for (let i = 0; i < 64; i++) rewriteLinks(`L${i}`, rules)
+  expect(calls).toBe(64)
+  rewriteLinks('L0', rules) // touch the oldest: L1 is now the least recently used
+  expect(calls).toBe(64)
+  rewriteLinks('L64', rules) // evicts L1
+  expect(calls).toBe(65)
+  rewriteLinks('L0', rules)
+  expect(calls).toBe(65)
+  rewriteLinks('L1', rules)
+  expect(calls).toBe(66)
+})
+
+test('an invalid rule is logged once per rule set, not on every call', async () => {
+  resetLinkMemo()
+  const stub = stubHost()
+  initLog(stub.host)
+  const rules: LinkRule[] = [{ name: 'broken-once', pattern: '(', url: 'https://x.invalid/{0}' }, jira]
+  for (let i = 0; i < 3; i++) rewriteLinks(`ZR-${i}`, rules)
+  await flushLog()
+  expect(stub.writes.filter(w => w.text.includes('broken-once')).length).toBe(1)
+})
+
+test('an unknown kind is skipped alone', () => {
+  resetLinkMemo()
+  const rules = [{ kind: 'nope', name: 'n' }, jira] as unknown as LinkRule[]
+  expect(rewriteLinks('ZR-1', rules)).toBe('[ZR-1](https://example.invalid/browse/ZR-1)')
 })
