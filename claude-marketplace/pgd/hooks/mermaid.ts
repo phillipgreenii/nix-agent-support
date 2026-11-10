@@ -6,7 +6,8 @@ import { FENCE_CLOSED } from './links'
 // this pass only names where the file is expected). An open fence (still streaming) is left
 // byte-for-byte, so a half-written diagram is never claimed. The fence definition is the one the
 // protected-span pass in links.ts uses (FENCE_CLOSED), so the two cannot disagree.
-const MERMAID_INFO = /^ {0,3}(?:`{3,}|~{3,})[ \t]*mermaid(?:[ \t{][^\n]*)?\n/i
+const MERMAID_INFO = /^ {0,3}(`{3,}|~{3,})[ \t]*mermaid(?:[ \t{][^\n]*)?\n/i
+const CLOSING_RUN = /(`{3,}|~{3,})[`~]*[ \t]*$/
 
 // 32-bit FNV-1a of the fence source, as 8 hex digits: a stable file name without node:crypto.
 export function mermaidHash(source: string): string {
@@ -28,6 +29,10 @@ export function appendMermaidLinks(text: string, urlFor: (source: string) => str
   return text.replace(FENCE_CLOSED, m => {
     const head = MERMAID_INFO.exec(m)
     if (!head) return m
+    // the shared fence regex may back off an opening run (a four-backtick opener closed by three);
+    // claim only when the closing run is at least as long as the opening one
+    const close = CLOSING_RUN.exec(m.slice(head[0].length - 1))
+    if (!close || close[0].trimEnd().length < head[1].length) return m
     return `${m}\n\n[mermaid diagram (rendered file)](${urlFor(m)})`
   })
 }
