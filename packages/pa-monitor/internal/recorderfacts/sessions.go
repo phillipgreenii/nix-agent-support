@@ -82,17 +82,24 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 	// start-time check). With an open window the span stays the full scan.
 	spanWhere := base
 	if win := windowFilter(since, before); win != nil {
-		active, err := run(client.QueryRequest{
-			Where: &client.Filter{All: append(append([]client.Filter{}, base...), *win)},
-			Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000,
-		})
+		act, ok, err := f.activeSessions(ctx, c, since)
 		if err != nil {
 			return nil, err
 		}
-		var act []any
-		for _, r := range active.Rows {
-			if sid := str(r[0]); sid != "" {
-				act = append(act, sid)
+		if !ok {
+			// No usable inventory (degraded, or no lower bound): count records.
+			active, err := run(client.QueryRequest{
+				Where: &client.Filter{All: append(append([]client.Filter{}, base...), *win)},
+				Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000,
+			})
+			if err != nil {
+				return nil, err
+			}
+			act = nil
+			for _, r := range active.Rows {
+				if sid := str(r[0]); sid != "" {
+					act = append(act, sid)
+				}
 			}
 		}
 		if len(act) == 0 {
@@ -208,6 +215,42 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 		return out[i].SessionID < out[j].SessionID
 	})
 	return out, nil
+}
+
+// inventoryPage is the page size of the file inventory read.
+const inventoryPage = 10000
+
+// activeSessions lists the sessions with a transcript file whose newest record
+// is at or after since, from the recorder's per-file table (no scan of
+// records, which timed out on a real tree). ok is false when the answer cannot
+// be trusted (no lower bound, or the recorder reports it degraded); the caller
+// then counts records. The list is a superset of the sessions active in the
+// window; the caller checks each session's true first record.
+func (f *Facts) activeSessions(ctx context.Context, c *client.Client, since time.Time) (ids []any, ok bool, err error) {
+	if since.IsZero() {
+		return nil, false, nil
+	}
+	req := client.InventoryRequest{Sources: []string{"claude-transcript"}, Since: since.UTC().Format(time.RFC3339), Limit: inventoryPage}
+	seen := map[string]bool{}
+	for {
+		ans, err := c.FilesInventory(ctx, req)
+		if err != nil {
+			return nil, false, f.wrap(err)
+		}
+		if ans.Degraded {
+			return nil, false, nil
+		}
+		for _, fl := range ans.Files {
+			if fl.FileSession != "" && !seen[fl.FileSession] {
+				seen[fl.FileSession] = true
+				ids = append(ids, fl.FileSession)
+			}
+		}
+		if !ans.More || len(ans.Files) == 0 {
+			return ids, true, nil
+		}
+		req.After = ans.Files[len(ans.Files)-1].File
+	}
 }
 
 // windowFilter is the record-time filter for [since, before); nil when open.

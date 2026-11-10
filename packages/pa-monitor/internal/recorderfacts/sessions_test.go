@@ -100,3 +100,19 @@ func TestSessionsWindowKeepsTrueStartAndExcludesEarlierSessions(t *testing.T) {
 		t.Errorf("empty window: %v %v", empty, err)
 	}
 }
+
+// TestSessionsBeforeOnlyWindowFallsBackToRecordCount: with no lower bound the
+// per-file inventory cannot narrow the scan, so the record-count path answers.
+func TestSessionsBeforeOnlyWindowFallsBackToRecordCount(t *testing.T) {
+	_, f := recorderWithTranscript(t)
+	ctx := context.Background()
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 0, 0, 0, 0, time.UTC) }
+	got, err := f.Sessions(ctx, time.Time{}, day(30))
+	if err != nil || len(got) != 1 {
+		t.Fatalf("before-only window: %v %v", got, err)
+	}
+	none, err := f.Sessions(ctx, time.Time{}, day(29))
+	if err != nil || len(none) != 0 {
+		t.Errorf("window before the session: %v %v", none, err)
+	}
+}
