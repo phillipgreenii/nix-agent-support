@@ -13,7 +13,7 @@ this file and do what it says."
 
 Module root: `packages/claude-extended-tool-approver` (all relative paths below are relative to
 this root unless stated otherwise). Ceta marketplace plugin root:
-`claude-marketplace/claude-extended-tool-approver` (this skill's own home).
+`claude-marketplace/pg-claude-extended-tool-approver` (this skill's own home).
 
 ## What you produce
 

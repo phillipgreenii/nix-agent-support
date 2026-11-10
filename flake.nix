@@ -5592,7 +5592,7 @@
                 let
                   src = lib.fileset.toSource {
                     root = ./.;
-                    fileset = ./claude-marketplace/claude-tool-tracker;
+                    fileset = ./claude-marketplace/pg-claude-tool-tracker;
                   };
                   shim = pkgs.writeText "claude-code-testing-shim.mjs" ''
                     import assert from "node:assert/strict";
@@ -5624,7 +5624,7 @@
                   }
                   ''
                     set -euo pipefail
-                    plugin=${src}/claude-marketplace/claude-tool-tracker
+                    plugin=${src}/claude-marketplace/pg-claude-tool-tracker
                     jq -e '.modules == ["./register.ts"]' "$plugin/hooks/hooks.json" >/dev/null
                     for f in register.ts tracker.ts tracker.test.ts; do test -f "$plugin/hooks/$f"; done
                     mkdir work

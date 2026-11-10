@@ -13,7 +13,7 @@ let
   # routerEnabled (ADR 0071 Phase C, C0/C2) is the graceful-degradation switch:
   # when true, ceta contributes its full five-event surface to
   # programs.claude-hook-router.delegates INSTEAD OF firing through its own
-  # committed claude-marketplace/claude-extended-tool-approver/ plugin's
+  # committed claude-marketplace/pg-claude-extended-tool-approver/ plugin's
   # hooks.json (disabled below via marketplaces.overrides) -- avoiding the
   # double-dispatch that would otherwise result from BOTH the router's delegate
   # call AND ceta's own direct hook registration invoking this same binary for

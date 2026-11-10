@@ -82,7 +82,7 @@ sequenceDiagram
 
 1. **Claude Code fires `PreToolUse`** with the tool name, its input, and the session's cwd — either
    straight at ceta (the graceful-degradation fallback: ceta's own committed
-   `claude-marketplace/claude-extended-tool-approver/` plugin registers this event directly, per
+   `claude-marketplace/pg-claude-extended-tool-approver/` plugin registers this event directly, per
    its `hooks/hooks.json`) or at the `claude-hook-router` (ADR 0071), which dispatches to ceta as
    one of its five delegates when `programs.claude-hook-router.enable` is set — the two
    registrations are mutually exclusive (enabling the router disables ceta's own direct

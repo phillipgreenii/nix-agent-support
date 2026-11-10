@@ -12,7 +12,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design patterns behin
 
 Ceta is not necessarily the sole/direct registrant of these hook events. Since
 [ADR 0071](../../docs/adr/0071-claude-code-hook-router.md), Claude Code can reach ceta one of two
-ways: directly, via ceta's own committed `claude-marketplace/claude-extended-tool-approver/`
+ways: directly, via ceta's own committed `claude-marketplace/pg-claude-extended-tool-approver/`
 plugin (its `hooks/hooks.json`) — the fallback path — or through the `claude-hook-router`, when
 `programs.claude-hook-router.enable` is set, which dispatches to ceta as one of its five delegates
 instead. The two registrations are mutually exclusive (enabling the router disables ceta's own

@@ -153,7 +153,7 @@ home inside ceta's chain.
 
 **Honest scoping consequence**: as of this design, **ceta is the only plugin that actually
 registers hooks today** — and it registers more than `PreToolUse(Bash)`. Its real
-`hooks/hooks.json` (`claude-marketplace/claude-extended-tool-approver/hooks/hooks.json`, read
+`hooks/hooks.json` (`claude-marketplace/pg-claude-extended-tool-approver/hooks/hooks.json`, read
 directly for this revision) declares **five** entries: `PreToolUse` with **no matcher** (fires on
 every tool, not only Bash — this is how ADR `0049`/`0051`'s agent-config write-protection carve-out
 for `Write`/`Edit`/`MultiEdit` actually gets enforced, per `docs/ARCHITECTURE.md`'s sequence
