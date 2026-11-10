@@ -100,6 +100,12 @@ const (
 	EvStartupPhaseBegin = "startup_phase_begin"
 	EvStartupPhase      = "startup_phase"
 	EvStartupComplete   = "startup_complete"
+	// Events of the daemon's stop: shutdown_started (reason), one
+	// shutdown_phase per step (phase, duration_ms) and shutdown_done (total_ms).
+	// A hard exit past the deadline logs shutdown_overrun instead of the last two.
+	EvShutdownStarted = "shutdown_started"
+	EvShutdownPhase   = "shutdown_phase"
+	EvShutdownDone    = "shutdown_done"
 	// EvQueryTimeout is a request that hit the query deadline.
 	EvQueryTimeout = "query_timeout"
 )

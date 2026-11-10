@@ -38,6 +38,8 @@ const (
 	ExitCursor     = 7
 	ExitRefused    = 8
 	ExitMismatch   = 9
+	// ExitShutdownOverrun is serve's hard exit when shutdown outlasts its deadline.
+	ExitShutdownOverrun = 10
 )
 
 // Stable error names. The wire names are the daemon's; daemon_offline is the

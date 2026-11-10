@@ -113,6 +113,7 @@ const exitTable = `  0  success
   7  cursor expired
   8  refused: a precondition failed (removal disabled, the extract target exists or a live Process holds it, or serve found an older index.db schema and needs the rebuild command)
   9  doctor found a mismatch
+  10 serve hard-exited because shutdown outlasted its 8 s deadline (shutdown_overrun in the log; the launch agent restarts it)
 `
 
 const stageTable = `

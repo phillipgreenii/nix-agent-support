@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/shutdown"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
@@ -62,6 +64,11 @@ type Options struct {
 	// SrcFS is the copier's source-side file system seam (tests count opens);
 	// the real file system when nil.
 	SrcFS copier.SrcFS
+	// Hooks, when set, gets the in-flight and phase providers once Open has
+	// built the loop tracker (the shutdown watchdog is armed before Open).
+	Hooks *shutdown.Hooks
+	// Watchdog, when set, is disarmed by a Close that finishes.
+	Watchdog *shutdown.Watchdog
 }
 
 // Daemon is the composed recorder.
@@ -162,6 +169,12 @@ type Daemon struct {
 	cancel context.CancelCauseFunc
 	stop   <-chan struct{}
 	gor    goroutines
+	// closeOnce makes Close idempotent; closeErr is its result. phase is the
+	// shutdown step in progress (nil before Close), read lock-free by the
+	// watchdog.
+	closeOnce sync.Once
+	closeErr  error
+	phase     atomic.Pointer[phaseRec]
 
 	// statusMu guards statusSnap, the cached figures opStatus serves.
 	statusMu     sync.Mutex
@@ -220,6 +233,7 @@ func Open(opt Options) (*Daemon, error) {
 	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, sweepPace: newPacer(opt.Clock, cfg.MaxFilesPerSecond), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
 	d.ctx, d.cancel = context.WithCancelCause(context.Background())
 	d.stop = d.ctx.Done()
+	d.registerShutdownHooks()
 	d.seenDB = newSeenStore(st, opt.Clock, func(err error) { o.Log.Warn("seen_write_failed", "err", err.Error()) })
 	d.loadSeen()
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
@@ -1053,44 +1067,104 @@ func (d *Daemon) refreshGaugesPass() {
 	d.obs.Reg.Set(obs.MStateUsedBytes, nil, float64(used)+qb)
 }
 
-// Close stops everything and flushes the checkpoint.
-func (d *Daemon) Close() error {
-	d.beginClosing()
-	if d.cancel != nil {
-		d.cancel(errDaemonClosing)
-	}
-	if d.srv != nil {
-		d.srv.Close()
-	}
-	if d.exp != nil {
-		d.exp.Close()
-	}
+// Close stops everything and flushes the checkpoint. It is idempotent and safe
+// on a daemon that was never started.
+func (d *Daemon) Close() error { return d.closeFor("close") }
+
+// closeFor is Close with the reason logged in shutdown_started.
+func (d *Daemon) closeFor(reason string) error {
+	d.closeOnce.Do(func() { d.closeErr = d.shutdown(reason) })
+	return d.closeErr
+}
+
+func (d *Daemon) shutdown(reason string) error {
+	t0 := d.clock.Now()
+	d.obs.Event(obs.EvShutdownStarted, "reason", reason)
 	if c, ok := d.opt.Procs.(io.Closer); ok {
 		// The kqueue loop stops now; the tracker's own watches are stopped by
 		// tr.Close below, and a closed table only refuses new ones.
 		defer func() { _ = c.Close() }()
 	}
 	var errs []error
-	errs = append(errs, d.w.Close())
-	d.waitLoops()
-	d.seenDB.flush()
-	d.tr.Close()
-	errs = append(errs, d.ckpt.Flush())
-	errs = append(errs, d.st.Close())
+	step := func(name string, fn func()) {
+		start := d.clock.Now()
+		d.phase.Store(&phaseRec{name: name, since: start})
+		fn()
+		d.obs.Event(obs.EvShutdownPhase, "phase", name, "duration_ms", ms(d.clock.Now().Sub(start)))
+	}
+	step("cancel", func() {
+		d.beginClosing()
+		if d.cancel != nil {
+			d.cancel(errDaemonClosing)
+		}
+	})
+	step("server_exporter", func() {
+		if d.srv != nil {
+			d.srv.Close()
+		}
+		if d.exp != nil {
+			d.exp.Close()
+		}
+	})
+	step("watcher", func() { errs = append(errs, d.w.Close()) })
+	step("loops_wait", d.waitLoops)
+	step("seen_flush", d.seenDB.flush)
+	step("tracker", d.tr.Close)
+	step("checkpoint_flush", func() { errs = append(errs, d.ckpt.Flush()) })
+	step("store", func() { errs = append(errs, d.st.Close()) })
+	d.phase.Store(&phaseRec{name: "done", since: d.clock.Now()})
+	// A deadline that fired is already exiting the process; Disarm losing the
+	// race means this line is the last the old process writes, so log first.
+	if d.opt.Watchdog == nil || d.opt.Watchdog.Disarm() {
+		d.obs.Event(obs.EvShutdownDone, "total_ms", ms(d.clock.Now().Sub(t0)))
+	}
 	return errors.Join(errs...)
+}
+
+// phaseRec is the shutdown step in progress and when it began.
+type phaseRec struct {
+	name  string
+	since time.Time
+}
+
+// registerShutdownHooks gives the watchdog its lock-free providers: the goLoop
+// set and the current shutdown step with the sweep counters.
+func (d *Daemon) registerShutdownHooks() {
+	h := d.opt.Hooks
+	if h == nil {
+		return
+	}
+	h.SetInFlight(func() []shutdown.Flight {
+		fl := d.inFlight()
+		out := make([]shutdown.Flight, len(fl))
+		for i, f := range fl {
+			out[i] = shutdown.Flight{Name: f.Name, Age: f.Age}
+		}
+		return out
+	})
+	h.SetPhase(func() shutdown.PhaseInfo {
+		pi := shutdown.PhaseInfo{Name: "not_closing", Attrs: []any{
+			"files_total", d.filesTotal.Load(), "files_copied", d.filesCopied.Load(), "backfill_done", d.backfillDone.Load(),
+		}}
+		if r := d.phase.Load(); r != nil {
+			pi.Name = r.name
+			pi.Elapsed = d.clock.Now().Sub(r.since)
+		}
+		return pi
+	})
 }
 
 // Run starts the daemon and blocks until ctx ends, then closes it.
 func (d *Daemon) Run(ctx context.Context) error {
 	if ctx.Err() != nil {
-		return d.Close() // stopped before start: nothing to serve
+		return d.closeFor("signal") // stopped before start: nothing to serve
 	}
 	if err := d.Start(); err != nil {
-		_ = d.Close()
+		_ = d.closeFor("start_failed")
 		return err
 	}
 	<-ctx.Done()
-	return d.Close()
+	return d.closeFor("signal")
 }
 
 func (d *Daemon) hello() any {

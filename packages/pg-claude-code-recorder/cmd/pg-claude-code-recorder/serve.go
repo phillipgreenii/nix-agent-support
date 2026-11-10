@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/serve"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/shutdown"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -54,9 +55,12 @@ func (a *app) serve(args []string) int {
 	for _, w := range cfg.Warnings {
 		log.Warn("config_warning", "msg", w)
 	}
+	hooks := &shutdown.Hooks{}
+	wd := shutdown.Watch(a.ctx, shutdown.Options{Log: log, InFlight: hooks.InFlight, Phase: hooks.Phase})
+	defer wd.Disarm()
 	stopPprof := startPprof(pprofOn, a.getenv, logLines{log})
 	defer stopPprof()
-	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, MetricsAddr: metricsAddr, Rebuild: rebuild})
+	d, err := serve.Open(serve.Options{Config: cfg, Logger: log, Version: Version, MetricsAddr: metricsAddr, Rebuild: rebuild, Hooks: hooks, Watchdog: wd})
 	if err != nil {
 		var older *store.SchemaOlderError
 		if errors.As(err, &older) {
