@@ -1,6 +1,7 @@
 package links
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -94,5 +95,16 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 	}
 	if !stored.Stored || stored.State != "closed" || stored.Assignee != "bob" || stored.Priority != "P1" || stored.Metadata["k"] != "v" || !reflect.DeepEqual(stored.Labels, []string{"x"}) {
 		t.Errorf("stored link = %+v", stored)
+	}
+}
+
+// A store that is not on schema 2 is refused with the store's error.
+func TestReadLinkedRefusesRetiredSchemaStore(t *testing.T) {
+	st := store.OpenRetiredSchemaForTest(t)
+	if _, err := ReadLinked(st, testRepo, "pr", testPR); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("ReadLinked on a retired-schema store = %v, want store.ErrOldSchema", err)
+	}
+	if _, err := ReadDetailed(Deps{Store: st, Repo: testRepo}, "pr", testPR); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("ReadDetailed on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }
