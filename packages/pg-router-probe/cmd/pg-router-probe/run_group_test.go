@@ -75,6 +75,54 @@ func TestUngroupedRuleBurstStillOneBeadPerLabelSet(t *testing.T) {
 	}
 }
 
+func TestDefaultGroupRuleUIDsCoverRepeatedRules(t *testing.T) {
+	for _, uid := range []string{
+		"pg-repo-runner-tips-stale",
+		"pg-router-queue-stalled",
+		"pg-repo-runner-red-no-newer-tip",
+		"pg-router-failure-rate",
+		"pg-router-role-stalled",
+		"beads-claims-no-live-owner",
+	} {
+		found := false
+		for _, g := range defaultGroupRuleUIDs {
+			found = found || g == uid
+		}
+		if !found {
+			t.Errorf("defaultGroupRuleUIDs lacks %q", uid)
+		}
+	}
+}
+
+// A later firing of a grouped default rule with a NEW label set, while the
+// group bead is already open, comments on it and files no second bead.
+func TestDefaultGroupedRuleNewLabelSetCommentsOnOpenBead(t *testing.T) {
+	const uid = "pg-repo-runner-red-no-newer-tip"
+	opts := episodeOpts(t)
+	opts.groupRuleUIDs = append([]string{}, defaultGroupRuleUIDs...)
+	first := groupSpy(burstAlerts(uid, "r1"))
+	if err := tick(t, opts, first, t0); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.created) != 1 {
+		t.Fatalf("first firing: want 1 bead, got %d", len(first.created))
+	}
+	bead := connectorIssue{ID: "zr-new", Labels: []string{"escalated"}, Metadata: map[string]string{
+		metaFingerprint: "group:" + uid, metaState: "active", metaEpisodeCount: "1",
+	}}
+	second := groupSpy(burstAlerts(uid, "r1", "r2"))
+	second.listEscalatedByQuery[defaultDedupQuery] = []connectorIssue{bead}
+	if err := tick(t, opts, second, t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.created) != 0 {
+		t.Fatalf("want no second bead, got %+v", second.created)
+	}
+	if len(second.commented) != 1 || second.commented[0].id != "zr-new" || !strings.Contains(second.commented[0].body, "repo=r2") {
+		t.Fatalf("want one comment naming repo=r2 on zr-new, got %+v", second.commented)
+	}
+}
+
 func TestGroupedRuleSecondTickIsSilent(t *testing.T) {
 	opts := episodeOpts(t)
 	opts.groupRuleUIDs = []string{"pg-repo-runner-tips-stale"}

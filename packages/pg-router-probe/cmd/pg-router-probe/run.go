@@ -257,6 +257,10 @@ var registeredRuleUIDs = []string{
 var defaultGroupRuleUIDs = []string{
 	"pg-repo-runner-tips-stale",
 	"pg-router-queue-stalled",
+	"pg-repo-runner-red-no-newer-tip",
+	"pg-router-failure-rate",
+	"pg-router-role-stalled",
+	"beads-claims-no-live-owner",
 }
 
 func defaultSnapshotPath() string {
