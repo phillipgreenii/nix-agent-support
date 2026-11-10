@@ -144,7 +144,7 @@ func newKRig(t *testing.T, mut func(*KeeperOptions)) *krig {
 
 func (g *krig) tick() {
 	g.t.Helper()
-	if err := g.k.Tick(); err != nil {
+	if err := g.k.Tick(context.Background()); err != nil {
 		g.t.Fatalf("Tick: %v", err)
 	}
 }
@@ -211,7 +211,7 @@ func TestHeartbeatTouchedOnlyAfterStatusWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.advance(time.Minute)
-	if err := g.k.Tick(); err == nil {
+	if err := g.k.Tick(context.Background()); err == nil {
 		t.Fatal("Tick succeeded although status.json could not be written")
 	}
 	if !g.hbMTime().Equal(old) {
@@ -270,7 +270,7 @@ func TestSweepListFailureIsAnIncompletePass(t *testing.T) {
 	if err := os.WriteFile(g.dir.LeasesPath(), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.k.Tick(); err == nil {
+	if err := g.k.Tick(context.Background()); err == nil {
 		t.Fatal("Tick succeeded although the leases directory is unusable")
 	}
 	if !g.hbMTime().Equal(old) {
@@ -647,7 +647,7 @@ func TestStartAdoptsARunningPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.advance(time.Second)
-	if err := g2.k.Tick(); err != nil {
+	if err := g2.k.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if hasPrefixCall(g.fp.log(), "start") {
@@ -658,5 +658,42 @@ func TestStartAdoptsARunningPair(t *testing.T) {
 	}
 	if s := g2.status(); !s.Assertion.Held || s.Assertion.PID != pair.caff.PID {
 		t.Fatalf("status after adoption = %+v", s.Assertion)
+	}
+}
+
+func TestTickStopsAtABoundaryWhenTheContextIsCancelled(t *testing.T) {
+	g := newKRig(t, nil)
+	g.putAcquire("a")
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel as the pass reaches the observe step: the converge step (which
+	// starts and stops processes) and everything after it must not run.
+	g.k.step = func(s string) {
+		g.steps = append(g.steps, s)
+		if s == stepObserve {
+			cancel()
+		}
+	}
+	err := g.k.Tick(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Tick = %v, want context.Canceled", err)
+	}
+	want := []string{stepSweep, stepGate, stepDesired, stepObserve}
+	if !slices.Equal(g.steps, want) {
+		t.Fatalf("steps = %v, want %v", g.steps, want)
+	}
+	if _, serr := os.Stat(g.hbPath()); !os.IsNotExist(serr) {
+		t.Fatalf("a cancelled pass touched the heartbeat (stat err = %v)", serr)
+	}
+}
+
+func TestTickWithACancelledContextStopsAfterTheSweep(t *testing.T) {
+	g := newKRig(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := g.k.Tick(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Tick = %v, want context.Canceled", err)
+	}
+	if want := []string{stepSweep}; !slices.Equal(g.steps, want) {
+		t.Fatalf("steps = %v, want %v", g.steps, want)
 	}
 }

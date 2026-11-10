@@ -291,6 +291,10 @@ in
               # replaces it make-before-break. Same key and reason as
               # darwin/modules/pg-router (pg2-e5u06).
               AbandonProcessGroup = true;
+              # Shutdown budget: 2 s lease-lock wait + 3 s telemetry flush + the
+              # in-flight pass (which stops at its next step boundary). 15 s is
+              # well above that and below launchd's 60 s clamp.
+              ExitTimeOut = 15;
               EnvironmentVariables = {
                 # launchd's bare default environment has no locale; the keeper needs
                 # none, and nothing is inherited from the user's shell. HOME is how

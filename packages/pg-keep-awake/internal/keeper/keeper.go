@@ -230,11 +230,12 @@ func (k *Keeper) Run(ctx context.Context) error {
 	ticker := time.NewTicker(k.Interval())
 	defer ticker.Stop()
 	for {
-		if err := k.Tick(); err != nil {
+		if err := k.Tick(ctx); err != nil && ctx.Err() == nil {
 			k.logf("tick: %v", err)
 		}
 		select {
 		case <-ctx.Done():
+			k.logf("shutdown: stop signal received")
 			return nil
 		case <-ticker.C:
 		}
@@ -246,15 +247,18 @@ func (k *Keeper) Run(ctx context.Context) error {
 // countdown) and a bounded OTel flush. Valid leases, assertion.json, the
 // anchor and caffeinate are left alone.
 func (k *Keeper) Shutdown() {
+	k.logf("shutdown: sweeping leases")
 	if _, err := k.sw.Shutdown(); err != nil {
 		k.logf("shutdown sweep: %v", err)
 	}
 	k.em.RecordKeeperUp(false)
+	k.logf("shutdown: flushing telemetry")
 	ctx, cancel := context.WithTimeout(context.Background(), emitterCloseTimeout)
 	defer cancel()
 	if err := k.em.Close(ctx); err != nil {
 		k.logf("close emitter: %v", err)
 	}
+	k.logf("shutdown: done")
 }
 
 // Tick runs one pass: sweep; read the battery once and compute the gate;
@@ -264,7 +268,12 @@ func (k *Keeper) Shutdown() {
 // still counts as completed. A pass that cannot trust its view of the leases
 // (the lease directory could not be listed) or cannot write status.json is
 // not completed: it returns an error and leaves the heartbeat alone.
-func (k *Keeper) Tick() error {
+//
+// ctx is checked at the natural boundaries between steps (after the sweep and
+// before the converge step, which starts and stops processes): a cancelled
+// context abandons the rest of the pass, returns ctx.Err() and leaves the
+// heartbeat alone, so a stop signal never waits for a whole pass.
+func (k *Keeper) Tick(ctx context.Context) error {
 	started := k.now()
 	now := started
 
@@ -280,6 +289,10 @@ func (k *Keeper) Tick() error {
 	}
 	if serr != nil && sres.Live == nil && !sres.LockSkipped {
 		return fmt.Errorf("sweep: %w", serr)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// 2. Read the battery once; compute the gate.
@@ -299,6 +312,9 @@ func (k *Keeper) Tick() error {
 	// 4 and 5. Observe actual state and converge.
 	in := ReconcileInputs{Now: now, Live: sres.Live, Pause: pause, Gate: gate, Config: k.acfg}
 	k.step(stepObserve)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rr := k.rc.Reconcile(in)
 	k.step(stepConverge)
 	for _, err := range rr.Errs {
