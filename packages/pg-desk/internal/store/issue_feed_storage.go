@@ -79,6 +79,11 @@ func ensureIssueFeedStorage(s *Store) error {
 // returns, so callers may issue a query right after on the single
 // connection.
 func (s *Store) tableColumns(table string) (map[string]bool, error) {
+	if s.faultTableColumns != nil { // test seam: nil in production
+		if err := s.faultTableColumns(table); err != nil {
+			return nil, err
+		}
+	}
 	rows, err := s.sql.Query(`SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return nil, fmt.Errorf("store: read %s columns: %w", table, err)

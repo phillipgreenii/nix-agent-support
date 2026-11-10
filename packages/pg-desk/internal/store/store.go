@@ -84,6 +84,16 @@ type Store struct {
 	// gateScope is the delivery gate's scope predicate (SetGateScope); nil
 	// means no gate, so nothing is withheld.
 	gateScope atomic.Pointer[GateScope]
+
+	// interpStamp is the stamp the handle writes into interpretation rows and
+	// compares against (SetInterpStamp); nil means none. Atomic, like
+	// gateScope, because the handle is shared.
+	interpStamp atomic.Pointer[string]
+
+	// faultTableColumns, when set, is consulted at the start of tableColumns;
+	// a non-nil return is that call's error. TEST SEAM, nil in production:
+	// the pragma read cannot otherwise fail on an open handle.
+	faultTableColumns func(table string) error
 }
 
 // synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`
@@ -148,6 +158,10 @@ func Open(path string) (*Store, error) {
 	if err := ensureIssueFeedStorage(s); err != nil {
 		_ = s.sql.Close()
 		return nil, fmt.Errorf("store: ensure issue feed storage %s: %w", path, err)
+	}
+	if err := ensureInterpretationStamp(s); err != nil {
+		_ = s.sql.Close()
+		return nil, fmt.Errorf("store: ensure interpretation stamp %s: %w", path, err)
 	}
 	return s, nil
 }

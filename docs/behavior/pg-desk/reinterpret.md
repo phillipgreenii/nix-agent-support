@@ -95,6 +95,13 @@ The stamp is `<build version>/<config digest>`.
   (the path the configuration was discovered at differs between the heartbeat, a router role and
   the operator's shell, and would make the stamp flap), and it MUST be unchanged by reordering the
   configuration's keys or by whitespace.
+- The digest is over a fixed projection of the configuration, not the whole configuration: the
+  fields interpret reads (own and team identities, watched labels, the approver allowlist, the
+  verdict generations, the check interpreters, the review-exempt checks, the Jira block, the category
+  vocabulary and the urgency block) plus the resolved in-progress and done status lists (the
+  configured list, or the default when none is configured). An empty list and an absent one digest
+  alike. A test fails when interpret starts reading a configuration field the projection does not
+  hold, so a new read cannot silently escape the stamp.
 - A build whose version is `dev` (a development or test build) stamps `dev/<digest>`.
 - A row that carries no stamp differs from every stamp.
 - Interpretation depends on configuration outside the package sources (for example the team

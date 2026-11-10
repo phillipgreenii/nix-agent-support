@@ -131,6 +131,19 @@ func WithRunRecordWriter(w io.Writer) Option {
 	return func(p *Pipeline) { p.recordOut = w }
 }
 
+// WithStamp sets the interpretation stamp on the store handle the pipeline
+// writes through (Store.SetInterpStamp), so every interpretation row the
+// pipeline writes carries it. The stamp is `interpret.Stamp(version, cfg)`;
+// callers compute it where the config and the store meet. An empty stamp
+// leaves the handle's stamp as it was.
+func WithStamp(stamp string) Option {
+	return func(p *Pipeline) {
+		if stamp != "" {
+			p.store.SetInterpStamp(stamp)
+		}
+	}
+}
+
 // New constructs a Pipeline backed by a fresh gather.Gatherer — exactly
 // one per Pipeline instance, matching internal/gather's own documented
 // expectation ("the pipeline packet, 6, is expected to construct exactly

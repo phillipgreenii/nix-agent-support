@@ -199,6 +199,16 @@ interpretation-relevant configuration that computed the row (see [`reinterpret.m
   can omit it. A handle with no stamp writes NULL (read-only tools and tests).
 - An interpretation row that failed to re-interpret carries the stamp followed by `!failed`.
 - A write of the stamp alone MUST change no other column.
+- The **behind query** returns the keys (repository, entity type, entity id) of the `pr`
+  interpretation rows of one repository whose stamp differs from the handle's stamp (a NULL stamp
+  differs from every stamp) and that are not marked failed under that stamp. It reads only the
+  interpretation table joined to the entity row WITHOUT its facts, so a query that finds nothing is
+  cheap, and it orders open PRs first without reading facts: active entities before inactive ones,
+  then the most recently hydrated first, then by entity id; a row whose entity is gone is still
+  returned, last, so its failure can be recorded. A caller may bound the number of rows returned.
+- The behind query MUST answer "unknown", never "none", when it cannot decide: on a store that is not
+  on schema 2 and on a store whose interpretation table has no stamp column yet. A handle with no
+  stamp cannot ask the question (it would find every row behind forever), so the query refuses it.
 
 ## Interpretation writes need schema 2
 

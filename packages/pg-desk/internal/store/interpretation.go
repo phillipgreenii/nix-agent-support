@@ -33,30 +33,64 @@ type Interpretation struct {
 	Degraded       bool
 	SyncError      string // old schema only (the cutover drops the column); always empty on the new schema
 	AsOf           string // RFC3339 timestamp
+
+	// InterpVersion is the stamp the row was written under (the interp_version
+	// column). Readers fill it; "" means NULL, a row written before stamping
+	// (or read from a store that does not have the column yet). It is never
+	// written from this field: the writer stamps with the handle's stamp
+	// (SetInterpStamp).
+	InterpVersion string
 }
 
 // interpretationSelectList is the column list the readers select. It is
 // schema-dual: the new schema has no sync_error column (the cutover drops
 // it), so there the same position is filled with NULL and SyncError reads
-// back empty.
-func interpretationSelectList(newSchema bool) string {
+// back empty. It is also guarded for the stamp: a store that has not had
+// interp_version added yet (a read-only or raw open that ran before any Open
+// of the new binary) gets NULL in that position, so the readers work and the
+// row reads as unstamped.
+func interpretationSelectList(newSchema, haveStamp bool) string {
 	syncError := "sync_error"
 	if newSchema {
 		syncError = "NULL"
 	}
+	stamp := "interp_version"
+	if !haveStamp {
+		stamp = "NULL"
+	}
 	return `repo, entity_type, entity_id, ownership, enrichment, urgency, category,
 		        dispositions, approvals, gate_state, match_reasons, panel,
-		        ready_to_promote, degraded, ` + syncError + `, as_of`
+		        ready_to_promote, degraded, ` + syncError + `, as_of, ` + stamp
+}
+
+// selectListFor decides both guards from the table's current shape, before
+// any query is issued (never while a result set is open).
+func (s *Store) selectListFor() (string, error) {
+	newSchema, haveStamp, err := s.interpShape()
+	if err != nil {
+		return "", err
+	}
+	return interpretationSelectList(newSchema, haveStamp), nil
 }
 
 // UpsertInterpretation inserts or replaces the interpretation row keyed by
 // (Repo, EntityType, EntityID). It works on both schema versions; on the
 // new schema, which has no sync_error column, a non-empty SyncError is an
 // error rather than a silently dropped write.
+//
+// It writes the handle's stamp (SetInterpStamp) into interp_version: a handle
+// with no stamp writes NULL. On a store whose table has no interp_version
+// column (a raw open that never ran the ensure step) the stamp is not written.
 func (s *Store) UpsertInterpretation(i Interpretation) error {
-	newSchema, err := s.isNewSchema()
+	newSchema, haveStamp, err := s.interpShape()
 	if err != nil {
 		return fmt.Errorf("store: upsert interpretation (%s,%s,%s): %w", i.Repo, i.EntityType, i.EntityID, err)
+	}
+	stampCol, stampVal, stampSet := "", "", ""
+	var stampArgs []any
+	if haveStamp {
+		stampCol, stampVal, stampSet = ", interp_version", ", ?", ", interp_version = excluded.interp_version"
+		stampArgs = []any{nullableString(s.InterpStamp())}
 	}
 	if newSchema {
 		if i.SyncError != "" {
@@ -66,8 +100,8 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 			`INSERT INTO interpretation (
 			   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
 			   dispositions, approvals, gate_state, match_reasons, panel,
-			   ready_to_promote, degraded, as_of
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   ready_to_promote, degraded, as_of`+stampCol+`
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+stampVal+`)
 			 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
 			   ownership = excluded.ownership,
 			   enrichment = excluded.enrichment,
@@ -80,18 +114,20 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 			   panel = excluded.panel,
 			   ready_to_promote = excluded.ready_to_promote,
 			   degraded = excluded.degraded,
-			   as_of = excluded.as_of`,
-			i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
-			i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
-			i.ReadyToPromote, i.Degraded, i.AsOf,
+			   as_of = excluded.as_of`+stampSet,
+			append([]any{
+				i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
+				i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
+				i.ReadyToPromote, i.Degraded, i.AsOf,
+			}, stampArgs...)...,
 		)
 	} else {
 		_, err = s.sql.Exec(
 			`INSERT INTO interpretation (
 			   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
 			   dispositions, approvals, gate_state, match_reasons, panel,
-			   ready_to_promote, degraded, sync_error, as_of
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   ready_to_promote, degraded, sync_error, as_of`+stampCol+`
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+stampVal+`)
 			 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
 			   ownership = excluded.ownership,
 			   enrichment = excluded.enrichment,
@@ -105,10 +141,12 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 			   ready_to_promote = excluded.ready_to_promote,
 			   degraded = excluded.degraded,
 			   sync_error = excluded.sync_error,
-			   as_of = excluded.as_of`,
-			i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
-			i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
-			i.ReadyToPromote, i.Degraded, nullableString(i.SyncError), i.AsOf,
+			   as_of = excluded.as_of`+stampSet,
+			append([]any{
+				i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
+				i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
+				i.ReadyToPromote, i.Degraded, nullableString(i.SyncError), i.AsOf,
+			}, stampArgs...)...,
 		)
 	}
 	if err != nil {
@@ -122,12 +160,12 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 // docket's packet 7 (serve) routes rows into a fixed set of panel arrays
 // and needs a stable order across calls, not incidental SQLite scan order.
 func (s *Store) ListInterpretations() ([]Interpretation, error) {
-	newSchema, err := s.isNewSchema()
+	cols, err := s.selectListFor()
 	if err != nil {
 		return nil, fmt.Errorf("store: list interpretations: %w", err)
 	}
 	rows, err := s.sql.Query(
-		`SELECT ` + interpretationSelectList(newSchema) + `
+		`SELECT ` + cols + `
 		 FROM interpretation ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -138,14 +176,15 @@ func (s *Store) ListInterpretations() ([]Interpretation, error) {
 	var out []Interpretation
 	for rows.Next() {
 		var interp Interpretation
-		var syncError sql.NullString
+		var syncError, stamp sql.NullString
 		if err := rows.Scan(&interp.Repo, &interp.EntityType, &interp.EntityID, &interp.Ownership,
 			&interp.Enrichment, &interp.Urgency, &interp.Category, &interp.Dispositions, &interp.Approvals,
 			&interp.GateState, &interp.MatchReasons, &interp.Panel, &interp.ReadyToPromote, &interp.Degraded,
-			&syncError, &interp.AsOf); err != nil {
+			&syncError, &interp.AsOf, &stamp); err != nil {
 			return nil, fmt.Errorf("store: scan interpretation row: %w", err)
 		}
 		interp.SyncError = syncError.String
+		interp.InterpVersion = stamp.String
 		out = append(out, interp)
 	}
 	if err := rows.Err(); err != nil {
@@ -169,25 +208,26 @@ func (s *Store) HasAnyInterpretation() (bool, error) {
 // GetInterpretation returns the interpretation row for
 // (repo, entityType, entityID), or found=false if no such row exists.
 func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Interpretation, found bool, err error) {
-	newSchema, err := s.isNewSchema()
+	cols, err := s.selectListFor()
 	if err != nil {
 		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
-	var syncError sql.NullString
+	var syncError, stamp sql.NullString
 	row := s.sql.QueryRow(
-		`SELECT `+interpretationSelectList(newSchema)+`
+		`SELECT `+cols+`
 		 FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&interp.Repo, &interp.EntityType, &interp.EntityID, &interp.Ownership,
 		&interp.Enrichment, &interp.Urgency, &interp.Category, &interp.Dispositions, &interp.Approvals,
 		&interp.GateState, &interp.MatchReasons, &interp.Panel, &interp.ReadyToPromote, &interp.Degraded,
-		&syncError, &interp.AsOf); err != nil {
+		&syncError, &interp.AsOf, &stamp); err != nil {
 		if err == sql.ErrNoRows {
 			return Interpretation{}, false, nil
 		}
 		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
 	interp.SyncError = syncError.String
+	interp.InterpVersion = stamp.String
 	return interp, true, nil
 }
