@@ -107,6 +107,10 @@ in
         };
         serviceConfig = {
           ProcessType = "Background";
+          # serve bounds the http Shutdown at 5 s (cmd/pg-checkout-pool/serve.go)
+          # and launchd's default ExitTimeOut is also 5 s, so launchd could
+          # SIGKILL mid-drain. Keep this above that bound, under the 60 s cap.
+          ExitTimeOut = 15;
           StandardOutPath = stdoutLog;
           StandardErrorPath = stderrLog;
         }

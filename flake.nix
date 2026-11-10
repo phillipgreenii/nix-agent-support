@@ -8571,6 +8571,8 @@
                 assert ua.keepAlive == true;
                 assert ua.runAtLoad;
                 assert ua.serviceConfig.ProcessType == "Background";
+                # the 5 s serve shutdown bound plus margin, under launchd's 60 s clamp
+                assert ua.serviceConfig.ExitTimeOut == 15;
                 assert enabled.phillipgreenii.observability.metricsTargets.pg-checkout-pool.port == 9148;
                 assert enabled.phillipgreenii.observability.metricsTargets.pg-checkout-pool.scrapeInterval == "60s";
                 assert hasInfixNoCtx "pg-checkout-pool serve" ua.script;
