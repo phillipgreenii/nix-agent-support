@@ -339,7 +339,9 @@ under "Rule format and compatibility".
 - Bare `#123` is not linked: it appears in headings, step numbers and issue lists too often.
 - A bare `PR #123` with no `owner/repo` in the message declines by default; the session repo
   fallback is an option, `sessionRepoFallback`, default `false` (changed after review: a wrong
-  repo is the worst outcome). The operator has not ruled on the default.
+  repo is the worst outcome). Operator ruling (Phillip, 2026-11-09), verbatim: "1) yes. if no
+  session repo, then don't render." So the first deployment turns the fallback on, and with no
+  session repo the reference stays plain text (decline `no-repo`); the shipped default stays off.
 - The keyword PR forms link the whole token (`PR 12`), not just the number.
 - Existing markdown links, autolinks and bare URLs are protected from rewriting; link-text
   escaping gains `_`, `*` and `<`.
