@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { register } from './register'
 import { listContributions } from './contributions'
 import { setOptions } from './options'
+import { resetLinkMemo, rewriteLinks, type LinkContext, type LinkRule } from './links'
 
 test('registering the mod registers the band and alert ui.render hooks and session.start', () => {
   const seen: Array<{ name: string; component?: string }> = []
@@ -46,4 +47,18 @@ test('an engine.create hook adds the pgd noun to $ and its put stores a contribu
   await start.fn(make('$'), {}, async () => undefined)
   await built.pgd.put({ id: 'r', surface: 'alert', priority: 1, text: 'wired' })
   expect(listContributions('alert').map(c => c.text)).toEqual(['wired'])
+})
+
+test('registering the mod registers the github-pr and jira link kinds with the engine', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(register as any)(() => {})
+  resetLinkMemo()
+  const rules: LinkRule[] = [
+    { kind: 'github-pr', name: 'pr', options: { sessionRepoFallback: false } },
+    { kind: 'jira', name: 'jira', options: { baseUrl: 'https://tracker.example/browse', keys: ['ABC'] } },
+  ]
+  const ctx: LinkContext = { githubOwners: ['acme'], knownRepos: ['acme/widgets'] }
+  expect(rewriteLinks('see acme/widgets#5 and ABC-12', rules, ctx)).toBe(
+    'see [acme/widgets#5](https://github.com/acme/widgets/pull/5) and [ABC-12](https://tracker.example/browse/ABC-12)',
+  )
 })

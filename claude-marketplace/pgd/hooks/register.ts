@@ -18,6 +18,7 @@ import { hydrateToggles, setToggleStore } from './toggles'
 import { registerModalEventHooks } from './modals'
 import { registerLinkHooks } from './links'
 import { registerGithubPrKind } from './githubPr'
+import { registerJiraKind } from './jira'
 import { registerPgdNoun } from './pgd-noun'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
@@ -75,6 +76,8 @@ export const register: Register = on => {
   registerBandHooks(on)
   registerAlertHooks(on)
   registerModalEventHooks(on)
+  registerGithubPrKind()
+  registerJiraKind()
   registerLinkHooks(on)
   // The pgd noun: a plugin adds a noun to `$` only through an engine.create hook.
   registerPgdNoun(on)
