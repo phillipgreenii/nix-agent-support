@@ -85,7 +85,7 @@ func TestPipelineRunInterpretOnly_FailureIsStageTagged(t *testing.T) {
 	}), &out)
 	// A never-gathered entity is a quiet no-op now (pg2-4i9ywp); a malformed
 	// stored-facts row is the load_facts failure this test pins.
-	if err := p.store.UpsertEntity(store.Entity{
+	if err := p.store.UpsertEntityForTest(store.Entity{
 		Repo: "acme/widgets", EntityType: "pr", EntityID: "bad-facts",
 		Facts: "{not json", ContentHash: "fixture",
 	}); err != nil {

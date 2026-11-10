@@ -226,38 +226,38 @@ func (s *Store) Path() string { return s.path }
 // Close closes the underlying handle.
 func (s *Store) Close() error { return s.sql.Close() }
 
-// OpenForTest opens an in-temp-dir store for tests, registering cleanup.
-// The store is at the OLD schema (version 1); use OpenNewSchemaForTest for
-// one that has already been cut over.
-func OpenForTest(t interface {
+// testT is the part of *testing.T (or testing.TB) the open helpers use.
+type testT interface {
 	TempDir() string
 	Cleanup(func())
 	Fatalf(string, ...any)
-},
-) *Store {
-	SetSynchronousForTests("OFF")
-	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("OpenForTest: %v", err)
+}
+
+// OpenForTest opens an in-temp-dir store for tests, registering cleanup. The
+// store has been cut over to the new schema (version 2), the only schema the
+// production write paths accept. A test of the old schema (the cutover
+// itself, the schema-dual readers, the refusal of an old store) opens one
+// with OpenSchema1ForTest.
+func OpenForTest(t testT) *Store {
+	s := OpenSchema1ForTest(t)
+	if err := s.Cutover(); err != nil {
+		t.Fatalf("OpenForTest: cutover: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
-// OpenNewSchemaForTest is OpenForTest for a store that has already been cut
-// over to the new schema (version 2): change_log, consumer and the
-// key/value annotation exist. It takes the same t parameter shape as
-// OpenForTest.
-func OpenNewSchemaForTest(t interface {
-	TempDir() string
-	Cleanup(func())
-	Fatalf(string, ...any)
-},
-) *Store {
-	s := OpenForTest(t)
-	if err := s.Cutover(); err != nil {
-		t.Fatalf("OpenNewSchemaForTest: cutover: %v", err)
+// OpenNewSchemaForTest is OpenForTest, kept under its older name.
+func OpenNewSchemaForTest(t testT) *Store { return OpenForTest(t) }
+
+// OpenSchema1ForTest opens an in-temp-dir store at the OLD schema (version
+// 1), for the few tests that need it.
+func OpenSchema1ForTest(t testT) *Store {
+	SetSynchronousForTests("OFF")
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("OpenSchema1ForTest: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

@@ -119,7 +119,7 @@ func TestReadDetailed_DependsOn(t *testing.T) {
 
 // On the unmigrated store `show` still lists the stack dependency.
 func TestReadDetailed_DependsOnUnmigrated(t *testing.T) {
-	st := store.OpenForTest(t)
+	st := store.OpenSchema1ForTest(t)
 	putStackPR(t, st, 1, "open", "feat-a", "main", false)
 	top := putStackPR(t, st, 2, "open", "feat-b", "feat-a", false)
 	got, err := ReadDetailed(deps(st), "pr", top)

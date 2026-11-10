@@ -57,21 +57,13 @@
       "category": "chore",
       "as_of": "2026-09-16T10:00:00Z",
       "ready_to_promote": false,
-      "degraded": false,
-      "sync_error": "sync timeout"
+      "degraded": false
     }
   ],
   "last_run_at": "2026-09-16T11:59:00Z",
   "last_sweep_at": "2026-09-16T11:00:00Z",
-  "runs_failed_24h": 1,
-  "errors": [
-    {
-      "repo": "acme/widgets",
-      "entity_type": "pull_request",
-      "entity_id": "303",
-      "error": "sync timeout"
-    }
-  ],
+  "runs_failed_24h": 0,
+  "errors": [],
   "attention": null,
   "attention_error": "no repository configured",
   "sources": []

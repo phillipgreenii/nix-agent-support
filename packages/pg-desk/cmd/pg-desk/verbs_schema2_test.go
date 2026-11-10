@@ -433,7 +433,7 @@ func newVerbFixture(t *testing.T) *verbFixture {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
 	if err := st.UpsertInterpretation(store.Interpretation{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {

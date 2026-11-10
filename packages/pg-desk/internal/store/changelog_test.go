@@ -111,7 +111,7 @@ func TestWriteEntityWithLog_AdoptsCutoverRowAtVersionZero(t *testing.T) {
 }
 
 func TestWriteEntityWithLog_RefusesOldSchema(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	_, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"x"}, "sync", "t")
 	if !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
@@ -377,7 +377,7 @@ func TestLatestChangeAt_PerEntityMaxTypeScopedAndAbsentWhenNoRows(t *testing.T) 
 }
 
 func TestLatestChangeAt_RefusesOldSchema(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	if _, err := s.LatestChangeAt("pr"); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
 	}

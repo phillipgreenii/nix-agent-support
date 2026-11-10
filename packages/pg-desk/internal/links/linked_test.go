@@ -74,7 +74,7 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 	if err := st.ReplaceDerivedXrefs(testRepo, "pr", testPR, derived); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: testRepo, EntityType: "issue", EntityID: "ABC-43", AsOf: "2026-10-01T00:00:00Z",
 		Facts: `{"issue_show":{"title":"ABC-43: adopt me","state":"closed","labels":["x"],"metadata":{"k":"v"},"assignee":"bob","priority":"P1","closed_by":"nobody"}}`,
 	}); err != nil {

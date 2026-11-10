@@ -120,7 +120,7 @@ func TestReinterpretStored_DifferentFactsCommittedBetweenReadAndWriteSkipTheWrit
 	opts := ReinterpretOptions{beforeWrite: func() error {
 		e, _, _ := p.store.GetEntity(riRepo, "pr", "41")
 		e.ContentHash = "someone-hydrated-different-facts"
-		return p.store.UpsertEntity(e)
+		return p.store.UpsertEntityForTest(e)
 	}}
 	res, err := riReinterpret(t, p, "pr", "41", opts)
 	if err != nil || !res.Write.Skipped || res.Write.Written {
@@ -153,7 +153,7 @@ func TestReinterpretStored_RequiresAStamp(t *testing.T) {
 
 // INV-REINTERPRET-12: a schema-1 store is refused with the cutover message.
 func TestReinterpretStored_SchemaOneStoreIsRefused(t *testing.T) {
-	st := store.OpenForTest(t)
+	st := store.OpenSchema1ForTest(t)
 	st.SetInterpStamp("s")
 	p := New(testCfg(), st)
 	seedInterpretOnlyEntity(t, p, "43", minimalFacts(t, map[string]any{"author": "me", "title": "x"}))

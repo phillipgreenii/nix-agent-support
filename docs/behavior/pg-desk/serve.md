@@ -18,8 +18,10 @@ serves `GET /api/v1/dashboard` with today's payload contract — the five named 
 (`team_awaiting_owner`, `team_awaiting_team`, `team_awaiting_me`, `mine_awaiting_me`,
 `mine_awaiting_team`) and the root fields `generated_at`, `age_seconds`, `stale`, `stale_after_seconds`,
 `sync_interval_seconds`, `dropped_count` — plus the fields this phase adds: a `hidden` array,
-`last_run_at`, `last_sweep_at`, `runs_failed_24h`, `errors[]`, and per-row `degraded`,
-`sync_error`, and `ready_to_promote`. It also carries an additive `sources[]` — the per-source data age (see [`freshness.md`](freshness.md)): one row per
+`last_run_at`, `last_sweep_at`, `runs_failed_24h`, `errors[]`, and per-row `degraded` and
+`ready_to_promote`. `errors[]` is always empty and `runs_failed_24h` always `0`, and no row carries
+`sync_error`: nothing writes a sync error any more, and the two fields stay only so the dashboard
+that selects them keeps working until its panel is removed. It also carries an additive `sources[]` — the per-source data age (see [`freshness.md`](freshness.md)): one row per
 connector source with `source`, `label`, `last_success_at`, `age_seconds` (both `null` for a source
 with no recorded success) and `stale`. The payload's own `generated_at`, `age_seconds` and `stale`
 are PIPELINE LIVENESS, not data age: they derive from `meta.last_heartbeat` with the same
@@ -528,5 +530,5 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
-`sync_error` is no longer populated by anything (the sync stage was deleted, packet P9a-2). Any payload field this dashboard
+`sync_error` is no longer stored or served (the sync stage was deleted, packet P9a-2, and the store no longer reads the column). Any payload field this dashboard
 could eventually carry from cross-referencing is Phase 13.

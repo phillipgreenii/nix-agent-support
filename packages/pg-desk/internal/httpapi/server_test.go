@@ -148,7 +148,7 @@ func TestStaleFlag(t *testing.T) {
 // leaves its would-be panel entirely and appears only in Hidden, still
 // carrying the three new per-row fields.
 func TestHiddenArrayExcludesFromPanel(t *testing.T) {
-	s := store.OpenForTest(t)
+	s := store.OpenSchema1ForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "9",
 		Panel: PanelMineAwaitingTeam, ReadyToPromote: true, Degraded: true,
@@ -310,7 +310,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		}
 	}
 
-	s := store.OpenForTest(t)
+	s := store.OpenSchema1ForTest(t)
 
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "101",
@@ -335,11 +335,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "303",
 		Ownership: "mine", Category: "chore",
 		Panel: PanelMineAwaitingTeam, ReadyToPromote: false, Degraded: false,
-		// SyncError is the one row exercising the sync_error Grafana
-		// selector (see the doc comment above): buildRow sets it uniformly
-		// regardless of destination panel, so a single fixture suffices.
-		SyncError: "sync timeout",
-		AsOf:      "2026-09-16T10:00:00Z",
+		AsOf: "2026-09-16T10:00:00Z",
 	})
 	hidden := true
 	if err := s.UpsertAnnotation(store.Annotation{
@@ -369,7 +365,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		"entity_id", "title", "url", "author", "human_approved", "self_approved", "human_changes_requested", "bot_verdict",
 		"match_team_authored", "match_review_requested", "match_has_watch_label", "ready_to_promote", "degraded",
 	}
-	hiddenColumns := []string{"entity_id", "category", "ready_to_promote", "degraded", "sync_error"}
+	hiddenColumns := []string{"entity_id", "category", "ready_to_promote", "degraded"}
 
 	if len(payload.MineAwaitingMe) != 1 {
 		t.Fatalf("MineAwaitingMe = %+v, want exactly 1 row", payload.MineAwaitingMe)
@@ -608,7 +604,7 @@ func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
 func TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel(t *testing.T) {
 	s := store.OpenNewSchemaForTest(t)
 	for _, id := range []string{"9", "10"} {
-		if err := s.UpsertEntity(store.Entity{
+		if err := s.UpsertEntityForTest(store.Entity{
 			Repo: "acme/widgets", EntityType: "pr", EntityID: id,
 			Facts: `{}`, AsOf: "2026-09-16T10:00:00Z",
 		}); err != nil {

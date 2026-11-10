@@ -29,7 +29,7 @@ func linksFixture(t *testing.T, cutover bool) (string, *config.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: "acme/api", EntityType: "pr", EntityID: "acme/api#123", AsOf: "2026-10-01T10:00:00Z",
 		Facts: `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123"}}`,
 	}); err != nil {
@@ -246,7 +246,7 @@ func TestLinksVerbBuildLinksHonorConfigCheckInterpreters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: "acme/api", EntityType: "pr", EntityID: "acme/api#123", AsOf: "2026-10-01T10:00:00Z",
 		Facts: `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123","head_sha":"h"},` +
 			`"ci":{"runs":[` +

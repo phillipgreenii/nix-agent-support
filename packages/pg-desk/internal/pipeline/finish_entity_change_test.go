@@ -82,7 +82,7 @@ func TestFinishEntityChange_NoLinksFlagLeavesStoredLinksAlone(t *testing.T) {
 func TestFinishEntityChange_InterpretationWriteFailureSkipsTheLinks(t *testing.T) {
 	p := finishPipeline(t)
 	bad := finishInterp("i-1", "A")
-	bad.SyncError = "boom" // refused on the new schema: a real store failure
+	_ = p.store.Close() // a real store failure
 	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
 		interp: bad, contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})

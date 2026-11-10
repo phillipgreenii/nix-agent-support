@@ -92,7 +92,6 @@ func interpretationRow(repo, entityType, entityID string, interp interpret.Inter
 		Panel:          interp.Panel,
 		ReadyToPromote: interp.ReadyToPromote,
 		Degraded:       interp.Degraded != "",
-		SyncError:      "",
 		AsOf:           interp.AsOf,
 	}
 	return row, nil

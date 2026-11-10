@@ -28,7 +28,7 @@ func attentionConfig() *config.Config {
 // pr.review-requested raises as a medium item.
 func seedAttentionPR(t *testing.T, s *store.Store, id string) {
 	t.Helper()
-	if err := s.UpsertEntity(store.Entity{
+	if err := s.UpsertEntityForTest(store.Entity{
 		Repo: attentionRepo, EntityType: "pr", EntityID: id,
 		Facts: `{"pr_show":{"number":1,"state":"open","author":"me","head_sha":"h1"}}`, AsOf: "2026-10-06T11:00:00Z",
 	}); err != nil {

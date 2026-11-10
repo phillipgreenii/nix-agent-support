@@ -13,7 +13,7 @@ import (
 // hide/unhide/wip's own "does the entity exist at all" resolution check.
 func seedBareEntity(t *testing.T, st *store.Store, repo, id string) {
 	t.Helper()
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: repo, EntityType: entityTypePR, EntityID: id,
 		Facts: `{}`, AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {

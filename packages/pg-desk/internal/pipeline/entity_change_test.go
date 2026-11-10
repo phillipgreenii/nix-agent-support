@@ -262,7 +262,7 @@ func TestRunEntityChange_RemovedObservedStateWritesAndClearsLinks(t *testing.T) 
 
 func TestRunEntityChange_OldSchemaStoreRefused(t *testing.T) {
 	p := newTestPipeline(t, nil, nil)
-	p.store = store.OpenForTest(t) // version 1: newTestPipeline's store is cut over
+	p.store = store.OpenSchema1ForTest(t) // version 1: newTestPipeline's store is cut over
 	p.entityGatherers = map[string]gather.EntityGatherer{
 		"issue": funcEntityGatherer(func(gather.ChangeKind) (gather.GatherResult, error) {
 			t.Fatal("gather must not run on an old-schema store")
@@ -307,7 +307,7 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreAdded(t *testing.T) {
 	p := ecPipeline(t, &res, &gerr)
 
 	// A row the cutover left at version 0 with no hydrated_at is unobserved.
-	if err := p.store.UpsertEntity(store.Entity{Repo: ecRepo, EntityType: "issue", EntityID: "i-1", Facts: `{"old":true}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}); err != nil {
+	if err := p.store.UpsertEntityForTest(store.Entity{Repo: ecRepo, EntityType: "issue", EntityID: "i-1", Facts: `{"old":true}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}); err != nil {
 		t.Fatal(err)
 	}
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})

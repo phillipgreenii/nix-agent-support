@@ -92,7 +92,7 @@ func TestRunInterpretOnly_LoadFactsFailures(t *testing.T) {
 	t.Run("undecodable stored facts", func(t *testing.T) {
 		var out bytes.Buffer
 		p := interpretOnlyPipeline(t, &out)
-		if err := p.store.UpsertEntity(store.Entity{
+		if err := p.store.UpsertEntityForTest(store.Entity{
 			Repo: "acme/widgets", EntityType: "pr", EntityID: "33",
 			Facts: "{not json", AsOf: "2026-09-16T00:00:00Z", ContentHash: "h",
 		}); err != nil {

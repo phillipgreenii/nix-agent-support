@@ -109,7 +109,7 @@ const (
 )
 
 func TestComputeHealthOnAnUnmigratedStoreOrNoRepoIsZero(t *testing.T) {
-	h, err := ComputeHealth(store.OpenForTest(t), &config.Config{Repos: []config.RepoConfig{{Remote: testRepo}}}, fixtureNow)
+	h, err := ComputeHealth(store.OpenSchema1ForTest(t), &config.Config{Repos: []config.RepoConfig{{Remote: testRepo}}}, fixtureNow)
 	if err != nil || h.Migrated() || h.Beads != nil {
 		t.Fatalf("unmigrated: %+v, %v; want the zero Health and no error", h, err)
 	}

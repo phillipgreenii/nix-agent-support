@@ -35,7 +35,7 @@ func TestServePayloadGoldenOverCorpus(t *testing.T) {
 		if fx.Type != "pr" {
 			continue
 		}
-		if err := s.UpsertEntity(store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID, Facts: string(fx.Payload), AsOf: "2026-09-16T00:00:00Z", ContentHash: "seed"}); err != nil {
+		if err := s.UpsertEntityForTest(store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID, Facts: string(fx.Payload), AsOf: "2026-09-16T00:00:00Z", ContentHash: "seed"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := p.RunInterpretOnly(context.Background(), "pr", fx.ID, gather.ChangeChanged); err != nil {

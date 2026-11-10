@@ -50,12 +50,16 @@ func buildSyntheticPreMigrationDB(t *testing.T, path string) {
 
 	for i, in := range []Interpretation{
 		{Repo: repo, EntityType: "pr", EntityID: repo + "#1", Ownership: "mine", Enrichment: `{"kind":"feature"}`, Urgency: `{"level":"low"}`, Category: "feature", Dispositions: `{}`, Approvals: `[]`, GateState: "green", MatchReasons: `["authored"]`, Panel: "mine_awaiting_team", ReadyToPromote: true, AsOf: "2026-09-01T00:00:00Z"},
-		{Repo: repo, EntityType: "pr", EntityID: repo + "#2", Ownership: "team", Panel: "team_awaiting_me", Degraded: true, SyncError: "bead create failed", AsOf: "2026-09-02T00:00:00Z"},
+		{Repo: repo, EntityType: "pr", EntityID: repo + "#2", Ownership: "team", Panel: "team_awaiting_me", Degraded: true, AsOf: "2026-09-02T00:00:00Z"},
 		{Repo: repo, EntityType: "pr", EntityID: repo + "#3", Ownership: "team", Panel: "team_awaiting_owner", AsOf: "2026-09-03T00:00:00Z"},
 	} {
 		if err := s.UpsertInterpretation(in); err != nil {
 			t.Fatalf("seed interpretation %d: %v", i, err)
 		}
+	}
+	// A schema-1 row may carry the sync_error the cutover drops.
+	if _, err := s.sql.Exec(`UPDATE interpretation SET sync_error = 'bead create failed' WHERE entity_id = ?`, repo+"#2"); err != nil {
+		t.Fatalf("seed sync_error: %v", err)
 	}
 
 	for i, x := range []Xref{
@@ -494,9 +498,6 @@ func TestMigrateFromSyntheticPreMigrationDB(t *testing.T) {
 	if interps[0].Ownership != "mine" || !interps[0].ReadyToPromote || interps[0].Panel != "mine_awaiting_team" || !interps[1].Degraded {
 		t.Errorf("interpretation content changed by cutover: %+v", interps)
 	}
-	if interps[1].SyncError != "" {
-		t.Errorf("SyncError = %q on a schema-2 store, want empty", interps[1].SyncError)
-	}
 
 	// ledger is dropped; the new tables exist and start empty.
 	if tableExists(t, s, "ledger") {
@@ -864,7 +865,7 @@ func TestPreCutoverBinaryRefusesVersion2Store(t *testing.T) {
 func TestSchemaCheckRefusesOldSchemaStore(t *testing.T) {
 	const want = "run pg-desk migrate --cutover"
 
-	old := OpenForTest(t)
+	old := OpenSchema1ForTest(t)
 	if v, err := old.SchemaVersion(); err != nil || v != 1 {
 		t.Fatalf("old SchemaVersion = %d, %v; want 1", v, err)
 	}
@@ -937,7 +938,7 @@ func TestEntityAndInterpretationAccessWorkOnBothSchemas(t *testing.T) {
 		open func(t *testing.T) *Store
 		v2   bool
 	}{
-		{"schema1", func(t *testing.T) *Store { return OpenForTest(t) }, false},
+		{"schema1", func(t *testing.T) *Store { return OpenSchema1ForTest(t) }, false},
 		{"schema2", func(t *testing.T) *Store { return OpenNewSchemaForTest(t) }, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -992,9 +993,6 @@ func TestEntityAndInterpretationAccessWorkOnBothSchemas(t *testing.T) {
 				Dispositions: `{}`, Approvals: `[]`, GateState: "green", MatchReasons: `["a"]`,
 				Panel: "mine_awaiting_team", ReadyToPromote: true, Degraded: true, AsOf: "2026-09-16T00:00:00Z",
 			}
-			if !tc.v2 {
-				in.SyncError = "sync failed"
-			}
 			if err := s.UpsertInterpretation(in); err != nil {
 				t.Fatalf("UpsertInterpretation: %v", err)
 			}
@@ -1012,15 +1010,6 @@ func TestEntityAndInterpretationAccessWorkOnBothSchemas(t *testing.T) {
 			}
 			if has, err := s.HasAnyInterpretation(); err != nil || !has {
 				t.Fatalf("HasAnyInterpretation = %v, %v; want true", has, err)
-			}
-
-			if tc.v2 {
-				// sync_error no longer exists: silently dropping a write would
-				// hide a failure, so the writer says so.
-				in.SyncError = "boom"
-				if err := s.UpsertInterpretation(in); err == nil {
-					t.Errorf("UpsertInterpretation with SyncError on a schema-2 store must fail")
-				}
 			}
 
 			// xref (old API)
@@ -1091,7 +1080,7 @@ func TestSchemaDualAccessSurvivesCutoverOnLiveStore(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("post-cutover GetInterpretation found=%v err=%v", found, err)
 	}
-	if in.SyncError != "" || !in.Degraded {
+	if !in.Degraded {
 		t.Errorf("post-cutover interpretation = %+v", in)
 	}
 	in.Panel = "mine_awaiting_me"

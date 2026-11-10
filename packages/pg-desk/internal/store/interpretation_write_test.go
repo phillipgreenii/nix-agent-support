@@ -265,7 +265,7 @@ func TestWriteInterpretation_StampRules(t *testing.T) {
 }
 
 func TestWriteInterpretation_SchemaOneIsRefusedBeforeBeginAndNothingIsWritten(t *testing.T) {
-	s := OpenForTest(t) // version 1
+	s := OpenSchema1ForTest(t) // version 1
 	s.SetInterpStamp(wStamp)
 	begun := false
 	s.SetInterpretationWriteHook(func(InterpretationWriteStep) error { begun = true; return nil })
@@ -289,15 +289,6 @@ func TestWriteInterpretation_SchemaOneIsRefusedBeforeBeginAndNothingIsWritten(t 
 	}
 	if begun {
 		t.Fatal("a refused call began a transaction")
-	}
-}
-
-func TestWriteInterpretation_RefusesSyncError(t *testing.T) {
-	s := wStore(t, true)
-	row := wRow("1", "me", "mine")
-	row.SyncError = "boom"
-	if _, err := s.WriteInterpretation(row, InterpretationWriteOptions{ExpectedHash: "h1"}); err == nil || !strings.Contains(err.Error(), "SyncError") {
-		t.Fatalf("err = %v, want the SyncError refusal", err)
 	}
 }
 
@@ -523,7 +514,7 @@ func TestMarkInterpretationFailed_RefusesBadCallsAndRollsBackOnFault(t *testing.
 }
 
 func TestSeedHelpersRefuseASchemaOneStore(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	ft := &fakeSeedT{}
 	s.SeedEntityForTest(ft, wEntity("1", "h"))
 	s.SeedInterpretationForTest(ft, wRow("1", "me", "mine"))

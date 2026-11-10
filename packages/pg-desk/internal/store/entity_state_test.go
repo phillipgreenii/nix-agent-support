@@ -237,7 +237,7 @@ func TestWriteEntityStateWithLog_RacingWritersExactlyOneWins(t *testing.T) {
 }
 
 func TestWriteEntityStateWithLog_RefusesOldSchema(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	_, err := s.WriteEntityStateWithLog(clEntity("a"), 0, hydratedStamp, true, []string{"x"}, "sync", "t")
 	if !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
@@ -278,7 +278,7 @@ func TestAppendEntityChange_AbsentEntityAndOldSchema(t *testing.T) {
 	if n := changeCount(t, s); n != 0 {
 		t.Fatalf("change_log rows = %d, want 0", n)
 	}
-	old := OpenForTest(t)
+	old := OpenSchema1ForTest(t)
 	if _, err := old.AppendEntityChange(clRepo, clType, clID, []string{"x"}, "o", "t"); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("old-schema err = %v, want ErrOldSchema", err)
 	}
@@ -403,7 +403,7 @@ func TestWriteEntityStateWithLogFP_NilListFPPreservesStoredValue(t *testing.T) {
 }
 
 func TestWriteEntityStateWithLogFP_RefusesOldSchema(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	if _, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, hydratedStamp, true, strp("fp"), []string{"x"}, "sync", "t1"); err == nil {
 		t.Fatal("old-schema FP write succeeded, want refusal")
 	}

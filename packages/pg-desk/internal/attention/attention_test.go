@@ -136,7 +136,7 @@ func put(t *testing.T, st *store.Store, p prSpec) {
 		p.approvals.WaitingOn, p.approvals.Reason = string(w), r
 	}
 	if !p.noFacts {
-		if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: p.id(), Facts: p.facts(), AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+		if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: p.id(), Facts: p.facts(), AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -499,7 +499,7 @@ func orEmpty(m map[string]string) map[string]string {
 }
 
 func TestUnmigratedStoreStillRunsAndHonorsOldColumns(t *testing.T) {
-	st := store.OpenForTest(t) // version 1
+	st := store.OpenSchema1ForTest(t) // version 1
 	hide := true
 	wip := true
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})

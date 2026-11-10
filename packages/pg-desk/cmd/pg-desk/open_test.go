@@ -316,7 +316,7 @@ func seedOpenPR(t *testing.T, st *store.Store, repo string, number int, title, u
 	if err != nil {
 		t.Fatalf("marshal facts: %v", err)
 	}
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: repo, EntityType: entityTypePR, EntityID: id,
 		Facts: string(factsRaw), AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {

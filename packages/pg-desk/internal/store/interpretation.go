@@ -7,14 +7,10 @@ import (
 
 // Interpretation is one row of the interpretation table: ownership,
 // enrichment, urgency, category, dispositions, approvals, gate state, match
-// reasons, panel, ready-to-promote, degraded, and sync_error for a single
-// (repo, entity_type, entity_id), per the design doc's section 7.6.
-//
-// sync_error is a field on THIS table (not a separate table) written only
-// by Phase 10's sync when it exists; no Phase-9 packet (gather, interpret,
-// or the pipeline) ever writes it, so it stays empty here (corrected during
-// this docket's semantic post-check, round 1 — see this packet's Contract
-// section).
+// reasons, panel, ready-to-promote and degraded for a single
+// (repo, entity_type, entity_id), per the design doc's section 7.6. A store
+// still on schema 1 has a sync_error column the cutover drops; nothing reads
+// or writes it any more.
 type Interpretation struct {
 	Repo       string
 	EntityType string
@@ -31,7 +27,6 @@ type Interpretation struct {
 	Panel          string
 	ReadyToPromote bool
 	Degraded       bool
-	SyncError      string // old schema only (the cutover drops the column); always empty on the new schema
 	AsOf           string // RFC3339 timestamp
 
 	// InterpVersion is the stamp the row was written under (the interp_version
@@ -43,87 +38,41 @@ type Interpretation struct {
 }
 
 // interpretationSelectList is the column list the readers select. It is
-// schema-dual: the new schema has no sync_error column (the cutover drops
-// it), so there the same position is filled with NULL and SyncError reads
-// back empty. It is also guarded for the stamp: a store that has not had
-// interp_version added yet (a read-only or raw open that ran before any Open
-// of the new binary) gets NULL in that position, so the readers work and the
-// row reads as unstamped.
-func interpretationSelectList(newSchema, haveStamp bool) string {
-	syncError := "sync_error"
-	if newSchema {
-		syncError = "NULL"
-	}
+// guarded for the stamp: a store that has not had interp_version added yet (a
+// read-only or raw open that ran before any Open of the new binary) gets NULL
+// in that position, so the readers work and the row reads as unstamped.
+func interpretationSelectList(haveStamp bool) string {
 	stamp := "interp_version"
 	if !haveStamp {
 		stamp = "NULL"
 	}
 	return `repo, entity_type, entity_id, ownership, enrichment, urgency, category,
 		        dispositions, approvals, gate_state, match_reasons, panel,
-		        ready_to_promote, degraded, ` + syncError + `, as_of, ` + stamp
+		        ready_to_promote, degraded, as_of, ` + stamp
 }
 
-// selectListFor decides both guards from the table's current shape, before
-// any query is issued (never while a result set is open).
+// selectListFor decides the guard from the table's current shape, before any
+// query is issued (never while a result set is open).
 func (s *Store) selectListFor() (string, error) {
-	newSchema, haveStamp, err := s.interpShape()
+	_, haveStamp, err := s.interpShape()
 	if err != nil {
 		return "", err
 	}
-	return interpretationSelectList(newSchema, haveStamp), nil
+	return interpretationSelectList(haveStamp), nil
 }
 
 // UpsertInterpretation inserts or replaces the interpretation row keyed by
-// (Repo, EntityType, EntityID). It works on both schema versions; on the
-// new schema, which has no sync_error column, a non-empty SyncError is an
-// error rather than a silently dropped write.
+// (Repo, EntityType, EntityID). It is the seeding writer of tests (production
+// code writes through WriteInterpretation) and runs the one statement both
+// schema versions accept: it never names sync_error.
 //
 // It writes the handle's stamp (SetInterpStamp) into interp_version: a handle
 // with no stamp writes NULL. On a store whose table has no interp_version
 // column (a raw open that never ran the ensure step) the stamp is not written.
 func (s *Store) UpsertInterpretation(i Interpretation) error {
-	newSchema, haveStamp, err := s.interpShape()
-	if err != nil {
-		return fmt.Errorf("store: upsert interpretation (%s,%s,%s): %w", i.Repo, i.EntityType, i.EntityID, err)
-	}
-	stampCol, stampVal, stampSet := "", "", ""
-	var stampArgs []any
-	if haveStamp {
-		stampCol, stampVal, stampSet = ", interp_version", ", ?", ", interp_version = excluded.interp_version"
-		stampArgs = []any{nullableString(s.InterpStamp())}
-	}
-	if newSchema {
-		if i.SyncError != "" {
-			return fmt.Errorf("store: upsert interpretation (%s,%s,%s): SyncError is not stored on the new schema", i.Repo, i.EntityType, i.EntityID)
-		}
+	_, haveStamp, err := s.interpShape()
+	if err == nil {
 		err = upsertInterpretationNew(s.sql, i, haveStamp, s.InterpStamp())
-	} else {
-		_, err = s.sql.Exec(
-			`INSERT INTO interpretation (
-			   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
-			   dispositions, approvals, gate_state, match_reasons, panel,
-			   ready_to_promote, degraded, sync_error, as_of`+stampCol+`
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+stampVal+`)
-			 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
-			   ownership = excluded.ownership,
-			   enrichment = excluded.enrichment,
-			   urgency = excluded.urgency,
-			   category = excluded.category,
-			   dispositions = excluded.dispositions,
-			   approvals = excluded.approvals,
-			   gate_state = excluded.gate_state,
-			   match_reasons = excluded.match_reasons,
-			   panel = excluded.panel,
-			   ready_to_promote = excluded.ready_to_promote,
-			   degraded = excluded.degraded,
-			   sync_error = excluded.sync_error,
-			   as_of = excluded.as_of`+stampSet,
-			append([]any{
-				i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
-				i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
-				i.ReadyToPromote, i.Degraded, nullableString(i.SyncError), i.AsOf,
-			}, stampArgs...)...,
-		)
 	}
 	if err != nil {
 		return fmt.Errorf("store: upsert interpretation (%s,%s,%s): %w", i.Repo, i.EntityType, i.EntityID, err)
@@ -152,14 +101,13 @@ func (s *Store) ListInterpretations() ([]Interpretation, error) {
 	var out []Interpretation
 	for rows.Next() {
 		var interp Interpretation
-		var syncError, stamp sql.NullString
+		var stamp sql.NullString
 		if err := rows.Scan(&interp.Repo, &interp.EntityType, &interp.EntityID, &interp.Ownership,
 			&interp.Enrichment, &interp.Urgency, &interp.Category, &interp.Dispositions, &interp.Approvals,
 			&interp.GateState, &interp.MatchReasons, &interp.Panel, &interp.ReadyToPromote, &interp.Degraded,
-			&syncError, &interp.AsOf, &stamp); err != nil {
+			&interp.AsOf, &stamp); err != nil {
 			return nil, fmt.Errorf("store: scan interpretation row: %w", err)
 		}
-		interp.SyncError = syncError.String
 		interp.InterpVersion = stamp.String
 		out = append(out, interp)
 	}
@@ -188,7 +136,7 @@ func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Int
 	if err != nil {
 		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
-	var syncError, stamp sql.NullString
+	var stamp sql.NullString
 	row := s.sql.QueryRow(
 		`SELECT `+cols+`
 		 FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
@@ -197,13 +145,12 @@ func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Int
 	if err := row.Scan(&interp.Repo, &interp.EntityType, &interp.EntityID, &interp.Ownership,
 		&interp.Enrichment, &interp.Urgency, &interp.Category, &interp.Dispositions, &interp.Approvals,
 		&interp.GateState, &interp.MatchReasons, &interp.Panel, &interp.ReadyToPromote, &interp.Degraded,
-		&syncError, &interp.AsOf, &stamp); err != nil {
+		&interp.AsOf, &stamp); err != nil {
 		if err == sql.ErrNoRows {
 			return Interpretation{}, false, nil
 		}
 		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
-	interp.SyncError = syncError.String
 	interp.InterpVersion = stamp.String
 	return interp, true, nil
 }
@@ -214,9 +161,9 @@ type execer interface {
 }
 
 // upsertInterpretationNew is the ONE statement that writes an interpretation
-// row on the new schema (no sync_error column). WriteInterpretation runs it
-// inside its transaction; UpsertInterpretation (the schema-dual seeding and
-// cutover-test writer, not called from production code) runs it on the handle.
+// row. WriteInterpretation runs it inside its transaction; UpsertInterpretation
+// (the seeding writer of tests, not called from production code) runs it on
+// the handle.
 // stamp is written into interp_version (NULL when empty) when haveStamp, i.e.
 // when the table has the column.
 func upsertInterpretationNew(ex execer, i Interpretation, haveStamp bool, stamp string) error {

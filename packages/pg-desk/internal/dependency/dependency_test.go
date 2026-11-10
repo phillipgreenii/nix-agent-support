@@ -22,7 +22,7 @@ func prID(n int) string { return fmt.Sprintf("acme/api#%d", n) }
 func putPR(t *testing.T, st *store.Store, id, state, branch, base string, merged bool) {
 	t.Helper()
 	facts := fmt.Sprintf(`{"pr_show":{"state":%q,"branch":%q,"base":%q,"merged":%v}}`, state, branch, base, merged)
-	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: id, Facts: facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: id, Facts: facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
 }
@@ -154,7 +154,7 @@ func TestStackSource_NotAnEdge(t *testing.T) {
 		}},
 		{"undecodable facts", func(t *testing.T, st *store.Store) {
 			putPR(t, st, prID(2), "open", "feat-b", "feat-a", false)
-			if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: prID(1), Facts: "not json", AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+			if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: prID(1), Facts: "not json", AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 				t.Fatal(err)
 			}
 		}},

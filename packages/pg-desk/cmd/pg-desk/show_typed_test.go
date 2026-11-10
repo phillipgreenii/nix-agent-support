@@ -246,7 +246,7 @@ func TestTypedShowLinkToUnstoredEntityOmitsSnapshotFields(t *testing.T) {
 // snapshot carries none, for a PR or thread link, and for an unstored entity.
 func TestTypedShowLinkPriority(t *testing.T) {
 	f := newViewFixture(t)
-	if err := f.seed.UpsertEntity(store.Entity{
+	if err := f.seed.UpsertEntityForTest(store.Entity{
 		Repo: "o/r", EntityType: "issue", EntityID: "bd-1", AsOf: "2026-09-29T14:10:00Z",
 		Facts: `{"issue_show":{"id":"bd-1","title":"process feedback","state":"open","priority":"P3","labels":[],"metadata":{}}}`,
 	}); err != nil {

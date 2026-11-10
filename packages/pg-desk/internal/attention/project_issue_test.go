@@ -11,7 +11,7 @@ import (
 
 func putIssue(t *testing.T, st *store.Store, id, facts string) {
 	t.Helper()
-	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -57,7 +57,7 @@ func TestProjectEntityOnlyRowSelection(t *testing.T) {
 	// pr with an interpretation row: projected once, through the row.
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
 	// pr entity with NO interpretation row: not projected (a PR rule reads the interpretation).
-	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testRepo + "#2", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testRepo + "#2", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	// issue with an interpretation row (the generic pipeline writes one): projected once, not twice.
@@ -71,7 +71,7 @@ func TestProjectEntityOnlyRowSelection(t *testing.T) {
 	// issue with no interpretation row: projected.
 	putIssue(t, st, "K-2", `{"issue_show":{"state":"In Progress"}}`)
 	// issue in another repo: not projected.
-	if err := st.UpsertEntity(store.Entity{Repo: "other/repo", EntityType: "issue", EntityID: "K-3", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: "other/repo", EntityType: "issue", EntityID: "K-3", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -399,7 +399,7 @@ func TestGroupingIsIndependentOfStoreInsertionOrder(t *testing.T) {
 }
 
 func TestUnmigratedStoreGroupsByLegacyJiraAndSkipsBeads(t *testing.T) {
-	st := store.OpenForTest(t) // version 1
+	st := store.OpenSchema1ForTest(t) // version 1
 	teamPR(t, st, 1)
 	teamPR(t, st, 2)
 	teamPR(t, st, 3)

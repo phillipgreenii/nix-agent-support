@@ -125,7 +125,6 @@ func buildRow(interp store.Interpretation) Row {
 	setIfNonEmpty(row, "as_of", interp.AsOf)
 	row["ready_to_promote"] = interp.ReadyToPromote
 	row["degraded"] = interp.Degraded
-	setIfNonEmpty(row, "sync_error", interp.SyncError)
 
 	return row
 }
@@ -187,10 +186,10 @@ func hasWatchLabelReason(reasons []string) bool {
 	return false
 }
 
-// PayloadError is one entry of Payload.Errors: a row currently carrying a
-// non-empty interpretation.sync_error. Always empty in Phase 9 because no
-// stage writes sync_error yet (docs/behavior/pg-desk/serve.md's "Out of
-// scope"); wired now so Phase 10's sync needs no serve change.
+// PayloadError is one entry of Payload.Errors. Nothing writes sync_error any
+// more, so Errors is always empty and RunsFailed24h always 0; the two keys
+// stay in the payload only so the dashboard that selects them keeps working
+// until its panel is removed.
 type PayloadError struct {
 	Repo       string `json:"repo"`
 	EntityType string `json:"entity_type"`
@@ -291,7 +290,6 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 		PanelMineAwaitingTeam:  &p.MineAwaitingTeam,
 	}
 
-	cutoff := now.Add(-24 * time.Hour)
 	for _, interp := range interps {
 		row := buildRow(interp)
 
@@ -313,16 +311,6 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 			// An interp.Panel value matching none of the five known panels
 			// is dropped here: guaranteeing a valid value is interpret's job
 			// (packet 5), not serve's.
-		}
-
-		if interp.SyncError != "" {
-			p.Errors = append(p.Errors, PayloadError{
-				Repo: interp.Repo, EntityType: interp.EntityType, EntityID: interp.EntityID,
-				Error: interp.SyncError,
-			})
-			if asOf := parseAsOf(interp.AsOf); !asOf.IsZero() && asOf.After(cutoff) {
-				p.RunsFailed24h++
-			}
 		}
 	}
 

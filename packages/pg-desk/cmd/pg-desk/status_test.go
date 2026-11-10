@@ -30,7 +30,7 @@ func TestStatusReportsCountsAgainstFixtureStore(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	withOpenSeams(t, openTestConfig("o/r"), openFresh)
 
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "1",
 		Facts: `{}`, AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
@@ -38,7 +38,7 @@ func TestStatusReportsCountsAgainstFixtureStore(t *testing.T) {
 	}
 	if err := st.UpsertInterpretation(store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "1",
-		Degraded: true, SyncError: "boom", AsOf: "2026-09-16T00:00:00Z",
+		Degraded: true, AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}

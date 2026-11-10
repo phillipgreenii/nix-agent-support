@@ -292,7 +292,7 @@ func TestRunThreadLinkedNonPREntityIsNotReinterpreted(t *testing.T) {
 func TestRunThreadReinterpretFailuresAreJoinedAndTheRestStillRun(t *testing.T) {
 	st := newThreadStore(t)
 	for _, id := range []string{"acme/widgets#1", "acme/widgets#3"} {
-		if err := st.UpsertEntity(store.Entity{
+		if err := st.UpsertEntityForTest(store.Entity{
 			Repo: "acme/widgets", EntityType: entityTypePR, EntityID: id,
 			Facts: "{not json", AsOf: "2026-09-17T00:00:00Z", ContentHash: "h",
 		}); err != nil {

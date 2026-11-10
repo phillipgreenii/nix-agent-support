@@ -133,7 +133,7 @@ func seedPRFacts(t *testing.T, st *store.Store, entityID string) {
 	if err != nil {
 		t.Fatalf("marshal facts fixture: %v", err)
 	}
-	if err := st.UpsertEntity(store.Entity{
+	if err := st.UpsertEntityForTest(store.Entity{
 		Repo: "acme/widgets", EntityType: entityTypePR, EntityID: entityID,
 		Facts: string(factsJSON), AsOf: "2026-09-17T00:00:00Z", ContentHash: "fixture",
 	}); err != nil {

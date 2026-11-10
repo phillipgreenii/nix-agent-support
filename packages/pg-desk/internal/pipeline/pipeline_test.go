@@ -84,7 +84,7 @@ func seedInterpretOnlyEntity(t *testing.T, p *Pipeline, entityID string, facts g
 	if err != nil {
 		t.Fatalf("marshal facts fixture: %v", err)
 	}
-	if err := p.store.UpsertEntity(store.Entity{
+	if err := p.store.UpsertEntityForTest(store.Entity{
 		Repo: "acme/widgets", EntityType: "pr", EntityID: entityID,
 		Facts: string(factsJSON), AsOf: facts.AsOf, HeadSHA: facts.HeadSHA, ContentHash: "fixture",
 	}); err != nil {

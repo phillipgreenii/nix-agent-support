@@ -175,7 +175,7 @@ func TestHydrateEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := q.store.UpsertEntity(store.Entity{
+	if err := q.store.UpsertEntityForTest(store.Entity{
 		Repo: "acme/widgets", EntityType: "pr", EntityID: "1", Facts: string(factsJSON),
 		AsOf: facts.AsOf, ContentHash: contentHash(factsJSON), HeadSHA: facts.HeadSHA,
 	}); err != nil {

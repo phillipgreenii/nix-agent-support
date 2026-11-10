@@ -344,7 +344,7 @@ func TestInterpretationsBehind_NeedsAStampAndSchema2(t *testing.T) {
 	if _, _, err := s.InterpretationsBehind("o/r", 0); !errors.Is(err, ErrNoInterpStamp) {
 		t.Fatalf("err = %v, want ErrNoInterpStamp", err)
 	}
-	v1 := OpenForTest(t)
+	v1 := OpenSchema1ForTest(t)
 	v1.SetInterpStamp("x")
 	keys, known, err := v1.InterpretationsBehind("o/r", 0)
 	if err != nil || known || keys != nil {

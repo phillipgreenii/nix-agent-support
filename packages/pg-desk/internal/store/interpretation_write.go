@@ -130,9 +130,6 @@ func (s *Store) WriteInterpretation(row Interpretation, opts InterpretationWrite
 	if opts.RequireStamp && stamp == "" {
 		return InterpretationWriteResult{}, wrap(ErrStampRequired)
 	}
-	if row.SyncError != "" {
-		return InterpretationWriteResult{}, wrap(errors.New("SyncError is not stored on the new schema"))
-	}
 	haveStamp, err := s.hasInterpStampColumn()
 	if err != nil {
 		return InterpretationWriteResult{}, wrap(err)

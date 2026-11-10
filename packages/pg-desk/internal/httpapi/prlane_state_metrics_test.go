@@ -67,7 +67,7 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertEntity(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#9", Facts: `{}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#9", Facts: `{}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := lanestate.MarkInactive(s, "o/r", "o/r#9"); err != nil {
@@ -105,7 +105,7 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 // needs a schema-2 store; an older one has no series for it (never a 0 that
 // would read as healthy) and the scrape still succeeds.
 func TestMetricsOmitThePersistedLaneFamiliesOnAnOldSchemaStore(t *testing.T) {
-	s := store.OpenForTest(t)
+	s := store.OpenSchema1ForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",

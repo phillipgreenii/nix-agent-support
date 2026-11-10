@@ -179,7 +179,7 @@ VALUES (1, 'acme/widgets', 'pr', 'acme/widgets#7', 'x', 1, 'bogus')`)
 }
 
 func TestVersion1StoreHasNoFocusObjects(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	for _, table := range focusTables {
 		if tableExists(t, s, table) {
 			t.Errorf("version-1 store has %s", table)

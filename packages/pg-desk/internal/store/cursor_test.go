@@ -198,7 +198,7 @@ func TestListAndForgetConsumers(t *testing.T) {
 }
 
 func TestOldSchemaRefusesCursorAPI(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 	if _, err := s.ReadChanges("c", "pr", 0, curNow); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("ReadChanges on old schema err = %v", err)
 	}

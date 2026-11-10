@@ -36,10 +36,10 @@ func TestMetricsExposeTheOpenAnchorFamiliesFromTheStoresLinks(t *testing.T) {
 	} {
 		prID := fmt.Sprintf("o/r#%d", n+1)
 		anchorID := fmt.Sprintf("bd-%d", n+1)
-		if err := s.UpsertEntity(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: p.facts, AsOf: p.hydratedAt}); err != nil {
+		if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: p.facts, AsOf: p.hydratedAt}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.UpsertEntity(store.Entity{
+		if err := s.UpsertEntityForTest(store.Entity{
 			Repo: "o/r", EntityType: "issue", EntityID: anchorID,
 			Facts: `{"issue_show":{"issue_type":"merge-request","state":"open"}}`, AsOf: p.hydratedAt,
 		}); err != nil {
@@ -79,7 +79,7 @@ func TestMetricsExposeTheOpenAnchorFamiliesFromTheStoresLinks(t *testing.T) {
 // schema-2 links, so an older store has no series for them (never a 0 that
 // would read as healthy) and the scrape still succeeds.
 func TestMetricsOmitTheOpenAnchorFamiliesOnAnOldSchemaStore(t *testing.T) {
-	old := store.OpenForTest(t)
+	old := store.OpenSchema1ForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{Repo: "o/r", EntityType: "pull_request", EntityID: "1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})
 	body := scrapeWithConfig(t, old, testConfig())
 	if strings.Contains(body, "pg_desk_pr_open_anchor") || strings.Contains(body, "pg_desk_pr_stale_anchor") {
@@ -104,10 +104,10 @@ func TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes(t *testing.T)
 	for n, facts := range []string{`{"pr_show":{"state":"open"}}`, `{"pr_show":{"state":"closed"}}`, `{"pr_show":{"state":"open"}}`} {
 		prID := fmt.Sprintf("o/r#%d", n+1)
 		anchorID := fmt.Sprintf("bd-%d", n+1)
-		if err := s.UpsertEntity(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: facts, AsOf: at}); err != nil {
+		if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: facts, AsOf: at}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.UpsertEntity(store.Entity{
+		if err := s.UpsertEntityForTest(store.Entity{
 			Repo: "o/r", EntityType: "issue", EntityID: anchorID,
 			Facts: `{"issue_show":{"issue_type":"merge-request","state":"open"}}`, AsOf: at,
 		}); err != nil {

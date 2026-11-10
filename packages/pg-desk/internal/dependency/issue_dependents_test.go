@@ -147,7 +147,7 @@ func TestIssueDependents_Available(t *testing.T) {
 func TestIssueDependents_IgnoresOtherEntityTypes(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putIssue(t, st, "bd-a", "open", true, "")
-	err := st.UpsertEntity(store.Entity{
+	err := st.UpsertEntityForTest(store.Entity{
 		Repo: testRepo, EntityType: "pr", EntityID: prID(1),
 		Facts: `{"issue_show":{"deps":[{"id":"bd-a","type":"blocks"}]},"issue_deps":{}}`, AsOf: "2026-10-01T00:00:00Z",
 	})
@@ -176,7 +176,7 @@ func TestIssueDependents_ReturnsCopy(t *testing.T) {
 
 // The unmigrated store records no activity, so the index refuses it.
 func TestIssueDependents_RefusesOldSchema(t *testing.T) {
-	st := store.OpenForTest(t)
+	st := store.OpenSchema1ForTest(t)
 	if _, err := NewIssueDependents(st, nil); !errors.Is(err, store.ErrOldSchema) {
 		t.Errorf("err = %v, want store.ErrOldSchema", err)
 	}

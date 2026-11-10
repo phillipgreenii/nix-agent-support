@@ -284,7 +284,7 @@ func TestDoctorIgnoresALegacySyncErrorRow(t *testing.T) {
 	stubDoctorSeams(t, nil, nil, nil)
 	if err := seed.UpsertInterpretation(store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#9",
-		SyncError: "close failed", AsOf: "2026-09-22T00:00:00Z",
+		AsOf: "2026-09-22T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

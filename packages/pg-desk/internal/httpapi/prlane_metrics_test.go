@@ -32,7 +32,7 @@ func TestMetricsExposeThePRLaneFamiliesOnASchema2Store(t *testing.T) {
 	setClock(t, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	s := store.OpenForTest(t)
 	for id, asOf := range map[string]string{"o/r#1": "2026-10-10T00:00:00Z", "o/r#2": "2026-10-09T00:00:00Z", "o/r#3": "2026-10-01T00:00:00Z"} {
-		if err := s.UpsertEntity(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: asOf}); err != nil {
+		if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: asOf}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -82,7 +82,7 @@ func TestMetricsPRLaneEmitsZeroWhenHealthyAndNothingWhenUnmigrated(t *testing.T)
 		}
 	}
 
-	old := store.OpenForTest(t)
+	old := store.OpenSchema1ForTest(t)
 	mustUpsertInterpretation(t, old, store.Interpretation{Repo: "o/r", EntityType: "pull_request", EntityID: "1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})
 	cfg := testConfig()
 	cfg.PRLane.Mode = "bogus"

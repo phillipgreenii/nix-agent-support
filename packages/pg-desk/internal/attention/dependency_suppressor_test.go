@@ -163,7 +163,7 @@ func TestDependencySuppression_ConflictIsSelfBroken(t *testing.T) {
 // it runs on the version 1 store too. A PR with no stored dependencies is
 // unaffected.
 func TestDependencySuppression_OldSchemaStore(t *testing.T) {
-	st := store.OpenForTest(t)
+	st := store.OpenSchema1ForTest(t)
 	put(t, st, stackPR(1, "feat-a", "main", "open"))
 	put(t, st, stackPR(2, "feat-b", "feat-a", "open"))
 	put(t, st, stackPR(5, "solo", "main", "open"))

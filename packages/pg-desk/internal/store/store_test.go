@@ -77,7 +77,7 @@ func TestDefaultPathHonoursXDGStateHomeAndCreatesOnFirstRun(t *testing.T) {
 // tables exist per migration; xref exists but is never written by this
 // packet."
 func TestMigrateCreatesAllSixTables(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 
 	want := []string{"entity", "interpretation", "xref", "annotation", "ledger", "meta"}
 	for _, table := range want {
@@ -131,7 +131,7 @@ func TestMigrateIsIdempotentAndMirrorsSchemaVersion(t *testing.T) {
 }
 
 func TestEntityRoundTrip(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 
 	e := Entity{
 		Repo:        "owner/repo",
@@ -251,7 +251,6 @@ func TestInterpretationRoundTrip(t *testing.T) {
 		Panel:          "mine_awaiting_me",
 		ReadyToPromote: false,
 		Degraded:       false,
-		SyncError:      "", // Phase 9 never writes this; must round-trip as empty.
 		AsOf:           "2026-09-16T00:00:00Z",
 	}
 	if err := s.UpsertInterpretation(i); err != nil {
@@ -267,9 +266,6 @@ func TestInterpretationRoundTrip(t *testing.T) {
 	}
 	if got != i {
 		t.Fatalf("GetInterpretation round-trip = %+v, want %+v", got, i)
-	}
-	if got.SyncError != "" {
-		t.Fatalf("SyncError = %q, want empty (Phase 9 never writes it)", got.SyncError)
 	}
 }
 
@@ -303,7 +299,7 @@ func TestXrefRoundTrip(t *testing.T) {
 }
 
 func TestAnnotationRoundTripPRLevelAndCommentLevel(t *testing.T) {
-	s := OpenForTest(t)
+	s := OpenSchema1ForTest(t)
 
 	hidden := true
 	prLevel := Annotation{

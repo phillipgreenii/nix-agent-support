@@ -23,7 +23,7 @@ func deps(st *store.Store) Deps {
 
 func putEntity(t *testing.T, st *store.Store, typ, id, asOf, facts string) {
 	t.Helper()
-	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
 		t.Fatalf("seed entity %s %s: %v", typ, id, err)
 	}
 }
@@ -245,7 +245,7 @@ func TestLegacyAndDerivedJiraEdgesDedup(t *testing.T) {
 // On an unmigrated store the verb degrades to the legacy pr-to-issue rows and
 // says so (design: links exist only on the migrated schema).
 func TestUnmigratedStoreDegradesToLegacyJiraLinks(t *testing.T) {
-	st := store.OpenForTest(t) // schema version 1
+	st := store.OpenSchema1ForTest(t) // schema version 1
 	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123"}}`)
 	if err := st.UpsertXref(store.Xref{Repo: testRepo, FromType: "pr", FromID: testPR, ToType: "issue", ToID: "ABC-42", Evidence: "title", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestParseRef(t *testing.T) {
 }
 
 func TestUnmigratedStoreIsDegradedEvenWhenNoRefIsSupported(t *testing.T) {
-	st := store.OpenForTest(t)
+	st := store.OpenSchema1ForTest(t)
 	r := resolve(t, deps(st), "alert:grafana:abc")
 	if !r.Degraded || r.Items["alert:grafana:abc"].Known {
 		t.Errorf("result = %+v; want degraded and unknown", r)
@@ -443,7 +443,7 @@ func TestPRLinks_HeadFallsBackToEntityHeadSHA(t *testing.T) {
 			ciRun("unit", "success", "h", "2", "https://ci.example.invalid/run/2"),
 		}},
 	})
-	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testPR, Facts: string(facts), AsOf: "2026-10-01T10:00:00Z", HeadSHA: "h"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testPR, Facts: string(facts), AsOf: "2026-10-01T10:00:00Z", HeadSHA: "h"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := buildKindLinks(resolve(t, deps(st), "pr:"+testPR), "pr:"+testPR); len(got) != 0 {

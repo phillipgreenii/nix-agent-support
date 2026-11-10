@@ -44,7 +44,7 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 		if facts == "" {
 			facts = fmt.Sprintf(`{"pr_show":{"number":%d,"state":"open","author":"me","head_sha":"h1"}}`, p.n)
 		}
-		if err := st.UpsertEntity(store.Entity{Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+		if err := st.UpsertEntityForTest(store.Entity{Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 		if p.panel == "none" {

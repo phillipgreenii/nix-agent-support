@@ -260,7 +260,7 @@ func TestDecisionsAndRunsAccumulateAcrossRunsAndLookupFiguresAreKept(t *testing.
 
 func TestMarkInactiveWorksFromAPlanRunAndDropsThePRFromTheNeverHydratedSet(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	if err := st.UpsertEntity(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: `{"pr_show":{"state":"open"}}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: `{"pr_show":{"state":"open"}}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	// Migrate the row to schema 2 style: a never-hydrated entity (version 0).

@@ -125,7 +125,7 @@ func TestCorpusRowGoldens_RunInterpretOnly(t *testing.T) {
 		}
 		t.Run(fx.Name, func(t *testing.T) {
 			st := store.OpenNewSchemaForTest(t)
-			if err := st.UpsertEntity(store.Entity{
+			if err := st.UpsertEntityForTest(store.Entity{
 				Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID,
 				Facts: string(fx.Payload), AsOf: corpusAsOf, ContentHash: "seed",
 			}); err != nil {

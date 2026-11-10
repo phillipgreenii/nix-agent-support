@@ -107,7 +107,7 @@ func TestLoadScopesToTheRepo(t *testing.T) {
 }
 
 func TestLoadRejectsAnOldSchemaStore(t *testing.T) {
-	st := store.OpenForTest(t)
+	st := store.OpenSchema1ForTest(t)
 	if _, err := Load(st, fixtureConfig(), testRepo, fixtureNow); err == nil {
 		t.Fatal("Load over an old-schema store: want an error, never an empty set")
 	}

@@ -261,7 +261,7 @@ func TestSuppressOtherKindsAreIndependent(t *testing.T) {
 
 func TestForceReviewStoresHeadSHA(t *testing.T) {
 	open, seed := newStoreAt(t, "new")
-	if err := seed.UpsertEntity(store.Entity{
+	if err := seed.UpsertEntityForTest(store.Entity{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-29T00:00:00Z", HeadSHA: "deadbeef",
 	}); err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestForceReviewNeedsAKnownHead(t *testing.T) {
 // seedForceReviewEntity seeds o/r#1 with a recorded head SHA.
 func seedForceReviewEntity(t *testing.T, seed *store.Store, head string) {
 	t.Helper()
-	if err := seed.UpsertEntity(store.Entity{
+	if err := seed.UpsertEntityForTest(store.Entity{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-29T00:00:00Z", HeadSHA: head,
 	}); err != nil {
 		t.Fatal(err)

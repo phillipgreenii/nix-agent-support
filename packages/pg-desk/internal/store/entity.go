@@ -11,7 +11,7 @@ import (
 // docket); this packet exposes the writer/reader only.
 //
 // Schema-dual: the cutover adds version, hydrated_at and active to the
-// entity table, all with defaults. UpsertEntity names only the original
+// entity table, all with defaults. SeedEntityForTest names only the original
 // columns, so it works unchanged on both schema versions: on the new schema
 // it leaves the new columns at their defaults (or at whatever the new-schema
 // API last set). Reads return the new columns on the new schema and their
@@ -28,13 +28,13 @@ type Entity struct {
 
 	// Version is the optimistic-concurrency version of the row (new schema
 	// only; always 0 when read from an old-schema store). Populated by
-	// reads; UpsertEntity ignores it. WriteEntityWithLog takes the version
+	// reads; SeedEntityForTest ignores it. WriteEntityWithLog takes the version
 	// the caller read as its expectedVersion and ignores this field.
 	Version int64
 
 	// HydratedAt is when the entity was last hydrated (RFC3339; "" means
 	// NULL, never hydrated). New schema only; always "" when read from an
-	// old-schema store. Populated by reads; UpsertEntity and
+	// old-schema store. Populated by reads; SeedEntityForTest and
 	// WriteEntityWithLog ignore it. WriteEntityStateWithLog sets it.
 	HydratedAt string
 
@@ -42,20 +42,20 @@ type Entity struct {
 	// column is 0). It is inverted on purpose: the zero value means ACTIVE,
 	// so every existing literal keeps meaning "active". New schema only;
 	// always false when read from an old-schema store. Populated by reads;
-	// UpsertEntity and WriteEntityWithLog ignore it, so no existing caller
+	// SeedEntityForTest and WriteEntityWithLog ignore it, so no existing caller
 	// can deactivate an entity by accident. WriteEntityStateWithLog sets it.
 	Inactive bool
 
 	// ListFP is the list fingerprint observed at the last successful
 	// hydration ("" when the column is NULL, and always "" on an old-schema
-	// store). Populated by reads; UpsertEntity and WriteEntityWithLog ignore
+	// store). Populated by reads; SeedEntityForTest and WriteEntityWithLog ignore
 	// it. WriteEntityStateWithLogFP sets it.
 	ListFP string
 
 	// FirstSeenAt is when pg-desk first inserted the row (RFC3339; "" means
 	// NULL). New schema only; always "" when read from an old-schema store.
 	// It is stamped ONCE, by the insert of the row (the write's own time:
-	// the `at` of the WriteEntity* writers, AsOf for UpsertEntity), and no
+	// the `at` of the WriteEntity* writers, AsOf for SeedEntityForTest), and no
 	// update rewrites it; the cutover backfills existing rows from as_of.
 	// It is the rank's age fallback (the change log is pruned and cannot
 	// supply it). Populated by reads; every writer ignores this field.
@@ -64,7 +64,7 @@ type Entity struct {
 	// Backend is the registry backend instance that serves the entity ("" =
 	// NULL, not known yet). Added by ensureIssueFeedStorage on every ordinary
 	// open, so it reads "" on a store opened read-only or raw that lacks the
-	// column. Populated by reads; UpsertEntity and the WriteEntity* writers
+	// column. Populated by reads; SeedEntityForTest and the WriteEntity* writers
 	// ignore it; SetEntityColumns sets it.
 	Backend string
 
@@ -79,41 +79,6 @@ type Entity struct {
 	// SetEntityReadTimes sets them.
 	ReadAttemptAt string
 	ReadOKAt      string
-}
-
-// UpsertEntity inserts or replaces the entity row keyed by
-// (Repo, EntityType, EntityID).
-//
-// On a version-2 store a first insert also stamps first_seen_at with e.AsOf;
-// the conflict (update) branch never names first_seen_at, so it is never
-// rewritten.
-func (s *Store) UpsertEntity(e Entity) error {
-	isNew, err := s.isNewSchema()
-	if err != nil {
-		return err
-	}
-	insertCols, placeholders := `repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha`, `?, ?, ?, ?, ?, ?, ?, ?`
-	args := []any{e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA)}
-	if isNew {
-		insertCols += `, first_seen_at`
-		placeholders += `, ?`
-		args = append(args, nullableString(e.AsOf))
-	}
-	_, err = s.sql.Exec(
-		`INSERT INTO entity (`+insertCols+`)
-		 VALUES (`+placeholders+`)
-		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
-		   facts = excluded.facts,
-		   as_of = excluded.as_of,
-		   stale = excluded.stale,
-		   content_hash = excluded.content_hash,
-		   head_sha = excluded.head_sha`,
-		args...,
-	)
-	if err != nil {
-		return fmt.Errorf("store: upsert entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
-	}
-	return nil
 }
 
 // GetEntity returns the entity row for (repo, entityType, entityID), or
