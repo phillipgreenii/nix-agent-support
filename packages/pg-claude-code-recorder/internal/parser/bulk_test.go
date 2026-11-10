@@ -91,7 +91,16 @@ func TestBulkRebuildMatchesDefaultDurabilityBuild(t *testing.T) {
 }
 
 func TestBulkRebuildCommitsFarFewerTimesPerRecord(t *testing.T) {
-	const files = 60 // 11 records each
+	// 60 files, 11 records each, with BulkRecords 200 (below): the default build
+	// commits once per file (60), the bulk build 4 times (3 budget flushes at
+	// about 18 files each, plus the final flush), so 60/4 = 15x fewer against the
+	// asserted 10x, a margin of 1.5x. The test needs several budget flushes (not
+	// just the final one), which takes about 36 or more files at this budget
+	// (2 x 18 files before the third commit). Only the margin is arithmetic, not
+	// a measured threshold, and the saving from fewer files is small against the
+	// risk, so the pair is kept as is (measured 1.91 s plain, 4.93 s -race). Both
+	// builds are needed: the test compares them.
+	const files = 60
 	def := bulkCorpus(t, files)
 	def.Parse()
 	records := def.Count(`SELECT COUNT(*) FROM records`)

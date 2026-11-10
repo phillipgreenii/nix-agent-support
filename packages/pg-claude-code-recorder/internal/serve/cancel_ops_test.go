@@ -127,6 +127,9 @@ func postHeader(d *Daemon, op, deadlineMs string) (int, string) {
 
 // A header at the clamp floor ends a statement that never returns with
 // query_timeout, well before query.timeout, and counts as a deadline cancel.
+// The header "1" is clamped up to wire.MinDeadline (1 s), a production constant
+// and the point of the test, so this test waits 1 s by design (measured 1.04 s
+// plain, 1.13 s -race) and cannot be shortened without changing that constant.
 func TestDeadlineHeaderAtTheFloorTimesOutARealStatement(t *testing.T) {
 	e := newEnv(t, false)
 	d := e.open(t)
@@ -154,10 +157,32 @@ func TestDeadlineHeaderAtTheFloorTimesOutARealStatement(t *testing.T) {
 	}
 }
 
+// noHeaderQueryTimeout is the query.timeout of TestWithoutTheHeaderQueryTimeoutApplies.
+//
+//   - It has to be an ordinary positive query.timeout: the config has no floor on
+//     it (only wire.MinDeadline, 1 s, floors a client's header, and that is not
+//     in play here because a header not shorter than query.timeout is ignored).
+//     So 250 ms is as legitimate a query.timeout as 1 s.
+//   - What the assertions need: spin never ends on its own, so a 504 query_timeout
+//     can only come from query.timeout, whatever its size, and the header cases
+//     ("" and "60000") must both be NOT shorter than it: 60000 ms is 240x 250 ms.
+//     A deadline that fires before the statement starts is expected to still
+//     yield query_timeout (a context deadline maps to the wire query_timeout
+//     error in wire.go), so a slow start under load should not flip the result;
+//     the test passed 3 times under -race with this value.
+//   - Smaller than this buys little (each of the 2 requests waits one timeout);
+//     larger is unnecessary because nothing in the test depends on the size. The
+//     floor test (TestDeadlineHeaderAtTheFloor...) keeps the daemon default
+//     query.timeout (25 s) and MUST NOT use this value, as it needs
+//     query.timeout above wire.MinDeadline.
+//   - Measured, niced -p 4: 2.05 s plain / 2.11 s -race at 1 s (2 x 1 s); at
+//     250 ms 0.53 s plain / 0.69 s -race (full-module after run).
+const noHeaderQueryTimeout = 250 * time.Millisecond
+
 // Without the header the daemon's own query.timeout ends the request.
 func TestWithoutTheHeaderQueryTimeoutApplies(t *testing.T) {
 	e := newEnv(t, false)
-	e.cfg.QueryTimeout = time.Second
+	e.cfg.QueryTimeout = noHeaderQueryTimeout
 	d := e.open(t)
 	defer func() { _ = d.Close() }()
 	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)

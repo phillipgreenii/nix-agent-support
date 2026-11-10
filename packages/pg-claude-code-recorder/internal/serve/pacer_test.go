@@ -39,6 +39,9 @@ func TestPacerEarnsNoBurstCreditWhileIdleAndZeroIsUnlimited(t *testing.T) {
 	ctx := context.Background()
 	p := newPacer(clock.Real{}, 20) // one slot per 50 ms
 	p.wait(ctx)
+	// 200 ms idle is 4 slots of 50 ms: a pacer that banked idle time would
+	// release the next 4 at once, which the 140 ms floor below rejects. Real
+	// clock on purpose (built with clock.Real{}); whole test 0.35 s measured.
 	time.Sleep(200 * time.Millisecond) // idle
 	t0 := time.Now()
 	for i := 0; i < 4; i++ {

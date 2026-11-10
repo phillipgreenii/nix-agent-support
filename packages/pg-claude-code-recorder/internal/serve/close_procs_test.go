@@ -12,6 +12,12 @@ import (
 
 // Daemon.Close closes the process table when it can be closed, so the kqueue
 // loop (started by the first watch) is gone afterwards.
+//
+// The real table is the thing under test, so the fake proc.System of the other
+// tests cannot stand in: only the real one has a kqueue loop whose goroutine
+// can leak. The 1 s (measured 1.02 s plain, 1.11 s -race) is Real.Close waiting
+// for that loop's own one-second wake, a production interval; it is not a test
+// number and stays.
 func TestDaemonCloseStopsTheProcessTableLoop(t *testing.T) {
 	opt := goleak.IgnoreCurrent()
 	e := newEnv(t, false)

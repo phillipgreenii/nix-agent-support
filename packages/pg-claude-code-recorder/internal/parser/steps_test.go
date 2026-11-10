@@ -94,6 +94,12 @@ func TestStepTimersWithFakeClock(t *testing.T) {
 // On the real clock the six steps partition ParseAll: other is the wall time
 // less the five measured steps, and it stays a small share of a fixture rebuild.
 func TestStepsPartitionParseAll(t *testing.T) {
+	// 4 files x 150 repeats is tied to the two timing ratios below (steps >= 90%
+	// of wall, other < 15%): both are shares of a real-clock run, so the run must
+	// be long enough for the fixed per-parse overhead (outside the five measured
+	// steps) to stay a small share. Kept as is (measured 0.37 s plain, 3.51 s
+	// -race): a shorter run raises the unmeasured share and makes the ratios
+	// flaky, so no smaller value was justified.
 	s, wall, _, _ := rebuildKit(t, 4, 150, nil)
 	var sum int64
 	for i := range s.StepNS {

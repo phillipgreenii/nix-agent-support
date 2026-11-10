@@ -119,6 +119,10 @@ func TestCoalesceWaitsForTheBurstThenReturns(t *testing.T) {
 	go func() { done <- p.Coalesce(stop) }()
 	// A wake-up every 30 ms keeps the quiet window open until the burst ends.
 	for i := 0; i < 5; i++ {
+		// 30 ms is half the 60 ms quiet window, so each wake-up lands inside it.
+		// Coalesce uses real timers (parser.Config has no clock for them), so
+		// these windows are real time and are the spec of the bounds below;
+		// left as is (0.66 s plain, 0.73 s -race measured).
 		time.Sleep(30 * time.Millisecond)
 		p.Notify(int64(i + 1))
 	}

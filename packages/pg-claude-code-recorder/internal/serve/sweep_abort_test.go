@@ -100,6 +100,9 @@ func TestBackfillStopsBetweenFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool, 1)
 	go func() { done <- d.afterBatch(ctx, results) }()
+	// Fixed 100 ms: gives afterBatch time to handle its first file and block in
+	// the hour-long throttle before the cancel. Nothing signals "now blocked", so
+	// a channel would need a production seam; left as is (0.16 s plain test).
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 	select {

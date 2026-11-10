@@ -35,10 +35,39 @@ func countStat(d *Daemon) *atomic.Int64 {
 	return &n
 }
 
-// With 5,000 files unchanged since their last copy, one status refresh Lstats
-// only the exceptions: 2 files whose recorded size differs from the copy offset
-// and 3 touched within status.fresh (5 in all), and the cached rows are not
-// re-read while the store's commit counter stands still.
+// statusLightFiles is the number of seeded files in
+// TestStatusRefreshStatsOnlyTheExceptions.
+//
+//   - It MUST be at least 6: the test hardcodes ids 100001..100006 (2 lagging,
+//     3 fresh, 1 touched outside status.fresh), and seedFiles numbers files from
+//     100001.
+//   - What the assertions need: "Lstat the exceptions only" is 5 calls (then 10
+//     after the second refresh) and "re-read nothing" is at most 3 statements.
+//     A regression that stats every file makes at least N calls, so N only has
+//     to be far enough above 5 that the two cannot be confused: 100 is 20x the 5
+//     calls. A regression that re-reads the file table adds a fixed couple of
+//     statements (statusRows runs two whole-table queries), which the "at most
+//     3" bound catches at any N, so only the Lstat count scales with N. The
+//     lazy path (computeCoverageFrom and statusRows, both in ops.go) loops once
+//     per cached row with no batch or chunk size, so N has no threshold effect
+//     and a larger N tests nothing more.
+//   - A value near 6 would be too small: an every-file regression would make
+//     only slightly more than 5 calls and the assertion would lose its margin.
+//   - Measured (go test -count=1, niced, -p 4; this test alone, seconds plain /
+//     -race): N=50 0.02 / 0.19, N=100 0.03 / 0.17, N=500 0.03 / 0.56,
+//     N=5000 0.16 / 4.51 (5.07 -race in the full-module baseline run). So the
+//     change from 5000 to 100 saves about 0.13 s plain and 4.4 to 4.9 s -race
+//     (full-module after run: 0.02 s plain, 0.66 s -race under load).
+//   - Negative control: with a statFunc call added for every file in the lazy
+//     branch of computeCoverageFrom, on top of the existing exception stat, the
+//     test failed at N=100 with "first refresh made 105 Lstat calls, want 5"
+//     (100 added calls plus the 5 exceptions).
+const statusLightFiles = 100
+
+// With statusLightFiles files unchanged since their last copy, one status
+// refresh Lstats only the exceptions: 2 files whose recorded size differs from
+// the copy offset and 3 touched within status.fresh (5 in all), and the cached
+// rows are not re-read while the store's commit counter stands still.
 func TestStatusRefreshStatsOnlyTheExceptions(t *testing.T) {
 	c := countdriver.Register("status-lazy-counting")
 	e := newEnv(t, false)
@@ -48,7 +77,7 @@ func TestStatusRefreshStatsOnlyTheExceptions(t *testing.T) {
 	}
 	e.d = d
 	defer func() { _ = d.Close() }()
-	seedFiles(t, d, filepath.Join(e.claude, "projects", "example-proj"), 5000)
+	seedFiles(t, d, filepath.Join(e.claude, "projects", "example-proj"), statusLightFiles)
 	err = d.st.WithWrite("", func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE files SET last_size=10 WHERE id IN (100001,100002)`) // lagging: nothing copied
 		return err
