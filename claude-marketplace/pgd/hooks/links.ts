@@ -1,5 +1,6 @@
 import { getOptions } from './options'
 import { log } from './log'
+import { record } from './metrics'
 import { linkContext } from './linkContext'
 import { appendMermaidLinks } from './mermaid'
 import type { PgdLink, PgdOptions } from './types'
@@ -95,6 +96,7 @@ registerKind('regex', (rule: { pattern: string; url: string }) => {
 
 interface Compiled {
   name: string
+  kindName: string
   kind: LinkKind
 }
 
@@ -103,7 +105,7 @@ function compile(rule: LinkRule): Compiled | undefined {
   try {
     const factory = KINDS.get(kindName)
     if (!factory) throw new Error(`unknown kind "${kindName}"`)
-    return { name: rule.name, kind: factory(rule) }
+    return { name: rule.name, kindName, kind: factory(rule) }
   } catch (err) {
     log('warn', 'links', `link rule "${rule.name}" skipped: ${err instanceof Error ? err.message : String(err)}`)
     return undefined
@@ -142,6 +144,19 @@ export function resetLinkMemo(): void {
   memo = new Map()
   byIdentity = new WeakMap()
   byContent = new Map()
+}
+
+// The first decline per (kind, reason) in a session writes one debug line (the kind and the
+// reason, never message text); later ones are silent. Tests reset it so order cannot matter.
+let declineLogged = new Set<string>()
+export function resetLinkDeclineLog(): void {
+  declineLogged = new Set()
+}
+function noteDecline(kind: string, reason: DeclineReason): void {
+  const k = `${kind}\u0000${reason}`
+  if (declineLogged.has(k)) return
+  declineLogged.add(k)
+  log('debug', 'links', `link declined: kind=${kind} reason=${reason}`)
 }
 
 // Link text escapes the characters that would end, nest or restyle the markdown link; the url
@@ -188,7 +203,7 @@ function rewriteUncached(
     .replace(BARE_URL, m => protect(m))
 
   let noContext = false
-  for (const { kind } of compiled) {
+  for (const { kind, name, kindName } of compiled) {
     let out = ''
     let at = 0
     for (const c of kind.scan(work)) {
@@ -197,9 +212,12 @@ function rewriteUncached(
       const shown = { ...c, text: restore(work.slice(c.start, c.end), spans) }
       const r = kind.resolve(shown, work, context)
       if (isDecline(r)) {
+        record('pgd_links_declined_total', 1, { kind: kindName, rule: name, reason: r.decline })
+        noteDecline(kindName, r.decline)
         if (r.decline === 'no-context') noContext = true
         continue
       }
+      record('pgd_links_resolved_total', 1, { kind: kindName, rule: name })
       out += work.slice(at, c.start) + protect(`[${escapeText(shown.text)}](${r})`)
       at = c.end
     }

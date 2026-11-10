@@ -280,6 +280,14 @@ entry.
   or that is not a valid URL once `{0}` is filled, skips that rule only; a `warn` line naming the
   rule is written to the log.
 - Default list: empty.
+- Counters: `pgd_links_resolved_total{kind,rule}` and `pgd_links_declined_total{kind,rule,reason}`
+  (reason is one of `no-context`, `no-repo`, `unknown-repo`, `adjacent`, `unsafe`; `rule` is the
+  rule name, so the label set is bounded by configuration). They count resolutions on memo cache
+  misses, an approximation and not a count of unique links: a streaming message is a miss on every
+  chunk, an evicted message is counted again when it is redrawn, and a `no-context` decline later
+  followed by a link counts once in each.
+- Debug log: the first decline per (kind, reason) in a session writes one `debug` line carrying the
+  kind and the reason and no message text; there is no per-link line.
 
 ## Focus pane (`components.focus`)
 

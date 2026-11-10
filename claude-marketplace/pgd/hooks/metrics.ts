@@ -22,6 +22,8 @@ export const METRIC_NAMES = [
   'pgd_draw_duration_seconds',
   'pgd_invalidate_total',
   'pgd_invalidate_coalesced_total',
+  'pgd_links_resolved_total',
+  'pgd_links_declined_total',
 ] as const
 
 const series = new Map<string, Sample>()
