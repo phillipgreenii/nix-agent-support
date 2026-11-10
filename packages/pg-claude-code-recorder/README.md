@@ -191,7 +191,7 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `settle_tick_examined_total`, `settle_tick_transitions_total`, `settle_tick_last_duration_seconds`,
   `settle_tick_last_timestamp_seconds`, `settle_run_lock_wait_total{op}` and
   `settle_run_lock_wait_seconds_total{op}` (time callers queued for the settler's run lock; a `settle_run_lock_wait_slow`
-  warning is logged for a wait of 5 s or more), `refresh_gauges_duration_seconds`, `loop_runs_total{loop,outcome}`,
+  warning is logged for a wait of 5 s or more, naming `holder_op` and `holder_held_ms`, the holder it queued behind; a `remove --dry-run` hands the lock to a queued caller about every second), `refresh_gauges_duration_seconds`, `loop_runs_total{loop,outcome}`,
   `process_cpu_seconds_total`, `go_goroutines`, `go_memstats_heap_alloc_bytes`,
   `go_memstats_alloc_bytes_total`, `go_gc_pause_seconds_total`, `wal_bytes` and the database/sql pool figures `db_open_connections`,
   `db_in_use_connections`, `db_idle_connections`, `db_wait_total`, `db_wait_seconds_total`,

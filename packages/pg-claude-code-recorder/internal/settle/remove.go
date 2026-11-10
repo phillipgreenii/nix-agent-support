@@ -90,6 +90,9 @@ type RemoveOptions struct {
 	// settled and older than remove.after. A named one never bypasses the age.
 	Sessions []string
 	DryRun   bool
+	// yield, set by Remove for a dry run, hands the run lock to a queued caller
+	// between Conversations; it reports whether it did.
+	yield func() bool
 }
 
 // RemoveSkip is one Conversation removal did not touch, and why.
@@ -127,7 +130,13 @@ func (s *Settler) cfs() fsx.FS {
 // Remove removes the selected Conversations (or reports what it would remove on
 // a dry run, which works while removal is disabled and changes nothing).
 func (s *Settler) Remove(opt RemoveOptions) (RemoveReport, error) {
-	defer s.lockRun("remove")()
+	unlock, _ := s.lockRunWait("remove")
+	defer unlock()
+	if opt.DryRun {
+		// A dry run only reads, so it may give the lock up between Conversations: a
+		// pass over many of them once held it 14 s and starved the settle wake.
+		opt.yield = s.yieldRun
+	}
 	rep, err := s.removeLocked(opt, s.cfg.Clock.Now())
 	if err == nil && !opt.DryRun {
 		// An operator run that completed counts even when it removed nothing.
@@ -206,6 +215,9 @@ func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time) (RemoveRepo
 	}
 	var todo []*conv
 	for _, session := range sessions {
+		if opt.yield != nil {
+			opt.yield()
+		}
 		if !uuidRe.MatchString(session) {
 			skip(session, "not_found")
 			continue

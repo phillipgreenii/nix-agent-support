@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -200,6 +201,19 @@ type Settler struct {
 	fs  fsx.FS
 
 	run sync.Mutex // one pass at a time
+
+	// Run-lock attribution, all guarded by run itself except waiters: curOp and
+	// curAt name the current holder and when it took the lock (or last yielded
+	// it), prevOp and prevHeld the holder that released it last, which is the one
+	// a waiter that just got the lock queued behind. waiters counts callers
+	// queued for run, so a holder knows whether yielding would help anyone.
+	curOp, prevOp string
+	curAt         time.Time
+	prevHeld      time.Duration
+	waiters       atomic.Int32
+	// yieldSlice is how long a yielding holder (Remove's dry run) keeps the run
+	// lock while someone queues before it hands it over; 0 means runLockSlice.
+	yieldSlice time.Duration
 
 	// doctorMu is the single flight of the doctor cursor: a rolling slice and a
 	// CLI doctor run never overlap.
@@ -568,8 +582,9 @@ func (s *Settler) applyChanged(ids []int64) error {
 	return nil
 }
 
-// slowRunLockWait is the wait for the run lock above which a warning is logged.
-const slowRunLockWait = 5 * time.Second
+// slowRunLockWait is the wait for the run lock above which a warning is logged
+// (a variable so a test can lower it).
+var slowRunLockWait = 5 * time.Second
 
 // lockRun takes the run lock for op and returns its unlock. The time spent
 // waiting is counted (settle_run_lock_wait_total, settle_run_lock_wait_seconds_total,
@@ -580,18 +595,72 @@ func (s *Settler) lockRun(op string) func() {
 	return unlock
 }
 
-// lockRunWait is lockRun that also returns how long it waited.
+// lockRunWait is lockRun that also returns how long it waited. The slow-wait
+// line names the holder the caller queued behind (holder_op) and for how long that
+// holder kept the lock (holder_held_ms).
 func (s *Settler) lockRunWait(op string) (func(), time.Duration) {
+	w := s.acquireRun(op)
+	return s.releaseRun, w
+}
+
+// acquireRun takes the run lock for op, counts and logs the wait, and records op
+// as the holder.
+func (s *Settler) acquireRun(op string) time.Duration {
 	t0 := time.Now()
+	s.waiters.Add(1)
 	s.run.Lock()
-	w := time.Since(t0)
+	s.waiters.Add(-1)
+	now := time.Now()
+	w := now.Sub(t0)
+	prevOp, prevHeld := s.prevOp, s.prevHeld
+	s.curOp, s.curAt = op, now
 	lbl := map[string]string{"op": op}
 	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaits, lbl, 1)
 	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaitSeconds, lbl, w.Seconds())
 	if w >= slowRunLockWait {
-		s.cfg.Obs.Log.Warn("settle_run_lock_wait_slow", "op", op, "wait_ms", w.Milliseconds())
+		s.cfg.Obs.Log.Warn("settle_run_lock_wait_slow", "op", op, "wait_ms", w.Milliseconds(),
+			"holder_op", prevOp, "holder_held_ms", prevHeld.Milliseconds())
 	}
-	return s.run.Unlock, w
+	return w
+}
+
+// releaseRun records how long the current holder kept the lock and releases it.
+func (s *Settler) releaseRun() {
+	s.prevOp, s.prevHeld = s.curOp, time.Since(s.curAt)
+	s.curOp = ""
+	s.run.Unlock()
+}
+
+// runLockSlice is the longest a yielding holder keeps the run lock while another
+// caller queues for it (checked between units of work, so one unit can overrun).
+const runLockSlice = time.Second
+
+// runLockHandoff bounds how long a yielding holder waits for a queued caller to
+// take the lock it released before it queues again itself.
+const runLockHandoff = 50 * time.Millisecond
+
+// yieldRun hands the run lock to a queued caller when the holder has had it for
+// a slice, and takes it back after that caller is done. The caller holds the lock
+// from lockRunWait and keeps its unlock. It reports whether it yielded. State read
+// before a yield may be stale after it.
+func (s *Settler) yieldRun() bool {
+	slice := s.yieldSlice
+	if slice <= 0 {
+		slice = runLockSlice
+	}
+	if s.waiters.Load() == 0 || time.Since(s.curAt) < slice {
+		return false
+	}
+	op, queued := s.curOp, s.waiters.Load()
+	s.releaseRun()
+	// Mutex barging would let this goroutine retake the lock before the queued
+	// one wakes; wait (bounded) until a waiter has taken it.
+	for t0 := time.Now(); s.waiters.Load() >= queued && time.Since(t0) < runLockHandoff; {
+		runtime.Gosched()
+		time.Sleep(50 * time.Microsecond)
+	}
+	s.acquireRun(op)
+	return true
 }
 
 // Outcome is what one evaluation of a Conversation did.
