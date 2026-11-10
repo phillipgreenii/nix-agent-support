@@ -345,6 +345,9 @@ func (p *Pipeline) commitRemovedFeedRow(c feedCommit, repo, at string, opts stor
 		if hydratedAt == "" {
 			hydratedAt = at
 		}
+		if h := p.seams.beforeCASWrite; h != nil {
+			h(attempt)
+		}
 		v, err := p.store.WriteEntityStateWithLogOpts(store.Entity{
 			Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
 			Facts: cur.Facts, AsOf: cur.AsOf, ContentHash: cur.ContentHash, HeadSHA: cur.HeadSHA,
@@ -385,6 +388,9 @@ func (p *Pipeline) feedCAS(ctx context.Context, repo string, c feedCommit, at st
 			expected = cur.Version
 		}
 		e, hydratedAt := mk(cur, found)
+		if h := p.seams.beforeCASWrite; h != nil {
+			h(attempt)
+		}
 		v, werr := p.store.WriteEntityStateWithLogOpts(e, expected, hydratedAt, active, nil, c.kinds, c.origin, at, opts)
 		if werr == nil {
 			return v, cur, found, false, nil

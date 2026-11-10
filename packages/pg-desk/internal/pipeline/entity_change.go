@@ -426,6 +426,11 @@ type postCommit struct {
 // interpretation row and, LAST, the derived-link replacement. RunEntityChange
 // and IngestFeedRow both call it.
 func (p *Pipeline) finishEntityChange(repo, entityType, entityID string, pc postCommit) error {
+	if h := p.seams.beforeFinish; h != nil {
+		if err := h(); err != nil {
+			return err
+		}
+	}
 	if err := p.appendLocalRecords(repo, entityType, entityID, pc.observed, pc.propagate, pc.otherLinks, pc.own, pc.at); err != nil {
 		return err
 	}
@@ -446,6 +451,11 @@ func (p *Pipeline) finishEntityChange(repo, entityType, entityID string, pc post
 // to it. Each (entity, kind) is appended at most once per call; an entity with
 // no row is skipped. An unobserved hydration appends nothing.
 func (p *Pipeline) appendLocalRecords(repo, entityType, entityID string, observed, propagate bool, otherLinks []classify.Targeted, own classify.WorkLookup, at string) error {
+	if h := p.seams.appendLocalRecords; h != nil {
+		if err := h(); err != nil {
+			return err
+		}
+	}
 	if !observed {
 		return nil
 	}

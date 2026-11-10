@@ -405,6 +405,9 @@ func (e *Engine) deactivateIf(entityType, id string, kinds []string, guard func(
 		if !found || row.Inactive || (guard != nil && !guard(row)) {
 			return nil
 		}
+		if e.beforeCASWrite != nil {
+			e.beforeCASWrite(attempt)
+		}
 		var wo store.WriteOptions
 		if entityType == issueEntityType && !OwningSet(e.Cfg, entityType)[row.Backend] {
 			// The watched flag of an entity no owning backend holds ends with its
@@ -718,6 +721,9 @@ func (e *Engine) reconcileOne(entityType, id string) error {
 		}
 		if !found || row.Inactive {
 			return nil
+		}
+		if e.beforeCASWrite != nil {
+			e.beforeCASWrite(attempt)
 		}
 		_, err = e.Store.WriteEntityStateWithLog(row, row.Version, row.HydratedAt, true, []string{string(classify.KindReconcile)}, OriginLocalReconcile, at)
 		if err == nil {

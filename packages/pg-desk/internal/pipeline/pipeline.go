@@ -70,6 +70,31 @@ type Pipeline struct {
 	// recordOut, when non-nil, receives every run record in addition to out
 	// (bead pg2-dpml1).
 	recordOut io.Writer
+	// seams are fault-injection test seams; every field is nil in
+	// production. See testSeams.
+	seams testSeams
+}
+
+// testSeams are TEST SEAMS: fault-injection hooks, nil by default, set only
+// by this package's tests (they are unexported, so nothing outside the
+// package can set them). Each is consulted at one point and changes no
+// behavior while nil.
+type testSeams struct {
+	// beforeFinish runs at the start of finishEntityChange, i.e. in the gap
+	// between an entity's commit and the steps after it; a returned error
+	// aborts finishEntityChange with it. A test also uses it to place a
+	// competing write in the gap.
+	beforeFinish func() error
+	// appendLocalRecords runs at the start of appendLocalRecords; a
+	// returned error is that function's error.
+	appendLocalRecords func() error
+	// interpretOnlyWrite runs in RunInterpretOnly just before its store
+	// write; a returned error is the store write's error.
+	interpretOnlyWrite func() error
+	// beforeCASWrite runs once per compare-and-set attempt of the feed-row
+	// writes (feedCAS, commitRemovedFeedRow), after the entity read and
+	// before the write, so a test can lose the race on purpose.
+	beforeCASWrite func(attempt int)
 }
 
 // Option configures a Pipeline constructed by New.
@@ -240,7 +265,8 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
 	}
 
-	if err := p.persist(entityType, entityID, facts, interp); err != nil {
+	err = p.persistInterpretOnly(entityType, entityID, facts, interp)
+	if err != nil {
 		err = TagStage(StageStore, err)
 		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only store %s %s: %w", entityType, entityID, err)
@@ -270,6 +296,17 @@ func (p *Pipeline) repo() string {
 		return ""
 	}
 	return p.cfg.Repos[0].Remote
+}
+
+// persistInterpretOnly is RunInterpretOnly's store write: persist, behind the
+// interpretOnlyWrite test seam.
+func (p *Pipeline) persistInterpretOnly(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) error {
+	if h := p.seams.interpretOnlyWrite; h != nil {
+		if err := h(); err != nil {
+			return err
+		}
+	}
+	return p.persist(entityType, entityID, facts, interp)
 }
 
 // persist writes facts and interp to the entity and interpretation

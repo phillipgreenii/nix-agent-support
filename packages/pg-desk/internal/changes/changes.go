@@ -95,6 +95,12 @@ type Engine struct {
 	// setMeta replaces Store.SetMeta for the best-effort listing-status
 	// write; tests use it to inject a write failure.
 	setMeta func(key, value string) error
+
+	// beforeCASWrite is a TEST SEAM (nil in production): it runs once per
+	// compare-and-set attempt of deactivateIf and reconcileOne, after the
+	// entity read and before the write, so a test can lose the race on
+	// purpose.
+	beforeCASWrite func(attempt int)
 }
 
 // Outcome tells the caller how a call that delivered an envelope ended.
