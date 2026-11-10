@@ -853,6 +853,7 @@ let
     "pg-connector-calendar-osx-bridge"
     "pg-connector-calendar-task-focus"
     "pg-connector-alert-grafana"
+    "pg-connector-alert-pagerduty"
     "pg-connector-mail-osx-bridge"
   ];
   # The PATH entries the pinned names stand for, with a hint per entry.

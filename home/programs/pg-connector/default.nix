@@ -60,6 +60,7 @@ let
       pkgs.pg-connector-calendar-osx-bridge
       pkgs.pg-connector-calendar-task-focus
       pkgs.pg-connector-alert-grafana
+      pkgs.pg-connector-alert-pagerduty
       pkgs.pg-connector-mail-osx-bridge
     ]
     ++ lib.optional gh.enable gh.package
