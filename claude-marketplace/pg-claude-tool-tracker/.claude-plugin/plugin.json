@@ -4,5 +4,6 @@
   "version": "1.0.0",
   "defaultEnabled": true,
   "requires": ["claude-tool-tracker"],
+  "uses": ["beads"],
   "uses": ["beads"]
 }
