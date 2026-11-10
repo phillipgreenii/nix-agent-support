@@ -19,6 +19,7 @@ import { registerModalEventHooks } from './modals'
 import { registerLinkHooks } from './links'
 import { registerGithubPrKind } from './githubPr'
 import { registerJiraKind } from './jira'
+import { registerFileRefKind } from './fileRef'
 import { registerPgdNoun } from './pgd-noun'
 
 // The display mod. Choices (the design leaves them to the builder, so they follow the
@@ -78,6 +79,7 @@ export const register: Register = on => {
   registerModalEventHooks(on)
   registerGithubPrKind()
   registerJiraKind()
+  registerFileRefKind()
   registerLinkHooks(on)
   // The pgd noun: a plugin adds a noun to `$` only through an engine.create hook.
   registerPgdNoun(on)

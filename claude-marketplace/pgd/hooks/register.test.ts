@@ -49,6 +49,14 @@ test('an engine.create hook adds the pgd noun to $ and its put stores a contribu
   expect(listContributions('alert').map(c => c.text)).toEqual(['wired'])
 })
 
+test('registering the mod registers the file-ref link kind with the engine', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(register as any)(() => {})
+  resetLinkMemo()
+  const rules: LinkRule[] = [{ kind: 'file-ref', name: 'files', options: { localTemplate: 'file://{path}:{line}' } }]
+  expect(rewriteLinks('see a.go:3', rules, { cwd: '/w' })).toBe('see [a.go:3](file:///w/a.go:3)')
+})
+
 test('registering the mod registers the github-pr and jira link kinds with the engine', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(register as any)(() => {})
