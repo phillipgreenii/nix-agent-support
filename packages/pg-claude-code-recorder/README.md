@@ -850,6 +850,26 @@ The first apply after that change pays this once, and a rollback (revert the com
 Launchd settings (`KeepAlive`, `ExitTimeOut`) live outside this package and were not checked. The operator runs the
 apply.
 
+### Restart: degraded status and the checkpoint stamp (accepted)
+
+Two properties of the watcher after a restart are known and accepted, not defects to fix.
+
+- A restart within `MaxReplayGap` (10 minutes) of the last checkpoint replays the event stream and skips the first
+  sweep. The first-backfill-done flag is set only by a sweep pass, so `status`, `coverage`, the process lists and
+  `query` answer `degraded` (exit 5, `caught_up` 0) until the next scheduled sweep finishes, up to 15 minutes. This
+  already happens after every ordinary restart. Operator ruling (Phillip, 2026-11-09): "not worried about the
+  resume; the sweep duration is the concern." Callers that need an answer meanwhile MAY use `--allow-partial`.
+  A fix (running a sweep on every start) would pay the full sweep cost each restart, which is the cost being
+  reduced, so it MUST NOT be added without a new ruling.
+- A sweep that is cut short after its walk (a shutdown abort during the sinks) still stamps `LastSweep` and saves the
+  checkpoint, because the stamp is written when the walk finishes, before the sinks run. The checkpoint and the
+  last-sweep heartbeat then claim a sweep that did not finish. No data is lost: the replay decision reads the event
+  id and event time, not `LastSweep`, and every file the aborted sweep did not deliver is found by the next sweep.
+  The stamp MAY be moved to after the sinks if a later change needs an honest checkpoint, but then it MUST keep the
+  rule that an aborted sweep never advances the event id.
+  A SIGKILL, OOM or panic leaves no shutdown line: a `startup_complete` with no preceding `shutdown_done` or
+  `shutdown_overrun` in the log marks an unclean previous run.
+
 ### Clone re-sharing on settle (APFS)
 
 In clone mode the copier seeds a copy with `clonefile`, and an append then gives that copy private blocks. The settle
