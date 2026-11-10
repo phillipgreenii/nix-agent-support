@@ -30,7 +30,7 @@ func TestCommitRemovedFeedRow_ReadFailureIsAnError(t *testing.T) {
 	if err := p.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, err := p.commitRemovedFeedRow(removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
+	_, err := p.commitRemovedFeedRow(context.Background(), removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
 	if err == nil || !strings.Contains(err.Error(), "read issue i-1") {
 		t.Fatalf("err = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestCommitRemovedFeedRow_UnheldEntityMarkerAdvanceFailure(t *testing.T) {
 	m := &store.FeedMarker{Instance: frInstance, StoreIdentity: frIdentity, Seq: 9}
 	failStoreWrites(t, p.store, "INSERT", "meta")
 	failStoreWrites(t, p.store, "UPDATE", "meta")
-	_, err := p.commitRemovedFeedRow(removedCommit("i-9", m), ecRepo, "t", store.WriteOptions{})
+	_, err := p.commitRemovedFeedRow(context.Background(), removedCommit("i-9", m), ecRepo, "t", store.WriteOptions{})
 	if err == nil || !strings.Contains(err.Error(), "advance feed marker "+frInstance) {
 		t.Fatalf("err = %v", err)
 	}
@@ -58,7 +58,7 @@ func TestCommitRemovedFeedRow_WriteFailureIsAnErrorAndLeavesTheRow(t *testing.T)
 	before, _, _ := p.store.GetEntity(ecRepo, issueEntityType, "i-1")
 	failStoreWrites(t, p.store, "UPDATE", "entity")
 
-	_, err := p.commitRemovedFeedRow(removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
+	_, err := p.commitRemovedFeedRow(context.Background(), removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
 	if err == nil || !strings.Contains(err.Error(), "write issue i-1") {
 		t.Fatalf("err = %v", err)
 	}
@@ -81,7 +81,7 @@ func TestCommitRemovedFeedRow_LostRaceRetriesThenGivesUp(t *testing.T) {
 			bumpEntity(t, p, "i-1")
 		}
 	}
-	out, err := p.commitRemovedFeedRow(removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
+	out, err := p.commitRemovedFeedRow(context.Background(), removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
 	if err != nil || !out.written || out.failure != "" {
 		t.Fatalf("out = %+v err = %v, want the retry to land the write", out, err)
 	}
@@ -96,7 +96,7 @@ func TestCommitRemovedFeedRow_LostRaceRetriesThenGivesUp(t *testing.T) {
 	frIngest(t, p2, frRow(1, "i-1", "title_changed"))
 	calls := 0
 	p2.seams.beforeCASWrite = func(int) { calls++; bumpEntity(t, p2, "i-1") }
-	out, err = p2.commitRemovedFeedRow(removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
+	out, err = p2.commitRemovedFeedRow(context.Background(), removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
 	if err != nil || out.written || out.failure != "still losing the version race" {
 		t.Fatalf("out = %+v err = %v, want the version-race failure", out, err)
 	}
@@ -114,27 +114,28 @@ func TestCommitRemovedFeedRow_LocalRecordsFailureIsReturned(t *testing.T) {
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
 	boom := errors.New("injected local records failure")
 	p.seams.appendLocalRecords = func() error { return boom }
-	_, err := p.commitRemovedFeedRow(removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
+	_, err := p.commitRemovedFeedRow(context.Background(), removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the injected failure", err)
 	}
 }
 
-func casMk(id string) func(store.Entity, bool) (store.Entity, string) {
-	return func(store.Entity, bool) (store.Entity, string) {
-		return store.Entity{Repo: ecRepo, EntityType: issueEntityType, EntityID: id, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z", ContentHash: "h"}, "2026-09-16T00:00:00Z"
-	}
+// casFeed drives the shared compare-and-set loop the way a feed row does.
+func casFeed(ctx context.Context, p *Pipeline, id string) (version int64, cur store.Entity, found, exhausted bool, err error) {
+	cr, err := p.commitCAS(ctx, ecRepo, issueEntityType, id, defaultEntityChangeRetries, p.seams.beforeCASWrite, func(store.Entity, bool) (casPlan, error) {
+		return casPlan{
+			entity:     store.Entity{Repo: ecRepo, EntityType: issueEntityType, EntityID: id, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z", ContentHash: "h"},
+			hydratedAt: "2026-09-16T00:00:00Z", active: true, kinds: []string{"added"}, origin: defaultEntityChangeOrigin, at: "t",
+		}, nil
+	})
+	return cr.version, cr.cur, cr.found, cr.exhausted, err
 }
 
-func casCommit(id string) feedCommit {
-	return feedCommit{instance: frInstance, entityID: id, kinds: []string{"added"}, origin: defaultEntityChangeOrigin}
-}
-
-func TestFeedCAS_CancelledContextIsAnErrorBeforeAnyWrite(t *testing.T) {
+func TestCommitCAS_CancelledContextIsAnErrorBeforeAnyWrite(t *testing.T) {
 	p, _ := frPipeline(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, _, exhausted, err := p.feedCAS(ctx, ecRepo, casCommit("i-2"), "t", true, store.WriteOptions{}, casMk("i-2"))
+	_, _, _, exhausted, err := casFeed(ctx, p, "i-2")
 	if !errors.Is(err, context.Canceled) || exhausted {
 		t.Fatalf("err = %v exhausted = %v", err, exhausted)
 	}
@@ -143,23 +144,23 @@ func TestFeedCAS_CancelledContextIsAnErrorBeforeAnyWrite(t *testing.T) {
 	}
 }
 
-func TestFeedCAS_ReadFailureIsAnError(t *testing.T) {
+func TestCommitCAS_ReadFailureIsAnError(t *testing.T) {
 	p, _ := frPipeline(t)
 	if err := p.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, err := p.feedCAS(context.Background(), ecRepo, casCommit("i-2"), "t", true, store.WriteOptions{}, casMk("i-2"))
+	_, _, _, _, err := casFeed(context.Background(), p, "i-2")
 	if err == nil || !strings.Contains(err.Error(), "read issue i-2") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestFeedCAS_WriteFailureIsAnErrorNotARetry(t *testing.T) {
+func TestCommitCAS_WriteFailureIsAnErrorNotARetry(t *testing.T) {
 	p, _ := frPipeline(t)
 	failStoreWrites(t, p.store, "INSERT", "entity")
 	calls := 0
 	p.seams.beforeCASWrite = func(int) { calls++ }
-	_, _, _, exhausted, err := p.feedCAS(context.Background(), ecRepo, casCommit("i-2"), "t", true, store.WriteOptions{}, casMk("i-2"))
+	_, _, _, exhausted, err := casFeed(context.Background(), p, "i-2")
 	if err == nil || !strings.Contains(err.Error(), "write issue i-2") || exhausted {
 		t.Fatalf("err = %v exhausted = %v", err, exhausted)
 	}
@@ -170,7 +171,7 @@ func TestFeedCAS_WriteFailureIsAnErrorNotARetry(t *testing.T) {
 
 // One lost race returns the winning attempt's row read; a race lost on every
 // attempt reports exhausted with no error.
-func TestFeedCAS_LostRaceRetriesAndReportsExhaustion(t *testing.T) {
+func TestCommitCAS_LostRaceRetriesAndReportsExhaustion(t *testing.T) {
 	p, _ := frPipeline(t)
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
 	p.seams.beforeCASWrite = func(a int) {
@@ -178,13 +179,13 @@ func TestFeedCAS_LostRaceRetriesAndReportsExhaustion(t *testing.T) {
 			bumpEntity(t, p, "i-1")
 		}
 	}
-	v, cur, found, exhausted, err := p.feedCAS(context.Background(), ecRepo, casCommit("i-1"), "t", true, store.WriteOptions{}, casMk("i-1"))
+	v, cur, found, exhausted, err := casFeed(context.Background(), p, "i-1")
 	if err != nil || exhausted || !found || v != cur.Version+1 || cur.Version < 2 {
 		t.Fatalf("v=%d cur=%+v found=%v exhausted=%v err=%v, want a win against the bumped row", v, cur, found, exhausted, err)
 	}
 
 	p.seams.beforeCASWrite = func(int) { bumpEntity(t, p, "i-1") }
-	_, _, _, exhausted, err = p.feedCAS(context.Background(), ecRepo, casCommit("i-1"), "t", true, store.WriteOptions{}, casMk("i-1"))
+	_, _, _, exhausted, err = casFeed(context.Background(), p, "i-1")
 	if err != nil || !exhausted {
 		t.Fatalf("exhausted = %v err = %v, want exhaustion without an error", exhausted, err)
 	}

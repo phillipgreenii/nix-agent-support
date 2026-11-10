@@ -94,7 +94,7 @@ type testSeams struct {
 	// write; a returned error is the store write's error.
 	interpretOnlyWrite func() error
 	// beforeCASWrite runs once per compare-and-set attempt of the feed-row
-	// writes (feedCAS, commitRemovedFeedRow), after the entity read and
+	// writes (commitCAS, commitRemovedFeedRow), after the entity read and
 	// before the write, so a test can lose the race on purpose.
 	beforeCASWrite func(attempt int)
 }

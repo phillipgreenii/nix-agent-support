@@ -272,19 +272,11 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		observed   bool
 		propagate  bool
 		otherLinks []classify.Targeted
+		lastKinds  []string
 	)
-	for attempt := 0; ; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return res, fmt.Errorf("pipeline: %s %s: %w", entityType, entityID, err)
-		}
-		row, found, err := p.store.GetEntity(repo, entityType, entityID)
-		if err != nil {
-			return res, fmt.Errorf("pipeline: read %s %s: %w", entityType, entityID, err)
-		}
-		var expected int64
+	cr, err := p.commitCAS(ctx, repo, entityType, entityID, maxRetries, opts.beforeWrite, func(row store.Entity, found bool) (casPlan, error) {
 		old := classify.Snapshot{Type: entityType, ID: entityID}
 		if found {
-			expected = row.Version
 			old.Active = !row.Inactive
 			if !opts.ForceReconcile && !(row.Version == 0 && row.HydratedAt == "") {
 				old.Exists = true
@@ -363,14 +355,10 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 				storedCompare = issueCompareBytes(storedCompare)
 			}
 			if bytes.Equal(storedCompare, comparePayload) {
-				res.Unchanged = true
-				return res, nil
+				return casPlan{skip: true}, nil
 			}
 		}
 
-		if opts.beforeWrite != nil {
-			opts.beforeWrite(attempt)
-		}
 		wo := store.WriteOptions{Watched: result.Watched}
 		if opts.Backend != "" {
 			b := opts.Backend
@@ -380,26 +368,31 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			on := true
 			wo.Watched = &on
 		}
+		lastKinds = kinds
 		active := true
 		if opts.KeepActive && found {
 			active = !row.Inactive
 		}
-		v, err := p.store.WriteEntityStateWithLogOpts(store.Entity{
-			Repo: repo, EntityType: entityType, EntityID: entityID,
-			Facts: string(factsJSON), AsOf: asOf, ContentHash: newSnap.ContentHash, HeadSHA: headSHA,
-		}, expected, at, active, opts.ListFP, kinds, origin, at, wo)
-		if err == nil {
-			res.Kinds, res.Version, res.Written = kinds, v, true
-			break
-		}
-		if !errors.Is(err, store.ErrVersionConflict) {
-			return res, fmt.Errorf("pipeline: write %s %s: %w", entityType, entityID, err)
-		}
-		if res.Retries >= maxRetries {
-			return res, fmt.Errorf("pipeline: write %s %s: still losing the version race after %d retries: %w", entityType, entityID, res.Retries, err)
-		}
-		res.Retries++
+		return casPlan{
+			entity: store.Entity{
+				Repo: repo, EntityType: entityType, EntityID: entityID,
+				Facts: string(factsJSON), AsOf: asOf, ContentHash: newSnap.ContentHash, HeadSHA: headSHA,
+			},
+			hydratedAt: at, active: active, listFP: opts.ListFP, kinds: kinds, origin: origin, at: at, opts: wo,
+		}, nil
+	})
+	res.Retries = cr.retries
+	if err != nil {
+		return res, err
 	}
+	switch {
+	case cr.skipped:
+		res.Unchanged = true
+		return res, nil
+	case cr.exhausted:
+		return res, fmt.Errorf("pipeline: write %s %s: still losing the version race after %d retries: %w", entityType, entityID, cr.retries, cr.conflict)
+	}
+	res.Kinds, res.Version, res.Written = lastKinds, cr.version, true
 
 	// (4) after the commit: local records for other entities, the
 	// interpretation, and the derived-link replacement LAST.

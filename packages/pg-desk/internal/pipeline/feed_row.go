@@ -235,7 +235,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 		if !removedRow {
 			return feedOutcome{failure: "hydration failed: issue not found"}, nil
 		}
-		return p.commitRemovedFeedRow(c, repo, at, opts)
+		return p.commitRemovedFeedRow(ctx, c, repo, at, opts)
 	}
 	if result.Degraded != "" {
 		return feedOutcome{failure: "degraded answer: " + result.Degraded, degraded: true}, nil
@@ -279,18 +279,22 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	}
 	own := classify.NewStoreWorkLookup(p.store, repo)
 
-	version, cur, found, exhausted, err := p.feedCAS(ctx, repo, c, at, active, opts, func(store.Entity, bool) (store.Entity, string) {
-		return store.Entity{
-			Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
-			Facts: string(factsJSON), AsOf: asOf, ContentHash: hash, HeadSHA: headSHA,
-		}, at
+	cr, err := p.commitCAS(ctx, repo, issueEntityType, c.entityID, defaultEntityChangeRetries, p.seams.beforeCASWrite, func(store.Entity, bool) (casPlan, error) {
+		return casPlan{
+			entity: store.Entity{
+				Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
+				Facts: string(factsJSON), AsOf: asOf, ContentHash: hash, HeadSHA: headSHA,
+			},
+			hydratedAt: at, active: active, kinds: c.kinds, origin: c.origin, at: at, opts: opts,
+		}, nil
 	})
 	if err != nil {
 		return feedOutcome{}, err
 	}
-	if exhausted {
+	if cr.exhausted {
 		return feedOutcome{failure: "still losing the version race"}, nil
 	}
+	version, cur, found := cr.version, cr.cur, cr.found
 
 	// A reset replay is a first observation: nothing propagates from it.
 	observed := !c.replay && found && !cur.Inactive && !(cur.Version == 0 && cur.HydratedAt == "")
@@ -321,80 +325,42 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 // found: the last stored facts stay (no snapshot rewrite), the entity is set
 // inactive with watched cleared, and the marker advances in the same write.
 // An entity that is not held creates nothing; the marker still advances.
-func (p *Pipeline) commitRemovedFeedRow(c feedCommit, repo, at string, opts store.WriteOptions) (feedOutcome, error) {
-	const retries = defaultEntityChangeRetries
-	for attempt := 0; ; attempt++ {
-		cur, found, err := p.store.GetEntity(repo, issueEntityType, c.entityID)
-		if err != nil {
-			return feedOutcome{}, fmt.Errorf("pipeline: read %s %s: %w", issueEntityType, c.entityID, err)
-		}
+func (p *Pipeline) commitRemovedFeedRow(ctx context.Context, c feedCommit, repo, at string, opts store.WriteOptions) (feedOutcome, error) {
+	cr, err := p.commitCAS(ctx, repo, issueEntityType, c.entityID, defaultEntityChangeRetries, p.seams.beforeCASWrite, func(cur store.Entity, found bool) (casPlan, error) {
 		if !found {
-			if c.marker != nil {
-				if err := p.store.AdvanceFeedMarker(*c.marker); err != nil {
-					return feedOutcome{}, fmt.Errorf("pipeline: advance feed marker %s: %w", c.instance, err)
-				}
-			}
-			return feedOutcome{}, nil
+			return casPlan{skip: true}, nil
 		}
 		hydratedAt := cur.HydratedAt
 		if hydratedAt == "" {
 			hydratedAt = at
 		}
-		if h := p.seams.beforeCASWrite; h != nil {
-			h(attempt)
-		}
-		v, err := p.store.WriteEntityStateWithLogOpts(store.Entity{
-			Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
-			Facts: cur.Facts, AsOf: cur.AsOf, ContentHash: cur.ContentHash, HeadSHA: cur.HeadSHA,
-		}, cur.Version, hydratedAt, false, nil, c.kinds, c.origin, at, opts)
-		if err == nil {
-			own := classify.NewStoreWorkLookup(p.store, repo)
-			observed := !c.replay && !cur.Inactive && !(cur.Version == 0 && cur.HydratedAt == "")
-			if err := p.appendLocalRecords(repo, issueEntityType, c.entityID, observed, len(c.kinds) > 0, nil, own, at); err != nil {
-				return feedOutcome{}, err
+		return casPlan{
+			entity: store.Entity{
+				Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
+				Facts: cur.Facts, AsOf: cur.AsOf, ContentHash: cur.ContentHash, HeadSHA: cur.HeadSHA,
+			},
+			hydratedAt: hydratedAt, kinds: c.kinds, origin: c.origin, at: at, opts: opts,
+		}, nil
+	})
+	if err != nil {
+		return feedOutcome{}, err
+	}
+	switch {
+	case cr.skipped:
+		if c.marker != nil {
+			if err := p.store.AdvanceFeedMarker(*c.marker); err != nil {
+				return feedOutcome{}, fmt.Errorf("pipeline: advance feed marker %s: %w", c.instance, err)
 			}
-			return feedOutcome{written: true, version: v}, nil
 		}
-		if !errors.Is(err, store.ErrVersionConflict) {
-			return feedOutcome{}, fmt.Errorf("pipeline: write %s %s: %w", issueEntityType, c.entityID, err)
-		}
-		if attempt >= retries {
-			return feedOutcome{failure: "still losing the version race"}, nil
-		}
+		return feedOutcome{}, nil
+	case cr.exhausted:
+		return feedOutcome{failure: "still losing the version race"}, nil
 	}
-}
-
-// feedCAS is the compare-and-set write loop of one feed row: it reads the
-// entity's current version, builds the entity to write from the current row
-// (mk returns the entity and its hydrated_at) and retries a lost race up to
-// the existing bound. It returns the new version, the row read for the
-// winning attempt and whether the retries ran out.
-func (p *Pipeline) feedCAS(ctx context.Context, repo string, c feedCommit, at string, active bool, opts store.WriteOptions, mk func(cur store.Entity, found bool) (store.Entity, string)) (version int64, cur store.Entity, found, exhausted bool, err error) {
-	for attempt := 0; ; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return 0, cur, found, false, fmt.Errorf("pipeline: feed row %s %s: %w", c.instance, c.entityID, err)
-		}
-		cur, found, err = p.store.GetEntity(repo, issueEntityType, c.entityID)
-		if err != nil {
-			return 0, cur, found, false, fmt.Errorf("pipeline: read %s %s: %w", issueEntityType, c.entityID, err)
-		}
-		var expected int64
-		if found {
-			expected = cur.Version
-		}
-		e, hydratedAt := mk(cur, found)
-		if h := p.seams.beforeCASWrite; h != nil {
-			h(attempt)
-		}
-		v, werr := p.store.WriteEntityStateWithLogOpts(e, expected, hydratedAt, active, nil, c.kinds, c.origin, at, opts)
-		if werr == nil {
-			return v, cur, found, false, nil
-		}
-		if !errors.Is(werr, store.ErrVersionConflict) {
-			return 0, cur, found, false, fmt.Errorf("pipeline: write %s %s: %w", issueEntityType, c.entityID, werr)
-		}
-		if attempt >= defaultEntityChangeRetries {
-			return 0, cur, found, true, nil
-		}
+	cur := cr.cur
+	own := classify.NewStoreWorkLookup(p.store, repo)
+	observed := !c.replay && !cur.Inactive && !(cur.Version == 0 && cur.HydratedAt == "")
+	if err := p.appendLocalRecords(repo, issueEntityType, c.entityID, observed, len(c.kinds) > 0, nil, own, at); err != nil {
+		return feedOutcome{}, err
 	}
+	return feedOutcome{written: true, version: cr.version}, nil
 }
