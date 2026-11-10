@@ -29,6 +29,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/shutdown"
 	"github.com/phillipgreenii/pg-router/internal/telemetry"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
@@ -78,8 +79,8 @@ const inFlightDrainTimeout = 5 * time.Second
 // two killed dispatches ran <= 15s. 20s comfortably covers those and the
 // median; it does NOT cover the p90 (~31s), which is the price of fitting the
 // launchd budget: launchd clamps ExitTimeOut at 60s (pg2-s3fzr, measured),
-// so drain (20s) + the 30s session-sweep allowance + inFlightDrainTimeout's
-// 5s tail = 55s must stay under the 60s ExitTimeOut in
+// so drain (20s) + the session-sweep allowance (preShutdownTimeout, 25s) +
+// inFlightDrainTimeout's 5s tail = 50s (plus ~3s of flush/close) must stay under the 60s ExitTimeOut in
 // darwin/modules/pg-router/default.nix with margin -- keep the two in step,
 // and never raise this without shrinking another term. A drain that times out
 // cancels the dispatch context and kills the handler as before, but the
@@ -92,6 +93,22 @@ const inFlightDrainTimeout = 5 * time.Second
 // than any budget launchd allows, so the daemon neither waits for it nor
 // cancels it: its handler keeps running and the next daemon adopts the session.
 const shutdownDrainTimeout = 20 * time.Second
+
+// preShutdownTimeout bounds preShutdownAll's handler sweep (it used to run on
+// an unbounded context). It is the "session-sweep allowance" in the launchd
+// budget above, trimmed from 30s to 25s so the whole shutdown fits the
+// watchdog deadline below.
+const preShutdownTimeout = 25 * time.Second
+
+// shutdownWatchdogDeadline is the overall shutdown deadline the S5 watchdog
+// enforces once the signal context ends. Worst case of the existing phases:
+// drain shutdownDrainTimeout (20s) + preShutdownTimeout (25s) +
+// inFlightDrainTimeout (5s) = 50s, plus ~3s for the metrics flush, accept-loop
+// close and store close. Deadline + 7s must stay at or under launchd's 60s
+// ExitTimeOut clamp (darwin/modules/pg-router/default.nix), so 53s. A shutdown
+// still running at this point logs shutdown_overrun naming the phase in flight
+// and exits 10, rather than being SIGKILLed with the store lock held.
+const shutdownWatchdogDeadline = 53 * time.Second
 
 // inFlightDrainPollInterval is WaitForInFlightDrain's poll cadence during
 // the wait inFlightDrainTimeout bounds.
@@ -1128,6 +1145,12 @@ type preparedRun struct {
 	cfg     config.Config
 	o       *orchestrator.Orchestrator
 	cleanup func() // closes the eventlog writer, if one was opened
+	// Shutdown watchdog seams (runLongRunningBody only); zero values select the
+	// production defaults: stderr logger, shutdownWatchdogDeadline, os.Exit.
+	shutdownLog      *slog.Logger
+	shutdownDeadline time.Duration
+	shutdownExit     func(code int)
+	tracker          *shutdown.Tracker // set by runLongRunningBody; nil is a no-op
 	// declaredRoles/excluded are Task 4.1's own captures (Binding Decision
 	// 4): the FULL, pre-selector role list and the run-scoped exclusions
 	// applySelectors computed at its own decision point — both threaded
@@ -1736,6 +1759,25 @@ func runRun(only, disable []string, metricsAddr string) int {
 // (drainThenCancelDispatch), so a SIGTERM lets in-flight handlers finish
 // instead of SIGKILLing them (bead pg2-euh4f).
 func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.Duration) int {
+	// S5/S7: once ctx ends the shutdown has shutdownWatchdogDeadline to finish
+	// or the watchdog logs shutdown_overrun and exits 10. Registered first so it
+	// is disarmed last, after the store lock is released. The raw stderr logger
+	// keeps a hung telemetry path from blocking the overrun line.
+	shutLog := pr.shutdownLog
+	if shutLog == nil {
+		shutLog = slog.New(slog.NewTextHandler(os.Stderr, nil))
+	}
+	deadline := pr.shutdownDeadline
+	if deadline <= 0 {
+		deadline = shutdownWatchdogDeadline
+	}
+	pr.tracker = shutdown.NewTracker(shutLog)
+	watchdog := shutdown.Watch(ctx, shutdown.Options{Deadline: deadline, Log: shutLog, Tracker: pr.tracker, Exit: pr.shutdownExit})
+	defer func() {
+		if watchdog.Disarm() {
+			pr.tracker.Done()
+		}
+	}()
 	dispatchCtx, cancelDispatch := context.WithCancel(context.Background())
 	defer cancelDispatch()
 	svc, q, mp, storeClose, err := bootCore(dispatchCtx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeLongRunning)
@@ -1767,12 +1809,21 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// (ADR 0085); the drain and the store close do not wait on them.
 	survivors := survivingRoles(pr.cfg)
 	survives := func(listenerID string) bool { return survivors[listenerID] }
-	defer drainThenCloseStore(q, storeClose, survives)
+	defer func() {
+		pr.tracker.Phase("store_close")
+		drainThenCloseStore(q, storeClose, survives)
+	}()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
-	defer preShutdownAll(context.Background(), pr.o, pr.cfg)
 	defer func() {
+		pr.tracker.Phase("pre_shutdown")
+		ctx, cancel := context.WithTimeout(context.Background(), preShutdownTimeout)
+		defer cancel()
+		preShutdownAll(ctx, pr.o, pr.cfg)
+	}()
+	defer func() {
+		pr.tracker.Phase("accept_close")
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
 			slog.Warn("core accept loop exited with an error", "err", err)
@@ -1792,6 +1843,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// final-snapshot limitation, not a new regression — see that defer's own
 	// comment for the full reasoning.
 	defer func() {
+		pr.tracker.Phase("metrics_flush")
 		if err := metrics.Flush(context.Background(), mp); err != nil {
 			slog.Warn("run: metrics flush failed", "err", err)
 		}
@@ -1824,6 +1876,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 		select {
 		case <-ctx.Done():
 			slog.Info("run: shutdown requested")
+			pr.tracker.Phase("drain")
 			// Drain BEFORE returning: the deferred preShutdownAll (the ccpool
 			// session sweep) must not run while a dispatch is still in flight.
 			drainThenCancelDispatch(q, cancelDispatch, drainTimeout, survives)
