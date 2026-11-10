@@ -355,6 +355,7 @@ func (s *Store) commitBatchLocked() error {
 	s.addStep(StepCommit, took.Nanoseconds())
 	committed = true
 	s.bCommits++
+	s.bumpLive()
 	for _, h := range s.wrHooks {
 		h()
 	}

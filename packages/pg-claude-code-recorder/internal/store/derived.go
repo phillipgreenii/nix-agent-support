@@ -221,6 +221,7 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 		return err
 	}
 	done = true
+	s.bumpLive()
 	for _, h := range s.wrHooks {
 		h()
 	}

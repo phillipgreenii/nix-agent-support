@@ -209,6 +209,8 @@ type Store struct {
 	onContended func()
 	rbEpoch     atomic.Uint64
 	commitSeq   atomic.Uint64 // journal applies committed (see CommitSeq)
+	liveSeq     atomic.Uint64 // commits that may have changed the live-Process inputs (see LiveInputSeq)
+	livePend    atomic.Bool   // a write in flight stored a live-Process input (see NoteLiveInput)
 	jf          fsx.File
 	nextSeq     int64
 	nextFile    int64
@@ -740,6 +742,28 @@ func (s *Store) Epoch() int { return int(s.metaInt("epoch")) }
 // rebuilds only when it moved. It issues no query.
 func (s *Store) CommitSeq() uint64 { return s.commitSeq.Load() }
 
+// LiveInputSeq counts the commits that may have changed what decides which
+// Conversations hold a live Process: a session-registry record (a WithWrite or
+// bulk-batch commit that followed NoteLiveInput) and a journal apply holding a
+// Process observation. It moves after the commit is visible to readers, so a
+// reader that reads it before it queries and caches the answer under that value
+// never keeps a stale one: a write that lands later moves the value and the next
+// caller reloads. It may move without a change (a rolled-back write leaves the
+// mark for the next commit), never the other way. It issues no query.
+func (s *Store) LiveInputSeq() uint64 { return s.liveSeq.Load() }
+
+// NoteLiveInput marks the write in flight as storing a live-Process input (a
+// session-registry record); the commit of that write moves LiveInputSeq. It is
+// called inside the WithWrite callback.
+func (s *Store) NoteLiveInput() { s.livePend.Store(true) }
+
+// bumpLive moves LiveInputSeq when a committed write was marked by NoteLiveInput.
+func (s *Store) bumpLive() {
+	if s.livePend.Swap(false) {
+		s.liveSeq.Add(1)
+	}
+}
+
 // LastSeq returns the last journal sequence applied to the database.
 func (s *Store) LastSeq() int64 { return s.metaInt("last_seq") }
 
@@ -1119,6 +1143,12 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 	}
 	s.lastSeq = last
 	s.commitSeq.Add(1)
+	for _, r := range recs {
+		if r.T == TProc {
+			s.liveSeq.Add(1)
+			break
+		}
+	}
 	s.noteFiles(recs)
 	s.fireOffsets(notes)
 	return nil

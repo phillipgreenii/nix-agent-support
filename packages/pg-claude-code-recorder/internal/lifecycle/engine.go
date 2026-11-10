@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
@@ -34,6 +35,18 @@ type Engine struct {
 	// Ctx is the daemon root context (Background when nil): the registry load
 	// the settle stage asks for each pass ends with it.
 	Ctx context.Context
+
+	// live is the last LiveSessions answer with the store state it was read at.
+	live atomic.Pointer[liveEntry]
+}
+
+// liveEntry is a cached LiveSessions answer. The answer is a function of the
+// stored registry records and Process observations alone,
+// so it stays valid while the store has committed no registry record or Process
+// observation and rolled back no write since it was read.
+type liveEntry struct {
+	data, epoch uint64
+	sessions    map[string]bool
 }
 
 func (e *Engine) exists(p string) bool {
@@ -132,19 +145,24 @@ func (e *Engine) load() (*model, error) {
 
 // loadCtx is load with every statement under ctx, so a cancelled request ends
 // the read in flight.
-func (e *Engine) loadCtx(ctx context.Context) (*model, error) {
+func (e *Engine) loadCtx(ctx context.Context) (*model, error) { return e.loadWith(ctx, false) }
+
+// loadWith is loadCtx; liveOnly reads just what decides whether a Process holds
+// a session (the registry, its deletions and the processes) and leaves the
+// history, end reasons and stages of the model empty.
+func (e *Engine) loadWith(ctx context.Context, liveOnly bool) (*model, error) {
 	// One read transaction: the registry, history, end reasons, stages and
 	// processes are read under one lock round trip and from one snapshot.
 	var m *model
 	err := e.St.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e2 error
-		m, e2 = e.loadFrom(rd)
+		m, e2 = e.loadFrom(rd, liveOnly)
 		return e2
 	})
 	return m, err
 }
 
-func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
+func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 	m := &model{
 		vers: map[pkey][]regRow{}, segs: map[string][]seg{}, deleted: map[pkey]int64{}, procs: map[pkey]store.Proc{},
 		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
@@ -221,48 +239,50 @@ func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
 	if err := drows.Close(); err != nil {
 		return nil, err
 	}
-	hrows, err := db.Query(pick(slashCommandQuery))
-	if err != nil {
-		return nil, err
-	}
-	for hrows.Next() {
-		var s, c string
-		var t int64
-		if err := hrows.Scan(&s, &t, &c); err != nil {
-			_ = hrows.Close()
+	if !liveOnly {
+		hrows, err := db.Query(pick(slashCommandQuery))
+		if err != nil {
 			return nil, err
 		}
-		switch c {
-		case "clear":
-			m.clears[s] = append(m.clears[s], t)
-		case "exit":
-			m.exits[s] = append(m.exits[s], t)
+		for hrows.Next() {
+			var s, c string
+			var t int64
+			if err := hrows.Scan(&s, &t, &c); err != nil {
+				_ = hrows.Close()
+				return nil, err
+			}
+			switch c {
+			case "clear":
+				m.clears[s] = append(m.clears[s], t)
+			case "exit":
+				m.exits[s] = append(m.exits[s], t)
+			}
 		}
-	}
-	if err := hrows.Close(); err != nil {
-		return nil, err
-	}
-	erows, err := db.Query(pick(endReasonQuery))
-	if err != nil {
-		return nil, err
-	}
-	for erows.Next() {
-		var s, reason string
-		if err := erows.Scan(&s, &reason); err != nil {
-			_ = erows.Close()
+		if err := hrows.Close(); err != nil {
 			return nil, err
 		}
-		m.ends[s] = reason
-	}
-	if err := erows.Close(); err != nil {
-		return nil, err
-	}
-	srows, err := rd.Stages()
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range srows {
-		m.stages[r.Session] = r.Stage
+		erows, err := db.Query(pick(endReasonQuery))
+		if err != nil {
+			return nil, err
+		}
+		for erows.Next() {
+			var s, reason string
+			if err := erows.Scan(&s, &reason); err != nil {
+				_ = erows.Close()
+				return nil, err
+			}
+			m.ends[s] = reason
+		}
+		if err := erows.Close(); err != nil {
+			return nil, err
+		}
+		srows, err := rd.Stages()
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range srows {
+			m.stages[r.Session] = r.Stage
+		}
 	}
 	ps, err := rd.Procs()
 	if err != nil {
@@ -275,9 +295,22 @@ func (e *Engine) loadFrom(rd *store.Reader) (*model, error) {
 }
 
 // LiveSessions returns the sessions a live Process holds now (one load of the
-// registry for every session, so the settle stage asks once per pass).
+// registry for every session, so the settle stage asks once per pass). The
+// answer is kept while the store has committed no registry record or Process
+// observation since it was read, so a poll with nothing new reads nothing; the
+// caller gets its own copy.
 func (e *Engine) LiveSessions() (map[string]bool, error) {
-	m, err := e.load()
+	// The counters are read BEFORE the load: a write that lands during it moves
+	// them, and the next call reloads.
+	data, epoch := e.St.LiveInputSeq(), e.St.RollbackEpoch()
+	if c := e.live.Load(); c != nil && c.data == data && c.epoch == epoch {
+		return copyLive(c.sessions), nil
+	}
+	ctx := e.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m, err := e.loadWith(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +320,16 @@ func (e *Engine) LiveSessions() (map[string]bool, error) {
 			out[session] = true
 		}
 	}
-	return out, nil
+	e.live.Store(&liveEntry{data: data, epoch: epoch, sessions: out})
+	return copyLive(out), nil
+}
+
+func copyLive(m map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func anyAfter(ts []int64, after int64) bool {

@@ -1051,6 +1051,9 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if err != nil {
 			return err
 		}
+		if src.Name() == "session-registry" {
+			p.cfg.Store.NoteLiveInput() // moves the live-Process input counter at commit
+		}
 		tx.noteSession(ref, tns, f.ID, lk)
 		tx.noteFileFact(f.ID, tns, caps)
 		id, _ := res.LastInsertId()
