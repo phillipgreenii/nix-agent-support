@@ -48,6 +48,11 @@ type Result struct {
 	Code   int
 }
 
+// sessionCloseReason is the ccpool close reason for the doctor probe session.
+// ccpool close accepts only its own closed vocabulary, so this MUST be a member
+// of it; "handler" matches the runner automated sessions.
+const sessionCloseReason = "handler"
+
 // String renders the doctor line.
 func (r Result) String() string {
 	if r.Status == Fail {
@@ -342,7 +347,7 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 	defer func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := d.Ccpool.Close(cctx, extID, "doctor"); err != nil && res.Status == Pass {
+		if err := d.Ccpool.Close(cctx, extID, sessionCloseReason); err != nil && res.Status == Pass {
 			res = fail(CheckSession, exitcode.Provider, "the session resolved but could not be closed: %v", err)
 		}
 	}()

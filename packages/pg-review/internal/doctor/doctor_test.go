@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ type fakeCcpool struct {
 	startErr  error
 	started   []ccpool.StartOpts
 	closed    []string
+	reasons   []string
 	reply     string
 	pending   int // Result polls answering pending first
 	polls     int
@@ -49,8 +51,9 @@ func (f *fakeCcpool) Result(context.Context, string) (string, ccpool.ResultStatu
 }
 func (f *fakeCcpool) State(context.Context, string) (string, error) { return "idle", nil }
 func (f *fakeCcpool) Cancel(context.Context, string) error          { return nil }
-func (f *fakeCcpool) Close(_ context.Context, id, _ string) error {
+func (f *fakeCcpool) Close(_ context.Context, id, reason string) error {
 	f.closed = append(f.closed, id)
+	f.reasons = append(f.reasons, reason)
 	return nil
 }
 
@@ -382,5 +385,41 @@ func TestSessionAllowsProbeCommandsInBothForms(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("allowed tools %q lack %q", got, want)
 		}
+	}
+}
+
+// ccpoolCloseReasons reads the real vocabulary from ccpool's source
+// (store.CloseReasons). The module is separate and its package is internal, so
+// it cannot be imported; the test skips when the sibling source is not on disk
+// (e.g. a package-only nix build source).
+func ccpoolCloseReasons(t *testing.T) map[string]bool {
+	t.Helper()
+	b, err := os.ReadFile("../../../ccpool/internal/store/ops.go")
+	if err != nil {
+		t.Skipf("ccpool source not available: %v", err)
+	}
+	m := regexp.MustCompile(`(?m)^var CloseReasons = map\[string\]bool\{([^}]*)\}`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("store.CloseReasons not found in ccpool source; update this test")
+	}
+	set := map[string]bool{}
+	for _, q := range regexp.MustCompile(`"([a-z_]+)"\s*:`).FindAllSubmatch(m[1], -1) {
+		set[string(q[1])] = true
+	}
+	if len(set) == 0 {
+		t.Fatal("parsed no close reasons")
+	}
+	return set
+}
+
+func TestSessionCloseReasonIsAcceptedByCcpool(t *testing.T) {
+	h := newHarness(t)
+	h.answer(t, true, true)
+	Run(context.Background(), h.d)
+	if len(h.cp.reasons) != 1 {
+		t.Fatalf("close calls = %v", h.cp.reasons)
+	}
+	if got := h.cp.reasons[0]; !ccpoolCloseReasons(t)[got] {
+		t.Errorf("doctor closes its session with %q, which ccpool close rejects", got)
 	}
 }
