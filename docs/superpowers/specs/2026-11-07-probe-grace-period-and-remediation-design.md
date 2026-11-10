@@ -13,6 +13,8 @@
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in this document are to be read as in RFC 2119.
 
+> Pointer: ADR 0122 records the replacement of gates by levels of resources (`INV-LVL`, `INV-SEN`, `INV-ADM`); where this document says a pass is skipped by a gate, read an unmet level requirement.
+
 ## 1. Problem
 
 `pg-router-probe run` ticks every 30 minutes. Each tick it lists the Grafana alert instances that are

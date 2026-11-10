@@ -1,5 +1,7 @@
 # pg-router: resource-pressure dispatch gate (disk, load, swap) — design
 
+> Superseded by design v14 of pg-router resources and levels (ADR 0122): the gate mechanism and the disk-watchdog are removed.
+
 - **Status**: Draft for operator review. Implemented in `packages/pg-router-disk-watchdog`; not applied to any machine.
 - **Date**: 2026-11-04
 - **Builds on**: `docs/investigations/2026-10-09-desk-pr-stall.md` (the LOW_DISK_USAGE gate, C1);

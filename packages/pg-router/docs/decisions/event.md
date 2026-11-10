@@ -120,7 +120,7 @@ triager session, which is an accepted retry. Stopping `work-report` from emittin
 ### `DEC-EVENT-3` — the durable queue is size-bounded: a soft threshold halts polled emitters, the maximum refuses admission with a classified reason <!-- uuid: 8e5ff850-31f1-4c4a-bf55-875701f70455 -->
 
 **Decided** (operator rulings, Phillip, 2026-10-02, bead `pg2-5d3ui`; the soft-step mechanism on
-the same day, option "B"). The queue's write-ahead log (`queue.jsonl`, events **and** gates) has a
+the same day, option "B"). The queue's write-ahead log (`queue.jsonl`, events **and** level records) has a
 configured maximum size, `max_log_bytes` (`[pool].max_log_bytes` / `PG_ROUTER_MAX_LOG_BYTES`,
 default 64 MiB; the env var accepts units such as `64MiB` and an unparseable value is an error, never
 silently the default). Two **derived** thresholds, one user-visible knob: **soft** = 90% of the
@@ -131,21 +131,21 @@ ruling rejected: nothing already queued is ever evicted to make room.
 - **Order at startup.** Compaction runs first (`pg2-8e0m6`), then the limits are evaluated — the
   live log was ~33 MB of mostly dead history, so a default below that would otherwise refuse events
   at boot.
-- **Soft step — an in-memory flag, deliberately NOT a gate.** After a compaction attempt, if the log
+- **Soft step — an in-memory flag, deliberately NOT a level.** After a compaction attempt, if the log
   is still over soft, the queue sets `emittersHalted`: the producer skips every polled source except
-  the timer emitter, checked right next to the gate check. It is re-derived **every tick** from the
+  the timer emitter, checked right next to the requirement check. It is re-derived **every tick** from the
   log size, is volatile (nothing is persisted, so a restart simply re-derives it), and is **not**
-  cleared by `gate clear` / `resume --all`. The gate registry (`BlockingGate`, `CheckPull`, the
-  `NonBlockingGates` opt-out, `dropGateBlockedLocked`) and the gated drain-and-exit are untouched —
-  making this a gate would have meant a new emitter-only gate class and an amendment to `INV-LIFE-2`
-  (rejected as option "A"), and a gate also blocks listeners, which would stop the very dispatch that
+  cleared by `level clear` / `resume --all`. The admission evaluation (`CheckPull`, the
+  requirement-drop path) and the drain-and-exit with registrations paused are untouched —
+  making this a level would have meant a new emitter-only level class and an amendment to `INV-LIFE-2`
+  (rejected as option "A"), and a level also blocks listeners, which would stop the very dispatch that
   frees the space. Listeners keep dispatching and the drain keeps draining while halted; timer
   emitters and pushed events keep being admitted — **only the hard limit stops those.** Because it
-  is not a gate, its whole surface is `status`, the `tui` and a metric, which state plainly what is
+  is not a level, its whole surface is `status`, the `tui` and a metric, which state plainly what is
   halted and what still runs.
 - **Hard limit — admission only.** At or above the maximum, `Enqueue` refuses new events with
   `ErrLogFull` (`log_full: ...`). The limit applies to **admission and nothing else**: accept, evict
-  and gate records still append above it (the soft-to-hard headroom exists for this; refusing an
+  and level records still append above it (the soft-to-hard headroom exists for this; refusing an
   accept record would make the event redeliver on every restart). A still-retained duplicate id
   stays a no-write success.
 - **Unwritable.** The first append error (disk full, I/O error) marks the log unwritable
@@ -157,7 +157,7 @@ ruling rejected: nothing already queued is ever evicted to make room.
 - **Refusal is non-fatal to the loop.** A classified refusal from a pull or timer source is recorded
   as a source error and a per-source reject count and the pass continues; the tick always runs the
   limit controller, `Kick`, `Expire` and `PublishTick` even when producing errors, and
-  `run-until-idle` drains before exiting — otherwise the never-gated timer source would wedge the
+  `run-until-idle` drains before exiting — otherwise the never-paused timer source would wedge the
   loop at the maximum and nothing could ever free space.
 - **Classified reasons.** The reply's `reason` begins with a fixed prefix, `log_full:` or
   `log_unwritable:`; the exit code stays `1`, because the reply schema carries only `{id, reason}`
@@ -193,7 +193,7 @@ the TUI and that there be a way to trigger a compaction and a dry-run compaction
   `--socket` never falls back to offline. The socket verb alone gets a longer connection deadline
   (2 minutes, set only after the token check) because it does real file work.
 - **Dry run.** Reads only: no rename, no temp file, no lock kept, no lock file created, no counter.
-  It reports bytes and records before and after, events kept and dropped, gates kept, the percent of
+  It reports bytes and records before and after, events kept and dropped, levels kept, the percent of
   `max_log_bytes` afterwards, a torn tail, and whether a real run would be refused (the offline case:
   the log is locked) or would do nothing.
 - **"Nothing to do" is success.** A real run whose plan finds no progress possible (the log is
@@ -289,7 +289,7 @@ flowchart LR
   (6.03 s on 2026-10-12). A probe on 2026-10-14 (a manual reader collecting in a loop while `bootCore`
   ran, 300 boots at most) panicked in the depth callback (`DepthByType`).
   - **Decided.** Every gauge that reads the queue (queue depth and backlog, oldest-owed age,
-    `listener_in_flight`, the event-log size and limit gauges and the active-gate gauge) **MUST** observe
+    `listener_in_flight`, the event-log size and limit gauges and the resource-level gauge) **MUST** observe
     nothing until `bootCore` has built the queue and registered its listeners, and **MUST NOT** call a
     function that reads the queue before then. A collect in the window therefore reads no series for
     them: not a panic, and not a zero, because there is no queue to read a zero from, and a zero would

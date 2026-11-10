@@ -56,7 +56,7 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-EVENT-2`](event.md) — the queue is durable, ordered, de-duped and retention-bounded, and
   delivers at-least-once with per-handler serial FIFO.
 - [`DEC-EVENT-3`](event.md) — the durable queue is size-bounded: a soft threshold halts polled
-  emitters (an in-memory flag, not a gate); the maximum refuses admission with a classified
+  emitters (an in-memory flag, not a level); the maximum refuses admission with a classified
   `log_full` / `log_unwritable` reason.
 - [`DEC-EVENT-4`](event.md) — the queue log has one owner at a time (an exclusive lock, second opener
   refused), and `log compact [--dry-run]` is the operator's way to reclaim dead history.
@@ -75,7 +75,7 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   role's failures are bulkheaded under `reason="triager-failure"` (amended, `pg2-u2yub`).
 - [`DEC-OBS-4`](observability.md) — a pull source is persistently failing when it has not succeeded
   for `max(3 x its period, 30m)` of awake time (a router-measured age on its monotonic clock, so a
-  host sleep is not a failure; amended, `pg2-ez292`); a gate- or halt-skipped pass advances the
+  host sleep is not a failure; amended, `pg2-ez292`); a level- or halt-skipped pass advances the
   last-success time (a pause is not a failure), and the time is persisted in the state dir so a restart continues it (`pg2-yagdb2`).
 - [`DEC-OBS-5`](observability.md) — `role` labels every delivery-side failure class, throughput and
   dispatch latency (config-bounded), and the latency buckets now span 100 ms to 1 hour.
@@ -106,3 +106,10 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-WIRE-3`](wire.md) — `postStartup`/`preShutdown` are once-per-process-lifetime handler hooks, and
   a role's context (its name and its opaque config) travels on stdin in every request (amended by the
   handler split).
+- [`DEC-LEVEL-1`](level.md) — levels replace gates: a resource has an ordered scale, a sensor reports it,
+  and a registration requires what it cares about; the Gate Registry and its exemptions are removed.
+- [`DEC-LEVEL-2`](level.md) — band edges, hysteresis and dwell for disk, cpu, ram and Claude pace.
+- [`DEC-LEVEL-3`](level.md) — the answer schema, the push envelope, outcomes and strict staleness.
+- [`DEC-LEVEL-4`](level.md) — the sensors module layout, invocation, exit status and probe details.
+- [`DEC-LEVEL-5`](level.md) — the metric catalog mapping from the gate metrics to the resource family.
+- [`DEC-LEVEL-6`](level.md) — a legacy gate is dropped at upgrade and logged; no translation code.

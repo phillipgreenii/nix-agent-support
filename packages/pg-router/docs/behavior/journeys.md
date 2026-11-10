@@ -87,7 +87,7 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   weekdays and carries fixed key-value metadata, say what happens when the router was not running or
   the host was asleep at that time, and see its schedule, last handled slot and next fire, so a weekly
   job runs once per slot without a separate scheduler. _(→ `USECASE-VALIDATE-CONFIG`,
-  `USECASE-GATE-POOL`; `INV-EVT-5`, `INV-EVT-6`, `INV-EVT-7`, `INV-OBS-1`.)_
+  `USECASE-LEVEL-POOL`; `INV-EVT-5`, `INV-EVT-6`, `INV-EVT-7`, `INV-OBS-1`.)_
 
 **Observer (`ACTOR-OBS`)**
 
@@ -162,9 +162,9 @@ The three not-applicable reasons, stated once each:
 
 **Three actions sit outside the grid on purpose, and are elements all the same.** **Running** the core
 is not crossed with a participant kind: it is one whole-system act with two modes, so it is two
-elements — `USECASE-RUN-DAEMON` and `USECASE-RUN-DRAIN` — rather than eight cells. **Gating** the core
+elements — `USECASE-RUN-DAEMON` and `USECASE-RUN-DRAIN` — rather than eight cells. **Pausing** the core
 (pause/resume) is a third: a global, out-of-band operator control orthogonal to which run mode is in
-progress and to any one participant's lifecycle, so it is its own element, `USECASE-GATE-POOL`
+progress and to any one participant's lifecycle, so it is its own element, `USECASE-LEVEL-POOL`
 (`INV-LIFE-2`), rather than a ninth column. And the end-to-end **arc** is not an action at all but the
 composition of every element above, which is `JOURNEY-FLOW`.
 
@@ -196,7 +196,7 @@ life.
 
 **One event's life.** A source **emits** a typed event — a pull source on its query trigger, a push
 source on its ingest callback. The core then takes three decisions in order, and they are distinct
-decisions rather than one gate:
+decisions rather than one hold:
 
 1. **Is this `type` known to the configuration at all?** If **no configured binding declares** it,
    the event is **rejected** to the caller: it is never enqueued, the reply names it as rejected, and
@@ -908,7 +908,7 @@ unexpired events are kept, and the reason shows in the logs, a metric, the TUI a
 **no alert** (`INV-ROLE-5`). An error in the core's own configuration still refuses to start. An
 adapter without `validate` is reported **not supported**, which is not a failure. The operator
 runs the same checks on demand with `config check`, and `doctor` adds quick probes of the running
-system: the state directory is writable, the socket is reachable, the active gates, the unavailable
+system: the state directory is writable, the socket is reachable, the levels held, the unavailable
 roles with their reasons, each role's progress and each handler's own `validate` (`INTF-CLI`).
 
 **Run-scoping is not a config defect.** A binding merely **disabled for this run** by a
@@ -1062,81 +1062,84 @@ sequenceDiagram
     deactivate Core
 ```
 
-### `USECASE-GATE-POOL` — pause and resume the pool, or gate part of it, via a generic gate <!-- uuid: a2668c8c-fd26-4849-a7f5-a5068355cb1a -->
+### `USECASE-LEVEL-POOL` — pause and resume the pool, or hold part of it, through a resource's level <!-- uuid: a2668c8c-fd26-4849-a7f5-a5068355cb1a -->
 
-**Actor:** `ACTOR-OP` (the human operator, for `SYSTEM_PAUSE`), or an **external system** acting
-through the gate API (for any other gate TYPE, e.g. a disk-space watchdog setting `LOW_DISK_USAGE`).
+**Actor:** `ACTOR-OP` (the human operator, for the `router` resource), or a **sensor** reporting a
+level for a resource it owns (for example a disk sensor reporting `disk` at `EXHAUSTED`).
 **Level:** user-goal.
-**Preconditions:** a core is running — a gate is a record in its durable event log, so setting or
+**Preconditions:** a core is running — a level is a record in its durable event log, so setting or
 clearing one is an ordinary call to the running core.
-**Intent:** halt, then release, the participants that block on a named condition, reversibly and
+**Intent:** halt, then release, the registrations that require a named resource, reversibly and
 without touching configuration (`INV-LIFE-2`).
 _Requires:_ `INV-LIFE-2`, `INV-LIFE-1` (reachability in both run modes).
-_Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is gated or quiescent).
+_Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is paused by levels or quiescent).
 
-**Flow.** `pause` sets the `SYSTEM_PAUSE` gate and `resume` clears it; `gate set TYPE` / `gate clear
-TYPE` do the same for any other TYPE, with an optional description, owner (debug only) and TTL lease
-(an external owner keeps its lease alive by setting the gate again, and the gate simply lapses if the
-owner dies). `resume --all` / `gate clear --all` clears every active gate; **any caller may clear any
-gate**. While a gate is active, each participant that **blocks** on it is halted — an emitter is not
-polled, a listener is not dispatched to — while pushed events are still accepted, acks and
-confirmations still processed, queued events stay queued and **unblocked** participants carry on
-(`INV-LIFE-2`). A participant declares at registration which gate TYPEs it does not block on; the
-timer emitter is never blocked. This differs from a **run-scoped selector** (`STORY-OP-3`) in
-**kind**, not degree: a selector is scoped to one run and never outlives it, while a gate is global,
-durable, and persists across runs and restarts until cleared or its lease lapses.
+**Flow.** `pause` sets the `router` resource to `PAUSED` and `resume` clears it; `level set RESOURCE
+LEVEL` / `level clear RESOURCE` do the same for any other resource, with a lease (`--for`) or
+`--until-cleared` (`INV-SEN-6`). A sensor reports a level on its own schedule and the operator's
+override wins while it is fresh. `resume --all` clears every operator level. While a registration's
+`requires` clauses are not all met, that registration is halted — an emitter is not polled, a
+listener is not dispatched to — while pushed events are still accepted, acks and confirmations still
+processed, queued events stay queued and registrations whose requirements are met carry on
+(`INV-LIFE-2`, `INV-ADM-1`). A registration names only the resources it cares about; the timer
+emitter is never blocked. This differs from a **run-scoped selector** (`STORY-OP-3`) in **kind**, not
+degree: a selector is scoped to one run and never outlives it, while a level is global, durable, and
+persists across runs and restarts until cleared, replaced or lapsed.
 
 **Calendar ticks during a pause.** The timer emitter is never blocked, so **calendar ticks keep being
 enqueued during a pause**; delivery waits, and the tick's expiry (the next slot, or `expires_in`,
 `INV-EVT-7`) decides whether it survives until resume.
 
-**Gates are independent, not a fixed set.** There is no list of named gates in the core; each TYPE is
-its own gate and any number may be active at once. A participant is halted if it blocks on **any**
-active gate TYPE.
+**Resources are independent, not a fixed set.** There is no list of named resources in the core; each
+resource is its own scale and any number may sit below best at once. A registration is halted if ANY
+of its clauses is unmet.
 
-**A gated drain-and-exit run does not drain.** Because a blocked listener will not be dispatched to,
-a drain-and-exit run (`USECASE-RUN-DRAIN`) started while gated would never see its own queue empty on
-its own idle predicate; `INV-LIFE-2` instead requires it to boot, stay reachable, emit its final
-snapshot, and exit promptly, without reporting the queue as drained.
+**A drain-and-exit run does not drain while paused by levels.** Because a paused listener will not be
+dispatched to, a drain-and-exit run (`USECASE-RUN-DRAIN`) started while its registrations are paused
+would never see its own queue empty on its own idle predicate; `INV-LIFE-2` and `INV-ADM-8` instead
+require it to boot, stay reachable, emit its final snapshot, and exit promptly, without reporting the
+queue as drained.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ungated
-    ungated --> gated: set a gate - a record in the event log
-    gated --> gated: set another TYPE, or renew a lease
-    gated --> ungated: last gate cleared, or its lease lapses
-    gated --> gated: clear one TYPE - others may remain active
-    note right of gated
-      blocked participants halted: emitters not polled, listeners not dispatched to
+    [*] --> unpaused
+    unpaused --> paused: a level makes a requirement unmet - a record in the event log
+    paused --> paused: another resource changes, or a lease is renewed
+    paused --> unpaused: last unmet requirement met, or an override lapses
+    paused --> paused: one resource recovers - others may remain unmet
+    note right of paused
+      paused registrations halted: emitters not polled, listeners not dispatched to
       pushes accepted, acks processed, queued events stay queued, expiry continues (INV-LIFE-2)
-      an event whose final attempt falls due for a blocked listener is lost to it
+      an event whose final attempt falls due for a paused listener is lost to it
     end note
 ```
 
-**Reading gated apart from quiescent.** `INV-LIFE-2` requires inspection to **distinguish** these —
-a gated core MAY still have unsettled work in flight, and a core MAY be quiescent (nothing unsettled
-remains) without any gate active at all, so neither reading substitutes for the other. That
-distinction is read the same way any other run state is read, through `USECASE-DEBUG-RUN`'s
-inspection: the core's own lifecycle state and run mode name whether it is winding toward exit on its
-own account (a drain-and-exit run with nothing left to offer, independent of any gate — see the
-glossary's **quiescing** entry), and each active gate's TYPE, description, owner, set-at and TTL
-remaining name what is halting dispatch and who set it. A client that watches continuously renders
-these as two visibly different states rather than one generic "not dispatching": a **gated** pool
-still shows every participant's own health, because the participants themselves are not the ones
-stopped; a **quiescent**, ungated run is winding down toward `USECASE-RUN-DRAIN`'s own exit and is not
-an error condition at all.
+**Reading paused apart from quiescent.** `INV-LIFE-2` requires inspection to **distinguish** these —
+a core with registrations paused by levels MAY still have unsettled work in flight, and a core MAY be
+quiescent (nothing unsettled remains) without any requirement unmet at all, so neither reading
+substitutes for the other. That distinction is read the same way any other run state is read, through
+`USECASE-DEBUG-RUN`'s inspection: the core's own lifecycle state and run mode name whether it is
+winding toward exit on its own account (a drain-and-exit run with nothing left to offer, independent
+of any level — see the glossary's **quiescing** entry), and each resource's level, source, owner,
+age and lease remaining name what is halting dispatch and who reported it. A client that watches
+continuously renders these as two visibly different states rather than one generic "not
+dispatching": a **paused** pool still shows every participant's own health, because the participants
+themselves are not the ones stopped; a **quiescent** run with every requirement met is winding down
+toward `USECASE-RUN-DRAIN`'s own exit and is not an error condition at all.
 
 Extensions:
 
-- A gate is set or cleared while no core is running: the command fails with "no running core" and a
+- A level is set or cleared while no core is running: the command fails with "no running core" and a
   non-zero exit, like every other operator command (`INTF-CLI` "Locating the core").
-- The core is asked to run drain-and-exit while gated: it boots, stays reachable, emits a final
-  snapshot, and exits promptly without draining (`INV-LIFE-2`, `USECASE-RUN-DRAIN`).
-- A gate's lease lapses without anyone clearing it: it counts as cleared from that instant and the
-  core records its expiry; the blocked participants resume.
-- Inspecting a running core while it is gated and/or winding toward a drain-and-exit: lifecycle
-  state/mode and each active gate together let the reading distinguish gated from quiescent, per
-  `INV-LIFE-2` (`USECASE-DEBUG-RUN`).
+- The core is asked to run drain-and-exit while registrations are paused by levels: it boots, stays
+  reachable, emits a final snapshot, and exits promptly without draining (`INV-LIFE-2`,
+  `INV-ADM-8`, `USECASE-RUN-DRAIN`).
+- An operator override's lease lapses without anyone clearing it: the sensor's value returns from that
+  instant and the core records the expiry; the paused registrations resume if it now meets them.
+- A sensor goes silent: its level is held for the grace period, then reads `unknown` (`INV-STALE-1`).
+- Inspecting a running core while it is paused by levels and/or winding toward a drain-and-exit:
+  lifecycle state/mode and each resource's level together let the reading distinguish paused from
+  quiescent, per `INV-LIFE-2` (`USECASE-DEBUG-RUN`).
 
 ### `USECASE-DEBUG-RUN` — read a run: metrics, injected test events, and run-scoped selectors <!-- uuid: 3c360b41-5a84-4607-88b6-425c02f80474 -->
 
@@ -1174,10 +1177,10 @@ queue. Injecting is how an operator reproduces a routing question on a running s
 waiting for a source to emit the event again.
 
 **Flow — halted vs quiescent.** A running core's own lifecycle state and run mode, together with
-each gate's active and owner fields, let a reader tell **halted** (`USECASE-GATE-POOL`'s gate, set
-by an operator or an automation actor) apart from **quiescent** (nothing unsettled remains in
-flight, per `INV-LIFE-2`) — two readings that never substitute for one another, because a gated core
-MAY still have unsettled work and an ungated core MAY be quiescent on its own account (a
+each resource's level and owner, let a reader tell **halted** (`USECASE-LEVEL-POOL`'s level, set
+by an operator or a sensor) apart from **quiescent** (nothing unsettled remains in
+flight, per `INV-LIFE-2`) — two readings that never substitute for one another, because a paused core
+MAY still have unsettled work and an unpaused core MAY be quiescent on its own account (a
 drain-and-exit run with nothing left to offer; see the glossary's **quiescing** entry for the
 lifecycle-state reading that names this). Reading them together is what keeps a coherent, non-error
 resting state visually distinct from an actual poll failure.

@@ -629,7 +629,7 @@ sequenceDiagram
     recent **successful pass** (`INV-FAIL-3`), in seconds. Exported only for a source that is enabled,
     not excluded from this run, and has a period; a push source, a disabled source and an excluded
     source have no series. A **failed** pass never advances it, but a pass the core **deliberately
-    skipped** — an active gate blocking the source, or the log-size limit halting the polled emitters
+    skipped** — an unmet level requirement blocking the source, or the log-size limit halting the polled emitters
     (`INV-EVT-1`) — advances it exactly like a success, because a pause is not a failure. It is restored on start from a file in the state dir, written on every success or pause, so a restart
     continues it (`pg2-yagdb2`); a source with no persisted success starts at **process start**, never at zero (`DEC-OBS-4`). It is a **wall-clock**
     reading, so it is the member for "when did this last succeed", never for "for how long has it
@@ -664,7 +664,7 @@ sequenceDiagram
   **skipped**, a counter per `type`, `role` and `reason`, so a stream of no-op completions cannot
   read as progress; **enqueued** is
   a counter per `type`: the events admitted to the queue (a duplicate id, a restored event, a refused
-  admission and the Gate Registry's own records are not arrivals), the arrivals that throughput's
+  admission and a level record, which is not a queue event, are not arrivals), the arrivals that throughput's
   completions are weighed against, less the events the queue retired without any handler accepting
   them (**unconsumed_expired**), so an event that was retired and re-emitted counts once
   (`DEC-OBS-10`); **dispatch
@@ -739,7 +739,7 @@ sequenceDiagram
 
   **listener_expired_pending** is a counter per `role` and `type`: one for each event whose
   retention ended while that handler matched it and never accepted it (a post-expiry decline, or a
-  gate drop), counted once per event and handler, so a handler that declines for the whole time to
+  requirement drop), counted once per event and handler, so a handler that declines for the whole time to
   live shows it where the gauges show a sawtooth (`DEC-OBS-13`; no alert).
 
   Both gauges read the queue and are derived from it, so a restart does **not** reset them, and a scrape
@@ -819,9 +819,9 @@ sequenceDiagram
   `INTF-SOURCE`'s manager-initiated direction and is invoked through the callback the core hands out,
   not by the operator.
 - **What the operator can do.** The boundary offers exactly these affordances: run the core in its
-  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **set and clear gates** — pause
-  and resume the pool via the `SYSTEM_PAUSE` gate, or set and clear a gate of any other TYPE — a
-  global **gate** that halts the participants that block on it while accepted work finishes and
+  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **set and clear levels** — pause
+  and resume the pool via the `router` resource, or set and clear the level of any other resource — a
+  global **level** that halts the registrations that require it while accepted work finishes and
   expiry continues (`INV-LIFE-2`); **smoke-test one handler**
   against one explicitly named event, and **smoke-test one pull source's query** once and
   **read-only**, both under a **test-mode signal** so the participant knows a test is in flight and
@@ -846,25 +846,27 @@ DEC-CLI-2`).
   event is durable via the queue and delivered at-least-once and deduped like any push event
   (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a manager→core
   callback) and from the one-shot handler smoke test, which tears down.
-- **Operator pause/resume and gates.** `pause` / `resume` set or clear the `SYSTEM_PAUSE` **gate**
-  (`INV-LIFE-2`), recording the operator as its owner; a bare `resume` clears only `SYSTEM_PAUSE`,
-  and clearing **every** active gate requires an explicit `resume --all`, so a gate another system
-  owns is never cleared by accident. `gate set` / `gate clear` / `gate list` do the same for a gate
-  of any TYPE, accepting an optional description, owner and TTL lease. A gate is a record in the
-  core's durable log, so these commands are ordinary socket clients: they **MUST fail with a "no
-  running core" error** (non-zero exit) when none is reachable, exactly like every other operator
-  command (contrast the file-direct behavior this replaced). An external system sets and clears
-  gates over the same socket (`gate-set` / `gate-clear`); there is no separate file-based path.
-  (Concrete spelling:
+- **Operator pause/resume and levels.** `pause` / `resume` set or clear the `router` resource's
+  `PAUSED` **level** (`INV-LIFE-2`, `INV-LVL-5`), recording the operator as its owner; a bare `resume`
+  clears only the `router` operator record, and clearing **every** operator level requires an
+  explicit `resume --all`, so a level another system owns is never cleared by accident.
+  `level set <resource> <LEVEL>` (with a duration or `--until-cleared`), `level clear <resource>`,
+  `level refresh [resource...]` and `level list` do the same for any resource (`INV-SEN-6`,
+  `INV-SEN-7`), `explain <role>` prints the current admission decision of one registration, and
+  `doctor --clauses` prints which registrations the current readings pause and why. A level is a
+  record in the core's durable log, so these commands are ordinary socket clients: they **MUST fail
+  with a "no running core" error** (non-zero exit) when none is reachable, exactly like every other
+  operator command. A sensor pushes a level over the same socket (level ingest, `INV-LVL-3`); there
+  is no separate file-based path. (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
 - **Operator log compaction.** The durable queue log accumulates history a restart never needs
   (every evicted event leaves its records behind). The core compacts it itself — at startup, and
   when it outgrows a configured size — and the operator **MAY** also ask for it, or ask what it
   would do: **`log compact`** compacts the log down to live state now, and **`log compact
 --dry-run`** reports what that would do (size and record counts before and after, events kept
-  versus dropped, gates kept, the share of the configured maximum afterwards, and whether a real
+  versus dropped, levels kept, the share of the configured maximum afterwards, and whether a real
   run would be refused) **without changing anything**. Compaction **MUST NOT** change what a
-  restart rebuilds: the retained events and their order, who accepted them, the active gates.
+  restart rebuilds: the retained events and their order, who accepted them, the current levels.
   Against a running core the request goes to that core, which does the work; with none running the
   command compacts the log itself. The log has **one owner at a time**: a second process **MUST NOT**
   open it while another holds it — a second start, or an offline `log compact` beside a live core,
@@ -896,7 +898,7 @@ DEC-CLI-2`).
   (`INV-ROLE-5`) through each enabled role's adapter, and reports every problem with its
   reason, so a configuration is judged without starting the daemon. **`doctor`** runs `config
 check` and adds **quick probes** of the system as it stands: the state directory is writable,
-  the core's socket is reachable, which gates are active, which roles are **unavailable** and why,
+  the core's socket is reachable, which levels are held, which roles are **unavailable** and why,
   each role's **progress** (`INV-OBS-3`) and the result of each handler's own `validate`
   (`INTF-HANDLER`). A handler without `validate` is reported **not supported**, and one that does
   not answer within a short timeout is reported as not answering, so a hung handler never hangs
@@ -919,8 +921,8 @@ check` and adds **quick probes** of the system as it stands: the state directory
   running core" error** and a **non-zero exit code**; it **MUST NOT start one**. Locating means being
   able to **reach** a core, not merely finding a trace that one once existed — a trace left behind by a
   core that has died is the same outcome as no trace at all. This holds on every locate path: the
-  manager callbacks and the operator commands alike, **including** pause/resume and the gate commands
-  ("Operator pause/resume and gates" above)
+  manager callbacks and the operator commands alike, **including** pause/resume and the level commands
+  ("Operator pause/resume and levels" above)
   (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-2`).
 - **Protocol-level failure.** A **socket verb** — any message that reaches the core over its held
   socket connection, an operator command or a manager callback alike — MAY fail at the **protocol**
@@ -1013,11 +1015,12 @@ Inspection's **MUST** set has widened to also offer:
   non-failing lifecycle state such as a drain-and-exit run winding toward exit — observable from
   outside the process, rather than indistinguishable from a poll failure (see the glossary's
   **quiescing** entry).
-- Every **active gate**: its TYPE, description, **gate owner** (debug only — the identity that set it),
-  when it was **set** and its **TTL remaining** (or that it has none), plus the instant the rest of
-  this reading is current **as of**. Only gates in force are listed — an empty list means nothing is
-  gated. Together with the lifecycle facts above, the active gates are what lets inspection
-  **distinguish** _gated_ (some gate active) from _quiescent_ (nothing unsettled remains in flight) —
+- Every **resource**: its level, the source of that level (sensor, operator or grace fallback), its
+  owner, its age, when an override was **set** and its **lease remaining** (or that it has none),
+  plus the instant the rest of this reading is current **as of**; and every registration **paused
+  by levels** with the clauses that pause it. An empty paused list means nothing is held. Together
+  with the lifecycle facts above, these are what lets inspection **distinguish** _paused by levels_
+  (some requirement unmet) from _quiescent_ (nothing unsettled remains in flight) —
   the distinction `INV-LIFE-2` already requires of inspection.
 - Every configured **listener**'s own role, its binds, **enabled** and **excluded** as two
   **independent** booleans computed over the **full configured participant set** — before any
@@ -1068,7 +1071,7 @@ Inspection's **MUST** set has widened to also offer:
   (past the soft threshold, polled emitters not being polled), `log_full` (at the maximum, new
   events refused) or `log_unwritable` (the queue cannot be written, new events refused) — whether
   polled emitters are halted; and how many events have been refused so far, by reason. Because the
-  soft step is **not** a gate, no gate and no gates line says it is in force: inspection (and the
+  soft step is **not** a level, no level line says it is in force: inspection (and the
   `tui` subcommand) **MUST** say plainly what is **halted** (polled command-source emitters; and,
   at `log_full` / `log_unwritable`, every new event), what **still runs** (listener dispatch and the
   drain; the timer emitter and pushed events until the maximum), why, and the operator's remedies.

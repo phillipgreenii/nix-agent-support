@@ -293,7 +293,7 @@ Known boundary: for a 30-minute source (threshold 90m) whose observed tick spaci
 consecutive failed ticks followed by a success put the last success about 99m old, so that case does
 reach Alerting briefly; the approved factor is kept and this is recorded rather than tuned away.
 
-**A pause is not a failure.** While a gate blocks a source or the log-size limit halts the polled
+**A pause is not a failure.** While an unmet level requirement blocks a source or the log-size limit halts the polled
 emitters, the pass is skipped and **advances** the last-success time like a success. Without this, a
 60-minute pg-router pause or log-limit halt would fire the rule for every pull source at once. A
 **failed** pass never advances it. Which sources are exported: enabled, non-excluded **pull**
@@ -310,7 +310,7 @@ the daemon (or its metrics endpoint) is down, which `pg-router-liveness-down` co
 
 **Host sleep (amendment, 2026-10-12; bead `pg2-ez292`; implements that bead's recommended option (d),
 no separate operator ruling is recorded for it).** The silence the alert measures is **awake time**, not
-wall-clock time. The paragraphs above cover a pause (a gated pass advances last-success), a restart
+wall-clock time. The paragraphs above cover a pause (a paused pass advances last-success), a restart
 (the clock resets) and no data (the daemon is down); none covered a host that sleeps. The original
 rule computed the silence in Prometheus as `time() - last_success`, a wall-clock difference, while the
 router counts awake time: it paces a pull source on Go's monotonic clock (`cadenceDue`), and on macOS
@@ -378,7 +378,7 @@ through the queue's signal fan-out.
 (14 roles x 17 latency series), so the cardinality cost is fixed by configuration, not by event
 traffic. No other identifier (event id, session, bead) becomes a label. Existing labels are
 unchanged, including the inconsistent names other metrics use for the same concept (`listener` on
-gate-drops, `participant` on gate-blocked, `pgrouter_role` on the session runner's metrics); unifying them is a
+requirement-drops, `participant` on requirement-blocked, `pgrouter_role` on the session runner's metrics); unifying them is a
 possible follow-up, not part of this decision (settled in `DEC-OBS-7`).
 
 **Latency buckets.** Latency is measured from the event's enqueue instant through the handler's
@@ -418,13 +418,13 @@ unaffected; only a rule that expects exactly one series per (`outcome`, `role`) 
 inconsistency open). Four label names overlapped: `role`, `listener`, `participant`, `pgrouter_role`.
 They are not four spellings of one concept, so only one is unified:
 
-- `pg_router_gate_drops` renames `listener` to `role`. Its value is the listener id, the same value
+- `pg_router_requirement_drops` (the successor of the retired gate-drop counter) carries `role`. Its value is the listener id, the same value
   `role` carries on `failures`, `throughput` and `dispatch-latency` (`DEC-OBS-3`, `DEC-OBS-5`), so
   a listener-scoped metric now uses one label name. The observed consumers are none: no dashboard,
-  alert rule or query in any workspace repo references `pg_router_gate_drops`, so the rename breaks
+  alert rule or query in any workspace repo references the retired gate-drop counter, so the rename breaks
   nothing known. Series recorded before the change keep `listener`; a query that wants both
   spellings during the overlap can match either.
-- `pg_router_gate_blocked` keeps `participant`. Its value is any registry participant a gate
+- `pg_router_requirement_blocked` keeps `participant`. Its value is any registry participant a requirement
   stopped, including a polled event **source** as well as a listener, so it is the wider concept
   and `role` would mislabel the source rows.
 - The session runner's `pgrouter_role` keeps its name. It is not emitted by pg-router: it is a
@@ -545,7 +545,7 @@ metric changes name, labels or buckets.
 
 **Before the queue exists (decided 2026-10-14, bead `pg2-nzkjl`, `DEC-EVENT-5`).** Every gauge that
 reads the queue (the depth gauge and its backlog sum, `queue_oldest_age`, `listener_in_flight`, `listener_pending`, `listener_oldest_pending_age`, and the
-log-size, log-limit and active-gate gauges) reads it on each collect, and the daemon serves `/metrics`
+log-size, log-limit and resource-level gauges) reads it on each collect, and the daemon serves `/metrics`
 before it has built the queue (the startup compaction alone took 6.03 s on 2026-10-12). A scrape in that
 gap reads **no series** for them, not a zero: there is no queue to read a zero from, and a zero would say
 "nothing queued, no offer outstanding" of a daemon that has not replayed its log. From the first scrape
@@ -579,8 +579,8 @@ or when consumption stays far below generation.
   for 5 minutes. The second clause exists because a role whose dispatches last seconds is in flight on
   about 3 percent of 30 second scrapes even while it drains a backlog; a dispatch that settled inside the
   window is processing. A dispatch that is running is processing however long it runs.
-  Any gate (`SYSTEM_PAUSE` included) holds every listener but its owner, so the rule is suppressed from the
-  first scrape of a gate until 10 minutes after it ends; a long hold is `pg-router-gate-held`'s page. The
+  The `router` resource at `PAUSED` holds every listener, and any other unmet requirement holds the listeners that name it, so the rule is suppressed from the
+  first scrape of a pause until 10 minutes after it ends; a long hold is the page of the alert for a resource below best with a registration blocked. The
   depth gauge carries `type` and the in-flight gauge `role`, and the binding is configuration, so the join
   is an explicit table in the rule, one clause per role of the daemon config. The rule needs 18 of 20
   scrapes, which is also its wake grace: a laptop sleep leaves no samples and the condition cannot hold
@@ -590,7 +590,7 @@ or when consumption stays far below generation.
 - **Declined attempts are not processing (amended 2026-10-14, bead `pg2-9nfla`).** A declined offer is in
   flight too: the queue marks the role outstanding before the offer and clears it after the offer returns,
   whatever the outcome, and a decline is decided inside the offer (the listener, then the handler's
-  admission gate, which reads the pool's sessions and capacity first), about two seconds. The gauge cannot
+  admission check, which reads the pool's sessions and capacity first), about two seconds. The gauge cannot
   tell it from a running dispatch. On 2026-10-13 the account's five-hour usage limit made the handler
   decline every `drain-pg2` offer from 20:54:26Z to 21:59:59Z, one every 13 seconds: nothing was accepted
   from 20:53:50Z to 22:02:39Z, 19 to 24 events waited, and about one scrape in eight landed inside a
@@ -660,7 +660,7 @@ or when consumption stays far below generation.
   across every laptop sleep; the counters compare the two rates directly and `increase()` is exact across a
   sleep because nothing arrives or completes while the host is asleep.
 - **`enqueued`** — a new counter per `type`: events admitted to the queue. A duplicate id, a restored
-  event, a refused admission and the Gate Registry's own records are not arrivals; a fresh event that
+  event, a refused admission and a level record are not arrivals; a fresh event that
   reuses a retired id is. The queue retires events unaccepted and the source re-emits them (2026-10-13
   00:18Z to 00:24Z: about 17 such pairs), which this counts as arrivals; the slow-growth rule nets that
   out (the next bullet).
@@ -814,7 +814,7 @@ retained events that are already expired but still owed to a listener, not only 
   - A decline, or a hand-back for a dispatch retry, stays pending until the single post-expiry attempt,
     then drops to 0, so a listener that declines for the whole time to live shows a sawtooth. The count
     of events that reach their time to live without the listener accepting them (`DEC-OBS-13`) closes that gap.
-  - A pause gate, a `Matches` that is not yet met, or serialize occupancy (`INV-CONC-1`) keeps events
+  - A `router` pause, an unmet requirement, a `Matches` that is not yet met, or serialize occupancy (`INV-CONC-1`) keeps events
     pending, so a pause raises every listener's count and age. `Matches` is by type today; a payload
     narrowing would flow through automatically.
   - An event no listener matches counts for nobody: only `unconsumed_expired` shows it. A disabled role
@@ -850,10 +850,10 @@ accepted, another never did) is not counted and a listener cannot be named.
 - **Counted once per (event, listener).** When an event's retention ends, the queue counts every
   listener that matches it and never **accepted** it. Retention waits for each matching listener's
   final attempt (`INV-EVT-4`), so such a listener is already settled by then: it declined its
-  post-expiry attempt, or a gate dropped the event for it. An event is retired once, so a pair counts
+  post-expiry attempt, or a requirement drop removed the event for it. An event is retired once, so a pair counts
   once, whether the sweep (`Expire`) or a re-emit of the same id retires it.
 - **Counts nothing** when every matching listener accepted, for an event no listener matches (only
-  `unconsumed_expired` shows that), and for a Gate Registry record.
+  `unconsumed_expired` shows that), and for a level record.
 - **Restart.** Only the retiring process counts, at retirement. A restart replays only retained events,
   so a pair already retired is not recounted; a counter is also a process-lifetime total, so it resets
   to 0 with the process and is read with `increase()` or `rate()`.

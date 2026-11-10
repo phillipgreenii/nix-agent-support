@@ -105,10 +105,10 @@ flowchart TD
   counts and logs every refusal. It is not a drop: nothing already accepted into the queue is lost,
   every event already queued still gets its delivery opportunity, and a still-retained duplicate
   `id` is still absorbed (`INV-EVT-3`). Refusing admission is the **only** thing the maximum stops:
-  delivery, acceptance, retirement and gate changes continue above it, so the queue can shrink
+  delivery, acceptance, retirement and level changes continue above it, so the queue can shrink
   again. Before the maximum, once the queue passes a **soft threshold** below it (and compaction has
   not brought it back under), the core **MUST** stop polling its pull sources (command-source
-  emitters) — a reduction in intake, not a drop, and **not** a gate (`INV-LIFE-2`): listeners, the
+  emitters) — a reduction in intake, not a drop, and **not** a level (`INV-LIFE-2`): listeners, the
   drain, the **timer emitter** and **pushed** events keep running until the maximum itself is
   reached. Inspection **MUST** say plainly which of these limited-capability states is in force,
   what is halted, what still runs, and what the operator can do about it.
@@ -299,7 +299,7 @@ sequenceDiagram
   role's progress gauges (`INTF-MON`). **The core never reads a decline's `reason` for counting**
   (`GOAL-MIN-1`); it reads only the kind. (Removed: the core has no wrap concept, so there is no
   "wrap-failed" counting reason; a failure before the payload is ready is this decline, and
-  whether to stop a role that keeps declining is the participant's own concern, never a core gate,
+  whether to stop a role that keeps declining is the participant's own concern, never a core level,
   `INV-LIFE-2`.) A **second narrow exception is opt-in per
   role** (`DEC-RETRY-2`): a role MAY declare a small bounded number of re-runs, and the core then
   re-runs a dispatch whose handler failed with a **transient** class (`killed`, `deadline`,
@@ -362,7 +362,7 @@ sequenceDiagram
 A role, or a `[[query]]`, is a **command** plus the **minimal base environment** it starts from and,
 for a role, the **item context** it is given. What the command itself is, and whatever it begins
 with, is opaque to the core: pg-router invokes it and never reads inside it (`GOAL-MIN-1`). Nothing
-here changes a gate or `INV-LIFE-2`.
+here changes a level or `INV-LIFE-2`.
 
 - **`INV-ENV-2`** <!-- uuid: 6e2d52e6-b43b-4894-84a4-8e5538d24b47 --> — **A command starts from a
   minimal base environment, plus the item context, and nothing else.** The base environment holds
@@ -523,6 +523,33 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   before it exits. Inspection **MUST** also report, **per calendar query**: its schedule, its zone, the
   last handled slot with its outcome and reason, and its next fire (`INV-EVT-6`, `INV-EVT-7`). **No
   new metrics are added for this**, so the closed metric catalog is untouched.
+  **Level metrics (amends the catalog).** The catalog carries the resource and sensor family that
+  replaces the retired gate metrics, so levels and the readings behind them can be watched over time
+  (the code constant omits `_total`; the exporter adds it):
+
+  | Metric                                                                                           | Labels                                                |
+  | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+  | `pg_router_resource_level` (gauge, 0 = best) and `pg_router_resource_scale_size`                 | resource                                              |
+  | `pg_router_resource_level_age_seconds`, `_lease_remaining_seconds`, `_stale`, `_override_active` | resource                                              |
+  | `pg_router_resource_level_seconds` (counter)                                                     | resource, level                                       |
+  | `pg_router_resource_changes`                                                                     | resource, to                                          |
+  | `pg_router_resource_level_source`                                                                | resource, source = sensor / operator / grace_fallback |
+  | `pg_router_resource_reading` (gauge, numeric)                                                    | resource, unit                                        |
+  | `pg_router_sensor_pull_seconds`, `_pull`, `_pull_failures`, `_last_observed_age_seconds`         | sensor                                                |
+  | `pg_router_level_events_rejected`                                                                | reason                                                |
+  | `pg_router_role_paused` (0/1)                                                                    | role                                                  |
+  | `pg_router_requirement_blocked`                                                                  | role, resource, kind (the 64-value fold applies)      |
+  | `pg_router_requirement_drops`                                                                    | event type, role, resource                            |
+
+  `resource_scale_size` lets an alert tell "below best" from "worst" on any scale (a two-level
+  scale's 1 is the worst; a graded scale's 1 is `OK`, which is normal). Mapping from the retired
+  gate metrics: the active-gates gauge becomes `resource_level` and `role_paused`; the gate-blocked
+  counter becomes `requirement_blocked`; the gate-duration counter becomes `resource_level_seconds`;
+  the counters of gates placed, cleared and expired become `resource_changes`; the gate-drops counter becomes
+  `requirement_drops`. The log lines (one JSON line, key `resource_level`) are `level_changed`,
+  `level_grace_expired`, `level_override_set`, `level_override_expired`, `level_event_rejected`,
+  `role_paused`, `role_resumed` (per transition, not per tick) and `legacy_gate_dropped` at startup.
+
 - **`INV-OBS-2`** <!-- uuid: 83a98350-7344-4e10-a911-8f1bcccb340c --> — **Per-participant inspection.**
   Beyond the aggregate metric catalog (`INV-OBS-1`), the core's inspection surface (`INTF-CLI`) **MUST**
   let `ACTOR-OP` see, for **each** configured event source and **each** configured event handler
@@ -563,57 +590,59 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   `crashing`** signal on sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no
   correctness rule may depend on it** — this signal stays best-effort even though event **data** is now
   durable (`INV-EVT-1`).
-- **`INV-LIFE-2`** <!-- uuid: 376c7af0-95a7-4b24-a0c2-466031352d65 --> — **A gate prevents the core
-  from routing — to the participants that block on it.** A **gate** is a **TYPE**-keyed record in the
-  core's durable event log (a TYPE is an arbitrary ALL-CAPS string; there is **one active gate per
-  TYPE**, the **last writer wins**, and **any caller may clear any gate**), with an optional
-  description, an optional **owner** (the setter's identity — **debug only**, with no behavioral
-  effect) and an optional **TTL lease** that the owner renews by setting the gate again; a lapsed
-  lease counts as cleared. The set of active gates **MUST persist across a restart** and **MUST NOT
-  depend on any queued event** (a queue drop never un-sets a gate). While any gate is active, for each
-  participant that **blocks** on it the core **MUST**: not poll a blocked **emitter**; not dispatch to
-  a blocked **listener**, and reject a blocked listener's pull naming the gate. The core **MUST
-  still** accept pushed events, process acks and confirmations, keep queued events queued, and keep
-  delivering them to any **unblocked** listener — a gate acts on **participants, never on events**,
-  and work already **accepted** — per `(event, handler)`, `INV-EVT-1` — **runs to completion**. Each
-  participant **MUST** be able to declare, at registration, which gate TYPEs it does **not** block on;
-  absent a declaration it blocks on every TYPE. The **timer emitter MUST NEVER be blocked** by any
-  gate.
+- **`INV-LIFE-2`** <!-- uuid: 376c7af0-95a7-4b24-a0c2-466031352d65 --> — **A resource's level can keep
+  the core from routing — to the registrations that require it.** A **resource** is a measured or
+  declared condition with an ordered scale, and its **level** is its current position on that scale
+  (`router` `RUNNING > PAUSED`; a graded resource `PLENTY > OK > TIGHT > EXHAUSTED`; a two-level
+  resource `UP > DOWN` or `AVAILABLE > UNAVAILABLE`). A **level** is its own durable record in the
+  core's event log (`INV-LVL-1`), and the set of current levels **MUST persist across a restart** and
+  **MUST NOT depend on any queued event**. A registration declares what it **requires** (`INV-REQ-1`);
+  a resource it does not name is one it does not care about. While a registration's requirement is
+  not met (`INV-ADM-1`), the core **MUST**: not poll a blocked **emitter**; not dispatch to a blocked
+  **listener**, and reject a blocked listener's pull naming the unmet clause. The core **MUST still**
+  accept pushed events, process acks and confirmations, keep queued events queued, and keep
+  delivering them to any registration whose requirements are met — levels act on **registrations,
+  never on events**, and work already **accepted** — per `(event, handler)`, `INV-EVT-1` — **runs to
+  completion** (`INV-ADM-1`). The **timer emitter MUST NEVER be blocked** by any level. There is no
+  Gate Registry, no gate TYPE and no external gate: a system that wants to hold work reports a level
+  for a resource, as a sensor (`INV-SEN-1`) or as the operator (`INV-SEN-6`).
 
-  **Gate records are routable and bypass gating.** Setting, renewing, clearing and expiring a gate
-  are each recorded in the log and **MAY** be routed as ordinary events (`gate.set`, `gate.cleared`,
-  `gate.expired`) to any listener that binds them; those events **MUST ALWAYS bypass gating for
-  delivery** — otherwise a participant that blocks on TYPE X could never learn that X was cleared.
+  **Level records are not events.** Setting, refreshing and clearing a level are recorded in the log
+  but are not queue events, so no listener binds them and none can be dropped by admission
+  (`INV-LVL-1`, `INV-LVL-3`).
 
   **Event TTL still holds.** When an event is about to expire, each listener that has not received it
-  gets one final attempt (`INV-EVT-4`); a listener that is still **blocked** at that point **loses the
-  event** ("the event goes away for it"). Long gates therefore cause event drops and the queue is
-  bounded by event TTL; the core **MUST** count gate-caused drops. **Expiry MUST continue** while any
-  gate is active — `INV-EVT-4`'s retry-bound clock does not pause with production.
+  gets one final attempt (`INV-EVT-4`); a listener whose requirement is still unmet at that point
+  **loses the event** ("the event goes away for it"; `INV-ADM-7`). Long holds therefore cause event
+  drops and the queue is bounded by event TTL; the core **MUST** count requirement-caused drops.
+  **Expiry MUST continue** while any requirement is unmet — `INV-EVT-4`'s retry-bound clock does not
+  pause with production.
 
-  **Inspection.** Inspection **MUST** report every active gate with its TYPE, description, owner,
-  when it was set and its TTL remaining, and **MUST distinguish** _gated_ (a gate is active) from
-  _quiescent_ (nothing unsettled remains in flight): a gated core MAY still have unsettled work, and
-  a core MAY be quiescent without being gated, so neither reading substitutes for the other. The core
+  **Inspection.** Inspection **MUST** report every resource with its level, the source of that level
+  (sensor, operator or grace fallback), its age and its lease remaining, every registration paused
+  by levels with the clauses that pause it, and **MUST distinguish** _paused by levels_ from
+  _quiescent_ (nothing unsettled remains in flight): a paused core MAY still have unsettled work, and
+  a core MAY be quiescent without being paused, so neither reading substitutes for the other. The core
   **remains reachable to its participants in both run modes**, exactly as `INV-LIFE-1` already
-  requires (cited here, not restated). A **gated drain-and-exit run** boots, stays reachable, emits
-  its final observability snapshot, and **exits promptly WITHOUT draining** — it **MUST NOT** report
-  the queue as drained, because without this rule a gated drain-and-exit run would spin forever on an
-  idle predicate a blocked listener can never satisfy.
+  requires (cited here, not restated). A **drain-and-exit run** with registrations paused by levels
+  boots, stays reachable, emits its final observability snapshot, and **exits promptly WITHOUT
+  draining** (`INV-ADM-8`): it **MUST NOT** report the queue as drained, because without this rule it
+  would spin forever on an idle predicate a paused listener can never satisfy.
 
-  **Operator pause.** `pause` sets the `SYSTEM_PAUSE` gate and `resume` clears it (with the caller
-  recorded as owner); a bare `resume` clears **only** `SYSTEM_PAUSE`, so a gate another system owns
-  is never cleared by accident. No other gate TYPE is special to the core — `cicd-down` and
-  `disk-space-low` are retired, their roles taken by arbitrary TYPEs that external systems set.
+  **Operator pause.** `pause` sets the `router` resource to `PAUSED` (durable, with the caller
+  recorded as owner and an optional lease; `INV-LVL-5`) and `resume` clears it; a bare `resume`
+  clears **only** the `router` operator record, so a level another system owns is never cleared by
+  accident. No other resource is special to the core. The components that report levels, the
+  **sensors**, keep working during `pause` (`INV-LVL-3`).
 
-  **A gate is not a run-scoped selector.** A run-scoped selector (`STORY-OP-3`) is scoped to a single
-  run and never outlives it; a gate is **global** and **persists across runs**. The two differ in
+  **A level is not a run-scoped selector.** A run-scoped selector (`STORY-OP-3`) is scoped to a single
+  run and never outlives it; a level is **global** and **persists across runs**. The two differ in
   **kind**, not degree, and neither substitutes for the other.
 
-  **Clearing is the veto.** There is no separate "disable" signal for a gate: to make a gate stop
-  mattering, clear it (or exempt the participant). Realization detail, including what was retired, is
-  in `phillipgreenii-nix-agent-support · packages/pg-router/MIGRATION.md`'s "Gates: file-backed gates
-  replaced by the Gate Registry" section, not restated here.
+  **Clearing is the veto.** There is no separate "disable" signal for a level: to make a held level
+  stop mattering, clear it (`level clear`), let a sensor report a better one, or drop the
+  registration's clause. Realization detail, including what was removed, is in `DEC-LEVEL-1` and
+  `DEC-LEVEL-6` (`packages/pg-router/docs/decisions`).
 
 - **`INV-LIFE-3`** <!-- uuid: 4c5534a8-3ef4-4e5f-954e-c099da336988 --> — **The drive loop's own
   liveness does not wait on any one offer settling.** The core's drive loop — re-querying pull
@@ -640,7 +669,7 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   however deep its queue, and a backlog that source production outpaces never shrinks. Exactly one
   offer per handler is still outstanding at every instant (`INV-CONC-1`), the next head comes from
   the same per-handler FIFO and serialize-type gates, and a handler that **declined** or is held
-  by a gate waits for the next pass at the `INV-FAIL-2` cadence exactly as before. The core
+  by a level requirement waits for the next pass at the `INV-FAIL-2` cadence exactly as before. The core
   **MUST** stop making such follow-on offers once shutdown has been requested.
 
   **A restarted core offers before it queries.** A core that starts over a queue holding events an
@@ -662,6 +691,156 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   one handler against one event, or an internal pass with no live caller of its own) — `INV-LIFE-3`
   states what the core's own drive loop MUST NOT be blocked by, not that every pass MUST be
   non-blocking.
+
+## Levels, sensors and admission
+
+A **level** replaces the gate: a resource has an ordered scale, a **sensor** reports where it stands,
+and a registration's **requires** clauses decide whether it may start. `INV-LIFE-2` states the
+overall rule; the invariants below state the parts.
+
+### Level path
+
+- **`INV-LVL-1`** <!-- uuid: 202e8aa5-930c-4297-9040-2eb3a2363305 --> — **Levels are their own durable log records, not queue
+  events.** A level is a `level_set` or `level_cleared` record, appended **without passing the queue's
+  admission limit**, carrying an absolute `expires_at` and the receipt time. The in-memory projection
+  is updated independently of the append. A record is written on a change and as a bounded refresh
+  (every `valid_for_s / 2`) that carries the new `expires_at`; there is no per-pull record.
+- **`INV-LVL-2`** <!-- uuid: 3ed21342-016d-42e3-94de-821a9223577f --> — **Time and trust.** The core **MUST** order levels by
+  receipt sequence per owner (the append order in the durable log) **and** by `observed_at` per owner:
+  an older `observed_at` **MUST NOT** overwrite a newer one from the same owner, so a slow pull
+  answer never regresses a newer push. The core **MUST** reject an `observed_at` more than a
+  configured skew bound ahead of now; treat a duplicate (same owner, resource, level and
+  `observed_at`) as idempotent; reject the same owner, resource and `observed_at` with a different
+  level as `conflict` and an `observed_at` older than the one held as `older_than_held`; accept a level
+  only from the resource's registered sensor or `operator`; and reject and count anything unknown or
+  malformed. The owner is a self-declared string, a typo guard and not a trust boundary.
+- **`INV-LVL-3`** <!-- uuid: 80e5f6a1-4b3d-48fe-9f4c-b3e144eed306 --> — **Level ingest is never starved.** Level ingest and
+  level-source queries **MUST** be exempt from every level, from `router` pause, from the log
+  soft-halt, from a full or unwritable log, and from load backoff: the sensors are what report that
+  load. Level-source pulls **MUST** run concurrently under their own deadlines in a pass of their
+  own, so one hung probe delays neither another sensor nor dispatch.
+- **`INV-LVL-4`** <!-- uuid: 803f9b06-4390-4ff0-8e0f-6634bc5c8dfa --> — **A level-source query's output is diverted to level
+  ingest** before it can be enqueued; it never reaches the queue, so the orphan-producer rule, dedupe,
+  retention and the unconsumed-expiry metrics do not apply to it.
+- **`INV-LVL-5`** <!-- uuid: 4a68b262-a002-4822-a5a6-090899c3beeb --> — **The `router` resource's `PAUSED` level is durable** with an
+  owner and an optional lease: a `level_set` record for resource `router`, level `PAUSED`, owner the
+  caller's string (default `operator`) and an `expires_at` when given a lease. `resume` clears the
+  operator record.
+- **`INV-LVL-6`** <!-- uuid: 6a01399c-393e-4f5e-aa28-db5d04a2cb16 --> — **Compaction folds per resource and owner.** It keeps the
+  latest record of each (resource, owner); a sensor record is kept (the last-known value is needed by
+  `unknown` and grace) and only a lapsed operator override is dropped, so an operator override and a
+  later sensor record never displace each other. A lapsed override is one whose `expires_at` is
+  strictly before the wall clock at evaluation or replay; an until-cleared override never lapses.
+  History is not retained in the log; `level history` and `explain --at` are not part of this
+  set's intent (history comes from the metrics, `INV-OBS-1`).
+
+### Sensors
+
+A sensor is a level source. It reuses the event-source transport: a **pull** is an ordinary query
+(command, period, hard deadline, environment allowlist) whose JSONL answer is diverted by
+`INV-LVL-4`; a **push** is a dedicated level-ingest call on the same socket. One schema serves both:
+`resource`, `level`, optional `reading` (`{value: number, unit: string}`), `observed_at`,
+`valid_for_s`, `owner`.
+
+- **`INV-SEN-1`** <!-- uuid: 03f4ed95-5826-4dcc-91ba-3a6875fa65a8 --> — **A sensor is minimally constrained.** The core **MUST NOT**
+  require a sensor to be a daemon, to run checks in any order or concurrency, to keep state, or to
+  answer every resource at once, and assumes no ordering among sensors or among one sensor's
+  resources. The only top-down timing is the query period and deadline.
+- **`INV-SEN-2`** <!-- uuid: b8413a41-65d0-4f04-b4d0-2f9c77cd757f --> — **A sensor MAY answer from a cache;** freshness is judged
+  by `observed_at` (`INV-STALE-1`), never by when the core asked.
+- **`INV-SEN-3`** <!-- uuid: c381ca92-658f-436c-a2ef-d46513251a09 --> — **A sensor owns its thresholds.** It answers with a level
+  and owns its thresholds, hysteresis, dwell (a duration) and any state they need; the core holds no
+  thresholds. A one-shot sensor persists its dwell state in a file, so a lost file does not release
+  the herd (a fall is immediate, a rise is one level per dwell).
+- **`INV-SEN-4`** <!-- uuid: d8820557-e072-4400-a8fc-929535c1f324 --> — **A sensor does bounded, non-interactive probes only.** It
+  **MUST NOT** touch the issue tracker, git remote content or Claude's own sessions. A sensor needing
+  another resource's level reads it from the core as published (a missing level reads `unknown`).
+- **`INV-SEN-5`** <!-- uuid: fe615e24-845a-4deb-8543-ab3075452185 --> — **A pull failure keeps the last level.** A deadline
+  overrun, non-zero exit or malformed answer is a pull failure: the core keeps the last level, counts
+  the failure and applies `INV-STALE-1`; one sensor's failure never blocks another.
+- **`INV-SEN-6`** <!-- uuid: d2488498-dd96-4347-a8da-4662c8536727 --> — **The operator can override a level.** `level set
+<resource> <LEVEL>` with a duration or `--until-cleared` pushes an `operator` level that wins while
+  fresh; on expiry or `level clear` the sensor's value returns, and the sensor's record stays stored
+  beneath it (`INV-LVL-6`). Every override other than `--until-cleared` is capped at 24 hours, shown
+  in inspection with its expiry, and logged at set and expiry. A planned outage of a tracker's server
+  is held with an `--until-cleared` level on that tracker's resource, set before the server stops and
+  cleared last.
+- **`INV-SEN-7`** <!-- uuid: e9b95723-7e91-4f0d-b459-d3bd51824317 --> — **An operator can refresh a level.** `level refresh
+[resource...]` runs the sensor's pull query once, now, and applies the answer; a rise for a
+  credential resource skips the dwell on a refresh. It is a probe, not an override.
+
+### Admission
+
+- **`INV-ADM-1`** <!-- uuid: fa6923c6-46b5-4b95-8409-9f0765f54cb6 --> — **Levels govern admission only.** A level change **MUST
+  NOT** stop, signal, pause or deprioritise running or accepted work. One pure function over (levels,
+  clauses) makes the admission decision and its explanation at every admission site (the queue's two
+  dispatch sites and the two pull and emit sites), over one snapshot and no second lock; the readers
+  that only report state use the same snapshot.
+- **`INV-ADM-2`** <!-- uuid: 2a3f777a-159f-4b83-b38c-c6bdf7dbb91e --> — **The admission herd is spread.** A sensor applies a rise
+  dwell, and at core start the queue admits at most one registration start per 30 seconds of queue
+  clock, in the registration order rotated by the start time in Unix seconds modulo the number of
+  registrations. The stagger is stateful and not part of the pure decision function; it is its own
+  named reason in `explain`, is not counted as a requirement block, never applies to a final-attempt
+  offer (`INV-EVT-4`), and is not persisted.
+- **`INV-ADM-3`** <!-- uuid: 9615fa5d-0225-461e-941d-21c090a0f90d --> — **Retries pass admission again.** Retries, the exit-9
+  decline and the shutdown re-offer pass through admission again.
+- **`INV-ADM-4`** <!-- uuid: a3af1576-8f0e-4040-8cc9-c073762c01fb --> — **A level can be minutes stale at best;** staleness is
+  judged per `INV-STALE-1`.
+- **`INV-ADM-5`** <!-- uuid: b0ef6a30-ef69-4151-b1d3-7b1d9d89ed01 --> — **Levels persist across a restart** (`INV-LVL-1`).
+- **`INV-ADM-6`** <!-- uuid: 1ce75a39-ae22-4e13-a37c-a64c88cc6128 --> — **The core pulls before its first dispatch.** At startup it
+  runs an initial pull pass over all level sources, with a bounded wait (10 seconds), before the first
+  dispatch pass; a resource that has not answered reads `unknown`. It also runs its pull queries at
+  once after it wakes from sleep, because `expires_at` is wall-clock and a sleep makes levels stale
+  together; `INV-STALE-1` holds them for the grace period.
+- **`INV-ADM-7`** <!-- uuid: 9f4b3e5b-da39-452e-8806-de31f69db01b --> — **An event a blocked role cannot take expires** at the
+  event's existing `expiresAt`; no new TTL is added. The drop metric carries role and resource.
+- **`INV-ADM-8`** <!-- uuid: 0f9fc60f-8916-4f74-aca5-44dcba48d727 --> — **Idle ignores registrations paused by levels.** A
+  drain-and-exit run exits when no dispatchable work remains; registrations paused by levels are
+  reported as "paused by levels" with their clauses and do not hold the run open.
+
+### Requirement language, staleness, gate removal and alert conversion
+
+- **`INV-REQ-1`** <!-- uuid: 9715bc64-2289-4bcb-8ef9-e7fdca6e3faa --> — **The requirement language.** A registration declares
+  `requires = [ "<resource> <op> <LEVEL>", ... ]`; the operators are `==`, `!=`, `<`, `<=`, `>`,
+  `>=` by position in the scale, "greater" means better, and clauses combine with AND only. Clauses on
+  one resource compile to one allowed-level set, the sets of different resources are ANDed, and one
+  pure function makes the decision and the explanation. A resource with no clause uses the registry's
+  `ignored`; no registration declares a clause "to have one". An absent level (never reported,
+  sensor not running, or grace-expired) reads the resource's `unknown` value: best for every
+  resource except credentials, which read the worst level. Validation **MUST** reject an unknown
+  resource or level and an empty allowed set, and **SHOULD** warn on a clause naming a resource with
+  no sensor on this machine; documentation prefers `>=` and `<=`. A role's query is polled when ANY
+  consumer could run (the per-resource union of the consumers' allowed sets: it can over-poll, never
+  under-poll); a level-source query has no consumer and is exempt. `config --show` prints each clause
+  with its expansion, and validation messages name the registration and the clause index.
+- **`INV-STALE-1`** <!-- uuid: 84834406-d6ce-4ef1-9c95-bf06f15a7f35 --> — **Staleness is strict and a stale level is held, then
+  reads `unknown`.** A sensor answer carries `observed_at` (the time of the underlying measurement; a
+  failed re-measure keeps the old stamp or reports a failure, never re-stamps a cache) and
+  `valid_for_s`; the core stamps `received_at` and stores `expires_at = received_at + valid_for_s`. A
+  level is stale when the evaluation time is strictly after `expires_at`, or when
+  `received_at - observed_at` is strictly greater than `valid_for_s`. A stale level holds its last value
+  until `expires_at` plus the grace period (a factor times `valid_for_s`), then reads the resource's
+  `unknown` value; a resource that has not answered since the core started reads `unknown` too, so a
+  credential resource blocks its roles until its first answer. A measured failure (no agent, no
+  certificate, expired certificate) is reported by the sensor as `UNAVAILABLE` and is not silence. A
+  metric and a log line mark the boundary where a held level changes.
+- **`INV-GATE-1`** <!-- uuid: 7c96382a-40cb-4f6a-88e3-f16fac9ac502 --> — **The gate mechanism is removed.** The gate mechanism,
+  its list of exempt gates, its CLI verbs, schemas, metrics and records do not exist. The `register`
+  message carries no list of gates not to block on; an external pull participant is paused only by
+  `router` and cannot declare requirements. A legacy gate record in the log is ignored on replay and
+  dropped by compaction; because startup compaction runs before replay, an active legacy gate (a
+  latest record that is a set with no expiry or an unlapsed expiry) is deleted on the first start,
+  and the core logs every dropped active legacy gate at startup with its type, owner and expiry. No
+  translation of a legacy gate into a level is built (`DEC-LEVEL-6`).
+- **`INV-ALR-1`** <!-- uuid: de90efaf-b7b8-4de6-9745-e7bf12c4c2cb --> — **Every consumer of a gate name is converted, and a check
+  enforces it.** A search of every workspace repository for the retired gate names, the retired gate
+  metrics and the retired disk watchdog names returns nothing outside an allowlist of superseded design
+  and investigation documents (the unrelated issue-tracker gate and apply-gate lifecycles are not
+  matched). The alerts, rule tests, dashboards and runbooks that named a gate are converted in the same
+  landing: a rule that suppresses on a global pause suppresses ONLY on the `router` resource at
+  `PAUSED`; a rule that suppresses per consumer role does so on the role-paused metric, and a rule test
+  pauses an unrelated role and requires the rule to still fire. "A resource below best and a
+  registration blocked for 30 minutes" replaces the gate-held alert.
 
 ## Precedence
 

@@ -9,21 +9,37 @@ metrics backend, …) define their own terms in their own behavior sets.
   drain-and-exit, and stays reachable to its participants while it runs (`INV-LIFE-1`).
 - **Registry** — the core's roster of participants that have registered with it. A participant
   registers to receive lifecycle signals and to make its callback reachable, and deregisters on exit.
-- **Gate** — what **prevents the core from routing**: a **TYPE** (an ALL-CAPS string such as
-  `SYSTEM_PAUSE` or `LOW_DISK_USAGE`, arbitrary), an optional description, an optional **gate owner**
-  and an optional **TTL lease**. A gate is **global and out-of-band** and **persists across runs**: it
-  is a record in the core's durable event log, set and cleared through the `INTF-CLI` (`gate set`/
-  `gate clear`, and `pause`/`resume` as sugar for the `SYSTEM_PAUSE` gate) or by any external system
-  over the socket (`INV-LIFE-2`). There is **one active gate per TYPE**, the **last writer wins**, and
-  **any caller may clear any gate**. A gate acts on **participants, never on events**: a participant
-  that **blocks** on an active gate is halted (an emitter is not polled, a listener is not dispatched
-  to), while pushed events are still accepted and queued events stay queued. Each participant
-  declares at registration which gate TYPEs it does **not** block on (default: it blocks on every
-  TYPE); the **timer emitter** is never blocked by any gate. Contrast a **run-scoped selector**
-  (`STORY-OP-3`), which selects the **active** subset of sources/handlers for a **single run** and
-  never outlives it — a selector changes no persisted state; a gate outlives every run until
-  explicitly cleared or its lease lapses.
-- **Gate owner** — the identity of whoever set a gate (e.g. `"operator"`, or a watchdog's own name).
+- **Resource** — a measured or declared condition with an ordered scale (`router`, `disk`, a tracker's
+  reachability, a credential), named by the deployment; a registration's `requires` clauses and a
+  sensor's answers both speak of resources (`INV-LIFE-2`, `INV-REQ-1`).
+- **Level** — a resource's current position on its scale (graded: `PLENTY > OK > TIGHT > EXHAUSTED`;
+  two-level: `UP > DOWN`, `AVAILABLE > UNAVAILABLE`, `RUNNING > PAUSED`; "greater" means better). A
+  level is **global and out-of-band** and **persists across runs**: it is a durable record in the
+  core's event log, reported by a sensor or set by the operator through the `INTF-CLI` (`level set`,
+  `level clear`, `level refresh`, and `pause`/`resume` as sugar for the `router` resource), and it acts
+  on **registrations, never on events** (`INV-LIFE-2`, `INV-LVL-1`). Contrast a **run-scoped
+  selector** (`STORY-OP-3`), which selects the **active** subset of sources and handlers for a
+  **single run** and never outlives it: a selector changes no persisted state; a level outlives every
+  run until it is cleared, lapses or is replaced.
+- **Sensor** — a **level source** that answers with a level and owns its thresholds, hysteresis and
+  dwell; the core holds no thresholds and does not constrain how a sensor is built
+  (`INV-SEN-1`, `INV-SEN-3`). Sensors keep working while the core is paused.
+- **Level source** — a query whose output is **diverted to level ingest** instead of the queue
+  (`INV-LVL-4`); a pull query or a push through the level-ingest call.
+- **Requires** — the AND-only list of clauses (`<resource> <op> <LEVEL>`) a registration declares; the
+  registration may start only while every clause holds (`INV-REQ-1`).
+- **`ignored`** — what silence on a resource means to a registration: a resource with no clause is one
+  the registration does not care about, whatever its level.
+- **`unknown`** — the level an absent or grace-expired resource reads: best for every resource except
+  credentials, which read the worst (`INV-REQ-1`, `INV-STALE-1`).
+- **Grace** — the period after `expires_at` during which a stale level is still held, before the
+  resource reads `unknown` (`INV-STALE-1`).
+- **Operator override** — an `operator` level that wins while fresh; the sensor's value returns on
+  expiry or `level clear` (`INV-SEN-6`).
+- **Level owner** — the identity that reported a level (`operator`, or a sensor's own name); a typo
+  guard, not a trust boundary (`INV-LVL-2`).
+- **Probe versus sensor** — a **probe** files issues (it acts on an alert); a **sensor** only reports
+  a level and never files or changes anything.
   **Debug-only**: it has no behavioral effect, is overwritten on re-set, and is shown on inspection
   surfaces but is never a metric label (its cardinality is unbounded).
 - **Quiescing** — the reading a client gives an inspected core whose own lifecycle state (the
