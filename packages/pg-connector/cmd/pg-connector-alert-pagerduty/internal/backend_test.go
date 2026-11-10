@@ -193,6 +193,43 @@ func TestSeverity_HighestAmongAlertsThenUrgencyFallback(t *testing.T) {
 	}
 }
 
+// The extension reports the raw alert severities PagerDuty sent, so a reader can
+// tell a real alert severity from the urgency fallback and spot an unmapped value.
+func TestExtension_RawAlertSeveritiesAreExposed(t *testing.T) {
+	cases := []struct {
+		name   string
+		alerts []apiIncidentAlert
+		err    error
+		want   []string
+	}{
+		{"lower-cased, deduplicated and sorted", []apiIncidentAlert{{Severity: "Warning"}, {Severity: "critical"}, {Severity: " warning "}}, nil, []string{"critical", "warning"}},
+		{"an unmapped value is still reported", []apiIncidentAlert{{Severity: "unknown"}, {Severity: "info"}}, nil, []string{"info", "unknown"}},
+		{"empty severities are dropped", []apiIncidentAlert{{Severity: ""}}, nil, nil},
+		{"no alerts", nil, nil, nil},
+		{"alerts call failed", nil, errors.New("boom"), nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st := &stubTransport{
+				incidents: map[string][]apiIncident{"*": {inc("P1", "triggered", "high")}},
+				alerts:    map[string][]apiIncidentAlert{"P1": c.alerts},
+				alertsErr: map[string]error{"P1": c.err},
+			}
+			res, err := okBackend(st).List(cfgCtx(baseCfg()), nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ext pagerdutyExtension
+			if err := json.Unmarshal(res.Entities[0].Extensions["pagerduty"], &ext); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(ext.AlertSeverities, c.want) {
+				t.Fatalf("alert_severities = %v, want %v", ext.AlertSeverities, c.want)
+			}
+		})
+	}
+}
+
 func TestSeverity_UnauthorizedAlertsCallIsUnauthenticated(t *testing.T) {
 	st := &stubTransport{
 		incidents: map[string][]apiIncident{"*": {inc("P1", "triggered", "high")}},

@@ -957,6 +957,25 @@ the real `go` tool that the tag splits every integration package and that both b
 single-process test is a unit test even when it is real (a `git` fixture repo, an in-process serve
 loop, the re-exec-the-test-binary helper process).
 
+**Live-API contract tests (on demand).** `cmd/pg-connector-alert-pagerduty/internal/contract_test.go`
+(`//go:build contract`) calls the real PagerDuty REST API with the operator's own key (Keychain
+service `pd-schedule-manager`, account `pagerduty-api`, or `PAGERDUTY_API_TOKEN`), so it can run
+only where a person started it: not in a build sandbox, not from a hook or a land gate. It proves the
+key resolves and is accepted, a bogus key is `unauthenticated`, the incident and alert JSON still has
+the shape `client.go` decodes, every alert severity PagerDuty sends is one of critical, error, warning
+or info, and the backend's mapped severity agrees with the raw alert severities it reports in
+`extensions.pagerduty.alert_severities`. A missing key fails the run loudly. Run it when the
+PagerDuty backend or its mapping changes, or to confirm the API still behaves as assumed:
+
+```bash
+nix run .#pg-connector-contract    # the whole contract tier
+# or just this suite, from packages/pg-connector:
+go test -tags contract -count=1 -v ./cmd/pg-connector-alert-pagerduty/internal/
+```
+
+`checks.<system>.pg-connector-integration-tests-gating` vets the contract build, so the file keeps
+compiling even though nothing runs it automatically.
+
 A daemon a test starts MUST NOT outlive the test process (bead `pg2-qupkv0`: `t.Cleanup` does not
 run when the test binary is killed by a timeout or SIGKILL, so daemons were orphaned for days). Every
 `pg-connector-github` and `pg-connector-issue-jira` binary the daemon's `servetest` harness builds,

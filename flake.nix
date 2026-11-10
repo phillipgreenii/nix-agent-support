@@ -9282,7 +9282,11 @@
                       echo "$tagged" | grep -q '^TestCrossCompileLinuxWholeModule$' || fail "the tagged build does not list TestCrossCompileLinuxWholeModule"
                       go vet ./... || fail "go vet of the default build failed"
                       go vet -tags integration ./... || fail "go vet of the integration build failed"
-                      echo "pg-connector-integration-tests-gating: the tag splits $(echo "$pkgs" | wc -l) packages; both builds vet clean"
+                      # The contract tier (real credentials, run by hand through
+                      # `nix run .#pg-connector-contract`) is never run here, but it
+                      # must keep compiling: a renamed helper must not rot it unseen.
+                      go vet -tags contract ./... || fail "go vet of the contract build failed"
+                      echo "pg-connector-integration-tests-gating: the tag splits $(echo "$pkgs" | wc -l) packages; the default, integration and contract builds vet clean"
                       runHook postBuild
                     '';
                   });

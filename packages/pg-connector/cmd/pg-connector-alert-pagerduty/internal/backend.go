@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -389,24 +390,34 @@ func severityRank(s schema.Severity) int {
 // incidentSeverity returns the highest recognized severity among the
 // incident's alerts, falling back to urgency when the alerts call fails or
 // carries no recognized severity. A rejected key is returned as an error: it
-// is not a reason to quietly degrade.
-func (b *Backend) incidentSeverity(ctx context.Context, baseURL, tok string, inc apiIncident) (schema.Severity, error) {
+// is not a reason to quietly degrade. It also returns the raw alert severity
+// strings PagerDuty sent (lower-cased, deduplicated, sorted), recognized or not,
+// so a reader can tell a real alert severity from the urgency fallback and
+// spot a value the closed mapping table does not know.
+func (b *Backend) incidentSeverity(ctx context.Context, baseURL, tok string, inc apiIncident) (schema.Severity, []string, error) {
 	alerts, err := b.transport.IncidentAlerts(ctx, baseURL, tok, inc.ID)
 	if errors.Is(err, errUnauthorized) {
-		return "", mapTransportErr(err)
+		return "", nil, mapTransportErr(err)
 	}
 	var best schema.Severity
+	var raw []string
 	if err == nil {
+		seen := make(map[string]bool)
 		for _, a := range alerts {
 			if s := alertSeverity(a.Severity); severityRank(s) > severityRank(best) {
 				best = s
 			}
+			if v := strings.ToLower(strings.TrimSpace(a.Severity)); v != "" && !seen[v] {
+				seen[v] = true
+				raw = append(raw, v)
+			}
 		}
+		sort.Strings(raw)
 	}
 	if best == "" {
 		best = urgencySeverity(inc.Urgency)
 	}
-	return best, nil
+	return best, raw, nil
 }
 
 // pagerdutyExtension is the typed per-provider data under extensions.pagerduty.
@@ -416,6 +427,9 @@ type pagerdutyExtension struct {
 	Urgency        string `json:"urgency,omitempty"`
 	ServiceID      string `json:"service_id,omitempty"`
 	ServiceSummary string `json:"service_summary,omitempty"`
+	// AlertSeverities are the raw severity strings of the incident's alerts, as
+	// PagerDuty sent them (empty when the alerts call failed or carried none).
+	AlertSeverities []string `json:"alert_severities,omitempty"`
 }
 
 // toSchemaAlert maps one firing incident onto the shared Alert shape
@@ -432,7 +446,7 @@ func (b *Backend) toSchemaAlert(ctx context.Context, baseURL, tok string, inc ap
 	if err != nil {
 		return schema.Alert{}, malformed(fmt.Sprintf("incident %s: created_at %q: %v", inc.ID, inc.CreatedAt, err))
 	}
-	sev, err := b.incidentSeverity(ctx, baseURL, tok, inc)
+	sev, rawSeverities, err := b.incidentSeverity(ctx, baseURL, tok, inc)
 	if err != nil {
 		return schema.Alert{}, err
 	}
@@ -454,6 +468,7 @@ func (b *Backend) toSchemaAlert(ctx context.Context, baseURL, tok string, inc ap
 	extJSON, err := json.Marshal(pagerdutyExtension{
 		IncidentNumber: inc.IncidentNumber, Status: inc.Status, Urgency: inc.Urgency,
 		ServiceID: inc.Service.ID, ServiceSummary: inc.Service.Summary,
+		AlertSeverities: rawSeverities,
 	})
 	if err != nil {
 		return schema.Alert{}, malformed("marshal extension: " + err.Error())
