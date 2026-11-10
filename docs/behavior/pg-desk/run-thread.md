@@ -64,6 +64,17 @@ and triggers no re-interpret — unless an EARLIER run already linked a PR to it
 un-linked either). If more than one PR is linked, every one is attempted; a failure re-interpreting
 one does not skip the rest.
 
+## What a re-interpretation writes, and the schema requirement
+
+Step 5 is the shared re-interpretation of stored facts (see [`reinterpret.md`](reinterpret.md)): it
+writes each linked PR's interpretation row with the current stamp and leaves its entity row (facts,
+as-of time, version) untouched, and when it changes who owes the next step or the panel of the PR it
+appends one history-only `interpretation_changed` record to the PR's change log.
+
+`run thread` MUST require schema 2 before it does anything, right after it opens the store: its
+cross-reference rows are written before the final re-interpretation, so a late refusal would leave
+rows behind. On a store on schema 1 it exits `1` with the cutover message and writes nothing.
+
 ## Exit codes
 
 Same contract as every other `run` invocation (see [`pipeline-run.md`](pipeline-run.md)): exit `0`

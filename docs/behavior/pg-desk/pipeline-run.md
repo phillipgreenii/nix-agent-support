@@ -10,7 +10,10 @@ entity type, with a failure line that names the removal.
 
 The run is two stages in one process: the stored facts of the PR are loaded, and interpret (stage
 2, pure and deterministic) re-derives its interpretation and stores it. It never gathers a PR and it
-never writes a bead.
+never writes a bead. The re-derivation is the single re-interpretation of stored facts that `pg-desk
+pr reinterpret` and the heartbeat catch-up also use (see [`reinterpret.md`](reinterpret.md)): it
+leaves the PR's entity row alone, writes the interpretation with the current stamp, and appends one
+history-only `interpretation_changed` record when the PR's owner or panel changed.
 
 ```mermaid
 flowchart LR
@@ -24,7 +27,8 @@ flowchart LR
 `run issue` resolves the triggering bead (or Jira ticket key) to the PR(s) it is about and
 re-interprets each one, see [`run-issue.md`](run-issue.md). `run thread` cross-references a Slack
 thread to PRs and re-interprets them, see [`run-thread.md`](run-thread.md). Both are kept after the
-sync stage's removal and MUST run on a schema-2 store.
+sync stage's removal and MUST require a schema-2 store: each refuses a schema-1 store with the
+cutover message, before anything is written, and exits `1`.
 
 ## Exit codes
 

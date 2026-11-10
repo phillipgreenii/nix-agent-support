@@ -11,7 +11,8 @@ For `pr` pg-desk keeps no change feed of the forge's changes: the daemon-backed 
 change feed for `pr` and `ci`, so it owns the consumers' cursors and their retention, and pg-desk's
 own PR change flow is retired (see [`changes.md`](changes.md), "Who owns change detection"). The one
 exception is pg-desk's own annotation changes: they are `annotation_changed` records in pg-desk's
-change log, read by `pg-desk <type> annotation-items` under consumers named `annotations:NAME` (see
+change log (the one local record kind that triggers work; the history-only `interpretation_changed`
+record of a `pr` is never delivered, see [`reinterpret.md`](reinterpret.md)), read by `pg-desk <type> annotation-items` under consumers named `annotations:NAME` (see
 [`annotation-items.md`](annotation-items.md)), which are rows of this table like any other: `consumer
 list` and `forget` show and delete them, and a live one holds back pruning of its type's rows. They
 start at the type's current maximum sequence on first registration, and `<type> changes` refuses

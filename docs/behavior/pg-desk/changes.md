@@ -52,7 +52,10 @@ does not restate it.
   `pg-desk pr annotation-items` turns those records into router items (see
   [`annotation-items.md`](annotation-items.md)). That is the one local change log and the one
   consumer kind pg-desk keeps for `pr`; it does detection by no means: no baseline, no sweep, no
-  hydration.
+  hydration. The log also holds, for `pr`, one history-only kind of its own:
+  `interpretation_changed`, appended when a re-interpretation changes who owes the next step or the
+  panel (see [`reinterpret.md`](reinterpret.md)). No consumer is woken by it and no feed delivers
+  it, so `annotation_changed` remains the only local kind that triggers work.
 - **For `issue`, ownership is decided per backend.** pg-desk MUST NOT choose how to detect an issue
   change by type alone. Its configuration names, for each watched query, the backend instance that
   serves it and whether that backend owns its changes, rendered from the same source as the

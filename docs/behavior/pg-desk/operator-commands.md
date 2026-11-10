@@ -1,4 +1,4 @@
-# pg-desk — show, status, pr head-check, pr lane-record, pr mark-inactive, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
+# pg-desk — show, status, pr reinterpret, pr head-check, pr lane-record, pr mark-inactive, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
 
 ## show
 
@@ -81,9 +81,29 @@ health model, with every tripped gate marked `FAIL` (`status` itself never fails
 code is unchanged). It has no `--router-config`, so the consumer lag line reads `n/a`.
 On a store without the focus tables the block is the single line `focus: unmigrated`.
 
+`status` also prints the interpretation catch-up state (see [`reinterpret.md`](reinterpret.md)), as
+counts only with no verdict: `interpretations behind: N (stamp differs from <stamp>)`, the number of
+interpretations marked failed under the running stamp, and the counts and time of the last catch-up
+(from the heartbeat or `pr reinterpret --open`), including the number remaining when it stopped at a
+limit. On a store whose `interpretation` table does not yet have the stamp column it prints
+`interpretations behind: unknown (column not yet added)`, never `0`. It reads the stored state only
+and makes no connector call.
+
 Exit codes: `0` on success; `1` when the store cannot be opened. A config-load failure (needed
 only to read the sweep bound's inputs) degrades to omitting that section rather than failing
 `status` outright — status's own exit-code floor stays "1 only when the store cannot be opened."
+
+## pr reinterpret
+
+`pg-desk pr reinterpret <pr>` re-interprets one PR from the facts already stored, and `pg-desk pr
+reinterpret --open` re-interprets every open PR whose interpretation is behind the running stamp
+and stamps the rest, with no connector or network call. The command, its options (`--dry-run`,
+`--verbose`), the summary line and the invariants are in [`reinterpret.md`](reinterpret.md). It is
+the unbounded path that finishes the job the heartbeat does a slice at a time ("heartbeat" below).
+
+Exit codes: `0` when nothing failed; `1` otherwise, including a store on schema 1 (the cutover
+message), an unresolvable `<pr>`, both or neither of `<pr>` and `--open`, a store or configuration
+error, and any row that failed.
 
 ## pr head-check
 
@@ -404,6 +424,14 @@ carrying a timestamp id. The deployed `desk-heartbeat` query is a 60-second peri
 dispatch per minute (roughly 50 an hour while the daemon is up) is the intended cadence, not a fault; the
 period lives in the deployment module, not in `pg-desk`.
 
+After the liveness stamp and before it records the source fetch times, `heartbeat` runs a bounded
+catch-up that re-interprets the open PRs whose interpretation is behind the running stamp (see
+[`reinterpret.md`](reinterpret.md), "The heartbeat catch-up"). It stops at a 10-second budget and at
+25 rows per pass, runs only on a non-`dev` build against a schema-2 store, skips when a previous
+catch-up is still running, and never changes the heartbeat's exit code: a configuration that cannot
+be loaded, an unreadable store or a catch-up error is at most one line on stderr. It writes nothing
+when nothing is behind. The liveness stamp and the source fetch record never depend on it.
+
 Exit codes: `0` on success; `1` when the store cannot be written (`heartbeat`) or read
 (`heartbeat-item`).
 
@@ -430,7 +458,8 @@ entity or no reachable connector). The unsafe verbs today are the legacy top-lev
 `pr show`) and
 `migrate` (a one-shot cutover verb), and the `open` verbs (they exec the configured browser opener). The
 top-level `hide`, `unhide`, `wip` and `feedback list|set` are safe: they dispatch on the store schema
-like the typed `pr` forms. `run` (issue and thread only) is safe: it reads no ledger.
+like the typed `pr` forms. `run` (issue and thread only) is safe: it reads no ledger. `pr reinterpret` is safe: it needs only
+the version-2 tables and refuses a version-1 store before writing.
 
 The list of safe verbs is written into the package output as `share/pg-desk/safe-verbs.txt`, one verb
 path per line (for example `pr refresh`), blank lines and `#` comments allowed. The same test verifies
@@ -476,6 +505,12 @@ can drift.
 
 - **INV-OPERATOR-11.** <!-- uuid: b0994b23-e3bf-4c10-a9fd-1194d541b6b7 --> `doctor` MUST NOT check, list or give a remedy for a `sync_error` row, and a line of the `focus:` block that is red for a known reason until the lane flips to `apply`
   (unminted PR selections) MUST carry an `expected until P6` tag without ceasing to be a gate.
+
+- **INV-OPERATOR-12.** <!-- uuid: aee652c7-9967-4761-91e3-53c197747d29 --> `status` MUST print the number of interpretations behind the running stamp, the number marked
+  failed and the last catch-up's counts and time as counts only with no verdict, and on a store
+  without the stamp column MUST print the behind count as unknown rather than `0`.
+- **INV-OPERATOR-13.** <!-- uuid: 1a2fd1a5-d01f-4cd9-ab72-5047e06f4bd8 --> `heartbeat` MUST stamp liveness before the catch-up and the catch-up MUST NOT change its exit code;
+  `pr reinterpret` MUST exit `0` only when nothing failed.
 
 ## Telemetry and logs
 

@@ -19,7 +19,8 @@ below. "Schema version 2 tables" describes what the cutover changes.
   by gather.
 - **`interpretation`** — ownership, enrichment, urgency, category, feedback dispositions,
   approvals, gate state, match reasons, panel placement, `ready_to_promote`, `degraded`, and
-  `sync_error`. Written by interpret. The `sync_error` column is no longer written by anything (the sync stage was deleted, packet P9a-2); a version-1 row may still carry an old value.
+  `sync_error`, and the stamp (see "The interpretation stamp" below). Written by interpret, through
+  the one interpretation writer (see [`reinterpret.md`](reinterpret.md)). The `sync_error` column is no longer written by anything (the sync stage was deleted, packet P9a-2); a version-1 row may still carry an old value.
 - **`xref`** — cross-reference edges (`from`/`to` type and id, the evidence that produced the
   link, first-seen and last-confirmed times). This table's schema exists in Phase 9's ladder;
   starting Phase 13 (docket `pg2-2j5ac.40`) it is written by gather's own ticket-key scan (see
@@ -79,7 +80,9 @@ can print it.
   MUST NOT run the cutover.
 - Until the old code paths are retired, that ordinary open MUST accept a store at version 1 or 2.
   It MUST refuse a store newer than version 2, and it MUST NOT rewrite `meta.schema_version` on a
-  version-2 store.
+  version-2 store. Schema 2 is the only schema a writing command supports: opening a version-1 store
+  is for inspection and for `migrate --cutover` only (see the next bullet group and "Interpretation
+  writes need schema 2").
 - `migrate --cutover`, `status` and `doctor` MUST open the store without running migrations and
   without the version gate, so they can inspect or change a store in any state, including one that
   has not been cut over yet and one that has no schema at all. `status` and `doctor` MUST NOT fail
@@ -90,9 +93,10 @@ can print it.
 - Every command that needs the version-2 schema MUST check for it right after opening the store,
   and on a version-1 store MUST refuse with an error that says to run
   `pg-desk migrate --cutover`.
-- Until the old code paths are retired, access to `entity`, `interpretation` and `xref` MUST work
-  on both versions, because the cutover adds columns to `entity`, drops `interpretation.sync_error`
+- Until the old code paths are retired, READ access to `entity`, `interpretation` and `xref` MUST
+  work on both versions, because the cutover adds columns to `entity`, drops `interpretation.sync_error`
   and rebuilds `xref`. The old `annotation` and `ledger` access is available on version 1 only.
+  Writing an interpretation is not part of that dual access: see "Interpretation writes need schema 2".
 
 ## Schema version 2 tables
 
@@ -110,8 +114,7 @@ The cutover makes these changes, and no others:
   rewritten by any update. The cutover backfills every existing row with its `as_of`. It is the
   daily-focus rank's age fallback (the change log is pruned and cannot supply it). It reads back as
   the empty string when NULL and on a version-1 store.
-- **`interpretation`** loses `sync_error`. On version 2 a write that carries a sync error is an
-  error, not a silent drop.
+- **`interpretation`** loses `sync_error`. No write carries a sync error any more.
 - **`change_log`** is new and append-only: `seq` (integer, autoincrementing primary key), `repo`,
   `entity_type`, `entity_id`, `version` (integer), `kinds` (a JSON array), `origin` and `at`, all
   not null, with an index on `(repo, entity_type, entity_id, seq)`. The cutover creates it empty.
@@ -177,6 +180,40 @@ The columns, the table and the `meta` keys that the watched-only `issue` change 
 this schema are NOT part of the cutover and are not a new schema version: see "Watched-entity columns,
 the failed-ingest table and the feed markers (schema version 2)" below.
 
+## The interpretation stamp
+
+The `interpretation` table carries a nullable text `interp_version`: the stamp of the build and the
+interpretation-relevant configuration that computed the row (see [`reinterpret.md`](reinterpret.md),
+"The stamp"). A NULL stamp means the row was written before stamping and differs from every stamp.
+
+- The column is added by an idempotent ensure step run when the store is opened for ordinary use,
+  guarded by a check of the table's columns. It is NOT a rung of the version ladder (a rung would
+  mis-stamp `user_version`), so `user_version` and `meta.schema_version` are unchanged. The cutover
+  only drops `sync_error` from `interpretation` and does not rebuild it, so the column survives it.
+- Readers that never run the ensure step (the read-only and raw opens that `status`, `doctor`,
+  `freshness`, `links`, `attention` and the focus verbs use) MUST select the stamp as NULL when the
+  column is absent, decided from the table's columns before the query. Any query that counts or
+  filters on the stamp MUST follow the same rule, and `status` MUST then report the behind count as
+  unknown, never as zero.
+- The stamp is written by the one interpretation writer from the store handle's stamp, so no caller
+  can omit it. A handle with no stamp writes NULL (read-only tools and tests).
+- An interpretation row that failed to re-interpret carries the stamp followed by `!failed`.
+- A write of the stamp alone MUST change no other column.
+
+## Interpretation writes need schema 2
+
+Every command that writes an interpretation (hydration, `refresh`, `changes`, `run issue`, `run
+thread`, `pr reinterpret`, the heartbeat catch-up) MUST require schema 2 before it writes
+anything, and on a version-1 store MUST refuse with the error that says to run `pg-desk migrate
+--cutover`. There is no version-1 write mode and no unconditional write mode: the `sync_error`
+fallback and the "write whatever is there" interpretation write of the old schema are removed.
+`status`, `doctor` and `migrate --cutover` keep opening a version-1 store.
+
+The interpretation write is one transaction that takes the write lock first, so a competing writer
+waits rather than failing with a busy error; it reads the old row inside that transaction; and it
+is skipped only when the entity's stored `content_hash` differs from the facts the interpretation was
+derived from (see [`reinterpret.md`](reinterpret.md), "The write").
+
 ## Entity versions and the change log (schema version 2)
 
 `entity.version` and `change_log` move together, through one write primitive.
@@ -206,6 +243,16 @@ the failed-ingest table and the feed markers (schema version 2)" below.
 - For an `issue` entity the append that this primitive performs is subject to the delivery gate, and
   the entity row carries two further kinds of write that bump no version; both are described in
   "Watched-entity columns, the failed-ingest table and the feed markers (schema version 2)" below.
+
+## The `interpretation_changed` change kind (schema version 2)
+
+A re-interpretation of a PR whose `waiting_on` or panel changed appends one `change_log` record of
+kind `interpretation_changed`, in the same transaction as the interpretation write, at the entity's
+current version, with the origin of the flow that re-interpreted. It does not bump `entity.version`.
+It is history only: the delivery gate withholds only `issue` rows, no code validates a kind against a
+catalogue, `pr history` and the change-flow metrics print kinds verbatim, and the one consumer of `pr`
+(`annotation-items`) prints only `annotation_changed` rows and advances past the rest. For an `issue`
+or a `thread` no such record is ever appended.
 
 ## Annotations and cross-reference links (schema version 2)
 

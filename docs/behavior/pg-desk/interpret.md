@@ -4,6 +4,17 @@ Interpret is stage 2 of the pipeline (see [`pipeline-run.md`](pipeline-run.md)).
 interpretation MUST be a deterministic function of store rows, computed with an injectable clock,
 and MUST NOT use an LLM for any step below.
 
+## When an interpretation is recomputed
+
+A stored interpretation MUST be recomputed whenever its entity's facts change (a hydration that
+finds a change interprets what it stored) AND whenever its stamp differs from the running stamp (a
+re-interpretation from the stored facts, with no read of any source, after a rule or an
+interpretation-relevant configuration changed). Both paths derive the row through the same
+derivation, so the same facts give the same interpretation whichever path computed it; the stamp,
+the command and the heartbeat catch-up are in [`reinterpret.md`](reinterpret.md). A re-interpretation
+is deterministic like every other run of interpret: with the same stored facts, configuration and clock it
+gives the same row.
+
 ## Steps this phase implements
 
 - **Ownership** — classifies a PR as mine, co-owned, or team, from config and the commit-author

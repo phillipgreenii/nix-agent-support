@@ -30,7 +30,9 @@ flowchart LR
   hydrate, and refuses an old-schema store with the same cutover message as `<type> changes`.
 - **What is scanned and what is printed.** The verb reads the change-log rows of `<type>` past the
   consumer's cursor, in ascending sequence, and prints an item only for a row whose kind is
-  `annotation_changed`. `--limit N` bounds the rows SCANNED, not the items printed (0 = no limit).
+  `annotation_changed`; a row of another kind, among them a `pr`'s history-only
+  `interpretation_changed` (see [`reinterpret.md`](reinterpret.md)), is scanned and skipped, so it
+  never becomes an item and never wakes a decider. `--limit N` bounds the rows SCANNED, not the items printed (0 = no limit).
   The cursor advances, after the output is flushed, to the last row SCANNED, not the last item
   printed, so a page made only of other rows (hydrations) prints `[]` and still moves on: the feed
   cannot stall, and its lag stays near zero however many other rows the type has.

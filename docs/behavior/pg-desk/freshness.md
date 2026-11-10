@@ -51,6 +51,10 @@ conservatively: the older success wins.
   `last_seen_at`: the newest `last_seen` among the row's consumers in `ledger show` (the
   `pg-router` consumer stamps it on every poll, successful or not). It is monotonic like the
   success time, and absent when the ledger carries none.
+- **The interpretation catch-up sits between the two.** After the liveness stamp, `heartbeat` runs
+  a bounded re-interpretation of the open PRs behind the running stamp (see
+  [`reinterpret.md`](reinterpret.md), "The heartbeat catch-up"); the source fetch times are recorded
+  after it, and a slow or failing catch-up prevents neither the stamp nor the record.
 - **Reporting lag** is at most one heartbeat period (60 seconds by default), far below the
   threshold.
 

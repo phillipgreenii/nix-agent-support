@@ -30,7 +30,7 @@ path (the legacy `sync` stage, `reconcile`, `sweep` and `run pr` were deleted by
 packet P9a-2), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
-verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `issue changes` and `thread changes` (see [`changes.md`](changes.md); there is no `pr changes`, the daemon is the PR feed), `<type> annotation-items` (the feed of a type's local annotation changes, see [`annotation-items.md`](annotation-items.md)), the focus configuration keys (`focus.*`, `bead_id_pattern`, see [`config.md`](config.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
+verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `issue changes` and `thread changes` (see [`changes.md`](changes.md); there is no `pr changes`, the daemon is the PR feed), `<type> annotation-items` (the feed of a type's local annotation changes, see [`annotation-items.md`](annotation-items.md)), the focus configuration keys (`focus.*`, `bead_id_pattern`, see [`config.md`](config.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, `pr reinterpret` and the heartbeat's interpretation catch-up (the stamp and the single interpretation path, see [`reinterpret.md`](reinterpret.md)), and the annotation verbs `<type> annotate|suppress|unsuppress`,
 `pr force-review`, `pr head-check`, `pr lane-record`, `pr mark-inactive` (see [`operator-commands.md`](operator-commands.md)) and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
 [`annotate.md`](annotate.md)).
 
@@ -62,6 +62,7 @@ back here — not the full list.
 | [`gather.md`](gather.md)                       | Pipeline stage 1 — facts, only through `pg-connector`                                                                                   |
 | [`interpret.md`](interpret.md)                 | Pipeline stage 2 — pure, deterministic derivation                                                                                       |
 | [`pipeline-run.md`](pipeline-run.md)           | `pg-desk run issue`/`run thread`, the run record and failure diagnosis                                                                  |
+| [`reinterpret.md`](reinterpret.md)             | `pg-desk pr reinterpret`, the interpretation stamp, the heartbeat catch-up and the single interpretation path                           |
 | [`run-issue.md`](run-issue.md)                 | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                                                 |
 | [`run-thread.md`](run-thread.md)               | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                                  |
 | [`serve.md`](serve.md)                         | `pg-desk serve`, soak-port only this phase                                                                                              |
@@ -101,6 +102,10 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   series of its own; every non-dry-run `select`, `pull`, `close` and `select --repair` leaves one run
   record row in the store and prints the same record as one `pg-desk.focus-select/v1` JSON line on
   stderr — see [`focus.md`](focus.md)'s "Telemetry and logs".
+- **Re-interpretation:** `pr reinterpret` and the heartbeat's catch-up emit nothing over OpenTelemetry
+  or Prometheus and log one structured debug line per re-interpreted PR (off by default); their
+  counts persist in the store and `status` prints them (see [`reinterpret.md`](reinterpret.md),
+  "Observability").
 - **Logs:** `run` logs structured JSON to stderr (pg-router captures it); `run issue`'s and
   `run thread`'s own interpret-only re-runs write that structured line, logged
   against the resolved PR's own entity id — once per linked PR, which can re-interpret more than

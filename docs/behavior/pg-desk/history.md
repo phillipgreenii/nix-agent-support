@@ -24,6 +24,10 @@ origin=<origin>`, with `<at>` exactly as stored (RFC3339 UTC). Example:
   with the record shape of contract `pg-desk.changes/v1`: `seq`, `type`, `id`, `title`,
   `version`, `kinds`, `origin`, `at`. `title` is display only and is the empty string when the
   entity row is unavailable. An entity with no records yields `{"records": []}`.
+- A PR's history can hold an `interpretation_changed` record: its interpretation was recomputed and
+  its owner or panel changed (see [`reinterpret.md`](reinterpret.md)). It is history only, appended
+  without a version bump, so a record of this kind can share its version with the record before it.
+  It is printed like any other kind.
 - `history` is read-only: it writes nothing and moves no consumer cursor.
 
 ## Old-schema refusal

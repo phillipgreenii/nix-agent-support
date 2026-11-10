@@ -65,8 +65,7 @@ failure re-interpreting one does not skip the rest.
 ## Holding the issue itself (Jira, watched)
 
 When `watch.issue.queries` names at least one query, a Jira-shaped `run issue` ALSO gathers the
-ticket key and stores it as an `issue` entity (the entity and interpretation rows, no derived
-links before the store is migrated), so attention rules can read the issue itself and not only the
+ticket key and stores it as an `issue` entity (the entity and interpretation rows), so attention rules can read the issue itself and not only the
 PRs that mention it. The entity carries the connector's status, assignee, when the issue entered its
 current status, and when the operator last updated it (the operator's own comments and transitions;
 other users and bots excluded). With `watch.issue.queries` empty, nothing is gathered and the
@@ -103,6 +102,23 @@ Given the triggering bead's id, `run issue`:
 
 A bead whose title and metadata match none of the known shapes (nor the title-adopted fallback) is
 a clear, non-panicking error — `run issue` does not guess.
+
+## What a re-interpretation writes, and the schema requirement
+
+The re-interpretation of a linked PR is the shared re-interpretation of stored facts (see
+[`reinterpret.md`](reinterpret.md)), so:
+
+- It writes the PR's interpretation row, with the current stamp, and nothing of the PR's entity row:
+  the stored facts, their as-of time, hydration time, list fingerprint and version are left exactly
+  as they were. (An earlier version of this path rewrote the entity row from the decoded facts; it no
+  longer does.) The interpretation's own as-of time is the run's time, and may therefore differ from
+  the entity's.
+- When the re-interpretation changes who owes the next step or the panel of the PR, it appends one
+  history-only `interpretation_changed` record to the PR's change log, so a Jira or bead event for a
+  linked PR can leave that record in the PR's history. It wakes no decider.
+- `run issue` MUST require schema 2 before it does anything, right after it opens the store, for
+  both backends and every `--change` value. On a store on schema 1 it exits `1` with the cutover
+  message and writes nothing; there is no unversioned fallback hydration of a Jira issue any more.
 
 ## Exit codes
 
