@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -222,6 +223,13 @@ func (d *Daemon) timeSweep(step func() error) error {
 	start := d.clock.Now()
 	d.sweepActive.Store(false)
 	err := d.runLoop(obs.LoopWatcherSweep, step)
+	if errors.Is(err, watcher.ErrSweepAborted) {
+		// A shutdown stopped it: no skipped-ratio from half a sweep.
+		d.sweepActive.Store(false)
+		d.obs.Log.Info("sweep_aborted", "walked", d.sweepWalked.Load(), "skipped", d.sweepSkipped.Load(),
+			"ingested", d.sweepIngested.Load(), "elapsed_ms", d.clock.Now().Sub(start).Milliseconds())
+		return err
+	}
 	if d.sweepActive.Swap(false) {
 		d.finishSweep(d.clock.Now().Sub(start))
 	}

@@ -1,59 +1,108 @@
 package serve
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 )
 
+// The pacer tests run on the real clock: clock.Fake.Sleep advances and never
+// blocks, so a wait test on it would pass with the cancellable wait reverted.
 func TestPacerNeverExceedsTheCapAndFinishes(t *testing.T) {
-	const rate, n = 20, 200
-	clk := clock.NewFake(time.Unix(1_000_000, 0))
-	p := newPacer(clk, rate)
-	start := clk.Now()
+	const rate, n = 200, 20 // one slot per 5 ms
+	p := newPacer(clock.Real{}, rate)
+	ctx := context.Background()
+	start := time.Now()
 	stamps := make([]time.Time, 0, n)
 	for i := 0; i < n; i++ {
-		p.wait()
-		stamps = append(stamps, clk.Now())
-	}
-	// Finishes: n files take (n-1)/rate seconds, no more than that plus one slot.
-	if got, want := stamps[n-1].Sub(start), time.Duration(n-1)*time.Second/rate; got != want {
-		t.Fatalf("pass took %v, want %v", got, want)
-	}
-	// Never exceeds the cap: in any window of one second at most rate+1 releases
-	// (rate slots plus the one on the window's opening edge).
-	for i := range stamps {
-		c := 0
-		for j := i; j < n && stamps[j].Sub(stamps[i]) < time.Second; j++ {
-			c++
+		if !p.wait(ctx) {
+			t.Fatal("wait reported cancelled on a live context")
 		}
-		if c > rate {
-			t.Fatalf("%d releases within one second of release %d, cap %d", c, i, rate)
-		}
+		stamps = append(stamps, time.Now())
+	}
+	// Never exceeds the cap: n releases take at least (n-1) slots.
+	if got, min := stamps[n-1].Sub(start), time.Duration(n-1)*time.Second/rate; got < min {
+		t.Fatalf("pass took %v, the cap needs at least %v", got, min)
+	}
+	// Finishes: well inside a generous multiple of the ideal time.
+	if got := stamps[n-1].Sub(start); got > 2*time.Second {
+		t.Fatalf("pass took %v, never released at its cap", got)
 	}
 }
 
 func TestPacerEarnsNoBurstCreditWhileIdleAndZeroIsUnlimited(t *testing.T) {
-	clk := clock.NewFake(time.Unix(1_000_000, 0))
-	p := newPacer(clk, 10)
-	p.wait()
-	clk.Advance(time.Hour) // idle
-	t0 := clk.Now()
-	for i := 0; i < 10; i++ {
-		p.wait()
+	ctx := context.Background()
+	p := newPacer(clock.Real{}, 20) // one slot per 50 ms
+	p.wait(ctx)
+	time.Sleep(200 * time.Millisecond) // idle
+	t0 := time.Now()
+	for i := 0; i < 4; i++ {
+		p.wait(ctx)
 	}
-	if got := clk.Now().Sub(t0); got < 800*time.Millisecond {
-		t.Fatalf("10 releases after an idle hour took %v: idle time must not buy a burst", got)
+	if got := time.Since(t0); got < 140*time.Millisecond {
+		t.Fatalf("4 releases after an idle spell took %v: idle time must not buy a burst", got)
 	}
-	u := newPacer(clk, 0)
-	t1 := clk.Now()
+	u := newPacer(clock.Real{}, 0)
+	t1 := time.Now()
 	for i := 0; i < 1000; i++ {
-		u.wait()
+		u.wait(ctx)
 	}
-	if !clk.Now().Equal(t1) {
+	if time.Since(t1) > 100*time.Millisecond {
 		t.Fatal("a zero cap waited")
+	}
+}
+
+// Cancelling the context wakes every cancellable wait of a sweep at once: the
+// pacer, the copy throttle and the backfill's per-path pacing. Each case blocks
+// for an hour unless the context frees it.
+func TestWaitsWakeOnCancel(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(ctx context.Context) bool
+	}{
+		{"pacer", func(ctx context.Context) bool {
+			p := newPacer(clock.Real{}, 1)
+			p.wait(ctx) // takes the free slot; the next is a second away
+			p.next = time.Now().Add(time.Hour)
+			return p.wait(ctx)
+		}},
+		{"copy throttle", func(ctx context.Context) bool { return clock.SleepCtx(ctx, clock.Real{}, time.Hour) }},
+		{"backfill pacing", func(ctx context.Context) bool {
+			e := newEnv(t, false)
+			e.cfg.MaxFilesPerSecond = 1
+			e.transcript("a.jsonl", "a\n", time.Now().Add(-time.Hour))
+			e.transcript("b.jsonl", "b\n", time.Now().Add(-time.Hour))
+			d := e.open(t)
+			defer func() { _ = d.Close() }()
+			d.sweepPace.next = time.Now().Add(time.Hour)
+			ctx2, cancel := context.WithCancel(ctx)
+			d.ctx = ctx2
+			go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+			d.backfill([]watcher.FileInfo{{Path: filepath.Join(e.claude, "projects", "example-proj", "a.jsonl")}})
+			return false
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan bool, 1)
+			go func() { done <- tc.run(ctx) }()
+			time.Sleep(30 * time.Millisecond)
+			cancel()
+			select {
+			case ok := <-done:
+				if ok {
+					t.Fatal("a cancelled wait reported completion")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the wait ignored the cancelled context")
+			}
+		})
 	}
 }
 
@@ -67,6 +116,22 @@ func TestSweepAndCatchUpRespectTheCapAndStillFinish(t *testing.T) {
 		e.transcript(fmt.Sprintf("f%02d.jsonl", i), "{\"type\":\"user\"}\n", old)
 	}
 	start := clk.Now()
+	// The pacer waits on the clock; the fake clock advances only when told to.
+	stopAdv := make(chan struct{})
+	defer close(stopAdv)
+	go func() {
+		for {
+			select {
+			case <-stopAdv:
+				return
+			default:
+			}
+			if clk.Waiters() > 0 {
+				clk.Advance(10 * time.Millisecond)
+			}
+			time.Sleep(50 * time.Microsecond)
+		}
+	}()
 	if err := d.Watcher().Rescan(); err != nil {
 		t.Fatal(err)
 	}

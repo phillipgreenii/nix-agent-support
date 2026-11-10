@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+// ErrSweepAborted is what a sweep returns when its context ended before it
+// finished: a shutdown, not a failure. The sweep stops at the next file, leaves
+// the checkpoint's last-sweep time unchanged where the walk did not finish, and
+// the next sweep ingests whatever this one skipped.
+var ErrSweepAborted = errors.New("watcher: sweep aborted by shutdown")
+
 const (
 	defaultSweepInterval = 15 * time.Minute
 	defaultMaxReplayGap  = 10 * time.Minute
@@ -129,7 +135,12 @@ func New(cfg Config) (*Watcher, error) {
 // Start loads the checkpoint, chooses replay or sweep, starts the event source
 // and the loop. A sweep owed at start runs in the loop, after the stream is
 // live, so no event is lost between the sweep and the stream.
-func (w *Watcher) Start() error {
+func (w *Watcher) Start() error { return w.StartContext(context.Background()) }
+
+// StartContext is Start with a parent context: cancelling ctx stops the loop
+// and aborts a sweep in flight at its next file (ErrSweepAborted), the same as
+// Close does.
+func (w *Watcher) StartContext(parent context.Context) error {
 	var st State
 	if w.cfg.Checkpoint != nil {
 		loaded, err := w.cfg.Checkpoint.Load()
@@ -163,7 +174,7 @@ func (w *Watcher) Start() error {
 			return err
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	w.cancel = cancel
 	w.done = make(chan struct{})
 	go w.loop(ctx, !d.Replay)
@@ -193,7 +204,11 @@ func (w *Watcher) Wake(path string) {
 }
 
 // Rescan forces a sweep now (test seam) and returns its error.
-func (w *Watcher) Rescan() error { return w.sweep() }
+func (w *Watcher) Rescan() error { return w.RescanContext(context.Background()) }
+
+// RescanContext is Rescan that stops at the next file once ctx is done and
+// then returns ErrSweepAborted.
+func (w *Watcher) RescanContext(ctx context.Context) error { return w.sweep(ctx) }
 
 // LastSweep is the time of the last successful sweep (zero if none): the
 // heartbeat the serve packet exports as a gauge.
@@ -223,27 +238,28 @@ func (w *Watcher) loop(ctx context.Context, sweepFirst bool) {
 		tickC = tick.C
 	}
 	if sweepFirst {
-		w.sweepLogged()
+		w.sweepLogged(ctx)
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tickC:
-			w.sweepLogged()
+			w.sweepLogged(ctx)
 		case <-w.notify:
-			w.drain()
+			w.drain(ctx)
 		}
 	}
 }
 
-func (w *Watcher) sweepLogged() {
-	if err := w.sweep(); err != nil {
+func (w *Watcher) sweepLogged(ctx context.Context) {
+	// An abort is a shutdown, not a failure: no warning.
+	if err := w.sweep(ctx); err != nil && !errors.Is(err, ErrSweepAborted) {
 		w.cfg.Logger.Warn("watcher sweep failed", "err", err)
 	}
 }
 
-func (w *Watcher) drain() {
+func (w *Watcher) drain(ctx context.Context) {
 	w.qmu.Lock()
 	hints := w.queue
 	w.queue = nil
@@ -269,7 +285,7 @@ func (w *Watcher) drain() {
 	}
 	w.mu.Unlock()
 	if mustScan {
-		w.sweepLogged()
+		w.sweepLogged(ctx)
 	}
 }
 
@@ -296,30 +312,37 @@ func (w *Watcher) handle(path string) {
 // sweep reports every filtered file under the roots with its identity and, on
 // success, records the sweep time. A missing root is skipped (the ends
 // directory may not exist yet).
-func (w *Watcher) sweep() error {
+func (w *Watcher) sweep(ctx context.Context) error {
 	w.sweepMu.Lock()
 	defer w.sweepMu.Unlock()
+	pass := func() error { return w.sweepPass(ctx) }
 	if w.cfg.SweepTimer != nil {
-		return w.cfg.SweepTimer(w.sweepPass)
+		return w.cfg.SweepTimer(pass)
 	}
-	return w.sweepPass()
+	return pass()
 }
 
 // sweepPass is one sweep: the walk, then the callbacks. The walk and the
 // checkpoint state run under w.mu; OnSweepWalked, OnSweep and the sinks run with
 // it released, so a hint (Wake, an event) never waits for a slow sink.
-func (w *Watcher) sweepPass() error {
-	files, walked, err := w.walkLocked()
+func (w *Watcher) sweepPass(ctx context.Context) error {
+	files, walked, err := w.walkLocked(ctx)
 	if err != nil {
 		return err
 	}
 	if w.cfg.OnSweepWalked != nil {
 		w.cfg.OnSweepWalked(walked)
 	}
+	if ctx.Err() != nil {
+		return ErrSweepAborted
+	}
 	if w.cfg.OnSweep != nil {
 		w.cfg.OnSweep(files)
 	}
 	for _, fi := range files {
+		if ctx.Err() != nil {
+			return ErrSweepAborted
+		}
 		w.cfg.Sink(Event{Path: fi.Path, Info: fi, Sweep: true})
 	}
 	return nil
@@ -327,7 +350,7 @@ func (w *Watcher) sweepPass() error {
 
 // walkLocked walks the sweep roots and, on success, records the sweep time. It
 // takes w.mu itself.
-func (w *Watcher) walkLocked() (files, walked []FileInfo, err error) {
+func (w *Watcher) walkLocked(ctx context.Context) (files, walked []FileInfo, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	dirs := w.cfg.SweepDirs
@@ -335,6 +358,9 @@ func (w *Watcher) walkLocked() (files, walked []FileInfo, err error) {
 		dirs = w.cfg.Roots
 	}
 	for _, root := range dirs {
+		if ctx.Err() != nil {
+			return nil, nil, ErrSweepAborted
+		}
 		infos, err := platformSweep(root, w.cfg.DirFilter)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
@@ -350,6 +376,9 @@ func (w *Watcher) walkLocked() (files, walked []FileInfo, err error) {
 		}
 	}
 	for _, p := range w.cfg.SweepFiles {
+		if ctx.Err() != nil {
+			return nil, nil, ErrSweepAborted
+		}
 		fi, regular, err := lstatInfo(p)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {

@@ -2,7 +2,9 @@ package serve
 
 import (
 	"context"
+	"errors"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -52,17 +54,21 @@ func (d *Daemon) opSweep(_ context.Context, body []byte) (any, *wire.Error) {
 // watcher's lock, so no other sweep can re-fill them between the clear and
 // this sweep's walk.
 func (d *Daemon) runForcedSweep() {
-	err := d.w.Rescan()
+	err := d.w.RescanContext(d.rootCtx())
 	d.forcePending.Store(false) // the sweep failed before its hook ran
 	d.forceMu.Lock()
 	d.forceRunning = false
 	d.forceDone++
 	d.forceErr = ""
-	if err != nil {
+	if errors.Is(err, watcher.ErrSweepAborted) {
+		d.forceErr = "aborted by shutdown"
+	} else if err != nil {
 		d.forceErr = err.Error()
 	}
 	d.forceMu.Unlock()
-	if err != nil {
+	if errors.Is(err, watcher.ErrSweepAborted) {
+		d.obs.Log.Info("forced_sweep_aborted")
+	} else if err != nil {
 		d.obs.Log.Warn("forced_sweep_failed", "err", err.Error())
 	} else {
 		d.obs.Log.Info("forced_sweep_done")

@@ -1,11 +1,13 @@
 package serve
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -124,7 +126,8 @@ func (d *Daemon) runLoop(name string, step func() error) error {
 	err = step()
 	end := d.clock.Now()
 	outcome := obs.OutcomeOK
-	if err != nil {
+	if err != nil && !errors.Is(err, watcher.ErrSweepAborted) {
+		// An abort is a shutdown, recorded as ok (the label set is closed).
 		outcome = obs.OutcomeError
 	}
 	d.loops.end(name, id, &loopLast{dur: end.Sub(start), outcome: outcome, end: end})

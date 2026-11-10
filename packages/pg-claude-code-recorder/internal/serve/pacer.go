@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -26,10 +27,12 @@ func newPacer(clk clock.Clock, perSecond int) *pacer {
 	return p
 }
 
-// wait blocks (by the clock's Sleep) until the next ingest slot.
-func (p *pacer) wait() {
+// wait blocks until the next ingest slot and reports true, or returns false as
+// soon as ctx is done (the slot it took stays taken; a stopping daemon does not
+// care).
+func (p *pacer) wait(ctx context.Context) bool {
 	if p == nil || p.interval <= 0 {
-		return
+		return ctx.Err() == nil
 	}
 	p.mu.Lock()
 	now := p.clk.Now()
@@ -40,6 +43,7 @@ func (p *pacer) wait() {
 	p.next = slot.Add(p.interval)
 	p.mu.Unlock()
 	if d := slot.Sub(now); d > 0 {
-		p.clk.Sleep(d)
+		return clock.SleepCtx(ctx, p.clk, d)
 	}
+	return ctx.Err() == nil
 }

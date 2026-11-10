@@ -401,7 +401,9 @@ func (d *Daemon) sink(e watcher.Event) {
 		if d.skipUnchanged(e) {
 			return
 		}
-		d.sweepPace.wait() // the sweep's ingests only; a live file's hint is never paced
+		if !d.sweepPace.wait(d.rootCtx()) { // the sweep's ingests only; a live file's hint is never paced
+			return
+		}
 	}
 	if e.Sweep {
 		d.sweepIngested.Add(1)
@@ -447,6 +449,9 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 	if !d.backfillDone.Load() {
 		d.backfill(files)
 	}
+	if d.rootCtx().Err() != nil {
+		return // closing: the next sweep does the rest
+	}
 	st, err := d.cp.SweepMissingWalk(found, walked)
 	if err != nil {
 		d.obs.Log.Warn("sweep_missing_failed", "err", err.Error())
@@ -483,6 +488,7 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ModTime.After(sorted[j].ModTime) })
 	d.obs.Event("backfill_start", "files", fmt.Sprint(len(files)))
 	skipped := false
+	ctx := d.rootCtx()
 	// Files are copied in batches that share one journal commit and one directory
 	// sync (copier.IngestBatch); the newest-first order and the low-space check
 	// are unchanged. A batch is durable as a unit: a crash inside one leaves the
@@ -494,10 +500,8 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 		batch = min(backfillBatch, max(1, r/10))
 	}
 	for start := 0; start < len(sorted); start += batch {
-		select {
-		case <-d.stop:
+		if ctx.Err() != nil {
 			return
-		default:
 		}
 		var paths []string
 		for _, f := range sorted[start:min(start+batch, len(sorted))] {
@@ -514,15 +518,12 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 			paths = append(paths, f.Path)
 		}
 		for range paths {
-			d.sweepPace.wait() // catch-up shares the sweep's cap
-		}
-		for _, br := range d.cp.IngestBatch(paths) {
-			res := d.afterIngest(br.Path, br.Result, br.Err)
-			d.filesCopied.Add(1)
-			d.obs.Reg.Set(obs.MCopiedFiles, nil, float64(d.filesCopied.Load()))
-			if res.Bytes > 0 && d.cfg.CopyThrottle > 0 {
-				d.clock.Sleep(d.cfg.CopyThrottle)
+			if !d.sweepPace.wait(ctx) { // catch-up shares the sweep's cap
+				return
 			}
+		}
+		if !d.afterBatch(ctx, d.cp.IngestBatch(paths)) {
+			return
 		}
 	}
 	if skipped {
@@ -532,6 +533,25 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	d.tr.StartupDone()
 	d.obs.Reg.Set(obs.MCaughtUp, nil, 1)
 	d.obs.Event("backfill_done", "files", fmt.Sprint(len(files)))
+}
+
+// afterBatch runs the per-file follow-up of one ingested batch. The batch is
+// already durable as a unit, and IngestBatch is not interruptible; this stops
+// between its files once ctx is done (the next sweep catches the rest up) and
+// reports false when it did. The copy throttle is a cancellable wait.
+func (d *Daemon) afterBatch(ctx context.Context, results []copier.BatchResult) bool {
+	for _, br := range results {
+		if ctx.Err() != nil {
+			return false
+		}
+		res := d.afterIngest(br.Path, br.Result, br.Err)
+		d.filesCopied.Add(1)
+		d.obs.Reg.Set(obs.MCopiedFiles, nil, float64(d.filesCopied.Load()))
+		if res.Bytes > 0 && d.cfg.CopyThrottle > 0 && !clock.SleepCtx(ctx, d.clock, d.cfg.CopyThrottle) {
+			return false
+		}
+	}
+	return true
 }
 
 // registerOps registers every operation on d.srv (the audit of which operations
@@ -583,7 +603,7 @@ func (d *Daemon) Start() error {
 		endPhase()
 	}
 	endPhase = d.su.begin("watcher_start", true)
-	if err := d.w.Start(); err != nil {
+	if err := d.w.StartContext(d.rootCtx()); err != nil {
 		d.srv.Close()
 		return fmt.Errorf("start watcher: %w", err)
 	}
