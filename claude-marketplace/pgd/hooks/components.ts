@@ -8,6 +8,7 @@ import { startWrapUp } from './wrap-up'
 import { startFocusPane } from './focus-pane'
 import { startSessionName } from './session-name'
 import { startAssume } from './assume'
+import { startLinkContext } from './linkContext'
 
 // FINAL registration shape (checked by `claude plugin validate`, which refuses a module that
 // passes `$` itself as an argument):
@@ -33,6 +34,7 @@ export const COMPONENTS: ReadonlyArray<{
   { flag: 'focus', run: startFocusPane },
   { flag: 'sessionName', run: startSessionName },
   { flag: 'assume', run: startAssume },
+  { flag: 'links', run: startLinkContext },
 ]
 
 // Register every component whose flag is true. The top-level `enable` short-circuits all of it.

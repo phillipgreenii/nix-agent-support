@@ -1,5 +1,6 @@
 import { pgdEnabled } from './options'
 import { defineSource, noteEvent, refresh } from './source'
+import { LINK_CONTEXT_SOURCE } from './linkContext'
 import type { ModApi } from './types'
 import { recordCompaction } from './context-modal'
 import { onSessionModeTurnComplete } from './session-mode'
@@ -84,6 +85,7 @@ export function registerGitHeadHooks(on: ModApi): void {
     if (pgdEnabled()) {
       noteEvent()
       refresh('gitHead')
+      refresh(LINK_CONTEXT_SOURCE, { force: true })
       refreshSessionName()
       onSessionModeTurnComplete()
     }

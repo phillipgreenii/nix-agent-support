@@ -3,7 +3,8 @@ import type { Register } from 'claude-code'
 import { registerComponents } from './components'
 import { parseOptionsDetailed, type ModApi } from './types'
 import { setOptions } from './options'
-import { initSources, requestInvalidate } from './source'
+import { initSources, refresh, requestInvalidate } from './source'
+import { LINK_CONTEXT_SOURCE } from './linkContext'
 import { initContributions } from './contributions'
 import { registerGitHeadHooks, startGitHead } from './gitHead'
 import { registerModelEffortHooks, startModelEffort } from './modelEffort'
@@ -135,6 +136,9 @@ export const register: Register = on => {
       startGitHead(host)
     }
     registerComponents(options, host)
+    // The link context source exists only under components.links (defined by registerComponents);
+    // otherwise this is a no-op. Forced past the throttle, as every turn.complete does.
+    refresh(LINK_CONTEXT_SOURCE, { force: true })
     return next(e)
   })
 }

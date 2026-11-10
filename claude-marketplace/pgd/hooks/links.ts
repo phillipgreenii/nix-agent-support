@@ -1,5 +1,6 @@
 import { getOptions } from './options'
 import { log } from './log'
+import { linkContext } from './linkContext'
 import type { PgdLink, PgdOptions } from './types'
 
 // Transcript links: a render hook on assistant-message text rewrites matches of the configured
@@ -224,7 +225,7 @@ export function linkHook(_$: unknown, e: any, next: (e: any) => unknown): unknow
   const options = getOptions()
   const text = e?.props?.text
   if (!linksActive(options) || typeof text !== 'string' || options.links.length === 0) return next(e)
-  const rewritten = rewriteLinks(text, options.links)
+  const rewritten = rewriteLinks(text, options.links, linkContext())
   return next(rewritten === text ? e : { ...e, props: { ...e.props, text: rewritten } })
 }
 
