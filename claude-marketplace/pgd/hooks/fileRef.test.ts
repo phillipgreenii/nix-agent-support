@@ -13,9 +13,9 @@ const rule = (localTemplate?: string): LinkRule => ({
   options: localTemplate === undefined ? undefined : { localTemplate },
 }) as LinkRule
 const ctx: LinkContext = { cwd: '/work/proj', home: '/home/u', knownRepos: ['acme/widgets'] }
-const run = (text: string, context: LinkContext | undefined = ctx, template?: string): string => {
+const run = (text: string, context: LinkContext | null = ctx, template?: string): string => {
   resetLinkMemo()
-  return rewriteLinks(text, [rule(template)], context)
+  return rewriteLinks(text, [rule(template)], context ?? undefined)
 }
 
 test('a relative path joins onto cwd; an absolute path is used as is', () => {
@@ -31,8 +31,8 @@ test('tilde expands from the snapshot home and declines without it', () => {
 })
 
 test('relative paths decline before the snapshot loads; absolute ones do not', () => {
-  expect(run('foo.go:42', undefined)).toBe('foo.go:42')
-  expect(run('/abs/p.go:7', undefined)).toBe('[/abs/p.go:7](file:///abs/p.go:7)')
+  expect(run('foo.go:42', null)).toBe('foo.go:42')
+  expect(run('/abs/p.go:7', null)).toBe('[/abs/p.go:7](file:///abs/p.go:7)')
 })
 
 test('punctuation and ranges', () => {
@@ -58,7 +58,7 @@ test('the template gets {path} with its leading slash and {col} defaulting to 1'
     '[a.go:5:9](vscode://file/work/proj/a.go:5:9)',
   )
   expect(run('a.go:5', ctx, 'file://{path}#L{line}')).toBe('[a.go:5](file:///work/proj/a.go#L5)')
-  expect(run('a.go:5', ctx, 'vscode://file{path}:{line}:{col}')).not.toContain('undefined')
+  expect(run('a.go:5', ctx, 'vscode://file{path}:{line}:{col}').includes('undefined')).toBe(false)
 })
 
 test('segments are encoded, spaces and special characters included', () => {
