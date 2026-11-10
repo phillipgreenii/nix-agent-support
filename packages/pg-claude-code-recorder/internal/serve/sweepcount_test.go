@@ -348,7 +348,7 @@ func TestSweepSkipsUnchangedSnapshotFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pad := strings.Repeat("x", int(snapshotSkipMin)) // above the snapshot skip floor
+	pad := strings.Repeat("x", 64<<10) // padding; size no longer matters to skipping
 	write("result one\n" + pad)
 	e.transcript("a.jsonl", "{\"type\":\"user\"}\n", old)
 	d := e.open(t)

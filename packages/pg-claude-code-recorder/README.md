@@ -150,9 +150,10 @@ refused at start with a message naming it). The full verification runs only on r
 sweep now that ingests every file (`--wait` blocks until it finishes). Residual risk: a rewrite that keeps
 the same size, mtime and inode is invisible to the incremental sweep; it is found by the doctor (its 24 h
 cycle) or by `sweep --force`.
-Snapshot files (the registry and session-mode JSON files) of 64 KiB or less are never skipped: they are re-read
-on every sweep, so a same-size rewrite of one is found within one sweep. Larger snapshot files follow the same skip
-rule as transcripts. The first sweep after a start with an empty `seen` table is a full verification (it skips
+Snapshot files (tool results, subagent metadata, the registry and session-mode JSON files) follow the same skip rule
+as transcripts, with one guard against a rewrite that hides behind an unchanged mtime: a snapshot file whose mtime is
+within 2 s of the moment it was ingested is not cached, so the next sweep reads it again (see
+`docs/investigations/2026-11-10-sweep-reingests-small-snapshots.md`). The first sweep after a start with an empty `seen` table is a full verification (it skips
 nothing, and counts in `sweep_verify_forced_total` like a forced sweep). Every sweep logs one `sweep_done` line with
 `walked`, `skipped`, `ingested`, `missing`, `duration_ms` and `verify` (true for a full verification); its duration is
 also in `loop_duration_seconds{loop="watcher_sweep"}`.

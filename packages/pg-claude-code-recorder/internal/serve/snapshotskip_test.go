@@ -11,6 +11,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 )
 
+// largeSnap is a snapshot size that the earlier 64 KiB floor skipped.
+const largeSnap = 64<<10 + 1
+
 // snapEnv is a daemon whose copier opens its source files through a counting
 // seam, over one tool-result snapshot file of the given size.
 type snapEnv struct {
@@ -64,13 +67,13 @@ func (s *snapEnv) opensDuring(t *testing.T) int64 {
 // An unchanged snapshot file above the size floor is not opened by a sweep;
 // one change to it is read and stored as a new version.
 func TestUnchangedLargeSnapshotIsNotOpened(t *testing.T) {
-	s := newSnapEnv(t, int(snapshotSkipMin)+1)
+	s := newSnapEnv(t, largeSnap)
 	// The transcript is skipped too, so a sweep opens nothing at all.
 	if n := s.opensDuring(t); n != 0 {
 		t.Fatalf("a sweep over unchanged files opened %d source files, want 0", n)
 	}
 	before := ingestCount(s.d, "snapshot")
-	s.write(strings.Repeat("b", int(snapshotSkipMin)+1)) // same size, new content and mtime now
+	s.write(strings.Repeat("b", largeSnap)) // same size, new content and mtime now
 	if err := os.Chtimes(s.path, time.Now(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -82,17 +85,55 @@ func TestUnchangedLargeSnapshotIsNotOpened(t *testing.T) {
 	}
 }
 
-// A snapshot of the floor size or less is read on every sweep.
-func TestSmallSnapshotIsReadEverySweep(t *testing.T) {
-	for _, size := range []int{10, int(snapshotSkipMin)} {
+// A small, old, unchanged snapshot file (the registry and session-mode JSON
+// files: about half of the files a real sweep walks) is skipped without being
+// opened, like a large one. This is the regression guard for sweeps that
+// re-ingested every small snapshot file every time.
+func TestUnchangedSmallSnapshotIsNotOpened(t *testing.T) {
+	for _, size := range []int{10, 64 << 10, largeSnap} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			s := newSnapEnv(t, size)
 			for i := range 3 {
-				if n := s.opensDuring(t); n == 0 {
-					t.Fatalf("sweep %d did not open the %d-byte snapshot", i, size)
+				if n := s.opensDuring(t); n != 0 {
+					t.Fatalf("sweep %d opened %d source files over unchanged files, want 0", i, n)
 				}
 			}
+			before := ingestCount(s.d, "snapshot")
+			s.write(strings.Repeat("b", size)) // same size, new content, mtime restored to old
+			if err := os.Chtimes(s.path, time.Now().Add(-30*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			if n := s.opensDuring(t); n == 0 {
+				t.Fatal("a small snapshot file with a new mtime was not opened")
+			}
+			if got := ingestCount(s.d, "snapshot") - before; got != 1 {
+				t.Fatalf("changed snapshot stored %v times, want 1", got)
+			}
 		})
+	}
+}
+
+// A snapshot file written within snapshotRacyWindow of the ingest is read
+// again by the next sweep (a same-size rewrite could share its mtime), and is
+// skipped once its mtime is older than the window.
+func TestRacySnapshotIsReadUntilItsMtimeAges(t *testing.T) {
+	s := newSnapEnv(t, 10)
+	fresh := time.Now()
+	s.write("0123456789")
+	if err := os.Chtimes(s.path, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	rescan(t, s.d)
+	if n := s.opensDuring(t); n == 0 {
+		t.Fatal("a snapshot file with a fresh mtime was skipped")
+	}
+	old := fresh.Add(-time.Hour)
+	if err := os.Chtimes(s.path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	rescan(t, s.d) // sees the new mtime, ingests to unchanged, caches
+	if n := s.opensDuring(t); n != 0 {
+		t.Fatalf("an aged snapshot file was opened %d times, want 0", n)
 	}
 }
 
@@ -103,7 +144,7 @@ func TestInvalidJSONSnapshotIsNeverSkippedAndIsReadOnceValid(t *testing.T) {
 	e := newEnv(t, false)
 	old := time.Now().Add(-time.Hour)
 	p := filepath.Join(e.claude, "sessions", "4242.json")
-	pad := strings.Repeat("x", int(snapshotSkipMin)+1)
+	pad := strings.Repeat("x", largeSnap)
 	write := func(content string) {
 		t.Helper()
 		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {

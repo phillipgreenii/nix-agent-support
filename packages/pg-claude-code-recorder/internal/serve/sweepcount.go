@@ -118,17 +118,23 @@ type caughtUp struct {
 	file int64
 }
 
-// snapshotSkipMin is the size above which a snapshot file may be skipped by a
-// sweep. Snapshot files of this size or smaller (the registry and session-mode
-// JSON files) are re-read on every sweep: they are cheap to read, and a rewrite
-// that keeps size and mtime is found within one sweep instead of a forced one.
-const snapshotSkipMin int64 = 64 << 10
+// snapshotRacyWindow is how recent a snapshot file's mtime may be, at the
+// moment the daemon ingests it, for the file to count as "racily clean": a
+// rewrite that keeps the size lands on an mtime the file already carries
+// (coarse timestamps, or a writer that restores the time). Such a file is not
+// cached as caught up, so the next sweep reads it again; once its mtime is
+// older than the window no same-size rewrite can hide behind the same mtime,
+// and it is skipped like any other file. This replaced a blanket re-read of
+// every snapshot file of 64 KiB or less, which cost every sweep about 28,500
+// paced ingests of files that had not changed.
+const snapshotRacyWindow = 2 * time.Second
 
-// skipExempt reports whether a sweep must not skip the path: a snapshot-mode
-// file of snapshotSkipMin bytes or fewer.
-func (d *Daemon) skipExempt(path string, size int64) bool {
+// racyClean reports whether the path is a snapshot-mode file whose mtime is
+// within snapshotRacyWindow of now (or in the future), so a sweep must not
+// trust a cached "caught up" for it yet.
+func (d *Daemon) racyClean(path string, mtime time.Time) bool {
 	_, mode := d.scope.Classify(path)
-	return mode == scope.Snapshot && size <= snapshotSkipMin
+	return mode == scope.Snapshot && d.clock.Now().Sub(mtime) < snapshotRacyWindow
 }
 
 // skipUnchanged reports whether a sweep event needs no ingest: the path was
@@ -154,7 +160,7 @@ func (d *Daemon) caughtMatches(path string, fi watcher.FileInfo) (int64, bool) {
 	d.seen.mu.Lock()
 	c, ok := d.seen.caught[path]
 	d.seen.mu.Unlock()
-	if !ok || c.seen != seenOf(fi) || d.skipExempt(path, fi.Size) {
+	if !ok || c.seen != seenOf(fi) {
 		return 0, false
 	}
 	return c.file, true
@@ -165,13 +171,13 @@ func (d *Daemon) caughtMatches(path string, fi watcher.FileInfo) (int64, bool) {
 // snapshot whose content hash matches its latest version) is cached; anything
 // else (a copy that may be partial, an error) is ingested again next sweep.
 // Snapshot files (tool results, subagent metadata, registry files) are about
-// half of what a sweep walks, so they are cached too, except those of
-// snapshotSkipMin bytes or fewer, which are re-read on every sweep. The sweep walk only reports regular files, so
-// a link never reaches here.
+// half of what a sweep walks, so they are cached too, except those whose mtime
+// is within snapshotRacyWindow of now (racyClean), which are read again next
+// sweep. The sweep walk only reports regular files, so a link never reaches here.
 func (d *Daemon) noteCaughtUp(e watcher.Event, res copier.Result, err error) {
 	d.seen.mu.Lock()
 	defer d.seen.mu.Unlock()
-	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 || d.skipExempt(e.Path, e.Info.Size) {
+	if err != nil || e.Gone || res.Action != "unchanged" || res.File == 0 || d.racyClean(e.Path, e.Info.ModTime) {
 		delete(d.seen.caught, e.Path)
 		d.seenDB.forget(e.Path)
 		return
