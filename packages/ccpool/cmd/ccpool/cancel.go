@@ -108,7 +108,7 @@ func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) ses
 		NotifyOn:             cfg.Notify.On,
 		Events:               el,
 		Exister:              recorderExister{},
-		Gate:                 factReader,
+		Gate:                 processGate{},
 		Control:              newControlClient(),
 		Socket:               cfg.Tmux.Socket,
 		Prefix:               cfg.Tmux.Prefix,

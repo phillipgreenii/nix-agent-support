@@ -259,6 +259,10 @@ cachePackages = [
     version = 'v0.58.0'
     hash = 'sha256-fDOkQJXURrbq2dBGa91bCUsXknCZlo3ru2JIofSOGRo='
 
+  [mod.'golang.org/x/sync']
+    version = 'v0.24.0'
+    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='
+
   [mod.'golang.org/x/sys']
     version = 'v0.49.0'
     hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='

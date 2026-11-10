@@ -36,6 +36,9 @@ type Reader struct {
 
 	mu sync.Mutex
 	c  *client.Client
+
+	pingMu sync.Mutex
+	pinged bool // a PingOnce succeeded: the recorder answered earlier in this process
 }
 
 // New returns a Reader. name is the per-client metric label sent to the daemon.
@@ -104,6 +107,23 @@ func (r *Reader) Ping(ctx context.Context) error {
 		r.reset()
 		return wrapErr(err)
 	}
+	return nil
+}
+
+// PingOnce is Ping for a process that gates many times (a multi-pool metrics run
+// builds one service per pool, each consulting the gate): the first success is
+// remembered, so later calls send no further hello. A failure is not remembered.
+// Dial already performs a hello, so a run costs one or two, not one per pool.
+func (r *Reader) PingOnce(ctx context.Context) error {
+	r.pingMu.Lock()
+	defer r.pingMu.Unlock()
+	if r.pinged {
+		return nil
+	}
+	if err := r.Ping(ctx); err != nil {
+		return err
+	}
+	r.pinged = true
 	return nil
 }
 
