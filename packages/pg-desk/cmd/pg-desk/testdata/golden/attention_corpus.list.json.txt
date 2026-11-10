@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 1,
+  "now": "2026-10-06T12:00:00Z",
+  "items": [
+    {
+      "type": "pr",
+      "id": "acme/widgets#101",
+      "summary": "CI failing on my PR",
+      "severity": "high",
+      "rule": "pr.own-ci-failing",
+      "group": "pr:acme/widgets#101"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#102",
+      "summary": "my PR needs action: bot disapproval",
+      "severity": "medium",
+      "rule": "pr.own-needs-action",
+      "group": "pr:acme/widgets#102"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#103",
+      "summary": "my PR needs action: changes requested",
+      "severity": "medium",
+      "rule": "pr.own-needs-action",
+      "group": "pr:acme/widgets#103"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#104",
+      "summary": "my PR needs action: merge conflict",
+      "severity": "medium",
+      "rule": "pr.own-needs-action",
+      "group": "pr:acme/widgets#104"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#105",
+      "summary": "my PR needs action: unresolved review thread",
+      "severity": "medium",
+      "rule": "pr.own-needs-action",
+      "group": "pr:acme/widgets#105"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#204",
+      "summary": "new commits since my review",
+      "severity": "medium",
+      "rule": "pr.review-requested",
+      "group": "pr:acme/widgets#204"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#205",
+      "summary": "review requested of me",
+      "severity": "medium",
+      "rule": "pr.review-requested",
+      "group": "pr:acme/widgets#205"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#206",
+      "summary": "my review is in progress",
+      "severity": "medium",
+      "rule": "pr.review-requested",
+      "group": "pr:acme/widgets#206"
+    },
+    {
+      "type": "pr",
+      "id": "acme/widgets#106",
+      "summary": "my PR needs action: approved and ready to land",
+      "severity": "low",
+      "rule": "pr.own-needs-action",
+      "group": "pr:acme/widgets#106"
+    }
+  ],
+  "groups": [
+    {
+      "key": "pr:acme/widgets#101",
+      "label": "acme/widgets#101",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#101",
+          "summary": "CI failing on my PR",
+          "severity": "high",
+          "rule": "pr.own-ci-failing",
+          "group": "pr:acme/widgets#101"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#102",
+      "label": "acme/widgets#102",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#102",
+          "summary": "my PR needs action: bot disapproval",
+          "severity": "medium",
+          "rule": "pr.own-needs-action",
+          "group": "pr:acme/widgets#102"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#103",
+      "label": "acme/widgets#103",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#103",
+          "summary": "my PR needs action: changes requested",
+          "severity": "medium",
+          "rule": "pr.own-needs-action",
+          "group": "pr:acme/widgets#103"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#104",
+      "label": "acme/widgets#104",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#104",
+          "summary": "my PR needs action: merge conflict",
+          "severity": "medium",
+          "rule": "pr.own-needs-action",
+          "group": "pr:acme/widgets#104"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#105",
+      "label": "acme/widgets#105",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#105",
+          "summary": "my PR needs action: unresolved review thread",
+          "severity": "medium",
+          "rule": "pr.own-needs-action",
+          "group": "pr:acme/widgets#105"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#204",
+      "label": "acme/widgets#204",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#204",
+          "summary": "new commits since my review",
+          "severity": "medium",
+          "rule": "pr.review-requested",
+          "group": "pr:acme/widgets#204"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#205",
+      "label": "acme/widgets#205",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#205",
+          "summary": "review requested of me",
+          "severity": "medium",
+          "rule": "pr.review-requested",
+          "group": "pr:acme/widgets#205"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#206",
+      "label": "acme/widgets#206",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#206",
+          "summary": "my review is in progress",
+          "severity": "medium",
+          "rule": "pr.review-requested",
+          "group": "pr:acme/widgets#206"
+        }
+      ]
+    },
+    {
+      "key": "pr:acme/widgets#106",
+      "label": "acme/widgets#106",
+      "items": [
+        {
+          "type": "pr",
+          "id": "acme/widgets#106",
+          "summary": "my PR needs action: approved and ready to land",
+          "severity": "low",
+          "rule": "pr.own-needs-action",
+          "group": "pr:acme/widgets#106"
+        }
+      ]
+    }
+  ]
+}

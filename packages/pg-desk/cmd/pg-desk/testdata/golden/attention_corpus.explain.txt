@@ -1,0 +1,304 @@
+== pr:acme/widgets#303
+pr:acme/widgets#303: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on others
+== pr:acme/widgets#302
+pr:acme/widgets#302: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on others
+== pr:acme/widgets#301
+pr:acme/widgets#301: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#311
+pr:acme/widgets#311: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is none
+  not raised:         pr.own-needs-action: the only cause is CI
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#310
+pr:acme/widgets#310: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is pending
+  not raised:         pr.own-needs-action: pr is waiting on others
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#312
+pr:acme/widgets#312: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is none
+  not raised:         pr.own-needs-action: the only cause is CI
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#350
+pr:acme/widgets#350: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: interpretation degraded
+  not raised:         pr.own-needs-action: interpretation degraded
+  not raised:         pr.review-requested: interpretation degraded
+== pr:acme/widgets#351
+pr:acme/widgets#351: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: interpretation degraded
+  not raised:         pr.own-needs-action: interpretation degraded
+  not raised:         pr.review-requested: interpretation degraded
+== pr:acme/widgets#320
+pr:acme/widgets#320: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on none
+== pr:acme/widgets#900
+pr:acme/widgets#900: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: interpretation degraded
+  not raised:         pr.own-needs-action: interpretation degraded
+  not raised:         pr.review-requested: interpretation degraded
+== pr:acme/widgets#106
+pr:acme/widgets#106: listed (group pr:acme/widgets#106)
+  raised, survived:   pr.own-needs-action [low] my PR needs action: approved and ready to land
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#108
+pr:acme/widgets#108: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.own-needs-action: pr is waiting on others
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#102
+pr:acme/widgets#102: listed (group pr:acme/widgets#102)
+  raised, survived:   pr.own-needs-action [medium] my PR needs action: bot disapproval
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#103
+pr:acme/widgets#103: listed (group pr:acme/widgets#103)
+  raised, survived:   pr.own-needs-action [medium] my PR needs action: changes requested
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#101
+pr:acme/widgets#101: listed (group pr:acme/widgets#101)
+  raised, survived:   pr.own-ci-failing [high] CI failing on my PR
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-needs-action: the only cause is CI
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#104
+pr:acme/widgets#104: listed (group pr:acme/widgets#104)
+  raised, survived:   pr.own-needs-action [medium] my PR needs action: merge conflict
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#105
+pr:acme/widgets#105: listed (group pr:acme/widgets#105)
+  raised, survived:   pr.own-needs-action [medium] my PR needs action: unresolved review thread
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#107
+pr:acme/widgets#107: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: pr is a draft
+  not raised:         pr.own-needs-action: an own draft is not an item
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#370
+pr:acme/widgets#370: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.own-needs-action: pr is waiting on others
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#330
+pr:acme/widgets#330: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#340
+pr:acme/widgets#340: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: pr is not open
+  not raised:         pr.own-needs-action: pr is waiting on none
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#341
+pr:acme/widgets#341: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on none
+== pr:acme/widgets#206
+pr:acme/widgets#206: listed (group pr:acme/widgets#206)
+  raised, survived:   pr.review-requested [medium] my review is in progress
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+== pr:acme/widgets#210
+pr:acme/widgets#210: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on others
+== pr:acme/widgets#209
+pr:acme/widgets#209: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#208
+pr:acme/widgets#208: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on others
+== pr:acme/widgets#211
+pr:acme/widgets#211: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#213
+pr:acme/widgets#213: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on others
+== pr:acme/widgets#207
+pr:acme/widgets#207: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#203
+pr:acme/widgets#203: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#201
+pr:acme/widgets#201: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#202
+pr:acme/widgets#202: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#205
+pr:acme/widgets#205: listed (group pr:acme/widgets#205)
+  raised, survived:   pr.review-requested [medium] review requested of me
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+== pr:acme/widgets#204
+pr:acme/widgets#204: listed (group pr:acme/widgets#204)
+  raised, survived:   pr.review-requested [medium] new commits since my review
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+== pr:acme/widgets#212
+pr:acme/widgets#212: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on author
+== pr:acme/widgets#321
+pr:acme/widgets#321: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on none
+== pr:acme/widgets#360
+pr:acme/widgets#360: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: ci rollup state is success
+  not raised:         pr.own-needs-action: pr is waiting on others
+  not raised:         pr.review-requested: an own pr
+== pr:acme/widgets#990
+pr:acme/widgets#990: not listed
+  not raised:         issue.due-soon: not an issue
+  not raised:         issue.overdue: not an issue
+  not raised:         issue.stale-in-progress: not an issue
+  not raised:         pr.own-ci-failing: not an own pr
+  not raised:         pr.own-needs-action: not an own pr
+  not raised:         pr.review-requested: pr is waiting on nobody recorded (not yet interpreted)
