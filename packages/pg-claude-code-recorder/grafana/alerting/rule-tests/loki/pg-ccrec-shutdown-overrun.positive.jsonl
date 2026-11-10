@@ -1,0 +1,2 @@
+{"ts":"2026-11-09T09:00:01.000Z","level":"INFO","event":"shutdown_started"}
+{"ts":"2026-11-09T09:00:08.000Z","level":"ERROR","event":"shutdown_overrun","phase":"watcher","phase_elapsed_ms":7400,"in_flight":"sweep:7400","total_ms":8000}

@@ -70,3 +70,5 @@ deleteRules:
     uid: pg-ccrec-bad-line-rate
   - orgId: 1
     uid: pg-ccrec-format-drift
+  - orgId: 1
+    uid: pg-ccrec-shutdown-overrun

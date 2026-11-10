@@ -391,6 +391,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-ccrec-loop-stalled",
 		"pg-ccrec-request-slow",
 		"pg-ccrec-schema-rebuild-required",
+		"pg-ccrec-shutdown-overrun",
 		"pg-checkout-pool-leaked-slots",
 		"pg-checkout-pool-quarantined",
 		"pg-checkout-pool-exhausted-waiting",
@@ -1059,8 +1060,8 @@ func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
 			registered = append(registered, uid)
 		}
 	}
-	if len(registered) != 20 {
-		t.Fatalf("registered pg-ccrec uids = %d, want 20: %v", len(registered), registered)
+	if len(registered) != 21 {
+		t.Fatalf("registered pg-ccrec uids = %d, want 21: %v", len(registered), registered)
 	}
 	for _, uid := range registered {
 		if len(uid) > 40 {

@@ -4,9 +4,9 @@
 # packages/pg-claude-code-recorder/grafana/pg_claude_code_recorder_metrics.txt) plus the Prometheus
 # `up` series of the scrape target for the daemon-down and heartbeat guards.
 #
-# Twenty rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
+# Twenty-one rules: the ten of the design's alerts table (daemon-down, heartbeat-stale, copy-lag,
 # parse-stuck, held-old, format-drift (bad lines and unknown keys over lines parsed; it replaces unknown-key-burst), data-loss, removal-due, doctor-mismatch,
-# control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus blocked-no-space (the recorder could not do an operation for lack of space), plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow), plus schema-rebuild-required (the one Loki rule: a log event, not a metric). Each uid is
+# control-inbox-gone; its free-space rule was removed, see alerts-delete.yaml) plus crash-share and removal-stuck of the second review, plus settle-tick-slow and field-type-mismatch, plus blocked-no-space (the recorder could not do an operation for lack of space), plus the four of the phase 1 observability work (cpu-high, wal-large, loop-stalled, request-slow), plus schema-rebuild-required and shutdown-overrun (the two Loki rules: log events, not metrics). Each uid is
 # pg-ccrec-<name> (the structure check caps a uid at 40 characters), each annotation names the first
 # command to run, and each uid is registered in registeredRuleUIDs of
 # packages/pg-router-probe/cmd/pg-router-probe/run.go. The thresholds are the builder's calls and
@@ -916,6 +916,54 @@ groups:
               editorMode: code
               queryType: instant
               expr: 'sum(count_over_time({service_name="pg-claude-code-recorder"} | json | event="schema_rebuild_required" [1h]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Shutdown overrun. The daemon bounds its shutdown with a deadline; when a stop does not finish
+      # in time it logs one shutdown_overrun error event (fields phase, phase_elapsed_ms, in_flight and
+      # the sweep counters) and exits non-zero, and the launch agent restarts it. The restart recovers
+      # by itself, so this is a warning: it says a stop was slow enough to be cut short, not that
+      # data is lost. Any one event in the last 24 hours fires it. The event is written by a
+      # separate change, so noDataState is OK and the rule stays quiet until the first such line.
+      # Tested by logcli over rule-tests/loki/pg-ccrec-shutdown-overrun.{positive,negative}.jsonl
+      # (check-loki-rules.sh, flake check test-pg-claude-code-recorder-alert-loki-rules).
+      - uid: pg-ccrec-shutdown-overrun
+        title: pg-claude-code-recorder shutdown overran its deadline
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-claude-code-recorder was cut short: a shutdown overran its deadline in the last 24 hours"
+          description: 'serve logged shutdown_overrun in the last 24 hours: a stop did not finish before the deadline, so the daemon exited non-zero and the launch agent restarted it. Nothing needs doing for one event; repeated events mean a step of the shutdown is stuck. Read the fields phase, phase_elapsed_ms and in_flight with {service_name="pg-claude-code-recorder"} | json | event="shutdown_overrun" to see where it was, and the shutdown_phase events before it for the slow steps (see pg-claude-code-recorder status).'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-claude-code-recorder"} | json | event="shutdown_overrun" [24h]))'
           - refId: B
             datasourceUid: __expr__
             model:

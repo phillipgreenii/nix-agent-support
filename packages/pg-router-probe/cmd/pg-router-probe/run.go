@@ -241,6 +241,7 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-loop-stalled",
 	"pg-ccrec-request-slow",
 	"pg-ccrec-schema-rebuild-required",
+	"pg-ccrec-shutdown-overrun",
 	"pg-checkout-pool-leaked-slots",
 	"pg-checkout-pool-quarantined",
 	"pg-checkout-pool-exhausted-waiting",
