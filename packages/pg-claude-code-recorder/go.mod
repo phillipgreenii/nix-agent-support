@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
+	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.61.0
 )

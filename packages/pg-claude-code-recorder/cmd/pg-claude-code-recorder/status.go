@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/serve"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // launchLabelEnv overrides the launch agent label the offline status asks
@@ -23,18 +23,24 @@ const launchLabelEnv = "PG_CLAUDE_CODE_RECORDER_LAUNCH_LABEL"
 
 const defaultLaunchLabel = "com.phillipg.pg-claude-code-recorder"
 
-// launchctlState asks launchctl about label.
+// launchctlState asks launchctl about label through the shared command runner.
 func launchctlState(label string) string {
-	if runtime.GOOS != "darwin" {
-		return "unknown (no launchctl on " + runtime.GOOS + ")"
+	return launchctlStateVia(cmdrun.Exec, runtime.GOOS, label)
+}
+
+// launchctlStateVia is launchctlState with the runner and OS injected so a
+// unit test needs no real launchctl.
+func launchctlStateVia(run cmdrun.Runner, goos, label string) string {
+	if goos != "darwin" {
+		return "unknown (no launchctl on " + goos + ")"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "launchctl", "list", label).CombinedOutput()
-	if err != nil {
+	r := run(ctx, cmdrun.Call{Name: "launchctl", Args: []string{"list", label}})
+	if !r.OK() {
 		return "not loaded"
 	}
-	if strings.Contains(string(out), "\"PID\"") {
+	if strings.Contains(string(r.Stdout)+string(r.Stderr), "\"PID\"") {
 		return "loaded, running"
 	}
 	return "loaded, not running"

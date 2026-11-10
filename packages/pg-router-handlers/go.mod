@@ -4,9 +4,8 @@ go 1.26.0
 
 require (
 	github.com/phillipgreenii/ccpool v0.0.0
-	github.com/phillipgreenii/claude-transcript v0.0.0
 	github.com/phillipgreenii/pg-router v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
+	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 )
 
 require github.com/cespare/xxhash/v2 v2.3.0 // indirect

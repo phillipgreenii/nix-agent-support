@@ -10,7 +10,7 @@ require (
 require (
 	github.com/gofrs/flock v0.13.0
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder v0.0.0-00010101000000-000000000000
-	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
+	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.22.0
